@@ -41,9 +41,10 @@
 //! `memory.profile.*` and `memory.receipts.get` (§7.28) are served. The
 //! sub-capability gated families (reflection, transfer) are rejected as not
 //! served.
+// why: the protocol rules live in `spoke_operations`, so this layer owns admission and delegates the rest instead of re-implementing them.
 
 mod journal;
-/// The single provider-seam legacy projection/read bridge (NXM-5 Task 1).
+/// note: The single provider-seam legacy projection/read bridge (NXM-5 Task 1).
 pub mod legacy;
 pub mod policy;
 pub mod profile;
@@ -77,7 +78,7 @@ use storage::{
     StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
 };
 
-/// The Character binding a binding-local capture stands on (compass D15).
+/// note: The Character binding a binding-local capture stands on (compass D15).
 ///
 /// The capture hands it to the provider's own write transaction, which re-reads
 /// the binding rows on that connection before inserting the candidate, so the
@@ -89,11 +90,11 @@ pub struct CaptureBinding<'a> {
     pub binding: &'a str,
 }
 
-/// The single space this provider provisions (§7.0.6). Clients discover it via
+/// note: The single space this provider provisions (§7.0.6). Clients discover it via
 /// `memory.describe`/`memory.spaces.list`; it is never a payload default.
 pub const DEFAULT_SPACE_ID: &str = "spc_local_default";
 
-/// `authority_host_id` of the single authoritative provider (MEM-R001). It is an
+/// note: `authority_host_id` of the single authoritative provider (MEM-R001). It is an
 /// opaque host label, not a transport address.
 pub const LOCAL_AUTHORITY_HOST_ID: &str = "nexus-local";
 
@@ -116,25 +117,25 @@ const OP_RECORDS_LIST: &str = "memory.records.list";
 const OP_RECORDS_PROMOTE: &str = "memory.records.promote";
 const OP_RECALL: &str = "memory.recall";
 const OP_PROFILE_UPDATE: &str = "memory.profile.update";
-/// The §7.25–§7.27 reflection family (N4-R). Served under the
+/// note: The §7.25–§7.27 reflection family (N4-R). Served under the
 /// `spoke-memory-reflection` sub-capability; Task 2 wires their admission.
 const OP_REFLECTIONS_STATE: &str = "memory.reflections.state";
 const OP_REFLECTIONS_LIST: &str = "memory.reflections.list";
 const OP_REFLECTIONS_GENERATE: &str = "memory.reflections.generate";
-/// NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
+/// note: NXM-5 Task 2's internal op: adopting a legacy-derived object into provider
 /// storage. It is never a wire op — it is the receipt identity of the
 /// just-in-time adoption a dismissal performs **inside the transaction that
 /// consumes the row** (NXM-5 Task 2 fix round 3, finding F1), so a retried
 /// dismissal replays instead of duplicating and no adopted row is left pending.
 const OP_LEGACY_ADOPT: &str = "memory.legacy.adopt";
 
-/// P5's one-shot legacy-content migration. Like [`OP_LEGACY_ADOPT`] it is never
+/// note: P5's one-shot legacy-content migration. Like [`OP_LEGACY_ADOPT`] it is never
 /// a wire op: it is the operator-invoked pass's receipt identity, so the
 /// migration commits a journal intent and a receipt through the same protocol
 /// every other guarded write uses.
 const OP_LEGACY_MIGRATE: &str = "memory.legacy.migrate";
 
-/// Time order for a merged read.
+/// note: Time order for a merged read.
 ///
 /// A provider row renders whole seconds, while a projected legacy row keeps the
 /// precision its legacy column carried, so the two renderings are not
@@ -161,7 +162,7 @@ pub fn created_at_cmp(left: &str, right: &str) -> std::cmp::Ordering {
     }
 }
 
-/// §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
+/// note: §7.3/§7.4: the two space lifecycle transitions, each naming its op string and
 /// the state it writes.
 #[derive(Clone, Copy)]
 enum SpaceTransition {
@@ -185,7 +186,7 @@ impl SpaceTransition {
     }
 }
 
-/// Why an op was refused, in protocol vocabulary (§14.1).
+/// note: Why an op was refused, in protocol vocabulary (§14.1).
 ///
 /// Every variant maps onto a wire `code` plus its §14.2 retry class, so the
 /// mapping lives in one place and cannot drift between ops.
@@ -208,26 +209,26 @@ pub enum ProviderError {
     RevisionConflict {
         current: i64,
     },
-    /// §7.25 state CAS (reflection generate): the recomputed basis digest no
+    /// note: §7.25 state CAS (reflection generate): the recomputed basis digest no
     /// longer matches `expected_state_digest`. Terminal; the recovery is
     /// re-reading `memory.reflections.state` and retrying with the fresh
     /// token, which `details.current_state_digest` names.
     StateConflict {
         current: String,
     },
-    /// §7.27 data-sufficiency policy (C-079): the authorized basis cannot
+    /// note: §7.27 data-sufficiency policy (C-079): the authorized basis cannot
     /// support generation. Terminal; the recovery is authoring or capturing
     /// source content, never a retry of the same request.
     InsufficientData(String),
     IdempotencyConflict,
-    /// §6.10/MEM-R021: the receipt body is past `receipt_retention_seconds`; the
+    /// note: §6.10/MEM-R021: the receipt body is past `receipt_retention_seconds`; the
     /// op is never re-executed and only the tombstone's last known status is
     /// disclosed (§7.28).
     ReceiptExpired {
         last_known_status: String,
     },
     CandidateConsumed(String),
-    /// §4.2/MEM-R005: an admission-relevant consumer is missing a required
+    /// note: §4.2/MEM-R005: an admission-relevant consumer is missing a required
     /// authored content kind — fail closed, never an empty success.
     ProfileIncomplete {
         subject_id: String,
@@ -236,22 +237,22 @@ pub enum ProviderError {
     InvalidInput {
         field: String,
         reason: String,
-        /// Structured protocol keys the published validator attached (e.g.
+        /// note: Structured protocol keys the published validator attached (e.g.
         /// `limit`); `None` when this refusal comes from the provider itself.
         details: Option<Map<String, Value>>,
     },
     StatusTransition(String),
     CursorInvalid,
-    /// The effect may have committed (§14.2/§14.3): never reported as a clean
+    /// note: The effect may have committed (§14.2/§14.3): never reported as a clean
     /// no-effect failure.
     OutcomeUncertain(String),
-    /// §5.2/D-10: the subject's journaled file intent is quarantined, so its
+    /// note: §5.2/D-10: the subject's journaled file intent is quarantined, so its
     /// objects are withheld until an operator resolves it. Terminal: retrying
     /// cannot help.
     Unreconciled {
         subject_id: String,
     },
-    /// §5.2 step 3/MEM-R010: this receipt records a quarantine — the intent
+    /// note: §5.2 step 3/MEM-R010: this receipt records a quarantine — the intent
     /// committed but its file effect could not be published. Terminal on the
     /// replay channel; the recorded envelope is served by
     /// `memory.receipts.get`, and recovery re-drives the intent once the target
@@ -260,14 +261,14 @@ pub enum ProviderError {
         receipt_id: String,
         message: String,
     },
-    /// §5.2 step 2: an earlier intent for this operation's file target is still
+    /// note: §5.2 step 2: an earlier intent for this operation's file target is still
     /// unsettled. Raised before the operation commits, so retrying after the
     /// journal recovery settles that predecessor is the supported path.
     UnsettledPredecessor {
         receipt_id: String,
         state: String,
     },
-    /// The provider was opened read-only: a mutation is refused before
+    /// note: The provider was opened read-only: a mutation is refused before
     /// admission, retention, the publication lock or any connection write
     /// (fix round 2, finding F3).
     ReadOnly(String),
@@ -275,7 +276,7 @@ pub enum ProviderError {
 }
 
 impl ProviderError {
-    /// The published validator's refusal, keeping its structured `details`.
+    /// note: The published validator's refusal, keeping its structured `details`.
     ///
     /// §7.0.7 requires an exceeded limit to name itself in `details.limit`;
     /// rebuilding the envelope from `message` alone dropped that key. The
@@ -290,7 +291,7 @@ impl ProviderError {
         }
     }
 
-    /// The request member a published reflection validator refused: the
+    /// note: The request member a published reflection validator refused: the
     /// validator's own machine-readable `field` (e.g. `selection.context_ids`,
     /// `filter.source_context_ids`, `limit`), cut to the top-level request
     /// member a client repairs — the shape the `"limit"` exemplars publish, so
@@ -308,7 +309,7 @@ impl ProviderError {
             )
     }
 
-    /// [`Self::from_reject`] over the field the validator actually named —
+    /// note: [`Self::from_reject`] over the field the validator actually named —
     /// the reflection entry points' mapping (inspector round 2, may-fix).
     fn from_validator(reject: SpokeReject) -> Self {
         let field = Self::validator_field(&reject);
@@ -340,7 +341,7 @@ impl ProviderError {
         }
     }
 
-    /// §14.2 retry class. `INTERNAL_ERROR` is retryable only because this
+    /// note: §14.2 retry class. `INTERNAL_ERROR` is retryable only because this
     /// provider raises it strictly before the effect commits — which is exactly
     /// the shape of an unsettled predecessor; an uncertain outcome is its own
     /// class, and a quarantined intent stops being retryable once its receipt
@@ -353,7 +354,7 @@ impl ProviderError {
         }
     }
 
-    /// The human-readable rendering a projection onto another error taxonomy
+    /// note: The human-readable rendering a projection onto another error taxonomy
     /// carries as its reason.
     #[must_use]
     pub fn message(&self) -> String {
@@ -541,12 +542,12 @@ fn store_error(error: StoreError) -> ProviderError {
     }
 }
 
-/// A refusal is a reject, never a success value (§14.1).
+/// note: A refusal is a reject, never a success value (§14.1).
 fn deny<T>(error: &ProviderError) -> SpokeResult<T> {
     spoke_operations::spoke_reject(error.reject_code(), error.message(), Some(error.details()))
 }
 
-/// The sub-capability gated families: the dispatch-level denial shape for a
+/// note: The sub-capability gated families: the dispatch-level denial shape for a
 /// family this provider instance does not serve — transfer always, reflection
 /// only in the deliberately-unadvertised shape (§4.1). A reject can only carry a
 /// [`SpokeRejectCode`], and the port
@@ -580,7 +581,7 @@ fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
     }
 }
 
-/// Project a receipt that is already committed. A failure here is *after* the
+/// note: Project a receipt that is already committed. A failure here is *after* the
 /// effect, so it is `OUTCOME_UNCERTAIN`, never a retryable `INTERNAL_ERROR`
 /// (§14.2/§14.3).
 fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
@@ -601,7 +602,7 @@ fn settle_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> SpokeResult<T> {
     }
 }
 
-/// §5.2 step 3: a receipt the journal settled as `failed` records a committed
+/// note: §5.2 step 3: a receipt the journal settled as `failed` records a committed
 /// intent whose file effect could not be published. Repeating the key cannot
 /// settle it, so until the intent is re-driven both the replay channel and
 /// `memory.receipts.get` answer with the recorded failure. That answer is not
@@ -629,7 +630,7 @@ fn failed_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
     })
 }
 
-/// The failure envelope a `failed` receipt recorded at quarantine time.
+/// note: The failure envelope a `failed` receipt recorded at quarantine time.
 fn receipt_failure(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
     let raw = receipt.error_json.as_deref().ok_or_else(|| {
         ProviderError::Internal(format!(
@@ -641,7 +642,7 @@ fn receipt_failure(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
         .map_err(|e| ProviderError::Internal(format!("receipt failure envelope: {e}")))
 }
 
-/// §5.2 step 2: a journaled op's receipt is durable at the point of no return
+/// note: §5.2 step 2: a journaled op's receipt is durable at the point of no return
 /// but terminal only once its file effect is consistent. Until then both the
 /// replay and `memory.receipts.get` answer the pending state as `uncertain`, so
 /// no caller is told an unsettled outcome is final.
@@ -656,7 +657,7 @@ fn pending_receipt(receipt: &ReceiptRow) -> Option<ProviderError> {
     })
 }
 
-/// The §7.0.3 pending receipt body for the async reflection generate op: no
+/// note: The §7.0.3 pending receipt body for the async reflection generate op: no
 /// result, no terminal stamp, no error — the poll answer while generation is
 /// still running. Journaled pending states never take this shape (their
 /// pending means an unpublished file effect, and they answer the uncertain
@@ -671,7 +672,7 @@ fn pending_receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
     Ok(body)
 }
 
-/// The generate flow's receipt projection (§7.0.3): a committed receipt
+/// note: The generate flow's receipt projection (§7.0.3): a committed receipt
 /// settles as the response; a failed one replays its recorded failure — the
 /// only class a generation failure records is retryable `INTERNAL_ERROR` —
 /// and a still-pending one (observable only under the park hook) answers
@@ -702,7 +703,7 @@ fn settle_generation_receipt<T: DeserializeOwned>(receipt: &ReceiptRow) -> Spoke
     }
 }
 
-/// §6.1 `payload_digest`, bound to the operation as the plan's memory identity
+/// note: §6.1 `payload_digest`, bound to the operation as the plan's memory identity
 /// requires: SHA-256 over the JCS canonicalization of `{"op", "payload"}`.
 fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, ProviderError> {
     let payload = serde_json::to_value(request)
@@ -713,7 +714,7 @@ fn payload_digest<T: Serialize>(op: &str, request: &T) -> Result<String, Provide
     }
 }
 
-/// §7.1 `memory.describe`'s response, shared with nothing: it is the provider's
+/// note: §7.1 `memory.describe`'s response, shared with nothing: it is the provider's
 /// declaration of its own surface. `reflections` is the instance's own switch,
 /// so the advertisement names `spoke-memory-reflection` exactly when the three
 /// reflection ops are served.
@@ -732,7 +733,7 @@ fn describe_body(reflections: bool) -> Value {
     })
 }
 
-/// §6.2 space projection.
+/// note: §6.2 space projection.
 fn space_body(space: &SpaceRow) -> Value {
     json!({
         "schema_version": 1,
@@ -748,7 +749,7 @@ fn space_body(space: &SpaceRow) -> Value {
     })
 }
 
-/// §6.3 subject projection.
+/// note: §6.3 subject projection.
 fn subject_body(subject: &SubjectRow) -> Result<Value, ProviderError> {
     let kind = match (&subject.kind_ns, &subject.kind_id) {
         (Some(ns), Some(id)) => json!({ "ns": ns, "id": id }),
@@ -767,7 +768,7 @@ fn subject_body(subject: &SubjectRow) -> Result<Value, ProviderError> {
     }))
 }
 
-/// §6.5 grant projection. `context_ids` is present only on the restricted shape,
+/// note: §6.5 grant projection. `context_ids` is present only on the restricted shape,
 /// which is what the generated `MemoryGrant` oneOf distinguishes.
 fn grant_body(grant: &GrantRow) -> Result<Value, ProviderError> {
     let capabilities = grant.capabilities().map_err(store_error)?;
@@ -828,7 +829,7 @@ fn reflect_requirement<'a>(
     }
 }
 
-/// §7.25 state digest shape: 64 lowercase hex, the exact form the `state` op
+/// note: §7.25 state digest shape: 64 lowercase hex, the exact form the `state` op
 /// publishes as its CAS token (locked D9 — the provider never widens the
 /// accepted token grammar).
 fn is_state_digest(token: &str) -> bool {
@@ -838,7 +839,7 @@ fn is_state_digest(token: &str) -> bool {
             .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Locked D9: the provider serves no cognition family, so a present
+/// note: Locked D9: the provider serves no cognition family, so a present
 /// `cognition_filter` is refused outright on every reflection op — an honest
 /// refusal, never a silent widening of the selection.
 fn cognition_refusal(present: bool) -> Option<ProviderError> {
@@ -851,7 +852,7 @@ fn cognition_refusal(present: bool) -> Option<ProviderError> {
     })
 }
 
-// ── Reflection read-time basis mechanism (§7.25–§7.27, N4-R) ────────────
+// note: Reflection read-time basis mechanism (§7.25–§7.27, N4-R)
 //
 // Staleness is computed, never stored (C-042/MEM-R013): every read recomposes
 // the canonical basis object over the *current* authorized set and compares
@@ -861,7 +862,7 @@ fn cognition_refusal(present: bool) -> Option<ProviderError> {
 // read, which is the whole mechanism. The storage layer owns the authorized
 // sets and runs the same compositions inside its read transaction.
 
-/// 64-hex over a canonical basis object. The error is the reject's message
+/// note: 64-hex over a canonical basis object. The error is the reject's message
 /// text: the composition runs on both sides of the module boundary (storage
 /// reads and this facade), and each wraps it in its own error type.
 fn digest_value(value: &Value) -> Result<String, String> {
@@ -871,13 +872,13 @@ fn digest_value(value: &Value) -> Result<String, String> {
     }
 }
 
-/// §7.27 `source_set_digest`: 64-hex over the authorized source record id +
+/// note: §7.27 `source_set_digest`: 64-hex over the authorized source record id +
 /// revision set — sorted `[record_id, revision]` pairs, the caller's contract.
 fn reflection_source_set_digest(records: &[(String, i64)]) -> Result<String, String> {
     digest_value(&json!({ "records": records }))
 }
 
-/// §7.25 `state_digest`: the provider-composed canonical object of the
+/// note: §7.25 `state_digest`: the provider-composed canonical object of the
 /// current authorized basis — sorted record pairs, profile revisions, the
 /// selection/filter resolution, and the engine policy version. It is the
 /// shape both the `state` op publishes as its CAS token and a pinned basis
@@ -897,7 +898,7 @@ fn reflection_state_digest(
     }))
 }
 
-/// A pinned selection column parsed back into the §6.12 read selection. The
+/// note: A pinned selection column parsed back into the §6.12 read selection. The
 /// column is verbatim wire JSON; anything else is a broken projection.
 fn pinned_selection(raw: &str) -> Result<Selection, String> {
     let value = json_member(raw, "pinned selection").map_err(|error| error.message())?;
@@ -923,7 +924,7 @@ fn pinned_selection(raw: &str) -> Result<Selection, String> {
     }
 }
 
-/// Whether a request's selection scope covers a reflection pinned to
+/// note: Whether a request's selection scope covers a reflection pinned to
 /// `pinned` (§7.26: a present request selection restricts the listing to the
 /// reflections it covers; an absent one names no restriction beyond the
 /// caller's own coverage). Coverage is scope containment — a pin never
@@ -952,13 +953,13 @@ fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> 
                 .all(|context_id| requested_ids.contains(context_id))
                 && (!*include_shared || *requested_shared)
         }
-        // A pin reaching past its request's scope — `subject_all` under a
+        // why: A pin reaching past its request's scope — `subject_all` under a
         // restricted request, context pins under `shared_only` — is uncovered.
         _ => false,
     }
 }
 
-/// §7.25 provider policy verdict over the authorized basis: the protocol
+/// note: §7.25 provider policy verdict over the authorized basis: the protocol
 /// defines no numeric thresholds, so this provider calls an empty authorized
 /// basis insufficient and any non-empty one sufficient. Generation refuses
 /// `INSUFFICIENT_DATA` on exactly the same verdict.
@@ -970,7 +971,7 @@ pub(crate) const fn data_sufficiency(record_count: usize) -> &'static str {
     }
 }
 
-/// §7.27 envelope projection. The pinned `selection`/`filter`/`basis` columns
+/// note: §7.27 envelope projection. The pinned `selection`/`filter`/`basis` columns
 /// are served verbatim (published array shapes preserved, absent optionals
 /// never `null`-substituted); `stale` is the read's own recomputation, never
 /// the stored write-time cache; `cost` and `generator.model` exist only when
@@ -1016,7 +1017,7 @@ fn reflection_body(row: &ReflectionRow, stale: bool) -> Result<Value, ProviderEr
     Ok(body)
 }
 
-/// §6.10 receipt projection, as every mutating op returns it. A `failed` receipt
+/// note: §6.10 receipt projection, as every mutating op returns it. A `failed` receipt
 /// carries the recorded failure envelope and no result — the wire schema's own
 /// failed branch (§5.2 step 3), which is the channel that reports a quarantined
 /// intent terminally.
@@ -1050,7 +1051,7 @@ fn receipt_body(receipt: &ReceiptRow) -> Result<Value, ProviderError> {
     Ok(body)
 }
 
-/// Opaque page cursor bound to principal + space + subject/filter + policy
+/// note: Opaque page cursor bound to principal + space + subject/filter + policy
 /// version + snapshot marker (§7.0.7, MEM-R026). It is plain JSON: cursors are
 /// opaque strings to clients, and JSON keeps the binding inspectable in tests.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1061,7 +1062,7 @@ struct PageCursor {
     marker: String,
 }
 
-/// The bound query a cursor belongs to: op, space, the subject and principal
+/// note: The bound query a cursor belongs to: op, space, the subject and principal
 /// filters actually applied, and the engine policy version. Any other request
 /// under the same cursor is `CURSOR_INVALID` (MEM-R026).
 fn cursor_scope(
@@ -1089,7 +1090,7 @@ fn encode_cursor(principal: &str, scope: &str, offset: u64, marker: &str) -> Str
     serde_json::to_string(&cursor).expect("a page cursor always serializes")
 }
 
-/// The wire `cursor` newtypes are transparent over `String`; the decoder binds
+/// note: The wire `cursor` newtypes are transparent over `String`; the decoder binds
 /// the text they carry.
 fn cursor_text<C: std::ops::Deref<Target = String>>(cursor: Option<&C>) -> Option<&str> {
     cursor.map(|value| value.as_str())
@@ -1111,7 +1112,7 @@ fn decode_cursor(
     Ok(cursor.offset)
 }
 
-/// The offset a cursor claims, decoded **before** the page is cut, for reads
+/// note: The offset a cursor claims, decoded **before** the page is cut, for reads
 /// whose scope is only known after the read resolves it (the grants page names
 /// the principal filter that read decides). The claim is verified afterwards by
 /// [`decode_cursor`] — an offset from a foreign or stale cursor only ever
@@ -1126,7 +1127,7 @@ fn claimed_offset(raw: Option<&str>) -> Result<u64, ProviderError> {
         .offset)
 }
 
-/// The cursor's offset and the snapshot marker it was issued against, decoded
+/// note: The cursor's offset and the snapshot marker it was issued against, decoded
 /// **before** the store reads the page: the offset is what selects the SQL page,
 /// while the marker is verified afterwards against that same snapshot, so a
 /// stale cursor still answers `CURSOR_INVALID` (§7.0.7/MEM-R026).
@@ -1145,7 +1146,7 @@ fn cursor_page(
     Ok((cursor.offset, Some(cursor.marker)))
 }
 
-/// Refuse a page read against a different snapshot than the cursor was minted
+/// note: Refuse a page read against a different snapshot than the cursor was minted
 /// on — the visible set or its grants changed between pages.
 fn verify_cursor(claimed: Option<&str>, marker: &str) -> Result<(), ProviderError> {
     if claimed.is_some_and(|claimed| claimed != marker) {
@@ -1171,13 +1172,13 @@ fn page_limit(limit: Option<NonZeroU64>) -> u64 {
 pub struct LocalMemoryProvider {
     store: MemoryStore,
     space_id: String,
-    /// Whether this instance serves the `spoke-memory-reflection` family: the
+    /// note: Whether this instance serves the `spoke-memory-reflection` family: the
     /// §4.1 advertisement and the §7.25–§7.27 op entry share this one switch, so
     /// `describe` and the ops can never disagree. Production opens turn it on.
     reflections: bool,
 }
 
-/// Exclusive per-bearer memory-disposition section
+/// note: Exclusive per-bearer memory-disposition section
 /// ([`LocalMemoryProvider::review_disposition`]).
 ///
 /// Held for the critical section and released on drop. It is not a writer
@@ -1186,39 +1187,39 @@ pub struct MemoryDisposition {
     _file: std::fs::File,
 }
 
-/// What one `creator memory migrate-legacy` pass did.
+/// note: What one `creator memory migrate-legacy` pass did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LegacyMigrationStatus {
-    /// The pass wrote the space's legacy content into provider storage.
+    /// note: The pass wrote the space's legacy content into provider storage.
     Migrated,
-    /// The space was already migrated and its manifest still matches the source.
+    /// note: The space was already migrated and its manifest still matches the source.
     AlreadyComplete,
 }
 
-/// What one legacy-content migration pass moved (P5, compass D7).
+/// note: What one legacy-content migration pass moved (P5, compass D7).
 ///
 /// The counts and the digest are the completion marker's own manifest, so a
 /// re-run reports exactly what the marker records.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LegacyContentMigration {
-    /// The provider space the pass migrated.
+    /// note: The provider space the pass migrated.
     pub space_id: String,
-    /// Whether this pass wrote, or verified an earlier one.
+    /// note: Whether this pass wrote, or verified an earlier one.
     pub status: LegacyMigrationStatus,
-    /// The source-snapshot digest the completion marker records.
+    /// note: The source-snapshot digest the completion marker records.
     pub digest: String,
-    /// Migrated `memory_records` rows.
+    /// note: Migrated `memory_records` rows.
     pub records: u64,
-    /// Migrated `memory_candidates` rows.
+    /// note: Migrated `memory_candidates` rows.
     pub candidates: u64,
-    /// Migrated `memory_profiles` rows (one per bearer's `SOUL.md`).
+    /// note: Migrated `memory_profiles` rows (one per bearer's `SOUL.md`).
     pub profiles: u64,
-    /// Object count per legacy family (including `SOUL.md`).
+    /// note: Object count per legacy family (including `SOUL.md`).
     pub families: BTreeMap<String, u64>,
 }
 
-/// The lock file name for one bearer: a SHA-256 digest of the exact subject id
+/// note: The lock file name for one bearer: a SHA-256 digest of the exact subject id
 /// under `<state db dir>/memory_locks/` (NXM-5 Task 2 fix round 4, finding
 /// R4-F2).
 ///
@@ -1237,7 +1238,7 @@ fn disposition_lock_file(subject_id: &str) -> Result<String, ProviderError> {
 }
 
 impl LocalMemoryProvider {
-    /// Close this provider's own pool, and with it its writer admission.
+    /// note: Close this provider's own pool, and with it its writer admission.
     ///
     /// Called by the binding when the open that pinned this provider ends. It
     /// closes only this provider's pool: any other open's pool, and any raw
@@ -1246,7 +1247,7 @@ impl LocalMemoryProvider {
         self.store.close().await;
     }
 
-    /// Open (or join) the workspace's admitted writer and provision the local
+    /// note: Open (or join) the workspace's admitted writer and provision the local
     /// space plus its first `admin` grant (§7.0.6). Re-opening is a no-op.
     ///
     /// # Errors
@@ -1287,13 +1288,13 @@ impl LocalMemoryProvider {
         })
     }
 
-    /// The space this provider serves.
+    /// note: The space this provider serves.
     #[must_use]
     pub fn space_id(&self) -> &str {
         &self.space_id
     }
 
-    /// Open the provider over a **read-only** connection (NXM-5 Task 2 fix round
+    /// note: Open the provider over a **read-only** connection (NXM-5 Task 2 fix round
     /// 1, finding F6).
     ///
     /// A read-only core access must keep serving memory reads, so this open
@@ -1324,7 +1325,7 @@ impl LocalMemoryProvider {
         })
     }
 
-    /// Open the same provider with the `spoke-memory-reflection` sub-capability
+    /// note: Open the same provider with the `spoke-memory-reflection` sub-capability
     /// withheld: `describe` omits the flag and the three reflection ops answer
     /// the not-served refusal, the deliberately-unadvertised shape staging spec
     /// §4 N4-R keeps C-003 green on. Everything else is the writable open above.
@@ -1347,13 +1348,13 @@ impl LocalMemoryProvider {
         Ok(provider)
     }
 
-    /// Whether this provider may write (`false` for a read-only open).
+    /// note: Whether this provider may write (`false` for a read-only open).
     #[must_use]
     pub const fn is_writable(&self) -> bool {
         self.store.writable()
     }
 
-    /// P5: migrate every legacy table row and bearer file of this workspace into
+    /// note: P5: migrate every legacy table row and bearer file of this workspace into
     /// the provider's own surfaces, in one guarded transaction, and publish the
     /// completion marker the legacy read bridge then honours.
     ///
@@ -1426,7 +1427,7 @@ impl LocalMemoryProvider {
         migration_report(&self.space_id, status, &manifest)
     }
 
-    /// The bearer's memory-disposition section (NXM-5 Task 2 fix round 2,
+    /// note: The bearer's memory-disposition section (NXM-5 Task 2 fix round 2,
     /// finding F1).
     ///
     /// A provider candidate consumption and the legacy review drain's
@@ -1449,7 +1450,7 @@ impl LocalMemoryProvider {
         self.disposition(subject_id).await
     }
 
-    /// [`Self::review_disposition`] as the provider's own error taxonomy.
+    /// note: [`Self::review_disposition`] as the provider's own error taxonomy.
     async fn disposition(&self, subject_id: &str) -> Result<MemoryDisposition, ProviderError> {
         if !self.is_writable() {
             return Err(ProviderError::ReadOnly(
@@ -1481,7 +1482,7 @@ impl LocalMemoryProvider {
                 )))
             }
         };
-        // The attempt itself (fix round 4, finding R4-F3): the non-blocking
+        // why: The attempt itself (fix round 4, finding R4-F3): the non-blocking
         // probe decides whether this acquisition is contended, so a test can
         // observe a real lock wait instead of a pre-lock rendezvous. The probe
         // also takes the section when free, so the blocking `lock()` below runs
@@ -1514,7 +1515,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// §14.2 proof seam: whether the bearer's disposition section is free right
+    /// note: §14.2 proof seam: whether the bearer's disposition section is free right
     /// now. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
@@ -1539,7 +1540,7 @@ impl LocalMemoryProvider {
         free
     }
 
-    /// NXM-5 Task 2 fix round 4 (finding R4-F3) proof seam: notify `waiter`
+    /// note: NXM-5 Task 2 fix round 4 (finding R4-F3) proof seam: notify `waiter`
     /// from inside the lock attempt of the next disposition acquisition whose
     /// non-blocking probe finds the section held, i.e. only after the caller has
     /// really reached the contended lock. Compiled out of a production build.
@@ -1549,7 +1550,7 @@ impl LocalMemoryProvider {
         self.store.report_disposition_waits(waiter);
     }
 
-    /// NXM-5 Task 2 fix round 3 (finding F5) proof seam: entries that passed the
+    /// note: NXM-5 Task 2 fix round 3 (finding F5) proof seam: entries that passed the
     /// read-only gate and reached the admission or publication machinery.
     /// Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
@@ -1559,7 +1560,7 @@ impl LocalMemoryProvider {
         self.store.lock_attempts()
     }
 
-    /// MEM-R005 profile admission gate: the authored content kinds a subject
+    /// note: MEM-R005 profile admission gate: the authored content kinds a subject
     /// has, or the typed `PROFILE_INCOMPLETE` refusal.
     ///
     /// An absent *optional* kind is honest-empty (§7.23) and simply not listed.
@@ -1603,7 +1604,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// Dismiss a legacy-derived candidate: adopt the projection under the
+    /// note: Dismiss a legacy-derived candidate: adopt the projection under the
     /// bridge's deterministic id and consume it **in one guarded transaction**
     /// (NXM-5 Task 2 fix round 1, finding F4).
     ///
@@ -1637,7 +1638,7 @@ impl LocalMemoryProvider {
         expected_revision: Option<i64>,
         idempotency_key: &str,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
-        // The section must belong to the row's owner, not to whatever subject the
+        // why: The section must belong to the row's owner, not to whatever subject the
         // caller named (fix round 4, finding R4-F1): resolving the stored owner
         // before locking means a caller can never consume A while holding B's
         // section, interleaving A's review drain. The probe authorizes the
@@ -1668,7 +1669,7 @@ impl LocalMemoryProvider {
             Some(owner) => owner,
             None => subject_id,
         };
-        // The consumption decision holds the bearer's disposition section (fix
+        // why: The consumption decision holds the bearer's disposition section (fix
         // round 2, finding F1): a legacy review drain holds the same section
         // across its consumed-check, classification and persistence, so a
         // dismissal can never commit in between.
@@ -1724,7 +1725,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// NXM-8: review one bearer's candidate while the caller already holds that
+    /// note: NXM-8: review one bearer's candidate while the caller already holds that
     /// bearer's memory-disposition section.
     ///
     /// The review drain is the caller: it takes [`MemoryDisposition`] once for
@@ -1754,7 +1755,7 @@ impl LocalMemoryProvider {
             .await
     }
 
-    /// §7.15 admission and decision projection, shared by the wire review (which
+    /// note: §7.15 admission and decision projection, shared by the wire review (which
     /// took the candidate's section) and the bearer drain's review (which holds
     /// the bearer's own section and names the subject it may adopt under).
     async fn review_committed(
@@ -1777,7 +1778,7 @@ impl LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // §7.15: `review` *and* `records_write`, both covering the candidate's
+        // note: §7.15: `review` *and* `records_write`, both covering the candidate's
         // capture scope — created records inherit that placement verbatim.
         let admission = Admission {
             op,
@@ -1850,7 +1851,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// The disposition section of the bearer that owns one provider-native
+    /// note: The disposition section of the bearer that owns one provider-native
     /// candidate, or `None` when this store holds no such row (NXM-5 Task 2 fix
     /// round 3, finding F1).
     ///
@@ -1876,7 +1877,7 @@ impl LocalMemoryProvider {
         self.disposition(&subject).await.map(Some)
     }
 
-    /// §14.2/§14.3 proof seam: force the next committing transaction to fail at
+    /// note: §14.2/§14.3 proof seam: force the next committing transaction to fail at
     /// the commit boundary (`after_commit: false` → before `COMMIT`, no effect;
     /// `true` → after `COMMIT`, effect committed). Compiled out of a production
     /// build.
@@ -1886,7 +1887,7 @@ impl LocalMemoryProvider {
         self.store.inject_commit_fault(after_commit);
     }
 
-    /// §5.2/C-113 proof seam: force the next journal publish to stop at a crash
+    /// note: §5.2/C-113 proof seam: force the next journal publish to stop at a crash
     /// window (`after_publish: false` → after the hidden staged write, before
     /// the rename; `true` → after the publish rename, before the applied mark).
     /// Compiled out of a production build.
@@ -1896,7 +1897,7 @@ impl LocalMemoryProvider {
         self.store.inject_file_fault(after_publish);
     }
 
-    /// §5.2 proof seam: the provider's markdown projection root. Compiled out of
+    /// note: §5.2 proof seam: the provider's markdown projection root. Compiled out of
     /// a production build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
@@ -1905,7 +1906,7 @@ impl LocalMemoryProvider {
         self.store.file_root().to_path_buf()
     }
 
-    /// §14.3 proof seam: force the next post-commit journal settlement to fail
+    /// note: §14.3 proof seam: force the next post-commit journal settlement to fail
     /// (`before_write: true` → its transaction never opens; `false` → its write
     /// fails). Both are failures after the journal COMMIT. Compiled out of a
     /// production build.
@@ -1915,7 +1916,7 @@ impl LocalMemoryProvider {
         self.store.inject_settle_fault(before_write);
     }
 
-    /// §6.5/§6.10 proof seam: move the provider clock forward so grant expiries
+    /// note: §6.5/§6.10 proof seam: move the provider clock forward so grant expiries
     /// and the receipt retention windows elapse. Compiled out of a production
     /// build.
     #[cfg(feature = "test-hooks")]
@@ -1924,7 +1925,7 @@ impl LocalMemoryProvider {
         self.store.advance_clock(seconds);
     }
 
-    /// §6.5/§7.28 proof seam: park the next read once it holds its connection
+    /// note: §6.5/§7.28 proof seam: park the next read once it holds its connection
     /// (`entered` signals it is parked, `release` frees it), so a test can move
     /// the clock while the read is queued and only after it has parked. Compiled
     /// out of a production build.
@@ -1938,7 +1939,7 @@ impl LocalMemoryProvider {
         self.store.park_next_read(entered, release);
     }
 
-    /// Proof seam: park the next write once it has entered the write-admission
+    /// note: Proof seam: park the next write once it has entered the write-admission
     /// machinery and before its writer transaction, so a competing transition can
     /// be observed at the contested boundary. `entered` signals the arrival,
     /// `release` frees it. Single next use. Compiled out of a production build.
@@ -1952,7 +1953,7 @@ impl LocalMemoryProvider {
         self.store.park_next_admission(entered, release)
     }
 
-    /// Disarm exactly the admission arm `token` owns; a stale handle cannot clear
+    /// note: Disarm exactly the admission arm `token` owns; a stale handle cannot clear
     /// a newer arm. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
@@ -1960,7 +1961,7 @@ impl LocalMemoryProvider {
         self.store.disarm_next_admission(token);
     }
 
-    /// §5.2 step 2 proof seam: park the next publication while it holds the
+    /// note: §5.2 step 2 proof seam: park the next publication while it holds the
     /// workspace publication section — cross-process flock and in-process gate —
     /// (`entered` signals it, `release` frees it). Test only.
     #[cfg(feature = "test-hooks")]
@@ -1972,7 +1973,7 @@ impl LocalMemoryProvider {
         self.store.park_next_publish(entered, release);
     }
 
-    /// D15 proof seam: park the next capture once its write transaction holds
+    /// note: D15 proof seam: park the next capture once its write transaction holds
     /// the lock and has validated the caller's binding (`entered` signals it,
     /// `release` frees it), so a test can show a concurrent `remove_binding`
     /// cannot interleave. Compiled out of a production build.
@@ -1986,7 +1987,7 @@ impl LocalMemoryProvider {
         self.store.park_next_capture(entered, release);
     }
 
-    /// §7.0.3/C-015/C-070 proof seam: park the next reflection generate after
+    /// note: §7.0.3/C-015/C-070 proof seam: park the next reflection generate after
     /// its pending receipt committed and before its terminal commit (`entered`
     /// signals the pending receipt is published, `release` frees the
     /// generation), so a test can observe the published pending receipt
@@ -2002,7 +2003,7 @@ impl LocalMemoryProvider {
         self.store.park_next_generation(entered, release);
     }
 
-    /// §7.27/C-078 proof seam: fail the next reflection generation step so its
+    /// note: §7.27/C-078 proof seam: fail the next reflection generation step so its
     /// transaction 2 commits an honest `failed` receipt with no cost. One-shot:
     /// a replay never runs a generation, so an armed fault stays armed across
     /// one. Compiled out of a production build.
@@ -2012,7 +2013,7 @@ impl LocalMemoryProvider {
         self.store.inject_generation_fault();
     }
 
-    /// §5.2 step 2 proof seam: have every workspace flock **wait** report from
+    /// note: §5.2 step 2 proof seam: have every workspace flock **wait** report from
     /// its blocking task just before it blocks, so a test can cancel callers that
     /// have really reached the wait. Compiled out of a production build.
     #[cfg(feature = "test-hooks")]
@@ -2021,7 +2022,7 @@ impl LocalMemoryProvider {
         self.store.report_flock_waits(report);
     }
 
-    /// §7.3/§7.4. The space lifecycle ops define their own freeze admission
+    /// note: §7.3/§7.4. The space lifecycle ops define their own freeze admission
     /// (§7.3 names re-freezing a frozen space a no-op success, and §8.2 admits
     /// `unfreeze`), so `freeze_gated` is false for them.
     async fn change_space_status<T: DeserializeOwned>(
@@ -2067,7 +2068,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// §7.21 explicit promotion of one Character fragment addressed by the id the
+    /// note: §7.21 explicit promotion of one Character fragment addressed by the id the
     /// E4 DTO serves.
     ///
     /// A listed legacy fragment's id is the legacy column, not a provider record
@@ -2115,7 +2116,7 @@ impl LocalMemoryProvider {
             visibility: Placement::SHARED,
             context_id: None,
         };
-        // §7.21: `promote` + `records_write` over BOTH placements.
+        // note: §7.21: `promote` + `records_write` over BOTH placements.
         let admission = Admission {
             op,
             space_id: &self.space_id,
@@ -2147,7 +2148,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// R4-F3 round 2: the placement a committed Character-fragment promotion
+    /// note: R4-F3 round 2: the placement a committed Character-fragment promotion
     /// left behind, while the caller's SOUL-narrative invalidation has not
     /// succeeded yet.
     ///
@@ -2168,7 +2169,7 @@ impl LocalMemoryProvider {
             .map_err(store_error)
     }
 
-    /// Clear the recovery row once the invalidation it names ran; a repeated
+    /// note: Clear the recovery row once the invalidation it names ran; a repeated
     /// clear is a no-op.
     ///
     /// # Errors
@@ -2181,7 +2182,7 @@ impl LocalMemoryProvider {
     }
 }
 
-/// The facts both `memory.grants.grant` request shapes name (§7.9); the restricted
+/// note: The facts both `memory.grants.grant` request shapes name (§7.9); the restricted
 /// shape adds the placement-context restriction (§6.5).
 struct GrantFacts<'a> {
     space_id: &'a str,
@@ -2237,7 +2238,7 @@ fn grant_facts(request: &schemas::MemoryGrantsGrantRequest) -> GrantFacts<'_> {
     }
 }
 
-/// The §7 `admin` requirement for a space- or subject-scoped admin op.
+/// note: The §7 `admin` requirement for a space- or subject-scoped admin op.
 pub(crate) const fn admin_requirement(subject_id: Option<&str>) -> GrantRequirement<'_> {
     GrantRequirement {
         capability: "admin",
@@ -2252,7 +2253,7 @@ fn bootstrap_grant_id(creator_id: &str) -> String {
     format!("grt_bootstrap_{creator_id}")
 }
 
-/// Project the completion marker's manifest onto the public migration report.
+/// note: Project the completion marker's manifest onto the public migration report.
 fn migration_report(
     space_id: &str,
     status: LegacyMigrationStatus,
@@ -2292,15 +2293,15 @@ fn principal_id(principal: &schemas::Principal) -> &str {
     principal.principal_id.as_str()
 }
 
-/// `expected_revision` as the stored integer. A wire revision above `i64::MAX`
+/// note: `expected_revision` as the stored integer. A wire revision above `i64::MAX`
 /// cannot be stored, so it saturates and can only ever fail the CAS.
 fn expected_revision(value: NonZeroU64) -> i64 {
     i64::try_from(value.get()).unwrap_or(i64::MAX)
 }
 
-// ── Content-family projections and requirements (§6.6–§6.8) ────────────
+// note: Content-family projections and requirements (§6.6–§6.8)
 
-/// §6.6/§6.7 placement projection: `context_id` is present iff the visibility is
+/// note: §6.6/§6.7 placement projection: `context_id` is present iff the visibility is
 /// `context` — the conditional both the table CHECK and the wire shape carry.
 fn placement_body(placement: Placement<'_>) -> Value {
     placement.context_id.map_or_else(
@@ -2317,7 +2318,7 @@ fn to_json<T: Serialize>(value: &T, what: &str) -> Result<Value, ProviderError> 
     serde_json::to_value(value).map_err(|e| ProviderError::Internal(format!("{what}: {e}")))
 }
 
-/// §6.5 requirement for one named placement: a `context` placement needs
+/// note: §6.5 requirement for one named placement: a `context` placement needs
 /// coverage of that context, a `shared` placement needs shared access.
 fn placement_requirement<'a>(
     capability: &'a str,
@@ -2337,7 +2338,7 @@ fn placement_requirement<'a>(
     }
 }
 
-/// D-7: a Nexus authoring kind keeps its own name inside the namespaced record
+/// note: D-7: a Nexus authoring kind keeps its own name inside the namespaced record
 /// kind; any other hint is an open-vocabulary product kind and is used verbatim.
 fn candidate_kind(hint: Option<&str>) -> String {
     match hint {
@@ -2349,7 +2350,7 @@ fn candidate_kind(hint: Option<&str>) -> String {
     }
 }
 
-/// The wire list selection mapped onto the provider-internal one.
+/// note: The wire list selection mapped onto the provider-internal one.
 fn wire_read_selection(
     selection: &schemas::memory_reflections_list_request::ReadSelection,
 ) -> Selection {
@@ -2370,7 +2371,7 @@ fn wire_read_selection(
     }
 }
 
-/// The generate request's selection mapped onto the provider-internal one.
+/// note: The generate request's selection mapped onto the provider-internal one.
 fn wire_generate_selection(
     selection: &schemas::memory_reflections_generate_request::ReadSelection,
 ) -> Selection {
@@ -2391,7 +2392,7 @@ fn wire_generate_selection(
     }
 }
 
-/// The verbatim pins the generate columns stage: the wire selection/filter
+/// note: The verbatim pins the generate columns stage: the wire selection/filter
 /// shapes serialized unaltered, an absent filter staying `None` — never
 /// null-substituted.
 fn pinned_request_shapes(
@@ -2408,7 +2409,7 @@ fn pinned_request_shapes(
     Ok((selection_json, filter_json))
 }
 
-/// §9.2/§9.3, cut out of the wire method: score every authorized row, order
+/// note: §9.2/§9.3, cut out of the wire method: score every authorized row, order
 /// by (score, recency, id) — deterministic for identical state, request and
 /// policy — apply the byte/item budget after the cursor, and project the
 /// kept bodies. Returns the bodies, the offset they consumed and the id the
@@ -2449,7 +2450,7 @@ fn recall_ranked_bodies(
     Ok((bodies, consumed, outcome.overflow_record_id))
 }
 
-/// A subject's profile kinds and the required ones it misses — the same
+/// note: A subject's profile kinds and the required ones it misses — the same
 /// projection the `state` op publishes and the generate gate refuses on.
 fn profile_projection(profile_revisions: &[(String, i64)]) -> (Vec<String>, Vec<String>) {
     let kinds: Vec<String> = profile_revisions
@@ -2464,7 +2465,7 @@ fn profile_projection(profile_revisions: &[(String, i64)]) -> (Vec<String>, Vec<
     (kinds, missing)
 }
 
-/// The request's id set canonicalized for every place that treats it as a
+/// note: The request's id set canonicalized for every place that treats it as a
 /// set (bound-query keys, digests, list narrowing): sorted, de-duplicated.
 pub(crate) fn canonical_ids(ids: &[String]) -> Vec<String> {
     let mut ids = ids.to_vec();
@@ -2473,7 +2474,7 @@ pub(crate) fn canonical_ids(ids: &[String]) -> Vec<String> {
     ids
 }
 
-/// The bound query a content page belongs to (MEM-R026): everything that
+/// note: The bound query a content page belongs to (MEM-R026): everything that
 /// changes which rows the page was cut from. The ids render canonically —
 /// two requests naming the same context/filter set in different orders or
 /// with duplicates are the same bound query and the same state digest.
@@ -2492,7 +2493,7 @@ fn selection_key(selection: &Selection) -> String {
     }
 }
 
-/// The provenance filter rendered into the bound-query/digest keys, the same
+/// note: The provenance filter rendered into the bound-query/digest keys, the same
 /// set canonicalization as [`selection_key`].
 fn filter_key(filter: Option<&[String]>) -> String {
     filter.map_or_else(
@@ -2501,7 +2502,7 @@ fn filter_key(filter: Option<&[String]>) -> String {
     )
 }
 
-/// §9.2 ranking input: the record's untrusted text, never re-interpreted.
+/// note: §9.2 ranking input: the record's untrusted text, never re-interpreted.
 fn record_text(row: &RecordRow) -> String {
     json_member(&row.content_json, "record content")
         .ok()
@@ -2514,7 +2515,7 @@ fn record_text(row: &RecordRow) -> String {
         .unwrap_or_default()
 }
 
-/// §6.7 candidate projection. The pending shape carries the proposed body; the
+/// note: §6.7 candidate projection. The pending shape carries the proposed body; the
 /// consumed shell replaces it with the digest and the outcome (§8.1 scrub), and
 /// `expires_at` belongs to the pending shape alone.
 fn candidate_body(row: &CandidateRow) -> Result<Value, ProviderError> {
@@ -2563,7 +2564,7 @@ fn candidate_body(row: &CandidateRow) -> Result<Value, ProviderError> {
     Ok(body)
 }
 
-/// §6.6 record projection. A tombstoned record carries its scrubbed content and
+/// note: §6.6 record projection. A tombstoned record carries its scrubbed content and
 /// the deletion marker instead of `import_ref` (MEM-R014).
 fn record_body(row: &RecordRow) -> Result<Value, ProviderError> {
     let mut body = json!({
@@ -2605,7 +2606,7 @@ fn record_body(row: &RecordRow) -> Result<Value, ProviderError> {
     Ok(body)
 }
 
-/// §6.8 profile projection.
+/// note: §6.8 profile projection.
 fn profile_body(row: &ProfileRow) -> Result<Value, ProviderError> {
     Ok(json!({
         "schema_version": 1,
@@ -2621,7 +2622,7 @@ fn profile_body(row: &ProfileRow) -> Result<Value, ProviderError> {
     }))
 }
 
-/// §7.18/§7.19 with mutation-time adoption (NXM-6 fix round 1, finding F2).
+/// note: §7.18/§7.19 with mutation-time adoption (NXM-6 fix round 1, finding F2).
 ///
 /// The E4 adapter addresses a Creator or Character memory by the id its DTO
 /// serves, which for an unmigrated item is the bridge's projection: no provider
@@ -2632,7 +2633,7 @@ fn profile_body(row: &ProfileRow) -> Result<Value, ProviderError> {
 /// records) and re-authorizes the mutation against the adopted row. Nothing is
 /// written to the legacy surface (D6).
 impl LocalMemoryProvider {
-    /// Materialize one still-projected legacy candidate on the provider without
+    /// note: Materialize one still-projected legacy candidate on the provider without
     /// consuming it: the Character capture adopts its own retained queue row in
     /// the same call, so the row stays visible after the migration's marker
     /// turns the legacy queue reads off (fix round 1, Greptile `legacy.rs:318`).
@@ -2654,7 +2655,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// §7.11 capture under a caller-fixed candidate id.
+    /// note: §7.11 capture under a caller-fixed candidate id.
     ///
     /// The Character capture writes its provider candidate under the bridge's
     /// deterministic id for the same `pending_id`, so the candidate still aligns
@@ -2682,7 +2683,7 @@ impl LocalMemoryProvider {
             .await
     }
 
-    /// The §7.11 capture every entry point above runs; `candidate_id` fixes the
+    /// note: The §7.11 capture every entry point above runs; `candidate_id` fixes the
     /// candidate's identity (and makes a repeat a no-op on the stored row),
     /// `None` mints one.
     async fn capture_request(
@@ -2711,7 +2712,7 @@ impl LocalMemoryProvider {
             payload_digest: &digest,
         };
         let subject_id = request.subject_id.as_str();
-        // §7.11: `capture_scope` is the admitted placement and becomes the
+        // note: §7.11: `capture_scope` is the admitted placement and becomes the
         // candidate's immutable authorization fence.
         let placement = match &request.capture_scope {
             schemas::memory_capture_request::PlacementScope::Shared => Placement {
@@ -2744,7 +2745,7 @@ impl LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return Ok(deny(&error)),
         };
-        // spoke-schemas 0.16.0: capture-request anchors became Option<...>
+        // note: spoke-schemas 0.16.0: capture-request anchors became Option<...>
         // (absent = None, serialized as null); the stored provenance must stay
         // the published `anchors` array shape (may be empty), never null.
         let anchors = match to_json(&request.anchors, "capture anchors") {
@@ -2763,7 +2764,7 @@ impl LocalMemoryProvider {
             "rationale_codes": classification.rationale_codes,
         });
         let occurred_at = request.occurred_at.map(storage::timestamp);
-        // §7.11/§6.7: the advisory classifier can leave a capture with no
+        // note: §7.11/§6.7: the advisory classifier can leave a capture with no
         // candidate at all; that is a committed outcome with its count recorded.
         let keep_existing = candidate_id.is_some();
         let candidate_id = candidate_id.map_or_else(storage::mint_candidate_id, str::to_string);
@@ -2793,7 +2794,7 @@ impl LocalMemoryProvider {
         }
     }
 
-    /// One §7.18 edit, adopting a still-projected record inside the edit.
+    /// note: One §7.18 edit, adopting a still-projected record inside the edit.
     pub async fn update_legacy_record(
         &self,
         principal: &schemas::Principal,
@@ -2804,7 +2805,7 @@ impl LocalMemoryProvider {
             .await
     }
 
-    /// One §7.19 tombstone, adopting a still-projected record inside the delete.
+    /// note: One §7.19 tombstone, adopting a still-projected record inside the delete.
     pub async fn delete_legacy_record(
         &self,
         principal: &schemas::Principal,
@@ -3004,7 +3005,7 @@ impl LocalMemoryProvider {
     }
 }
 
-/// The §7.20 record list with the legacy bridge's projection made optional.
+/// note: The §7.20 record list with the legacy bridge's projection made optional.
 ///
 /// A provider-native read (`project_legacy = false`) serves the provider's own
 /// rows only: resolving a promoted memory by its authored slug must not parse
@@ -3054,7 +3055,7 @@ impl LocalMemoryProvider {
             request.kinds.join(","),
             request.include_tombstoned
         );
-        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
+        // note: §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
         // is verified against the snapshot the page was read in.
         let (offset, claimed) =
             match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
@@ -3241,7 +3242,7 @@ impl MemoryPort for LocalMemoryProvider {
             .kind
             .as_ref()
             .map(|kind| (kind.ns.as_str(), kind.id.as_str()));
-        // The sole `idempotency_key` exemption (§7.0.5): a keyless receipt sits
+        // why: The sole `idempotency_key` exemption (§7.0.5): a keyless receipt sits
         // outside the dedup namespace, so every ensure records its own outcome.
         let ctx = OpContext {
             space_id: request.space_id.as_str(),
@@ -3263,7 +3264,7 @@ impl MemoryPort for LocalMemoryProvider {
             principal_id,
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
-            // §7.5: a fenced or archived subject rejects its writes, checked in
+            // note: §7.5: a fenced or archived subject rejects its writes, checked in
             // the same transaction as the get-or-create.
             subject_gate: Some(request.subject_id.as_str()),
             placement_gate: None,
@@ -3285,7 +3286,7 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemorySubjectsGetRequest,
     ) -> SpokeResult<schemas::MemorySubjectsGetResponse> {
         let principal_id = principal_id(principal);
-        // §7.6/S-4: the "any live grant" test and the subject row are one read
+        // note: §7.6/S-4: the "any live grant" test and the subject row are one read
         // transaction on the store's clock.
         match self
             .store
@@ -3325,7 +3326,7 @@ impl MemoryPort for LocalMemoryProvider {
             schemas::memory_subjects_fence_request::Action::Unfence => FenceAction::Unfence,
             schemas::memory_subjects_fence_request::Action::Archive => FenceAction::Archive,
         };
-        // §6.5/§7.7: authorization is bound to what the op actually touches — a
+        // note: §6.5/§7.7: authorization is bound to what the op actually touches — a
         // context fence needs coverage of THAT context, and a whole-subject
         // fence/archive needs unrestricted coverage of the subject.
         let mut requirement = admin_requirement(Some(request.subject_id.as_str()));
@@ -3383,14 +3384,14 @@ impl MemoryPort for LocalMemoryProvider {
         let principal_filter = request.principal_id.as_ref().map(|value| value.as_str());
         let subject_filter = request.subject_id.as_ref().map(|value| value.as_str());
         let limit = page_limit(request.limit);
-        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its claim is
+        // note: §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its claim is
         // verified after the read, because the scope names the principal filter
         // that read resolves.
         let page_offset = match claimed_offset(cursor_text(request.cursor.as_ref())) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
-        // §7.0.7/§7.8/S-4: the `admin` verdict, the page and its invalidation
+        // note: §7.0.7/§7.8/S-4: the `admin` verdict, the page and its invalidation
         // marker are ONE read transaction on the store's clock, and the returned
         // filter is the one that read actually applied.
         let (rows, marker, filter, more) = match self
@@ -3483,7 +3484,7 @@ impl MemoryPort for LocalMemoryProvider {
             shared_access,
             expires_at,
         };
-        // §7.9: admission uses the ISSUED grant's scope — a subject-scoped admin
+        // note: §7.9: admission uses the ISSUED grant's scope — a subject-scoped admin
         // delegates within its own subject — and non-amplification is evaluated
         // on the same grant set, inside the transaction that inserts the grant.
         let requirements = [admin_requirement(subject_id)];
@@ -3521,7 +3522,7 @@ impl MemoryPort for LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // `memory.grants.revoke` is on the §8.2 allowlist, so an incident can be
+        // why: `memory.grants.revoke` is on the §8.2 allowlist, so an incident can be
         // contained while the space is frozen.
         let requirements = [admin_requirement(None)];
         let admission = Admission {
@@ -3549,7 +3550,7 @@ impl MemoryPort for LocalMemoryProvider {
         }
     }
 
-    // ── Content families ───────────────────────────────────────────────
+    // note: Content families
     //
     // Every mutating op here follows the same §7.0 discipline as the control
     // families:
@@ -3566,7 +3567,7 @@ impl MemoryPort for LocalMemoryProvider {
     ) -> SpokeResult<schemas::MemoryCaptureResponse> {
         match self.capture_request(principal, request, None, None).await {
             Ok(result) => result,
-            // Only a named binding can fail this way, and this entry point
+            // why: Only a named binding can fail this way, and this entry point
             // names none.
             Err(error) => deny(&store_error(StoreError::Database(error))),
         }
@@ -3594,7 +3595,7 @@ impl MemoryPort for LocalMemoryProvider {
             ),
             status.as_deref().unwrap_or("*")
         );
-        // §7.0.7/MEM-R026: the cursor's offset selects the authorized page; its
+        // note: §7.0.7/MEM-R026: the cursor's offset selects the authorized page; its
         // marker is verified against the snapshot the page was read in.
         let (offset, claimed) =
             match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
@@ -3665,7 +3666,7 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCandidatesDismissRequest,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
-        // Whichever op consumes a candidate, it holds the owning bearer's
+        // why: Whichever op consumes a candidate, it holds the owning bearer's
         // disposition section (fix round 3, finding F1): the legacy review drain
         // holds the same section across its consumed-check and classification.
         let _disposition = match self
@@ -3688,7 +3689,7 @@ impl MemoryPort for LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // §7.14: `review` covering the candidate's immutable `capture_scope`.
+        // note: §7.14: `review` covering the candidate's immutable `capture_scope`.
         let admission = Admission {
             op,
             space_id: request.space_id.as_str(),
@@ -3725,7 +3726,7 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
             return deny(&ProviderError::from_reject(reject, "decision"));
         }
-        // A review consumes the candidate exactly as a dismissal does, so it
+        // why: A review consumes the candidate exactly as a dismissal does, so it
         // takes the owning bearer's disposition section too (fix round 3,
         // finding F1).
         let _disposition = match self
@@ -3794,7 +3795,7 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return deny(&error),
         };
-        // spoke-schemas 0.16.0: request anchors became Option<...> (serialized
+        // note: spoke-schemas 0.16.0: request anchors became Option<...> (serialized
         // null when absent); the stored provenance keeps the published array
         // shape (may be empty), not null.
         let anchors = match to_json(&request.anchors, "record anchors") {
@@ -3802,7 +3803,7 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(anchors) => anchors,
             Err(error) => return deny(&error),
         };
-        // §6.6/§10: `captured_by`/`captured_at` are provider-populated; the
+        // note: §6.6/§10: `captured_by`/`captured_at` are provider-populated; the
         // context claims are recorded verbatim and never authorize anything.
         let provenance = json!({
             "source_context_ids": request.source_context_ids.unwrap_or_default(),
@@ -3911,7 +3912,7 @@ impl MemoryPort for LocalMemoryProvider {
                 }
             }
         };
-        // §7.21: `promote` + `records_write` over BOTH placements.
+        // note: §7.21: `promote` + `records_write` over BOTH placements.
         let admission = Admission {
             op,
             space_id: request.space_id.as_str(),
@@ -3972,7 +3973,7 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // §9.1: authorization + selection + filter are applied by the read path,
+        // note: §9.1: authorization + selection + filter are applied by the read path,
         // so the authorized set — never the raw table — is what gets ranked.
         let (rows, marker, total) = match self
             .store
@@ -3993,9 +3994,9 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(page) => page,
             Err(error) => return deny(&store_error(error)),
         };
-        // The recall budget is a byte/item bound over a Rust-ranked list.
+        // why: The recall budget is a byte/item bound over a Rust-ranked list.
         let total = usize::try_from(total).unwrap_or(usize::MAX);
-        // §9.2: the query decides the ordering, so a cursor continues only the
+        // note: §9.2: the query decides the ordering, so a cursor continues only the
         // ranking it was minted under (MEM-R026).
         let terms = policy::query_terms(request.query.as_deref().unwrap_or_default());
         let scope = format!(
@@ -4065,7 +4066,7 @@ impl MemoryPort for LocalMemoryProvider {
                 request.subject_id.as_str()
             )));
         };
-        // §7.23: absent kinds are honest-empty, never invented and never an error.
+        // note: §7.23: absent kinds are honest-empty, never invented and never an error.
         let mut bodies = Vec::new();
         for row in profile::select(rows, &request.profile_kinds) {
             match profile_body(&row) {
@@ -4109,7 +4110,7 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: Some(subject_id),
-            // Profiles are subject-level documents with no placement (§6.8).
+            // why: Profiles are subject-level documents with no placement (§6.8).
             placement_gate: None,
             freeze_gated: true,
         };
@@ -4140,7 +4141,7 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryReceiptsGetRequest,
     ) -> SpokeResult<schemas::MemoryReceiptsGetResponse> {
-        // §7.28: the sole uncertainty-resolution channel (MEM-R010). Read-only
+        // note: §7.28: the sole uncertainty-resolution channel (MEM-R010). Read-only
         // (MEM-R011), content-free (§6.10/MEM-R022), and admissible only under the
         // caller's *current* authorization (MEM-R018/R021).
         let stored = match self
@@ -4155,7 +4156,7 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(stored) => stored,
             Err(error) => return deny(&store_error(error)),
         };
-        // §7.0.3 async receipts (reflection generate): a pending receipt IS the
+        // note: §7.0.3 async receipts (reflection generate): a pending receipt IS the
         // poll answer — generation in progress, no effect and no cost yet
         // (C-015/C-070). Journaled pending states keep the uncertain-error
         // answer below: their pending means an unpublished file effect, not
@@ -4171,13 +4172,13 @@ impl MemoryPort for LocalMemoryProvider {
                 Ok(body) => respond(json!({ "receipt": body })),
                 Err(error) => deny(&error),
             },
-            // §5.2 step 2: durable but not consistent yet — the channel answers
+            // note: §5.2 step 2: durable but not consistent yet — the channel answers
             // the pending state instead of a terminal receipt.
             |error| deny(&error),
         )
     }
 
-    // ── Sub-capability gated (N4-R reflection family) ──────────────────
+    // note: Sub-capability gated (N4-R reflection family)
 
     async fn get_reflection_state(
         &self,
@@ -4221,7 +4222,7 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // §7.25: the basis is published content-free and its digest is composed
+        // note: §7.25: the basis is published content-free and its digest is composed
         // over the *current* authorized basis (C-042 — no eager invalidation
         // writes exist), so every basis-affecting fact shows up at the next
         // read. The basis and the visible reflections come from ONE store
@@ -4257,7 +4258,7 @@ impl MemoryPort for LocalMemoryProvider {
         };
         let (profile_kinds, missing_required_profile_kinds) =
             profile_projection(&snapshot.profile_revisions);
-        // The read-side narrowing is the same one `list` uses: the newest
+        // why: The read-side narrowing is the same one `list` uses: the newest
         // envelope this caller may see under this selection and provenance
         // filter, excluding tombstoned-basis rows (C-077) — read in the same
         // snapshot as the basis above. With no envelope to compare against,
@@ -4286,7 +4287,7 @@ impl MemoryPort for LocalMemoryProvider {
         if !self.reflections {
             return unsupported(OP_REFLECTIONS_LIST);
         }
-        // An absent selection is a subject-wide listing, so its admission
+        // why: An absent selection is a subject-wide listing, so its admission
         // demands the same unrestricted grant an explicit `subject_all` does;
         // a present one is covered like any other read selection (C-075).
         let selection = request.selection.as_ref().map(wire_read_selection);
@@ -4314,7 +4315,7 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // MEM-R026: the cursor binds everything that decides the page — the
+        // note: MEM-R026: the cursor binds everything that decides the page — the
         // op, space, subject, the selection/filter resolution actually applied
         // and the engine policy version. Any other request under it is
         // `CURSOR_INVALID`.
@@ -4336,7 +4337,7 @@ impl MemoryPort for LocalMemoryProvider {
                 Ok(page) => page,
                 Err(error) => return deny(&error),
             };
-        // §7.26: every envelope this caller may see under this selection,
+        // note: §7.26: every envelope this caller may see under this selection,
         // staleness recomputed per row against its pinned basis (the stored
         // write-time cache is never served), tombstoned-basis rows excluded
         // (C-077). The marker covers the whole visible set plus every record
@@ -4398,7 +4399,7 @@ impl MemoryPort for LocalMemoryProvider {
                 details: None,
             });
         }
-        // Generate is the cost-bearing mutation: its admission checks current
+        // why: Generate is the cost-bearing mutation: its admission checks current
         // coverage before any receipt disclosure, but the §8.2 freeze gate
         // does not run here — the store's transaction gate applies freeze to
         // fresh work only, after replay resolution (§7.0.5/MEM-R021/C-036),
@@ -4415,7 +4416,7 @@ impl MemoryPort for LocalMemoryProvider {
         {
             return deny(&error);
         }
-        // The §7.0.3 two-transaction flow: the store commits the pending
+        // why: The §7.0.3 two-transaction flow: the store commits the pending
         // receipt (transaction 1 — the point of no return) inside the same
         // transaction that rechecks authorization, the §7.25 CAS and the
         // sufficiency verdicts, then generation runs deterministically over
@@ -4439,7 +4440,7 @@ impl MemoryPort for LocalMemoryProvider {
             placement_gate: None,
             freeze_gated: true,
         };
-        // Verbatim pins for the columns Task 1 staged (see
+        // note: Verbatim pins for the columns Task 1 staged (see
         // [`pinned_request_shapes`]).
         let (selection_json, filter_json) = match pinned_request_shapes(&request) {
             Ok(pins) => pins,
@@ -4530,7 +4531,7 @@ mod tests {
         serde_json::from_value(value).expect("request payload deserializes")
     }
 
-    /// The top-level request member a validator refusal publishes as
+    /// note: The top-level request member a validator refusal publishes as
     /// `details.field` (inspector round 2, may-fix): the provider maps the
     /// member the validator actually refused, never a hardcoded
     /// `"selection"`.
@@ -4545,7 +4546,7 @@ mod tests {
         }
     }
 
-    /// Per-entry-point mapping: over-bound `limit` → `limit` (agreeing with
+    /// note: Per-entry-point mapping: over-bound `limit` → `limit` (agreeing with
     /// `details.limit`, §7.0.7 and the `validate_memory_spaces_list`
     /// exemplar); an empty selected-contexts selection → `selection`; an
     /// empty provenance filter → `filter`.
@@ -4594,7 +4595,7 @@ mod tests {
         );
     }
 
-    /// A validator reject that attaches no machine-readable field keeps the
+    /// note: A validator reject that attaches no machine-readable field keeps the
     /// `"selection"` default — the only shape reflection validators can
     /// refuse without one today.
     #[test]
@@ -4610,7 +4611,7 @@ mod tests {
         ));
     }
 
-    /// The wire request types accept the shapes the mapping tests build (a
+    /// note: The wire request types accept the shapes the mapping tests build (a
     /// deserialization regression guard for the tests above).
     #[test]
     fn reflection_request_shapes_deserialize() {
@@ -4625,7 +4626,7 @@ mod tests {
         }));
     }
 
-    /// §4.1: the advertisement names the reflection sub-capability exactly when
+    /// note: §4.1: the advertisement names the reflection sub-capability exactly when
     /// the instance serves the three reflection ops — the same switch the
     /// `memory.reflections.*` entry guard reads, so both shapes stay honest and
     /// `spoke-memory-transfer` is never advertised.
@@ -4647,20 +4648,20 @@ mod tests {
         }
     }
 
-    /// NXM-5 QC1-F1 fix round 2: the merged-read comparator must be a total
+    /// note: NXM-5 QC1-F1 fix round 2: the merged-read comparator must be a total
     /// order for every supported legacy timestamp format. The reported cycle —
     /// RFC 3339 second `A < B` (fractional RFC 3339) by parse, `B < C` and
     /// `C < A` by pairwise text fallback — must not be expressible.
     #[test]
     fn created_at_cmp_is_a_total_order_for_mixed_legacy_formats() {
         let values = [
-            "2026-01-01T00:00:00Z",     // A: RFC 3339, whole second
-            "2026-01-01T00:00:00.900Z", // B: RFC 3339 with fraction
-            "2026-01-01T00:00:00.950",  // C: bare-T form (no offset)
-            "2026-01-01 00:00:00.950",  // the same instant in the SQLite form
-            "2026-01-01T00:00:01Z",     // D: one second later
-            "not a timestamp",          // unparseable class
-            "also not a timestamp",     // unparseable class
+            "2026-01-01T00:00:00Z",     // note: A: RFC 3339, whole second
+            "2026-01-01T00:00:00.900Z", // note: B: RFC 3339 with fraction
+            "2026-01-01T00:00:00.950",  // note: C: bare-T form (no offset)
+            "2026-01-01 00:00:00.950",  // note: the same instant in the SQLite form
+            "2026-01-01T00:00:01Z",     // note: D: one second later
+            "not a timestamp",          // note: unparseable class
+            "also not a timestamp",     // note: unparseable class
         ];
 
         for left in values {
@@ -4689,7 +4690,7 @@ mod tests {
             }
         }
 
-        // The reported triple now ranks by instant: A < B < C and therefore
+        // why: The reported triple now ranks by instant: A < B < C and therefore
         // A < C, with no cycle.
         assert_eq!(
             created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.900Z"),
@@ -4704,7 +4705,7 @@ mod tests {
             Ordering::Less
         );
 
-        // One sort yields exactly one ranking, parseable instants first and
+        // why: One sort yields exactly one ranking, parseable instants first and
         // the unparseable class last in raw-text order.
         let mut sorted = values;
         sorted.sort_by(|left, right| created_at_cmp(left, right));

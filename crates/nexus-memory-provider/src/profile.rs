@@ -20,18 +20,19 @@
 //! an absent or empty *optional* kind is honest-empty and simply not listed, and
 //! a missing provider capability is decided at provider selection — it never
 //! reaches this module.
+// why: profiles are the only trusted documents the provider stores, so admission keeps the MEM-R005 outcomes distinct.
 
 use serde_json::Value;
 
 use crate::storage::ProfileRow;
 
-/// D-12: SOUL.md ↔ the authored `personality` content kind.
+/// note: D-12: SOUL.md ↔ the authored `personality` content kind.
 pub const SOUL_PROFILE_KIND: &str = "personality";
 
-/// MEM-R005 admission view: what the subject has authored.
+/// note: MEM-R005 admission view: what the subject has authored.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfileAdmission {
-    /// Authored content kinds carrying content, sorted.
+    /// note: Authored content kinds carrying content, sorted.
     pub present: Vec<String>,
 }
 
@@ -48,7 +49,7 @@ pub struct ProfileAdmission {
 /// A stored body outside the `{ body, format }` shape authors nothing.
 ///
 /// shortcut: only the top level is inspected, so `{"a":{}}` counts as content;
-/// upgrade when nested-empty JSON bodies must also fail admission closed.
+/// upgrade: when nested-empty JSON bodies must also fail admission closed.
 fn has_content(row: &ProfileRow) -> bool {
     let Ok(document) = serde_json::from_str::<Value>(&row.document_json) else {
         return false;
@@ -72,7 +73,7 @@ fn has_content(row: &ProfileRow) -> bool {
     }
 }
 
-/// §4.2/MEM-R005: the admission view over a subject's authored profiles.
+/// note: §4.2/MEM-R005: the admission view over a subject's authored profiles.
 ///
 /// A kind is present only when its stored document carries content, so `Err`
 /// carries the §4.2 required kinds that are absent **or empty** — the
@@ -102,7 +103,7 @@ pub(super) fn admission(
     }
 }
 
-/// §7.23 honest-empty read: the profiles the caller named, or every present one
+/// note: §7.23 honest-empty read: the profiles the caller named, or every present one
 /// when it named none. A kind that is absent is simply not in the result — an
 /// authored profile is never invented and absence is never an error.
 pub(super) fn select(rows: Vec<ProfileRow>, requested: &[String]) -> Vec<ProfileRow> {

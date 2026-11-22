@@ -119,6 +119,7 @@
 //! The digest is the provider's standard `jcs_sha256_hex` over the rendered
 //! markdown as a JSON string — the same helper the candidate `content_digest`
 //! uses — so journal, publish and recovery all compare one computation.
+// why: SQLite and markdown cannot commit atomically together, so the journaled intent is the point of no return.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -127,10 +128,10 @@ use serde_json::Value;
 
 use crate::storage::{CandidateRow, ProfileRow, RecordRow, StoreError, StoreResult};
 
-/// The provider's file root inside the workspace directory, next to `state.db`.
+/// note: The provider's file root inside the workspace directory, next to `state.db`.
 pub const FILES_DIR: &str = "memory-store";
 
-/// How many unsettled intents one recovery pass settles. Recovery runs at open
+/// note: How many unsettled intents one recovery pass settles. Recovery runs at open
 /// and must never page an unbounded journal; a pass that leaves work behind
 /// marks it [`STATE_DEFERRED`], which reads answer terminally until a later
 /// pass reaches it.
@@ -139,16 +140,16 @@ pub const RECOVERY_BOUND: i64 = 64;
 pub const STATE_PENDING: &str = "pending";
 pub const STATE_APPLIED: &str = "applied";
 pub const STATE_QUARANTINED: &str = "quarantined";
-/// Left over by a bounded pass: still recoverable, but no longer silently
+/// note: Left over by a bounded pass: still recoverable, but no longer silently
 /// withheld — the subject's reads answer the terminal refusal (§5.2 step 5).
 pub const STATE_DEFERRED: &str = "deferred";
 
-/// The workspace publication lock file, at the root of the provider's own file
+/// note: The workspace publication lock file, at the root of the provider's own file
 /// tree. Hidden, never removed: unlinking it would let the next holder lock a
 /// different inode while an earlier one still holds the old.
 pub const PUBLISH_LOCK_FILE: &str = ".memory-publish.lock";
 
-/// The cross-process half of the publish lock (§5.2 step 2): an exclusive
+/// note: The cross-process half of the publish lock (§5.2 step 2): an exclusive
 /// `flock` on [`PUBLISH_LOCK_FILE`], held for the whole settle → publish section
 /// of one operation (or recovery pass).
 ///
@@ -170,7 +171,7 @@ pub struct PublishFlock {
 }
 
 impl PublishFlock {
-    /// Take the exclusive lease, creating the lock file if it is absent.
+    /// note: Take the exclusive lease, creating the lock file if it is absent.
     ///
     /// `flock` has no async form, so the wait runs on the blocking pool: a
     /// publication waiting for another process must not stall the executor's
@@ -211,7 +212,7 @@ impl PublishFlock {
         .map_err(|error| std::io::Error::other(format!("publish lock task: {error}")))?
     }
 
-    /// Run one file-effect section on a blocking thread that owns this lease for
+    /// note: Run one file-effect section on a blocking thread that owns this lease for
     /// its whole duration, then hand the lease back for the next section.
     ///
     /// The closure runs synchronous `std::fs` operations only. Cancelling the
@@ -223,7 +224,7 @@ impl PublishFlock {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        // A join error is a panic inside the section, not an I/O outcome: the
+        // why: A join error is a panic inside the section, not an I/O outcome: the
         // unwinding task has already released the lease.
         tokio::task::spawn_blocking(move || (work(), self))
             .await
@@ -232,7 +233,7 @@ impl PublishFlock {
     }
 }
 
-/// One planned file write: the target relative to the file root, the exact
+/// note: One planned file write: the target relative to the file root, the exact
 /// bytes, their digest, and the digest of the projection this intent replaces.
 /// The same shape is stored in the journal and replayed by recovery, so an
 /// intent and its effect cannot drift.
@@ -240,7 +241,7 @@ impl PublishFlock {
 pub struct FileEffect {
     pub path: String,
     pub digest: String,
-    /// The provider's own previous projection of this target, or `None` when
+    /// note: The provider's own previous projection of this target, or `None` when
     /// the target must not exist yet. Taken from the stored row, never from
     /// whatever bytes happen to sit at the path, so foreign bytes are never
     /// adopted as a legitimate predecessor.
@@ -250,29 +251,29 @@ pub struct FileEffect {
 }
 
 impl FileEffect {
-    /// Declare the projection this effect replaces.
+    /// note: Declare the projection this effect replaces.
     pub fn over(mut self, prior: Option<String>) -> Self {
         self.prior = prior;
         self
     }
 }
 
-/// What recovery did with one target.
+/// note: What recovery did with one target.
 pub enum Settled {
     Published,
     Quarantined(String),
 }
 
-/// The protocol step a deterministic test seam runs at, so a regression can
+/// note: The protocol step a deterministic test seam runs at, so a regression can
 /// land a foreign write or an I/O failure at the exact instant the step depends
 /// on. Production passes [`noop`], which ignores the point and never fails.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Point {
-    /// After the scratch ownership read, before the target is displaced.
+    /// note: After the scratch ownership read, before the target is displaced.
     BeforeDisplacement,
-    /// After the target is displaced, before the new bytes are linked.
+    /// note: After the target is displaced, before the new bytes are linked.
     AfterDisplacement,
-    /// Immediately before an obsolete scratch is unlinked.
+    /// note: Immediately before an obsolete scratch is unlinked.
     BeforeScratchRemoval,
 }
 
@@ -293,7 +294,7 @@ fn effect(path: String, content: String) -> StoreResult<FileEffect> {
     })
 }
 
-/// A frontmatter value must stay one line; ids come off the wire.
+/// note: A frontmatter value must stay one line; ids come off the wire.
 fn line(value: &str) -> String {
     value.replace(['\n', '\r'], " ")
 }
@@ -318,30 +319,30 @@ fn document_text(document_json: &str) -> String {
     }
 }
 
-/// A frontmatter line for an optional value, or nothing when it is absent.
+/// note: A frontmatter line for an optional value, or nothing when it is absent.
 fn optional(label: &str, value: Option<&str>) -> String {
     value.map_or_else(String::new, |value| format!("{label}: {}\n", line(value)))
 }
 
-/// §6.6 record projection target. The one source of "which file this row owns":
+/// note: §6.6 record projection target. The one source of "which file this row owns":
 /// the journal writes it and an operation's predecessor check asks for it.
 pub fn record_target(record_id: &str) -> String {
     format!("records/{record_id}.md")
 }
 
-/// §6.7 consumed-candidate shell target.
+/// note: §6.7 consumed-candidate shell target.
 pub fn candidate_target(candidate_id: &str) -> String {
     format!("candidates/{candidate_id}.md")
 }
 
-/// §6.8 profile target. The file name is the digest of the subject/kind pair, so
+/// note: §6.8 profile target. The file name is the digest of the subject/kind pair, so
 /// open-vocabulary ids never become path components.
 pub fn profile_target(subject_id: &str, profile_kind: &str) -> StoreResult<String> {
     let name = digest_of(&format!("{subject_id}\u{1f}{profile_kind}"))?;
     Ok(format!("profiles/{name}.md"))
 }
 
-/// §6.6 record projection: the stored row as markdown.
+/// note: §6.6 record projection: the stored row as markdown.
 pub fn record_effect(row: &RecordRow) -> StoreResult<FileEffect> {
     let out = format!(
         "---\n\
@@ -378,7 +379,7 @@ pub fn record_effect(row: &RecordRow) -> StoreResult<FileEffect> {
     effect(record_target(&row.record_id), out)
 }
 
-/// §6.7 consumed-candidate shell projection: the content-free audit shell.
+/// note: §6.7 consumed-candidate shell projection: the content-free audit shell.
 pub fn candidate_effect(row: &CandidateRow) -> StoreResult<FileEffect> {
     let out = format!(
         "---\n\
@@ -405,7 +406,7 @@ pub fn candidate_effect(row: &CandidateRow) -> StoreResult<FileEffect> {
     effect(candidate_target(&row.candidate_id), out)
 }
 
-/// §6.8 profile projection. The file name is the digest of the subject/kind
+/// note: §6.8 profile projection. The file name is the digest of the subject/kind
 /// pair, so open-vocabulary ids never become path components.
 pub fn profile_effect(row: &ProfileRow) -> StoreResult<FileEffect> {
     let target = profile_target(&row.subject_id, &row.profile_kind)?;
@@ -432,7 +433,7 @@ pub fn profile_effect(row: &ProfileRow) -> StoreResult<FileEffect> {
     effect(target, out)
 }
 
-/// Resolve an intent target below the file root, refusing anything that would
+/// note: Resolve an intent target below the file root, refusing anything that would
 /// leave it (absolute paths, `..`, prefixes).
 fn resolve(root: &Path, effect: &FileEffect) -> Option<PathBuf> {
     let mut path = root.to_path_buf();
@@ -450,13 +451,13 @@ fn resolve(root: &Path, effect: &FileEffect) -> Option<PathBuf> {
     Some(path)
 }
 
-/// The hidden staged sibling of a target: dot-prefixed and receipt-scoped, so
+/// note: The hidden staged sibling of a target: dot-prefixed and receipt-scoped, so
 /// no provider reader lists it and two operations never share a staged file.
 fn staged(target: &Path, receipt_id: &str) -> PathBuf {
     hidden(target, &format!("{receipt_id}.staged"))
 }
 
-/// The hidden sibling a target is displaced to while it is replaced: dot-prefixed
+/// note: The hidden sibling a target is displaced to while it is replaced: dot-prefixed
 /// and receipt-scoped, so it is invisible to readers and two intents never share
 /// one scratch path.
 fn displaced(target: &Path, receipt_id: &str) -> PathBuf {
@@ -480,14 +481,14 @@ fn write_staged(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::
     }
     let staged_path = staged(&target, receipt_id);
     std::fs::write(&staged_path, effect.content.as_bytes())?;
-    // A-13: the staged bytes — and the directory entry that names them — must be
+    // note: A-13: the staged bytes — and the directory entry that names them — must be
     // on disk before the journal's recovery bytes are cleared, or a power loss
     // loses the file while recovery still sees the intent as applied.
     sync_path(&staged_path)?;
     Ok(staged_path)
 }
 
-/// fsync one file and the directory holding its name, so the write/link/rename
+/// note: fsync one file and the directory holding its name, so the write/link/rename
 /// that installed it survives a power loss (A-13; the repo's durable-write
 /// precedents fsync the file and then its parent directory).
 fn sync_path(path: &Path) -> std::io::Result<()> {
@@ -498,7 +499,7 @@ fn sync_path(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// A read-only handle to flush that may name a directory: Windows refuses a
+/// note: A read-only handle to flush that may name a directory: Windows refuses a
 /// directory handle unless it carries `FILE_FLAG_BACKUP_SEMANTICS`.
 #[cfg(not(windows))]
 fn open_for_sync(path: &Path) -> std::io::Result<std::fs::File> {
@@ -509,7 +510,7 @@ fn open_for_sync(path: &Path) -> std::io::Result<std::fs::File> {
 fn open_for_sync(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
 
-    /// `FILE_FLAG_BACKUP_SEMANTICS` (`windows-sys` value; `std` exposes none).
+    /// note: `FILE_FLAG_BACKUP_SEMANTICS` (`windows-sys` value; `std` exposes none).
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
     std::fs::OpenOptions::new()
         .read(true)
@@ -524,7 +525,7 @@ fn matches_digest(bytes: &[u8], digest: &str) -> bool {
         .is_some_and(|actual| actual == digest)
 }
 
-/// Whether these bytes are content this intent may drop: its own projection or
+/// note: Whether these bytes are content this intent may drop: its own projection or
 /// the exact predecessor it replaces. Everything else belongs to someone else.
 fn obsolete(bytes: &[u8], effect: &FileEffect) -> bool {
     matches_digest(bytes, &effect.digest)
@@ -534,7 +535,7 @@ fn obsolete(bytes: &[u8], effect: &FileEffect) -> bool {
             .is_some_and(|prior| matches_digest(bytes, prior))
 }
 
-/// Write the staged file for one intent (step 2's first half).
+/// note: Write the staged file for one intent (step 2's first half).
 ///
 /// Synchronous by design: the caller runs it as part of a
 /// [`PublishFlock::section`], which owns the lease for the whole call.
@@ -542,7 +543,7 @@ pub fn stage(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::Res
     write_staged(root, receipt_id, effect).map(|_| ())
 }
 
-/// Verify the staged bytes against the intent digest and install them at the
+/// note: Verify the staged bytes against the intent digest and install them at the
 /// target without replacing bytes this intent did not produce.
 ///
 /// Synchronous by design: the caller runs it as part of a
@@ -559,12 +560,12 @@ pub fn publish(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::R
         ));
     }
     install(&staged_path, &target, receipt_id, effect)?;
-    // A-13: the settlement that clears the journal's recovery bytes runs only
+    // note: A-13: the settlement that clears the journal's recovery bytes runs only
     // after the installed file and its directory entry are durable.
     sync_path(&target)
 }
 
-/// Move the staged bytes into place under the intent's ownership rule.
+/// note: Move the staged bytes into place under the intent's ownership rule.
 ///
 /// The target must be absent, already hold the intent's content (a crash
 /// between the install and the applied mark), or hold exactly the recorded
@@ -591,14 +592,14 @@ fn install(
     install_verifying(staged_path, target, receipt_id, effect, &noop)
 }
 
-/// The seam production passes: every protocol point is a no-op.
+/// note: The seam production passes: every protocol point is a no-op.
 // The result type is the seam's contract, not a value being wrapped.
 #[allow(clippy::unnecessary_wraps)]
 const fn noop(_: Point) -> std::io::Result<()> {
     Ok(())
 }
 
-/// [`install`] with the deterministic seam the regressions use to land a foreign
+/// note: [`install`] with the deterministic seam the regressions use to land a foreign
 /// write or an I/O failure at the exact point the swap depends on. Plainly a
 /// no-op in production paths.
 fn install_verifying<F>(
@@ -625,7 +626,7 @@ where
     if taken {
         let bytes = std::fs::read(&scratch)?;
         if matches_digest(&bytes, &effect.digest) {
-            // Crash between the install and the applied mark: the displaced
+            // why: Crash between the install and the applied mark: the displaced
             // bytes ARE this intent's content, so they go back to the target —
             // dropping them would report success with the projection absent.
             match restore(&scratch, target) {
@@ -643,7 +644,7 @@ where
             return Ok(());
         }
         if !obsolete(&bytes, effect) {
-            // Not ours: restore it where it was, without replacing anything that
+            // why: Not ours: restore it where it was, without replacing anything that
             // landed meanwhile. If even that is impossible the bytes stay at the
             // scratch path — preserved, never deleted.
             let _ = restore(&scratch, target);
@@ -656,7 +657,7 @@ where
     seam(Point::AfterDisplacement)?;
     match std::fs::hard_link(staged_path, target) {
         Ok(()) => {}
-        // A writer created the target after it was displaced: its bytes stay.
+        // why: A writer created the target after it was displaced: its bytes stay.
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(std::io::Error::other(format!(
                 "{} was replaced while this intent published",
@@ -666,7 +667,7 @@ where
         Err(error) => return Err(error),
     }
     let _ = std::fs::remove_file(staged_path);
-    // The verified predecessor must not outlive the link, and a scratch a
+    // why: The verified predecessor must not outlive the link, and a scratch a
     // concurrent attempt of this same receipt left inside its own swap is
     // obsolete too. A failure here leaves obsolete bytes on disk, so it is
     // reported and the intent stays unsettled for a later pass to re-attempt
@@ -675,7 +676,7 @@ where
     Ok(())
 }
 
-/// Give the target a second name at the scratch path and only then unlink it.
+/// note: Give the target a second name at the scratch path and only then unlink it.
 ///
 /// The link is no-clobber: it fails rather than replacing whatever occupies the
 /// name, so the displacement itself can never overwrite bytes that landed there
@@ -704,8 +705,9 @@ where
             // This intent's own obsolete leftover: drop it and take the name
             // once more. The read above decides; a name re-taken between that
             // read and this unlink would be deleted with it.
-            // shortcut: unlink-by-name cannot prove the inode it read; upgrade
-            // to an fd-relative unlink if the platform layer ever exposes one.
+            // shortcut: unlink-by-name cannot prove the inode it read;
+            // upgrade: use an fd-relative unlink if the platform layer ever
+            // exposes one.
             std::fs::remove_file(scratch)?;
             match std::fs::hard_link(target, scratch) {
                 Ok(()) => {}
@@ -722,7 +724,7 @@ where
     Ok(true)
 }
 
-/// The refusal for a scratch name holding bytes this intent did not produce.
+/// note: The refusal for a scratch name holding bytes this intent did not produce.
 fn preserved(effect: &FileEffect, scratch: &Path) -> std::io::Error {
     std::io::Error::other(format!(
         "{} preserves bytes at {} that this intent did not produce",
@@ -731,7 +733,7 @@ fn preserved(effect: &FileEffect, scratch: &Path) -> std::io::Error {
     ))
 }
 
-/// Put preserved bytes back where they were, never over anything that appeared
+/// note: Put preserved bytes back where they were, never over anything that appeared
 /// meanwhile, and drop the scratch only once they are back.
 fn restore(scratch: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::hard_link(scratch, target)?;
@@ -739,7 +741,7 @@ fn restore(scratch: &Path, target: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Settle one target from the crash-consistent state on disk: publish an
+/// note: Settle one target from the crash-consistent state on disk: publish an
 /// already-consistent target, complete from a scratch a crash left behind,
 /// publish a matching staged file, or regenerate the staged file from the
 /// journaled bytes. Anything that would overwrite content the intent did not
@@ -752,7 +754,7 @@ pub fn settle(root: &Path, receipt_id: &str, effect: &FileEffect) -> Settled {
     settle_verifying(root, receipt_id, effect, &noop)
 }
 
-/// [`settle`] with the deterministic seam the cleanup-failure regression uses
+/// note: [`settle`] with the deterministic seam the cleanup-failure regression uses
 /// to fail the obsolete-scratch removal at the exact call. Plainly a no-op in
 /// production paths.
 fn settle_verifying<F>(root: &Path, receipt_id: &str, effect: &FileEffect, seam: &F) -> Settled
@@ -766,7 +768,7 @@ where
     let scratch = displaced(&target, receipt_id);
     match std::fs::read(&target) {
         Ok(bytes) if matches_digest(&bytes, &effect.digest) => {
-            // Crash after publish, before the applied mark: the content is
+            // why: Crash after publish, before the applied mark: the content is
             // already consistent, so the stale staged copy and the scratch an
             // interrupted displacement left (a superseded predecessor, or a
             // duplicate of this content) are dropped. A cleanup that fails is
@@ -795,7 +797,7 @@ where
             return Settled::Quarantined(format!("target read failed: {error}"));
         }
     }
-    // A scratch holds the previous version this intent displaced and never
+    // why: A scratch holds the previous version this intent displaced and never
     // superseded — or the intent's own bytes, when the crash landed after the
     // link. Verified against the intent's own digests, it completes the intent
     // without rewriting the journaled content.
@@ -805,7 +807,7 @@ where
                 let _ = std::fs::remove_file(&staged_path);
                 return durable_published(&target);
             }
-            // The target was re-created meanwhile: its bytes stay, and the
+            // why: The target was re-created meanwhile: its bytes stay, and the
             // ownership rule below decides.
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => {
@@ -816,7 +818,7 @@ where
     let staged_bytes = std::fs::read(&staged_path).ok();
     let staged_path = match staged_bytes {
         Some(bytes) if matches_digest(&bytes, &effect.digest) => staged_path,
-        // Missing or mismatched staged content: regenerate it from the
+        // why: Missing or mismatched staged content: regenerate it from the
         // journaled bytes, verify what was written, and publish that.
         _ => match write_staged(root, receipt_id, effect) {
             Ok(path) => path,
@@ -831,13 +833,13 @@ where
         return Settled::Quarantined("journaled content does not match its digest".to_string());
     }
     match install_verifying(&staged_path, &target, receipt_id, effect, seam) {
-        // The install removes every obsolete scratch before it reports success.
+        // why: The install removes every obsolete scratch before it reports success.
         Ok(()) => durable_published(&target),
         Err(error) => Settled::Quarantined(format!("publish failed: {error}")),
     }
 }
 
-/// Report the intent as published, after making the target and its directory
+/// note: Report the intent as published, after making the target and its directory
 /// entry durable (A-13): the journal's recovery bytes are cleared in the same
 /// settlement, so a file a power loss could still revert must keep the intent
 /// unsettled. The payload survives, so a later pass retries the sync.
@@ -848,7 +850,7 @@ fn durable_published(target: &Path) -> Settled {
     }
 }
 
-/// Drop a scratch holding content this intent may remove — its own bytes or the
+/// note: Drop a scratch holding content this intent may remove — its own bytes or the
 /// predecessor it replaces — and leave anything else exactly where it is. A read
 /// or unlink failure is returned: the obsolete bytes are still on disk, so the
 /// caller must keep the intent unsettled instead of settling it as published.
@@ -902,7 +904,7 @@ mod tests {
         );
     }
 
-    /// §5.2 step 2's ownership rule: a version is installed only where there is
+    /// note: §5.2 step 2's ownership rule: a version is installed only where there is
     /// nothing, where its own content already is, or where the intent's recorded
     /// predecessor is — never over bytes the intent did not produce.
     #[test]
@@ -936,7 +938,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "foreign\n");
     }
 
-    /// F1: the ownership check and the predecessor's removal were two steps, so
+    /// note: F1: the ownership check and the predecessor's removal were two steps, so
     /// a writer replacing the target between them had its file deleted by the
     /// provider's `remove_file`, which the no-clobber link could not undo. The
     /// target is now displaced before anything is verified, so a write landing in
@@ -957,7 +959,7 @@ mod tests {
         stage(root, "rcp_b", &second).unwrap();
         let staged_path = staged(&target, "rcp_b");
 
-        // The foreign writer lands after the predecessor was displaced and
+        // why: The foreign writer lands after the predecessor was displaced and
         // verified, at the point the old protocol removed the target.
         let error = install_verifying(&staged_path, &target, "rcp_b", &second, &|point| {
             if point == Point::AfterDisplacement {
@@ -988,7 +990,7 @@ mod tests {
         );
     }
 
-    /// NF1: a target that already holds the intent's content is displaced by the
+    /// note: NF1: a target that already holds the intent's content is displaced by the
     /// swap and must be linked back. Dropping the displaced copy reported success
     /// with no projection on disk at all.
     #[test]
@@ -1001,7 +1003,7 @@ mod tests {
         stage(root, "rcp_a", &first).unwrap();
         publish(root, "rcp_a", &first).unwrap();
 
-        // A re-drive of the same intent: the target is already consistent, so the
+        // why: A re-drive of the same intent: the target is already consistent, so the
         // swap that displaces it has to put those bytes back.
         stage(root, "rcp_a", &first).unwrap();
         publish(root, "rcp_a", &first).unwrap();
@@ -1015,7 +1017,7 @@ mod tests {
         assert!(!staged(&target, "rcp_a").exists());
     }
 
-    /// NF2(a): a crash between displacing the predecessor and linking the new
+    /// note: NF2(a): a crash between displacing the predecessor and linking the new
     /// bytes leaves the target absent and the predecessor in scratch. Recovery
     /// must finish the intent and drop the superseded bytes — leaving them is a
     /// deleted body surviving its own tombstone.
@@ -1045,7 +1047,7 @@ mod tests {
         assert!(!staged(&target, "rcp_b").exists());
     }
 
-    /// NF2(a): a scratch can also hold the intent's own content — the swap linked
+    /// note: NF2(a): a scratch can also hold the intent's own content — the swap linked
     /// it, then the process died before the applied mark. Recovery completes from
     /// that evidence instead of rewriting the journaled bytes.
     #[test]
@@ -1063,7 +1065,7 @@ mod tests {
             .over(Some(first.digest));
         stage(root, "rcp_b", &second).unwrap();
         std::fs::rename(&target, displaced(&target, "rcp_b")).unwrap();
-        // The staged copy went with the process; only the scratch has the bytes.
+        // why: The staged copy went with the process; only the scratch has the bytes.
         std::fs::remove_file(staged(&target, "rcp_b")).unwrap();
 
         assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
@@ -1071,7 +1073,7 @@ mod tests {
         assert!(!displaced(&target, "rcp_b").exists());
     }
 
-    /// NF2(b): bytes an earlier attempt could not put back stay at the scratch
+    /// note: NF2(b): bytes an earlier attempt could not put back stay at the scratch
     /// name. Reusing that name on the retry replaced them on any platform with
     /// ordinary rename replacement semantics.
     #[test]
@@ -1108,7 +1110,7 @@ mod tests {
         );
     }
 
-    /// F1(a): the verified predecessor's scratch is unlinked after the new bytes
+    /// note: F1(a): the verified predecessor's scratch is unlinked after the new bytes
     /// are linked. Ignoring that unlink's failure marked the intent applied while
     /// the deleted body was still on disk in a hidden file no later pass would
     /// select again. The failure is propagated now, so the intent stays
@@ -1148,7 +1150,7 @@ mod tests {
             "the deleted body is still on disk, so the intent may not settle"
         );
 
-        // The retry the unsettled intent gets: recovery's consistent branch
+        // why: The retry the unsettled intent gets: recovery's consistent branch
         // removes the body and only then settles the intent.
         assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
         assert!(
@@ -1157,7 +1159,7 @@ mod tests {
         );
     }
 
-    /// F1(b): recovery's consistent-target branch also dropped the obsolete
+    /// note: F1(b): recovery's consistent-target branch also dropped the obsolete
     /// scratch with its errors ignored and answered `Published`. The deleted body
     /// then stayed on disk under an applied intent. The failure keeps the entry
     /// unsettled, and the next pass that can remove it settles the intent.
@@ -1174,7 +1176,7 @@ mod tests {
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
             .over(Some(first.digest));
-        // The state the failed install above leaves: the new content at the
+        // why: The state the failed install above leaves: the new content at the
         // target, the deleted body at the receipt's scratch name.
         std::fs::write(&target, "two\n").unwrap();
         let scratch = displaced(&target, "rcp_b");
@@ -1200,7 +1202,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "two\n");
     }
 
-    /// F2: the scratch name was read for ownership and then taken by a
+    /// note: F2: the scratch name was read for ownership and then taken by a
     /// replacement-capable rename, so bytes another attempt or process put there
     /// after the read were overwritten without ever being inspected. The
     /// displacement now hard-links — it replaces nothing — and a collision
@@ -1247,7 +1249,7 @@ mod tests {
         assert!(staged_path.exists());
     }
 
-    /// F2: the same collision with this intent's own obsolete leftover is
+    /// note: F2: the same collision with this intent's own obsolete leftover is
     /// dropped and the displacement retried once, so a superseded name does not
     /// block its own publication.
     #[test]
@@ -1282,7 +1284,7 @@ mod tests {
         assert!(!staged_path.exists());
     }
 
-    /// F-new-1: the lease belongs to the blocking task that runs the file
+    /// note: F-new-1: the lease belongs to the blocking task that runs the file
     /// operations, never to the caller's future. When the caller is cancelled
     /// while the section is in flight, only its handle goes away — the task
     /// finishes its ordered operations and releases the flock itself. A lease
@@ -1311,7 +1313,7 @@ mod tests {
                     std::fs::create_dir_all(written.parent().unwrap()).unwrap();
                     std::fs::write(&written, "one\n").unwrap();
                     entered_tx.send(()).unwrap();
-                    // The operation the cancelled caller can no longer wait for.
+                    // why: The operation the cancelled caller can no longer wait for.
                     finish_rx.recv().unwrap();
                     std::fs::write(&written, "two\n").unwrap();
                 })

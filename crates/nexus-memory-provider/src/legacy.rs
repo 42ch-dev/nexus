@@ -49,6 +49,7 @@
 //! source and the composing page read folds those digests into the MEM-R026
 //! snapshot marker. A bearer file or legacy row rewritten between two pages
 //! therefore invalidates the cursor instead of silently shifting its offset.
+// why: one read path must serve unmigrated legacy content without writing to, or migrating, the legacy tables and files.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -69,21 +70,21 @@ use crate::storage::{
     SubjectRow, SUBJECT_COLUMNS,
 };
 
-/// Subject namespace of the workspace's Creator bearer (`kind.ns`, an
+/// note: Subject namespace of the workspace's Creator bearer (`kind.ns`, an
 /// `ExtensionMap` key: lowercase, `_`/`-` only).
 pub const CREATOR_KIND_NS: &str = "nexus_creator";
 
-/// Subject namespace of a Character bearer (its `kind_id` is the character id).
+/// note: Subject namespace of a Character bearer (its `kind_id` is the character id).
 pub const CHARACTER_KIND_NS: &str = "nexus_character";
 
-/// Prefix of the deterministic subject id of a workspace Creator bearer.
+/// note: Prefix of the deterministic subject id of a workspace Creator bearer.
 const CREATOR_SUBJECT_PREFIX: &str = "sbj_legacy_creator_";
 
-/// Prefix of the deterministic subject id of a Character bearer, whose suffix
+/// note: Prefix of the deterministic subject id of a Character bearer, whose suffix
 /// is the character id.
 const CHARACTER_SUBJECT_PREFIX: &str = "sbj_legacy_character_";
 
-/// The provider subject id of the workspace Creator's bearer.
+/// note: The provider subject id of the workspace Creator's bearer.
 ///
 /// One deterministic id per bearer keeps the bridge's canonical-subject rule
 /// (smallest `subject_id` naming the bearer) trivially satisfied: E4's handlers
@@ -94,30 +95,30 @@ pub fn creator_subject_id(creator_id: &str) -> String {
     format!("{CREATOR_SUBJECT_PREFIX}{creator_id}")
 }
 
-/// [`creator_subject_id`] for a Character bearer.
+/// note: [`creator_subject_id`] for a Character bearer.
 #[must_use]
 pub fn character_subject_id(character_id: &str) -> String {
     format!("{CHARACTER_SUBJECT_PREFIX}{character_id}")
 }
 
-/// `provenance.captured_by` of every projected row: no authenticated principal
+/// note: `provenance.captured_by` of every projected row: no authenticated principal
 /// wrote it, the bridge projected it from the legacy bearer.
 const LEGACY_CAPTURED_BY: &str = "nexus:legacy";
 
-/// `profile_kind` of `SOUL.md` (§4.2's one required authored kind).
+/// note: `profile_kind` of `SOUL.md` (§4.2's one required authored kind).
 const SOUL_PROFILE_KIND: &str = "personality";
 
-/// Record kind of a cached SOUL narrative: a derived cache, never one of the
+/// note: Record kind of a cached SOUL narrative: a derived cache, never one of the
 /// nine authored kinds, so it sits beside the `nexus.` taxonomy under its own
 /// name.
 const SOUL_NARRATIVE_KIND: &str = "nexus.soul_narrative";
 
-/// §6.7 advisory disposition recorded for a legacy pending-review row. The
+/// note: §6.7 advisory disposition recorded for a legacy pending-review row. The
 /// provider never classified it; `fragment` is the shape the review pipeline
 /// consumes and the `rationale_codes` entry names the legacy origin.
 const PENDING_REVIEW_DISPOSITION: &str = "fragment";
 
-/// The legacy source families. These names are part of the external-id contract
+/// note: The legacy source families. These names are part of the external-id contract
 /// (P5's migration key is `(space, source family, source primary key)`), so they
 /// name both the projected family and the id segment.
 const FAMILY_MEMORY_PENDING_REVIEW: &str = "memory_pending_review";
@@ -130,23 +131,23 @@ const FAMILY_MEMORY_LONG_TERM: &str = "memory_long_term";
 const FAMILY_CHARACTER_LONG_TERM: &str = "character_long_term";
 const FAMILY_RUN_CAPTURES: &str = "character_run_captures";
 
-/// Record kind shared by a legacy fragment and by a promoted long-term memory of
+/// note: Record kind shared by a legacy fragment and by a promoted long-term memory of
 /// the `custom` kind is *not* collapsed: fragments use `fact`, long-term files
 /// keep their authored kind through [`policy::namespaced_record_kind`].
 pub(super) const FACT_KIND: &str = "fact";
-/// Record kind of a `character_run_captures` provenance row.
+/// note: Record kind of a `character_run_captures` provenance row.
 const EVENT_KIND: &str = "event";
-/// The external-id prefix. Provider-minted ids use `rec_`/`cnd_`, so a projected
+/// note: The external-id prefix. Provider-minted ids use `rec_`/`cnd_`, so a projected
 /// id is distinguishable at a glance and can never collide with one.
 const ID_PREFIX: &str = "lgc";
-/// Encoded representation of an absent composite key component (`world_id` /
+/// note: Encoded representation of an absent composite key component (`world_id` /
 /// `actor_world_binding_id` is `NULL`).
 const NULL_COMPONENT: &str = "\0";
-/// Timestamp used when a bearer file's mtime cannot be read: a fixed epoch keeps
+/// note: Timestamp used when a bearer file's mtime cannot be read: a fixed epoch keeps
 /// the projection deterministic instead of stamping the read time.
 const EPOCH_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
 
-/// The `memory_provider_meta` key that closes the bridge for one space.
+/// note: The `memory_provider_meta` key that closes the bridge for one space.
 ///
 /// P5 publishes it (presence is completion; the value is not interpreted) in the
 /// same transaction as its last migration effect, and every projection entry
@@ -156,7 +157,7 @@ pub fn legacy_migration_key(space_id: &str) -> String {
     format!("legacy_content_migration:{space_id}")
 }
 
-/// The deterministic external id of a Creator pending-review row.
+/// note: The deterministic external id of a Creator pending-review row.
 ///
 /// The E4 pending-review DTOs name the legacy `pending_id`; the provider names
 /// the same object with this id, so an adoption (Task 2) and P5's migration
@@ -166,13 +167,13 @@ pub fn pending_review_candidate_id(pending_id: &str) -> String {
     external_id(FAMILY_MEMORY_PENDING_REVIEW, &[pending_id])
 }
 
-/// [`pending_review_candidate_id`] for a Character pending-review row.
+/// note: [`pending_review_candidate_id`] for a Character pending-review row.
 #[must_use]
 pub fn character_pending_review_candidate_id(pending_id: &str) -> String {
     external_id(FAMILY_CHARACTER_PENDING_REVIEW, &[pending_id])
 }
 
-/// The deterministic external id of a Character memory fragment.
+/// note: The deterministic external id of a Character memory fragment.
 ///
 /// The E4 fragment DTOs name the legacy `fragment_id` verbatim (D5) while the
 /// bridge indexes that row under this id, so a promotion that receives a listed
@@ -183,7 +184,7 @@ pub fn character_fragment_record_id(fragment_id: &str) -> String {
     external_id(FAMILY_CHARACTER_FRAGMENTS, &[fragment_id])
 }
 
-/// The deterministic external id of one Creator long-term memory, addressed by
+/// note: The deterministic external id of one Creator long-term memory, addressed by
 /// its authored slug.
 ///
 /// A slug read resolves this id first instead of projecting every bearer file:
@@ -194,7 +195,7 @@ pub fn memory_long_term_record_id(creator_id: &str, slug: &str) -> String {
     external_id(FAMILY_MEMORY_LONG_TERM, &[creator_id, slug])
 }
 
-/// The legacy bearer roots of one opened workspace: the user home the bearer
+/// note: The legacy bearer roots of one opened workspace: the user home the bearer
 /// layout resolves from, and the Creator that owns it.
 #[derive(Debug, Clone)]
 pub(super) struct LegacyRoots {
@@ -221,7 +222,7 @@ impl LegacyRoots {
     }
 }
 
-/// The legacy bearer a provider subject projects.
+/// note: The legacy bearer a provider subject projects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Owner {
     Creator,
@@ -243,7 +244,7 @@ impl Owner {
         }
     }
 
-    /// The subject id a writer open ensures for this bearer, which is also the
+    /// note: The subject id a writer open ensures for this bearer, which is also the
     /// identity a read-only projection serves when no writer ever ensured it.
     fn canonical_subject_id(&self, roots: &LegacyRoots) -> String {
         match self {
@@ -253,13 +254,13 @@ impl Owner {
     }
 }
 
-// ── Read-path entry points ───────────────────────────────────────────────
+// note: Read-path entry points
 
-/// The subject's projected records, filtered by exactly the §6.13/§7.20
+/// note: The subject's projected records, filtered by exactly the §6.13/§7.20
 /// predicate the provider's own page uses ([`Selection`], provenance filter,
 /// kind filter). Tombstoned rows are not a legacy state: a legacy object is
 /// either present or absent.
-#[allow(clippy::too_many_arguments)] // the bridge entry mirrors the page predicate's inputs
+#[allow(clippy::too_many_arguments)] // why: the bridge entry mirrors the page predicate's inputs
 pub(super) async fn records_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
@@ -276,7 +277,7 @@ pub(super) async fn records_in_tx(
     let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    // An authored long-term memory always carries an `nexus.<MemoryKind>` kind
+    // why: An authored long-term memory always carries an `nexus.<MemoryKind>` kind
     // (D-7), so a request for other kinds cannot serve one: the files stay
     // unopened and a malformed one cannot break the read.
     let long_term = if kinds.is_empty()
@@ -306,7 +307,7 @@ pub(super) async fn records_in_tx(
     Ok(rows)
 }
 
-/// One projected record by its external id. The id names the source family, so
+/// note: One projected record by its external id. The id names the source family, so
 /// the owner and its provider subject are resolved before the projection runs;
 /// an id that does not belong to this workspace (or to any legacy source) is
 /// absent, never a disclosure of another bearer.
@@ -325,7 +326,7 @@ pub(super) async fn record_by_id_in_tx(
     let Some(owner) = id_owner(tx, roots, &family, &components).await? else {
         return Ok(None);
     };
-    // A bearer no writer ever ensured still projects under the deterministic
+    // why: A bearer no writer ever ensured still projects under the deterministic
     // identity a writer open would have created (fix round 2, finding F2):
     // when a subject already names the bearer, that canonical subject wins and
     // this absent one projects nothing.
@@ -342,7 +343,7 @@ pub(super) async fn record_by_id_in_tx(
         }
         _ => LongTerm::None,
     };
-    // The requested row is selected before its keywords are parsed, so a
+    // why: The requested row is selected before its keywords are parsed, so a
     // damaged sibling fragment cannot fail a read of another memory.
     let fragments = match family.as_str() {
         FAMILY_MEMORY_FRAGMENTS | FAMILY_CHARACTER_FRAGMENTS => {
@@ -369,7 +370,7 @@ pub(super) async fn record_by_id_in_tx(
     Ok(rows.into_iter().find(|row| row.record_id == record_id))
 }
 
-/// The subject's projected pending-review rows, filtered by §6.7's status
+/// note: The subject's projected pending-review rows, filtered by §6.7's status
 /// predicate. A legacy queue entry is always `pending` and never expires, so a
 /// non-pending request admits none of them.
 pub(super) async fn candidates_in_tx(
@@ -392,7 +393,7 @@ pub(super) async fn candidates_in_tx(
     candidates_for_owner(tx, roots, space_id, subject_id, &owner).await
 }
 
-/// One projected candidate by its external id (see [`record_by_id_in_tx`]).
+/// note: One projected candidate by its external id (see [`record_by_id_in_tx`]).
 ///
 /// `include_migrated` keeps the projection alive past the completion marker for
 /// the write paths that adopt or consume a named row: a Character capture keeps
@@ -426,7 +427,7 @@ pub(super) async fn candidate_by_id_in_tx(
         .find(|row| row.candidate_id == candidate_id))
 }
 
-/// The subject's projected profiles. `SOUL.md` is one authored document (§6.8),
+/// note: The subject's projected profiles. `SOUL.md` is one authored document (§6.8),
 /// so it projects as the `personality` profile and nothing else — a narrative or
 /// cache document is never fabricated as an authored profile.
 pub(super) async fn profiles_in_tx(
@@ -447,7 +448,7 @@ pub(super) async fn profiles_in_tx(
         .collect())
 }
 
-/// The one authored profile a bearer's `SOUL.md` yields, or `None` when the
+/// note: The one authored profile a bearer's `SOUL.md` yields, or `None` when the
 /// file is absent. Shared by the projection and P5's migration pass so the
 /// migrated row and the pre-marker read carry the same document.
 fn profile_of(
@@ -473,9 +474,9 @@ fn profile_of(
     }))
 }
 
-// ── Owner resolution ────────────────────────────────────────────────────
+// note: Owner resolution
 
-/// Whether P5's completion marker is present, read on the caller's read
+/// note: Whether P5's completion marker is present, read on the caller's read
 /// transaction so the marker and the projection it decides see one snapshot.
 async fn migration_complete(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -484,7 +485,7 @@ async fn migration_complete(
     Ok(migration_marker(tx, space_id).await?.is_some())
 }
 
-/// The completion marker's value — the migration manifest JSON recorded by P5 —
+/// note: The completion marker's value — the migration manifest JSON recorded by P5 —
 /// or `None` while the space is unmigrated.
 pub(super) async fn migration_marker(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -497,7 +498,7 @@ pub(super) async fn migration_marker(
         .map_err(StoreError::from)
 }
 
-/// Which legacy bearer this provider subject stands for, if any. Only the
+/// note: Which legacy bearer this provider subject stands for, if any. Only the
 /// bearer's canonical subject (see the module's bearer → subject mapping)
 /// projects, so a list read and a by-id read of the same external id always
 /// resolve the same subject — and therefore the same grants.
@@ -541,7 +542,7 @@ async fn owner_of(
     }
 }
 
-/// The bearer a deterministic projection subject id names, when this workspace
+/// note: The bearer a deterministic projection subject id names, when this workspace
 /// owns it. Reads only: nothing is registered or written.
 async fn projection_owner(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -559,7 +560,7 @@ async fn projection_owner(
         .then(|| Owner::Character(character_id.to_string())))
 }
 
-/// The owner an external id names, or `None` when the id is foreign to this
+/// note: The owner an external id names, or `None` when the id is foreign to this
 /// workspace. Character families whose primary key does not carry the character
 /// id resolve it from the source row itself.
 async fn id_owner(
@@ -618,7 +619,7 @@ async fn id_owner(
     }
 }
 
-/// Resolve the owning Character of a row addressed by its own primary key, then
+/// note: Resolve the owning Character of a row addressed by its own primary key, then
 /// re-check it against this workspace's Creator. `table`/`column` are literals
 /// from the fixed family table above, never caller text.
 async fn character_owner_of(
@@ -644,7 +645,7 @@ async fn character_owner_of(
         .then_some(Owner::Character(character_id)))
 }
 
-/// The legacy character tables are keyed by `character_id` alone, so ownership
+/// note: The legacy character tables are keyed by `character_id` alone, so ownership
 /// is re-checked here: a character of another Creator never projects.
 async fn character_owned(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -661,7 +662,7 @@ async fn character_owned(
     Ok(owned.is_some())
 }
 
-/// The canonical provider subject standing for a legacy owner: the smallest
+/// note: The canonical provider subject standing for a legacy owner: the smallest
 /// `subject_id` naming that bearer, if one has been ensured. This is the only
 /// subject the bearer projects under, so grants and coverage keep applying to
 /// exactly the row a merged read returns, and every entry point resolves the
@@ -685,9 +686,9 @@ async fn subject_of(
         .map_err(StoreError::from)
 }
 
-// ── Predicate parity with the provider's own page ───────────────────────
+// note: Predicate parity with the provider's own page
 
-/// The Rust rendering of [`crate::storage`]'s `record_predicate` selection
+/// note: The Rust rendering of [`crate::storage`]'s `record_predicate` selection
 /// term, so a projected row is admitted or excluded by exactly the rule the
 /// SQL page applies to a provider row.
 fn selection_admits(selection: &Selection, row: &RecordRow) -> bool {
@@ -711,7 +712,7 @@ fn selection_admits(selection: &Selection, row: &RecordRow) -> bool {
     }
 }
 
-/// The `source_context_ids` filter term of `record_predicate`.
+/// note: The `source_context_ids` filter term of `record_predicate`.
 fn provenance_admits(filter: Option<&[String]>, row: &RecordRow) -> bool {
     let Some(context_ids) = filter else {
         return true;
@@ -732,14 +733,14 @@ fn provenance_admits(filter: Option<&[String]>, row: &RecordRow) -> bool {
     })
 }
 
-/// The `kind IN (...)` term of `record_predicate`.
+/// note: The `kind IN (...)` term of `record_predicate`.
 fn kind_admits(kinds: &[String], row: &RecordRow) -> bool {
     kinds.is_empty() || kinds.iter().any(|kind| kind == &row.kind)
 }
 
-// ── Record projections ──────────────────────────────────────────────────
+// note: Record projections
 
-/// Which bearer long-term memory files a projection may open.
+/// note: Which bearer long-term memory files a projection may open.
 ///
 /// A memory file is authored content on disk, so parsing one is the only part
 /// of a projection that a malformed unrelated file can break: a read selects
@@ -747,16 +748,16 @@ fn kind_admits(kinds: &[String], row: &RecordRow) -> bool {
 /// Greptile `legacy.rs:270`).
 #[derive(Clone, Copy)]
 enum LongTerm<'a> {
-    /// Every authored memory file: the migration snapshot and the authored-kind
+    /// note: Every authored memory file: the migration snapshot and the authored-kind
     /// reads.
     All,
-    /// Only the named file: a by-id read addresses one record.
+    /// note: Only the named file: a by-id read addresses one record.
     Slug(&'a str),
-    /// No file: the requested kinds cannot be an authored memory.
+    /// note: No file: the requested kinds cannot be an authored memory.
     None,
 }
 
-/// Which fragment rows a projection may parse keywords for.
+/// note: Which fragment rows a projection may parse keywords for.
 ///
 /// A fragment's stored keyword list is authored content, so parsing it is the
 /// only part of a projection a malformed sibling row can break: a by-id read
@@ -765,19 +766,19 @@ enum LongTerm<'a> {
 /// snapshot project the whole family.
 #[derive(Clone, Copy)]
 enum Fragments<'a> {
-    /// Every row of the owner's fragment family.
+    /// note: Every row of the owner's fragment family.
     All,
-    /// Only the row this external id names.
+    /// note: Only the row this external id names.
     Only {
         family: &'a str,
         fragment_id: &'a str,
     },
-    /// No row: a by-id read of another family.
+    /// note: No row: a by-id read of another family.
     None,
 }
 
 impl<'a> Fragments<'a> {
-    /// How the named fragment family projects under this selector.
+    /// note: How the named fragment family projects under this selector.
     fn select(&self, family: &str) -> FragmentSelect<'a> {
         match *self {
             Self::All => FragmentSelect::Family,
@@ -790,14 +791,14 @@ impl<'a> Fragments<'a> {
     }
 }
 
-/// How one fragment family projects under a [`Fragments`] selector.
+/// note: How one fragment family projects under a [`Fragments`] selector.
 #[derive(Clone, Copy)]
 enum FragmentSelect<'a> {
-    /// Every row of the family.
+    /// note: Every row of the family.
     Family,
-    /// Exactly the named row.
+    /// note: Exactly the named row.
     Row(&'a str),
-    /// No row at all.
+    /// note: No row at all.
     Skip,
 }
 
@@ -896,7 +897,7 @@ async fn creator_fragments(
                     "keywords": keywords_json(&keywords)?,
                     "ttl": ttl,
                     "world_id": world_id,
-                    // The E4 DTO serves the legacy column verbatim (D5); the
+                    // note: The E4 DTO serves the legacy column verbatim (D5); the
                     // row's `created_at` above only carries its time for order.
                     "created_at": raw_created_at,
                 }},
@@ -976,7 +977,7 @@ async fn character_fragments(
                     "actor_world_binding_id": actor_world_binding_id,
                     "keywords": keywords_json(&keywords)?,
                     "ttl": ttl,
-                    // The E4 DTO serves the legacy column verbatim (D5).
+                    // note: The E4 DTO serves the legacy column verbatim (D5).
                     "created_at": raw_created_at,
                 }},
             });
@@ -993,7 +994,7 @@ async fn character_fragments(
                     occurred_at: None,
                     created_at: created_at.clone(),
                     updated_at: created_at,
-                    // Legacy revision 0 is the provider's revision 1, so the
+                    // why: Legacy revision 0 is the provider's revision 1, so the
                     // 0→1 promotion step the DTOs expose survives the bridge.
                     revision: revision.saturating_add(1),
                 },
@@ -1039,7 +1040,7 @@ async fn creator_narratives(
                 FAMILY_MEMORY_NARRATIVES,
                 &[scope_id.as_deref().unwrap_or(NULL_COMPONENT)],
                 row,
-                // A per-World narrative is World-scoped exactly like a
+                // why: A per-World narrative is World-scoped exactly like a
                 // Character's binding-scoped one: the provider's placement
                 // invariant is "context visibility iff a context id", so a
                 // shared row could not carry the World it belongs to.
@@ -1144,7 +1145,7 @@ struct RunCaptureRow {
     captured_at: String,
 }
 
-/// A receipt-only capture carries no session text, so its record has an empty
+/// note: A receipt-only capture carries no session text, so its record has an empty
 /// `text` and the complete tuple in `structured` — the receipt is preserved
 /// without inventing a review outcome.
 async fn character_run_captures(
@@ -1205,7 +1206,7 @@ async fn character_run_captures(
         .collect()
 }
 
-/// Bearer memory files project as shared records: a long-term memory is the
+/// note: Bearer memory files project as shared records: a long-term memory is the
 /// bearer's own retained fact, and its authored kind survives the D-7 mapping.
 fn long_term_records(
     roots: &LegacyRoots,
@@ -1237,7 +1238,7 @@ fn long_term_records(
     for slug in slugs {
         let (memory, document) = memory_io::load_memory_source(&roots.home, bearer, &slug)
             .map_err(|error| legacy_error(&error))?;
-        // The exact source framing: the parsed view trims the body and keeps
+        // why: The exact source framing: the parsed view trims the body and keeps
         // only the known frontmatter fields, so the file's own bytes travel with
         // the projection and a rewrite of bytes the view drops still changes the
         // migration manifest (P5-F3). The served text is the file's body, while
@@ -1250,7 +1251,7 @@ fn long_term_records(
         let updated_at = normalize_timestamp(&memory.frontmatter.updated_at);
         let record_id = external_id(family, &[owner_key, slug.as_str()]);
         let content = json!({
-            // The served text is the file's own body, not the parsed view: the
+            // why: The served text is the file's own body, not the parsed view: the
             // parser trims a leading blank line or indentation the author wrote,
             // and the migration preserves the authored body exactly (R2-C1).
             "text": body,
@@ -1287,9 +1288,9 @@ fn long_term_records(
     Ok(rows)
 }
 
-// ── Cursor versions ─────────────────────────────────────────────────────
+// note: Cursor versions
 
-/// The MEM-R026 version token of a projected record. A projection has no
+/// note: The MEM-R026 version token of a projected record. A projection has no
 /// provider revision to bump, so a digest over every value a merged read serves
 /// stands in for one: a rewritten bearer file, an updated narrative or a changed
 /// legacy timestamp changes the token and invalidates a cursor issued before it.
@@ -1310,7 +1311,7 @@ pub(super) fn record_version(row: &RecordRow) -> StoreResult<String> {
     }
 }
 
-// ── Candidate projections ───────────────────────────────────────────────
+// note: Candidate projections
 
 async fn candidates_for_owner(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
@@ -1371,7 +1372,7 @@ async fn creator_pending_reviews(
                     "world_id": world_id,
                     "task_kind": task_kind,
                     "raw_digest": raw_digest,
-                    // The E4 DTO serves the legacy column verbatim (D5); the
+                    // note: The E4 DTO serves the legacy column verbatim (D5); the
                     // row's `created_at` only carries its time for order.
                     "created_at": created_at,
                 }},
@@ -1439,7 +1440,7 @@ async fn character_pending_reviews(
                     "task_kind": task_kind,
                     "raw_digest": raw_digest,
                     "source_operation_id": source_operation_id,
-                    // The E4 DTO serves the legacy column verbatim (D5).
+                    // note: The E4 DTO serves the legacy column verbatim (D5).
                     "created_at": created_at,
                 }},
             });
@@ -1495,9 +1496,9 @@ fn candidate_row(
     })
 }
 
-// ── Bearer files ────────────────────────────────────────────────────────
+// note: Bearer files
 
-/// The `SOUL.md` bytes of a bearer, or `None` when the file is absent (an
+/// note: The `SOUL.md` bytes of a bearer, or `None` when the file is absent (an
 /// honest-empty profile, never an error).
 fn soul_document(roots: &LegacyRoots, owner: &Owner) -> StoreResult<Option<String>> {
     let path = roots.bearer(owner).soul_path(&roots.home);
@@ -1511,7 +1512,7 @@ fn soul_document(roots: &LegacyRoots, owner: &Owner) -> StoreResult<Option<Strin
     }
 }
 
-/// `SOUL.md`'s mtime as the profile timestamps; a fixed epoch when the file
+/// note: `SOUL.md`'s mtime as the profile timestamps; a fixed epoch when the file
 /// system cannot report one, so repeated reads stay deterministic.
 fn soul_timestamp(roots: &LegacyRoots, owner: &Owner) -> String {
     std::fs::metadata(roots.bearer(owner).soul_path(&roots.home))
@@ -1526,16 +1527,16 @@ fn legacy_error(error: &MemoryError) -> StoreError {
     StoreError::Corrupt(format!("legacy bearer file: {error}"))
 }
 
-// ── Migration snapshot (P5) ─────────────────────────────────────────────
+// note: Migration snapshot (P5)
 
-/// One provider subject the migration pass writes under.
+/// note: One provider subject the migration pass writes under.
 pub(super) struct MigrationSubject {
     pub subject_id: String,
     pub kind_ns: &'static str,
     pub kind_id: String,
 }
 
-/// Every legacy object of one space, as the bridge projects it, plus the
+/// note: Every legacy object of one space, as the bridge projects it, plus the
 /// manifest the completion marker records.
 ///
 /// The rows are the bridge's own projections, so a migrated space serves
@@ -1551,11 +1552,11 @@ pub(super) struct MigrationSnapshot {
     pub manifest: Value,
 }
 
-/// The family name of `SOUL.md` in the manifest's counts. Every other family
+/// note: The family name of `SOUL.md` in the manifest's counts. Every other family
 /// name is the external-id segment the bridge projects.
 pub(super) const SOUL_FAMILY: &str = "SOUL.md";
 
-/// Every legacy object of `space_id`, read on the caller's transaction.
+/// note: Every legacy object of `space_id`, read on the caller's transaction.
 ///
 /// A bearer with nothing to migrate contributes no subject: the pass never
 /// registers a subject for an empty bearer.
@@ -1595,7 +1596,7 @@ pub(super) async fn migration_snapshot(
         candidates.extend(owner_candidates);
         profiles.extend(owner_profile);
     }
-    // One order for every read of the same snapshot, so the manifest digest and
+    // why: One order for every read of the same snapshot, so the manifest digest and
     // the rows a re-run compares are stable however the source rows are paged.
     records.sort_by(|left, right| left.record_id.cmp(&right.record_id));
     candidates.sort_by(|left, right| left.candidate_id.cmp(&right.candidate_id));
@@ -1612,7 +1613,7 @@ pub(super) async fn migration_snapshot(
     })
 }
 
-/// The subject the migration's journal intent is recorded against: the first
+/// note: The subject the migration's journal intent is recorded against: the first
 /// bearer it migrates (the Creator, whenever the Creator carried anything).
 pub(super) fn migration_journal_subject(snapshot: &MigrationSnapshot) -> &str {
     snapshot
@@ -1621,7 +1622,7 @@ pub(super) fn migration_journal_subject(snapshot: &MigrationSnapshot) -> &str {
         .map_or("", |subject| subject.subject_id.as_str())
 }
 
-/// Every subject the migration's file effects belong to — the full fence set the
+/// note: Every subject the migration's file effects belong to — the full fence set the
 /// one intent carries until the projections settle.
 ///
 /// The pass commits one intent for effects that span bearers, so a read
@@ -1635,7 +1636,7 @@ pub(super) fn migration_fences(snapshot: &MigrationSnapshot) -> Vec<String> {
         .collect()
 }
 
-/// Every bearer of this workspace: the Creator plus the Characters it owns.
+/// note: Every bearer of this workspace: the Creator plus the Characters it owns.
 async fn migration_owners(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     roots: &LegacyRoots,
@@ -1652,7 +1653,7 @@ async fn migration_owners(
     Ok(owners)
 }
 
-/// The subject the migration writes a bearer's objects under: the canonical
+/// note: The subject the migration writes a bearer's objects under: the canonical
 /// subject the bridge serves, or the deterministic identity a writer would have
 /// ensured when no subject names the bearer yet.
 async fn migration_subject_id(
@@ -1666,7 +1667,7 @@ async fn migration_subject_id(
         .map_or_else(|| owner.canonical_subject_id(roots), |row| row.subject_id))
 }
 
-/// The manifest the completion marker records: one digest over every projected
+/// note: The manifest the completion marker records: one digest over every projected
 /// object's served values, the object counts, and the per-family counts.
 ///
 /// The digest covers content, not the derived profile timestamps: a re-run must
@@ -1755,7 +1756,7 @@ pub(super) fn migration_manifest(
     }))
 }
 
-// ── Projection helpers ──────────────────────────────────────────────────
+// note: Projection helpers
 
 struct RecordDraft {
     record_id: String,
@@ -1804,7 +1805,7 @@ fn record_row(space_id: &str, subject_id: &str, draft: RecordDraft) -> StoreResu
     })
 }
 
-/// The §6.6 provenance every projected row carries: no client claim, no source
+/// note: The §6.6 provenance every projected row carries: no client claim, no source
 /// anchor, the bridge as the capturing principal.
 fn provenance(source_context_ids: &[String], captured_at: &str) -> Value {
     json!({
@@ -1822,7 +1823,7 @@ const fn binding_visibility(binding_id: Option<&str>) -> &'static str {
     }
 }
 
-/// The parsed `keywords` column. A malformed stored value is the module's
+/// note: The parsed `keywords` column. A malformed stored value is the module's
 /// `Corrupt` answer — the same discipline every other unparsable legacy value
 /// gets — never a silently empty keyword list that hides the damaged row.
 fn keywords_json(raw: &str) -> StoreResult<Vec<String>> {
@@ -1830,7 +1831,7 @@ fn keywords_json(raw: &str) -> StoreResult<Vec<String>> {
         .map_err(|error| StoreError::Corrupt(format!("legacy fragment keywords: {error}")))
 }
 
-/// One UTC rendering of a legacy timestamp that keeps the precision the legacy
+/// note: One UTC rendering of a legacy timestamp that keeps the precision the legacy
 /// column carried. Legacy SQLite columns carry `YYYY-MM-DD HH:MM:SS[.fff]` and
 /// bearer frontmatter carries RFC 3339; a value in neither form is kept verbatim
 /// rather than replaced by an invented time.
@@ -1847,7 +1848,7 @@ fn normalize_timestamp(raw: &str) -> String {
     )
 }
 
-/// The provider's own whole-second rendering, for the one place a projected
+/// note: The provider's own whole-second rendering, for the one place a projected
 /// timestamp is written into a provider table (adoption): every stored
 /// timestamp column is compared as text, so a written value keeps the one
 /// format the provider mints.
@@ -1855,7 +1856,7 @@ pub(super) fn provider_timestamp(raw: &str) -> String {
     parse_timestamp(raw).map_or_else(|| raw.to_string(), timestamp)
 }
 
-/// The one legacy timestamp parser: RFC 3339, then the SQLite
+/// note: The one legacy timestamp parser: RFC 3339, then the SQLite
 /// (`YYYY-MM-DD HH:MM:SS[.fff]`) and bare-`T` forms. Shared with the merged-read
 /// ordering key so one queue of legacy formats sorts as instants.
 pub(super) fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
@@ -1872,9 +1873,9 @@ fn serialize(value: &Value, what: &str) -> StoreResult<String> {
     serde_json::to_string(value).map_err(|error| StoreError::Corrupt(format!("{what}: {error}")))
 }
 
-// ── External identity ───────────────────────────────────────────────────
+// note: External identity
 
-/// `lgc:<family>:<component>[:<component>…]`, each component percent-escaped so
+/// note: `lgc:<family>:<component>[:<component>…]`, each component percent-escaped so
 /// the id is both reversible and safe to store as one opaque string.
 fn external_id(family: &str, components: &[&str]) -> String {
     let mut id = format!("{ID_PREFIX}:{family}");
@@ -1953,7 +1954,7 @@ mod tests {
 
     #[test]
     fn external_id_escapes_separators_and_null_components() {
-        // A slug may contain ':' (only '/', '\\', '..' and control chars are
+        // why: A slug may contain ':' (only '/', '\\', '..' and control chars are
         // rejected), so the separator must be escaped for the id to parse back.
         let id = external_id(
             "character_long_term",
@@ -1981,7 +1982,7 @@ mod tests {
             normalize_timestamp("2026-11-02 08:05:00"),
             "2026-11-02T08:05:00Z"
         );
-        // Sub-second precision survives: two rows in one second stay ordered by
+        // why: Sub-second precision survives: two rows in one second stay ordered by
         // their real times (NXM-5 QC1-F1).
         assert_eq!(
             normalize_timestamp("2026-11-02T08:05:00.123+02:00"),
@@ -1992,14 +1993,14 @@ mod tests {
             "2026-11-02T08:05:00.900Z"
         );
         assert_eq!(normalize_timestamp("not a time"), "not a time");
-        // A written provider column keeps the one provider rendering.
+        // why: A written provider column keeps the one provider rendering.
         assert_eq!(
             provider_timestamp("2026-11-02T08:05:00.900Z"),
             "2026-11-02T08:05:00Z"
         );
     }
 
-    /// One row of each fragment family, both created in the same instant, so the
+    /// note: One row of each fragment family, both created in the same instant, so the
     /// projection order is decided by the legacy tie-break alone. Returns the
     /// Character that owns the Character family.
     async fn seed_same_instant_fragments(home: &std::path::Path) -> String {
@@ -2084,7 +2085,7 @@ mod tests {
         character_id
     }
 
-    /// F6 (`legacy.rs:770-771/841-845`): both fragment families project in the
+    /// note: F6 (`legacy.rs:770-771/841-845`): both fragment families project in the
     /// order the legacy per-scope read served — the RAW `created_at` TEXT
     /// descending, then `fragment_id` descending — including the tie-break
     /// between two rows created in the same instant.

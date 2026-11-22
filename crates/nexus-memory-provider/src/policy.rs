@@ -14,34 +14,35 @@
 //! reflection read paths recompute it at read time from the current authorized
 //! basis, so nothing here stores an invalidation flag or a dead function
 //! standing in for one.
+// why: clients pin recall and reflection bases to `engine_policy_version`, so these bounds must stay deterministic and model-free.
 
 use std::num::NonZeroU64;
 
 use serde_json::{json, Value};
 
-/// §3: the memory protocol revision this provider speaks.
+/// note: §3: the memory protocol revision this provider speaks.
 pub(super) const MEMORY_PROTOCOL_VERSION: u64 = 1;
 
-/// §4.1: the family flags served. `spoke-memory-reflection` is advertised only
+/// note: §4.1: the family flags served. `spoke-memory-reflection` is advertised only
 /// because the provider genuinely serves all three reflection ops (§7.25–§7.27).
 /// The `spoke-memory-transfer` family is not served, so it is never advertised
 /// and its ops refuse `op_unsupported`.
 pub(super) const CAPABILITIES: [&str; 2] = ["spoke-memory", "spoke-memory-reflection"];
 
-/// §4.1: the deliberately-unadvertised shape — the same provider with the
+/// note: §4.1: the deliberately-unadvertised shape — the same provider with the
 /// reflection sub-capability withheld (staging spec §4 N4-R completion: C-003
 /// still passes where reflection is deliberately not advertised). Its
 /// `memory.reflections.*` ops refuse `op_unsupported`.
 pub(super) const CAPABILITIES_WITHOUT_REFLECTION: [&str; 1] = ["spoke-memory"];
 
-/// §4.2: the authored content kinds this provider requires before generation.
+/// note: §4.2: the authored content kinds this provider requires before generation.
 pub(super) const REQUIRED_PROFILE_KINDS: [&str; 1] = ["personality"];
 
-/// Opaque provider policy version (§6.1). Bumped whenever a policy function's
+/// note: Opaque provider policy version (§6.1). Bumped whenever a policy function's
 /// output would change for unchanged input.
 pub(super) const ENGINE_POLICY_VERSION: &str = "nexus-local-memory-v1";
 
-/// §7.1 `limits`. Every value is a positive integer bound the provider enforces
+/// note: §7.1 `limits`. Every value is a positive integer bound the provider enforces
 /// or guarantees; `dedup_retention_seconds` covers
 /// `idempotency_retention_seconds` as MEM-R021 requires.
 const MAX_CONTENT_BYTES: u64 = 65_536;
@@ -49,21 +50,21 @@ const MAX_CANDIDATES_PER_CAPTURE: u64 = 32;
 const MAX_PAGE_SIZE: u64 = 100;
 const EXPORT_CHUNK_BYTES: u64 = 262_144;
 const IDEMPOTENCY_RETENTION_SECONDS: u64 = 2_592_000;
-/// §6.10/MEM-R021: how long a receipt *body* is served; afterwards only its
+/// note: §6.10/MEM-R021: how long a receipt *body* is served; afterwards only its
 /// content-free dedup tombstone answers (§7.28 `RECEIPT_EXPIRED`).
 pub(super) const RECEIPT_RETENTION_SECONDS: u64 = 2_592_000;
-/// §5.2/MEM-R014: how long an applied journal shell is retained. Its file
+/// note: §5.2/MEM-R014: how long an applied journal shell is retained. Its file
 /// content is scrubbed at settlement (`targets_json` becomes `'[]'`), so the
 /// window only bounds the diagnostic trail and the outbox history; an unsettled
 /// intent is never reclaimed, it is the recovery authority.
 pub(super) const JOURNAL_RETENTION_SECONDS: u64 = 2_592_000;
-/// How long the tombstone (namespace, digest, receipt id, terminal status)
+/// note: How long the tombstone (namespace, digest, receipt id, terminal status)
 /// outlives the body; past it the key is new again.
 pub(super) const DEDUP_RETENTION_SECONDS: u64 = 5_184_000;
 const STAGED_IMPORT_TTL_SECONDS: u64 = 86_400;
 const EXPORT_RETENTION_SECONDS: u64 = 86_400;
 
-/// §7.1 `limits` payload.
+/// note: §7.1 `limits` payload.
 pub(super) fn limits() -> Value {
     json!({
         "max_content_bytes": MAX_CONTENT_BYTES,
@@ -78,28 +79,28 @@ pub(super) fn limits() -> Value {
     })
 }
 
-/// §7.1 `max_content_bytes` as the content validators take it.
+/// note: §7.1 `max_content_bytes` as the content validators take it.
 pub(super) fn max_content_bytes() -> usize {
     usize::try_from(MAX_CONTENT_BYTES).unwrap_or(usize::MAX)
 }
 
-/// §7.0.7 page bound: the caller's `limit` defaults to and may never exceed the
+/// note: §7.0.7 page bound: the caller's `limit` defaults to and may never exceed the
 /// advertised `max_page_size`.
 pub const MAX_PAGE_SIZE_BOUND: NonZeroU64 = match NonZeroU64::new(MAX_PAGE_SIZE) {
     Some(bound) => bound,
     None => panic!("max_page_size must be positive"),
 };
 
-// ── Kind mapping, classification, recall ranking + budget ───────────────
+// note: Kind mapping, classification, recall ranking + budget
 
-/// D-7: every Nexus `MemoryKind` keeps its own name inside a namespaced record
+/// note: D-7: every Nexus `MemoryKind` keeps its own name inside a namespaced record
 /// kind, so the nine-value authoring taxonomy survives the protocol's open
 /// `RetainedRecord.kind` vocabulary instead of being collapsed into the core
 /// `event`/`fact`/`note` buckets. The mapping is a lossless bijection at the
 /// adapter boundary: `nexus.story_summary` ⇄ `story_summary`.
 pub(super) const NEXUS_KIND_PREFIX: &str = "nexus.";
 
-/// The nine `nexus_creator_memory::memory_item::MemoryKind` values.
+/// note: The nine `nexus_creator_memory::memory_item::MemoryKind` values.
 pub const NEXUS_MEMORY_KINDS: [&str; 9] = [
     "story_summary",
     "research_material",
@@ -117,7 +118,7 @@ pub fn namespaced_record_kind(memory_kind: &str) -> String {
     format!("{NEXUS_KIND_PREFIX}{memory_kind}")
 }
 
-/// The inverse mapping, for the adapter boundary that renders an authored kind.
+/// note: The inverse mapping, for the adapter boundary that renders an authored kind.
 ///
 /// `None` for a kind outside the Nexus taxonomy, which the protocol allows
 /// (product kinds are open vocabulary).
@@ -128,7 +129,7 @@ pub fn memory_kind_of(record_kind: &str) -> Option<&str> {
         .filter(|kind| NEXUS_MEMORY_KINDS.contains(kind))
 }
 
-/// §6.7 advisory classification: what the provider *suggests* for a capture.
+/// note: §6.7 advisory classification: what the provider *suggests* for a capture.
 /// The reviewer decision stays authoritative; this is deterministic and derived
 /// from the captured text alone (no model, no network, no stored state).
 pub(super) struct Classification {
@@ -136,7 +137,7 @@ pub(super) struct Classification {
     pub rationale_codes: Vec<&'static str>,
 }
 
-/// Shorter than this (in words) a capture is treated as a fragment claim rather
+/// note: Shorter than this (in words) a capture is treated as a fragment claim rather
 /// than a promotable record.
 const PROMOTABLE_MIN_WORDS: usize = 8;
 
@@ -148,7 +149,7 @@ pub(super) fn classify(text: &str, kind_hint: Option<&str>) -> Classification {
             rationale_codes: vec!["empty_content"],
         };
     }
-    // An explicit hint means the caller already knows what the capture is;
+    // why: An explicit hint means the caller already knows what the capture is;
     // classification then only confirms it.
     if kind_hint.is_some_and(|hint| !hint.is_empty()) {
         return Classification {
@@ -168,7 +169,7 @@ pub(super) fn classify(text: &str, kind_hint: Option<&str>) -> Classification {
     }
 }
 
-/// §9.2 ranking hint terms: lowercase alphanumeric words, de-duplicated, order
+/// note: §9.2 ranking hint terms: lowercase alphanumeric words, de-duplicated, order
 /// preserved so the score is computable from a stored record alone.
 pub(super) fn query_terms(query: &str) -> Vec<String> {
     let mut terms: Vec<String> = Vec::new();
@@ -184,7 +185,7 @@ pub(super) fn query_terms(query: &str) -> Vec<String> {
     terms
 }
 
-/// §9.2: how many distinct query terms occur in the record text. Ranking is
+/// note: §9.2: how many distinct query terms occur in the record text. Ranking is
 /// provider policy; it only has to be stable for identical state + policy.
 pub(super) fn recall_score(text: &str, terms: &[String]) -> usize {
     if terms.is_empty() {
@@ -197,15 +198,15 @@ pub(super) fn recall_score(text: &str, terms: &[String]) -> usize {
         .count()
 }
 
-/// §9.3 budget outcome over one ranked page candidate list.
+/// note: §9.3 budget outcome over one ranked page candidate list.
 pub(super) struct BudgetOutcome {
-    /// Indices into the ranked list that the page carries, in rank order.
+    /// note: Indices into the ranked list that the page carries, in rank order.
     pub kept: Vec<usize>,
-    /// §9.3 progress rule: the single oversized first item, surfaced whole.
+    /// note: §9.3 progress rule: the single oversized first item, surfaced whole.
     pub overflow_record_id: Option<String>,
 }
 
-/// §9.3: `max_items` is a hard cap and `max_bytes` a hard UTF-8 budget. When the
+/// note: §9.3: `max_items` is a hard cap and `max_bytes` a hard UTF-8 budget. When the
 /// next ranked item would exceed the byte budget and the page is still empty,
 /// that item is returned whole and named as the overflow; otherwise it is
 /// deferred. Whether the page is truncated is the caller's comparison between
