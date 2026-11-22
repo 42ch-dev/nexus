@@ -2146,8 +2146,7 @@ async fn enrich_with_chapters(
             dto.next_chapter = Some(chapter);
             dto.next_chapter_volume = Some(volume);
         }
-        Ok(None) => {
-        }
+        Ok(None) => {}
         Err(e) => {
             tracing::warn!(
                 target: "novel.chapters",
