@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Typed accessors over the `extensions.nexus` namespace on a spoke
 //! [`KnowledgeEntry`].
 //!
@@ -259,7 +260,6 @@ pub fn get_provenance(entry: &KnowledgeEntry) -> (Option<&str>, Option<i64>, Opt
 /// `claims.len() == 1` match arm.
 pub fn get_owner(entry: &KnowledgeEntry) -> Result<KnowledgeOwnerRef, KbError> {
     let ns = nexus_namespace(entry).ok_or(KbError::MissingOwner)?;
-    // Collect the present, string-typed owner claims as `(key, value)`,
     // rejecting a present-but-non-string/null owner key outright.
     let mut claims: Vec<(&str, &str)> = Vec::with_capacity(3);
     for key in ["world_id", "character_id", "actor_world_binding_id"] {

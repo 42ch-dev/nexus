@@ -10,7 +10,6 @@
 //!
 //! See the retired local-db-refactor-legacy baseline (local record) for the design.
 
-// V1.153 P2 T2: cas is pure SQL (OCC helpers — no unix APIs); the former
 // `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
 // `crate::cas`) on the Windows x64 build.
 pub mod actor_knowledge_store;
@@ -72,22 +71,18 @@ pub(crate) mod seed_shared;
 mod version;
 pub mod writer_protocol;
 
-// Test-only tracing-capture helpers shared by DAO mutation-path tests
 // (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
 #[cfg(test)]
 mod test_tracing;
 
-// Test-only pool bootstraps shared by this crate's unit tests. Not a shipping
 // surface: compiled only under `cfg(test)`, never re-exported.
 #[cfg(test)]
 pub(crate) mod test_support;
 
 use std::future::Future;
 
-// Re-export version constants
 pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 
-// Re-export error types
 pub use error::{ActorContractConflict, LocalDbError};
 pub use writer_protocol::{
     GuardedPool, GuardedPoolOptions, WorkspaceWriterGuard, WriterMode, BOOTSTRAP_CREATOR_ID,
@@ -112,48 +107,40 @@ pub use character::{
     CreateCharacterParams, CreateCharacterResult, FieldPatch,
 };
 
-// Re-export sqlx pool type for consumers
 pub use sqlx::SqlitePool;
 
-// Re-export identity types
 pub use identity::{
     create_local_identity, delete_local_identity, get_local_identity, link_to_platform,
     list_local_identities, unlink_from_platform, LocalIdentityRow,
 };
 
-// Re-export creators types (V1.167 P2 T2; T4 convergence)
 pub use creators::{
     delete_creator, ensure_creator_row, ensure_creator_row_in_tx, require_creator_holder,
 };
 
-// Re-export holder registry primitives (v1.191 P1 T3; lifecycle reads T4)
 pub use holders::{
     character_holder_entry_id, creator_holder_entry_id, ensure_character_holder_in_tx,
     ensure_creator_holder_in_tx, require_subject_holder, resolve_holder, resolve_subject_holder,
     HolderSubject, KnowledgeHolder, HOLDER_ENTRY_ID_PREFIX, HOLDER_MIGRATION_VERSION,
     HOLDER_STATE_INVALID_CODE,
 };
-// Re-export pending_review types
 pub use pending_review::{
     count_pending_reviews, create_pending_review, delete_pending_review,
     delete_pending_review_in_tx, get_pending_review, list_pending_reviews, PendingReviewRecord,
 };
 
-// Re-export memory_fragment types
 pub use memory_fragment::{
     count_fragments, create_fragment, delete_fragment, get_all_keywords, list_fragments,
     list_fragments_by_session, list_fragments_filtered, list_fragments_limited,
     MemoryFragmentRecord,
 };
 
-// Re-export soul_narrative types
 pub use soul_narrative::{
     build_stats_fingerprint, get_soul_narrative, soul_narrative_fragment_stats,
     soul_narrative_fragment_stats_readonly, upsert_soul_narrative, SoulNarrativeFragmentStats,
     SoulNarrativeRecord,
 };
 
-// Re-export character memory types (v1.184 P3 Task 1)
 pub use character_memory_fragment::{
     create_character_fragment, create_character_fragment_in_tx, delete_character_fragment,
     get_character_fragment, list_character_fragments, promote_character_fragment_to_shared,
@@ -183,24 +170,20 @@ pub use character_soul_narrative::{
 /// [`character_memory_fragment`](crate::character_memory_fragment)).
 pub const MAX_CHARACTER_MEMORY_LIST_LIMIT: i64 = 500;
 
-// Re-export mind_state_store types (V1.164 P2, l5-mind when-axis storage)
 pub use mind_state_store::{
     delete_mind_state, get_mind_state, insert_mind_state, list_mind_states_by_holder, MindStateRow,
 };
 
-// Re-export world_stories types
 pub use world_stories::{
     create_world_story, delete_world_story, generate_id as generate_world_story_id, get_by_id,
     list_by_world, update_chapters, update_status as update_world_story_status, WorldStory,
 };
 
-// Re-export narrative_write types
 pub use narrative_write::{
     append_event, create_world, create_world_tx, AppendEventResult, CreateWorldResult,
     NarrativeWriteError,
 };
 
-// Re-export kb_relationships types (V1.74 A2)
 pub use kb_relationships::{
     delete_relationship_in_tx, generate_relationship_id, get_relationship,
     insert_relationship_in_tx, list_confirmed_relationships_paginated,
@@ -208,7 +191,6 @@ pub use kb_relationships::{
     KbRelationshipRow, RelationshipCursor, UpdateRelationshipParams,
 };
 
-// Re-export kb_extract_job types
 pub use kb_extract_job::{
     claim_job as claim_extract_job, enqueue as enqueue_extract_job,
     enqueue_with_artifact as enqueue_extract_job_with_artifact, get as get_extract_job,
@@ -221,19 +203,16 @@ pub use kb_extract_job::{
     KbExtractPromotion,
 };
 
-// Re-export prompt_injection types
 pub use prompt_injection::{
     claim_prompt_injections, enqueue_prompt_injection, mark_prompt_injections_consumed,
     NewPromptInjection, PromptInjectionRow,
 };
 
-// Re-export peer_hosts types (V1.155 P0, N-C3 multi-host production)
 pub use peer_hosts::{
     list_peer_manifests, record_peer_manifest, PeerHostRow, MAX_HOST_ID_CHARS,
     MAX_MANIFEST_JSON_BYTES, MAX_PEER_ID_CHARS,
 };
 
-// Re-export moment_directive types (V1.150 P1, DF-75)
 pub use moment_directive::{
     clear as clear_moment_directive,
     clear_on_scene_change as clear_moment_directive_on_scene_change,
@@ -244,7 +223,6 @@ pub use moment_directive::{
     NewMomentDirective,
 };
 
-// Re-export findings types
 pub use findings::{
     count_open_findings_by_severity, count_resolved_findings_older_than, create_finding,
     create_finding_from_review, create_finding_from_review_tx, delete_finding, get_finding,
@@ -253,7 +231,6 @@ pub use findings::{
     ACTIONABLE_FINDING_STATUSES, RETENTION_DEFAULT_DAYS, VALID_STATUSES,
 };
 
-// Re-export works types
 pub use works::{
     advance_work_stage_atomic, append_inspiration, count_works, create_work,
     find_work_by_client_request_id, get_work, has_active_fl_e_schedule, is_essay_profile,
@@ -261,14 +238,12 @@ pub use works::{
     record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
 };
 
-// Re-export novel_pool_entries types
 pub use novel_pool_entries::{
     archive_pool_entry, count_pool_entries, get_active_pool_entry, get_pool_entry,
     get_pool_entry_by_work, list_pool_entries, mark_pool_entry_completed,
     mark_pool_entry_completed_for_work, promote_to_active, PoolEntry,
 };
 
-// Re-export operation receipt store + Recover handshake (v1.207 P3, RN-OGA-5)
 pub use operation_receipts::{
     begin_operation, classify_recovery, get_operation_receipt, is_known_consumer,
     is_terminal_status, recover, settle_operation, OperationReceipt, RecoveryDecision,
@@ -276,14 +251,12 @@ pub use operation_receipts::{
     STATUS_FAILED, STATUS_FINISHED, STATUS_INTERRUPTED, STATUS_RUNNING, TERMINAL_STATUSES,
 };
 
-// Re-export inspiration_items types
 pub use inspiration_items::{
     archive_inspiration, count_inspiration, create_inspiration_row,
     create_inspiration_with_scaffold, get_inspiration, inspiration_promote_atomic,
     list_inspiration, promote_inspiration, title_to_slug, InspirationItem,
 };
 
-// Re-export work_chapters types
 pub use work_chapters::{
     apply_reconcile_diff, compute_reconcile_diff, count_chapters, ensure_novel_profile,
     get_chapter, insert_chapter, is_essay_complete, is_game_bible_design_complete,
@@ -293,31 +266,26 @@ pub use work_chapters::{
     ReconcileOp, ReconcileReport, WorkChapterRecord,
 };
 
-// Re-export force_gates_audit types
 pub use force_gates_audit::{
     insert_force_gates_audit, list_force_gates_audit, prune_force_gates_audit_before,
     ForceGatesAuditParams, ForceGatesAuditRow,
 };
 
-// Re-export spoke_rules types (V1.148 P1; production CRUD V1.166 DR-64 AR-3)
 pub use spoke_rules::{
     get_spoke_rules_by_ids, insert_rule, insert_spoke_rule_for_test, list_rules_by_world,
     list_rules_by_world_limited, set_rule_status, SpokeRuleRow,
 };
 
-// Re-export runtime_lock types (V1.42 P0)
 pub use runtime_lock::{
     acquire_runtime_lock, clear_stale_lock, cli_holder, is_lock_stale, release_runtime_lock,
     schedule_holder, ttl_from_env, AcquireResult, DEFAULT_RUNTIME_LOCK_TTL_SECS,
 };
 
-// Re-export compute_session types (V1.146 P2 T2)
 pub use compute_session::{
     delete_compute_session, get_compute_session, insert_compute_session,
     update_compute_session_state, ComputeSessionRow,
 };
 
-// Re-export workspace_session types (V1.56 P0 DF-31)
 pub use workspace_session::{
     cleanup_expired_sessions, consume_session, count_active_sessions, create_session, get_session,
     is_session_active, ConsumeResult, CreateSessionParams, WorkspaceSessionRow,
@@ -432,7 +400,6 @@ pub mod begin_immediate_report {
             .execute(&mut *conn)
             .await?;
         match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
-            // The lock was free, so nothing contended: the rolled-back attempt
             // leaves the connection exactly as it found it.
             Ok(_) => {
                 sqlx::query("ROLLBACK").execute(&mut *conn).await?;
@@ -610,7 +577,6 @@ async fn apply_pending_migrations(
     }
     let table_name = migrator.table_name.as_ref();
 
-    // Bookkeeping identical to Migrator::run_direct (ignore_missing = false):
     // fail on a dirty (partially applied) migration, then validate applied
     // versions/checksums against the source before applying anything new.
     conn.ensure_migrations_table(table_name).await?;
@@ -712,7 +678,6 @@ async fn apply_fk_suspension_tx(
 ) -> Result<(), LocalDbError> {
     use sqlx::{Connection as _, Executor as _};
 
-    // `begin`/integrity-query/bookkeeping/commit errors are mapped to
     // `MigrateError::Execute` — exactly how sqlx's stock `Migrate::apply`
     // classifies them (`MigrateError::Execute(#[from] Error)`) — so a
     // transient SQLITE_BUSY or `_sqlx_migrations` UNIQUE race at any of
@@ -725,7 +690,6 @@ async fn apply_fk_suspension_tx(
     let start = std::time::Instant::now();
 
     let outcome: Result<(), LocalDbError> = async {
-        // v1.191 P1 T3: the holder migration's registry backfill needs the
         // BLAKE3 holder id of every stored Creator/Character, and SQLite has
         // no BLAKE3 function (holder-governance §2.1 is a Rust dependency
         // here). Stage those `<subject_kind, subject_id, holder_entry_id>`
@@ -889,7 +853,6 @@ pub async fn read_versions(pool: &sqlx::SqlitePool) -> Result<SchemaVersions, Lo
 ///
 /// Returns `LocalDbError` if version validation fails.
 pub async fn validate(pool: &sqlx::SqlitePool, _role: RuntimeRole) -> Result<(), LocalDbError> {
-    // Check workspace_meta table exists by reading a version key
     let versions = read_versions(pool).await?;
 
     if versions.db_schema_version != DB_SCHEMA_VERSION {
@@ -968,7 +931,6 @@ fn is_transient_migration_error(err: &LocalDbError) -> bool {
     else {
         return false;
     };
-    // `DatabaseError::code()` is the SQLite extended result code formatted as
     // a string (SqliteError formats its `sqlite3_extended_errcode` value).
     let sqlx::Error::Database(db_err) = sqlx_err else {
         return false;
@@ -979,7 +941,6 @@ fn is_transient_migration_error(err: &LocalDbError) -> bool {
     {
         return true;
     }
-    // Both processes applied the same migration; the loser's bookkeeping insert
     // violates the `_sqlx_migrations.version` UNIQUE constraint.
     db_err.is_unique_violation() && db_err.message().contains("_sqlx_migrations")
 }
@@ -994,7 +955,6 @@ fn is_transient_migration_error(err: &LocalDbError) -> bool {
 /// Returns `LocalDbError` if any step (pool creation, migration, seeding) fails.
 pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, LocalDbError> {
     let guarded = init_guarded_pool(db_path).await?;
-    // `clone_pool()` registers the returned handle for cooperative quiescence.
     // The dropped [`GuardedPool`] unregisters only its own RAII token; the
     // surviving clone stays tracked until it is closed.
     Ok(guarded.clone_pool())
@@ -1120,7 +1080,6 @@ pub fn reset_local_state_with_post_fence_hook(
         return Ok(0);
     }
 
-    // Scan and admit every store before touching anything: an unsafe candidate
     // refuses the whole reset instead of leaving a half-applied one. The path
     // checks below describe a moment; admission holds the directory itself, so
     // the deletions resolve against what was admitted rather than against
@@ -1149,7 +1108,6 @@ pub fn reset_local_state_with_post_fence_hook(
         }
     }
 
-    // Every target is fenced before the first deletion: a live writer aborts
     // the reset with no bytes removed from any store.
     let fences = targets
         .iter()
@@ -1166,7 +1124,6 @@ pub fn reset_local_state_with_post_fence_hook(
             }
         }
     }
-    // The fences stay held for every deletion above; releasing them is the end
     // of the reset.
     drop(fences);
     Ok(reset)
@@ -1227,7 +1184,6 @@ impl AdmittedDir {
             let std::path::Component::Normal(name) = component else {
                 return Err(untrusted_target(path, home));
             };
-            // The parent descriptor is borrowed only for the open; the borrow
             // ends with this block so the opened child can replace `current`.
             let opened = nix::fcntl::openat(
                 current.as_ref().unwrap_or(&home_fd).as_fd(),
@@ -1437,7 +1393,6 @@ fn untrusted_target(path: &std::path::Path, home: &std::path::Path) -> LocalDbEr
 mod tests {
     use super::*;
 
-    // V1.67 P2 (R-V160P1-QC2-W002): regression test that migrations leave the
     // database with no foreign-key violations. The 202606230001 table-recreate
     // migration now includes an explicit `PRAGMA foreign_key_check`; this test
     // would fail if any migration (including that one) introduced dangling FKs.
@@ -1461,7 +1416,6 @@ mod tests {
         );
     }
 
-    // V1.67 P2 fix-wave 1 (W-001): regression test that `run_migrations` fails
     // hard when the database contains a foreign-key violation, rather than
     // leaving `PRAGMA foreign_key_check` as a diagnostic-only result.
     #[tokio::test]
@@ -1471,7 +1425,6 @@ mod tests {
         let pool = open_pool(&db_path).await.unwrap();
         run_migrations(&pool).await.unwrap();
 
-        // Introduce a dangling FK with foreign-key enforcement temporarily off.
         // Use a single acquired connection so the PRAGMA setting is respected by
         // the insert that follows.
         let mut conn = pool.acquire().await.unwrap();
@@ -1506,8 +1459,6 @@ mod tests {
             "expected FK-check failure, got: {msg}"
         );
     }
-
-    // --- v1.184 P1 Task 1 fix round 1: migration FK-suspension safety ---
 
     /// Pool with exactly one connection and FK enforcement installed on every
     /// connection the pool opens (including replacements after a discard), so
@@ -1562,7 +1513,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let pool = single_conn_fk_pool(&dir.path().join("test.db")).await;
 
-        // Pre-upgrade schema: everything before the owner rebuild.
         {
             let mut conn = pool.acquire().await.unwrap();
             apply_pending_migrations(&mut conn, &pre_owner_migrator())
@@ -1570,7 +1520,6 @@ mod tests {
                 .unwrap();
         }
 
-        // Deterministic failure injection: a VIEW named kb_key_blocks_new
         // makes the owner migration's first statement (`DROP TABLE IF EXISTS
         // kb_key_blocks_new`) fail ("use DROP VIEW to delete view ...").
         sqlx::query("CREATE VIEW kb_key_blocks_new AS SELECT 1 AS x")
@@ -1582,7 +1531,6 @@ mod tests {
             .await
             .expect_err("owner migration must fail on the sabotage view");
 
-        // The pool must not hand out the poisoned connection: FK enforcement
         // is ON and a dangling write is rejected.
         let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
             .fetch_one(&pool)
@@ -1666,7 +1614,6 @@ mod tests {
         );
         drop(conn);
 
-        // Migrations 1 and 2 are recorded; the violating migration 3 is not.
         let recorded: Vec<i64> = sqlx::query_scalar(
             "SELECT version FROM _sqlx_migrations WHERE success = TRUE ORDER BY version",
         )
@@ -1695,7 +1642,6 @@ mod tests {
                 .unwrap();
         }
 
-        // Pre-existing dangling row: world_id with no narrative_worlds parent
         // (inserted with enforcement off, mirroring the W-001 fixture above).
         {
             let mut conn = pool.acquire().await.unwrap();
@@ -1730,7 +1676,6 @@ mod tests {
             "owner migration must not be recorded successful with dangling child FKs"
         );
 
-        // Self-healing: remove the dangling row; a retry applies the rebuild.
         sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_dangling'")
             .execute(&pool)
             .await
@@ -1793,14 +1738,12 @@ mod tests {
         .await
         .expect_err("the injected bookkeeping collision must surface after the single retry");
 
-        // The real SQLite error at the custom bookkeeping seam keeps the
         // co-boot signature (UNIQUE on `_sqlx_migrations.version`) …
         let msg = format!("{err}");
         assert!(
             msg.contains("UNIQUE constraint failed: _sqlx_migrations.version"),
             "expected the bookkeeping UNIQUE collision, got: {msg}"
         );
-        // … and is classified transient, so the existing single retry ran.
         assert!(
             is_transient_migration_error(&err),
             "custom-path bookkeeping collision must stay transient, got: {err}"
@@ -1811,7 +1754,6 @@ mod tests {
             "a transient custom-path failure must take the existing single retry"
         );
 
-        // Atomicity preserved: both attempts rolled back, nothing recorded.
         let recorded: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = TRUE")
                 .fetch_one(&pool)
@@ -1833,7 +1775,6 @@ mod tests {
         );
     }
 
-    // --- P2 QC3 F-001: shared-DB co-boot migration race (retry/backoff) ---
     //
     // The race itself (two processes applying the same pending migration on a
     // fresh database) is timing-dependent and cannot be reproduced
@@ -1911,7 +1852,6 @@ mod tests {
 
     #[test]
     fn transient_migration_error_classification() {
-        // SQLITE_BUSY family (primary + extended result codes) → transient.
         for code in ["5", "261", "517", "773"] {
             let err = fake_db_error(code, "database is locked");
             assert!(
@@ -1920,20 +1860,16 @@ mod tests {
             );
         }
 
-        // UNIQUE violation on `_sqlx_migrations` (both processes applied the
         // same migration; the loser's bookkeeping insert collides) → transient.
         let err = fake_db_error("2067", "UNIQUE constraint failed: _sqlx_migrations.version");
         assert!(is_transient_migration_error(&err));
 
-        // A UNIQUE violation on a real table is NOT the co-boot signature.
         let err = fake_db_error("2067", "UNIQUE constraint failed: works.work_id");
         assert!(!is_transient_migration_error(&err));
 
-        // A generic SQL error inside a migration is permanent.
         let err = fake_db_error("1", "no such column: oops");
         assert!(!is_transient_migration_error(&err));
 
-        // Non-database sqlx errors and non-Migrate LocalDbErrors are not
         // transient.
         assert!(!is_transient_migration_error(&LocalDbError::Sqlx(
             sqlx::Error::RowNotFound
@@ -1945,7 +1881,6 @@ mod tests {
 
     #[test]
     fn transient_migration_error_detected_from_migration_body_wrapper() {
-        // The migration-body path wraps the error in
         // `ExecuteMigration(error, version)` rather than `Execute`; both must
         // be recognized.
         let err = LocalDbError::Migrate(sqlx::migrate::MigrateError::ExecuteMigration(
@@ -1960,7 +1895,6 @@ mod tests {
 
     #[tokio::test]
     async fn init_migrations_retries_once_on_transient_error() {
-        // Simulated co-boot loss: the first attempt fails with a busy-like
         // error; the retry runs the real migrations, which now succeed (as
         // they would once the winning process has committed).
         let dir = tempfile::tempdir().unwrap();
@@ -1988,7 +1922,6 @@ mod tests {
 
     #[tokio::test]
     async fn init_migrations_surfaces_error_after_single_retry() {
-        // A persistently transient error is retried exactly once, then
         // surfaced.
         let dir = tempfile::tempdir().unwrap();
         let pool = open_pool(&dir.path().join("test.db")).await.unwrap();
@@ -2008,7 +1941,6 @@ mod tests {
 
     #[tokio::test]
     async fn init_migrations_does_not_retry_non_transient_error() {
-        // A permanent migration failure (e.g. a SQL error inside a migration)
         // must be surfaced immediately — no retry, no backoff.
         let dir = tempfile::tempdir().unwrap();
         let pool = open_pool(&dir.path().join("test.db")).await.unwrap();

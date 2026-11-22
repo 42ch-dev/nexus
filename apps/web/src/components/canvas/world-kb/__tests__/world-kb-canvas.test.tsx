@@ -59,10 +59,8 @@ describe('patchFromForm (reapply payload shape)', () => {
   it('keeps an explicitly-cleared title as the empty string (not undefined)', () => {
     const patch = patchFromForm(form({ title: '   ' }), ['title'] as EntityField[], []);
 
-    // `title` must be present as an empty string...
     expect(patch.title).toBe('');
     expect('title' in patch).toBe(true);
-    // ...and survive JSON serialization so it reaches the server.
     expect(JSON.parse(JSON.stringify(patch)).title).toBe('');
   });
 
@@ -74,7 +72,6 @@ describe('patchFromForm (reapply payload shape)', () => {
     expect('title' in patch).toBe(false);
   });
 
-  // L2-T2-001 regressions: the 409 reapply must rewrite only the dialects the
   // conflicting submit intended. The captured form predates any concurrent
   // writes, so including the other dialect would overwrite them.
   it('mental-only reapply omits belief entirely (a concurrent belief write survives)', () => {
@@ -155,7 +152,6 @@ describe('patchFromForm (reapply payload shape)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Promote conflict reapply onError — V1.73 greploop iter 3 (greptile 4→5).
 //
 // The promote `onReapply` handler must carry an `onError` that, on a second 409
@@ -177,7 +173,6 @@ const mocks = vi.hoisted(() => {
     source_anchor_count: 0,
     created_at: '2026-06-29T00:00:00Z',
   } as unknown as WorldKbCandidateProjection;
-  // Return STABLE references: the canvas derives `candidateItems` from the
   // hook result each render and feeds it into a useMemo + setNodes effect — a
   // fresh `data` object per render would retrigger that effect forever.
   const graphData = { entities: [] as unknown[], source_anchors: [] as unknown[], relationships: [] as unknown[] };
@@ -201,7 +196,6 @@ const mocks = vi.hoisted(() => {
     },
     patchResult: { mutate: vi.fn(), isPending: false },
     relationshipResult: { mutate: vi.fn(), isPending: false },
-    // The inspector and the canvas each call usePromoteWorldKbCandidate; both
     // resolve to the same mutate stub so call order is deterministic.
     promoteResult: { mutate: promoteMutate, isPending: false },
   };
@@ -211,7 +205,6 @@ vi.mock('@/lib/canvas/use-world-kb-data', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/canvas/use-world-kb-data')>();
   return {
     ...actual,
-    // `isWorldKbConflictError` (and other pure guards) stay real via ...actual.
     useWorldKbGraph: () => mocks.graphResult,
     useWorldKbCandidates: () => mocks.candidatesResult,
     usePatchWorldKbEntity: () => mocks.patchResult,
@@ -220,7 +213,6 @@ vi.mock('@/lib/canvas/use-world-kb-data', async (importOriginal) => {
   };
 });
 
-// Force the non-spatial list view so the canvas never mounts React Flow
 // (jsdom has no ResizeObserver); the alt-view row click is the selection path.
 vi.mock('../use-view-preference', () => ({
   useReducedMotionPreference: () => true,
@@ -250,11 +242,9 @@ describe('promote conflict reapply onError (V1.73 greploop iter 3)', () => {
     const user = userEvent.setup();
     render(<WorldKbCanvas worldId="w-1" />);
 
-    // 1. Select the pending candidate via the list view (no selection yet, so
     //    the name only appears in the alt-view row).
     await user.click(await screen.findByText('Elena Vale'));
 
-    // 2. Inspector submit → first 409 (v5) hands off to the canvas, opening the
     //    conflict modal at version 5.
     await user.click(screen.getByRole('button', { name: /Adopt candidate/i }));
     await rejectLastPromoteAsConflict(5);
@@ -262,12 +252,10 @@ describe('promote conflict reapply onError (V1.73 greploop iter 3)', () => {
       await screen.findByText('5', { selector: 'span.font-mono' }),
     ).toBeInTheDocument();
 
-    // 3. Reapply → a concurrent write races and returns a SECOND 409 (v9). The
     //    fix's onError must store v9 as the new currentVersion.
     await user.click(screen.getByRole('button', { name: /^Reapply$/i }));
     await rejectLastPromoteAsConflict(9);
 
-    // 4. Reapply again. The request MUST carry expected_version = 9 (the new
     //    version). Without the onError fix the state stays stale at 5 and this
     //    assertion fails — the conflict would never resolve without dismissing.
     await user.click(screen.getByRole('button', { name: /^Reapply$/i }));

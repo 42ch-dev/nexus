@@ -83,9 +83,6 @@ impl Capability for ContextSummarize {
         "context.summarize"
     }
 
-    // Identity fields ("_creator_id", "_session_id") are injected by
-    // orchestration context, NOT accepted from user input (security:
-    // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
         nexus_preset::capability_catalog::CONTEXT_SUMMARIZE_INPUT_SCHEMA
     }
@@ -119,7 +116,6 @@ impl Capability for ContextSummarize {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
         // to prevent cross-creator routing (IDOR). See SEC-V131-01.
         //
@@ -140,20 +136,16 @@ impl Capability for ContextSummarize {
         let trace = input.get("trace").and_then(|v| v.as_str()).unwrap_or("");
         let template = input.get("template").and_then(|v| v.as_str()).unwrap_or("");
 
-        // Build summarization prompt.
         let prompt = build_summary_prompt(content, trace, template);
 
-        // Compute blake3 hash of the prompt actually sent.
         let prompt_hash = blake3::hash(prompt.as_bytes()).to_hex().to_string();
 
-        // A1: resolve the coordinator cancellation token for this run from
         // the shared per-run map. FAIL-CLOSED: a run with no registered
         // token refuses with `CancellationUnavailable` — a fresh token would
         // be uncancellable by any coordinator (never mint one here). The run
         // admission path (engine start/spawn/recovery) registers the token.
         let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
-        // Execute through the Host plane.
         let result = executor
             .execute(PromptRequest {
                 run_id: session_id.to_string(),
@@ -206,7 +198,6 @@ fn build_summary_prompt(content: &str, trace: &str, template: &str) -> String {
         template
     };
 
-    // TD-V131-04: Truncate oversized content to prevent context window overflow.
     // Use char-boundary-aware truncation to avoid panics on multi-byte UTF-8.
     let content_display = if content.len() > DEFAULT_MAX_CONTENT_BYTES {
         tracing::warn!(
@@ -271,8 +262,6 @@ mod tests {
         assert!(required.contains(&json!("prompt_hash")));
     }
 
-    // ── J3: Standalone mode returns WorkerUnavailable ─────────────────
-
     #[tokio::test]
     async fn context_summarize_standalone_returns_unavailable() {
         let cap = ContextSummarize::new();
@@ -286,9 +275,6 @@ mod tests {
         );
     }
 
-    // ── J3: With mock executor ────────────────────────────────────────
-
-    /// Shared cancellation map with coordinator tokens registered for the
     /// given run ids (fail-closed contract; production registers at run
     /// admission).
     fn cancels_with(
@@ -349,7 +335,6 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["summary"], "A concise summary of the content.");
-        // Verify prompt_hash is a valid blake3 hex string.
         let hash = result["prompt_hash"].as_str().unwrap();
         assert_eq!(hash.len(), 64);
     }
@@ -380,9 +365,6 @@ mod tests {
         assert!(err.contains("missing 'content' field"));
     }
 
-    // ── SEC-V131-01: Identity boundary regression tests ────────────────
-
-    /// Proves that raw `creator_id` / `session_id` from preset args are
     /// NOT forwarded to the executor — only context-injected `_session_id`
     /// is trusted as the run identity. M-002: with no trusted `_session_id`
     /// the capability now fails closed (Forbidden) instead of falling back
@@ -394,7 +376,6 @@ mod tests {
             .with_session_cancels(cancels_with(&["default", "legit_session"]));
         let input = json!({
             "content": "Some text",
-            // Spoof attempt: raw preset args should be ignored
             "creator_id": "spoofed_creator",
             "session_id": "spoofed_session"
         });
@@ -403,7 +384,6 @@ mod tests {
             result.is_err(),
             "SEC-V131-01/M-002: raw session_id must never be trusted; missing trusted _session_id must refuse"
         );
-        // The executor must never have been reached with a spoofed id.
         assert_eq!(
             *executor.captured_run_id.lock().expect("capture lock"),
             "",
@@ -452,8 +432,6 @@ mod tests {
         );
     }
 
-    // ── J3: Prompt builder unit tests ─────────────────────────────────
-
     #[test]
     fn build_summary_prompt_basic() {
         let prompt = build_summary_prompt("Hello world", "", "");
@@ -475,8 +453,6 @@ mod tests {
         assert!(!prompt.contains("Summarize the following"));
     }
 
-    // ── TD-V131-04: Content truncation at size limit ────────────────────
-
     #[test]
     fn build_summary_prompt_truncates_oversized_content() {
         let oversized = "x".repeat(DEFAULT_MAX_CONTENT_BYTES + 1000);
@@ -484,7 +460,6 @@ mod tests {
         assert!(prompt.contains("[truncated at"));
         assert!(prompt.contains(&format!("{DEFAULT_MAX_CONTENT_BYTES} bytes")));
         assert!(prompt.contains(&format!("original was {} bytes", oversized.len())));
-        // The truncated portion should be exactly DEFAULT_MAX_CONTENT_BYTES of 'x'.
         let truncated_content = &oversized[..DEFAULT_MAX_CONTENT_BYTES];
         assert!(prompt.contains(truncated_content));
     }
@@ -504,15 +479,12 @@ mod tests {
     /// multi-byte scalar for non-ASCII content. Must NOT panic.
     #[test]
     fn build_summary_prompt_truncates_multibyte_utf8_without_panic() {
-        // 256 KiB worth of 3-byte CJK chars. The byte boundary cap is 262144,
         // which is NOT a multiple of 3, so naive byte slicing would panic.
         let char_count = DEFAULT_MAX_CONTENT_BYTES / 3 + 100;
         let cjk_content: String = "字".repeat(char_count);
         assert!(cjk_content.len() > DEFAULT_MAX_CONTENT_BYTES);
-        // Should not panic.
         let prompt = build_summary_prompt(&cjk_content, "", "");
         assert!(prompt.contains("[truncated at"));
-        // The truncated content must be valid UTF-8 (it is, by construction).
         // Verify the marker reports the actual byte length used.
         assert!(prompt.contains(&format!(
             "[truncated at {} bytes",
@@ -524,7 +496,6 @@ mod tests {
     /// at the cap boundary should be safe (boundary at the start of a char).
     #[test]
     fn build_summary_prompt_truncates_at_clean_char_boundary() {
-        // 3 ASCII bytes + 1 3-byte char = total 6 bytes; under cap.
         let content = "abc字def";
         assert_eq!(content.len(), 9);
         let prompt = build_summary_prompt(content, "", "");
@@ -536,14 +507,11 @@ mod tests {
     /// Must truncate to the nearest valid boundary.
     #[test]
     fn build_summary_prompt_truncates_mid_cjk_char() {
-        // 2 ASCII + 1 CJK = 5 bytes (cap would be 4 -> mid 3-byte char).
         let content = "ab字cd"; // bytes: a(1) b(1) 字(3) c(1) d(1) = 7 bytes
-                                // Force truncation by prepending lots of ASCII.
         let mut oversized = String::with_capacity(DEFAULT_MAX_CONTENT_BYTES + 100);
         oversized.push_str(&"x".repeat(DEFAULT_MAX_CONTENT_BYTES - 4));
         oversized.push_str(content);
         assert!(oversized.len() > DEFAULT_MAX_CONTENT_BYTES);
-        // Should not panic.
         let prompt = build_summary_prompt(&oversized, "", "");
         assert!(prompt.contains("[truncated at"));
     }

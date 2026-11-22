@@ -1,5 +1,4 @@
 /**
- * Settings Setup section — re-run entry (plan v1219-onboarding T4, access spec
  * §6.3).
  *
  * The wizard route is always directly reachable (compass D21), so re-running
@@ -17,7 +16,6 @@ export function SettingsSetupSection() {
   const navigate = useNavigate();
 
   return (
-    // The `#setup` deep-link anchor belongs to the composed section, not the
     // reusable chrome: a page may mount this chrome more than once per route.
     <div id="setup">
       <SettingsSetupSectionChrome

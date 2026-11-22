@@ -1,4 +1,4 @@
-//! Native CLI provider adapters.
+//! Native CLI provider adapters. See docs/specs/agents/agent-host.md.
 //!
 //! Wave 1 implements the Claude Code CLI native provider. Wave 2 adds
 //! the Codex CLI native provider. Future waves may add Gemini CLI, etc.

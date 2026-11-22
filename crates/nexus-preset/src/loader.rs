@@ -4,6 +4,7 @@
 //! a graph-free `LoadedPreset` for authoring and execution consumers.
 //!
 //! Design: `orchestration-engine.md` §8.1.
+// see docs/specs/orchestration/orchestration-engine.md §8.1.
 
 #[cfg(test)]
 use crate::capability_catalog::BuiltinCapabilityCatalog;
@@ -16,11 +17,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
 
-// ---------------------------------------------------------------------------
-// LoadedPreset
-// ---------------------------------------------------------------------------
-
-/// A validated preset manifest and its source metadata.
 ///
 /// Design: `orchestration-engine.md` §8.1.
 #[derive(Debug, Clone)]
@@ -52,11 +48,6 @@ pub struct LoadedPreset {
     pub source_identity: Option<PresetSourceIdentity>,
 }
 
-// ---------------------------------------------------------------------------
-// PresetLoadError
-// ---------------------------------------------------------------------------
-
-/// Default maximum YAML file size for user-supplied presets (1 MiB).
 pub const DEFAULT_MAX_YAML_SIZE: usize = 1024 * 1024;
 
 /// Default maximum YAML nesting depth for user-supplied presets.
@@ -129,11 +120,6 @@ pub struct ValidationProblem {
     pub error: String,
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Load a preset from a YAML string.
 ///
 /// Validates all §7.6 rules. Does NOT validate template file paths against a
 /// filesystem root (use [`load_preset`] for that).
@@ -162,7 +148,6 @@ pub fn load_preset_from_str_with_limits(
     max_size: usize,
     max_depth: usize,
 ) -> Result<LoadedPreset, PresetLoadError> {
-    // 0a. Size check.
     if yaml.len() > max_size {
         return Err(PresetLoadError::YamlSizeExceeded {
             actual: yaml.len(),
@@ -170,7 +155,6 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    // 0b. Depth check — parse to Value, measure depth, then deserialize from
     //     the same Value tree (single parse avoids double stack-overflow surface).
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
     let actual_depth = yaml_value_depth(&yaml_value);
@@ -181,17 +165,14 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    // 0c. Unknown top-level key check (R-V137P0-01).
     //     serde silently ignores unknown keys; warn so mis-placed sections
     //     (e.g. `gates:` at root instead of under `preset:`) are surfaced.
     warn_unknown_top_level_keys(&yaml_value);
 
-    // 1. Deserialize from the already-parsed Value (avoids double-parse that widens
     //    the stack-overflow attack surface — QC3 W-002).
     let manifest: PresetManifest =
         serde_yaml::from_value(yaml_value).map_err(PresetLoadError::from)?;
 
-    // 2. Structural validation (legacy §7.6 rules).
     let problems = validate_manifest(&manifest, caps);
     if !problems.is_empty() {
         return Err(PresetLoadError::Validation {
@@ -200,7 +181,6 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    // 2b. Semantic validation (V1.32 P1 facade — reachability, terminal consistency,
     //     id match, orphan inner graphs). Only certain error categories are fatal for
     //     the loader; capability arg drift is reported as warnings because existing
     //     embedded presets may not perfectly match schema metadata.
@@ -223,7 +203,6 @@ pub fn load_preset_from_str_with_limits(
             problems: all_problems,
         });
     }
-    // Log all warnings + capability arg drift errors as warnings.
     for d in sem.diagnostics.iter().filter(|d| {
         d.severity == super::validation::DiagnosticSeverity::Warning
             || d.category == super::validation::DiagnosticCategory::CapabilityArgDrift
@@ -232,10 +211,8 @@ pub fn load_preset_from_str_with_limits(
         tracing::warn!(path = %d.path, message = %d.message, category = ?d.category, "preset validation warning");
     }
 
-    // 5. Extract output bindings from manifest.
     let output_bindings = extract_output_bindings(&manifest);
 
-    // 6. Compute source hash.
     let hash = blake3::hash(yaml.as_bytes());
     let mut source_hash = [0u8; 32];
     source_hash.copy_from_slice(hash.as_bytes());
@@ -284,16 +261,13 @@ pub fn load_preset(
             }],
         })?;
 
-    // WS-B T3: parse first, then sandbox-validate template_file paths
     let manifest: PresetManifest = serde_yaml::from_str(&yaml)?;
 
-    // A3 parity: use the same shared validation surface as the daemon endpoint.
     // validate_path_safety() checks structural safety (no '..' traversal, no absolute paths).
     // validate_assets_in_bundle() checks file existence + symlink escape + id vs directory.
     let a3_path_result = super::validation::validate_path_safety(&manifest);
     let a3_asset_result = super::validation::validate_assets_in_bundle(&manifest, bundle_root);
 
-    // Collect all A3 error-severity diagnostics as validation problems.
     let mut a3_problems: Vec<ValidationProblem> = Vec::new();
     for d in a3_path_result.errors().chain(a3_asset_result.errors()) {
         a3_problems.push(ValidationProblem {
@@ -308,13 +282,11 @@ pub fn load_preset(
         });
     }
 
-    // Log A3 warnings (informational; do not block loading).
     for d in a3_path_result.warnings().chain(a3_asset_result.warnings()) {
         tracing::warn!(path = %d.path, message = %d.message, category = ?d.category, "A3 loader warning");
     }
 
     let mut loaded = load_preset_from_str(&yaml, caps)?;
-    // A directory bundle knows its source identity (A2/A7): content hash
     // over the manifest + every referenced asset, with a canonicalized root.
     loaded.source_identity = Some(preset_source_identity(
         &loaded.manifest,
@@ -346,12 +318,10 @@ pub fn preset_source_identity(
     bundle_root: Option<&Path>,
     embedded_id: Option<&str>,
 ) -> Result<PresetSourceIdentity, PresetLoadError> {
-    // Hash the manifest YAML first.
     let manifest_yaml = serde_yaml::to_string(manifest).map_err(PresetLoadError::from)?;
     let mut hasher = blake3::Hasher::new();
     hasher.update(manifest_yaml.as_bytes());
 
-    // Canonicalize the directory root so the stored identity is stable and
     // symlink-consistent (A2/A7).
     let canonical_root = match bundle_root {
         Some(root) => Some(
@@ -367,7 +337,6 @@ pub fn preset_source_identity(
         None => None,
     };
 
-    // Fold in every referenced asset's bytes (deterministic order). Uses the
     // same collector as the asset validation surface so the identity covers
     // template_file, prompt_file, system_prompt_file in capability args, and
     // role system_prompt_file (Important 6).
@@ -379,7 +348,6 @@ pub fn preset_source_identity(
     asset_paths.dedup();
 
     for rel in &asset_paths {
-        // Enforce safe relative paths before joining (A2/A7).
         if let Err(reason) = assert_template_file_safe(rel) {
             return Err(PresetLoadError::Validation {
                 len: 1,
@@ -449,7 +417,6 @@ pub fn preset_source_identity(
     })
 }
 
-// ---------------------------------------------------------------------------
 // Template path safety check (WS-B: modeled after assert_creator_id_safe)
 // ---------------------------------------------------------------------------
 
@@ -500,7 +467,6 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
 fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str)> {
     let mut entries: Vec<(String, &str)> = Vec::new();
 
-    // Outer state exit_when template_file
     for (i, state) in manifest.states.iter().enumerate() {
         if let Some(ExitWhen::LlmJudge {
             template_file: Some(ref tf),
@@ -509,7 +475,6 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
         {
             entries.push((format!("states[{i}].exit_when.template_file"), tf));
         }
-        // context_update template_file
         if let Some(ref hook) = state.context_update {
             entries.push((
                 format!("states[{i}].context_update.template_file"),
@@ -518,7 +483,6 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
         }
     }
 
-    // Inner graph node template_file
     if let Some(ref inner_graphs) = manifest.inner_graphs {
         for (name, ig) in inner_graphs {
             for (k, node) in ig.nodes.iter().enumerate() {
@@ -529,7 +493,6 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
         }
     }
 
-    // initial_action template_file
     if let Some(InitialAction::SeedExpansion {
         template_file: Some(ref tf),
         ..
@@ -541,7 +504,6 @@ fn collect_template_file_entries(manifest: &PresetManifest) -> Vec<(String, &str
     entries
 }
 
-// ---------------------------------------------------------------------------
 // Validation (§7.6)
 // ---------------------------------------------------------------------------
 
@@ -577,15 +539,11 @@ fn validate_manifest(
 
     let state_ids: HashSet<&str> = manifest.states.iter().map(|s| s.id.as_str()).collect();
 
-    // W-1 (v1.179 QC fix): runtime join-gate parity — pre-compute which
     // states the runtime gates as a merge join (`expected_incoming > 0`)
     // so the bounded-join fail-closed rule below accepts implicit
     // labeled-edge merges exactly as `build_outer_graph` wires them.
     let incoming_labeled = incoming_labeled_edge_counts(manifest);
 
-    // --- Field type checks (serde already handles most, but we add semantic checks) ---
-
-    // Validate requires_capabilities
     for (i, req_cap) in manifest.preset.requires_capabilities.iter().enumerate() {
         if caps.input_schema(req_cap).is_none() {
             problems.push(ValidationProblem {
@@ -595,7 +553,6 @@ fn validate_manifest(
         }
     }
 
-    // initial must exist
     if !state_ids.contains(manifest.preset.initial.as_str()) {
         problems.push(ValidationProblem {
             path: "preset.initial".into(),
@@ -603,7 +560,6 @@ fn validate_manifest(
         });
     }
 
-    // terminal must exist
     if !state_ids.contains(manifest.preset.terminal.as_str()) {
         problems.push(ValidationProblem {
             path: "preset.terminal".into(),
@@ -611,11 +567,9 @@ fn validate_manifest(
         });
     }
 
-    // Validate each state
     for (i, state) in manifest.states.iter().enumerate() {
         let state_path = format!("states[{i}]");
 
-        // Check next state reference
         if let Some(ref next) = state.next {
             match next {
                 NextTarget::Linear(target_id) => {
@@ -627,7 +581,6 @@ fn validate_manifest(
                     }
                 }
                 NextTarget::GoNogo(go_nogo) => {
-                    // V1.42 P2: GoNogo is only valid on llm_judge states.
                     if !matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. })) {
                         problems.push(ValidationProblem {
                             path: format!("{state_path}.next"),
@@ -649,7 +602,6 @@ fn validate_manifest(
                     }
                 }
                 NextTarget::Labeled(labeled_edges) => {
-                    // V1.52 T-B P0: Labeled edges are only valid on llm_judge states.
                     if !matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. })) {
                         problems.push(ValidationProblem {
                             path: format!("{state_path}.next"),
@@ -667,7 +619,6 @@ fn validate_manifest(
                     }
                 }
                 NextTarget::Conditional(next_cond) => {
-                    // V1.56 P2: Conditional next is now accepted on any state kind.
                     // Legacy `kind: conditional` form (rules field).
                     for (k, rule) in next_cond.rules.iter().enumerate() {
                         if !state_ids.contains(rule.target.as_str()) {
@@ -685,7 +636,6 @@ fn validate_manifest(
                     }
                 }
                 NextTarget::Branches(branches) => {
-                    // V1.56 P2: Form B — expression/rule-based multi-branch.
                     for (k, rule) in branches.branches.iter().enumerate() {
                         if !state_ids.contains(rule.target.as_str()) {
                             problems.push(ValidationProblem {
@@ -704,7 +654,6 @@ fn validate_manifest(
             }
         }
 
-        // Check that the terminal state has no next
         if state.terminal && state.next.is_some() {
             problems.push(ValidationProblem {
                 path: format!("{state_path}.terminal"),
@@ -712,7 +661,6 @@ fn validate_manifest(
             });
         }
 
-        // Check enter actions
         for (j, enter) in state.enter.iter().enumerate() {
             let enter_path = format!("{state_path}.enter[{j}]");
             match enter {
@@ -725,7 +673,6 @@ fn validate_manifest(
                     }
                 }
                 crate::manifest::EnterAction::InnerGraph { name } => {
-                    // Check inner_graph exists
                     let has_inner = manifest
                         .inner_graphs
                         .as_ref()
@@ -738,14 +685,12 @@ fn validate_manifest(
                     }
                 }
                 crate::manifest::EnterAction::HostTool { .. } => {
-                    // HostTool actions are dispatched through the daemon's
                     // unified registry, not the capability registry. No
                     // static validation needed.
                 }
             }
         }
 
-        // Check exit_when judge_capability
         if let Some(ExitWhen::LlmJudge {
             judge_capability: Some(ref cap_name),
             ..
@@ -759,12 +704,10 @@ fn validate_manifest(
             }
         }
 
-        // Validate context_update hook (WS7 §7)
         if let Some(ref hook) = state.context_update {
             match &hook.op {
                 ContextUpdateOp::Append { .. } | ContextUpdateOp::StructMerge { .. } => {}
                 ContextUpdateOp::LlmSummarize { capability } => {
-                    // Validate that the referenced capability exists
                     if caps.input_schema(capability).is_none() {
                         problems.push(ValidationProblem {
                             path: format!("{state_path}.context_update.op.capability"),
@@ -787,12 +730,9 @@ fn validate_manifest(
             }
         }
 
-        // V1.52 T-B P1: validate merge field
         if let Some(ref merge_kind) = state.merge {
             match merge_kind {
-                crate::manifest::MergeKind::All | crate::manifest::MergeKind::Any => {
-                    // All and Any are always valid.
-                }
+                crate::manifest::MergeKind::All | crate::manifest::MergeKind::Any => {}
                 crate::manifest::MergeKind::Quorum { n, m } => {
                     if *n < 1 {
                         problems.push(ValidationProblem {
@@ -810,7 +750,6 @@ fn validate_manifest(
             }
         }
 
-        // V1.56 P2 fix-wave (M-002): validate converge config.
         // Reject terminal converge states.
         if let Some(ref _converge_cfg) = state.converge {
             if state.terminal {
@@ -821,7 +760,6 @@ fn validate_manifest(
             }
         }
 
-        // DR-06 (v1.179): bounded-join fields fail closed at load.
         // `timeout_ms`/`on_timeout` are only meaningful on a join state —
         // one the runtime gates as a join: explicit `merge:`, explicit
         // `converge:`, or an implicit labeled-edge merge (≥1 incoming
@@ -854,11 +792,8 @@ fn validate_manifest(
             }
         }
     }
-    // --- WS-E T6: Role validation ---
-    // Build role ID set for agent reference validation
     let role_ids: HashSet<&str> = manifest.roles.iter().map(|r| r.id.as_str()).collect();
 
-    // Check role ID uniqueness (already implicitly unique via HashSet,
     // but we want explicit error message)
     let mut seen_role_ids: HashSet<&str> = HashSet::new();
     for (i, role) in manifest.roles.iter().enumerate() {
@@ -870,7 +805,6 @@ fn validate_manifest(
         }
         seen_role_ids.insert(role.id.as_str());
 
-        // Check recommended_skills format: must be a valid skill slug
         for (j, rec_skill) in role.recommended_skills.iter().enumerate() {
             if !validate_skill_slug_format(rec_skill) {
                 problems.push(ValidationProblem {
@@ -882,14 +816,12 @@ fn validate_manifest(
             }
         }
 
-        // Reject empty recommended_skills (loader should enforce at least one entry)
         if !role.recommended_skills.is_empty()
             && manifest
                 .roles
                 .iter()
                 .any(|r| r.recommended_skills.is_empty())
         {
-            // Only report if there are other roles with skills (mixed state)
             // If ALL roles have empty recommended_skills, that's a different error
         }
         if role.recommended_skills.is_empty() {
@@ -900,12 +832,10 @@ fn validate_manifest(
         }
     }
 
-    // Validate inner graphs
     if let Some(ref inner_graphs) = manifest.inner_graphs {
         for (name, ig) in inner_graphs {
             let ig_path = format!("inner_graphs.{name}");
 
-            // Cycle detection on depends_on
             let cycle_path = ig_path.clone();
             if let Some(cycle) = detect_cycle(ig) {
                 problems.push(ValidationProblem {
@@ -914,7 +844,6 @@ fn validate_manifest(
                 });
             }
 
-            // Check depends_on references
             let node_ids: HashSet<&str> = ig.nodes.iter().map(|n| n.id.as_str()).collect();
             for (k, node) in ig.nodes.iter().enumerate() {
                 for dep in &node.depends_on {
@@ -926,16 +855,13 @@ fn validate_manifest(
                     }
                 }
 
-                // WS-E T6: Check agent references
                 if let Some(ref agent_ref) = node.agent {
-                    // If roles are defined, agent must reference a valid role ID
                     if !manifest.roles.is_empty() && !role_ids.contains(agent_ref.as_str()) {
                         problems.push(ValidationProblem {
                             path: format!("{ig_path}.nodes[{k}].agent"),
                             error: format!("unknown role reference: '{agent_ref}'"),
                         });
                     }
-                    // If no roles defined, agent field should not be present
                     if manifest.roles.is_empty() {
                         problems.push(ValidationProblem {
                             path: format!("{ig_path}.nodes[{k}].agent"),
@@ -947,9 +873,7 @@ fn validate_manifest(
                 }
             }
 
-            // Check output_binding references a valid node
             if let Some(ref binding) = ig.output_binding {
-                // output_binding format is "node_id.field", extract node_id
                 let node_id = binding.split('.').next().unwrap_or(binding);
                 if !node_ids.contains(node_id) {
                     problems.push(ValidationProblem {
@@ -961,7 +885,6 @@ fn validate_manifest(
         }
     }
 
-    // --- WS-B T2: template_file path safety validation ---
     for (dot_path, template_file) in collect_template_file_entries(manifest) {
         if let Err(reason) = assert_template_file_safe(template_file) {
             problems.push(ValidationProblem {
@@ -978,7 +901,6 @@ fn validate_manifest(
 ///
 /// Returns a human-readable cycle path if found, e.g. `"a → b → a"`.
 fn detect_cycle(ig: &InnerGraph) -> Option<String> {
-    // Build adjacency list: node -> list of nodes it points to.
     // depends_on: "this node depends on dep" → edge from node to dep
     // (we follow the depends_on direction for cycle detection)
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -992,7 +914,6 @@ fn detect_cycle(ig: &InnerGraph) -> Option<String> {
         }
     }
 
-    // DFS with three-color marking.
     let mut white: HashSet<&str> = node_ids.clone();
     let mut gray: HashSet<&str> = HashSet::new();
     let mut black: HashSet<&str> = HashSet::new();
@@ -1029,7 +950,6 @@ fn dfs_cycle2<'a>(
                 continue;
             }
             if gray.contains(next) {
-                // Found a cycle: path from next to node to next.
                 let cycle_start = path.iter().position(|&n| n == *next).unwrap_or(0);
                 let mut parts: Vec<String> = path[cycle_start..]
                     .iter()
@@ -1060,26 +980,21 @@ fn validate_skill_slug_format(s: &str) -> bool {
         return false;
     }
     let bytes = s.as_bytes();
-    // Must start with a lowercase letter
     if !bytes[0].is_ascii_lowercase() {
         return false;
     }
-    // Single char is valid
     if bytes.len() == 1 {
         return true;
     }
-    // Must end with alphanumeric
     let last = bytes[bytes.len() - 1];
     if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
         return false;
     }
-    // Middle chars: lowercase alphanumeric or hyphen
     bytes[1..bytes.len() - 1]
         .iter()
         .all(|&b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-// ---------------------------------------------------------------------------
 // Graph building per §8.2 mapping table
 // ---------------------------------------------------------------------------
 
@@ -1126,11 +1041,6 @@ pub fn extract_output_bindings(manifest: &PresetManifest) -> HashMap<String, Str
     bindings
 }
 
-// ---------------------------------------------------------------------------
-// YAML depth measurement
-// ---------------------------------------------------------------------------
-
-/// Measure the maximum nesting depth of a [`serde_yaml::Value`].
 ///
 /// Scalars have depth 1, sequences/mappings add 1 for the container level.
 pub fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
@@ -1157,11 +1067,6 @@ pub fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Unknown top-level key check (R-V137P0-01)
-// ---------------------------------------------------------------------------
-
-/// Known top-level keys in `preset.yaml` per the `PresetManifest` schema.
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &["preset", "states", "inner_graphs", "signals", "roles"];
 
 /// Warn via `tracing::warn!` if the YAML document contains top-level keys
@@ -1192,10 +1097,6 @@ pub fn warn_unknown_top_level_keys(yaml_value: &serde_yaml::Value) {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -1337,8 +1238,6 @@ inner_graphs:
         );
     }
 
-    // ── DR-06 (v1.179): bounded-join loader validation ──────────────────
-
     #[test]
     fn reject_timeout_fields_on_non_join_state() {
         let yaml = r"
@@ -1405,7 +1304,6 @@ states:
 
     #[test]
     fn join_timeout_fields_load_cleanly_on_converge_state() {
-        // Positive control: the same fields on a real join state load fine.
         let yaml = r"
 preset:
   id: ok-timeout-join
@@ -1442,7 +1340,6 @@ states:
 
     #[test]
     fn join_timeout_fields_load_cleanly_on_implicit_labeled_edge_merge() {
-        // W-1 (v1.179 QC fix): a state targeted by incoming labeled edges
         // with NO explicit `merge:` is an implicit wait-all merge (§3.2) —
         // the runtime gates it on `expected_incoming > 0`, so the
         // bounded-join fields must load and bind to that gate instead of
@@ -1489,7 +1386,6 @@ states:
         );
         assert_eq!(join.timeout_ms, Some(1000));
         assert_eq!(join.on_timeout.as_deref(), Some("j1"));
-        // Runtime wait-bounding for this exact shape (expected_incoming 2,
         // no merge:) is pinned by the join_timeout_e2e merge-gate tests; the
         // loader and the graph wiring share `incoming_labeled_edge_counts`,
         // so acceptance here means the gate the fields bound is the gate the
@@ -1530,7 +1426,6 @@ states:
 
     #[test]
     fn reject_conditional_next() {
-        // V1.56 P2: Conditional next is now accepted on any state kind.
         let yaml = r#"
 preset:
   id: cond-test
@@ -1558,7 +1453,6 @@ states:
     terminal: true
 "#;
         let caps = test_capability_registry();
-        // V1.56 P2: conditional on non-llm_judge state is now accepted.
         let result = load_preset_from_str(yaml, &caps);
         assert!(
             result.is_ok(),
@@ -1855,8 +1749,6 @@ states:
         );
     }
 
-    // ── WS7 T4: initial_action + context_update parsing ──────────────────
-
     #[test]
     fn parse_initial_action_and_context_update() {
         use crate::manifest::{ContextUpdateOp, InitialAction};
@@ -1886,13 +1778,11 @@ states:
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(yaml, &caps).unwrap();
 
-        // Verify initial_action parsed
         assert!(matches!(
             loaded.initial_action,
             Some(InitialAction::SeedDirect)
         ));
 
-        // Verify context_update hook on state "a"
         let hook = loaded.context_update_hooks.get("a").unwrap();
         assert_eq!(hook.template_file, "prompts/a-ctx.md");
         assert!(matches!(hook.op, ContextUpdateOp::Append { .. }));
@@ -2036,7 +1926,6 @@ states:
 
     #[test]
     fn preset_without_initial_action_loads_successfully() {
-        // initial_action is optional — existing presets without it should still work.
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(minimal_valid_yaml(), &caps).unwrap();
         assert!(loaded.initial_action.is_none());
@@ -2111,7 +2000,6 @@ states:
         let tmp = tempfile::tempdir().unwrap();
         let bundle_root = tmp.path().join("missing");
         std::fs::create_dir_all(&bundle_root).unwrap();
-        // No preset.yaml written
 
         let caps = test_capability_registry();
         let err = load_preset(&bundle_root, &caps).unwrap_err();
@@ -2158,8 +2046,6 @@ states:
             "expected validation error for unknown initial state: {problems:?}"
         );
     }
-
-    // ── WS-B T1: assert_template_file_safe tests ───────────────
 
     #[test]
     fn template_file_safe_accepts_simple_relative_path() {
@@ -2252,8 +2138,6 @@ states:
             "expected validation error for unknown llm_summarize capability: {problems:?}"
         );
     }
-
-    // ── WS-B T5: path traversal integration tests ──────────────
 
     #[test]
     fn reject_template_file_dotdot_traversal_in_exit_when() {
@@ -2402,10 +2286,8 @@ inner_graphs:
         let tmp = tempfile::tempdir().unwrap();
         let bundle_root = tmp.path().join("escape-test");
         std::fs::create_dir_all(&bundle_root).unwrap();
-        // Create a real prompt file inside the bundle
         std::fs::create_dir_all(bundle_root.join("prompts")).unwrap();
         std::fs::write(bundle_root.join("prompts/good.md"), "hello").unwrap();
-        // Create a symlink outside the bundle
         let outside = tmp.path().join("outside-secret.md");
         std::fs::write(&outside, "secret").unwrap();
 
@@ -2516,11 +2398,8 @@ states:
         );
     }
 
-    // ── R-M1-W04: YAML depth/size limit tests ───────────────────────
-
     #[test]
     fn reject_oversized_yaml() {
-        // Build a YAML string that exceeds the size limit.
         let base = "preset:\n  id: big\n  version: 1\n  kind: creator\n  description: \"";
         let suffix = "\"\n  requires_capabilities: []\n  initial: a\n  terminal: b\nstates:\n  - id: a\n    enter: []\n    exit_when: { kind: manual }\n    next: b\n  - id: b\n    terminal: true\n";
         let padding_len = DEFAULT_MAX_YAML_SIZE + 1 - base.len() - suffix.len();
@@ -2538,7 +2417,6 @@ states:
             matches!(&err, PresetLoadError::YamlSizeExceeded { actual, limit } if *actual > *limit),
             "expected YamlSizeExceeded error: {err:?}"
         );
-        // Verify actionable message content.
         let msg = format!("{err}");
         assert!(msg.contains("bytes"), "error should mention bytes: {msg}");
         assert!(
@@ -2551,13 +2429,11 @@ states:
     fn reject_deeply_nested_yaml() {
         use std::fmt::Write as _;
 
-        // Build YAML with nesting deeper than the limit.
         let mut yaml = String::from("root:\n");
         for i in 1..=15 {
             let indent = "  ".repeat(i);
             writeln!(yaml, "{indent}level{i}:").expect("writing to String should not fail");
         }
-        // Add valid preset structure at the top level to make it parseable.
         yaml.push_str("preset:\n  id: deep\n  version: 1\n  kind: creator\n  description: test\n  requires_capabilities: []\n  initial: a\n  terminal: b\nstates:\n  - id: a\n    enter: []\n    exit_when: { kind: manual }\n    next: b\n  - id: b\n    terminal: true\n");
 
         let caps = test_capability_registry();
@@ -2581,7 +2457,6 @@ states:
 
     #[test]
     fn normal_yaml_passes_size_and_depth_limits() {
-        // Normal preset YAML should pass both checks without issue.
         let caps = test_capability_registry();
         let loaded = load_preset_from_str(minimal_valid_yaml(), &caps);
         assert!(loaded.is_ok(), "normal preset should load: {loaded:?}");
@@ -2596,20 +2471,17 @@ states:
     #[test]
     fn yaml_value_depth_nested_mapping() {
         let val: serde_yaml::Value = serde_yaml::from_str("a:\n  b:\n    c: 1").unwrap();
-        // root mapping → a mapping → b mapping → c scalar = 4
         assert_eq!(yaml_value_depth(&val), 4);
     }
 
     #[test]
     fn yaml_value_depth_sequence() {
         let val: serde_yaml::Value = serde_yaml::from_str("- a:\n    - b").unwrap();
-        // root sequence → mapping → sequence → scalar = 4
         assert!(yaml_value_depth(&val) >= 3);
     }
 
     #[test]
     fn load_preset_from_str_with_limits_allows_higher_limits() {
-        // Using higher limits should allow larger/deeper YAML.
         let yaml = minimal_valid_yaml();
         let caps = test_capability_registry();
         let loaded = load_preset_from_str_with_limits(yaml, &caps, 10 * 1024 * 1024, 50);
@@ -2619,9 +2491,6 @@ states:
         );
     }
 
-    // ── C-001 (rev2): A3 loader parity regression tests ───────────
-
-    /// C-001 regression: `load_preset()` must reject a preset that references
     /// a template file which does not exist in the bundle directory.
     /// This exercises the `validate_assets_in_bundle()` A3 surface.
     #[test]
@@ -2704,9 +2573,6 @@ states:
         );
     }
 
-    // ── V1.42 P2 T4: GoNogo conditional next tests ──────────────────────
-
-    /// Helper YAML for a preset with `llm_judge` + `GoNogo` next.
     fn gonogo_yaml() -> &'static str {
         r#"
 preset:
@@ -2855,7 +2721,6 @@ states:
 
     #[test]
     fn expression_conditional_still_rejected() {
-        // V1.56 P2: The expression-based Conditional form is now accepted on llm_judge states.
         // This test verifies the form parses correctly (targets must be valid state IDs).
         let yaml = r#"
 preset:
@@ -2885,7 +2750,6 @@ states:
     terminal: true
 "#;
         let caps = test_capability_registry();
-        // V1.56 P2: conditional form now accepted; validates target state references.
         let result = load_preset_from_str(yaml, &caps);
         assert!(
             result.is_ok(),
@@ -2893,12 +2757,10 @@ states:
         );
     }
 
-    // R-V137P0-01: unknown top-level key detection.
     #[test]
     fn warn_unknown_top_level_keys_detects_misplaced_gates() {
         use std::sync::{Arc, Mutex};
 
-        // Capturing layer to assert that tracing::warn! is actually emitted.
         #[derive(Clone)]
         struct CaptureLayer {
             messages: Arc<Mutex<Vec<String>>>,
@@ -2958,11 +2820,9 @@ gates:
     path: Works/{{work_ref}}/README.md
 ";
             let caps = test_capability_registry();
-            // Should NOT fail — unknown keys are warnings only.
             let loaded = load_preset_from_str(yaml, &caps).unwrap();
             assert_eq!(loaded.id, "stray-keys-test");
 
-            // Also call the helper directly to ensure the warn path fires.
             let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
             super::warn_unknown_top_level_keys(&yaml_value);
         });

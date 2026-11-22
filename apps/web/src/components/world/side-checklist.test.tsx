@@ -1,5 +1,4 @@
 /**
- * Side checklist tests (plan v1219-world-module T3) — product-final copy
  * (heading `接下来可以`, steps ①②③, `进度 {n} / 3`) and state styling:
  * done steps struck through, the first pending step highlighted, progress
  * derived from the done count.

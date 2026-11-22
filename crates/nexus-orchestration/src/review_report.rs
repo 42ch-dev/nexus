@@ -39,7 +39,6 @@ pub const KNOWN_FINDING_KINDS: &[&str] = &[
     "consistency",
     "plot_hole",
     "world_inconsistency",
-    // `other` is a DB-side catch-all; reports should emit one of the above
     // (the parser falls back to `craft` for unknown tokens per spec §1.2).
 ];
 
@@ -63,7 +62,6 @@ pub fn map_severity(report_token: &str) -> &'static str {
         "critical" | "blocker" => "blocker",
         "major" => "major",
         "minor" => "minor",
-        // `info`, unknown, or empty → safe default.
         _ => "info",
     }
 }
@@ -96,7 +94,6 @@ pub fn map_target_executor(report_token: &str, fallback_kind: &str) -> &'static 
     {
         return matched;
     }
-    // Spec §1.2 default.
     match fallback_kind {
         "craft" | "continuity" => "write",
         _ => "brainstorm",
@@ -194,7 +191,6 @@ fn split_sections(content: &str) -> Vec<(String, String)> {
 
     for line in content.lines() {
         let trimmed = line.trim_start();
-        // Match `### ` before `## ` so an h3 heading doesn't get its first
         // `#` swallowed by the h2 prefix.
         if let Some(rest) = trimmed
             .strip_prefix("### ")
@@ -206,7 +202,6 @@ fn split_sections(content: &str) -> Vec<(String, String)> {
                     std::mem::take(&mut current_body),
                 ));
             } else {
-                // First ever content was a heading — no preamble to push.
                 current_heading.clear();
                 current_body.clear();
             }
@@ -311,7 +306,6 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
     let mut i = 0;
     while i < raw_tokens.len() {
         let tok = raw_tokens[i];
-        // Recognize `key:` (optionally followed by other punctuation that
         // split_whitespace has already isolated).
         if let Some(key) = tok
             .strip_suffix(':')
@@ -319,7 +313,6 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
             .filter(|k| TAG_KEYS.contains(&k.as_str()))
         {
             if matches!(key.as_str(), "rule_suggestion" | "rule") {
-                // Capture the rest of the line as prose, stopping if another
                 // recognized tag appears later.
                 let mut value_parts: Vec<&str> = Vec::new();
                 let mut j = i + 1;
@@ -342,7 +335,6 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
                 i = j;
                 continue;
             }
-            // Single-token value tag (kind/severity/executor/...).
             if let Some(value_tok) = raw_tokens.get(i + 1) {
                 let value = value_tok.trim_end_matches([',', '.']).to_string();
                 if !value.is_empty() {
@@ -351,11 +343,9 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
                     continue;
                 }
             }
-            // Lone `key:` with no following value — drop the marker token.
             i += 1;
             continue;
         }
-        // Prose token. Trim trailing comma-only artifacts so the body reads
         // naturally (`, ` separators don't belong in prose).
         prose.push(tok.trim_end_matches(',').to_string());
         i += 1;
@@ -368,8 +358,6 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
 mod tests {
     use super::*;
 
-    // ── Vocabulary mapping ────────────────────────────────────────────────
-
     #[test]
     fn map_severity_translates_review_vocab_to_finding_vocab() {
         assert_eq!(map_severity("critical"), "blocker");
@@ -379,7 +367,6 @@ mod tests {
         assert_eq!(map_severity("MAJOR"), "major");
         assert_eq!(map_severity("minor"), "minor");
         assert_eq!(map_severity("info"), "info");
-        // Unknown tokens fall back to the safe default.
         assert_eq!(map_severity("severe"), "info");
         assert_eq!(map_severity(""), "info");
     }
@@ -396,21 +383,15 @@ mod tests {
 
     #[test]
     fn map_target_executor_uses_explicit_hint_then_kind_default() {
-        // Explicit known executor wins.
         assert_eq!(map_target_executor("write", "craft"), "write");
         assert_eq!(map_target_executor("brainstorm", "craft"), "brainstorm");
         assert_eq!(map_target_executor("master", "plot_hole"), "master");
-        // Unknown token + craft kind → write (spec §1.2).
         assert_eq!(map_target_executor("", "craft"), "write");
         assert_eq!(map_target_executor("nonsense", "craft"), "write");
-        // Unknown token + continuity → write.
         assert_eq!(map_target_executor("", "continuity"), "write");
-        // Unknown token + other kind → brainstorm.
         assert_eq!(map_target_executor("", "plot_hole"), "brainstorm");
         assert_eq!(map_target_executor("", "world_inconsistency"), "brainstorm");
     }
-
-    // ── Full-parse contract ───────────────────────────────────────────────
 
     #[test]
     fn parse_empty_content_is_an_error() {
@@ -451,11 +432,9 @@ Solid chapter overall; a couple of craft issues to address.
         assert!(f0.body.contains("POV drifts mid-chapter"));
         assert!(f0.rule_suggestion.is_none());
 
-        // critical → blocker mapping.
         let f1 = &parsed.findings[1];
         assert_eq!(f1.kind, "world_inconsistency");
         assert_eq!(f1.severity, "blocker");
-        // No executor + world_inconsistency kind → brainstorm default.
         assert_eq!(f1.target_executor, "brainstorm");
 
         let f2 = &parsed.findings[2];
@@ -478,9 +457,7 @@ rule_suggestion: Pin dialect per region in AGENTS.md
             f.rule_suggestion.as_deref(),
             Some("Pin dialect per region in AGENTS.md")
         );
-        // Body is the prose minus the tag chunks.
         assert!(f.body.contains("Inconsistent dialect"));
-        // Tag value must NOT leak into the body.
         assert!(!f.body.contains("Pin dialect"));
         assert!(!f.body.contains("kind:"));
     }
@@ -511,7 +488,6 @@ rule_suggestion: Pin dialect per region in AGENTS.md
 
     #[test]
     fn parse_missing_issues_section_yields_empty_findings_but_keeps_overall() {
-        // No ## Issues heading → findings empty, overall_assessment preserved.
         // The caller (auto_chain wiring) falls back to the placeholder shape
         // per spec §1.3 when findings is empty.
         let report = "\
@@ -544,7 +520,6 @@ Adequate; no actionable issues.
 
     #[test]
     fn parse_skips_malformed_bullets_but_keeps_good_ones() {
-        // Best-effort: the second bullet (empty prose after tag-strip) is
         // dropped; the first and third are kept.
         let report = "\
 ## Issues

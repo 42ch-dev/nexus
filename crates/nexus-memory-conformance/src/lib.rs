@@ -26,34 +26,26 @@
 //! retention operators are test control only — the assertions read the
 //! provider's own answers, refusals and receipts.
 
-// The assembled `MemoryPort` in `server` consumes the request-scope bridge
 // (`Admitted::from_scope`), while this slice's own direct-admission entry
 // points and its pending/failed receipt states stay exercised by the embedded
 // tests and the §7.0.3 async owners.
 #[allow(dead_code)]
 mod candidates;
-// Operator/test-only fault points and the controllable clock; consumed by the
 // assembled mutation path.
 mod faults;
-// The published provider policy and the authenticated peer→principal table.
 mod policy;
 mod provider;
-// The reflection admission slice: `OpTarget` construction, freeze
 // classification and the cognition refusal. Grown by the serving tasks.
+mod raw_invoke;
 #[allow(dead_code)]
 mod reflections;
-// The D15 raw-request digest scope and the wire error-envelope normalization.
-mod raw_invoke;
-// As in `spaces`: the outer convenience wrappers stay the slices' own tested
 // entry points, while the assembled port commits through the caller-owned
 // `*_in_tx` siblings so effect, receipt and dedup share one transaction.
 #[allow(dead_code)]
 mod recall;
 #[allow(dead_code)]
 mod records;
-// The assembled `MemoryPort`, its admission wrapper and the signed service.
 mod server;
-// The same split as `records`: the assembly needs this slice's authorization,
 // grant-loading and caller-owned seams, and its outer wrappers remain its own
 // embedded-test entry points.
 #[allow(dead_code)]

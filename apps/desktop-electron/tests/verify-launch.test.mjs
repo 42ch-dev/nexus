@@ -17,7 +17,6 @@ function makeFakeApp(root, name, executableSource, { executableName = 'Nexus', i
 }
 
 const WINDOW_MS = 500;
-// Fixtures whose stub exits on its own must not let a delayed exit event lose
 // the race to the window timer: under the suite's default test-file concurrency
 // an exit event can be delayed past 500ms (observed ~750ms), flipping the
 // expected FAIL to PASS. These fixtures use a window that absorbs that jitter;
@@ -74,7 +73,6 @@ test('exits 0 early within the window: FAIL (no exit-code success pattern-matchi
 });
 
 /**
- * Poll until `pid` is no longer signalable, or `timeoutMs` elapses. Keeps the
  * descendant assertion independent of scheduling jitter.
  */
 async function processReaped(pid, timeoutMs) {
@@ -97,7 +95,6 @@ test('early exit with a descendant holding the pipes: FAIL and the descendant is
   const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
   try {
     const pidFile = join(root, 'descendant.pid');
-    // The leader background-forks a long-lived descendant that inherits the
     // captured pipes, records its pid, then exits early. Without process-group
     // termination the inherited pipe keeps the probe pending and the descendant
     // survives; the probe must terminate the group and destroy the streams.
@@ -117,7 +114,6 @@ test('early exit with a SIGTERM-ignoring descendant: FAIL and the descendant is 
   const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
   try {
     const readyFile = join(root, 'stubborn.pid');
-    // The descendant installs a SIGTERM handler and only then records its pid,
     // so by the time the leader exits (after observing the ready file) it is
     // genuinely SIGTERM-resistant — only the probe's awaited SIGKILL escalation
     // can reap it. It inherits the captured stderr pipe, and the leader exits
@@ -139,7 +135,6 @@ test('early exit with a SIGTERM-ignoring descendant: FAIL and the descendant is 
     const elapsedMs = Date.now() - startedAt;
     assert.equal(record.verdict, 'FAIL');
     assert.equal(record.exitCode, 1);
-    // The descendant outlived SIGTERM, so the probe must have taken the bounded
     // grace wait before escalating — an immediate return would mean the fixture
     // was reaped by SIGTERM (no escalation exercised).
     assert.ok(elapsedMs >= 2000, `probe returned in ${elapsedMs}ms, before the SIGKILL escalation`);
@@ -158,7 +153,6 @@ test('early exit with a SIGTERM-ignoring descendant: FAIL and the descendant is 
 test('bootstrap marker straddling the retention boundary still FAILs (no false PASS)', async () => {
   const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
   try {
-    // First chunk ends with a partial marker (well under the retention cap, so
     // the naive append→trim→scan order keeps it); the second chunk completes
     // the marker at its head but exceeds the cap, so trimming the front before
     // scanning would drop the split marker entirely and the alive-at-window-end
@@ -213,7 +207,6 @@ test('non-darwin platform fails closed with an unsupported-platform diagnostic',
 test('window-end PASS requires the app to be alive: a late exit event cannot lock in a PASS', async () => {
   const root = mkdtempSync(join(tmpdir(), 'nexus-verify-launch-'));
   try {
-    // The stub stays alive, but the injected liveness probe reports the app
     // already gone at the window end — the exact state a dead app is in while
     // its `exit` event is still queued behind the window timer (event-loop
     // lag). The previous implementation ignored liveness and recorded a PASS;

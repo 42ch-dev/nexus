@@ -1,5 +1,4 @@
 /**
- * World Findings page — route entry for the world-scoped check findings
  * surface (V1.166 P2 / DR-64 surfacing half, Task 1).
  *
  * Reads the world id from the URL and renders {@link WorldFindingsPanel}.

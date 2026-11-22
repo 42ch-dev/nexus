@@ -23,19 +23,16 @@ use nexus_contracts::{
 
 #[test]
 fn update_finding_rule_suggestion_keeps_all_three_states() {
-    // Absent → None (do not touch the column).
     let keep: UpdateFindingRequest =
         serde_json::from_str(r#"{"status":"triaged"}"#).expect("keep parses");
     assert_eq!(keep.rule_suggestion, None);
     assert_eq!(keep.status.as_deref(), Some("triaged"));
 
-    // Explicit null → Some(Value::Null) (clear to SQL NULL); this is the
     // state a plain Option<T> carrier erases.
     let clear: UpdateFindingRequest =
         serde_json::from_str(r#"{"rule_suggestion":null}"#).expect("clear parses");
     assert_eq!(clear.rule_suggestion, Some(serde_json::Value::Null));
 
-    // Value → Some(Value::String) (set).
     let set: UpdateFindingRequest =
         serde_json::from_str(r#"{"rule_suggestion":"prefer scene breaks"}"#).expect("set parses");
     assert_eq!(
@@ -192,7 +189,6 @@ fn governance_fields_have_no_null_state() {
     };
     let hld = format!("hld_{}", "0123456789abcdef".repeat(4));
 
-    // Absent and `null` both leave `audience` unset — neither is a clear.
     let absent: UpdateKnowledgeEntryRequest =
         serde_json::from_str(r#"{"expected_revision":0}"#).expect("absent audience");
     assert!(absent.audience.is_none());
@@ -200,7 +196,6 @@ fn governance_fields_have_no_null_state() {
         serde_json::from_str(r#"{"expected_revision":0,"audience":null}"#).expect("null audience");
     assert!(null.audience.is_none());
 
-    // The explicit shared arm is the authored clear, and it round-trips.
     let cleared: UpdateKnowledgeEntryRequest =
         serde_json::from_str(r#"{"expected_revision":0,"audience":{"kind":"shared"}}"#)
             .expect("explicit clear");
@@ -216,7 +211,6 @@ fn governance_fields_have_no_null_state() {
         serde_json::json!({ "expected_revision": 0, "audience": { "kind": "shared" } })
     );
 
-    // The projection pair is absence-bearing: a shared row emits neither key.
     let shared: KnowledgeViewItem = serde_json::from_str(
         r#"{"entry_id":"kb_1","owner":{"kind":"world","id":"wld_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
             "block_type":"info_point","canonical_name":"note-alpha","status":"confirmed",
@@ -231,11 +225,9 @@ fn governance_fields_have_no_null_state() {
         "a shared projection must omit both governance members: {wire}"
     );
 
-    // A null holder is not a resolved holder; it stays the shared absence.
     let nulled: KnowledgeViewItem = serde_json::from_str(&view_item("null")).expect("null holder");
     assert!(nulled.holder_entry_id.is_none());
 
-    // A resolved pair round-trips as authored.
     let restricted: KnowledgeViewItem =
         serde_json::from_str(&view_item(&format!(r#""{hld}""#))).expect("resolved holder");
     let wire = serde_json::to_string(&restricted).expect("serializes");

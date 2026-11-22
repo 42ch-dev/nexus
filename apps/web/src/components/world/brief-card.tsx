@@ -1,5 +1,4 @@
 /**
- * Brief saved card (plan v1219-world-module T2) — the era KnowledgeEntry
  * rendered after a successful save: tag `BRIEF · {relative timestamp}`, the
  * one-sentence summary, and a follow-up `世界已就绪` card announcing the Work
  * module unlock (product-owned copy). An edit affordance reopens the inline
@@ -18,7 +17,6 @@ export interface BriefCardProps {
 }
 
 /**
- * Product-owned relative timestamp: `刚刚` for a fresh save (<45s, the
  * second-bucket cutover formatRelative uses), the shared relative formatter
  * afterwards.
  */

@@ -1,5 +1,4 @@
 /**
- * Service-unavailable surface (plan v1219-onboarding T4).
  *
  * The probe is `GET /v1/daemon/daemon/status` (plus `runtime/status` when only
  * the engine is degraded, to tell "no provider selected" from a failure); one
@@ -24,7 +23,6 @@ interface Deferred<T> {
   resolve: (value: T) => void;
 }
 
-// Promise.withResolvers is unavailable at the current tsconfig lib — same
 // local equivalent as brief-flow.test.tsx until the lib target reaches es2024.
 function withResolvers<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
@@ -117,7 +115,6 @@ describe('ServiceDegradedGate', () => {
       'Nexus 服务暂不可用：本地数据库未就绪。请确认本地服务正在运行后重试。',
     );
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
-    // The shell stays usable behind the single surface — no toasts.
     expect(screen.getByTestId('app-content')).toBeInTheDocument();
     expect(screen.getAllByRole('alert')).toHaveLength(1);
   });
@@ -152,13 +149,10 @@ describe('ServiceDegradedGate', () => {
     expect(surface).toHaveAttribute('data-state', 'unconfigured');
     expect(surface).toHaveTextContent('编排引擎未就绪');
     expect(surface).toHaveTextContent('配置编排提供方');
-    // The CLI escape hatch is gone: configuration is in-page only.
     expect(surface).not.toHaveTextContent('nexus42 connect');
     expect(screen.queryByTestId('engine-repair-failure')).not.toBeInTheDocument();
-    // The app is not usable until the engine is configured.
     expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
 
-    // Same install state + no curated priority → display-name order.
     const candidates = await screen.findAllByRole('listitem');
     expect(candidates[0]).toHaveTextContent('dsh (native CLI)');
     expect(candidates[1]).toHaveTextContent('Alpha Agent');
@@ -176,7 +170,6 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
-  // Defense-in-depth: the scan producer already dedupes by provider id; this
   // pins the page's independent guard for a producer that regresses.
   it('dedupes scan rows by provider id and keeps the curated launch recipe', async () => {
     const user = userEvent.setup();
@@ -224,7 +217,6 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/homebrew/bin/omp');
     await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
     await waitFor(() => expect(saved.length).toBe(1));
-    // The curated row's recipe (not the bare registry duplicate) is saved.
     expect(saved[0]!.providers).toEqual([
       {
         id: 'omp',
@@ -283,7 +275,6 @@ describe('ServiceDegradedGate', () => {
     const kimiRow = roster.find((row) => row.textContent?.includes('Kimi CLI'))!;
     const claudeRow = roster.find((row) => row.textContent?.includes('Claude Code'))!;
 
-    // Detection-only: rendered, badged, and impossible to choose.
     expect(within(kimiRow).getByTestId('detection-only-badge')).toHaveTextContent(
       '已检测，暂不支持从此处启用',
     );
@@ -292,7 +283,6 @@ describe('ServiceDegradedGate', () => {
     await user.click(kimiUse);
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('');
 
-    // A supported native row in the same render stays selectable.
     const claudeUse = within(claudeRow).getByRole('button', { name: '启用' });
     expect(claudeUse).toBeEnabled();
     await user.click(claudeUse);
@@ -331,7 +321,6 @@ describe('ServiceDegradedGate', () => {
 
     const roster = await screen.findAllByRole('listitem');
     await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
-    // Correcting the executable path of the same recipe preserves args.
     await user.clear(screen.getByLabelText('启动命令'));
     await user.type(screen.getByLabelText('启动命令'), '/usr/local/bin/alpha-acp');
     await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
@@ -379,7 +368,6 @@ describe('ServiceDegradedGate', () => {
 
     const roster = await screen.findAllByRole('listitem');
     await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
-    // Editing the manual recipe leaves the chosen row's hidden args behind.
     await user.clear(screen.getByLabelText('提供方 ID'));
     await user.type(screen.getByLabelText('提供方 ID'), 'custom-acp');
     await user.click(screen.getByRole('button', { name: '保存并重启检测' }));
@@ -391,7 +379,6 @@ describe('ServiceDegradedGate', () => {
 
   it('keeps a configured provider selectable even without a scan row', async () => {
     const user = userEvent.setup();
-    // gemini-style catalog-only target: no detection row, but the user has
     // it configured and enabled — it is the repair target, never disabled.
     const agents: AgentScanEntry[] = [
       { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', launch_args: ['acp'], installed: true },
@@ -431,7 +418,6 @@ describe('ServiceDegradedGate', () => {
     expect(geminiUse).toBeEnabled();
     await user.click(geminiUse);
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('gemini');
-    // Regression lock for the configured-prefill fix: the stored command
     // must back the form (never blanked), and the saved payload keeps it.
     expect(screen.getByLabelText('启动命令')).toHaveValue('gemini');
   });
@@ -461,7 +447,6 @@ describe('ServiceDegradedGate', () => {
       ),
     });
 
-    // Roster order: installed first; the not-installed row stays visible.
     const candidates = await screen.findAllByRole('listitem');
     expect(candidates[0]).toHaveTextContent('Alpha Agent');
     expect(candidates[1]).toHaveTextContent('dsh (native CLI)');
@@ -470,7 +455,6 @@ describe('ServiceDegradedGate', () => {
     const betaUse = within(candidates[1]!).getByRole('button', { name: '启用' });
     expect(betaUse).toBeDisabled();
 
-    // The installed row stays selectable.
     await user.click(within(candidates[0]!).getByRole('button', { name: '启用' }));
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('alpha-acp');
   });
@@ -496,7 +480,6 @@ describe('ServiceDegradedGate', () => {
       ),
     });
 
-    // The catalog is empty on an unconfigured home; the scan is the source.
     const candidates = await screen.findAllByRole('listitem');
     expect(candidates).toHaveLength(1);
     expect(candidates[0]).toHaveTextContent('Claude Code');
@@ -539,7 +522,6 @@ describe('ServiceDegradedGate', () => {
     expect(written.providers).toEqual([
       { id: 'manual-agent', protocol: 'native_cli', command: '/usr/local/bin/manual-agent', args: [], enabled: true },
     ]);
-    // A successful save re-runs the same probe the recheck button uses.
     await waitFor(() =>
       expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2),
     );
@@ -592,7 +574,6 @@ describe('ServiceDegradedGate', () => {
     const roster = await screen.findAllByRole('listitem');
     expect(roster).toHaveLength(1);
     await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
-    // The configured ACP provider keeps ACP + its own command; the native
     // scan row for the same id is not its recipe.
     expect(screen.getByLabelText('协议')).toHaveValue('acp');
     expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
@@ -641,7 +622,6 @@ describe('ServiceDegradedGate', () => {
     expect(roster).toHaveLength(2);
     expect(roster[0]).toHaveTextContent('omp (ACP)');
     expect(roster[1]).toHaveTextContent('omp (native CLI)');
-    // The detection-only native row is badged and disabled; the ACP row is not.
     expect(within(roster[1]!).getByTestId('detection-only-badge')).toBeInTheDocument();
     expect(within(roster[0]!).queryByTestId('detection-only-badge')).not.toBeInTheDocument();
   });
@@ -676,7 +656,6 @@ describe('ServiceDegradedGate', () => {
                 },
               ],
             }),
-          // Auto-discovered PATH roster row only — kimi is NOT saved.
           listProviders: () =>
             Promise.resolve({
               providers: [{ provider_id: 'kimi', display_name: 'Kimi CLI', protocol_kind: 'native_cli' }],
@@ -686,7 +665,6 @@ describe('ServiceDegradedGate', () => {
       ),
     });
 
-    // Both protocols stay as separate choices; the catalog only polishes the
     // label. The installed ACP row is selectable, the detection row is not.
     const roster = await screen.findAllByRole('listitem');
     expect(roster).toHaveLength(2);
@@ -732,7 +710,6 @@ describe('ServiceDegradedGate', () => {
                 },
               ],
             }),
-          // The catalog lists enabled providers only: B is disabled and absent.
           listProviders: () =>
             Promise.resolve({
               providers: [
@@ -752,17 +729,14 @@ describe('ServiceDegradedGate', () => {
     });
 
     const roster = await screen.findAllByRole('listitem');
-    // A appears once (catalog), B survives from its installed scan row.
     expect(roster).toHaveLength(2);
     const alphaRow = roster.find((row) => row.textContent?.includes('Alpha Agent'))!;
     const betaRow = roster.find((row) => row.textContent?.includes('beta (ACP)'))!;
     expect(betaRow).toHaveTextContent('已安装');
 
-    // B is selectable again and keeps its saved command.
     await user.click(within(betaRow).getByRole('button', { name: '启用' }));
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('beta-acp');
     expect(screen.getByLabelText('启动命令')).toHaveValue('/usr/local/bin/beta-acp');
-    // A was not duplicated by its scan row.
     expect(roster.filter((row) => row.textContent?.includes('Alpha Agent'))).toHaveLength(1);
     expect(within(alphaRow).getByRole('button', { name: '启用' })).toBeInTheDocument();
   });
@@ -836,7 +810,6 @@ describe('ServiceDegradedGate', () => {
     const roster = await screen.findAllByRole('listitem');
     expect(roster).toHaveLength(1);
     await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
-    // The not-installed scan row's bare "claude" must not replace the working
     // saved command.
     expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/private/claude');
   });
@@ -994,7 +967,6 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByTestId('engine-repair-failure')).toHaveTextContent(
       '已选择编排提供方，但就绪检测未通过：编排引擎未就绪。',
     );
-    // The failure note sits above the same configuration form: the saved
     // profile alone cannot make the recheck succeed.
     expect(screen.getByLabelText('提供方 ID')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeInTheDocument();
@@ -1014,7 +986,6 @@ describe('ServiceDegradedGate', () => {
     });
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalledTimes(1));
-    // Never a flash of setup guidance while the selection read is in flight.
     expect(screen.getByTestId('service-degraded-surface')).toHaveAttribute(
       'data-state',
       'failed',
@@ -1054,7 +1025,6 @@ describe('ServiceDegradedGate', () => {
 
     const surface = await screen.findByTestId('service-degraded-surface');
     expect(surface).toHaveAttribute('data-variant', 'full');
-    // The raw fetch message is not copy: transport failures get a fixed reason.
     expect(surface).toHaveTextContent(
       'Nexus 服务暂不可用：无法连接本地服务。请确认本地服务正在运行后重试。',
     );
@@ -1107,7 +1077,6 @@ describe('ServiceDegradedGate', () => {
       ),
     );
     expect(screen.getByTestId('service-degraded-surface')).toHaveTextContent('编排引擎未就绪');
-    // One instance throughout: the retry updates the existing surface.
     expect(screen.getAllByTestId('service-degraded-surface')).toHaveLength(1);
     expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
     expect(daemonStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -1120,7 +1089,6 @@ describe('ServiceDegradedGate', () => {
       deferreds.push(deferred);
       return deferred.promise;
     });
-    // The first-run gate resolves after mount, which re-runs the probe — two
     // probes are then in flight at once.
     const client = {
       daemonStatus,
@@ -1130,7 +1098,6 @@ describe('ServiceDegradedGate', () => {
 
     await waitFor(() => expect(daemonStatus).toHaveBeenCalledTimes(2));
 
-    // The newest probe resolves healthy first; the stale probe must not
     // overwrite that outcome when it settles later.
     await act(async () => {
       deferreds[1]!.resolve(HEALTHY);

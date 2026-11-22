@@ -117,7 +117,6 @@ pub fn spawn_stale_findings_watcher(
         );
 
         let mut ticker = tokio::time::interval(config.interval);
-        // Default `MissedTickBehavior::Burst` would cause back-to-back
         // sweeps after a long pause (e.g. laptop sleep). `Delay` keeps
         // sweeps spaced and avoids piling work on the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -195,7 +194,6 @@ pub async fn run_one_sweep(
             }
         }
         Err(e) => {
-            // Non-blocking: log and continue. The watcher must never
             // bubble errors — that would crash the spawned task and
             // silently stop the SLA signal.
             tracing::error!(
@@ -244,7 +242,6 @@ async fn maybe_enqueue_review_master(
     };
 
     if !work.auto_review_master_on_timeout {
-        // Default branch — no opt-in, no schedule. AC3.
         tracing::debug!(
             creator_id,
             work_id,
@@ -253,7 +250,6 @@ async fn maybe_enqueue_review_master(
         return;
     }
 
-    // N-9: derive the complete binding map for `novel-review-master` from
     // the configured default provider. The preset's graphs issue prompts
     // (`acp.prompt` + `judge.llm`), so a missing provider refuses the
     // enqueue — never a drive-enabled row with an empty binding map.
@@ -294,7 +290,6 @@ async fn maybe_enqueue_review_master(
                 schedule_id = %schedule_id,
                 "stale-findings: enqueued novel-review-master (opt-in)"
             );
-            // N-11: guaranteed post-commit coordinator handoff — the
             // review-master row is admitted through the SAME production
             // starter as every other insertion branch. A starter failure is
             // explicit (logged at error level); the row stays pending for a

@@ -43,7 +43,6 @@ pub fn get_or_create_device_id(home: &Path) -> Result<String, DeviceIdError> {
     use std::io::Write;
     let path = crate::device_id_path(home);
 
-    // Ensure parent directory exists.
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -59,7 +58,6 @@ pub fn get_or_create_device_id(home: &Path) -> Result<String, DeviceIdError> {
                 let new_id = uuid::Uuid::new_v4().to_string();
                 file.write_all(new_id.as_bytes())?;
 
-                // Set 0600 permissions on Unix.
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -83,9 +81,6 @@ pub fn get_or_create_device_id(home: &Path) -> Result<String, DeviceIdError> {
                             ),
                         )));
                     }
-                    // Empty file — another thread may be writing.
-                    // Wait briefly and retry rather than removing,
-                    // to avoid NotFound races for concurrent readers.
                     std::thread::sleep(std::time::Duration::from_millis(5));
                     continue;
                 }
@@ -193,7 +188,6 @@ mod tests {
         let id = get_or_create_device_id(tmp.path()).unwrap();
         assert_eq!(id, "pre-existing-uuid");
 
-        // Ensure the file was not overwritten with a new UUID.
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "pre-existing-uuid");
     }

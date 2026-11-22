@@ -121,7 +121,6 @@ async fn character_tom_record_show_json_and_human_parity() {
     let character_b = actor.create_character("Ben", &world_w1).await;
     let carrier = seed_tom_carrier(&actor, &character_a.character_id);
 
-    // L1: the viewer Character's own belief, `--json`, first CAS step.
     let json_args = record_argv(
         &character_a.character_id,
         &world_w1,
@@ -137,7 +136,6 @@ async fn character_tom_record_show_json_and_human_parity() {
     assert_eq!(payload["revision"], 1);
     assert_eq!(payload["carrier_entry_id"], carrier);
 
-    // L2: a belief about another Character, human output, next CAS step.
     let human_args = record_argv(
         &character_a.character_id,
         &world_w1,

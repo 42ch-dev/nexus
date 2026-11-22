@@ -36,11 +36,9 @@ pub mod stage0;
 mod test_support;
 pub mod world_context;
 
-// Cloud-stage types gated behind feature flag
 #[cfg(feature = "cloud-stage")]
 pub mod cloud_stage;
 
-// Re-export primary types
 #[cfg(feature = "cloud-stage")]
 pub use cloud_stage::TwoStageAssembly;
 pub use directive::{

@@ -1,5 +1,4 @@
 /**
- * `strategy_canvas_compose` flag resolution (compass D14/D18).
  *
  * D18: the flag is scoped to the Strategy Canvas surface only — it never
  * changes Outline, Timeline or any other canvas. D14: with no explicit

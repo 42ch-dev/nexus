@@ -1,5 +1,4 @@
 /**
- * SoulSection — V1.79 SOUL visualization wrapper, extended in V1.81 (Creator
  * SOUL Maturation) and V1.82 (per-World SOUL narrative completion).
  *
  * V1.79: keyword clusters + temporal drift over internalized fragments,
@@ -56,21 +55,17 @@ export function SoulSection({
   onFilterFragments: (keyword: string | null) => void;
 }) {
   const { t } = useTranslation('memory');
-  // World projection: null = "All worlds" (whole Creator SOUL); a world_id
   // narrows keyword/drift + growth + narrative to that world's subset.
   const [selectedWorld, setSelectedWorld] = useState<string | null>(null);
 
-  // Workspace-scoped world list: drives the selector titles and includes
   // Work-backed worlds even when they have zero fragments.
   const worlds = useNarrativeWorlds();
 
-  // Whole-creator fragments: drives fragment-count badges in the selector and
   // is the active view when "All worlds" is selected.
   const wholeFragments = useMemoryFragments(creatorId, undefined, {
     refetchInterval: SOUL_REFETCH_MS,
   });
 
-  // Active view: the whole list when "All worlds", the world subset when a
   // world is selected. Same key as `wholeFragments` when no world is selected,
   // so TanStack dedupes (one fetch); a distinct key only when a world is picked.
   const activeFragments = useMemoryFragments(
@@ -79,7 +74,6 @@ export function SoulSection({
     { refetchInterval: SOUL_REFETCH_MS },
   );
 
-  // V1.82: narrative follows the selected scope. The query key includes
   // `world_id` so the card re-renders when the selector changes and there is
   // exactly one active observer per scope (no duplicate poll timers).
   const narrative = useSoulNarrative(creatorId, selectedWorld);

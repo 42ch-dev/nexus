@@ -11,11 +11,6 @@ use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
 use serde_json::Value;
 
-// ---------------------------------------------------------------------------
-// outbox.flush
-// ---------------------------------------------------------------------------
-
-/// Flush pending outbox entries by marking them as acknowledged.
 ///
 /// **Pool-backed (production)**: transitions `staged`/`ready` entries
 /// to `acked` state. Platform is paused — this is a local-only DB operation.
@@ -72,9 +67,6 @@ impl Capability for OutboxFlush {
         let now = chrono::Utc::now().to_rfc3339();
 
         let flushed = if limit > 0 {
-            // Limit the number of entries flushed in this batch.
-            // SQLite does not support LIMIT in UPDATE with ORDER BY directly,
-            // so we use a subquery to select the IDs to update.
             let rows = sqlx::query_scalar!(
                 "SELECT outbox_entry_id as \"outbox_entry_id!\" FROM outbox_entries
                  WHERE delivery_state IN ('staged', 'ready')
@@ -89,7 +81,6 @@ impl Capability for OutboxFlush {
             if rows.is_empty() {
                 0u64
             } else {
-                // Build parameter list: collect owned values first to avoid lifetime issues.
                 let placeholders: Vec<String> = rows.iter().map(|_| "?".to_string()).collect();
                 // SAFETY: dynamic SQL for batch UPDATE with variable number of placeholders;
                 // values are string literals from the database (outbox_entry_id), not user input.
@@ -99,7 +90,6 @@ impl Capability for OutboxFlush {
                     placeholders.join(",")
                 );
 
-                // Bind timestamp + each entry ID as owned values.
                 let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(now);
                 for id in &rows {
                     query = query.bind(id.clone());
@@ -111,7 +101,6 @@ impl Capability for OutboxFlush {
                 result.rows_affected()
             }
         } else {
-            // No limit: flush ALL pending entries.
             let result = sqlx::query!(
                 "UPDATE outbox_entries
                  SET delivery_state = 'acked', updated_at = ?
@@ -131,11 +120,6 @@ impl Capability for OutboxFlush {
     }
 }
 
-// ---------------------------------------------------------------------------
-// outbox.compact
-// ---------------------------------------------------------------------------
-
-/// Compact outbox table by removing old acknowledged entries.
 ///
 /// **Pool-backed (production)**: deletes `acked` entries older than
 /// a configurable retention window (default 7 days). Returns counts
@@ -194,11 +178,9 @@ impl Capability for OutboxCompact {
             .unwrap_or(DEFAULT_RETENTION_DAYS)
             .max(0); // Clamp to non-negative; 0 means "remove all acked"
 
-        // Compute cutoff timestamp.
         let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
         let cutoff_str = cutoff.to_rfc3339();
 
-        // Delete old acked entries.
         let removed = sqlx::query!(
             "DELETE FROM outbox_entries
              WHERE delivery_state = 'acked'
@@ -210,7 +192,6 @@ impl Capability for OutboxCompact {
         .map_err(|e| CapabilityError::Internal(format!("outbox.compact delete failed: {e}")))?
         .rows_affected();
 
-        // Count remaining acked entries.
         let retained: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) as \"count!\" FROM outbox_entries WHERE delivery_state = 'acked'"
         )
@@ -283,8 +264,6 @@ mod tests {
         .expect("insert test entry");
     }
 
-    // ── outbox.flush tests ────────────────────────────────────────────
-
     #[tokio::test]
     async fn outbox_flush_no_pool_returns_internal_error() {
         let cap = OutboxFlush::new();
@@ -316,7 +295,6 @@ mod tests {
         let out = cap.run(serde_json::json!({})).await.unwrap();
         assert_eq!(out["flushed"], 2); // only staged + ready
 
-        // Verify states
         let states: Vec<(String,)> =
             sqlx::query_as("SELECT delivery_state FROM outbox_entries ORDER BY outbox_entry_id")
                 .fetch_all(&pool)
@@ -337,7 +315,6 @@ mod tests {
         let out = cap.run(serde_json::json!({"limit": 2})).await.unwrap();
         assert_eq!(out["flushed"], 2);
 
-        // One entry should still be staged
         let count: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) as \"count!\" FROM outbox_entries WHERE delivery_state = 'staged'"
         )
@@ -346,8 +323,6 @@ mod tests {
         .unwrap();
         assert_eq!(count, 1);
     }
-
-    // ── outbox.compact tests ──────────────────────────────────────────
 
     #[tokio::test]
     async fn outbox_compact_no_pool_returns_internal_error() {
@@ -376,7 +351,6 @@ mod tests {
     #[tokio::test]
     async fn outbox_compact_old_acked_removed() {
         let pool = test_pool().await;
-        // Insert an entry with old updated_at
         let old_time = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
         // SAFETY: test-only DDL — insert with explicit updated_at for compaction test.
         sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -436,7 +410,6 @@ mod tests {
         assert_eq!(out["removed"], 0);
         assert_eq!(out["retained"], 0);
 
-        // Non-acked entries are untouched
         let count: i64 = sqlx::query_scalar!("SELECT COUNT(*) as \"count!\" FROM outbox_entries")
             .fetch_one(&pool)
             .await

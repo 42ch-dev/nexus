@@ -18,7 +18,6 @@ import {
 } from '../scripts/package-contract.mjs';
 
 /**
- * Governed desktop product version from `resources/product.json` — the file the
  * packaging preflight pins equal to the root and Electron app manifests. The
  * native-compatibility and receipt fixtures below mirror it so they track the
  * real release version instead of a drifting literal.

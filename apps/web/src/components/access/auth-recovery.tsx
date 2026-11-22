@@ -37,7 +37,6 @@ export function AuthRecoveryGate({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * A guarded route is the only honest access probe: the runtime family is
    * unguarded, so it would answer 200 with or without a key. With no candidate
    * key the probe re-reads the session cookie (bootstrap finished in another tab).
    */
@@ -45,7 +44,6 @@ export function AuthRecoveryGate({ children }: { children: ReactNode }) {
     setProbe('checking');
     try {
       await new BrowserClient(candidate ? { apiKey: candidate } : {}).listCreators();
-      // A cookie-only success means the session is authoritative: drop any
       // stale stored key, because a non-empty X-API-Key wins service-side and
       // would keep rejecting requests (access spec §6.1).
       if (candidate) storeApiKey(candidate);

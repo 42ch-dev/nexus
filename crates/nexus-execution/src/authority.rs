@@ -74,7 +74,6 @@ impl WorkspaceAuthorityLease {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        // Explicit `flock` unlock, then the close: releasing here leaves the
         // same state as the dropped-lease path.
         let Some(file) = file else {
             return false;
@@ -108,7 +107,6 @@ fn unlock(_file: &File) {}
 /// and reported as an error to the caller.
 #[cfg(unix)]
 fn lock_conflict_error(err: nix::errno::Errno) -> io::Error {
-    // `EWOULDBLOCK` is `EAGAIN` on both target platforms, so `EAGAIN` already
     // spells both; `EACCES` covers the BSD lock-conflict variant.
     let raw = err as i32;
     if raw == nix::errno::Errno::EAGAIN as i32 || raw == nix::errno::Errno::EACCES as i32 {
@@ -123,7 +121,6 @@ fn lock_conflict_error(err: nix::errno::Errno) -> io::Error {
 
 impl Drop for WorkspaceAuthorityLease {
     fn drop(&mut self) {
-        // The last reference going away is the OTHER release path: the file
         // still held here is closed (and its lock released) only when nothing
         // can use the lease any more.
         if let Some(file) = self

@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use tracing::warn;
 
-// Re-export trace DTOs for use by other command modules
 pub use nexus_contracts::local::acp_runtime::trace::{
     NexusCapabilityCallId, NexusRunId, NexusTraceEvent,
 };
@@ -47,11 +46,9 @@ impl TraceWriter {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Check existing file size; truncate if over the limit.
         let existing_size = std::fs::metadata(trace_file).map_or(0, |m| m.len());
 
         let file = if existing_size > TRACE_FILE_SIZE_LIMIT {
-            // Truncate: open without append, which resets to zero length.
             std::fs::OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -85,7 +82,6 @@ impl TraceWriter {
 
 impl Drop for TraceWriter {
     fn drop(&mut self) {
-        // Best-effort final flush on drop
         let _ = self.writer.flush();
     }
 }
@@ -121,13 +117,11 @@ pub fn append_trace_event(
 
     let trace_file = nexus_home_layout::acp_run_trace_file(home, &run_id.0);
 
-    // Recover from mutex poisoning (a previous panic left the lock tainted)
     // rather than propagating the error — trace writes are best-effort.
     let mut guard = TRACE_WRITER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    // If the singleton is empty or points to a different file, (re)open it.
     let needs_reopen = guard.as_ref().is_none_or(|w| w.path != trace_file);
 
     if needs_reopen {
@@ -208,7 +202,6 @@ mod tests {
         let id = generate_run_id();
         assert!(id.0.starts_with("run_"));
         assert_eq!(id.0.len(), 4 + 32, "run_ prefix + 32 hex chars");
-        // All hex after prefix
         assert!(id.0[4..].chars().all(|c| c.is_ascii_hexdigit()));
     }
 
@@ -255,7 +248,6 @@ mod tests {
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 2, "should have 2 JSONL lines");
 
-        // Each line is valid JSON
         let parsed1: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(parsed1["event"], "run_started");
         let parsed2: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
@@ -288,7 +280,6 @@ mod tests {
     fn singleton_writer_reuses_file_handle() {
         let _lock = trace_lock();
         reset_trace_writer();
-        // I-000329: the singleton is a write-overhead optimization, so its
         // contract is observable only through trace output — repeated appends
         // for one run land in that run's file (append, never truncate), and
         // another run's appends land in that run's own file. Asserting the
@@ -319,11 +310,9 @@ mod tests {
             timestamp: now_rfc3339(),
         });
 
-        // Repeated appends for the same run reuse the open writer.
         append_trace_event(home, &run_id, &event).unwrap();
         append_trace_event(home, &run_id, &event).unwrap();
 
-        // A different run routes to its own file without disturbing the
         // first run's bytes.
         append_trace_event(home, &other_run_id, &other_event).unwrap();
 
@@ -355,11 +344,9 @@ mod tests {
         let run_id = NexusRunId("run_sizelimit0000000000000000001".to_string());
         let trace_path = nexus_home_layout::acp_run_trace_file(home, &run_id.0);
 
-        // Pre-create a trace file that exceeds the size limit
         if let Some(parent) = trace_path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        // Write TRACE_FILE_SIZE_LIMIT + 1 bytes of padding
         // SAFE: constant is 10 MiB, always fits in usize
         #[allow(clippy::cast_possible_truncation)]
         let oversize_content = "X".repeat((TRACE_FILE_SIZE_LIMIT + 1) as usize);
@@ -369,7 +356,6 @@ mod tests {
             "pre-condition: file should exceed limit"
         );
 
-        // Now write a trace event — the oversized file should be truncated
         let event = NexusTraceEvent::RunStarted(NexusRunStarted {
             schema_version: 1,
             run_id: run_id.clone(),
@@ -389,7 +375,6 @@ mod tests {
             "file should be capped at the limit after truncation, got {file_size} bytes"
         );
 
-        // The truncated file should contain exactly one JSONL line
         let content = std::fs::read_to_string(&trace_path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 1, "truncated file should have exactly 1 event");

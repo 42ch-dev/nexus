@@ -1,5 +1,4 @@
 /**
- * World KB relationship confidence banding (V1.76 γ).
  *
  * PM-locked stepped bands (NOT continuous linear): low / mid / high at the
  * 0.4 / 0.7 thresholds. Each band maps to a DESIGN.md confidence token color

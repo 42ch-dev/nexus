@@ -55,7 +55,6 @@ pub fn compatibility() -> Result<String> {
     let compat = NativeCompatibility {
         native_api_version: 1,
         writer_protocol: 1,
-        // Build-time target from `build.rs` (`TARGET`); never a runtime-env read.
         target_triple: env!("NEXUS_BUILD_TARGET").to_string(),
         package_version: env!("CARGO_PKG_VERSION").to_string(),
         contract_tree_sha256: contract_tree_sha256(),
@@ -182,7 +181,6 @@ impl NativeCore {
     pub async fn provider_call(&self, request_json: Buffer) -> Result<Buffer> {
         self.deny_service_only()?;
         let request: ProviderCall = serde_json::from_slice(request_json.as_ref())?;
-        // The provider-only lane is not an authority bypass (technical contract
         // §4): a core-indexed or tombstoned Actor id is refused before the port
         // can serve it, while an id the core never indexed keeps its existing
         // provider-only semantics.
@@ -214,7 +212,6 @@ impl NativeCore {
         max_bytes: u32,
     ) -> Result<Buffer> {
         self.deny_service_only()?;
-        // Same gate as `provider_call`: an Actor operation's stream belongs to
         // the core's own observation, so the raw lane must not drain it.
         host_query::deny_actor_provider_ids(&self.inner, None, Some(&operation_id))
             .map_err(core_error::napi_error_from_domain)?;
@@ -612,7 +609,6 @@ fn wire_core_error_from_reset(err: &nexus_local_db::LocalDbError) -> CoreError {
             details: serde_json::Map::from_iter([("path".into(), Value::String(path.clone()))]),
             http_status: Some(500),
         },
-        // The reset cannot produce another variant; refuse honestly rather than
         // leaking an unrelated diagnostic.
         _ => CoreError {
             code: CoreErrorCode::Internal,

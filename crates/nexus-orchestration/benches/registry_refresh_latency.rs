@@ -54,7 +54,6 @@ fn criterion_config() -> Criterion {
 }
 
 fn bench_synthetic_cold(c: &mut Criterion) {
-    // Cold path: construct + run. Measures allocation + first-call overhead.
     // Target: < 5 ms (adds capability allocation + LazyLock init).
     c.bench_function("synthetic_cold_construct_and_run", |b| {
         b.iter(|| {
@@ -68,7 +67,6 @@ fn bench_synthetic_cold(c: &mut Criterion) {
 }
 
 fn bench_synthetic_warm(c: &mut Criterion) {
-    // Warm path: reuse a pre-constructed capability. Measures steady-state
     // run() cost (embedded snapshot + metrics + tracing).
     // Target: < 1 ms (V1.58 spec primary latency target).
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -82,7 +80,6 @@ fn bench_synthetic_warm(c: &mut Criterion) {
 }
 
 fn bench_fallback_warm(c: &mut Criterion) {
-    // Fallback path (V1.58 P0 fix-wave — QC3 F-004): CDN configured with a
     // literal blocked IP. `fetch_from_cdn` fails fast at `is_blocked_ip`
     // (the host is a literal loopback address; `tokio::net::lookup_host`
     // returns immediately without DNS; the retry loop is never entered

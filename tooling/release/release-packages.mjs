@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Public Cargo package release planning — allowlist, dependency order,
  * provenance, content-matched resume and selected-only version preparation.
  *
  * The inventory is `tooling/release/version-brackets.json` through
@@ -98,7 +97,6 @@ export function releaseTag(name, version) {
 }
 
 /**
- * A refusal the caller must act on; `code` is the stable name tests assert.
  */
 class ReleaseRefusal extends Error {
   /**
@@ -120,7 +118,6 @@ function escapeRegExp(value) {
 }
 
 /**
- * A TOML name in every spelling Cargo treats as the same key or the same
  * string: bare, `"basic"` or `'literal'`. Both quote forms are ordinary TOML,
  * so a scan that accepts one and ignores the other skips a declaration instead
  * of refusing it — the one outcome this file must never produce.
@@ -134,7 +131,6 @@ function nameForms(name) {
 }
 
 /**
- * `git` as one more read of the repository: provenance is what makes a source
  * revision reviewable, and it needs no network.
  *
  * @param {string} repoRoot
@@ -187,7 +183,6 @@ export function readSourceProvenance(repoRoot) {
 }
 
 /**
- * Every declaration of `name` in one manifest, in file order: a package may
  * declare the same edge more than once (`nexus-knowledge` names
  * `nexus-contracts` as both a normal and a dev dependency), so planning and
  * preparation both read the declarations here instead of the first match.
@@ -248,7 +243,6 @@ function dependencyDeclarations(contents, manifestPath, name) {
 }
 
 /**
- * Inline dependency tables of an inventory manifest that name another
  * inventory package, with the requirement to satisfy: one edge per declaration.
  * The `[dependencies.x]` table form is refused: this helper rewrites bounds in
  * place and must not claim a package it cannot read the same way Cargo does.
@@ -275,7 +269,6 @@ function inventoryDependencies(contents, manifestPath, names) {
           `${manifestPath}: ${name} has no version requirement, so the package is not registry-ready`,
         );
       }
-      // Normal and dev declarations usually carry the same bound; one edge per
       // distinct requirement keeps the plan free of duplicate prerequisite rows
       // while a bound that differs is still checked on its own.
       if (
@@ -294,7 +287,6 @@ function inventoryDependencies(contents, manifestPath, names) {
 }
 
 /**
- * Caret acceptance of `version`, the requirement form every manifest keeps
  * (`"0.1.0"` means `^0.1.0`). Pre-1.0 the left-most non-zero component is
  * pinned: `^0.1.0` accepts `>=0.1.0 <0.2.0`, `^0.0.3` accepts only `0.0.3`.
  *
@@ -321,7 +313,6 @@ function caretAccepts(requirement, version) {
 }
 
 /**
- * The inventory as rows: name, manifest, literal version and dependency edges.
  * A consumer crate that inherits the workspace version is not independently
  * releasable, so an inherited literal is a refusal rather than a fallback.
  *
@@ -358,7 +349,6 @@ function readInventory(repoRoot) {
 }
 
 /**
- * Selected names in dependency-first order: every prerequisite precedes its
  * consumer, and inventory order breaks ties. A cycle cannot be ordered, so it
  * refuses.
  *
@@ -404,7 +394,6 @@ function dependencyOrder(rows, selected) {
 }
 
 /**
- * Published rows of one package from the caller's registry view.
  *
  * @param {{ name: string; version: string; checksum?: string }[] | null} published
  * @param {string} name
@@ -415,7 +404,6 @@ function publishedRows(published, name) {
 }
 
 /**
- * Archive rows the verifier produced for this source revision, keyed by package.
  *
  * @param {{ sourceSha?: string; results?: { name: string; ok: boolean; archive: { sha256: string } | null; package: { version: string } | null }[] } | null} evidence
  * @returns {Map<string, { version: string; archiveSha256: string; ok: boolean }>}
@@ -605,7 +593,6 @@ export function planPackageRelease(repoRoot, options) {
       const dependencyRow = byName.get(dependency.name);
       let resolved;
       if (selected.has(dependency.name)) {
-        // A selected prerequisite is what the same run publishes first, so its
         // version has to satisfy this consumer's own requirement — otherwise
         // the consumer would be packed against a version it cannot use.
         const satisfies = caretAccepts(dependency.requirement, /** @type {{version: string}} */ (dependencyRow).version);
@@ -628,7 +615,6 @@ export function planPackageRelease(repoRoot, options) {
         }
         resolved = satisfied ? "published" : "missing";
       } else {
-        // Nothing is known about the registry, so this plan cannot claim the
         // prerequisite exists; it stays unresolved and blocks publication.
         resolved = "unverified";
       }
@@ -661,7 +647,6 @@ export function planPackageRelease(repoRoot, options) {
   }
 
   /**
-   * Publication readiness: a plan can be correct and still not publishable.
    * Every prerequisite needs a satisfying selected or known-published version,
    * and every pending row needs the verified archive it would upload.
    *
@@ -678,7 +663,6 @@ export function planPackageRelease(repoRoot, options) {
       }
     }
     if (row.status === "pending" && !registryKnown) {
-      // An unknown view cannot rule out that this exact version already exists
       // with different content, and registry publication is irreversible.
       blockers.push({
         code: "registry-unverified",
@@ -826,7 +810,6 @@ export async function publishSelected(plan, client) {
 }
 
 /**
- * Replace the literal `[package].version` of one manifest, leaving the rest of
  * the file untouched.
  *
  * @param {string} contents
@@ -851,7 +834,6 @@ function replacePackageVersion(contents, manifestPath, version) {
 }
 
 /**
- * Rewrite the inline requirement of every declaration of `name` to `version`.
  * A manifest may declare the same edge twice (`nexus-knowledge` names
  * `nexus-contracts` in `[dependencies]` and `[dev-dependencies]`); rewriting
  * one bound leaves the other requiring a version the same local path no longer
@@ -881,7 +863,6 @@ function replaceDependencyRequirement(contents, manifestPath, name, version) {
 }
 
 /**
- * Open a dated section for `version` and keep an empty `[Unreleased]` above it,
  * the convention each package changelog documents.
  *
  * @param {string} contents
@@ -978,7 +959,6 @@ export function preparePackageVersions(repoRoot, options) {
       const row = /** @type {{ manifest: string }} */ (byName.get(name));
       patch(row.manifest, (contents) => replacePackageVersion(contents, row.manifest, version));
     }
-    // A consumer's caret bound must accept the new prerequisite, or the source
     // tree cannot resolve the bumped local path dependency.
     for (const row of rows) {
       for (const dependency of row.dependencies) {
@@ -1099,7 +1079,6 @@ function parseArgs(argv) {
 }
 
 /**
- * One JSON input file, parsed. A missing or malformed file is a named refusal
  * rather than a `TypeError` from whatever reads the value next.
  *
  * @param {string} path
@@ -1129,7 +1108,6 @@ function isRecord(value) {
 }
 
 /**
- * Registry view shape, checked before planning reads `published` rows: a wrong
  * shape would otherwise surface as a `TypeError` deep in the plan.
  *
  * @param {unknown} value
@@ -1171,7 +1149,6 @@ function readRegistryView(value) {
 }
 
 /**
- * Archive evidence shape, checked before planning reads `source`/`results`.
  * Only the fields the plan consumes are required; extra checker fields pass
  * through untouched.
  *
@@ -1326,7 +1303,6 @@ function main(argv) {
   }
   const plan = planPackageRelease(repoRoot, { packages, sourceSha, registry, evidence });
   printPlan(plan);
-  // Two distinct outcomes: `--check-only` succeeds for a valid plan and states
   // what is still missing, while `--require-publishable` is the gate a publish
   // path must pass. Neither one grants publication by itself.
   return plan.ok && (!switches.has("--require-publishable") || plan.ready) ? 0 : 1;

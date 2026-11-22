@@ -6,7 +6,6 @@ import '@testing-library/jest-dom/vitest';
 import { ConfirmDialog } from './confirm-dialog';
 
 /**
- * V1.149 P1 — L2 pattern component (DESIGN.md components.confirm-dialog).
  *
  * Pins: caller-owned copy (title/description/labels), controlled open/close
  * via onOpenChange, confirm/cancel wiring, the destructive variant mapping to
@@ -235,7 +234,6 @@ describe('ConfirmDialog', () => {
       />,
     );
 
-    // Radix attaches its document pointerdown listener after a tick.
     await new Promise((resolve) => setTimeout(resolve, 0));
     const overlay = container.ownerDocument.body.querySelector('.fixed.inset-0')!;
     fireEvent.pointerDown(overlay, { pointerType: 'mouse', bubbles: true, button: 0 });
@@ -260,7 +258,6 @@ describe('ConfirmDialog', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onOpenChange).toHaveBeenCalledWith(false);
 
-    // Radix attaches its document pointerdown listener after a tick.
     await new Promise((resolve) => setTimeout(resolve, 0));
     const overlay = container.ownerDocument.body.querySelector('.fixed.inset-0')!;
     fireEvent.pointerDown(overlay, { pointerType: 'mouse', bubbles: true, button: 0 });

@@ -1,5 +1,4 @@
 /**
- * Compute Modules page (Control Room — READ + Run) — V1.114 P2 T4 / V1.147
  * P1 T3 / V1.147 P2 T3 / v221-modules-rail T2.
  *
  * `/modules` is the single owner of the Modules surface: list/detail/query/
@@ -49,7 +48,6 @@ export function ModulesPageBody() {
   const { t } = useTranslation('modules');
   const modules = useComputeModules();
 
-  // V1.147 P2 T3 — deep-link selection mechanism (consistent with the
   // `?layer=` search-param convention on the Timeline surface). Seeds the
   // initial module selection from `?module=`; `?run=` + `?world=` thread
   // into the detail panel (Run inspector + World pre-fill). User selection
@@ -73,7 +71,6 @@ export function ModulesPageBody() {
     setSelectedId(moduleParam);
   }, [moduleParam]);
 
-  // Bugbot 1 — `?branch=` pre-fill for the Run Studio, normalized like the
   // Timeline's branch derivation (`?branch=` empty → undefined/root — never
   // an empty-string branch id, which the daemon would reject as invalid).
   const branchParam = searchParams.get('branch');
@@ -81,7 +78,6 @@ export function ModulesPageBody() {
 
   function selectModule(id: string) {
     setSelectedId(id);
-    // Preserve the `?world=` / `?branch=` entry pre-fill (Timeline Run
     // Module entry); a module change invalidates the deep-linked run context.
     const next = new URLSearchParams(searchParams);
     next.set('module', id);
@@ -111,7 +107,6 @@ export function ModulesPageBody() {
             initialBranchId={branchSeed}
             initialRunId={searchParams.get('run') ?? undefined}
             onRunOpen={(runId) => {
-              // Keep `?world=` (entry pre-fill) alongside the run deep link
               // so refresh preserves the whole selection.
               const next = new URLSearchParams(searchParams);
               next.set('module', selectedId);
@@ -172,7 +167,6 @@ function ModuleDetailPanel({
   );
 }
 
-/* ── Caller-owned copy (i18n lives in the app, not in the chrome) ─────────── */
 
 function pageCopy(t: TFunction): ModulesPageCopy {
   return {

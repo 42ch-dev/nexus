@@ -1,5 +1,4 @@
 /**
- * OutlineAltView component — renders non-spatial chapter + timeline lists
  * (FB-C1-004, V1.108 P0 T3).
  *
  * Unit-tested in isolation with richer data than the orchestrator mock so the
@@ -69,7 +68,6 @@ describe('OutlineAltView', () => {
     expect(screen.getByText('The Beginning')).toBeInTheDocument();
     expect(screen.getByText('The Middle')).toBeInTheDocument();
     expect(screen.getByText('The End')).toBeInTheDocument();
-    // Status badges render as translated labels.
     expect(screen.getByText('Draft')).toBeInTheDocument();
     expect(screen.getByText('Finalized')).toBeInTheDocument();
     expect(screen.getByText('Published')).toBeInTheDocument();
@@ -125,10 +123,6 @@ describe('OutlineAltView', () => {
     expect(screen.getByText('No timeline events yet.')).toBeInTheDocument();
   });
 
-  // -------------------------------------------------------------------------
-  // V1.109 C2 T3 — Scene/Beat nested rows (FB-C2-003)
-  // -------------------------------------------------------------------------
-
   it('renders Scene rows nested under their parent chapter with a Scene type badge', () => {
     const outline = makeOutline({
       volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [1] }],
@@ -146,7 +140,6 @@ describe('OutlineAltView', () => {
 
     expect(screen.getByText('The Arrival')).toBeInTheDocument();
     expect(screen.getByText('The Departure')).toBeInTheDocument();
-    // Two Scene type badges (one per scene row).
     expect(screen.getAllByText('Scene')).toHaveLength(2);
   });
 
@@ -167,7 +160,6 @@ describe('OutlineAltView', () => {
 
     expect(screen.getByText('Turn: the call')).toBeInTheDocument();
     expect(screen.getByText('The rebutal')).toBeInTheDocument();
-    // One Scene badge + two Beat badges.
     expect(screen.getAllByText('Scene')).toHaveLength(1);
     expect(screen.getAllByText('Beat')).toHaveLength(2);
   });
@@ -177,7 +169,6 @@ describe('OutlineAltView', () => {
       volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [1, 2] }],
     });
     const chapters = [makeChapter({ chapter: 1 }), makeChapter({ chapter: 2 })];
-    // Only chapter 1 has a scene; chapter 2 has zero.
     const fixture: SceneBeatFixturePayload = {
       scenes: [{ sceneId: 's1', chapterId: 1, title: 'The Arrival', status: null }],
       beats: [],
@@ -185,7 +176,6 @@ describe('OutlineAltView', () => {
 
     renderInApp(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
 
-    // Locked empty-under-chapter copy appears once (chapter 2 only).
     expect(screen.getAllByText('No scenes in this chapter yet.')).toHaveLength(1);
   });
 
@@ -206,7 +196,7 @@ describe('OutlineAltView', () => {
     });
     const chapters = [
       makeChapter({ chapter: 1 }),
-      makeChapter({ chapter: 2, volume: 1 }), // unassigned
+      makeChapter({ chapter: 2, volume: 1 }),
     ];
     const fixture: SceneBeatFixturePayload = {
       scenes: [{ sceneId: 's2', chapterId: 2, title: 'Loose thread', status: null }],
@@ -220,18 +210,13 @@ describe('OutlineAltView', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// V1.115 T1 — Alt-view sort controls (R-V1108P0QC1-M001)
-//
 // Locked sort columns: chapters = number + volume; timeline events = event
 // time. Sort is client-side and ephemeral (useState, not persisted). The
 // default (volume ascending) reproduces the historical grouped rendering, so
 // the tests above remain valid untouched.
-// -------------------------------------------------------------------------
 
 describe('OutlineAltView sort controls', () => {
   it('sorts the chapter list by Number ascending, then toggles to descending', () => {
-    // Volume declares chapters out of numeric order (3, 1, 2).
     const outline = makeOutline({
       volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [3, 1, 2] }],
       chapter_titles: { '1': 'Alpha', '2': 'Beta', '3': 'Gamma' },
@@ -244,14 +229,11 @@ describe('OutlineAltView sort controls', () => {
 
     renderInApp(<OutlineAltView outline={outline} chapters={chapters} />);
 
-    // Default (volume ascending) keeps declaration order: 3, 1, 2.
     expect(chapterNumberOrder()).toEqual(['#3', '#1', '#2']);
 
-    // Activate Number sort → flat list ascending 1, 2, 3.
     fireEvent.click(screen.getByRole('button', { name: /^Number/ }));
     expect(chapterNumberOrder()).toEqual(['#1', '#2', '#3']);
 
-    // Toggle the same column → descending 3, 2, 1.
     fireEvent.click(screen.getByRole('button', { name: /^Number/ }));
     expect(chapterNumberOrder()).toEqual(['#3', '#2', '#1']);
   });
@@ -267,10 +249,8 @@ describe('OutlineAltView sort controls', () => {
 
     renderInApp(<OutlineAltView outline={outline} chapters={chapters} />);
 
-    // Default: Act One before Act Two.
     expect(volumeGroupOrder()).toEqual(['Act One', 'Act Two']);
 
-    // Toggle Volume (active ascending → descending): groups reversed.
     fireEvent.click(screen.getByRole('button', { name: /^Volume/ }));
     expect(volumeGroupOrder()).toEqual(['Act Two', 'Act One']);
   });
@@ -283,11 +263,9 @@ describe('OutlineAltView sort controls', () => {
     const chapters = [makeChapter({ chapter: 1 }), makeChapter({ chapter: 2 })];
 
     const { unmount } = renderInApp(<OutlineAltView outline={outline} chapters={chapters} />);
-    // Sort to Number ascending: 1, 2.
     fireEvent.click(screen.getByRole('button', { name: /^Number/ }));
     expect(chapterNumberOrder()).toEqual(['#1', '#2']);
 
-    // Tear down and remount — no persisted sort, back to default declaration order 2, 1.
     unmount();
     renderInApp(<OutlineAltView outline={outline} chapters={chapters} />);
     expect(chapterNumberOrder()).toEqual(['#2', '#1']);
@@ -309,10 +287,8 @@ describe('OutlineAltView sort controls', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Number/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Event time/ }));
 
-    // Client-side sort reorders the view only; the source graph is untouched.
     expect(outline.volumes.map((v) => v.chapter_ids.slice())).toEqual(volumeChapterIdsBefore);
     expect(outline.timeline_events.map((e) => e.event_id)).toEqual(eventIdsBefore);
-    // Every chapter is still represented after sorting.
     expect(chapterNumberOrder().sort()).toEqual(['#1', '#2', '#3']);
   });
 
@@ -326,10 +302,8 @@ describe('OutlineAltView sort controls', () => {
 
     renderInApp(<OutlineAltView outline={outline} chapters={[]} />);
 
-    // Default ascending = declared order: Inciting Incident before Climax.
     expect(textIndexOf('Inciting Incident')).toBeLessThan(textIndexOf('Climax'));
 
-    // Toggle event time → descending reverses the timeline.
     fireEvent.click(screen.getByRole('button', { name: /^Event time/ }));
     expect(textIndexOf('Climax')).toBeLessThan(textIndexOf('Inciting Incident'));
   });
@@ -344,11 +318,10 @@ describe('OutlineAltView sort controls', () => {
 
     const { unmount } = renderInApp(<OutlineAltView outline={outline} chapters={[]} />);
     fireEvent.click(screen.getByRole('button', { name: /^Event time/ }));
-    expect(textIndexOf('Climax')).toBeLessThan(textIndexOf('Inciting Incident')); // desc
+    expect(textIndexOf('Climax')).toBeLessThan(textIndexOf('Inciting Incident'));
 
     unmount();
     renderInApp(<OutlineAltView outline={outline} chapters={[]} />);
-    // Fresh mount → ascending (declared order) again.
     expect(textIndexOf('Inciting Incident')).toBeLessThan(textIndexOf('Climax'));
   });
 });

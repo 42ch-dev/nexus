@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Desktop trust-boundary tests (v1.192 P0-T1).
  *
  * Defends the frozen IPC and scheme/navigation contracts without launching
  * Electron: parser bounds + closed shapes, sender identity (top frame, live
@@ -59,9 +58,6 @@ function expectCode(fn, code) {
   assert.throws(fn, (err) => errorCode(err) === code);
 }
 
-// ---------------------------------------------------------------------------
-// Request parser: envelope, bounds, closed shapes
-// ---------------------------------------------------------------------------
 
 test('valid top-frame request parses with normalized payload', () => {
   const req = parseDesktopRequest({
@@ -122,7 +118,6 @@ test('null-payload operations reject any payload', () => {
     () => parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'get_workspace_root', payload: { path: '/x' } }),
     'invalid_input',
   );
-  // explicit null is tolerated
   const req = parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'get_workspace_root', payload: null });
   assert.equal(req.payload, undefined);
 });
@@ -207,12 +202,10 @@ test('connection config is public-only: unknown fields and key readback rejected
 });
 
 test('envelope version is required on requests: missing, wrong, or non-literal values rejected', () => {
-  // Missing version (legacy unversioned shape) is rejected before any effect.
   expectCode(
     () => parseDesktopRequest({ request_id: 'r1', operation: 'get_daemon_status' }),
     'invalid_input',
   );
-  // Any version other than the frozen literal 1 is rejected.
   expectCode(
     () => parseDesktopRequest({ version: 2, request_id: 'r1', operation: 'get_daemon_status' }),
     'invalid_input',
@@ -221,7 +214,6 @@ test('envelope version is required on requests: missing, wrong, or non-literal v
     () => parseDesktopRequest({ version: '1', request_id: 'r1', operation: 'get_daemon_status' }),
     'invalid_input',
   );
-  // Versioned frame parses and preserves the literal.
   const req = parseDesktopRequest({ version: 1, request_id: 'r1', operation: 'get_daemon_status' });
   assert.equal(req.version, 1);
 });
@@ -231,7 +223,6 @@ test('response envelope helpers honor the 1 MiB bound on the COMPLETE serialized
   assert.equal(ok.ok, true);
   assert.equal(ok.version, 1);
   assert.equal(isDesktopResponse(ok), true);
-  // Unversioned or wrong-version frames are not desktop responses.
   assert.equal(isDesktopResponse({ nope: 1 }), false);
   assert.equal(isDesktopResponse({ request_id: 'r1', ok: true, result: 1 }), false);
   assert.equal(isDesktopResponse({ version: 2, request_id: 'r1', ok: true, result: 1 }), false);
@@ -242,7 +233,6 @@ test('response envelope helpers honor the 1 MiB bound on the COMPLETE serialized
     ok: false,
     error: { code: 'busy', message: 'cap' },
   });
-  // Exact boundary: the COMPLETE frame (envelope overhead included) must fit.
   // A result that fits 1 MiB by itself but not with the envelope is rejected.
   const encoder = new TextEncoder();
   const requestId = 'boundary-req';
@@ -251,20 +241,17 @@ test('response envelope helpers honor the 1 MiB bound on the COMPLETE serialized
   assert.doesNotThrow(() => desktopOk(requestId, fits));
   const oneOver = 'x'.repeat(MAX_REQUEST_BYTES - overhead + 1);
   assert.throws(() => desktopOk(requestId, oneOver), (err) => errorCode(err) === 'internal');
-  // desktopErr never throws and always emits a frame within the bound,
   // trimming over-long messages (including JSON escaping overhead).
   const hugeMessage = 'e'.repeat(MAX_REQUEST_BYTES * 2);
   const boundedFailure = desktopErr(requestId, 'internal', hugeMessage);
   assert.equal(boundedFailure.ok, false);
   assert.equal(boundedFailure.error.code, 'internal');
-  // The message was genuinely oversized and is actually trimmed: a strict
   // prefix of the input, much smaller than the original, with the COMPLETE
   // serialized frame inside the frozen 1 MiB response bound.
   assert.ok(boundedFailure.error.message.length > 0);
   assert.ok(hugeMessage.startsWith(boundedFailure.error.message));
   assert.ok(boundedFailure.error.message.length < hugeMessage.length);
   assert.ok(encoder.encode(JSON.stringify(boundedFailure)).length <= MAX_REQUEST_BYTES);
-  // Over-long error codes collapse to `internal`.
   assert.equal(desktopErr(requestId, 'c'.repeat(100), 'm').error.code, 'internal');
 });
 
@@ -276,11 +263,8 @@ test('runtime metadata is nonsecret and http(s)-only', () => {
   expectCode(() => parseDesktopRuntimeMetadata({ localEndpoint: 'http://x', apiKey: 'k' }), 'invalid_input');
 });
 
-// ---------------------------------------------------------------------------
-// Remote service endpoint grammar (v1.194 P1-T2): ONE strict root-service
 // http(s) endpoint grammar shared by the IPC validator, the connection store
 // and the CSP origin boundary.
-// ---------------------------------------------------------------------------
 
 test('endpoint grammar accepts concrete root http(s) services and returns the exact origin', () => {
   assert.equal(
@@ -288,12 +272,9 @@ test('endpoint grammar accepts concrete root http(s) services and returns the ex
     'https://daemon.example.com:8443',
   );
   assert.equal(connectionEndpointOrigin('http://127.0.0.1:8420'), 'http://127.0.0.1:8420');
-  // Bracketed IPv6 literal host and explicit port stay supported.
   assert.equal(connectionEndpointOrigin('http://[::1]:8420'), 'http://[::1]:8420');
   assert.equal(connectionEndpointOrigin('https://[2001:db8::1]:9000'), 'https://[2001:db8::1]:9000');
-  // A root trailing slash is the same endpoint; the caller keeps its string.
   assert.equal(connectionEndpointOrigin('https://daemon.example.com/'), 'https://daemon.example.com');
-  // The raw check compares delimiters and path only, never normalized host
   // bytes, so host case and an explicit DEFAULT port stay supported.
   assert.equal(
     connectionEndpointOrigin('https://Daemon.Example.com:8443'),
@@ -316,7 +297,6 @@ test('endpoint grammar rejects opaque/null origins, wildcard host, userinfo, pad
     'https://*.example.com',
     'http://user:pass@daemon.example.com:8443',
     'http://user@daemon.example.com',
-    // Empty delimiters and dot-segment paths normalize away before the
     // query/fragment/userinfo/path fields can see them (L2 fix 1).
     'https://daemon.example.com?',
     'https://daemon.example.com#',
@@ -350,7 +330,6 @@ test('endpoint rejection is enforced at both the IPC and CSP boundaries', () => 
     'https://*.example.com',
     'https://daemon.example.com:8443/v1/daemon',
     'http://user:pass@daemon.example.com:8443',
-    // The raw-form holes must be refused at every boundary, not just one.
     'https://daemon.example.com?',
     'https://daemon.example.com#',
     'http://@daemon.example.com',
@@ -374,7 +353,6 @@ test('endpoint rejection is enforced at both the IPC and CSP boundaries', () => 
     );
     assert.throws(() => assertDesktopServiceOrigin(endpointUrl), endpointUrl);
   }
-  // A supported endpoint passes both boundaries and is stored verbatim.
   const endpointUrl = 'https://daemon.example.com:8443/';
   const req = parseDesktopRequest({
     version: 1,
@@ -390,9 +368,6 @@ test('endpoint rejection is enforced at both the IPC and CSP boundaries', () => 
   assert.equal(assertDesktopServiceOrigin(endpointUrl), 'https://daemon.example.com:8443');
 });
 
-// ---------------------------------------------------------------------------
-// Sender identity: subframes, stale senders, exact app origin
-// ---------------------------------------------------------------------------
 
 test('valid top-frame app-origin sender is allowed', () => {
   assert.doesNotThrow(() => assertDesktopSender(VALID_SENDER, 7));
@@ -411,12 +386,10 @@ test('stale sender from a previous window generation is rejected', () => {
 });
 
 test('registered IPC path rejects events once main moves to a newer generation', () => {
-  // Registration bound to generation 7 while main's live source still reads 7.
   const view = (({ generation: _ignored, ...rest }) => rest)(VALID_SENDER);
   assert.doesNotThrow(() =>
     assertDesktopEventSender(view, { generation: 7, getCurrentGeneration: () => 7 }),
   );
-  // Main advances to generation 8 (navigation/window replacement): the stale
   // registration left installed must now reject with stale_sender — the check
   // compares the registration's bound generation against the LIVE source,
   // not a closure constant against itself.
@@ -428,14 +401,12 @@ test('registered IPC path rejects events once main moves to a newer generation',
 
 test('registered IPC path fails closed without a live generation source', () => {
   const view = (({ generation: _ignored, ...rest }) => rest)(VALID_SENDER);
-  // A captured generation alone must NOT pass: without the live source the
   // check would degenerate to comparing a closure constant to itself.
   expectCode(() => assertDesktopEventSender(view, { generation: 7 }), 'invalid_input');
   expectCode(() => assertDesktopEventSender(view, {}), 'invalid_input');
 });
 
 test('registerDesktopIpc rejects registration without a live generation source', async () => {
-  // Fails closed BEFORE touching Electron, so the rejection is observable in
   // plain Node: P0-T7 must supply getCurrentGeneration when wiring main.
   const handlers = new Proxy({}, { get: () => async () => null });
   await assert.rejects(
@@ -472,7 +443,6 @@ test('dev HMR origin is allowed only under the explicit dev option', () => {
     'invalid_origin',
   );
   assert.doesNotThrow(() => assertDesktopSender({ ...VALID_SENDER, frameUrl: 'http://localhost:5173/' }, 7, { dev: true }));
-  // even in dev, only the exact Vite origin — not arbitrary http
   expectCode(
     () => assertDesktopSender({ ...VALID_SENDER, frameUrl: 'http://localhost:5174/' }, 7, { dev: true }),
     'invalid_origin',
@@ -487,9 +457,6 @@ test('isDesktopAppOrigin rejects credentials and non-app hosts', () => {
   assert.equal(isDesktopAppOrigin('nexus://app.evil/index.html'), false);
 });
 
-// ---------------------------------------------------------------------------
-// Admission caps: 32 active + 16 queued, queued aggregate ≤ 1 MiB, overflow busy
-// ---------------------------------------------------------------------------
 
 test('admission allows 32 active, queues the next 16, rejects the 49th with busy', async () => {
   const admission = new DesktopAdmission();
@@ -504,7 +471,6 @@ test('admission allows 32 active, queues the next 16, rejects the 49th with busy
     const pending = admission.admit(1);
     queued.push(pending);
   }
-  // 49th concurrent call exceeds 32 active + 16 queued
   assert.equal(await admission.admit(1), null);
   const firstQueued = queued[0];
   releases[0]();
@@ -519,7 +485,6 @@ test('queued aggregate byte cap rejects overflow with busy', async () => {
   for (let i = 0; i < 32; i += 1) {
     releases.push(await admission.admit(1));
   }
-  // A 1 MiB frame alone fits the empty queue (aggregate ≤ 1 MiB is admitted);
   // overflow needs prior queued bytes.
   const smallQueued = admission.admit(1);
   assert.equal(await admission.admit(MAX_REQUEST_BYTES), null); // 1 byte + 1 MiB > cap
@@ -527,9 +492,6 @@ test('queued aggregate byte cap rejects overflow with busy', async () => {
   assert.ok(await smallQueued);
 });
 
-// ---------------------------------------------------------------------------
-// Scheme / asset path policy: traversal, symlink escape, regular files only
-// ---------------------------------------------------------------------------
 
 function makeDist() {
   const root = mkdtempSync(join(tmpdir(), 'nexus-dist-'));
@@ -542,7 +504,6 @@ function makeDist() {
 test('serves real files under the dist root', () => {
   const root = makeDist();
   try {
-    // macOS realpaths /tmp under /private — compare against the canonical root.
     const canonicalRoot = realpathSync(root);
     assert.equal(resolveDesktopAssetPath(root, '/index.html'), join(canonicalRoot, 'index.html'));
     assert.equal(resolveDesktopAssetPath(root, '/assets/app.js'), join(canonicalRoot, 'assets', 'app.js'));
@@ -571,9 +532,7 @@ test('symlink escape outside the dist root is rejected', () => {
   try {
     writeFileSync(join(outside, 'secret.txt'), 'top secret');
     symlinkSync(join(outside, 'secret.txt'), join(root, 'assets', 'linked.js'));
-    // Symlinks are not regular files: rejected even before containment.
     assert.equal(resolveDesktopAssetPath(root, '/assets/linked.js'), null);
-    // Directory symlink pointing outside is likewise rejected.
     symlinkSync(outside, join(root, 'assets', 'escape'), 'dir');
     assert.equal(resolveDesktopAssetPath(root, '/assets/escape/secret.txt'), null);
   } finally {
@@ -596,10 +555,8 @@ test('SPA fallback applies to HTML navigation only, never API/assets/traversal',
   assert.equal(isDesktopHtmlNavigation('text/html,application/xhtml+xml'), true);
   assert.equal(isDesktopHtmlNavigation('application/json'), false);
   assert.equal(isDesktopHtmlNavigation(undefined), false);
-  // Accept: */* is the default fetch/asset value, NOT a navigation signal.
   assert.equal(isDesktopHtmlNavigation('*/*'), false);
   assert.equal(isDesktopHtmlNavigation('application/json, */*;q=0.8'), false);
-  // fallback decision chain mirrors the handler: traversal never falls back
   assert.equal(desktopPathHasTraversal('/v1/daemon/health/../../secret'), true);
 });
 
@@ -607,18 +564,14 @@ test('handler resolution chain: */* on missing API/assets yields 404, HTML nav f
   const root = makeDist();
   try {
     const canonicalRoot = realpathSync(root);
-    // Missing API/asset path with the common Accept: */* → 404 (no SPA fallback).
     assert.equal(resolveDesktopNavigationPath(root, '/v1/daemon/health', '*/*'), null);
     assert.equal(resolveDesktopNavigationPath(root, '/assets/missing.js', '*/*'), null);
     assert.equal(resolveDesktopNavigationPath(root, '/assets/missing.js', 'application/json'), null);
-    // Real browser HTML navigation (text/html present among accepted types) → index.html.
     assert.equal(
       resolveDesktopNavigationPath(root, '/workspace/chapter', 'text/html,application/xhtml+xml,image/avif,*/*;q=0.8'),
       join(canonicalRoot, 'index.html'),
     );
-    // Traversal paths never fall back, even with an HTML accept header.
     assert.equal(resolveDesktopNavigationPath(root, '/../secret', 'text/html'), null);
-    // Existing assets are served directly regardless of Accept.
     assert.equal(
       resolveDesktopNavigationPath(root, '/assets/app.js', '*/*'),
       join(canonicalRoot, 'assets', 'app.js'),
@@ -628,9 +581,6 @@ test('handler resolution chain: */* on missing API/assets yields 404, HTML nav f
   }
 });
 
-// ---------------------------------------------------------------------------
-// Navigation and external URL policy
-// ---------------------------------------------------------------------------
 
 test('navigation is denied outside the app origin', () => {
   assert.equal(allowDesktopNavigation('nexus://app/workspace'), true);
@@ -657,9 +607,6 @@ test('external URL predicate: http/https with host only, no userinfo/controls', 
   assert.equal(isAllowedDesktopExternalUrl('https://'), false);
 });
 
-// ---------------------------------------------------------------------------
-// CSP: exact origins, no wildcards, no renderer strings
-// ---------------------------------------------------------------------------
 
 test('CSP inserts exact validated origins and keeps the frozen posture', () => {
   const csp = buildDesktopCsp({
@@ -699,14 +646,10 @@ test('CSP rejects wildcard, credentialed, or path-carrying origins', () => {
   assert.throws(() => assertDesktopServiceOrigin('null')); // opaque origin, not an http(s) service
   assert.throws(() => assertDesktopServiceOrigin('about:blank'));
   assert.throws(() => assertDesktopServiceOrigin('https://example.com?token=1'));
-  // Concrete IPv6 remotes stay supported at the CSP boundary too.
   assert.equal(assertDesktopServiceOrigin('http://[::1]:8420'), 'http://[::1]:8420');
   assert.equal(assertDesktopServiceOrigin('https://example.com/'), 'https://example.com');
 });
 
-// ---------------------------------------------------------------------------
-// Status frame bounds (preload/main both enforce)
-// ---------------------------------------------------------------------------
 
 test('status frame bound: detail tail over 2 KiB and frame over 4 KiB rejected', async () => {
   const { assertDesktopStatusFrame } = await import('../dist/desktop-contract.js');
@@ -727,13 +670,10 @@ test('desktopError carries a machine-readable code', () => {
   assert.equal(errorCode(new Error('plain')), 'internal');
 });
 
-// ---------------------------------------------------------------------------
-// Preload/contract parity: the sandboxed preload mirrors contract values
 // locally (it compiles CommonJS and cannot import the ESM contract — see
 // preload.ts header). The lock below extracts the COMPILED preload's mirror
 // values and asserts structural equality against the canonical
 // DESKTOP_BRIDGE_MANIFEST, so drift on EITHER side fails the test.
-// ---------------------------------------------------------------------------
 
 /** Evaluate a mirrored numeric const expression (digits, +, *, parens only). */
 function evalConstExpr(expr) {
@@ -802,39 +742,27 @@ test('compiled preload mirrors the contract parity manifest exactly', async () =
   const contract = await import('../dist/desktop-contract.js');
   const manifest = contract.DESKTOP_BRIDGE_MANIFEST;
 
-  // Bridge + envelope versions.
   assert.equal(preloadNumber(source, 'DESKTOP_BRIDGE_VERSION'), manifest.version);
   assert.equal(preloadNumber(source, 'DESKTOP_ENVELOPE_VERSION'), manifest.envelopeVersion);
-  // Channels.
   assert.equal(preloadString(source, 'DESKTOP_INVOKE_CHANNEL'), manifest.invokeChannel);
   assert.equal(preloadString(source, 'DESKTOP_STATUS_CHANNEL'), manifest.statusChannel);
   assert.equal(preloadString(source, 'DESKTOP_RUNTIME_CHANNEL'), manifest.runtimeChannel);
-  // Mirrored bounds.
   assert.equal(preloadNumber(source, 'MAX_STATUS_BYTES'), manifest.maxStatusBytes);
   assert.equal(preloadNumber(source, 'MAX_DIAGNOSTIC_BYTES'), manifest.maxDiagnosticBytes);
   assert.equal(preloadNumber(source, 'MAX_URL_BYTES'), manifest.maxUrlBytes);
-  // Operation union: EXACT structural equality (same set, same order).
   assert.deepEqual(preloadOperations(source), [...manifest.operations]);
-  // The bridge object exposes the manifest bridge version.
   assert.match(source, /version: DESKTOP_BRIDGE_VERSION/);
-  // The invoke path emits the mirrored envelope version on every request.
   assert.match(source, /\{ version: DESKTOP_ENVELOPE_VERSION, request_id, operation(, payload)? \}/);
-  // Response guard requires the mirrored envelope version.
   assert.match(source, /value\.version === DESKTOP_ENVELOPE_VERSION/);
 
-  // Preload must be self-contained: importing the contract module would
   // re-emit it as CommonJS and clobber the ESM artifact the main process loads.
   assert.ok(!/require\(["']\.\/desktop-contract/.test(source), 'preload must not require desktop-contract');
   assert.ok(!/from ["']\.\/desktop-contract/.test(source), 'preload must not import desktop-contract');
-  // Product preload must not expose the retired proof bridge or raw primitives.
   assert.ok(!source.includes('nexusProof'));
   assert.ok(!source.includes('nexus-proof:'));
   assert.ok(!source.includes('runProofStep'));
   assert.ok(source.includes('contextBridge'));
 });
 
-// ---------------------------------------------------------------------------
-// Proof protocol: retired with the proof shell's runtime callsites (P0-T7) —
 // no product proof IPC remains (covered by tests/desktop-host.test.mjs).
-// ---------------------------------------------------------------------------
 

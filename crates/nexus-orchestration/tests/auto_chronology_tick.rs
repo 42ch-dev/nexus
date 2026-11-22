@@ -101,8 +101,6 @@ async fn seed_and_finalize(
     }
 }
 
-// ── Positive (AC §4.2) ───────────────────────────────────────────────────
-
 /// All chapters of volume 1 finalized + intake complete + opted in + not
 /// locked → tick advances to volume 2 (outline created).
 #[tokio::test]
@@ -124,7 +122,6 @@ async fn tick_advances_when_volume_finalized() {
     let body = std::fs::read_to_string(&outline).unwrap();
     assert!(body.contains("Volume 2 Outline"));
     assert!(body.contains("Previous volume: 1"));
-    // Auto path seeds zero chapters (placeholder outline, spec §4.2).
     let vol2_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM work_chapters WHERE work_id = 'wrk_pos' AND volume = 2",
     )
@@ -132,15 +129,12 @@ async fn tick_advances_when_volume_finalized() {
     .await
     .unwrap();
     assert_eq!(vol2_count, 0, "auto path seeds zero chapters");
-    // Log entry written (AC §4.5).
     assert!(ws
         .path()
         .join("Works/pos-novel/Logs/chronology")
         .read_dir()
         .is_ok());
 }
-
-// ── R-V150P3AUTOCHRONO-03 regression: title / total_planned_chapters ──────
 
 /// The auto-chronology advance must substitute the Work's stored `title` and
 /// `total_planned_chapters` into the rendered outline (spec §4.1 step 3),
@@ -172,7 +166,6 @@ async fn render_substitutes_work_title_and_total_chapters() {
         body.contains("20"),
         "rendered outline must contain total_planned_chapters=20; got:\n{body}"
     );
-    // Negative: the hardcoded placeholder must NOT appear.
     assert!(
         !body.contains("(untitled)"),
         "rendered outline must not contain the hardcoded placeholder"
@@ -183,15 +176,12 @@ async fn render_substitutes_work_title_and_total_chapters() {
     );
 }
 
-// ── Negative 1: volume not finalized (AC §4.2) ───────────────────────────
-
 #[tokio::test]
 async fn tick_skips_when_volume_not_finalized() {
     let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let work = base_work("wrk_neg1", "neg1-novel");
     works::create_work(&pool, &work).await.unwrap();
-    // One chapter still in 'draft' (not finalized).
     seed_and_finalize(&pool, "wrk_neg1", 1, 3, false).await;
     opt_in(&pool, "wrk_neg1").await;
 
@@ -202,8 +192,6 @@ async fn tick_skips_when_volume_not_finalized() {
         "negative: must not advance when volume not finalized"
     );
 }
-
-// ── Negative 2: intake not complete (AC §4.2) ────────────────────────────
 
 #[tokio::test]
 async fn tick_skips_when_intake_incomplete() {
@@ -223,8 +211,6 @@ async fn tick_skips_when_intake_incomplete() {
     );
 }
 
-// ── Negative 3: runtime lock held (AC §4.2) ──────────────────────────────
-
 #[tokio::test]
 async fn tick_skips_when_runtime_locked() {
     let (_dir, pool) = test_pool().await;
@@ -233,7 +219,6 @@ async fn tick_skips_when_runtime_locked() {
     works::create_work(&pool, &work).await.unwrap();
     seed_and_finalize(&pool, "wrk_neg3", 1, 3, true).await;
     opt_in(&pool, "wrk_neg3").await;
-    // Acquire a runtime lock.
     works::patch_work(
         &pool,
         "ctr_test",
@@ -255,8 +240,6 @@ async fn tick_skips_when_runtime_locked() {
     );
 }
 
-// ── Negative 4: already advanced / idempotent (AC §4.2) ───────────────────
-
 #[tokio::test]
 async fn tick_skips_when_outline_already_exists() {
     let (_dir, pool) = test_pool().await;
@@ -265,7 +248,6 @@ async fn tick_skips_when_outline_already_exists() {
     works::create_work(&pool, &work).await.unwrap();
     seed_and_finalize(&pool, "wrk_neg4", 1, 3, true).await;
     opt_in(&pool, "wrk_neg4").await;
-    // Pre-create the volume-2 outline (simulates a prior advance or a crash
     // after the outline write but before the tx commit).
     let outline = outline_path(ws.path(), "neg4-novel", 2);
     std::fs::create_dir_all(outline.parent().unwrap()).unwrap();
@@ -273,15 +255,12 @@ async fn tick_skips_when_outline_already_exists() {
 
     run_one_tick(&pool, ws.path()).await;
 
-    // Idempotent: the pre-existing outline is NOT clobbered.
     assert_eq!(
         std::fs::read_to_string(&outline).unwrap(),
         "pre-existing",
         "idempotent guard must not clobber existing outline"
     );
 }
-
-// ── Crash recovery (AC §4.3) ─────────────────────────────────────────────
 
 /// Simulate a crash mid-advance: the outline file exists (written) but the
 /// transaction was never committed (no chapters for volume 2). The next tick
@@ -296,13 +275,11 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
     seed_and_finalize(&pool, "wrk_crash", 1, 3, true).await;
     opt_in(&pool, "wrk_crash").await;
 
-    // Simulate the post-outline-write, pre-tx-commit crash: write the outline
     // by hand (as if the atomic write succeeded) but seed NO chapters for v2.
     let outline = outline_path(ws.path(), "crash-novel", 2);
     std::fs::create_dir_all(outline.parent().unwrap()).unwrap();
     std::fs::write(&outline, "crashed-mid-advance").unwrap();
 
-    // First tick after "crash": must skip (idempotent) — not re-advance, not
     // error, not clobber.
     run_one_tick(&pool, ws.path()).await;
     assert_eq!(
@@ -311,7 +288,6 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
         "recovery tick must not clobber the crashed-state outline"
     );
 
-    // DB remains consistent: still zero volume-2 chapters (the crashed tx
     // rolled back; the recovery tick did not re-seed).
     let vol2_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM work_chapters WHERE work_id = 'wrk_crash' AND volume = 2",
@@ -323,13 +299,7 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
         vol2_count, 0,
         "recovery: crashed tx must leave no v2 chapters"
     );
-
-    // Transactional rollback invariant: a fresh explicit advance that injects
-    // a tx failure must not leave orphan rows. Verified structurally by the
-    // idempotent guard above (outline exists → no second write path).
 }
-
-// ── R-V150P3AUTOCHRONO-04 regression: DB tx commits BEFORE outline write ──
 
 /// The advance must commit the DB transaction BEFORE writing the outline file
 /// (V1.36 "DB first, FS second"). When the outline write fails post-commit,
@@ -343,13 +313,11 @@ async fn perform_advance_writes_outline_after_tx_commit() {
     let work = base_work("wrk_order", "order-novel");
     works::create_work(&pool, &work).await.unwrap();
 
-    // Pre-create a regular FILE at the `Outlines` directory path so
     // `create_dir_all(outline.parent())` fails post-commit (NotADirectory).
     let outlines_as_file = ws.path().join("Works").join("order-novel").join("Outlines");
     std::fs::create_dir_all(outlines_as_file.parent().unwrap()).unwrap();
     std::fs::write(&outlines_as_file, "blocker").unwrap();
 
-    // Manual advance with 3 chapters → perform_advance must commit the tx
     // (chapter seed + updated_at) FIRST, then try the outline write → fails.
     let result = advance_manual(&pool, ws.path(), "wrk_order", 2, Some(3), false).await;
     assert!(
@@ -357,7 +325,6 @@ async fn perform_advance_writes_outline_after_tx_commit() {
         "outline write failure must surface as Err (observable); got: {result:?}"
     );
 
-    // The DB tx committed BEFORE the outline write (Design A): the 3 chapter
     // rows persist despite the outline failure. This is the key invariant —
     // the Work is not stuck because the DB is the source of truth.
     let vol2_count: i64 = sqlx::query_scalar(
@@ -371,14 +338,12 @@ async fn perform_advance_writes_outline_after_tx_commit() {
         "tx must commit BEFORE outline write: chapters persist despite outline failure"
     );
 
-    // No partial outline file (the write never succeeded; atomic cleanup holds).
     let outline = outline_path(ws.path(), "order-novel", 2);
     assert!(
         !outline.exists(),
         "no partial outline file after failed write"
     );
 
-    // Recovery: remove the blocker, re-run advance. The idempotent guard
     // passes (no outline), seed is idempotent (INSERT OR IGNORE), and the
     // outline write succeeds on retry.
     std::fs::remove_file(&outlines_as_file).unwrap();
@@ -395,8 +360,6 @@ async fn perform_advance_writes_outline_after_tx_commit() {
     );
 }
 
-// ── R-V150P3AUTOCHRONO-04 regression: --force bypasses idempotent guard ───
-
 /// `force = true` bypasses the idempotent guard so the caller can overwrite an
 /// existing outline (recovery path for an orphaned crash-state outline).
 #[tokio::test]
@@ -406,7 +369,6 @@ async fn manual_advance_force_overwrites_existing_outline() {
     let work = base_work("wrk_force", "force-novel");
     works::create_work(&pool, &work).await.unwrap();
 
-    // First advance creates the outline.
     let outcome = advance_manual(&pool, ws.path(), "wrk_force", 2, None, false)
         .await
         .unwrap();
@@ -415,7 +377,6 @@ async fn manual_advance_force_overwrites_existing_outline() {
     let original = std::fs::read_to_string(&outline).unwrap();
     assert!(original.contains("force-novel"));
 
-    // Without force: second advance is idempotent (AlreadyAdvanced).
     let skipped = advance_manual(&pool, ws.path(), "wrk_force", 2, None, false)
         .await
         .unwrap();
@@ -427,7 +388,6 @@ async fn manual_advance_force_overwrites_existing_outline() {
         }
     ));
 
-    // With force: bypasses the guard and rewrites the outline.
     let forced = advance_manual(&pool, ws.path(), "wrk_force", 2, None, true)
         .await
         .unwrap();
@@ -442,8 +402,6 @@ async fn manual_advance_force_overwrites_existing_outline() {
     );
 }
 
-// ── Manual override (spec §2.2 / AC §4.4) ─────────────────────────────────
-
 /// Manual advance bypasses finish detection and seeds the requested chapter
 /// count, regardless of the `auto_chronology` flag.
 #[tokio::test]
@@ -451,7 +409,6 @@ async fn manual_advance_bypasses_gates_and_seeds_chapters() {
     let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let mut work = base_work("wrk_manual", "manual-novel");
-    // Not opted in, intake incomplete, no finalized chapters — manual must
     // still advance (spec §2.2).
     work.intake_status = "pending".to_string();
     works::create_work(&pool, &work).await.unwrap();

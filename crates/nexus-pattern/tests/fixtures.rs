@@ -90,7 +90,6 @@ fn the_committed_packages_load_with_their_pins() {
         Some(STEP_WITH_JUDGE_HASH)
     );
 
-    // The malformed manifest is its own unavailable item and leaves both peers available.
     let broken = summary(&packages, "broken-manifest");
     assert!(!broken.available);
     assert_eq!(broken.id, None);

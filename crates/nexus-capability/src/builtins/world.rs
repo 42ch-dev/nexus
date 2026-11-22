@@ -28,9 +28,6 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-// ─── Shared admission gate ─────────────────────────────────────────────────
-
-/// Verify that `creator_id` owns `world_id`.
 ///
 /// V1.67 P2 (R-V160P0-QC2-W001): delegates to the shared
 /// [`nexus_local_db::narrative_write::is_world_owned`] gate so the ownership
@@ -113,9 +110,6 @@ async fn workspace_slug_for(pool: &sqlx::SqlitePool, world_id: &str) -> String {
     }
 }
 
-// ─── Input shapes ──────────────────────────────────────────────────────────
-
-/// Input for `nexus.world.state.query`.
 #[derive(Debug, Deserialize)]
 struct WorldStateQueryInput {
     world_id: String,
@@ -161,7 +155,6 @@ struct WorldDeltaApplyInput {
     atomic: bool,
 }
 
-// Justification: `*_id` suffix is the canonical schema column naming for
 // entity identifiers (world_id, creator_id, source_work_id) — diverging would
 // break the delta-package contract documented in world-delta-propose-apply.md.
 #[allow(clippy::struct_field_names)]
@@ -189,9 +182,6 @@ const fn default_true() -> bool {
     true
 }
 
-// ─── Capability: nexus.world.state.query ───────────────────────────────────
-
-/// Query KB/timeline slices for a world (read-only snapshot).
 #[derive(Debug, Clone)]
 pub struct WorldStateQuery {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -244,7 +234,6 @@ impl Capability for WorldStateQuery {
             "world.state.query admitted"
         );
 
-        // Admission gate: creator must own the world.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
         let slice = parsed.slice.as_deref().unwrap_or("all");
@@ -253,7 +242,6 @@ impl Capability for WorldStateQuery {
 
         let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
 
-        // World metadata (always returned).
         let world = gw
             .get_world_state(&parsed.world_id)
             .await
@@ -261,7 +249,6 @@ impl Capability for WorldStateQuery {
         let world_json =
             serde_json::to_value(&world).map_err(|e| CapabilityError::Internal(e.to_string()))?;
 
-        // KB slice. The KB rows are model-facing, so they are read through the
         // admitted Creator ActorView — another holder's `owner-private` World
         // row is never part of the slice, and an unresolvable selection refuses
         // rather than widening to the World listing. A timeline-only slice
@@ -281,7 +268,6 @@ impl Capability for WorldStateQuery {
             Vec::new()
         };
 
-        // Timeline slice.
         let timeline = if want_timeline {
             gw.get_timeline(&parsed.world_id, parsed.branch_id.as_deref(), parsed.limit)
                 .await
@@ -303,9 +289,6 @@ impl Capability for WorldStateQuery {
     }
 }
 
-// ─── Capability: nexus.world.delta.propose ─────────────────────────────────
-
-/// Produce a structured delta package from an input changeset (no writes).
 #[derive(Debug, Clone)]
 pub struct WorldDeltaPropose {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -359,35 +342,27 @@ impl Capability for WorldDeltaPropose {
             "world.delta.propose admitted"
         );
 
-        // Admission gate.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
         let slug = workspace_slug_for(pool, &parsed.world_id).await;
         let store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
         let mut proposed: Vec<Value> = Vec::with_capacity(parsed.changeset.len());
         for ch in parsed.changeset {
-            // V1.60 supports kb_key_block (create/update) + world_metadata title.
             let old_value = match (ch.entity.as_str(), ch.entity_id.as_deref()) {
                 ("kb_key_block", Some(kid)) => {
                     let existing = store.get_knowledge_entry(kid).await.ok();
                     existing.and_then(|kb| serde_json::to_value(field_of(&kb, &ch.field)).ok())
                 }
-                ("kb_key_block", None) => {
-                    // Create path — no prior value.
-                    Some(Value::Null)
-                }
-                ("world_metadata", _) if ch.field == "title" => {
-                    // Read current title from the world row.
-                    sqlx::query_scalar::<_, String>(
-                        "SELECT title FROM narrative_worlds WHERE world_id = ?",
-                    )
-                    .bind(&parsed.world_id)
-                    .fetch_optional(&**pool)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(Value::String)
-                }
+                ("kb_key_block", None) => Some(Value::Null),
+                ("world_metadata", _) if ch.field == "title" => sqlx::query_scalar::<_, String>(
+                    "SELECT title FROM narrative_worlds WHERE world_id = ?",
+                )
+                .bind(&parsed.world_id)
+                .fetch_optional(&**pool)
+                .await
+                .ok()
+                .flatten()
+                .map(Value::String),
                 (other_entity, _) => {
                     return Err(CapabilityError::InputInvalid(format!(
                         "unsupported entity '{other_entity}' (V1.60: kb_key_block, world_metadata)"
@@ -436,9 +411,6 @@ fn field_of(
     }
 }
 
-// ─── Capability: nexus.world.delta.apply ───────────────────────────────────
-
-/// Apply a delta package under a transaction with a lost-update guard.
 #[derive(Debug, Clone)]
 pub struct WorldDeltaApply {
     pool: Option<Arc<sqlx::SqlitePool>>,
@@ -501,7 +473,6 @@ impl Capability for WorldDeltaApply {
             "world.delta.apply admitted"
         );
 
-        // Atomic apply: the whole package runs in one transaction. `atomic:false`
         // is accepted but V1.60 still applies transactionally (partial commit is
         // post-1.0); the output reports `atomic_applied: true`.
         let mut tx = pool
@@ -528,7 +499,6 @@ impl Capability for WorldDeltaApply {
         let mut results: Vec<Value> = Vec::with_capacity(parsed.proposed_changes.len());
         let mut all_applied = true;
 
-        // V1.67 P2 (R-V160P0-QC3-W001 / W-002): pre-fetch current body_json
         // for all kb_key_block update targets in chunked, deduplicated
         // IN-lists, replacing the per-change SELECT + UPDATE N+1 pattern
         // while bounding the SQL size regardless of caller input.
@@ -546,7 +516,6 @@ impl Capability for WorldDeltaApply {
 
         let mut live_body_map: HashMap<String, Option<String>> = HashMap::new();
         if !update_kids.is_empty() {
-            // Dedupe ids so duplicate entity_id entries do not inflate bind
             // counts or generate redundant IN-list chunks.
             let mut seen = HashSet::with_capacity(update_kids.len());
             let unique_update_kids: Vec<&str> = update_kids
@@ -577,12 +546,9 @@ impl Capability for WorldDeltaApply {
         }
 
         for ch in parsed.proposed_changes {
-            // Capture the rationale for the audit trail before `ch` is consumed.
             let rationale = ch.rationale.clone();
             match (ch.entity.as_str(), ch.entity_id.as_deref()) {
                 ("kb_key_block", Some(kid)) => {
-                    // Update path with lost-update guard.
-                    // body_json is a nullable column → scalar type is Option<String>.
                     // V1.67 P2 (R-V160P0-QC3-W001): value was pre-fetched in
                     // bulk above instead of issuing one SELECT per change.
                     let live_body = live_body_map.get(kid).cloned().unwrap_or(None);
@@ -606,7 +572,6 @@ impl Capability for WorldDeltaApply {
                         }
                     }
 
-                    // Apply the field update. V1.60 supports body_json + status.
                     match ch.field.as_str() {
                         "body_json" => {
                             let body_str = serde_json::to_string(&ch.new_value)
@@ -645,9 +610,6 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("kb_key_block", None) => {
-                    // Create path: insert a new provisional key block via the
-                    // proper DAO method (`insert_key_block_in_tx`), which shares
-                    // this handler's transaction so the create rolls back
                     // atomically with sibling changes.
                     //
                     // R-V160P0-QC1-W001: the prior hand-written INSERT
@@ -665,7 +627,6 @@ impl Capability for WorldDeltaApply {
                                 "create kb_key_block requires new_value.canonical_name".into(),
                             )
                         })?;
-                    // Parse `block_type` into the enum (snake_case wire form).
                     // Defaults to `BlockType::Character` (the canonical default)
                     // when absent or unrecognised; the prior "concept" literal
                     // was never a valid variant.
@@ -712,7 +673,6 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("world_metadata", _) if ch.field == "title" => {
-                    // Lost-update guard: compare old_value (if supplied) to the
                     // live title before applying. SAFETY: SELECT against known
                     // narrative_worlds schema.
                     let live_title: Option<String> =
@@ -769,7 +729,6 @@ impl Capability for WorldDeltaApply {
             }
         }
 
-        // Commit the atomic batch.
         tx.commit()
             .await
             .map_err(|e| CapabilityError::TransientExternal(format!("commit: {e}")))?;
@@ -788,8 +747,6 @@ impl Capability for WorldDeltaApply {
         }))
     }
 }
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -901,7 +858,6 @@ mod tests {
         )
         .await
         .unwrap();
-        // Rename to a fixed id for deterministic tests.
         sqlx::query("UPDATE narrative_worlds SET world_id = ? WHERE owner_creator_id = ?")
             .bind(world_id)
             .bind(owner)
@@ -915,7 +871,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
-        // Append a timeline event so the timeline slice is non-empty.
         let world = sqlx::query_scalar::<_, String>(
             "SELECT root_fork_branch_id FROM narrative_worlds WHERE world_id = 'wld_a'",
         )
@@ -997,7 +952,6 @@ mod tests {
         )
         .await;
 
-        // Differential: the unscoped listing holds all three rows, so the
         // exclusion below is the selection's policy, not an empty KB.
         let unscoped = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
             .list_by_world("wld_a")
@@ -1053,8 +1007,6 @@ mod tests {
         );
     }
 
-    // ── nexus.world.delta.propose ────────────────────────────────────────────
-
     #[tokio::test]
     async fn world_delta_propose_success_populates_old_value() {
         let (_dir, pool) = fresh_pool().await;
@@ -1077,7 +1029,6 @@ mod tests {
             .unwrap();
         assert_eq!(out["schema_version"], 1);
         assert_eq!(out["policy_context"]["world_id"], "wld_a");
-        // old_value should be populated from current state (the seeded title).
         assert_eq!(out["proposed_changes"][0]["old_value"], "Test World");
         assert_eq!(out["proposed_changes"][0]["new_value"], "New Title");
     }
@@ -1114,8 +1065,6 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
-    // ── nexus.world.delta.apply ──────────────────────────────────────────────
-
     #[tokio::test]
     async fn world_delta_apply_title_update_success() {
         let (_dir, pool) = fresh_pool().await;
@@ -1144,7 +1093,6 @@ mod tests {
         assert_eq!(out["applied"][0]["status"], "applied");
         assert_eq!(out["atomic_applied"], true);
 
-        // Verify the title was actually updated.
         let title: String =
             sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = 'wld_a'")
                 .fetch_one(&pool)
@@ -1183,7 +1131,6 @@ mod tests {
         seed_world(&pool, "ctr_a", "wld_a").await;
 
         let cap = WorldDeltaApply::with_pool(pool.clone());
-        // Supply a stale old_value that does not match the live title.
         let out = cap
             .run(json!({
                 "policy_context": {"world_id": "wld_a", "creator_id": "ctr_a"},
@@ -1199,7 +1146,6 @@ mod tests {
             .unwrap();
         assert_eq!(out["applied"][0]["status"], "conflict");
         assert_eq!(out["atomic_applied"], false);
-        // The live title must NOT have changed (transaction rolled back).
         let title: String =
             sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = 'wld_a'")
                 .fetch_one(&pool)
@@ -1210,7 +1156,6 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_apply_kb_key_block_create_persists_row() {
-        // Regression for R-V160P0-QC1-W001: the kb_key_block create branch
         // previously hand-wrote an INSERT referencing a non-existent
         // `metadata_json` column (and an invalid "concept" block_type default).
         // None of the 9 in-file tests exercised the create path, so CI stayed
@@ -1246,7 +1191,6 @@ mod tests {
             .await
             .expect("create kb_key_block must succeed (W-001 regression)");
 
-        // The change reports applied with a freshly minted kb_ id.
         assert_eq!(out["applied"][0]["status"], "applied");
         assert_eq!(out["atomic_applied"], true);
         let new_id = out["applied"][0]["entity_id"]
@@ -1257,9 +1201,6 @@ mod tests {
             "expected a kb_ prefixed id, got {new_id}"
         );
 
-        // The row actually persisted with the canonical schema columns. This
-        // read-back would have failed entirely under the old hand-written SQL
-        // (the INSERT never succeeded).
         let (row_canonical, row_type, row_status, row_body): (
             String,
             String,
@@ -1284,7 +1225,6 @@ mod tests {
         assert!(body.contains("protagonist"));
     }
 
-    // V1.67 P2 (R-V160P0-QC3-W001): regression test for the N+1 SELECT fix.
     // Applies 4 kb_key_block updates in one delta package and asserts both
     // successful applies and conflict detection still work, while using the
     // bulk pre-fetch path instead of one SELECT per change.
@@ -1294,7 +1234,6 @@ mod tests {
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
 
-        // Seed two key blocks via the create path.
         let cap = WorldDeltaApply::with_pool(pool.clone());
         let out = cap
             .run(json!({
@@ -1333,7 +1272,6 @@ mod tests {
         let hero_id = out["applied"][0]["entity_id"].as_str().unwrap();
         let villain_id = out["applied"][1]["entity_id"].as_str().unwrap();
 
-        // Apply two body_json updates and one stale conflict in one package.
         let out2 = cap
             .run(json!({
                 "policy_context": {
@@ -1368,7 +1306,6 @@ mod tests {
         assert_eq!(out2["applied"][1]["status"], "conflict");
         assert_eq!(out2["atomic_applied"], false);
 
-        // The successful update must have persisted; the conflict must not.
         let hero_body: Option<String> =
             sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind(hero_id)
@@ -1386,7 +1323,6 @@ mod tests {
         assert!(villain_body.unwrap().contains("20"));
     }
 
-    // V1.67 P2 fix-wave 1 (W-002): regression test for chunked/deduped
     // kb_key_block pre-fetch. Applies body_json updates for more ids than
     // one IN-list chunk can hold, verifying the handler still returns correct
     // results and does not construct an oversized SQL statement.

@@ -419,7 +419,6 @@ pub async fn promote_character_fragment_to_shared(
                 code: ActorContractConflict::CharacterFragmentAlreadyShared,
             });
         };
-        // Revalidate the source binding inside the write transaction before
         // clearing its provenance: it must still be active, belong to this
         // Character, and target an owned active World. An invalid source
         // binding rejects with zero mutation rather than leaking the row into
@@ -460,7 +459,6 @@ pub async fn promote_character_fragment_to_shared(
         )
         .await?;
 
-        // Invalidate exactly the affected cache scopes: shared + old binding.
         sqlx::query!(
             "DELETE FROM character_soul_narratives
              WHERE character_id = ? AND (actor_world_binding_id IS NULL OR actor_world_binding_id = ?)",

@@ -96,11 +96,8 @@ impl Capability for TimelineEventAppend {
             "timeline.event.append admitted"
         );
 
-        // Admission gate: creator must own the world.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
-        // Atomic append + optional explicit-id rename.
-        // V1.67 P2 (R-V160P0-QC2-W002): wrap append and rename in one
         // transaction so a rename failure cannot leave the event under the
         // auto-allocated id.
         let mut tx = pool
@@ -108,8 +105,6 @@ impl Capability for TimelineEventAppend {
             .await
             .map_err(|e| CapabilityError::Internal(format!("begin tx: {e}")))?;
 
-        // Canon immutability: if the caller supplied an explicit event_id, reject
-        // if it already exists (no silent rewrite). The check runs inside the
         // same transaction as the append so the collision guard is consistent
         // with the insert.
         if let Some(ref explicit_id) = parsed.event_id {
@@ -144,8 +139,6 @@ impl Capability for TimelineEventAppend {
             other => CapabilityError::Internal(format!("append_event: {other}")),
         })?;
 
-        // If the caller supplied an explicit id, rename the allocated event to it
-        // (the collision was already rejected above, so this is safe).
         let final_id = if let Some(ref explicit_id) = parsed.event_id {
             if explicit_id != &result.event_id {
                 // SAFETY: id rename against known narrative_timeline_events schema.
@@ -176,8 +169,6 @@ impl Capability for TimelineEventAppend {
         }))
     }
 }
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -269,7 +260,6 @@ mod tests {
         .unwrap();
 
         let cap = TimelineEventAppend::with_pool(pool.clone());
-        // First append with an explicit id succeeds.
         cap.run(json!({
             "world_id": world_id,
             "creator_id": "ctr_a",
@@ -280,7 +270,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Second append reusing the same explicit id must be rejected.
         let err = cap
             .run(json!({
                 "world_id": world_id,
@@ -294,7 +283,6 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
-    // V1.67 P2 (R-V160P0-QC2-W002): regression test for append+rename running
     // inside one transaction. Verifies the explicit id is the one persisted in
     // the DB (not the transient auto-allocated id) and that no orphan row
     // remains.
@@ -326,7 +314,6 @@ mod tests {
         assert_eq!(out["event_id"], "evt_atomic_1");
         assert_eq!(out["status"], "provisional");
 
-        // The row must be queryable by the explicit id.
         let row_id: String = sqlx::query_scalar(
             "SELECT timeline_event_id FROM narrative_timeline_events WHERE timeline_event_id = ?",
         )
@@ -336,7 +323,6 @@ mod tests {
         .unwrap();
         assert_eq!(row_id, "evt_atomic_1");
 
-        // Exactly one event exists for this world — no orphan under an
         // auto-allocated id was left behind.
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM narrative_timeline_events WHERE world_id = ?")

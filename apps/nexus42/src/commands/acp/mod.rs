@@ -31,9 +31,6 @@ use clap::Subcommand;
 use nexus_acp_host::registry::{AgentEntry, DistributionExt, RegistryClient, REGISTRY_URL};
 use nexus_acp_host::transport::AgentSpawner;
 
-// ── Output format selector ──────────────────────────────────────────
-
-/// Output format for list/show commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
     /// Human-readable table (default).
@@ -53,8 +50,6 @@ impl std::str::FromStr for OutputFormat {
         }
     }
 }
-
-// ── Command definitions ────────────────────────────────────────────
 
 /// Registry subcommands
 #[derive(Debug, Subcommand)]
@@ -148,9 +143,6 @@ pub enum AcpCommand {
     },
 }
 
-// ── Entry point ────────────────────────────────────────────────────
-
-/// Run ACP command.
 ///
 /// # Errors
 ///
@@ -168,7 +160,6 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
             AgentSubcommand::Use { agent_ref } => cmd_agent_use(&agent_ref, config),
             AgentSubcommand::List { format } => {
                 let result = cmd_registry_list(&format).await;
-                // Show default agent banner after list output
                 if let Some(default) = default_agent_ref(config) {
                     println!("\nDefault agent: {default}");
                 }
@@ -186,8 +177,6 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
         } => cmd_run(&agent_ref, message, cwd, run_id).await,
     }
 }
-
-// ── `acp probe` ──────────────────────────────────────────────────
 
 pub(super) async fn cmd_probe(_registry_flag: bool, agent: Option<String>) -> Result<()> {
     match agent {
@@ -285,12 +274,10 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
             }
         }
         Err(_) => {
-            // Timeout — agent is still running (good sign)
             // Kill it since we're just probing
             if let Err(e) = child.kill().await {
                 eprintln!("  Warning: failed to kill agent process: {e}");
             }
-            // Reap the process to avoid zombie
             let _ = child.wait().await;
 
             println!("✓ Agent probe successful");
@@ -308,8 +295,6 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
 
     Ok(())
 }
-
-// ── `acp registry list` ──────────────────────────────────────────
 
 pub(super) async fn cmd_registry_list(format_str: &str) -> Result<()> {
     let output_format: OutputFormat = format_str
@@ -422,8 +407,6 @@ fn print_list_json(
     Ok(())
 }
 
-// ── `acp registry inspect` ──────────────────────────────────────────
-
 pub(super) async fn cmd_registry_inspect(agent_ref: &str) -> Result<()> {
     let client = RegistryClient::new()?;
     let registry = client.get_registry().await?;
@@ -465,9 +448,6 @@ fn print_show_details(agent: &AgentEntry) {
     println!("Source: {source_detail}");
 }
 
-// ── `acp agent use` ──────────────────────────────────────────────────
-
-/// File name for the persisted default agent config (TOML).
 const DEFAULT_AGENT_CONFIG_FILE: &str = "acp-default-agent.toml";
 
 /// Current schema version for the default agent config file.
@@ -484,7 +464,6 @@ const DEFAULT_AGENT_CONFIG_SCHEMA_VERSION: u32 = 1;
 /// Returns `CliError::Other` if the agent ref contains control characters
 /// or characters outside the allowed printable set.
 fn validate_agent_ref(agent_ref: &str) -> Result<()> {
-    // Reject control characters (0x00-0x1F, 0x7F)
     if agent_ref.chars().any(char::is_control) {
         return Err(crate::errors::CliError::Other(
             "Agent reference contains control characters. \
@@ -493,14 +472,12 @@ fn validate_agent_ref(agent_ref: &str) -> Result<()> {
         ));
     }
 
-    // Reject path traversal attempts
     if agent_ref.contains("..") {
         return Err(crate::errors::CliError::Other(
             "Agent reference must not contain '..' (path traversal).".to_string(),
         ));
     }
 
-    // Allow only: alphanumeric, hyphen, underscore, dot, forward slash, @
     let valid = agent_ref
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '@'));
@@ -547,7 +524,6 @@ fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
         .get(creator_id)
         .map_or(crate::config::DEFAULT_WORKSPACE_SLUG, |s| s.as_str());
 
-    // Sanitize path components (defense-in-depth via nexus-home-layout). The
     // returned borrow shadows workspace_slug so only the sanitized value reaches
     // operational_workspace_dir.
     nexus_home_layout::validate_creator_id_safe(creator_id)
@@ -564,7 +540,6 @@ fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
 
     let config_path = ws_dir.join(DEFAULT_AGENT_CONFIG_FILE);
 
-    // Manual TOML escaping is sufficient because `validate_agent_ref` above
     // already rejected control characters and non-printable input.
     // The only remaining special chars in TOML basic strings are `\` and `"`.
     let escaped_ref = trimmed.replace('\\', "\\\\").replace('"', "\\\"");
@@ -592,7 +567,6 @@ pub(crate) fn default_agent_ref(config: &CliConfig) -> Option<String> {
         .get(creator_id)
         .map_or(crate::config::DEFAULT_WORKSPACE_SLUG, |s| s.as_str());
 
-    // Non-panicking path validation; the returned borrow replaces the raw slug.
     nexus_home_layout::validate_creator_id_safe(creator_id).ok()?;
     let workspace_slug = nexus_home_layout::sanitize_entry_id(workspace_slug).ok()?;
 
@@ -603,16 +577,12 @@ pub(crate) fn default_agent_ref(config: &CliConfig) -> Option<String> {
 
     let content = std::fs::read_to_string(&config_path).ok()?;
 
-    // Parse TOML — extract default_agent_ref value
     let doc = content.parse::<toml_edit::DocumentMut>().ok()?;
     doc.get("default_agent_ref")?
         .as_str()
         .map(std::string::ToString::to_string)
 }
 
-// ── Shared helpers ──────────────────────────────────────────────────
-
-/// Resolve the launch command from an agent's distribution metadata.
 pub(super) fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
     if let Some(ref npx) = agent.distribution.npx {
         let mut args = vec![npx.package.clone()];
@@ -697,9 +667,6 @@ fn describe_distribution(agent: &AgentEntry) -> String {
     }
 }
 
-// ── `acp run` (moved from agent.rs) ────────────────────────────────
-
-/// Run an ACP agent interactively or with a single message.
 ///
 /// This is the primary ACP-first execution entry point, moved from the
 /// deprecated `agent run` command.
@@ -720,7 +687,6 @@ pub async fn cmd_run(
         NexusRunStarted, NexusTraceEvent, NexusTraceStatus,
     };
 
-    // Resolve or generate run ID
     let run_id = match run_id_opt {
         Some(ref id) => {
             nexus_home_layout::validate_run_id_safe(id).map_err(crate::errors::CliError::Other)?;
@@ -731,7 +697,6 @@ pub async fn cmd_run(
 
     eprintln!("Run ID: {}", run_id.0);
 
-    // Write run_started trace event (best-effort)
     let home = dirs::home_dir().unwrap_or_default();
     let now_ts = chrono::Utc::now().to_rfc3339();
     let pid = std::process::id();
@@ -749,7 +714,6 @@ pub async fn cmd_run(
 
     let result = cmd_run_inner(agent_ref, message, cwd, &run_id).await;
 
-    // Write run_finished trace event (best-effort)
     let now_ts = chrono::Utc::now().to_rfc3339();
     let (status, error) = match &result {
         Ok(()) => (NexusTraceStatus::Completed, None),
@@ -776,7 +740,6 @@ async fn cmd_run_inner(
     cwd: Option<PathBuf>,
     run_id: &super::acp_trace::NexusRunId,
 ) -> Result<()> {
-    // Validate cwd if provided
     if let Some(ref dir) = cwd {
         if !dir.exists() {
             return Err(crate::errors::CliError::Other(format!(
@@ -801,10 +764,8 @@ async fn cmd_run_inner(
         ))
     })?;
 
-    // Resolve working directory
     let work_dir = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-    // Resolve the launch command from distribution
     let (program, args) = resolve_launch_command(agent)?;
 
     eprintln!("Starting {} {}...", agent.name, agent.version);
@@ -812,7 +773,6 @@ async fn cmd_run_inner(
 
     let spawner = AgentSpawner::new(work_dir);
 
-    // Spawn the agent subprocess with NEXUS_RUN_ID in environment
     let env_pairs = [("NEXUS_RUN_ID", run_id.0.as_str())];
     let (child, _stdin, _stdout) = spawner
         .spawn_with_env(
@@ -826,23 +786,18 @@ async fn cmd_run_inner(
         .map_err(|e| crate::errors::CliError::Other(e.to_string()))?;
 
     let mut child = child;
-    // Set up graceful shutdown handler (Ctrl+C)
     let cancel_tx = setup_cancel_handler(agent.id.clone());
 
-    // Determine mode
     let result = if let Some(msg) = message {
-        // Single-shot mode: send message, wait, exit
         eprintln!("  Mode: single-shot");
         eprintln!();
         eprintln!("Message: {msg}");
         eprintln!();
 
-        // Wait for the agent to finish (with timeout).
         // wait_for_agent_exit already calls child.wait(), so we do NOT
         // call it again — single-shot mode handles its own exit reporting.
         let wait_result = wait_for_agent_exit(&mut child, &agent.id).await;
 
-        // Send cancel signal
         let _ = cancel_tx.send(());
 
         return match wait_result {
@@ -851,7 +806,6 @@ async fn cmd_run_inner(
                 Ok(())
             }
             Err(e) => {
-                // Ensure orphaned child is killed on error (e.g. timeout)
                 if child.id().is_some() {
                     let _ = child.kill().await;
                     let _ = child.wait().await;
@@ -860,20 +814,16 @@ async fn cmd_run_inner(
             }
         };
     } else {
-        // Interactive mode
         eprintln!("  Mode: interactive");
         eprintln!();
         eprintln!("Type your message and press Enter. Press Ctrl+C to exit.");
         eprintln!();
 
-        // Simple interactive prompt loop using stdin
         interactive_prompt_loop(&child, &agent.id)
     };
 
-    // Send cancel signal
     let _ = cancel_tx.send(());
 
-    // Interactive-mode cleanup: wait for exit
     match result {
         Ok(()) => {
             let status = child.wait().await.map_err(|e| {
@@ -888,7 +838,6 @@ async fn cmd_run_inner(
             }
         }
         Err(e) => {
-            // Ensure orphaned child is killed on error
             if child.id().is_some() {
                 let _ = child.kill().await;
                 let _ = child.wait().await;
@@ -904,7 +853,6 @@ async fn cmd_run_inner(
 fn setup_cancel_handler(agent_id: String) -> tokio::sync::oneshot::Sender<()> {
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
-    // Spawn a task that waits for Ctrl+C and forwards it
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
         tracing::info!(
@@ -965,22 +913,18 @@ fn interactive_prompt_loop(
     eprintln!();
 
     loop {
-        // Check if agent is still running
         if child.id().is_none() {
             eprintln!("Agent process has exited.");
             break;
         }
 
-        // Print prompt
         eprint!("> ");
         let _ = stdout.flush();
 
-        // Read user input
         let mut input = String::new();
         let read_result = stdin.lock().read_line(&mut input);
         match read_result {
             Ok(0) => {
-                // EOF (Ctrl+D)
                 eprintln!("\nExiting (EOF).");
                 break;
             }
@@ -995,13 +939,11 @@ fn interactive_prompt_loop(
             continue;
         }
 
-        // Exit commands
         if trimmed == "/quit" || trimmed == "/exit" || trimmed == "quit" || trimmed == "exit" {
             eprintln!("Exiting.");
             break;
         }
 
-        // In V1.0, we note that the full ACP prompt loop requires
         // LocalSet + SDK integration. The prompt would go through
         // AcpSdkAdapter::prompt() within a LocalSet context.
         eprintln!(
@@ -1011,8 +953,6 @@ fn interactive_prompt_loop(
 
     Ok(())
 }
-
-// ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -1191,17 +1131,13 @@ mod tests {
     #[test]
     fn agent_use_writes_config() {
         let mut config = CliConfig::default();
-        // Without active creator, should fail with CreatorNotSelected
         let result = cmd_agent_use("test-agent", &config);
         assert!(result.is_err());
 
-        // With active creator, should succeed
         let tmp = tempfile::tempdir().expect("tempdir");
-        // Override home for the test
         std::env::set_var("HOME", tmp.path());
         config.active_creator_id = Some("ctr_test".to_string());
         let result = cmd_agent_use("test-agent", &config);
-        // May fail on home dir resolution in test env, but validates the path
         drop(result);
     }
 
@@ -1246,7 +1182,6 @@ mod tests {
 
     #[test]
     fn validate_agent_ref_rejects_control_chars() {
-        // newline
         let result = validate_agent_ref("bad\nagent");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -1255,11 +1190,8 @@ mod tests {
             "Should mention control characters: {err}"
         );
 
-        // tab
         assert!(validate_agent_ref("bad\tagent").is_err());
-        // null byte
         assert!(validate_agent_ref("bad\0agent").is_err());
-        // DEL (0x7F)
         assert!(validate_agent_ref("bad\u{7F}agent").is_err());
     }
 
@@ -1273,19 +1205,15 @@ mod tests {
             "Should mention path traversal: {err}"
         );
 
-        // Also reject embedded traversal
         assert!(validate_agent_ref("agent/../other").is_err());
     }
 
     #[test]
     fn validate_agent_ref_rejects_special_chars() {
-        // spaces
         assert!(validate_agent_ref("bad agent").is_err());
-        // shell metacharacters
         assert!(validate_agent_ref("bad;agent").is_err());
         assert!(validate_agent_ref("bad$agent").is_err());
         assert!(validate_agent_ref("bad`agent").is_err());
-        // unicode
         assert!(validate_agent_ref("badαagent").is_err());
     }
 }

@@ -1,4 +1,4 @@
-//! Claude Code CLI native provider adapter (`claude-codes` stream-json client).
+//! Claude Code CLI native provider adapter (`claude-codes` stream-json client). See docs/specs/agents/agent-host.md.
 //!
 //! Implements a native provider for the `claude` CLI through the
 //! `claude-codes` async client (PD-2): per-invocation, one builder-spawned
@@ -178,7 +178,6 @@ impl ClaudeCliProvider {
         futures_util::stream::unfold(
             (sessions, op_id, session_id, VecDeque::new(), false),
             |(sessions, op_id, session_id, mut pending, finished)| async move {
-                // Drain events mapped from a previous frame first: one
                 // assistant frame can carry multiple content blocks.
                 if let Some(event) = pending.pop_front() {
                     return Some((Ok(event), (sessions, op_id, session_id, pending, finished)));
@@ -187,7 +186,6 @@ impl ClaudeCliProvider {
                     return None;
                 }
 
-                // Read frames until one maps to host events or the turn
                 // ends (terminal event / stream error / EOF). The read runs
                 // under the session's own lock (B-2): other sessions'
                 // cancel/shutdown never wait on this frame read.
@@ -198,7 +196,6 @@ impl ClaudeCliProvider {
                             guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
                         };
                         let Some(state) = state else {
-                            // Session removed by shutdown() / client killed
                             // by cancel(): EOF — the backstop below.
                             return Err(ClaudeError::ConnectionClosed);
                         };
@@ -208,7 +205,6 @@ impl ClaudeCliProvider {
                             None => Err(ClaudeError::ConnectionClosed),
                         }
                     };
-                    // B-3: no inter-frame timeout — the old rail read until
                     // EOF; a distinct frame-gap budget would reintroduce the
                     // hard-fail this removal fixes.
                     let outcome = read.await;
@@ -217,17 +213,14 @@ impl ClaudeCliProvider {
                         Ok(output) => {
                             let events = map_claude(&[output], &session_id, &op_id);
                             if events.is_empty() {
-                                // Skipped frame (unknown nested variant,
                                 // internal transcript event) — keep reading.
                                 continue;
                             }
-                            // map_claude puts the terminal (if any) last.
                             let terminal = matches!(
                                 events.last(),
                                 Some(HostEvent::OpFinished(_) | HostEvent::OpFailed(_))
                             );
                             if terminal {
-                                // Turn over: kill the child.
                                 drop_client(&sessions, &session_id).await;
                             }
                             let mut iter = events.into_iter();
@@ -239,7 +232,6 @@ impl ClaudeCliProvider {
                             ));
                         }
                         Err(ClaudeError::ConnectionClosed) => {
-                            // Stream abort (EOF or client killed) before a
                             // terminal frame: exactly one OpFailed (PD-3).
                             drop_client(&sessions, &session_id).await;
                             return Some((
@@ -254,7 +246,6 @@ impl ClaudeCliProvider {
                             ));
                         }
                         Err(error) => {
-                            // Typed-decode failure / io error: the frame is
                             // lost, so the turn fails once (PD-3, AR-7).
                             drop_client(&sessions, &session_id).await;
                             let failed = classify_stream_error(&error, &session_id, &op_id)
@@ -279,7 +270,6 @@ async fn drop_client(
     session_id: &HostSessionId,
 ) {
     let state = {
-        // Short registry write: also clear the recorded PID so a stale
         // cancel fallback can never signal a recycled pid.
         let mut guard = sessions.write().await;
         match guard.get_mut(session_id) {
@@ -328,7 +318,6 @@ fn kill_child_by_pid(pid: u32) {
 /// made about reaping descendants beyond this direct child.
 async fn close_probe_child(child: &mut tokio::process::Child) -> Result<(), ()> {
     let close = async {
-        // Already-exited children return Ok(None) here and are still reaped by
         // the `wait` below.
         let _ = child.start_kill();
         child.wait().await.map(|_| ())
@@ -358,13 +347,11 @@ impl ProviderAdapter for ClaudeCliProvider {
         let launch_dur = std::time::Duration::from_millis(request.timeout_ms);
         let command = self.command.clone();
         let cwd = request.cwd.clone();
-        // The probe must observe the SAME configured environment the launch
         // path injects: a PATH/API/runtime variable that makes `launch` work
         // would otherwise make the probe report the provider unavailable (or
         // probe a different runtime than the one selected).
         let env = self.env.clone();
 
-        // Owned child (never `Command::output()`): the probe keeps an explicit
         // handle so a timeout or error can kill and reap the `--version` child
         // within the bound instead of dropping the future and leaking it.
         let mut child = match tokio::process::Command::new(&command)
@@ -396,7 +383,6 @@ impl ProviderAdapter for ClaudeCliProvider {
             }
         };
 
-        // Poll the owned child to completion under the bound, so the deadline
         // path always has a child handle to close.
         let wait = async {
             loop {
@@ -411,7 +397,6 @@ impl ProviderAdapter for ClaudeCliProvider {
         let status = match tokio::time::timeout(launch_dur, wait).await {
             Ok(status) => status,
             Err(_elapsed) => {
-                // Timeout: bounded kill + wait on the OWNED child. A close that
                 // cannot be confirmed is reported as such — never silently
                 // reported as a clean unavailable.
                 return Ok(match close_probe_child(&mut child).await {
@@ -433,7 +418,6 @@ impl ProviderAdapter for ClaudeCliProvider {
 
         let available = matches!(status, Some(status) if status.success());
         if !available {
-            // The child already exited; confirm the handle is reaped.
             let _ = close_probe_child(&mut child).await;
         }
         Ok(ProviderHealth {
@@ -452,11 +436,9 @@ impl ProviderAdapter for ClaudeCliProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // Native provider launch only registers session state — the CLI
         // child spawns lazily on the first execute().
         let host_session_id = HostSessionId::new();
 
-        // Generate a UUID for Claude CLI session continuity (AR-5). The
         // crate emits `--session-id <uuid>` on first execute and
         // `--resume <uuid>` on subsequent ones.
         let claude_session_id = uuid::Uuid::new_v4();
@@ -492,7 +474,6 @@ impl ProviderAdapter for ClaudeCliProvider {
         })
     }
 
-    // Multi-turn execute involves session-state lookup, crate client
     // spawn + stdin write, and the frame stream — splitting would reduce
     // clarity, so allow the line count here.
     #[allow(clippy::too_many_lines)]
@@ -521,7 +502,6 @@ impl ProviderAdapter for ClaudeCliProvider {
             ));
         }
 
-        // Build prompt text from content blocks.
         let prompt_text: String = content
             .iter()
             .map(|block| match block {
@@ -538,7 +518,6 @@ impl ProviderAdapter for ClaudeCliProvider {
             ));
         }
 
-        // Clone the per-session state + working directory under a short
         // registry read (B-2, N-1); the setup I/O then runs lock-free or
         // under the per-session lock only, never the provider-global one.
         let (state, cwd) = {
@@ -555,13 +534,11 @@ impl ProviderAdapter for ClaudeCliProvider {
             (state, cwd)
         };
 
-        // Session continuity state + stale-client cleanup under the
         // per-session lock so a concurrent execute/shutdown cannot race a
         // half-initialized session.
         let (claude_session_id, is_resume) = {
             let mut guard = state.lock().await;
 
-            // A previous turn's stream that was abandoned before its
             // terminal (the consumer dropped it): kill the stale child.
             if guard.client.is_some() {
                 tracing::info!(
@@ -579,7 +556,6 @@ impl ProviderAdapter for ClaudeCliProvider {
             (id, resume)
         };
 
-        // Spawn the CLI child via the crate builder and send the prompt
         // (crate owns all flags — `--print`, stream-json, `--session-id`,
         // `--resume`, `--working-directory`). The setup phase runs under the
         // prompt timeout, mirroring the old spawn + stdin-write enforcement;
@@ -614,7 +590,6 @@ impl ProviderAdapter for ClaudeCliProvider {
                     Some(e.to_string()),
                 )
             })?;
-            // Record the child PID before moving it into the crate client:
             // cancel/shutdown fall back to signalling it when the per-session
             // lock is held by an in-flight frame read (B-2).
             let child_pid = child.id().unwrap_or(0);
@@ -677,7 +652,6 @@ impl ProviderAdapter for ClaudeCliProvider {
         session: &ManagedSessionHandle,
         op_id: HostOperationId,
     ) -> HostResult<()> {
-        // Best-effort graceful stop request, then kill: the crate client is
         // dropped (its Drop kills the child) and the stream backstop emits
         // exactly one `OpFailed(stream_closed)` (AR-1 table). Runs under the
         // per-session lock (B-2); if an in-flight frame read holds it, the
@@ -705,14 +679,12 @@ impl ProviderAdapter for ClaudeCliProvider {
                 }
                 guard.client = None;
                 drop(guard);
-                // The client is dropped (child killed); clear the recorded
                 // PID so a later fallback can never signal a recycled pid.
                 if let Some(ns) = self.sessions.write().await.get_mut(&session.session_id) {
                     ns.child_pid.store(0, Ordering::Relaxed);
                 }
             }
             Err(_) => {
-                // An in-flight frame read holds the per-session lock: kill
                 // the child by PID; the read returns EOF and the stream
                 // backstop emits the one terminal.
                 kill_child_by_pid(pid);
@@ -729,7 +701,6 @@ impl ProviderAdapter for ClaudeCliProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Removing the session drops the crate client (killing the CLI
         // child) once no in-flight frame read holds it; if one does, the
         // child is signalled by PID so shutdown stays prompt (B-2).
         let removed = {
@@ -762,7 +733,6 @@ impl ProviderAdapter for ClaudeCliProvider {
 
 #[cfg(test)]
 mod tests {
-    // Lock guards (session registry / crate client) are intentionally held
     // to the end of the visible test scope for readability; the nursery
     // significant_drop_tightening suggestion to drop them earlier is noise
     // here. `PROCESS_ENV_LOCK` (lib.rs test_support) is deliberately held
@@ -780,7 +750,6 @@ mod tests {
     );
 
     fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
-        // A portable, existing working directory. `/tmp` is not a valid
         // `current_dir` on Windows: spawn fails with ERROR_DIRECTORY (os
         // error 267) before the fixture is ever reached. See register row
         // R-V1202-P1T3-001.
@@ -798,7 +767,6 @@ mod tests {
 
     fn launch_spec() -> LaunchSpec {
         LaunchSpec {
-            // Portable, existing working directory (see `test_probe_request`).
             cwd: std::env::temp_dir(),
             model: None,
             mode: None,
@@ -844,7 +812,6 @@ mod tests {
         provider: &ClaudeCliProvider,
         text: &str,
     ) -> (ManagedSessionHandle, HostEventStream) {
-        // Serialize with the env-mutating discovery tests: the fixture is
         // spawned via `#!/usr/bin/env python3`, which resolves python3
         // through PATH at execve time (see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
@@ -1011,7 +978,6 @@ mod tests {
     /// argv per spawn).
     #[tokio::test]
     async fn second_execute_resumes_session() {
-        // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
@@ -1115,7 +1081,6 @@ mod tests {
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
 
-        // Pump the first frame so the turn is visibly streaming.
         let first = stream.next().await.expect("first event").expect("ok");
         assert!(matches!(
             first,
@@ -1158,7 +1123,6 @@ mod tests {
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
 
-        // Pump the first frame so the turn is visibly streaming.
         let first = stream.next().await.expect("first event").expect("ok");
         assert!(matches!(first, HostEvent::MessageDelta(_)));
 
@@ -1227,7 +1191,6 @@ mod tests {
             ..TimeoutConfig::default()
         };
         let provider = {
-            // Resolve the fixture launcher under the env lock: `fixture_launch`
             // inspects PATH on Windows. The raw `.py` fixture is never spawned
             // directly — a bare Python file is not executable on Windows.
             let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
@@ -1245,14 +1208,12 @@ mod tests {
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
 
-        // Pump the first frame so the turn is visibly streaming.
         let first = stream.next().await.expect("first event").expect("ok");
         assert!(matches!(
             first,
             HostEvent::MessageDelta(d) if d.text == "hello from mock claude"
         ));
 
-        // The next frame never arrives (the child is silent). With the old
         // prompt_ms-based per-frame timeout this emitted OpFailed(timeout)
         // after ~1s; the fixed rail keeps waiting (old-rail EOF semantics).
         let next =
@@ -1262,7 +1223,6 @@ mod tests {
             "silent turn must keep waiting, not emit a timeout terminal"
         );
 
-        // Tear down so no child process leaks.
         provider.shutdown(handle).await.expect("shutdown");
     }
 
@@ -1287,14 +1247,12 @@ mod tests {
         let (handle, stream) = launch_and_execute(&provider, "hi").await;
         let mut stream = stream;
 
-        // Pump the first frame so the turn is visibly streaming.
         let first = stream.next().await.expect("first event").expect("ok");
         assert!(matches!(
             first,
             HostEvent::MessageDelta(d) if d.text == "hello from mock claude"
         ));
 
-        // Poll in a background task so the next frame read is in flight.
         let pump = tokio::spawn(async move { stream.collect::<Vec<_>>().await });
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
@@ -1308,7 +1266,6 @@ mod tests {
             "cancel must not wait on the session's own in-flight frame read"
         );
 
-        // The stream terminates with the backstop once the child is dead.
         let events = tokio::time::timeout(std::time::Duration::from_secs(2), pump)
             .await
             .expect("stream must terminate promptly after cancel")
@@ -1332,7 +1289,6 @@ mod tests {
     /// replaces the provider-global write lock.
     #[tokio::test]
     async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
-        // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
@@ -1352,11 +1308,9 @@ mod tests {
             .await
             .expect("execute a");
 
-        // Keep session A's stream polling so its frame read is in flight.
         let pump = tokio::spawn(async move {
             let _ = stream_a.collect::<Vec<_>>().await;
         });
-        // Let the read settle into the blocked frame read.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         let handle_b = provider.launch(launch_spec()).await.expect("launch b");
@@ -1381,7 +1335,6 @@ mod tests {
             "shutdown of session B must not wait on session A's frame read"
         );
 
-        // Clean up session A: abort the pump (releasing the blocked read),
         // then tear the session down so no child process leaks.
         pump.abort();
         let _ = pump.await;
@@ -1392,7 +1345,6 @@ mod tests {
     /// `working_directory` (observed as the child's working directory).
     #[tokio::test]
     async fn launch_cwd_is_applied_to_cli_child() {
-        // Serialize with env-mutating discovery tests (fixture spawns
         // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");

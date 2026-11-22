@@ -1,5 +1,4 @@
 /**
- * Creator profile switcher — topnav identity control (IA spec §3.1).
  *
  * Dropdown lists creators from the existing surface (`GET /v1/daemon/creators`),
  * shows ✓ on the active row, appends the § Copy trailing item (`＋ 新建 Creator…`),
@@ -75,7 +74,6 @@ export function ProfileSwitcher() {
     try {
       await client.setActiveCreator({ creator_id: creatorId });
       setActiveCreatorId(creatorId);
-      // Nearly every surface is creator-scoped — refetch active queries.
       void queryClient.invalidateQueries();
     } catch (error) {
       toast({

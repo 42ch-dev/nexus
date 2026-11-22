@@ -158,13 +158,10 @@ async fn insert_with_retry(
             Ok(_) => {
                 return fetch_by_id(pool, &job_id).await;
             }
-            Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("1555") => {
-                // SQLite UNIQUE constraint violation (code 1555) — retry with new UUID
-            }
+            Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("1555") => {}
             Err(e) => return Err(e),
         }
     }
-    // Should never reach here with UUIDv4
     Err(sqlx::Error::Configuration(
         "UNIQUE constraint violation after retry — impossible with UUIDv4".into(),
     ))
@@ -183,7 +180,6 @@ pub async fn enqueue(
     work_entry_id: &str,
     world_id: &str,
 ) -> Result<KbExtractJob, sqlx::Error> {
-    // Check for existing non-failed job (idempotency).
     let existing = sqlx::query_as!(
         KbExtractJob,
         r#"SELECT
@@ -214,7 +210,6 @@ pub async fn enqueue(
         return Ok(job);
     }
 
-    // Insert new job with retry on PRIMARY KEY collision.
     insert_with_retry(
         pool,
         creator_id,
@@ -250,7 +245,6 @@ pub async fn enqueue_with_artifact(
     profile_hint: Option<&str>,
     work_id: Option<&str>,
 ) -> Result<KbExtractJob, sqlx::Error> {
-    // Check for existing non-failed job (idempotency).
     let existing = sqlx::query_as!(
         KbExtractJob,
         r#"SELECT
@@ -408,7 +402,6 @@ pub async fn claim_job(
 ) -> Result<Option<KbExtractJob>, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    // Select oldest queued job for this creator.
     let job = sqlx::query_as!(
         KbExtractJob,
         r#"SELECT
@@ -438,7 +431,6 @@ pub async fn claim_job(
         return Ok(None);
     };
 
-    // Atomically mark as running within the same transaction.
     let result = sqlx::query!(
         r#"UPDATE kb_extract_jobs
            SET status = 'running', started_at = datetime('now')
@@ -455,7 +447,6 @@ pub async fn claim_job(
 
     tx.commit().await?;
 
-    // Re-fetch to get the updated started_at timestamp.
     let claimed = fetch_by_id(pool, &job.job_id).await?;
     Ok(Some(claimed))
 }
@@ -510,10 +501,7 @@ pub async fn mark_failed(
     Ok(())
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.50 T-B P2 — Refreshable scan: idempotent upsert of pending candidates
 // (entity-scope-model.md §5.5; compass §0.1 decision 7)
-// ═══════════════════════════════════════════════════════════════════════
 
 /// Outcome of an idempotent upsert of a pending promotion candidate.
 ///
@@ -622,7 +610,6 @@ pub async fn upsert_pending_candidate(
     .await?;
 
     let Some(row) = existing else {
-        // No existing candidate — insert a new pending row.
         let job = insert_pending(
             pool,
             creator_id,
@@ -639,11 +626,9 @@ pub async fn upsert_pending_candidate(
     };
 
     if row.promotion_status == "confirmed" {
-        // Terminal per §5.5.2 — never mutate a promoted candidate.
         return Ok(UpsertOutcome::Unchanged(row.job_id));
     }
 
-    // Pending row: refresh only if something material changed.
     let same_payload = row.proposed_payload.as_deref() == Some(proposed_payload);
     let same_chapter = row.source_chapter_id == source_chapter_id;
     let same_type = row.block_type_guess.as_deref() == Some(block_type_guess);
@@ -699,9 +684,6 @@ pub async fn delete_pending_for_chapter(
     Ok(result.rows_affected() > 0)
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// V1.50 T-B P1 — World KB promotion lifecycle (entity-scope-model.md §5.5)
-// ═══════════════════════════════════════════════════════════════════════
 //
 // The promotion lifecycle is *orthogonal* to the V1.29/V1.40 extraction queue
 // (`KbExtractJob` + `status` = queued/running/done/failed). Review-time
@@ -804,7 +786,6 @@ pub async fn insert_pending(
     canonical_name_guess: &str,
     proposed_payload: &str,
 ) -> Result<KbExtractPromotion, sqlx::Error> {
-    // The insert runs on one pooled connection; the caller-owned transaction
     // lane passes its own connection to `insert_pending_with_llm` directly.
     let mut conn = pool.acquire().await?;
     insert_pending_with_llm(
@@ -1117,7 +1098,6 @@ pub async fn mark_confirmed_in_tx_with_cas(
         return Ok(true);
     }
 
-    // rows_affected == 0 — either the row was already non-pending, or the
     // version changed (CAS mismatch). Re-read to disambiguate.
     let (status, version): (Option<String>, Option<i64>) =
         sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
@@ -1127,10 +1107,7 @@ pub async fn mark_confirmed_in_tx_with_cas(
             .map_or((None, None), |(s, v): (String, i64)| (Some(s), Some(v)));
 
     match (status.as_deref(), version) {
-        (Some(s), _) if s != "pending" => {
-            // Row exists but is already confirmed/rejected — not a version conflict.
-            Ok(false)
-        }
+        (Some(s), _) if s != "pending" => Ok(false),
         (Some(_), Some(actual)) if actual != expected_version => {
             Err(LocalDbError::VersionMismatch {
                 table: "kb_extract_jobs".to_string(),
@@ -1139,14 +1116,10 @@ pub async fn mark_confirmed_in_tx_with_cas(
                 actual: Some(actual),
             })
         }
-        (None, _) => {
-            // Row not found at all.
-            Err(LocalDbError::MissingVersionKey {
-                key: format!("kb_extract_jobs/{job_id}"),
-            })
-        }
+        (None, _) => Err(LocalDbError::MissingVersionKey {
+            key: format!("kb_extract_jobs/{job_id}"),
+        }),
         _ => {
-            // Defensive: row is pending and version matches but rows_affected was 0
             // — shouldn't happen, but treat as version mismatch for safety.
             Err(LocalDbError::VersionMismatch {
                 table: "kb_extract_jobs".to_string(),
@@ -1197,7 +1170,6 @@ pub async fn mark_auto_promoted_in_tx_with_cas(
         return Ok(true);
     }
 
-    // Disambiguate stale version vs already-confirmed/rejected using the same
     // logic as mark_confirmed_in_tx_with_cas.
     let (status, version): (Option<String>, Option<i64>) =
         sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
@@ -1248,8 +1220,6 @@ pub async fn mark_rejected(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx
     Ok(result.rows_affected() > 0)
 }
 
-// ── internal fetchers ─────────────────────────────────────────────────
-
 async fn fetch_promotion_by_id<'e, E>(
     executor: E,
     job_id: &str,
@@ -1297,7 +1267,6 @@ mod tests {
         assert!(job.job_id.starts_with("xj_"));
         assert_eq!(job.status, "queued");
         assert_eq!(job.creator_id, "ctr_1");
-        // UUID format: xj_ + 32 hex chars
         let uuid_part = &job.job_id[3..];
         assert_eq!(uuid_part.len(), 32);
         assert!(uuid_part.chars().all(|c| c.is_ascii_hexdigit()));
@@ -1366,7 +1335,6 @@ mod tests {
         mark_running(&pool, &job.job_id).await.unwrap();
         mark_failed(&pool, &job.job_id, "error").await.unwrap();
 
-        // After failure, re-enqueue should create a new job.
         let job2 = enqueue(&pool, "ctr_1", "wrk_1", "kb_abc", "wld_1")
             .await
             .unwrap();
@@ -1402,11 +1370,9 @@ mod tests {
                 .unwrap();
         }
 
-        // Limit of 3 should return only 3
         let jobs = list_by_creator(&pool, "ctr_1", 3).await.unwrap();
         assert_eq!(jobs.len(), 3);
 
-        // Limit of 100 returns all
         let jobs = list_by_creator(&pool, "ctr_1", 100).await.unwrap();
         assert_eq!(jobs.len(), 5);
     }
@@ -1431,8 +1397,6 @@ mod tests {
         assert!(next.job_id.starts_with("xj_"));
         assert_ne!(next.job_id, j1.job_id);
     }
-
-    // ── K1: Atomic claim_job tests ──────────────────────────────────
 
     #[tokio::test]
     async fn test_claim_job_selects_oldest_queued() {
@@ -1464,19 +1428,16 @@ mod tests {
             .unwrap();
         mark_running(&pool, &j1.job_id).await.unwrap();
 
-        // Only running jobs — nothing to claim
         assert!(claim_job(&pool, "ctr_1").await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn test_claim_job_concurrent_double_claim_prevented() {
         let (_dir, pool) = fresh_engine_pool().await;
-        // Enqueue a single job
         let _j = enqueue(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
             .await
             .unwrap();
 
-        // Two concurrent claimers — SQLite may return BUSY for one of them,
         // which we treat as "did not claim".
         let pool1 = pool.clone();
         let pool2 = pool.clone();
@@ -1486,7 +1447,6 @@ mod tests {
         let r1 = h1.await.unwrap().ok().flatten();
         let r2 = h2.await.unwrap().ok().flatten();
 
-        // Exactly one should succeed (the other gets SQLITE_BUSY → Err, or
         // finds no queued row → None).
         let claimed_count = usize::from(r1.is_some()) + usize::from(r2.is_some());
         assert!(
@@ -1514,8 +1474,6 @@ mod tests {
         let done = get(&pool, &claimed.job_id).await.unwrap().unwrap();
         assert_eq!(done.status, "done");
     }
-
-    // ── V1.40 P3: Artifact locator tests ────────────────────────────
 
     #[tokio::test]
     async fn test_enqueue_with_artifact_fields() {
@@ -1561,7 +1519,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Same work_entry_id + world_id → idempotent return
         let job2 = enqueue_with_artifact(
             &pool,
             "ctr_1",
@@ -1591,8 +1548,6 @@ mod tests {
         assert!(job.work_id.is_none());
     }
 
-    // ── V1.52 T-A P0: auto-promote audit columns ──────────────────────
-
     #[tokio::test]
     async fn auto_promote_columns_default_to_null_and_record_on_flip() {
         let (_dir, pool) = fresh_engine_pool().await;
@@ -1618,7 +1573,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Freshly inserted rows have no auto-promotion audit.
         assert!(pending.auto_promoted_at.is_none());
         assert!(pending.auto_promoted_reason.is_none());
         assert!(pending.auto_promoted_by.is_none());

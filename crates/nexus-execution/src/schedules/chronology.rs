@@ -54,7 +54,6 @@ impl AutoChronologyConfig {
     /// be best-effort and must never refuse to start.
     #[must_use]
     pub fn from_env() -> Self {
-        // Spec §3 names the env in minutes (`NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN`).
         let env_value = std::env::var(ENV_AUTO_CHRONOLOGY_INTERVAL_MIN)
             .ok()
             .map(|s| s.as_str().to_string());
@@ -109,7 +108,6 @@ pub fn spawn_auto_chronology_tick(
         );
 
         let mut ticker = tokio::time::interval(config.interval);
-        // `Delay` keeps ticks spaced after a long pause (e.g. laptop sleep);
         // avoids piling advance evaluations onto the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -133,7 +131,6 @@ pub fn spawn_auto_chronology_tick(
 /// Thin wrapper over [`nexus_orchestration::auto_chronology::run_one_tick`];
 /// the orchestration layer owns scan + finish detection + advance.
 pub async fn run_one_tick(pool: &SqlitePool, workspace_dir: Option<&std::path::Path>) {
-    // Use an empty path sentinel when the caller has no workspace (hermetic
     // DB-only tests). The orchestration advance will fail its outline write
     // per-Work and log the error non-fatally; production always passes a real
     // workspace path.

@@ -1,5 +1,4 @@
 /**
- * User-layer entrance registry (V1.170 P1 — AR-15).
  *
  * Single typed **descriptor** + **route classification** SSOT for the
  * Create | Develop layout split. Mirrors the `SETTINGS_SECTION_DESCRIPTORS`
@@ -72,19 +71,15 @@ export interface EntranceDescriptor {
  * `resolveSettingsLocation` first (AR-19) — their rules carry `settingsSection`.
  */
 export const ENTRANCE_ROUTE_RULES: readonly EntranceRouteRule[] = [
-  // develop-only surfaces (guard-bounced on Create)
   { path: '/strategies', visibility: 'develop-only' },
-  // Strategy canvas — support deep-link per product EL §3 (no bounce, no toast).
   { path: '/strategies/:presetId', visibility: 'develop-only', allowDeepLink: true },
   { path: '/sessions', visibility: 'develop-only' },
   { path: '/schedule', visibility: 'develop-only' },
-  // Compute modules page (developer rail).
   { path: '/modules', visibility: 'develop-only' },
   { path: '/capabilities', visibility: 'develop-only' },
   { path: '/connect', visibility: 'develop-only' },
   { path: '/developer', visibility: 'develop-only' },
   { path: '/works/:workId/inspector', visibility: 'develop-only' },
-  // Settings sections — section-level visibility via resolveSettingsLocation.
   { path: '/settings/agent', visibility: 'develop-only', settingsSection: 'agent' },
   { path: '/settings/advanced', visibility: 'develop-only', settingsSection: 'advanced' },
   { path: '/settings/workspace', visibility: 'both', settingsSection: 'workspace' },
@@ -100,7 +95,6 @@ export function isEntranceId(value: string | null | undefined): value is Entranc
 }
 
 /**
- * Both-visibility nav groups (EL §3 keep-visible table) — ONE source shared by
  * both entrance descriptors (plan QC S-1): adding a surface visible on both
  * trees edits this constant only, not the two descriptor lists.
  */
@@ -138,7 +132,6 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
     layoutLabel: 'Create',
     personaLabel: 'Content creator',
     landRoute: '/works',
-    // EL §3 — reduced tree: primary JTBD (works/worlds), Memory, findings.
     navGroups: COMMON_NAV_GROUPS,
     hiddenSettingsSections: ['agent', 'advanced'],
     bounceToastKey: 'entrance.bounceToast',
@@ -148,7 +141,6 @@ export const ENTRANCE_DESCRIPTORS: readonly EntranceDescriptor[] = [
     layoutLabel: 'Develop',
     personaLabel: 'Developer',
     landRoute: '/developer',
-    // EL §4 — full config surface + Develop hub as the land route.
     navGroups: [
       {
         id: 'hub',

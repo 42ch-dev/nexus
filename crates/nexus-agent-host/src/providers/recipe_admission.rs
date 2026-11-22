@@ -1,4 +1,4 @@
-//! Rust-side admission of [`ValidatedProviderRecipe`] for JS provider callbacks.
+//! Rust-side admission of [`ValidatedProviderRecipe`] for JS provider callbacks. See docs/specs/agents/agent-host.md.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

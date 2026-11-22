@@ -43,7 +43,6 @@ async function waitForDeath(child, budgetMs = 3000) {
 
 describe('cancel honours the request deadline', () => {
   test('a never-settling prompt does not block the owned-child reap', async () => {
-    // A long-lived owned child, as a real ACP session would have.
     const child = spawn(resolveNode(), ['-e', 'setInterval(() => {}, 1000)'], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -53,7 +52,6 @@ describe('cancel honours the request deadline', () => {
     const engine = createTestEngine();
     const owner = makeOwner(child);
     engine.adoptSession('sess-1', owner);
-    // A prompt that NEVER settles, and a cancel notification that returns
     // immediately without settling it — the shape that used to hang the adapter
     // forever because the prompt join was unbounded.
     owner.connection = { cancel: async () => undefined };
@@ -70,16 +68,11 @@ describe('cancel honours the request deadline', () => {
     });
     const elapsed = Date.now() - started;
 
-    // The deadline bounds the cancel + prompt join; the call must come back
-    // promptly instead of awaiting a prompt that never settles.
     assert.ok(
       elapsed < 2000,
       `cancel must respect deadline_ms, took ${elapsed}ms`,
     );
 
-    // A never-settling prompt consumes the whole deadline, so nothing is left to
-    // confirm a reap. The verdict must be an honest `interrupted` with the owner
-    // RETAINED — never a silent success, and never a kill it cannot verify.
     assert.equal(reply.ok, false, `must not claim success: ${JSON.stringify(reply)}`);
     assert.equal(reply.error?.code, 'interrupted');
     assert.equal(
@@ -89,8 +82,6 @@ describe('cancel honours the request deadline', () => {
     );
     assert.equal(engine.cleanupFenceCount(), 1, 'the owner must be retained for retry');
 
-    // The retained owner settles on a later attempt, and only then is the child
-    // confirmed gone.
     const settled = await engine.trySettleCleanupFences();
     assert.equal(settled.pending.length, 0, `retry must confirm: ${JSON.stringify(settled)}`);
     assert.equal(engine.cleanupFenceCount(), 0);
@@ -138,8 +129,6 @@ describe('cancel honours the request deadline', () => {
     assert.equal(engine.cleanupFenceCount(), 1);
     assert.equal(childAlive(child), true, 'mismatched identity must not be signalled');
 
-    // Restore the real identity only in the fixture. A subsequent public cancel
-    // must perform the actual reap and clear its fence, without a test-only
     // settlement call standing in for the production retry path.
     owner.boundIdentity = identity;
     const settled = await cancel();
@@ -174,7 +163,6 @@ describe('cancel honours the request deadline', () => {
       elapsed < 2000,
       `shutdown must respect deadline_ms, took ${elapsed}ms`,
     );
-    // Same contract as cancel: no budget left means fence, retain, retry.
     assert.equal(engine.cleanupFenceCount(), 1, 'the owner must be retained for retry');
     const settled = await engine.trySettleCleanupFences();
     assert.equal(settled.pending.length, 0, `retry must confirm: ${JSON.stringify(settled)}`);
@@ -187,7 +175,6 @@ describe('cancel honours the request deadline', () => {
 
 describe('one absolute deadline per handler', () => {
   /**
-   * A child that IGNORES SIGTERM. The handler can only confirm the reap by
    * escalating to SIGKILL, which costs far more than the supplied deadline — so
    * a handler that grants itself a fresh default reap budget is instantly
    * visible here, both in wall time and in whether it claims a confirmed reap.
@@ -230,20 +217,15 @@ describe('one absolute deadline per handler', () => {
     });
     const elapsed = Date.now() - started;
 
-    // The whole handler is bounded by the ONE supplied deadline — the cancel
-    // phase plus the reap, not each with its own budget.
     assert.ok(
       elapsed <= deadlineMs + DEADLINE_TOLERANCE_MS,
       `handler must finish within its deadline (${deadlineMs}ms), took ${elapsed}ms`,
     );
 
-    // With the budget spent it must NOT claim a confirmed reap.
     assert.equal(reply.ok, false, `must not claim success: ${JSON.stringify(reply)}`);
     assert.equal(reply.error?.code, 'interrupted');
     assert.equal(reply.error?.details?.cleanup_unconfirmed, true);
 
-    // The owner is RETAINED for a later settlement, and the child is untouched —
-    // a kill we cannot confirm is not issued.
     assert.equal(
       engine.cleanupFenceCount(),
       1,
@@ -251,7 +233,6 @@ describe('one absolute deadline per handler', () => {
     );
     assert.equal(childAlive(child), true, 'no unconfirmable kill may be issued');
 
-    // A later settlement retries and, with a budget it can actually use,
     // confirms the reap (SIGKILL escalation) and clears the fence.
     const settled = await engine.trySettleCleanupFences();
     assert.equal(settled.pending.length, 0, `settlement must confirm: ${JSON.stringify(settled)}`);
@@ -302,7 +283,6 @@ describe('one absolute deadline per handler', () => {
   });
 
   test('a generous deadline still confirms the reap in one call', async () => {
-    // Contrast case: with enough budget the same child is reaped inside the
     // handler, so the deadline bounds the work rather than always fencing.
     const child = spawnTermResistantChild();
     await new Promise((resolve) => setTimeout(resolve, 150));

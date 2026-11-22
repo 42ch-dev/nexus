@@ -20,7 +20,6 @@ const AGENTS = [
 ];
 
 /**
- * Browser-shaped stub plus a call log, so finish-path ordering is observable:
  * creator bootstrap → workspace selection → world creation, with the derived
  * gate re-probed after selection (`probe` entries) and no client-side marker.
  */
@@ -46,14 +45,12 @@ function makeClient({
     runtimeStatus: () => {
       calls.push('probe');
       probeCount += 1;
-      // The mount probe answers; the finish-path re-probe is what fails.
       if (gateProbeFails && probeCount > 1) {
         return Promise.reject(new Error('gate probe failed'));
       }
       return Promise.resolve({ workspace_initialized: workspaceInitialized });
     },
     scanAgents: () => Promise.resolve({ agents: AGENTS }),
-    // The agent step reads the saved profile on mount and persists the choice
     // on advance; the daemon-global profile it reads back is empty by default.
     getAgentProfile: () =>
       profileReadFails
@@ -74,7 +71,6 @@ function makeClient({
     setActiveWorkspace: (request: { creator_id?: string; workspace_slug: string }) => {
       calls.push('select');
       if (selectionFails) return Promise.reject(new Error('workspace selection failed'));
-      // The service promotes the shell in process on selection (D21).
       workspaceInitialized = true;
       return Promise.resolve({
         creator_id: request.creator_id ?? 'creator-new',
@@ -190,7 +186,6 @@ describe('WizardShell', () => {
     const { client } = makeClient({ profileReadFails: true });
     renderShell({ client });
 
-    // A failed read must not hold the flow: onboarding proceeds with the
     // scan-recommended default instead of dead-ending on the profile gate.
     await reachWorldStep(user);
   });
@@ -207,9 +202,7 @@ describe('WizardShell', () => {
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/worlds/world-1?layer=brief'),
     );
-    // No workspace-create call exists anywhere in this path (compass D25).
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select', 'world']);
-    // The gate flips by re-probing the promoted service, never by a marker.
     expect(calls.slice(calls.indexOf('select') + 1)).toContain('probe');
     expect(screen.getByText('🎉 世界「灰烬王座」已创建')).toBeInTheDocument();
   });
@@ -256,7 +249,6 @@ describe('WizardShell', () => {
 
     expect(await screen.findByText('无法选择默认工作区')).toBeInTheDocument();
     expect(screen.queryByText(/创建世界失败/)).not.toBeInTheDocument();
-    // Still in the step with the draft; no world was created and nothing navigated.
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
     expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
     expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
@@ -271,12 +263,10 @@ describe('WizardShell', () => {
     await reachWorldStep(user);
     await user.click(screen.getByRole('button', { name: '创建并进入' }));
 
-    // Selection succeeded server-side; only the derived-gate re-probe failed.
     expect(await screen.findByText('状态刷新失败')).toBeInTheDocument();
     expect(screen.getByText('gate probe failed。请重试。')).toBeInTheDocument();
     expect(screen.queryByText('无法选择默认工作区')).not.toBeInTheDocument();
     expect(screen.queryByText(/创建世界失败/)).not.toBeInTheDocument();
-    // Still in the step with the draft; no world was created and nothing navigated.
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
     expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);

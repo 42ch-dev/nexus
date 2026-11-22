@@ -1,5 +1,4 @@
 /**
- * Budget block — P1 T2 (DF-76). Read-only.
  *
  * Renders the activation token-budget accounting (chars/4 estimates):
  * `primary_tokens_est`, `hop_tokens_est`, `cap`, `remaining`. Nullable fields

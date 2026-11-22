@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Exact-origin network auth policy tests (v1.192 P0-T5).
  *
  * Defends the frozen rule: the stored X-API-Key is attached ONLY to the
  * exact configured origin (scheme/host/port) AND the /v1/daemon/ path
@@ -25,7 +24,6 @@ const GOOD_URL = 'https://daemon.example.com:8443/v1/daemon/runtime/discovery';
 const FETCH = { url: GOOD_URL, resourceType: 'fetch' };
 
 /**
- * Read a header from Electron's real `webRequest` header-map shape
  * (`Record<string, string>`), case-insensitively.
  */
 function headerValue(headers, name) {
@@ -41,9 +39,6 @@ function headerCount(headers, name) {
   return Object.keys(headers).filter((k) => k.toLowerCase() === name.toLowerCase()).length;
 }
 
-// ---------------------------------------------------------------------------
-// Pure decision: exact origin + path prefix + resource type + active config
-// ---------------------------------------------------------------------------
 
 test('injects for fetch to the exact pinned origin and daemon prefix', () => {
   assert.deepEqual(decideAuthInjection(AUTH, FETCH), { inject: 'sk-live-secret' });
@@ -75,9 +70,7 @@ test('never injects on the same host via a different scheme or port', () => {
 });
 
 test('redirect target that left the pinned origin drops the credential', () => {
-  // Original request authenticated...
   assert.deepEqual(decideAuthInjection(AUTH, FETCH), { inject: 'sk-live-secret' });
-  // ...redirect (301/302) decided per request: foreign target gets nothing.
   assert.deepEqual(
     decideAuthInjection(AUTH, { url: 'https://other.example.net/v1/daemon/status', resourceType: 'fetch' }),
     { inject: null },
@@ -92,7 +85,6 @@ test('never injects outside the daemon path prefix on the pinned origin', () => 
   ]) {
     assert.deepEqual(decideAuthInjection(AUTH, { url, resourceType: 'fetch' }), { inject: null }, url);
   }
-  // Exact prefix with a real path segment is fine.
   assert.deepEqual(
     decideAuthInjection(AUTH, { url: 'https://daemon.example.com:8443/v1/daemon/', resourceType: 'xhr' }),
     { inject: 'sk-live-secret' },
@@ -144,9 +136,6 @@ test('malformed request URLs never carry auth', () => {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Header application: renderer-supplied auth stripped first
-// ---------------------------------------------------------------------------
 
 test('renderer-supplied X-API-Key is stripped before injection decision', () => {
   const headers = applyAuthHeaders(AUTH, {
@@ -168,9 +157,6 @@ test('renderer-supplied auth is stripped even when no injection is allowed', () 
   assert.equal(Object.keys(headers).length, 0, 'foreign request leaves with no auth header at all');
 });
 
-// ---------------------------------------------------------------------------
-// Real hook wiring through a fake session: actual header isolation
-// ---------------------------------------------------------------------------
 
 function fakeSession() {
   const listeners = [];
@@ -202,7 +188,6 @@ test('hook injects only for the exact pinned origin via the session listener', (
   const foreign = request({ url: 'https://evil.example.com/v1/daemon/status', resourceType: 'xhr' }, () => AUTH);
   assert.equal(headerValue(foreign, 'x-api-key'), undefined);
 
-  // Connection switched off / cleared: the re-read authority returns null.
   const inactive = request({ url: GOOD_URL, resourceType: 'xhr' }, () => null);
   assert.equal(headerValue(inactive, 'x-api-key'), undefined);
 });

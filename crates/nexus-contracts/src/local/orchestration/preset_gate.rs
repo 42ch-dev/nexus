@@ -5,10 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Gate declaration types (parsed from preset YAML `gates:` section)
-// ---------------------------------------------------------------------------
-
 /// A single gate declaration from a preset manifest.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]

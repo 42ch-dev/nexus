@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Round-trip proofs for the in-memory `KnowledgeEntryPort` stub and the
 //! `KnowledgeEntryRecord ↔ spoke KnowledgeEntry` conversion seam it is driven
 //! through (K2 §5.1 P0).

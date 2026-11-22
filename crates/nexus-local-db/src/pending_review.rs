@@ -252,11 +252,9 @@ mod tests {
         create_pending_review(&pool, &record2).await.unwrap();
         create_pending_review(&pool, &record3).await.unwrap();
 
-        // List for ctr_test should return 2 records (001 and 003)
         let list = list_pending_reviews(&pool, "ctr_test").await.unwrap();
         assert_eq!(list.len(), 2);
 
-        // Ordered by created_at DESC
         assert_eq!(list[0].pending_id, "pending_003");
         assert_eq!(list[1].pending_id, "pending_001");
     }

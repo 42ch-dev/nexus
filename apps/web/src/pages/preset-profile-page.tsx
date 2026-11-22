@@ -1,5 +1,4 @@
 /**
- * Per-preset profile drill-down (V1.171 P1 — PL-13, AR-27).
  *
  * Selecting a preset from the strategy catalog opens this view at
  * `/strategies/:presetId/profile`. It renders the P0 preset profile
@@ -53,7 +52,6 @@ function exitWhenSummary(exitWhen: PresetProfileExitWhen): string {
 }
 
 /**
- * Trigger-lane classification row (PL-3 locked vocabulary; PL-11/PL-12).
  *
  * Renders the lane's presence honestly (Yes/No from the profile flags) with
  * the locked vocabulary detail. The profile carries no next-fire value, so
@@ -119,7 +117,6 @@ export function PresetProfilePage() {
   const { presetId } = useParams<{ presetId: string }>();
   const navigate = useNavigate();
   const profile = usePresetProfile(presetId);
-  // List facts (id + source) for the graceful missing-profile summary
   // (PL-13) — the list already showed the preset, so the summary must not
   // imply it is gone. Same query key as the catalog page: cached.
   const presets = usePresets();
@@ -152,7 +149,6 @@ export function PresetProfilePage() {
       );
     }
 
-    // Graceful summary: id + list facts (source) + honest copy. The preset
     // may still exist in the list — never a hard "not found" error (PL-13).
     const all = presets.data
       ? [...presets.data.user, ...presets.data.system, ...presets.data.embedded]

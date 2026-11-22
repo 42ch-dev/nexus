@@ -7,7 +7,6 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Approve route (`POST /v1/daemon/strategies/{strategy_id}/approve`): the preset family mounts it
  * at the Strategy tier and hands the whole request body — the guarded base revision and the exact
  * simulated trajectory — to the core authority. The core's own approvals, refusals and snapshot
  * immutability are proven in `crates/nexus-core/tests/approve_route.rs`; this target proves the
@@ -106,7 +105,6 @@ describe('approve route (POST /v1/daemon/strategies/{id}/approve)', () => {
   });
 
   test('surfaces the core refusal unchanged', async () => {
-    // The native boundary rejects with a JSON `CoreError` envelope; the adapter must render its
     // status, code and structured details verbatim.
     const refusal = new Error(
       JSON.stringify({

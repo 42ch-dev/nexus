@@ -153,7 +153,6 @@ impl CoreHomeService {
 
         let global_db = self.nexus_home.join("state.db");
 
-        // Read-only collision/convergence decision tree (no store writes when
         // the registration is a no-op or a collision).
         if let Some(trimmed) = display_name.as_deref() {
             if global_db.exists() {
@@ -187,7 +186,6 @@ impl CoreHomeService {
             }
         }
 
-        // Mint leg: writable global store (migrations + seed versions via the
         // guarded initialization factory), INSERT, optional platform link,
         // then the active-creator config write.
         std::fs::create_dir_all(&self.nexus_home).map_err(|e| CoreError::Internal {
@@ -207,7 +205,6 @@ impl CoreHomeService {
         )
         .await;
         if let Err(err) = inserted {
-            // The unique partial index on persistent display_name rejects a
             // name minted concurrently between our 0-match read and this
             // INSERT (TOCTOU): surface the same honest collision. The
             // collision read must run on the still-open pool — reading after
@@ -253,7 +250,6 @@ impl CoreHomeService {
 
         Ok(CreatorDetail {
             creator_id,
-            // Registration activates the global identity; the workspace
             // `creators` row (and with it the holder registry row) is
             // materialized by the workspace-selection path, so no registry
             // state is at hand to project here.
@@ -283,7 +279,6 @@ impl CoreHomeService {
         }
         Ok(CreatorDetail {
             creator_id: creator_id.to_string(),
-            // Convergence is a config/selection read: it holds no workspace
             // pool, so there is no registry state to project.
             holder_entry_id: None,
             display_name: display_name.map(str::to_string),
@@ -357,7 +352,6 @@ impl CoreHomeService {
         }
         let slug = request.workspace_slug;
 
-        // Serialize the whole check+register transaction; see `CREATE_LOCK`.
         let _create_guard = CREATE_LOCK.lock().await;
 
         let op_dir = operational_workspace_dir(&self.user_home, &creator_id, &slug);
@@ -384,7 +378,6 @@ impl CoreHomeService {
             )));
         }
 
-        // `Some` means the target already existed: it is adopted only when
         // empty, and a later failure removes just the artifacts we added.
         let preexisting_root = creative_root.is_dir().then_some(creative_root.as_path());
         if let Some(root) = preexisting_root {
@@ -396,7 +389,6 @@ impl CoreHomeService {
             }
         }
         if let Err(err) = probe_creative_dir(&creative_root) {
-            // The probe is the first writer; undo the root it created.
             if preexisting_root.is_none() {
                 let _ = std::fs::remove_dir_all(&creative_root);
             }
@@ -572,7 +564,6 @@ impl CoreHomeService {
         }
         deny_foreign_workspace(&op_dir, &creator_id, workspace_slug)?;
 
-        // Initialize only the chosen workspace BEFORE committing the
         // selection: guarded initialization factory (Direct-writer admission
         // + migrations + seed versions) and the workspace `creators` row the
         // FK-prechecks rely on. The pool is closed before returning — the
@@ -587,12 +578,10 @@ impl CoreHomeService {
         pool.close().await;
         materialized.map_err(local_db_err)?;
 
-        // A creator bootstrap only pre-creates the directory: register the
         // workspace's discovery metadata so it is listable (D25 — the first
         // workspace is selected, never created over HTTP).
         self.ensure_workspace_registration(&creator_id, workspace_slug)?;
 
-        // Failure-atomic selection commit: the config write happens only
         // after initialization fully succeeded, so an initialization failure
         // preserves the previous selection instead of committing a broken one.
         write_active_selection(
@@ -632,7 +621,6 @@ impl CoreHomeService {
 
         let workspace_json = creative_meta.join("workspace.json");
         if !workspace_json.exists() {
-            // D25 copy: the pre-created first workspace is the product's
             // `默认工作区`; an additional workspace names itself by slug (the
             // deferred create route supplies its own display name).
             let display_name = if slug == "default" {
@@ -889,7 +877,6 @@ fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
         field: "creative_root".to_string(),
         reason: "not readable".to_string(),
     })?;
-    // OS thumbnail/metadata droppings are not author content: adopting a
     // directory that only carries them must not read as "already holds
     // content". `.DS_Store` (Finder), `desktop.ini` (Explorer) and `Thumbs.db`
     // (Explorer thumbs) are the three platforms' equivalents.

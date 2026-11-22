@@ -266,7 +266,6 @@ impl CoreService {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
-        // R-V139P1-W-2: delegate ID mint to findings module (single source of truth).
         let finding_id = findings::mint_finding_id();
         let now = chrono::Utc::now().timestamp();
         let f = Finding {
@@ -322,13 +321,11 @@ impl CoreService {
             creator_id: principal.creator_id().to_string(),
             kind: request.kind,
             rule_suggestion: request.rule_suggestion,
-            // Manual API path — no originating schedule; no idempotency guard.
             source_schedule_id: None,
         };
         let finding_id = findings::create_finding_from_review(&self.inner.pool, &verdict)
             .await
             .map_err(|e| {
-                // R-V139P1-W-6: explicitly log from-review hook errors for production debugging.
                 tracing::warn!(work_id = %work_id, error = %e, "from-review: failed to create finding");
                 FindingsFault::Internal {
                     code: "FINDING_CREATE_FAILED".to_string(),
@@ -359,7 +356,6 @@ impl CoreService {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
 
-        // F-P2 (V1.64): cursor-based pagination. Decode the opaque cursor into
         // the underlying offset, fetch `limit + 1` to detect `has_more`.
         let offset = decode_offset_cursor(query.cursor.as_ref())?;
         let limit = query.limit.unwrap_or(100).min(500);
@@ -434,7 +430,6 @@ impl CoreService {
             .map_err(findings_db_err)?
             .ok_or_else(|| FindingsFault::NotFound(format!("finding {finding_id}")))?;
         if f.work_id != work_id {
-            // Path `work_id` does not match the stored row: keep the legacy
             // 404 shape so the mismatch is indistinguishable from absence.
             return Err(FindingsFault::NotFound(format!("finding {finding_id}")).into());
         }
@@ -481,7 +476,6 @@ impl CoreService {
         finding_id: String,
         request: FindingsApi,
     ) -> CoreResult<FindingDetailResponse> {
-        // Payload shape first: the tri-state carrier is a client-shaped input,
         // so a malformed value is refused before the identity gates — the same
         // order the adapter's own parse had before the generated DTO replaced it.
         let patch = finding_patch_from_update(request)?;
@@ -497,7 +491,6 @@ impl CoreService {
         )
         .await
         .map_err(|err| match err {
-            // V1.49 P0 W-1: the DAO emits typed variants for the PATCH surface.
             // `IllegalTransition` → INVALID_TRANSITION (422); `InvalidEnum` →
             // INVALID_INPUT (422). Both are observed with a structured
             // `tracing::warn!` (qc3 S-2). No string-sniffing.
@@ -624,7 +617,6 @@ impl CoreService {
             .into());
         }
 
-        // If both fields are absent, the contract says return 200 with updated: 0.
         if patch.status.is_none() && patch.target_executor.is_none() {
             return Ok(BatchUpdateFindingsResponse {
                 updated: 0,
@@ -670,7 +662,6 @@ impl CoreService {
                         error = %other,
                         "findings batch PATCH: internal error updating finding"
                     );
-                    // Legacy batch surface: validation rejections ride
                     // `invalid_input`; every other fault (invalid enum values
                     // included) classified as `DATABASE_ERROR` via the shared
                     // storage carrier.

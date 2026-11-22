@@ -224,7 +224,6 @@ const GATE_BOUNDARY_TIMEOUT_MS = 15_000;
 const GATE_BOUNDARY_START_INTERVAL_MS = 100;
 const GATE_BOUNDARY_MAX_INTERVAL_MS = 500;
 /**
- * Extra time past the fixture's `timeout_ms` the driver waits with nobody
  * driving the run before the W6 resume re-drives it. The deadline is only
  * evaluated by a driver (`join_timeout_tick`), so the wait is what makes the
  * reroute deterministic instead of a race against the deadline.
@@ -237,7 +236,6 @@ const EFFECT_BOUNDARY_TIMEOUT_MS = 30_000;
 const EFFECT_BOUNDARY_START_INTERVAL_MS = 100;
 const EFFECT_BOUNDARY_MAX_INTERVAL_MS = 500;
 /**
- * Bound of ONE same-run cursor reconnect read (O2/O3). The exclusive successor
  * replay, the refusal controls and the post-restart `history_unavailable` close
  * are all answered inside this window; a live run with nothing new to send
  * simply idles until it elapses — an explicit window of this driver's own, never
@@ -246,7 +244,6 @@ const EFFECT_BOUNDARY_MAX_INTERVAL_MS = 500;
  */
 const EVENT_REPLAY_TIMEOUT_MS = 2_000;
 /**
- * Hostile-tool marker file NAMES under `<isolated root>/markers/` (the §6.2
  * adapter fixture's paths). `hostile_bodies_create_their_evidence_when_directly_run`
  * is the positive control proving an actually-executed unsolicited
  * `shell`/`str_replace_editor`/`run_code` body creates exactly these markers, so
@@ -266,7 +263,6 @@ const MODEL_PROMPT_READ_CAP_BYTES = 262_144;
 /** Cap on the recorded per-request structures (the journey authorizes ONE prompt request). */
 const MODEL_REQUEST_STRUCTURE_CAP = 8;
 /**
- * Ceiling for ONE placement observation taken outside a poll (the polls clamp
  * their reads to what is left of their own absolute bound). Same order as
  * `HTTP_TIMEOUT_MS`: a single read is bounded, and overrunning it is its own
  * typed STOP rather than a global CLI timeout.
@@ -276,14 +272,12 @@ const PLACEMENT_READ_TIMEOUT_MS = 30_000;
 const PLACEMENT_OUTPUT_CAP_BYTES = 1_048_576;
 
 /**
- * `creator_schedules.status` terminal values (`crates/nexus-orchestration/src/
  * schedule`). A terminal row without a claimed run can never produce one, so it
  * is a refusal; anything else without a run id is still pending.
  */
 const TERMINAL_SCHEDULE_STATUSES = new Set(['cancelled', 'completed', 'failed']);
 
 /**
- * Durable A7 recovery class of the parked bounded converge/merge gate
  * (`crates/nexus-orchestration/src/resume_rules.rs` rule 5: a non-terminal run
  * parked at a scheduler gate with its live `_gate_park_<task>` marker and no
  * human wait token). This is the ONE durable class W5/W6 may be placed at: a
@@ -296,7 +290,6 @@ const GATE_PARK_RECOVERY_CLASS = 'converge_merge';
 const COMMIT_REVISION_PATTERN = /^rev_[A-Za-z0-9-]+$/;
 
 /**
- * Credential-shaped environment variable names removed from every child.
  * Removal is by NAME: the values are never read, so an inherited secret can
  * neither be inspected nor forwarded into the deterministic run.
  */
@@ -342,7 +335,6 @@ const DRIVER_ENV_OVERRIDES = [
 ];
 
 /**
- * The checked-in fetch guard every owned Node child is started with (§6.3).
  * `NODE_OPTIONS=--import=<this path>` is the preload contract; the guard is not
  * imported by this driver, it is loaded by the child's own Node runtime.
  */
@@ -353,7 +345,6 @@ const OFFICIAL_MODEL_URL = 'https://api.deepseek.com/chat/completions';
 const GUARD_SPENT_FILENAME = 'spent';
 const GUARD_EVENTS_DIRNAME = 'events';
 /**
- * The guard's own marker that an event record could not be persisted. Its mere
  * presence disqualifies the attempt: a lost denial record is indistinguishable
  * from no denial at all, so "zero denials" may never be inferred from it.
  */
@@ -367,7 +358,6 @@ const GUARD_EVENT_RUNTIMES = ['dsh', 'other'];
 /** A guard record is a small JSON object, never a body/env dump. */
 const GUARD_RECORD_MAX_BYTES = 8_192;
 /**
- * Consumer-side leak check of the guard's own records (§6.3: the guard never
  * records a URL, a header, a body, an environment dump or a secret). A string
  * value that looks like a URL, spans lines, is long enough to be content, or
  * sits under a credential-shaped key refuses the record, so a leak can never
@@ -460,14 +450,12 @@ const blocked = (category, detail) => new DriverFailure('blocked', category, det
 const failed = (category, detail) => new DriverFailure('failed', category, detail);
 
 /**
- * The two modes this driver has: the offline loopback journey and the one
  * explicitly authorized live action. There is no third mode and no implicit
  * escalation between them (§6.3 item 7).
  */
 const DRIVER_MODES = ['deterministic', 'live'];
 
 /**
- * Parse and VALIDATE the invocation before anything is created or spawned: a
  * live action requires both of its authorization inputs, and the live-only
  * options are refused in deterministic mode, so no invocation can reach the
  * live journey by accident or with a half-specified authorization.
@@ -548,10 +536,7 @@ function parseArgs(argv) {
   return options;
 }
 
-// ---------------------------------------------------------------------------
-// Fixture extraction (no YAML dependency: the fixture is our own checked-in file
 // with a stable shape, and every extraction asserts a single unambiguous match)
-// ---------------------------------------------------------------------------
 
 /** Strip one layer of matching YAML quotes and any trailing inline comment. */
 function yamlScalar(raw) {
@@ -576,7 +561,6 @@ function indentOf(line) {
 }
 
 /**
- * Find the argument block of one capability enter action and return the value
  * of `key` inside it. The block runs from the enter-action list item that owns
  * `name: <capability>` up to the next list item at the same or a shallower
  * indent, so sibling keys (`kind`, `name`, `args`) stay inside the block while
@@ -614,7 +598,6 @@ function extractCapabilityArg(lines, capability, key) {
   return matches[0];
 }
 
-/** Preset id from the `preset:` header block. */
 function extractPresetId(lines) {
   const presetIndex = lines.findIndex((line) => line.trim() === 'preset:');
   if (presetIndex < 0) throw failed('fixture_contract', 'fixture has no preset: header');
@@ -629,7 +612,6 @@ function extractPresetId(lines) {
 }
 
 /**
- * The fixture's top-level state blocks: `{id, start, end}` line ranges, derived
  * from the shallowest `- id:` indent so the split follows the file's own shape.
  */
 function stateBlocks(lines) {
@@ -648,12 +630,10 @@ function stateBlocks(lines) {
   }));
 }
 
-/** The state block whose line range contains `index`. */
 function stateBlockAt(blocks, index) {
   return blocks.find((block) => index >= block.start && index < block.end) ?? null;
 }
 
-/** The state that owns the enter action declaring `name: <capability>`. */
 function stateOfCapability(lines, blocks, capability) {
   const nameIndex = lines.findIndex((line) => line.trim() === `name: ${capability}`);
   if (nameIndex < 0) {
@@ -666,7 +646,6 @@ function stateOfCapability(lines, blocks, capability) {
   return block;
 }
 
-/** Do any of a state block's lines match `pattern`? */
 function blockMatches(lines, block, pattern) {
   for (let index = block.start; index < block.end; index += 1) {
     if (pattern.test(lines[index])) return true;
@@ -674,7 +653,6 @@ function blockMatches(lines, block, pattern) {
   return false;
 }
 
-/** Value of `<key>: <scalar>` inside one state block. */
 function blockScalar(lines, block, key) {
   const matches = [];
   for (let index = block.start; index < block.end; index += 1) {
@@ -685,7 +663,6 @@ function blockScalar(lines, block, key) {
 }
 
 /**
- * The fixture's bounded pre-effect converge gate: the single state carrying a
  * `converge:` block, its `timeout_ms` deadline and the `on_timeout` state the
  * deadline reroutes onto. Every fact W5/W6 are placed with comes from here; the
  * driver never hard-codes a state name.
@@ -731,7 +708,6 @@ function extractConvergeGate(lines, blocks) {
 }
 
 /**
- * The preset YAML file inside a scaffolded preset bundle.
  *
  * `POST /presets` answers with the bundle DIRECTORY (`scaffold_user_preset`
  * returns `bundle.display()`), while every reader of a preset path —
@@ -746,7 +722,6 @@ function presetYamlPath(bundlePath) {
 }
 
 /**
- * Read the checked-in fixture and extract every fact this driver depends on.
  * The fixture stays authoritative; the driver never hard-codes the scope, the
  * committed path, the committed bytes or the bounded gate's identity.
  */
@@ -800,7 +775,6 @@ function readFixture() {
   if (gate.stateId === promptState.id) {
     throw failed('fixture_contract', 'the bounded gate and the effect state must be distinct states');
   }
-  // §4 publishes the session-detail `workspace_commit` projection only for a run
   // whose durable context holds the `workspace.commit` capability output as the
   // LAST capability the graph invoked. The fixture must therefore end its effect
   // state with that capability, or the receipt could never carry the revision.
@@ -853,9 +827,6 @@ function readFixture() {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Small utilities
-// ---------------------------------------------------------------------------
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -901,12 +872,10 @@ function resolveExecutable(explicit, name) {
 }
 
 /**
- * Build the deterministic child environment: isolated homes, loopback model,
  * the §6.3 guard interface, and no inherited credentials.
  */
 function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin, guardEnv }) {
   const env = {};
-  // Key-first filtering (§6.1): the credential-shaped / preload decision is
   // made on the NAME before the value is ever dereferenced, so an inherited
   // secret value is never materialized, copied, logged or persisted. Iterating
   // `Object.entries`/`Object.values` here would read every value first and only
@@ -927,7 +896,6 @@ function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin, guardEnv }) {
 }
 
 /**
- * Build the LIVE child environment: the same isolated homes and the same guard
  * interface, with the inherited environment passed through by REFERENCE.
  *
  * This is the only shape that satisfies §6.3 item 6 literally: the driver never
@@ -954,7 +922,6 @@ function buildLiveChildEnv({ home, dshHome, guardEnv }) {
 }
 
 /**
- * Name-only summary of the LIVE child environment. Unlike
  * {@link summarizeChildEnv} this never dereferences an inherited key:
  * `Object.hasOwn` answers "did this driver set this key itself?" without
  * touching the prototype, so the inherited credential (and every other
@@ -975,7 +942,6 @@ function isCredentialEnvKey(key) {
 }
 
 /**
- * Non-secret summary of the child environment this driver hands out: which
  * overrides are set, how many inherited credential-shaped names were dropped,
  * and whether any inherited credential-shaped name survived. Names only; no
  * value of an inherited variable is ever read.
@@ -997,8 +963,6 @@ function summarizeChildEnv(inheritedKeys, env) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Request-budget guard interface (§6.3)
 //
 // The guard itself lives in `scripts/public-first-workflow-request-guard.mjs`
 // and runs inside each owned Node child; this driver only (a) hands it the fixed
@@ -1039,7 +1003,6 @@ function isAbsoluteHttpUrl(value) {
 }
 
 /**
- * The §6.3 interface handed to the guarded child. Every value is validated here
  * so a malformed driver-side interface is a typed STOP before any child exists
  * — the guard's own fail-closed check is the second line of defence, not the
  * first.
@@ -1073,7 +1036,6 @@ function guardChildEnv({ attemptDir, allowedUrl, dshRealpath }) {
 }
 
 /**
- * Allocate the ONE attempt directory of a deterministic run: a fresh owner-only
  * (0700) directory that no other process knows about. The guard's evidence
  * lives in it, so it is deliberately NOT removed with the isolated root — a
  * `spent` token must survive the run that consumed it.
@@ -1085,7 +1047,6 @@ function createAttemptDir() {
 }
 
 /**
- * Take ownership of the operator-supplied attempt directory of the authorized
  * live action. The directory MUST NOT exist: exclusive creation is what makes
  * "a second launch can never recreate or reset `spent`" true, so an existing
  * path is a refusal, never a reset, an overwrite or a reuse.
@@ -1120,7 +1081,6 @@ function readGuardRecord(path) {
 }
 
 /**
- * Assert one guard record is credential-free (§6.3: never a URL, a header, a
  * body, an environment dump or a secret). Deep string walk; the first unsafe
  * key or value refuses the whole record, so a leaky guard can never pass as
  * evidence even when its counts look right.
@@ -1157,7 +1117,6 @@ function assertGuardRecordSafe(value, path) {
 }
 
 /**
- * Read the guard's attempt evidence. Counts are derived from the guard's own
  * records and never from this driver's expectations: an absent `events/`
  * directory, an unreadable record or an unknown kind/runtime is a failure, not
  * an empty result.
@@ -1204,7 +1163,6 @@ function readAttemptDir(dir, { final = false } = {}) {
     const path = join(eventsDir, name);
     const { text, bytes } = readGuardRecord(path);
     if (bytes === 0) {
-      // The only in-progress state of a single exclusive-create write. At rest
       // (final) it means the write never completed, so it disqualifies.
       state.truncated_events.push(name);
       if (final) {
@@ -1268,7 +1226,6 @@ function readAttemptDir(dir, { final = false } = {}) {
 }
 
 /**
- * Read the guard's `evidence-failed` marker, if any. Presence is the signal, so
  * an unreadable, empty or foreign payload still reports as present — the driver
  * only enriches the refusal when the payload really is the guard's own JSON
  * (`nexus-request-guard-evidence-failed/1`: `reason`, `kind`, `pid`, `at`) and
@@ -1330,7 +1287,6 @@ function readSpentToken(dir) {
 }
 
 /**
- * The guard half of the success condition (§6.3 items 1–4): dsh really loaded
  * the preload, exactly one request was admitted, nothing was denied, the spend
  * token survives — AND the evidence that says so is complete.
  *
@@ -1412,7 +1368,6 @@ function assertGuardAttempt(state, spent) {
     spent: spent.category,
     spent_at: spent.at,
     problems: [],
-    // The explicit condition the live gate re-checks: 'complete' means the marker
     // was absent, no record was truncated, every record parsed, and the guard
     // reported no degradation of its own ceiling. It is asserted here, not
     // inferred, so a receipt that lacks it can never authorize a live request.
@@ -1422,13 +1377,11 @@ function assertGuardAttempt(state, spent) {
 }
 
 /**
- * Best-effort guard evidence for a run that did NOT reach its success path: the
  * receipt must still say what the guard observed, and reading it must never
  * replace the real blocker with a secondary failure.
  */
 function captureGuardAttempt(dir) {
   try {
-    // Tolerant read on purpose: a run that stopped mid-flight may legitimately
     // have an in-progress (zero-length) record, and the raw counts plus the
     // evidence-failed marker are the evidence here. The strict FINAL read and the
     // integrity assertion belong to the success path.
@@ -1439,7 +1392,6 @@ function captureGuardAttempt(dir) {
 }
 
 /**
- * One prepared-artifact identity in the receipt: canonical absolute path, byte
  * size and a streamed content digest. Every present artifact is hashed whatever
  * its size, so an equal-size equal-mtime replacement (a debug CLI binary is
  * ~175 MB) cannot pass as the same artifact **as sampled at check time**.
@@ -1464,7 +1416,6 @@ async function artifactIdentity(path, { required = true } = {}) {
 }
 
 /**
- * Does the live action's CURRENT artifact match the one the receipt recorded?
  * Both sides are samples: the receipt's digest is the bytes read when it was
  * written, the `current` argument is whatever `artifactIdentity` just read — so
  * this answers "equal at this check", not "never replaced since".
@@ -1479,7 +1430,6 @@ function sameArtifact(recorded, current) {
 }
 
 /**
- * Every local input the deterministic proof depends on, as identities the live
  * gate can re-check: the driver (which produced the receipt), the guard (which
  * bounds the request), the fixture (the graph), the prepared service entry and
  * CLI, the installed dsh entry (the guarded process identity) and — when it is
@@ -1504,7 +1454,6 @@ async function localArtifactIdentities({ cliBinary, dshRealpath }) {
 }
 
 /**
- * Validate the live action's authorization: the prior deterministic receipt must
  * describe the artifacts and runtime that are on disk NOW, and its own guard
  * proof must be a clean one-request attempt. A stale, foreign, blocked,
  * incomplete or unreadable receipt never authorizes a live request (§6.3 item 7).
@@ -1567,7 +1516,6 @@ function assertDeterministicReceipt(receiptPath, { current }) {
     );
   }
   const guard = receipt.facts?.guard;
-  // Counts alone never authorize: the receipt must also carry the explicit
   // evidence-integrity condition this driver asserts at the end of the
   // deterministic run. A receipt that lacks it (an older receipt), that reports
   // guard degradation, or that reports a failed evidence write is refused, so a
@@ -1598,7 +1546,6 @@ function assertDeterministicReceipt(receiptPath, { current }) {
 }
 
 /**
- * Observe the live credential channel WITHOUT reading any value (§6.3 item 6).
  *
  * The only observation this driver is permitted to make is whether the inherited
  * environment NAMES a credential channel — `Object.keys(process.env)`, never
@@ -1630,7 +1577,6 @@ function observeLiveCredentialChannel(inheritedKeys = Object.keys(process.env)) 
 }
 
 /**
- * A user-authorized live attempt may use the existing inherited credential
  * channel without reading its value. A name is not proof that the credential is
  * valid: authentication or transport failure after admission consumes the
  * single request and is never retried. The caller explicitly selects live mode,
@@ -1669,7 +1615,6 @@ function reserveLoopbackPort() {
 }
 
 /**
- * Percent-encode ONE path segment for a public request URL.
  *
  * RFC 3986 keeps `:` (and the sub-delims) legal inside a path segment, and this
  * service hands the raw segment to its core owner untouched: encoding a session
@@ -1681,7 +1626,6 @@ function reserveLoopbackPort() {
 function encodePathSegment(value) {
   return String(value).replace(/[%/?#\s\p{Cc}]/gu, (char) => {
     const code = char.codePointAt(0);
-    // `\p{Cc}` also covers the C1 block (U+0080-U+009F), which the core owner
     // reads verbatim; those code points pass through untouched as before.
     if (code >= 0x80 && code <= 0x9f) return char;
     return `%${code.toString(16).toUpperCase().padStart(2, '0')}`;
@@ -1729,7 +1673,6 @@ function httpJson(port, method, path, { body, headers = {}, timeoutMs = HTTP_TIM
 function statusFailure(step, response) {
   const code = response.json?.error?.code ?? response.json?.code ?? null;
   const detail = `${step}: HTTP ${response.status}${code ? ` (${code})` : ''}`;
-  // §3.4 wire taxonomy (`apps/nexus-service/src/errors.ts`):
   //   * 501 `route_not_migrated` — the dependency release that owns this
   //     operation is not integrated in this tree. An unmet prerequisite.
   //   * 503 `busy` / `closing` / `interrupted` — the mounted producer's own
@@ -1774,12 +1717,8 @@ function tailLines(text, limit) {
     .slice(-limit);
 }
 
-// ---------------------------------------------------------------------------
-// Durable state classification (pure) and the bounded public polls
-// ---------------------------------------------------------------------------
 
 /**
- * Classify one inspect observation. A still-pending asynchronous admission
  * (§3.3: W1 success means durable descriptor, the run identity may be claimed
  * after the response) is distinct from a terminal refusal that can never
  * publish a run identity, and both are distinct from a claimed identity.
@@ -1806,7 +1745,6 @@ async function readScheduleInspect(port, scheduleId, step, { timeoutMs = HTTP_TI
 }
 
 /**
- * Bounded admission poll: resolve the root run identity after W1 without
  * treating a pending asynchronous admission as a missing producer, and without
  * ever fabricating an id.
  */
@@ -1839,7 +1777,6 @@ async function awaitRunIdentity(port, scheduleId) {
 }
 
 /**
- * One W4 HTTP observation of the admitted run: the schedule summary (owner of
  * `current_session_id`) plus the authorized root run detail (identity fields and
  * the §4 `workspace_commit` projection). Placement does NOT come from here — the
  * routed projection is empty on this baseline — but the run identity does: both
@@ -1889,7 +1826,6 @@ async function readDurableObservation(port, scheduleId, runId, step, { deadlineM
 }
 
 /**
- * Bound one already-started observation by an ABSOLUTE deadline. The HTTP
  * client's own timeout is an inactivity timer, so an active/trickling response
  * would outlive it; the guard makes the caller's declared bound real. A read
  * that loses the race is abandoned (its own request timeout still closes the
@@ -1910,7 +1846,6 @@ async function boundedObservation(promise, deadlineMs, onDeadline) {
 }
 
 /**
- * The A7 placement record the driver consumes from the public CLI DTO
  * (`nexus42 ops inspect <run> --json`), or `null` when the DTO cannot prove it
  * describes the synchronized root run.
  *
@@ -1950,7 +1885,6 @@ function parsePlacementDto(dto, runId) {
 }
 
 /**
- * Run one placement CLI invocation ASYNCHRONOUSLY.
  *
  * `spawnSync` (used by the setup CLI calls) BLOCKS the JS event loop, so a
  * stalled command would outlive any deadline timer a caller armed — a declared
@@ -1995,7 +1929,6 @@ function runPlacementCli(cliBinary, args, childEnv, timeoutMs) {
     child.once('error', (error) =>
       finish({ status: null, signal: null, stdout, stderr, timedOut: false, spawnError: error.message }),
     );
-    // Settle on `close`, NOT `exit`: `exit` fires when the process ends, while
     // its stdio streams may still be delivering buffered data, so a DTO larger
     // than the pipe buffer could be parsed from a truncated string. `close`
     // fires only after stdout/stderr are drained and closed, so the captured
@@ -2008,7 +1941,6 @@ function runPlacementCli(cliBinary, args, childEnv, timeoutMs) {
 }
 
 /**
- * Read one placement observation for the synchronized root run from the public
  * daemon-free operator surface. The CLI is handed the SAME root run id the W4
  * read resolved, and every failure is a typed, fail-closed STOP: a spawn failure
  * keeps its unmet-prerequisite outcome, an overrun returns the caller's own
@@ -2069,7 +2001,6 @@ async function readPlacementViaCli(
 }
 
 /**
- * Classify one placement observation against the fixture's bounded converge
  * gate.
  *
  * `gate` is the only placement W5/W6 accept: the A7 class is the parked
@@ -2097,7 +2028,6 @@ function classifyPreEffectGate(placement, gateStateId) {
 }
 
 /**
- * Classify one placement observation against the effect state's manual wait —
  * the boundary the deadline reroute must reach, which proves the reroute
  * happened and that W5/W6 were exercised strictly before the final manual wait.
  *
@@ -2156,7 +2086,6 @@ function preEffectGateStop(step, boundary, gateStateId) {
 }
 
 /**
- * Bounded synchronization on the fixture's bounded pre-effect gate, reading the
  * placement through the public operator surface. The gate is accepted only when
  * it is observed QUIET — two reads at least one poll apart with the SAME integer
  * `state_revision`, still parked at the fixture's gate state and still
@@ -2185,7 +2114,6 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests })
     let placement;
     try {
       placement = await boundedObservation(
-        // The read is clamped to what is left of the poll's absolute bound, and
         // its own overrun aborts as this poll's typed STOP (never as a global
         // CLI timeout), so the declared bound is the one that holds.
         readPlacement(runId, 'gate', { timeoutMs: Math.max(1, remaining), onTimeout: boundStop }),
@@ -2193,7 +2121,6 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests })
         boundStop,
       );
     } catch (error) {
-      // An abort that lands at or after the declared bound is this poll's typed
       // STOP, whatever aborted it; a placement failure BEFORE the bound keeps
       // propagating as itself, so a refused CLI is never relabelled as a
       // missing gate.
@@ -2203,7 +2130,6 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests })
     polls += 1;
     observation = classifyPreEffectGate(placement, gate.stateId);
     if (observation.state === 'gate') {
-      // The pre-effect property is asserted against the request-budget guard's
       // own admission record (§6.3), which is transport-independent: a gate
       // that already dispatched a request is not pre-effect in either mode.
       const requests = countRequests();
@@ -2225,7 +2151,6 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests })
       const revision = observation.observed.state_revision;
       quiet = quiet > 0 && revision === quietRevision ? quiet + 1 : 1;
       quietRevision = revision;
-      // Strict bound: the gate is never accepted after the declared deadline.
       if (quiet >= 2 && Date.now() < deadline) {
         return { ...observation, polls, quiet_polls: quiet, parked_at_ms: Date.now() };
       }
@@ -2239,7 +2164,6 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests })
 }
 
 /**
- * Bounded wait for the durable boundary the deadline reroute must reach: the
  * effect state resting in its manual wait, read through the public operator
  * surface. A human wait at any OTHER state, a settled run or an absent record is
  * a typed STOP, never a pass. The bound is absolute in the same way as the gate
@@ -2263,7 +2187,6 @@ async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
     let placement;
     try {
       placement = await boundedObservation(
-        // Same clamp as the gate poll: the placement read cannot outlive this
         // poll's absolute bound, and its overrun is this poll's typed STOP.
         readPlacement(runId, 'effect boundary', { timeoutMs: Math.max(1, remaining), onTimeout: boundStop }),
         deadline,
@@ -2296,7 +2219,6 @@ async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
 }
 
 /**
- * The sealed no-tools policy must govern the observed prompt of the REAL
  * installed runtime (S3-3 as this driver can see it end-to-end): every model
  * request the sealed composition made advertised NO tools (the `tools` key
  * absent, not an empty array — the dispatch-level mechanism §6.2's adapter
@@ -2368,7 +2290,6 @@ function assertSealedToolPolicy(observations) {
 }
 
 /**
- * The bounded inventory of one directory tree: relative path, kind, byte size
  * and SHA-256 for files. No file content is retained, the walk is depth- and
  * entry-capped, and the order is sorted so a receipt is comparable across runs.
  * `truncated` reports that a cap stopped the walk, so a caller that asserts
@@ -2419,7 +2340,6 @@ function directoryInventory(root, { maxDepth = 3, maxEntries = 64 } = {}) {
 }
 
 /**
- * Marker files that would exist if an unsolicited `shell`/`str_replace_editor`/
  * `run_code` body had actually executed against this isolated root (§6.2's
  * hostile-marker paths). Only presence is checked; no marker is read.
  */
@@ -2450,7 +2370,6 @@ function assertNoHostileMarkers(isolatedRoot) {
 }
 
 /**
- * The opened scope must carry EXACTLY the changes the checked-in fixture
  * declares — nothing else. This is the driver's end-to-end side-effect check on
  * the real admitted run: a tool that had produced any unsolicited write inside
  * the scope would appear here as an entry no fixture change declares, and the
@@ -2480,7 +2399,6 @@ function assertScopeEffectOnly(scopeDir, fixture) {
 }
 
 /**
- * The sealed-prompt cardinality contract of the effect boundary: the ONE
  * admitted schedule/run crosses the effect state exactly once, so exactly one
  * model request is authorized, it must carry the Idea W5 appended (the
  * boundary's own evidence that it consumed the committed core-context version),
@@ -2512,7 +2430,6 @@ function assertSealedPromptCardinality(observations) {
 }
 
 /**
- * The resumed schedule must still own exactly ONE run for this preset: the
  * deadline reroute re-drives the admitted run, so a resume that minted a second
  * run is a failure rather than a passing journey.
  */
@@ -2532,15 +2449,11 @@ function assertSingleRun(items, presetId, runId) {
   return { runs: runs.length, run_id: runs[0].session_id };
 }
 
-// ---------------------------------------------------------------------------
-// Owned child processes
-// ---------------------------------------------------------------------------
 
 /** Every child process and path this driver created, cleaned up in `main`. */
 const owned = { children: new Set(), paths: [] };
 
 /**
- * Start the isolated service process and return its discovery record.
  * Exactly one stdout line is the ready contract; every human log is stderr.
  */
 async function startService({ home, port, childEnv, evidenceDir, label }) {
@@ -2596,7 +2509,6 @@ async function startService({ home, port, childEnv, evidenceDir, label }) {
   } catch (error) {
     writeFileSync(join(evidenceDir, `service-${label}.stderr.log`), stderrBuffer, 'utf8');
     if (error instanceof DriverFailure) {
-      // The bounded service log stays in this driver's own evidence directory
       // (owner-only, inside the isolated root); it is never copied into the
       // printed receipt.
       error.serviceStderrLog = join(evidenceDir, `service-${label}.stderr.log`);
@@ -2604,7 +2516,6 @@ async function startService({ home, port, childEnv, evidenceDir, label }) {
     throw error;
   }
   writeFileSync(join(evidenceDir, `service-${label}.stderr.log`), stderrBuffer, 'utf8');
-  // The service's own stdout beyond the ready line carries its request/SSE
   // diagnostics; the bounded tail is retained as evidence so a stream symptom
   // is diagnosable from the receipt instead of only from the console.
   const stdoutLog = join(evidenceDir, `service-${label}.stdout.log`);
@@ -2612,7 +2523,6 @@ async function startService({ home, port, childEnv, evidenceDir, label }) {
     try {
       writeFileSync(stdoutLog, `${tailLines(stdoutBuffer, 200).join('\n')}\n`, 'utf8');
     } catch {
-      // Evidence capture never fails the journey.
     }
   };
   writeStdoutTail();
@@ -2634,7 +2544,6 @@ function servicePortOf(discovery) {
 }
 
 /**
- * Stop one owned service over the public operator stop path with the exact
  * instance identity, then wait for its exit.
  */
 async function stopServiceVia(running, label) {
@@ -2674,7 +2583,6 @@ async function stopServiceVia(running, label) {
 }
 
 /**
- * Close one owned Node HTTP server with a checked, bounded confirmation.
  *
  * Node's `server.close(callback)` reports a callback error when the server was
  * not open and otherwise waits for every open connection, so a rejected,
@@ -2697,7 +2605,6 @@ function boundedServerClose(server, timeoutMs = MODEL_ENDPOINT_CLOSE_TIMEOUT_MS)
       try {
         server.closeAllConnections?.();
       } catch {
-        // best effort: the callback verdict and the bound stay authoritative
       }
     };
     const timer = setTimeout(() => {
@@ -2717,14 +2624,12 @@ function boundedServerClose(server, timeoutMs = MODEL_ENDPOINT_CLOSE_TIMEOUT_MS)
       });
       return;
     }
-    // Release any idle/keep-alive socket the endpoint still holds, so a genuine
     // close is not parked behind a connection nobody is using.
     dropIdleConnections();
   });
 }
 
 /**
- * Cleanup is part of the success condition (§3.4 cleanup disposition; §6.1
  * confirmed shutdown; §7 "unconfirmed cleanup is a STOP with retained
  * evidence"). Every owned child contributes one cleanup record; a confirmed
  * shutdown leaves the journey outcome untouched, while any failed or
@@ -2755,12 +2660,8 @@ function exitCodeFor(outcome) {
   return outcome === 'blocked' ? 2 : 1;
 }
 
-// ---------------------------------------------------------------------------
-// Controlled loopback model protocol endpoint (§6.1: no egress)
-// ---------------------------------------------------------------------------
 
 /**
- * Non-secret STRUCTURE of one model request body: the message role sequence,
  * the message count, whether the caller advertised tools at all and how many,
  * whether a tool result or an assistant tool call is already in the
  * conversation, and the model name the runtime named. Nothing else is derived
@@ -2812,7 +2713,6 @@ function modelRequestStructure(text) {
 }
 
 /**
- * DeepSeek-compatible loopback endpoint. It answers one SSE completion for
  * `POST /chat/completions` and records only the non-secret STRUCTURE of each
  * request ({@link modelRequestStructure}) plus one boolean per request: whether
  * the prompt body carried the appended Steer Idea, which is the boundary's own
@@ -2845,7 +2745,6 @@ function startModelEndpoint() {
     req.on('data', (chunk) => {
       if (promptBytes >= MODEL_PROMPT_READ_CAP_BYTES) return;
       promptBytes += chunk.length;
-      // The marker comparison reads the request the sealed preset rendered; the
       // matched substring is the driver's own non-secret Idea, and nothing is
       // retained beyond this boolean.
       if (!promptHasIdea && chunk.includes(STEER_IDEA)) promptHasIdea = true;
@@ -2853,7 +2752,6 @@ function startModelEndpoint() {
     });
     req.on('end', () => {
       if (promptHasIdea) observations.prompt_with_idea += 1;
-      // Bounded: the journey authorizes ONE prompt request, so the cap only
       // keeps a misbehaving runtime from growing the receipt.
       if (observations.structures.length < MODEL_REQUEST_STRUCTURE_CAP) {
         observations.structures.push(modelRequestStructure(Buffer.concat(chunks).toString('utf8')));
@@ -2906,9 +2804,6 @@ function startModelEndpoint() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Public CLI
-// ---------------------------------------------------------------------------
 
 function runCli(binary, args, childEnv, label) {
   const result = spawnSync(binary, args, {
@@ -2951,12 +2846,8 @@ function readActiveCreator(binary, childEnv) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Workflow event stream (O1/O2)
-// ---------------------------------------------------------------------------
 
 /**
- * Read a bounded slice of a same-run SSE stream.
  *
  * The read window is this driver's OWN timer and the only authority for it: the
  * socket is closed by the driver when the window elapses, so a live run with
@@ -3051,7 +2942,6 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
         closed = true;
         settle(false);
       });
-      // A response-level failure is the transport's own and is surfaced, unless
       // this read already ended on its own window (which settles first).
       response.on('error', (error) => refuse(error));
     });
@@ -3064,7 +2954,6 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
 }
 
 /**
- * ONE bounded SSE read with a real transport failure reported as its own typed
  * STOP, so a broken connection can never be mistaken for an idle window (the
  * `timed_out` shape an ordinary no-new-frame read returns).
  */
@@ -3122,7 +3011,6 @@ function parseGapFrame(frame) {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
   if (typeof payload.run_id !== 'string' || payload.run_id.length === 0) return null;
   if (typeof payload.epoch !== 'string' || payload.epoch.length === 0) return null;
-  // Safe integers from the ring's own 1-based sequence space: `Number.isInteger`
   // alone would accept an out-of-range literal such as `1e100`, whose range
   // would then "cover" real successors (cursor sequences are safe integers by
   // `parseEventCursor`), and a 0-based range is outside the vocabulary the ring
@@ -3153,7 +3041,6 @@ function parseHistoryUnavailableFrame(frame) {
 }
 
 /**
- * Classify ONE same-run cursor reconnect against the frames this driver already
  * observed (§4: "same epoch, retained cursor → exclusive replay then tail
  * without duplicate handoff"). Exactly two honest outcomes are accepted, and an
  * idle window with no successor frame is NOT one of them:
@@ -3259,7 +3146,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
         `replayed frame ${JSON.stringify(frame.id)} is at or before the cursor ${cursor}: the replay must be exclusive`,
       );
     }
-    // Exclusive ORDERED replay: the ring's cursor is strictly increasing, so a
     // repeated or reordered successor is a duplicated/replayed event, not a
     // replay proof — the set-membership check alone would accept `…:3, …:2, …:2`.
     if (parsed.sequence <= lastReplayedSequence) {
@@ -3272,7 +3158,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
     lastReplayedSequence = parsed.sequence;
     replayed.push({ id: frame.id, event: frame.event ?? null, sequence: parsed.sequence });
   }
-  // A gap and a delivered data frame cannot describe the same sequence: the gap
   // states those frames are gone, so the two sets must be DISJOINT. Without this
   // check a `gap 2..5` alongside delivered `…:4, …:5` passed as a bounded gap —
   // a response that contradicts itself about 4 and 5 — because only the MISSING
@@ -3291,7 +3176,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
     }
   }
   const replayedIds = new Set(replayed.map((frame) => frame.id));
-  // Delivery-order reconciliation: the successors the reconnect replayed must
   // arrive in the same relative order as the frames this driver already
   // OBSERVED, so a response that reorders them can never be read as a faithful
   // replay of the observed stream.
@@ -3315,7 +3199,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
         `(${uncovered.join(', ')}) and no explicit gap covers them`,
     );
   }
-  // §4: the explicit gap is the EVICTION close. When the gap alone answers the
   // reconnect — nothing else could be replayed — the server must close the
   // stream with it; a stream that emits the gap and then idles until the
   // driver's window expires is not the contract's outcome. A retention gap that
@@ -3347,7 +3230,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
 }
 
 /**
- * Prove the same-run cursor reconnect over the public route: read the frames the
  * earliest observed cursor promised and classify them
  * ({@link classifySameRunReplay}). Fails closed when the stream read carried
  * fewer than two cursor-bearing frames — the run is an admitted, gated, steered
@@ -3378,7 +3260,6 @@ async function proveSameRunReplay({ port, runId, observed }) {
 }
 
 /**
- * The union of the observed frame sets, de-duplicated by identity and kept in
  * delivery order (the initial read's frames first, then the cursor reconnect's).
  * The receipt carries only ids and control-frame names — this union exists to be
  * scanned for an admissible workspace-commit response and is never printed.
@@ -3468,7 +3349,6 @@ async function collectStreamRefusals({ port, runId, observedIds }) {
       timed_out: read.timed_out === true,
     });
   }
-  // A cursor whose epoch is not the live ring's: the run IS owned, so this is
   // not a refusal — it is the explicit history-loss control frame, and reading
   // it as a short stream or a 400 would both be wrong.
   const historyStep = 'GET /orchestration/sessions/{run_id}/events (prior epoch cursor)';
@@ -3577,7 +3457,6 @@ function assertHistoryLossExplicit({ runId, cursor, read }) {
 }
 
 /**
- * Frame `event:` identities that carry a `CoreWorkspaceCommitResponse` — the
  * only admissible source of the receipt's commit revision (§6.1).
  *
  * Empty **by measurement, not as a placeholder**. `RunEventRegistry`
@@ -3595,7 +3474,6 @@ function assertHistoryLossExplicit({ runId, cursor, read }) {
 const COMMIT_RESPONSE_EVENT_IDENTITIES = new Set();
 
 /**
- * The workspace-commit revision carried by a routed same-run **workspace-commit
  * response** frame; `null` when no such frame exists. Never invented and never
  * derived from frame text or from the fixture bytes.
  *
@@ -3623,7 +3501,6 @@ function findCommitRevision(frames) {
 }
 
 /**
- * Payload predicate for the admission rules above. Kept beside the gate so the
  * P3-T2 producer change only adds its identity; the branch is unreachable while
  * no identity is admissible, so it is asserted against the schema directly
  * rather than through a fabricated frame.
@@ -3699,7 +3576,6 @@ function parseSessionWorkspaceCommit(detail) {
 }
 
 /**
- * Resolve the revision the receipt must carry (Task 1 requires the committed
  * file *and* its commit revision; §6.1 requires the commit revision in the
  * receipt).
  *
@@ -3760,12 +3636,8 @@ function resolveEffectRevision({
   };
 }
 
-// ---------------------------------------------------------------------------
-// Journey
-// ---------------------------------------------------------------------------
 
 /**
- * The whole public journey, in the mode `options.mode` selects.
  *
  * `deterministic` runs it against the owned loopback model endpoint and proves
  * the prompt's own non-secret structure; `live` runs the identical journey
@@ -3799,7 +3671,6 @@ async function runJourney(options) {
   let running = null;
   let attemptDir = null;
   try {
-    // 1. Prerequisites — fail, never skip. The fixture is a static input, so
     // it is validated before any temporary directory or child process exists.
     const fixture = readFixture();
     record('fixture', 'ok', {
@@ -3835,12 +3706,10 @@ async function runJourney(options) {
     if (!dshBinary) {
       throw blocked('missing_prerequisite', 'no real dsh runtime on PATH (set DSH_RUNTIME_BIN to the installed runtime)');
     }
-    // §6.3: the guard identifies the dsh child by the canonical real path of
     // this entry, so a symlinked launcher resolves to the installed module.
     const dshRealpath = canonicalRealPath(dshBinary, 'dsh runtime');
     record('preflight', 'ok', { node: process.versions.node, cli: basenameOf(cliBinary), dsh: basenameOf(dshBinary) });
 
-    // 1b. Preparation identity (§6.3 item 7). Both modes record it; the live
     // mode REQUIRES the prior deterministic receipt to name the very same
     // artifacts and runtime, so a stale receipt can never authorize a request;
     // and it establishes the inherited credential channel by NAME before any
@@ -3849,13 +3718,11 @@ async function runJourney(options) {
     facts.artifacts = artifacts;
     if (live) {
       const authorized = assertDeterministicReceipt(options.deterministicReceipt, { current: artifacts });
-      // The user explicitly authorized one attempt with this inherited channel.
       // Its name is observed, never its value; an auth failure spends the slot.
       const channel = observeLiveCredentialChannel();
       facts.credential_channel = channel;
       assertLiveCredentialChannel(channel);
       attemptDir = takeAttemptDir(options.attemptDir);
-      // The durable marker of the ONE authorized attempt: an attempt directory
       // that already existed is refused above, so this run cannot inherit,
       // reset or reuse the spend record of an earlier attempt.
       facts.live = {
@@ -3878,7 +3745,6 @@ async function runJourney(options) {
       record('attempt_dir', 'ok', { attempt_dir: attemptDir });
     }
 
-    // 2. Isolated root, fixture-derived scope.
     const root = mkdtempSync(join(tmpdir(), 'nexus-public-first-workflow-'));
     owned.paths.push(root);
     receipt.isolated_root = root;
@@ -3889,7 +3755,6 @@ async function runJourney(options) {
     for (const path of [home, dshHome, workspace, evidenceDir]) mkdirSync(path, { recursive: true });
 
     const scopeDir = join(workspace, fixture.scopePath);
-    // §6.1: the commit applier walks the opened scope with O_DIRECTORY and
     // creates nothing, so the declared scope must already exist.
     mkdirSync(scopeDir, { recursive: true });
     record('isolate', 'ok', { scope: `${basenameOf(workspace)}/${fixture.scopePath}` });
@@ -3909,7 +3774,6 @@ async function runJourney(options) {
       ? summarizeLiveChildEnv(childEnv, Object.keys(process.env))
       : summarizeChildEnv(Object.keys(process.env), childEnv);
     if (live) {
-      // Name-only summary: live inherits the credential by construction, and the
       // driver read no inherited value to say so.
       facts.live.child_env = childEnvSummary;
     } else {
@@ -3927,7 +3791,6 @@ async function runJourney(options) {
       child_env: childEnvSummary,
     });
 
-    // 3. First start on an empty home must be explicit and uninitialized.
     running = await startService({ home, port: servicePort, childEnv, evidenceDir, label: 'boot' });
     if (running.discovery.readiness !== 'uninitialized') {
       throw failed(
@@ -3955,7 +3818,6 @@ async function runJourney(options) {
     record('first_stop', 'ok', facts.first_stop);
     running = null;
 
-    // 4. Public clean-home setup: Creator + workspace through the CLI only.
     const register = runCli(
       cliBinary,
       ['creator', 'register', '--local', '--name', CREATOR_DISPLAY_NAME],
@@ -3980,7 +3842,6 @@ async function runJourney(options) {
     };
     record('identity', 'ok', { creator_origin: creator.origin });
 
-    // 5. Restart against the selected Creator: readiness must be real, not a shell.
     running = await startService({ home, port: servicePort, childEnv, evidenceDir, label: 'ready' });
     if (running.discovery.readiness !== 'ready') {
       throw blocked(
@@ -4005,7 +3866,6 @@ async function runJourney(options) {
 
     const port = servicePortOf(running.discovery);
 
-    // 6. Preset authoring over the public HTTP surface.
     const scaffold = requireOk(
       'POST /presets',
       await httpJson(port, 'POST', '/v1/daemon/presets', { body: { name: fixture.presetId } }),
@@ -4022,7 +3882,6 @@ async function runJourney(options) {
     );
     requireFields('PATCH /presets/{id}', patched, ['id', 'updated']);
     if (patched.updated !== true) throw failed('contract_violation', 'preset PATCH did not report updated=true');
-    // `POST /presets` answers with the preset BUNDLE directory
     // (`scaffold_user_preset` returns `bundle.display()`), while
     // `POST /presets:validate` takes the preset YAML FILE it reads and parses
     // (`validate_preset_file` rejects a directory with an untyped
@@ -4070,7 +3929,6 @@ async function runJourney(options) {
     };
     record('preset_authoring', 'ok', { validated: true, state_count: validated.state_count ?? null });
 
-    // 7. Admit one workflow with the explicit prompt-role binding.
     const admitted = requireOk(
       'POST /orchestration/schedules',
       await httpJson(port, 'POST', '/v1/daemon/orchestration/schedules', {
@@ -4090,7 +3948,6 @@ async function runJourney(options) {
     };
     record('admit', 'ok', { schedule_id: admitted.schedule_id });
 
-    // 8. W4 inspect with a bounded admission poll. W1 success means the
     // descriptor is durable while the root run identity may still be claimed
     // asynchronously (§3.3), so a pending admission is polled instead of being
     // reported as a missing producer, and a terminal refusal/timeout are their
@@ -4100,7 +3957,6 @@ async function runJourney(options) {
     const scheduleId = admitted.schedule_id;
     const admission = await awaitRunIdentity(port, scheduleId);
     const runId = admission.run_id;
-    // The A7 placement is read from the public daemon-free operator surface for
     // THIS root run (the W4 detail above resolved its identity); every placement
     // read below is bound to the same id and fails closed on a refused CLI, a
     // non-JSON answer, or a DTO that does not prove the run.
@@ -4116,7 +3972,6 @@ async function runJourney(options) {
     };
     record('inspect', 'ok', { schedule_status: facts.inspect.status, admission_polls: admission.polls });
 
-    // 9. W5/W6 on the fixture's bounded pre-effect gate (§6.1: W5/W6 are
     // exercised before the final manual wait; S0-3: the append is durable
     // before resume counts as success). The gate is the state the checked-in
     // fixture declares — its `converge:`/`timeout_ms` state, whose `on_timeout`
@@ -4132,7 +3987,6 @@ async function runJourney(options) {
     // expected count.
     const countRequests = () => readAttemptDir(attemptDir).admitted;
     const gateBoundary = await awaitPreEffectGate({ readPlacement, runId, gate: fixture.gate, countRequests });
-    // Nobody drives a parked gate: the deadline is only evaluated by a driver
     // (`join_timeout_tick`), so waiting it out HERE, with no signal issued, is
     // what makes the W6 resume deterministic instead of a race with the
     // deadline. `timeout_ms` comes from the fixture; the margin is the driver's
@@ -4140,7 +3994,6 @@ async function runJourney(options) {
     const deadlineAtMs = gateBoundary.parked_at_ms + fixture.gate.timeoutMs + GATE_DEADLINE_MARGIN_MS;
     const deadlineWaitedMs = Math.max(0, deadlineAtMs - Date.now());
     if (deadlineWaitedMs > 0) await sleep(deadlineWaitedMs);
-    // The gate must still be the same quiet park on the same run, and still
     // pre-effect: crossing the deadline alone performs no work. Both the W4
     // identity read (same schedule/root) and the public placement read are
     // re-taken.
@@ -4185,7 +4038,6 @@ async function runJourney(options) {
     );
     requireFields('PATCH /orchestration/schedules/{id}/core-context', appendResponse, ['new_version']);
     facts.steer.appended_version = appendResponse.new_version;
-    // Re-read the W4 identity and the public placement before resuming: if the
     // run moved on between the durable append and the resume, a plain resume
     // would land where it is fenced. The Steer then stops with the exact
     // observed state; the appended version stays durable and is never
@@ -4205,7 +4057,6 @@ async function runJourney(options) {
           'durable; resume was not issued and the append is never retried',
       );
     }
-    // W6 resumes THIS schedule, whose admitted run is the gated run: the
     // resume re-drives that run and its deadline reroute enters the effect
     // state. It is not a new admission and not a manual-wait bypass.
     const resumeResponse = await httpJson(
@@ -4220,7 +4071,6 @@ async function runJourney(options) {
       current_wait_id: resumeResponse.json?.current_wait_id ?? null,
     };
     if (resumeResponse.status < 200 || resumeResponse.status >= 300) {
-      // Preserve the exact conflict verbatim (wire status plus coded detail,
       // e.g. `workflow_wait_conflict`); the appended version remains durable and
       // there is no automatic re-append and no retry.
       const refusal = statusFailure('POST /orchestration/schedules/{id}/signal (resume)', resumeResponse);
@@ -4232,7 +4082,6 @@ async function runJourney(options) {
       );
     }
     facts.steer.resumed = true;
-    // The reroute must reach the effect state's manual wait on the SAME run:
     // that is the observable proof that the deadline reroute ran, that the same
     // schedule/root was re-driven, and that W5/W6 were exercised strictly
     // before the final manual wait.
@@ -4242,7 +4091,6 @@ async function runJourney(options) {
       effectStateId: fixture.gate.effectStateId,
     });
     facts.steer.post_resume_boundary = effectBoundary.observed;
-    // The resume must not have minted a second run: the Creator's durable page
     // still carries exactly this preset's ONE run, and it is the gated run.
     const sessionsPage = requireOk(
       'GET /orchestration/sessions',
@@ -4262,7 +4110,6 @@ async function runJourney(options) {
       post_resume_state: effectBoundary.observed.task_id,
     });
 
-    // 10. O1/O2: same-run stream against the inspected root session. The read
     // is bounded by this driver's own window, so `timed_out` (nothing new to
     // send while the run stays live) and a server-side close are distinct
     // recorded facts, and a real transport failure rejects instead of being
@@ -4295,7 +4142,6 @@ async function runJourney(options) {
       timed_out: stream.timed_out === true,
     });
 
-    // 11. O2 same-run cursor reconnect: the exclusive successor replay the
     // cursor contract promises, from the EARLIEST observed cursor of THIS run
     // (a read that merely idles out its window is never a replay proof), or the
     // explicit bounded gap the ring answers with when it cannot replay. The one
@@ -4323,7 +4169,6 @@ async function runJourney(options) {
     };
     facts.stream.replay_added_frames = allFrames.length - stream.frames.length;
 
-    // 11b. Public refusal controls of the same-run stream (§4): an absent run
     // is refused before any SSE header, a malformed and a future cursor are
     // typed invalid-input refusals before any SSE header, and a cursor from
     // another epoch against a live run is the explicit history-loss control
@@ -4332,7 +4177,6 @@ async function runJourney(options) {
     facts.stream.refusals = refusals;
     record('stream_refusals', 'ok', { controls: refusals.map((entry) => entry.control) });
 
-    // 12. §6.1: the declared workspace effect, read back byte-for-byte. The
     // effect is the FIRST real prompt of the run crossing into the effect
     // state, so its cardinality is asserted here: exactly one sealed prompt,
     // carrying the appended Idea, and no second dispatch. Its sealed no-tools
@@ -4375,7 +4219,6 @@ async function runJourney(options) {
       hostile_markers: markers.present.length,
       scope_entries: scopeInventory.length,
     });
-    // The receipt must carry the **commit** revision of this run: the
     // authorized root session detail's projected `workspace_commit` (contract
     // §4, P1-T2), strictly parsed here, or — if that projection is absent — a
     // routed same-run frame carrying the canonical workspace-commit response.
@@ -4412,7 +4255,6 @@ async function runJourney(options) {
         commitRevision: observedRevision,
         sessionCommitRevision,
         frames: allFrames,
-        // The `state_revision` beside the commit revision is the informational
         // run-state value from the same placement surface, never a substitute.
         projectionStateRevision: placementAtEffect?.state_revision ?? null,
       }),
@@ -4424,7 +4266,6 @@ async function runJourney(options) {
       revision_source: facts.effect.revision_source,
     });
 
-    // 13. W7 cancel: a durable `cancelled` is the only success, and the cancel
     // must not have committed anything: the authorized root detail still
     // projects the SAME commit revision and the opened scope is byte-identical.
     requireOk(
@@ -4457,7 +4298,6 @@ async function runJourney(options) {
     };
     record('cancel', 'ok', { schedule_status: facts.cancel.status });
 
-    // 14. O3 restart: same home, same schedule/session, preserved effect, no
     // repeated effect, and the LOST retained history stated explicitly. Every
     // half is asserted: the restarted producer must answer the pre-restart
     // cursor with exactly the one `history_unavailable` control frame (no
@@ -4465,7 +4305,6 @@ async function runJourney(options) {
     // own exactly this preset's ONE run, the effect bytes and ITS commit
     // revision must be identical, and the scope must carry nothing new.
     facts.ready_stop = await stopServiceVia(running, 'ready');
-    // §3.4 / §7: a confirmed owned shutdown is required before a successor
     // process reuses the same home and port.
     if (facts.ready_stop.confirmed !== true) {
       throw failed(
@@ -4538,7 +4377,6 @@ async function runJourney(options) {
     });
 
     if (live) {
-      // Live has no owned endpoint to report: the endpoint belongs to the
       // authorized upstream. What the driver records instead of a request body
       // structure is the guard's own credential-free evidence (§6.3 item 7:
       // safe model/runtime identity, request count, outcome category, cleanup).
@@ -4565,7 +4403,6 @@ async function runJourney(options) {
       });
     }
 
-    // 15. The request-budget guard's own verdict on this attempt (§6.3 items
     // 1–4). Read AFTER every owned child has run — including the restarted
     // service and any dsh probe it spawned — in FINAL mode, so the counts
     // describe the whole attempt, a truncated record cannot be skipped, and the
@@ -4591,7 +4428,6 @@ async function runJourney(options) {
       category: isDriverFailure ? error.category : 'internal',
       detail: error instanceof Error ? error.message : String(error),
     };
-    // A run that stopped early still reports what the guard observed: the raw
     // counts are evidence, and reading them must never mask the real blocker.
     if (attemptDir !== null && facts.guard === undefined) {
       facts.guard = captureGuardAttempt(attemptDir);
@@ -4600,10 +4436,8 @@ async function runJourney(options) {
   } finally {
     const cleanups = [];
     if (running) {
-      // Retain the service's own post-ready stdout (request/SSE diagnostics)
       // before the child is stopped, so a stream symptom is diagnosable.
       running.evidence?.writeStdoutTail?.();
-      // Cleanup disposition: a failed or unconfirmed owned shutdown is retained
       // as evidence and overrides an otherwise `ok` journey, so the receipt and
       // the exit code can never report success while an owned service may still
       // be alive (§3.4 / §7).
@@ -4633,7 +4467,6 @@ async function runJourney(options) {
       cleanups.push(cleanup);
     }
     if (model) {
-      // The loopback model endpoint is an owned child too (§6.1 confirmed
       // shutdown; §7: unconfirmed cleanup is a STOP with retained evidence).
       // `close()` always resolves with a checked, bounded verdict — a rejected
       // or throwing close, a close callback error and a close that never calls
@@ -4695,9 +4528,7 @@ async function main() {
     try {
       writeFileSync(join(receipt.isolated_root, 'evidence', 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
     } catch {
-      // The receipt is also printed; a missing evidence file is not a second failure.
     }
-    // Cleanup is ownership-scoped: a completed run removes its own temporary
     // root unless `--keep` was given, while a blocked or failed run retains its
     // evidence directory (and the printed receipt names it) so the STOP can be
     // diagnosed instead of erased. The attempt directory is NEVER removed: it

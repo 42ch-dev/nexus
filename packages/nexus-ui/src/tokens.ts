@@ -1,5 +1,4 @@
 /**
- * Nexus brand token constants — V1.83 foundation slice.
  * Normative cross-application values are defined in root DESIGN.md (P1);
  * this module exposes machine-consumable brand primitives for package consumers.
  *

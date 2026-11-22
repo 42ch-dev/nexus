@@ -1,5 +1,4 @@
 /**
- * NleTimelineChrome — presentational NLE-style multi-track Timeline band.
  *
  * Renders a vertically centered, horizontally scrollable multi-lane timeline
  * for dogfood visual verification in Design Studio and thin App adoption

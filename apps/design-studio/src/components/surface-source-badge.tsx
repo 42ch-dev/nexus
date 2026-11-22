@@ -43,7 +43,8 @@ const PROMOTED_IMPORT_ROOT = '@42ch/nexus-ui';
 const TRANSITIONAL_IMPORT_ROOT = '@web-ui';
 
 /**
- * Recognized presentational extract roots (spec §3.2). Utility/locale aliases
+ * Recognized presentational extract roots — see
+ * docs/specs/surfaces/design-studio.md §3.2. Utility/locale aliases
  * such as `@web-lib/utils` or `@web-locales/*` are NOT presentational extracts.
  */
 const EXTRACT_IMPORT_ROOTS: readonly string[] = [
@@ -58,7 +59,6 @@ const EXTRACT_IMPORT_ROOTS: readonly string[] = [
 ];
 
 /**
- * Exact-root/subpath boundary check — lockstep for every classified root so
  * lookalike prefixes (`@web-ui-legacy`, `@42ch/nexus-ui-legacy`) never match.
  */
 function isPackageOrSubpath(importPath: string, root: string): boolean {
@@ -115,7 +115,6 @@ export function SurfaceSourceBadge({ importPath }: SurfaceSourceBadgeProps) {
   const tier = classifySurfaceImport(importPath);
   const { shortLabel, badgeVariant } = TIER_COPY[tier];
 
-  // Narrow-viewport safety: the pill must never force document-wide overflow.
   // The full label + path stay visible — the mono path wraps inside the pill
   // (flex-wrap + break-all) instead of the nowrap pill escaping its column.
   return (

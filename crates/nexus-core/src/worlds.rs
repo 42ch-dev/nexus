@@ -188,7 +188,6 @@ pub fn narrative_internal(what: &str, e: &nexus_narrative::NarrativeError) -> Co
 
 /// Hard-delete transaction (ported verbatim from the daemon handler).
 async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) -> CoreResult<()> {
-    // Existence + ownership check using the shared narrative_write admission
     // gate. This is the only precondition before mutation; worlds have no
     // runtime lock analogue.
     let owned = narrative_write::is_world_owned(pool, creator_id, world_id)
@@ -257,7 +256,6 @@ async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) 
     {
         Ok(res) => res.rows_affected(),
         Err(e) => {
-            // Last resort after the declarative binding pre-count.
             if let sqlx::Error::Database(db) = &e {
                 if db.is_foreign_key_violation() {
                     return Err(CoreError::Forbidden {
@@ -270,7 +268,6 @@ async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) 
     };
 
     if deleted == 0 {
-        // Concurrent delete raced; treat as not found — row is gone. The tx
         // rolls back on Drop, discarding the no-op manual cleanup above.
         return Err(CoreError::NotFound {
             resource: format!("World {world_id} not found"),

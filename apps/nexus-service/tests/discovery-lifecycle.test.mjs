@@ -42,7 +42,6 @@ function seedHome() {
 }
 
 function emptyHome() {
-  // Exists (validateServiceHome requires it) but holds no profile, so the
   // service opens the explicit uninitialized shell.
   return track(mkdtempSync(join(tmpdir(), 'nexus-shell-')));
 }
@@ -144,7 +143,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
     assert.ok(staleRecord.instance_id.length > 0);
     assert.equal(readRecord(home).instance_id, staleRecord.instance_id);
 
-    // The confirmed owner removes its record; a replacement publishes its own.
     const report = await closeServiceBounded(first);
     assert.equal(report.cleanup_confirmed, true);
     assert.equal(readRecord(home), null, 'confirmed close removes the owned record');
@@ -153,7 +151,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
     const currentRecord = replacement.discovery;
     assert.notEqual(currentRecord.instance_id, staleRecord.instance_id, 'replacement mints a fresh instance');
 
-    // Stale instance id: conflict, no stop, replacement record preserved.
     const staleStop = await stopWith(replacement, {
       expected_instance_id: staleRecord.instance_id,
       expected_engine_epoch: staleRecord.engine_epoch,
@@ -164,21 +161,18 @@ describe('discovery-lifecycle (P5-T4)', () => {
     const health = await jsonRequest(`${replacement.url}/v1/daemon/runtime/health`);
     assert.equal(health.payload.status, 'ok', 'replacement still serves');
 
-    // Current instance but wrong epoch: conflict again.
     const wrongEpoch = await stopWith(replacement, {
       expected_instance_id: currentRecord.instance_id,
       expected_engine_epoch: currentRecord.engine_epoch + 1,
     });
     assert.equal(wrongEpoch.status, 409);
 
-    // Null epoch targets an uninitialized service; this one is ready.
     const nullEpoch = await stopWith(replacement, {
       expected_instance_id: currentRecord.instance_id,
       expected_engine_epoch: null,
     });
     assert.equal(nullEpoch.status, 409);
 
-    // Matching identity stops the replacement and removes its record.
     const owned = await stopWith(replacement, {
       expected_instance_id: currentRecord.instance_id,
       expected_engine_epoch: currentRecord.engine_epoch,
@@ -193,7 +187,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
   });
 
   test('failed open never publishes ready', async () => {
-    // A regular file in place of the socket's parent directory: the core
     // opens, the listener bind is then refused (unsafe parent), and nothing
     // may be published or left behind.
     const home = seedHome();
@@ -208,7 +201,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
     const lockPath = join(home, '.nexus42', 'run', 'service.start.lock');
     assert.equal(existsSync(lockPath), false, 'failed start released the start lock');
 
-    // The home stays usable: a normal start afterwards publishes cleanly.
     const recovery = await startServiceAt(home);
     try {
       assert.equal(recovery.discovery.readiness, 'ready');
@@ -232,7 +224,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       assert.equal(health.payload.status, 'ok', 'unowned service was not killed');
       assert.equal(readRecord(home).instance_id, service.discovery.instance_id);
 
-      // The removal seam refuses foreign ids even in-process.
       const { removeOwnedDiscovery } = await import(join(serviceRoot, 'dist', 'discovery.js'));
       const removal = await removeOwnedDiscovery('inst-not-the-owner');
       assert.equal(removal.removed, false);
@@ -257,7 +248,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       assert.equal(record.protocol_version, 1);
       assert.equal(readRecord(home).instance_id, record.instance_id);
 
-      // Null epoch matches the uninitialized service.
       const owned = await stopWith(service, {
         expected_instance_id: record.instance_id,
         expected_engine_epoch: null,
@@ -307,7 +297,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       assert.equal(owned.status, 200);
       assert.equal(owned.payload.status, 'stopping');
       stoppedThroughStopRoute = true;
-      // Discovery removal is the last step of a confirmed close — poll it,
       // then the socket file is guaranteed gone with the listener.
       assert.equal(
         await waitFor(() => readRecord(home) === null),
@@ -371,7 +360,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
     } finally {
       await closeServiceBounded(first);
     }
-    // Plant a leaf symlink whose target holds an attacker-chosen record.
     const planted = join(outside, 'fake-record.json');
     writeFileSync(planted, JSON.stringify({ instance_id: 'inst-attacker' }), { mode: 0o600 });
     symlinkSync(planted, recordPath);
@@ -424,7 +412,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       acquired_at: new Date().toISOString(),
       token: 'successor-live-token',
     });
-    // The clearer removes the stale lock between retry attempts; plant a
     // live lock the moment the stale one disappears — exactly what a racing
     // successor does in the read-then-unlink window this suite pins.
     let planted = false;
@@ -437,7 +424,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       }
     }
     if (!planted) {
-      // Event-loop stall swallowed the 25ms clear window: nothing about the
       // guarantee is exercised on this run; the start proceeds legitimately.
       await closeServiceBounded(await attempt);
       return;
@@ -455,7 +441,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
 
   test('unix socket refuses unsafe parents and locks down the socket file', async () => {
     const home = emptyHome();
-    // A shared-mode parent (0755) is refused before anything is bound.
     const openDir = track(mkdtempSync(join(tmpdir(), 'nexus-open-sock-')));
     chmodSync(openDir, 0o755);
     await assert.rejects(
@@ -464,7 +449,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
     );
     assert.equal(existsSync(join(openDir, 's.sock')), false, 'no socket in a shared parent');
     assert.equal(readRecord(home), null, 'refused binds publish no record');
-    // A symlinked parent is a redirect, not a private directory.
     const realDir = track(mkdtempSync(join(tmpdir(), 'nexus-real-sock-')));
     const linkPath = join(track(mkdtempSync(join(tmpdir(), 'nexus-linkparent-'))), 'link');
     symlinkSync(realDir, linkPath, 'dir');
@@ -472,7 +456,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       () => startServiceAt(home, { transport: 'unix', socketPath: join(linkPath, 's.sock') }),
       /not a real directory/,
     );
-    // A real 0700 parent binds, and the socket file itself is 0600.
     const safeDir = track(mkdtempSync(join(tmpdir(), 'nexus-safe-sock-')));
     const socketPath = join(safeDir, 'service.sock');
     const service = await startServiceAt(home, { transport: 'unix', socketPath });

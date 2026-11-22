@@ -10,7 +10,6 @@ use tokio::sync::{Notify, Semaphore};
 use uuid::Uuid;
 
 const MAX_EVENTS: usize = 1024;
-// Ring histories persist across session close for reconnect replay. Once full,
 // publish and subscribe evict an inactive ring; active rings are never evicted.
 const MAX_STREAMS: usize = 4096;
 const MAX_BATCH: usize = 64;
@@ -255,7 +254,6 @@ impl EventSubscription {
             .streams
             .get(&self.stream)
             .map_or_else(Vec::new, |ring| {
-                // Retention may have evicted events after the acknowledged
                 // cursor while a batch was outstanding, so the retained front
                 // can stop being contiguous with `cursor`. The same
                 // lost-history check the `subscribe` path applies (front is
@@ -737,7 +735,6 @@ mod tests {
         registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, mut first) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
-        // Take a batch, then withhold the ack: `next_batch` would otherwise
         // park on the ack semaphore forever.
         assert_eq!(first.next_batch().await.len(), 1);
         assert!(
@@ -753,7 +750,6 @@ mod tests {
             [] as [EventFrame; 0]
         );
         registry.activate("p", "s");
-        // Drain `second`'s replay (the frame published before it registered),
         // then prove the new generation delivers fresh live frames.
         let replay = second.next_batch().await;
         assert_eq!(replay.len(), 1);
@@ -907,7 +903,6 @@ mod tests {
         let first = registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, mut subscription) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
-        // Take the first batch, then withhold the ack while the publisher
         // overruns the ring, evicting every sequence the cursor still points
         // at (the retained front moves strictly past `cursor + 1`).
         assert_eq!(subscription.next_batch().await, vec![first.clone()]);
@@ -918,7 +913,6 @@ mod tests {
 
         let batch = subscription.next_batch().await;
         assert_generated_gap(&batch[0], "history_unavailable");
-        // The gap leads and the page never claims the evicted sequences: the
         // retained window starts at sequence 3 (1 initial + MAX_EVENTS+1
         // fillers, ring keeps the last MAX_EVENTS).
         let epoch = first.id.unwrap().split_once(':').unwrap().0.to_owned();

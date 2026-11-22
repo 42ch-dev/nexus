@@ -9,7 +9,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const scriptRoot = join(__dirname, '..', 'scripts');
 
 /**
- * Focused regression for the proof orchestrator's acceptance derivations and
  * abrupt-restart group-kill path (`scripts/proof-browser.mjs`). Same extraction
  * contract as `proof-browser-children.test.mjs`: the orchestrator is a
  * dependency-free single-file script, so its REAL helpers are extracted
@@ -36,7 +35,6 @@ function sliceBetween(source, startMarker, endMarker) {
 
 const source = readFileSync(join(scriptRoot, 'proof-browser.mjs'), 'utf8');
 
-// ── Module 1: pure acceptance derivations + the timing helpers they use ──────
 
 const derivationModulePath = join(mkdtempSync(join(tmpdir(), 'proof-browser-accept-')), 'derivations.mjs');
 writeFileSync(
@@ -56,7 +54,6 @@ writeFileSync(
 );
 const derivations = await import(derivationModulePath);
 
-// ── Module 2: child lifecycle (incl. the shared group-kill path) + ps sweep ──
 
 const lifecycleModulePath = join(mkdtempSync(join(tmpdir(), 'proof-browser-groupkill-')), 'group-kill.mjs');
 writeFileSync(
@@ -82,7 +79,6 @@ writeFileSync(
 );
 const lifecycle = await import(lifecycleModulePath);
 
-// ── Module 3: reversible-edit restore-gate outcome precedence ───────────────
 
 const restoreGateModulePath = join(mkdtempSync(join(tmpdir(), 'proof-browser-restore-gate-')), 'restore-gate.mjs');
 writeFileSync(
@@ -114,7 +110,6 @@ function waitForChildOutput(child, text, timeoutMs = 5_000) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── Fixtures: typed sample rows exactly as the phase runners emit them ───────
 
 function typedDb1Pair(index) {
   const expectedVersion = 10 + index;
@@ -184,7 +179,6 @@ describe('proof-browser locked DB-1 acceptance derivation', () => {
     assert.equal(verdict.typedPairCount, 100);
     assert.equal(verdict.pairMs.samples.length, 100);
     assert.equal(verdict.pairMs.max, Math.max(...verdict.pairMs.samples));
-    // Nearest-rank p95 (proof matrix §1): rank ceil(0.95*100)=95 of the sorted
     // fixture distribution — for n=100 this is NOT the max (that is rank 100).
     const sorted = [...verdict.pairMs.samples].sort((a, b) => a - b);
     assert.equal(verdict.pairMs.p95, sorted[Math.ceil(0.95 * sorted.length) - 1]);
@@ -401,7 +395,6 @@ describe('proof-browser provenance completeness gate', () => {
 
 describe('proof-browser abrupt-restart group kill (QC3-C3)', () => {
   test('a parked group descendant is DETECTED before the kill and gone after the shared group kill', async () => {
-    // Leader spawns a long-lived grandchild on inherited stdio (so `close`
     // stays pending), announces readiness, then exits — the exact abrupt-kill
     // shape. The grandchild outlives the leader.
     const leaderScript = `
@@ -415,7 +408,6 @@ setTimeout(() => process.exit(0), 100);
     });
     await waitForChildOutput(child, 'grandchild-ready-marker');
 
-    // Snapshot the tracked tree while the leader is still alive: after the
     // leader dies, orphans are re-parented and a fresh ps walk could no
     // longer find them.
     const groupBefore = lifecycle
@@ -428,13 +420,11 @@ setTimeout(() => process.exit(0), 100);
 
     await new Promise((resolveExit) => child.once('exit', resolveExit));
 
-    // The survivor sweep must SEE the descendant — this is the observation the
     // old unconditional pid fallback silently skipped.
     const survivorsBefore = lifecycle.survivingGroupRows(groupBefore, child.pid);
     assert.equal(survivorsBefore.length, 1, 'the parked grandchild must be reported as a survivor');
     assert.equal(survivorsBefore[0].pid, groupBefore[0].pid);
 
-    // Shared group-kill path: SIGKILL the whole group, verify nobody survives.
     lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
     await Promise.race([child.__closed, sleep(2_000)]);
     assert.equal(child.__closeSettled, true, 'the killed leader must settle through close');
@@ -455,7 +445,6 @@ setTimeout(() => process.exit(0), 100);
     lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
     await Promise.race([child.__closed, sleep(2_000)]);
     assert.equal(child.__closeSettled, true);
-    // The group no longer exists: the group signal hits ESRCH, the fallback
     // hits ESRCH on the dead leader, and the helper stays silent — a missing
     // group is a settled state, not an error.
     lifecycle.signalProcessGroup(child.pid, 'SIGKILL');

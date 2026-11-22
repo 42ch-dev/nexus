@@ -45,7 +45,6 @@ fn build_neutral_fixture() -> (
     let narrative = InMemoryNarrativeGateway::new(InMemoryKbStore::new());
     let kb = InMemoryKbStore::new();
 
-    // ── World (frozen created_at) ──
     let mut world = nexus_narrative::world::World::new(
         "wld_golden_slots",
         "ctr_golden",
@@ -57,7 +56,6 @@ fn build_neutral_fixture() -> (
     world.created_at = "2026-01-01T00:00:00Z".to_string();
     narrative.insert_world(world);
 
-    // ── Timeline event (frozen id + created_at) ──
     let mut event = nexus_narrative::timeline_event::TimelineEvent::new(
         "wld_golden_slots",
         "fbk_root",
@@ -69,7 +67,6 @@ fn build_neutral_fixture() -> (
     event.title = Some("The Beginning".to_string());
     narrative.insert_event(event);
 
-    // ── Stage0 (no wall-clock dep) ──
     let stage0 = Stage0Assembly {
         personality: "A creative writer who loves worldbuilding.".to_string(),
         experience: "Published 3 novels and 20 short stories.".to_string(),
@@ -116,14 +113,11 @@ async fn slots_neutral_only_byte_equivalent_golden() {
 
     let output = assemble_default_on(stage0, &narrative, &kb).await;
 
-    // 1. P0 reservation: no Moment Directive section renders when no
-    //    directive is active.
     assert!(
         !output.contains("## Moment Directive"),
         "reserved directive slot must not render in P0"
     );
 
-    // 2. No V1.150 slot sub-headings render when all slots are empty.
     for heading in SLOT_HEADINGS {
         assert!(
             !output.contains(heading),
@@ -131,7 +125,6 @@ async fn slots_neutral_only_byte_equivalent_golden() {
         );
     }
 
-    // 3. The World-KB section is byte-identical to the V1.149 flat block.
     let world_kb = output
         .split("## World Knowledge Base")
         .nth(1)
@@ -145,7 +138,6 @@ async fn slots_neutral_only_byte_equivalent_golden() {
         "neutral-only World-KB body must be the V1.149 flat block"
     );
 
-    // 4. Frozen guarantee: full output matches the checked-in golden.
     let golden = include_str!("fixtures/assemble_moment_slots_neutral_only.golden");
     assert_eq!(
         output, golden,

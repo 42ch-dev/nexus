@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Push working-tree changes as a GitHub-verified commit via GraphQL
  * `createCommitOnBranch` (no bot GPG key required).
  *
  * This is the spoke-ported release primitive: a plain `GITHUB_TOKEN` git push
@@ -69,7 +68,6 @@ export function parseArgs(argv, env = process.env) {
     bodyFile: null,
     trailers: [],
     baseRef: "main",
-    // A blank RELEASE_BASE_OID must fail the pin off (null) rather than pin an
     // empty string, so the falsy fallback is deliberate here.
     // eslint-disable-next-line typescript/prefer-nullish-coalescing -- blank env must map to null, not ""
     expectedBaseOid: env.RELEASE_BASE_OID?.trim() || null,
@@ -228,7 +226,6 @@ export function collectFileChanges(repoRoot, baseRef) {
     }
   }
 
-  // `git diff` never reports untracked files; a release commit must not
   // silently drop one (e.g. a newly bootstrapped artifact).
   for (const path of git(repoRoot, ["ls-files", "--others", "--exclude-standard"])
     .split("\n")
@@ -243,7 +240,6 @@ export function collectFileChanges(repoRoot, baseRef) {
 }
 
 /**
- * GitHub REST/GraphQL base URL. GitHub sets `GITHUB_API_URL` in every Actions
  * step (github.com and GitHub Enterprise Server alike); the tests point it at a
  * local stub.
  *
@@ -261,7 +257,6 @@ function apiBaseUrl() {
  * @returns {Promise<unknown>}
  */
 async function ghApi(path, body, method = body === undefined ? "GET" : "POST") {
-  // An empty GITHUB_TOKEN must fall back to GH_TOKEN: the `!token` guard below
   // already treats an empty token as missing, so the falsy fallback is intended.
   // eslint-disable-next-line typescript/prefer-nullish-coalescing -- empty token must fall through, not throw
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -314,7 +309,6 @@ async function ghGraphql(query, variables) {
 }
 
 /**
- * Resolve the exact `refs/heads/<branch>` tip, or `null` when the branch does
  * not exist yet.
  *
  * Exact-match endpoint: singular `GET /git/ref/heads/<branch>`. The plural
@@ -345,7 +339,6 @@ async function resolveBranchOid(repo, branch) {
 }
 
 /**
- * Create `refs/heads/<branch>` at `oid`. Used only when the branch is absent:
  * an existing release head is never force-reset — the replacement commit's
  * `expectedHeadOid` compare-and-swap is what moves it.
  *
@@ -404,7 +397,6 @@ export async function main(argv = process.argv.slice(2)) {
   const baseOid = git(repoRoot, ["rev-parse", `origin/${baseRef}`]);
   verifyPinnedBase(expectedBaseOid, baseOid, baseRef);
 
-  // Pre-screen: the dispatch prepared the bump on `origin/<baseRef>`, so an
   // empty delta there means there is nothing to publish. Refusing before any
   // GitHub call keeps the branch (and its previous head) untouched.
   const baseChanges = collectFileChanges(repoRoot, baseRef);
@@ -413,7 +405,6 @@ export async function main(argv = process.argv.slice(2)) {
     return 1;
   }
 
-  // Never destroy a previous release head: when the branch already exists the
   // replacement commit carries its current OID as the compare-and-swap
   // `expectedHeadOid`, so the ref only moves as part of a successful mutation.
   const existingHeadOid = await resolveBranchOid(
@@ -424,7 +415,6 @@ export async function main(argv = process.argv.slice(2)) {
   let fileChanges = baseChanges;
   let expectedHeadOid = baseOid;
   if (existingHeadOid !== null) {
-    // The replacement is parented on the existing head, so its delta must be
     // taken against that head: a delta against `baseRef` would drop the
     // `baseRef` changes that landed after the branch was first published.
     git(repoRoot, ["fetch", "origin", /** @type {string} */ (branch), "--prune"]);
@@ -474,7 +464,6 @@ export async function main(argv = process.argv.slice(2)) {
   if (typeof commit.url === "string") {
     console.log(commit.url);
   }
-  // Machine-readable for Actions steps (do not change the prefix).
   console.log(`COMMIT_OID=${commit.oid}`);
   return 0;
 }

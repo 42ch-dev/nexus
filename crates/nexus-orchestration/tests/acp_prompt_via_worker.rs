@@ -32,7 +32,6 @@ fn empty_session_cancels() -> std::sync::Arc<
 
 #[tokio::test]
 async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
-    // `new_for_test` defaults the session id to "default" and constructs an
     // empty cancellation map; register the run's coordinator token so the
     // task's fail-closed token resolution succeeds (production registers at
     // run admission).
@@ -57,7 +56,6 @@ async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
     ctx.set("core_context.version", "0").unwrap();
     let result = task.run(ctx.clone()).await.unwrap();
 
-    // The executor returns the non-echo transformation as full_text.
     assert_eq!(
         result.response.as_deref().unwrap_or(""),
         "transformed:hello 0",
@@ -65,14 +63,12 @@ async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
         result.response
     );
 
-    // Output should be stored at state.state-1.output.
     let stored: String = ctx.get("state.state-1.output").unwrap();
     assert_eq!(stored, "transformed:hello 0");
 }
 
 #[tokio::test]
 async fn acp_prompt_task_no_executor_refuses() {
-    // No executor — must refuse with a typed failure, never a placeholder
     // success (A1: no echo/worker fallback).
     let task = AcpPromptTask::new(
         None,

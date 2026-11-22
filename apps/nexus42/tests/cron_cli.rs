@@ -26,7 +26,6 @@ use nexus42::commands::creator::works::cron::{
 async fn cron_dao_round_trip_set_then_show() {
     let (_dir, pool) = fresh_seeded_pool().await;
 
-    // `set my-work --brainstorm "0 3,9,15,21 * * *" --tz Asia/Shanghai`
     let args = CronSetArgs {
         brainstorm: Some("0 3,9,15,21 * * *".to_string()),
         tz: Some("Asia/Shanghai".to_string()),
@@ -39,7 +38,6 @@ async fn cron_dao_round_trip_set_then_show() {
         .await
         .unwrap();
 
-    // `show my-work` — re-render from the stored blob.
     let stored = nexus_local_db::works::get_schedule_json(&pool, "wrk_seed")
         .await
         .unwrap()
@@ -47,7 +45,6 @@ async fn cron_dao_round_trip_set_then_show() {
     let resolved = resolve_schedule(Some(&stored));
     assert_eq!(resolved.tz, "Asia/Shanghai");
     assert_eq!(resolved.roles.brainstorm.cron, "0 3,9,15,21 * * *");
-    // write/review kept at defaults.
     assert!(resolved.roles.write.enabled);
     assert!(resolved.roles.review.enabled);
 
@@ -88,12 +85,10 @@ async fn cron_set_no_review_disables_role() {
 #[tokio::test]
 async fn cron_list_across_workspace() {
     let (_dir, pool) = fresh_seeded_pool().await;
-    // Seed a second Work.
     let other = sample_work_record("wrk_other", "other-ref");
     nexus_local_db::works::create_work(&pool, &other)
         .await
         .unwrap();
-    // Keep `wrk_other` at defaults; set a custom blob on `wrk_seed`.
     let custom = apply_set_args(
         WorkSchedule::defaults(),
         &CronSetArgs {
@@ -123,7 +118,6 @@ async fn cron_list_across_workspace() {
     assert!(rendered.contains("seed-ref"));
     assert!(rendered.contains("other-ref"));
     assert!(rendered.contains("America/New_York"));
-    // Defaults shown as canonical cron for the unset Work.
     assert!(rendered.contains("0 3,9,15,21 * * *"));
 }
 
@@ -150,7 +144,6 @@ async fn cron_show_on_unset_work_uses_defaults() {
 #[tokio::test]
 async fn cron_set_no_flags_resets_to_defaults() {
     let (_dir, pool) = fresh_seeded_pool().await;
-    // First, set a custom blob.
     let custom = apply_set_args(
         WorkSchedule::defaults(),
         &CronSetArgs {
@@ -165,7 +158,6 @@ async fn cron_set_no_flags_resets_to_defaults() {
         .await
         .unwrap();
 
-    // Now `set <work>` with no flags → reset to defaults.
     let current = resolve_schedule(
         nexus_local_db::works::get_schedule_json(&pool, "wrk_seed")
             .await
@@ -176,9 +168,7 @@ async fn cron_set_no_flags_resets_to_defaults() {
     assert_eq!(reset, WorkSchedule::defaults());
 }
 
-// =============================================================================
 // CLI binary surface (AC #5: invalid cron/TZ → ValidationError exit)
-// =============================================================================
 
 /// `creator works cron` is registered as a subcommand of `creator works`.
 #[test]
@@ -266,10 +256,6 @@ fn cron_list_help_documents_limit_flag() {
         "cron list --help must document --limit: {help}"
     );
 }
-
-// =============================================================================
-// Test helpers
-// =============================================================================
 
 /// Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
 /// `seed-ref`) under `ctr_test` / `default`.

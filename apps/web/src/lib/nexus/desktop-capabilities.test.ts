@@ -81,7 +81,6 @@ describe('ElectronDesktopCapabilities', () => {
   });
 
   it('unwraps a main path_outside_workspace rejection into the structured error', async () => {
-    // Mirrors the main action error serialized shape ({ code, message }).
     mockBridge(() =>
       Promise.reject({
         code: 'path_outside_workspace',
@@ -219,7 +218,6 @@ describe('ElectronDesktopCapabilities', () => {
     const caps = new ElectronDesktopCapabilities();
     const unlisten = await caps.onDaemonStatusChanged(handler);
     expect(typeof unlisten).toBe('function');
-    // The bridge delivers bounded status frames directly (no event objects).
     listener({ state: 'running', version: '1.0.0', port: 8420 });
     expect(handler).toHaveBeenCalledWith({ state: 'running', version: '1.0.0', port: 8420 });
     restoreBridge();

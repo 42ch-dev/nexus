@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * P0-T6 quit-gate tests.
  *
  * No GUI, no Electron, no E2E: the dialog adapter and the P0-T4 controller are
  * stubbed at their frozen contracts, and the detached handoff is exercised
@@ -34,15 +33,11 @@ after(() => {
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
-      // already gone
     }
   }
   rmSync(root, { recursive: true, force: true });
 });
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 
 function fixtureDir() {
   return mkdtempSync(join(root, 'case-'));
@@ -64,7 +59,6 @@ function shellQuote(value) {
 }
 
 /**
- * Stand-in for the installed standalone Node runtime: it answers the version
  * probe and then replaces itself with the real Node on whatever entry it is
  * handed (`exec` keeps the pid, so the child stays the one detached process).
  */
@@ -134,9 +128,6 @@ process.exit(0);
 `;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -184,7 +175,6 @@ async function stopChild(pid) {
   try {
     process.kill(pid, 'SIGTERM');
   } catch {
-    // already gone
   }
   await waitFor(() => !processAlive(pid), 5_000);
   liveChildren.delete(pid);
@@ -192,7 +182,6 @@ async function stopChild(pid) {
 }
 
 /**
- * The frozen quit surface. `stop()` is deliberately absent: an ordinary stop
  * leaves an attached independent service running (row 8), so the gate must use
  * the explicit authenticated stop.
  */
@@ -235,9 +224,6 @@ function unavailableError(message) {
   return Object.assign(new Error(message), { code: 'unavailable' });
 }
 
-// ---------------------------------------------------------------------------
-// Quit gate: the three frozen choices
-// ---------------------------------------------------------------------------
 
 test('stop choice closes through the explicit stop and allows the quit', async () => {
   const controller = stubController();
@@ -246,7 +232,6 @@ test('stop choice closes through the explicit stop and allows the quit', async (
   assert.equal(await quit.requestQuit(), true);
   assert.equal(controller.calls.stopExplicit, 1);
   assert.equal(controller.calls.keepForQuit, 0);
-  // The dialog sees the frozen status snapshot; a successful stop needs no notice.
   assert.deepEqual(dialogStatuses, [{ state: 'running', port: 8420 }]);
   assert.deepEqual(outcomes, []);
 });
@@ -296,7 +281,6 @@ test('keep without an installed Node refuses the quit and leaves the owned servi
 
   assert.equal(await quit.requestQuit(), false);
   assert.equal(controller.calls.keepForQuit, 1);
-  // Never a silent stop fallback: the utility owner is still alive.
   assert.equal(controller.calls.stopExplicit, 0);
   assert.equal(controller.getStatus().state, 'running');
   assert.equal(outcomes.length, 1);
@@ -392,9 +376,6 @@ test('a failing outcome reporter does not change the decision', async () => {
   assert.equal(await quit.requestQuit(), false);
 });
 
-// ---------------------------------------------------------------------------
-// Detached handoff (D-21 Keep transfer target)
-// ---------------------------------------------------------------------------
 
 test('isCompatibleNodeVersion accepts the frozen minimum and newer release lines', () => {
   assert.equal(isCompatibleNodeVersion('v22.22.0'), true);
@@ -523,7 +504,6 @@ test('a ready detached child survives the parent harness exit', async () => {
   const child = JSON.parse(readFileSync(join(home, 'service-child.json'), 'utf8'));
   track(child.pid);
   assert.deepEqual(child.argv, ['--home', home, '--host', '127.0.0.1', '--port', '8420', '--no-open']);
-  // The spawning parent is already gone when the child is sampled.
   assert.equal(processAlive(exit.parent_pid), false);
 
   const sampled = heartbeat(home);
@@ -532,7 +512,6 @@ test('a ready detached child survives the parent harness exit', async () => {
   assert.ok(later.seq > sampled.seq, `the detached child stopped beating (${sampled.seq} → ${later.seq})`);
   assert.ok(later.at > exit.at, 'the detached child kept working after the parent harness exited');
   assert.equal(processAlive(child.pid), true);
-  // `detached`, not merely "the parent exited politely": the child leads its own
   // process group, so the exiting session cannot take it down with a group signal.
   assert.equal(processGroupId(child.pid), child.pid);
 

@@ -1,5 +1,4 @@
 /**
- * Preset YAML parser — client-side projection of a preset bundle manifest.
  *
  * `GET /v1/daemon/presets/{id}` returns `GetPresetResponse { yaml: string }`
  * (A5 verdict — option a: existing endpoint suffices, no new read route). The

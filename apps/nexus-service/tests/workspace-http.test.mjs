@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Task 4 — workspace family exposure (list + active get/set), extended by
  * v1220 P3-T2 with create.
  *
  * `POST /v1/daemon/workspaces` forwards to the core create capability; the
@@ -77,7 +76,6 @@ async function startServer(stubState) {
       port: 0,
       allowRemote: false,
     });
-    // Boot snapshot semantics: the shell starts without an initialized
     // workspace and only the set-active handler may flip it in place.
     const service = {
       startedAt: new Date().toISOString(),
@@ -144,7 +142,6 @@ function stubState() {
           workspace_slug: request.workspace_slug,
         };
       },
-      // The core owns validation/exclusivity; this stub reproduces its typed
       // refusals so the transport fold (409/400) is what gets exercised.
       async createWorkspace(request) {
         state.createdRequest = request;
@@ -249,7 +246,6 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     assert.equal(unknownKey.status, 400, unknownKey.text);
     assert.equal(unknownKey.payload.error.code, 'invalid_input');
 
-    // An unknown cursor must not silently re-serve page one.
     const unknownCursor = await jsonFetch(
       `${server.url}/v1/daemon/workspaces?cursor=ctr_a%2Fmissing`,
     );
@@ -278,8 +274,6 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     assert.equal(before.status, 200, before.text);
     assert.equal(before.payload.workspace_initialized, false);
 
-    // A failed promotion must not publish readiness: the request fails and the
-    // status stays uninitialized (the next selection retries).
     state.failPromotion = true;
     const refused = await jsonFetch(`${server.url}/v1/daemon/workspace/active`, {
       method: 'POST',
@@ -300,18 +294,15 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     assert.deepEqual(state.selected, { creator_id: 'ctr_a', workspace_slug: 'second' });
     assert.equal(state.promotions, 2);
 
-    // Readiness is claimed only after the promotion succeeded.
     const after = await jsonFetch(`${server.url}/v1/daemon/runtime/status`);
     assert.equal(after.status, 200, after.text);
     assert.equal(after.payload.workspace_initialized, true);
     assert.equal(after.payload.runtime_mode, 'domain_only');
 
-    // The selected identity is observable through the active read.
     const followUp = await jsonFetch(`${server.url}/v1/daemon/workspace`);
     assert.equal(followUp.status, 200, followUp.text);
     assert.equal(followUp.payload.workspace_slug, 'second');
 
-    // Unknown workspace paths keep the retained 501 refusal.
     const legacyAlias = await jsonFetch(`${server.url}/v1/daemon/workspaces/active`);
     assert.equal(legacyAlias.status, 501, legacyAlias.text);
     assert.equal(legacyAlias.payload.error.code, 'route_not_migrated');
@@ -363,7 +354,6 @@ describe('workspace-http (v1219 shell Task 4)', () => {
     assert.equal(invalid.payload.error.code, 'invalid_input');
     assert.equal(invalid.payload.error.details.field, 'workspace_slug');
 
-    // A non-object body keeps the service's own pre-wire 400.
     const notAnObject = await jsonFetch(`${server.url}/v1/daemon/workspaces`, {
       method: 'POST',
       body: [],
@@ -384,8 +374,6 @@ describe('workspace-http (v1219 shell Task 4)', () => {
       const [left, right] = await Promise.all([select(), select()]);
       assert.equal(left.status, 200, left.text);
       assert.equal(right.status, 200, right.text);
-      // The select+promote pair is serialized: the second request finds the
-      // process ready instead of publishing a second core.
       assert.equal(concurrentState.promotions, 1);
       const status = await jsonFetch(`${concurrent.url}/v1/daemon/runtime/status`);
       assert.equal(status.payload.workspace_initialized, true);
@@ -425,7 +413,6 @@ function seedWorkspaceHome() {
       }),
     );
   }
-  // A registered workspace with no `local_root`: the active read must omit
   // `creative_root` instead of naming an empty path (D25).
   mkdirSync(join(workspacesRoot, 'third'), { recursive: true });
   writeFileSync(
@@ -488,7 +475,6 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
       workspace_slug: 'second',
     });
 
-    // The same session now reports the selected workspace, and selection
     // initialized the chosen workspace DB (never a route-level side effect).
     const after = await jsonFetch(`${service.url}/v1/daemon/workspace`);
     assert.equal(after.status, 200, after.text);
@@ -500,7 +486,6 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
     assert.equal(status.status, 200, status.text);
     assert.equal(status.payload.workspace_initialized, true);
 
-    // A workspace registered without a creative root answers without the
     // optional field (the client must not display an empty path).
     const bare = await jsonFetch(`${service.url}/v1/daemon/workspace/active`, {
       method: 'POST',
@@ -527,7 +512,6 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
     assert.equal(created.payload.workspace_slug, 'fourth');
     assert.equal(created.payload.creative_root, join(fixture.home, 'Nexus', 'fourth'));
 
-    // Success implies the workspace is discoverable through the list.
     const listed = await jsonFetch(`${service.url}/v1/daemon/workspaces`);
     const row = listed.payload.items.find((item) => item.workspace_slug === 'fourth');
     assert.ok(row, 'created workspace is discoverable');
@@ -554,7 +538,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
   let service;
 
   before(async () => {
-    // A genuinely fresh home: no `.nexus42`, no config, no state DB — the
     // service opens the status-only shell, exactly the first-run case.
     home = mkdtempSync(join(tmpdir(), 'nexus-workspace-shell-'));
     tempDirs.push(home);
@@ -562,7 +545,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
     service = await startService({
       home,
       host: '127.0.0.1',
-      // Port 0: the OS picks a free port, so parallel suites never collide.
       port: 0,
       allowRemote: false,
       domainOnly: true,
@@ -578,7 +560,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
     assert.equal(status.status, 200, status.text);
     assert.equal(status.payload.workspace_initialized, false);
 
-    // A session that never selects keeps the full domain denied.
     const denied = await jsonFetch(`${service.url}/v1/daemon/works`);
     assert.equal(denied.status, 409, denied.text);
     assert.equal(denied.payload.error.code, 'uninitialized');
@@ -595,7 +576,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
     const creatorId = created.payload.creator_id;
     assert.match(creatorId, /^ctr_local[a-zA-Z0-9]+$/);
 
-    // The created display name survives in the listing (global identity row +
     // enrichment cache), not degraded to the creator id.
     const listed = await jsonFetch(`${service.url}/v1/daemon/creators`);
     assert.equal(listed.status, 200, listed.text);
@@ -604,7 +584,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
       [{ id: creatorId, name: 'Fresh Creator' }],
     );
 
-    // Before any selection the pre-created `default` directory is unregistered.
     const beforeSelect = await jsonFetch(`${service.url}/v1/daemon/workspaces`);
     assert.equal(beforeSelect.status, 200, beforeSelect.text);
     assert.deepEqual(beforeSelect.payload.items, []);
@@ -626,7 +605,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
       operational_dir: join(home, '.nexus42', 'creators', creatorId, 'workspaces', 'default'),
     });
 
-    // Same session, no restart: promotion published the full core.
     const after = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
     assert.equal(after.status, 200, after.text);
     assert.equal(after.payload.workspace_initialized, true);
@@ -635,7 +613,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
     const domain = await jsonFetch(`${service.url}/v1/daemon/works`);
     assert.equal(domain.status, 200, domain.text);
 
-    // The first selection registered the pre-created default workspace.
     const discovered = await jsonFetch(`${service.url}/v1/daemon/workspaces`);
     assert.equal(discovered.status, 200, discovered.text);
     assert.deepEqual(discovered.payload.items, [

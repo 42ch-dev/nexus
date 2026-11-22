@@ -9,10 +9,6 @@
 use crate::generated::daemon_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Sessions
-// ---------------------------------------------------------------------------
-
 /// Query parameters for `GET /v1/daemon/orchestration/sessions`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -178,10 +174,6 @@ pub struct SignalSessionRequest {
     pub wait_id: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Capabilities
-// ---------------------------------------------------------------------------
-
 /// Query parameters for `GET /v1/daemon/orchestration/capabilities`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -224,11 +216,6 @@ pub struct CapabilityInfo {
     pub origin: String,
 }
 
-// ---------------------------------------------------------------------------
-// Presets
-// ---------------------------------------------------------------------------
-
-// The canonical preset wire DTOs (`OrchestrationPresetListResponse` and the
 // `PresetProfile*` family) are generated from
 // `schemas/core/orchestration-presets-api.schema.json` and live in
 // `crate::generated::core::orchestration_presets_api`. The handwritten copies

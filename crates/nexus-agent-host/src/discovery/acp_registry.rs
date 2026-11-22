@@ -1,4 +1,4 @@
-//! ACP registry discovery — maps registry entries to catalog entries.
+//! ACP registry discovery — maps registry entries to catalog entries. See docs/specs/agents/agent-host.md.
 //!
 //! Uses `nexus_acp_host::RegistryClient` to fetch the cached registry and maps
 //! each agent entry to a `ProviderCatalogEntry` with `protocol_kind = Acp`,
@@ -37,7 +37,6 @@ pub fn entries_from_registry(
     for agent in registry_agents {
         let pid = ProviderId::new(&agent.id);
 
-        // Determine launch command from distribution
         let launch = build_launch_strategy(agent);
 
         entries.push(ProviderCatalogEntry {
@@ -62,7 +61,6 @@ pub fn entries_from_registry(
 fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> LaunchStrategy {
     let dist = &agent.distribution;
 
-    // Prefer NPX distribution
     if let Some(ref npx) = dist.npx {
         let mut args = vec!["npx".to_string()];
         args.push(npx.package.clone());
@@ -79,7 +77,6 @@ fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> Launch
         };
     }
 
-    // Binary distribution — pick the platform-matching binary
     if let Some(ref binary) = dist.binary {
         let (cmd, _archive) = pick_platform_binary(binary);
         return LaunchStrategy::Acp {
@@ -89,7 +86,6 @@ fn build_launch_strategy(agent: &nexus_acp_host::registry::AgentEntry) -> Launch
         };
     }
 
-    // Fallback: use agent ID as command hint
     LaunchStrategy::Acp {
         command: agent.id.clone(),
         args: vec![],
@@ -118,7 +114,6 @@ fn pick_platform_binary(binary: &nexus_acp_host::registry::BinaryDistribution) -
         return (&pb.cmd, &pb.archive);
     }
 
-    // Fallback: first non-None platform binary
     if let Some(pb) = [
         binary.darwin_aarch64.as_ref(),
         binary.darwin_x86_64.as_ref(),
@@ -255,7 +250,6 @@ mod tests {
 
     #[test]
     fn platform_key_matches_current_platform() {
-        // Basic sanity: should not be "unknown" on CI/developer machines
         let key = platform_key();
         assert_ne!(key, "");
     }

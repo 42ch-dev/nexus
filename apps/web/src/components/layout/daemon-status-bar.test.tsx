@@ -1,5 +1,4 @@
 /**
- * DaemonStatusBar lifecycle + agent badge tests.
  *
  * V1.117 P2 (T3): single-line footer with left status dot + "Daemon running"
  * label + lowercase `running` tag, and right clickable agent badge (name+version
@@ -48,7 +47,6 @@ function makeDesktop(
     stopDaemon: vi.fn().mockResolvedValue(undefined),
     resetLocalDatabase: vi.fn().mockResolvedValue({ status: 'confirmed' }),
     ...impl,
-    // Expose a test-only trigger so event-driven updates can be simulated.
     _triggerStatusChange: trigger,
   } as DesktopCapabilities;
 }
@@ -76,12 +74,10 @@ describe('DaemonStatusBar lifecycle action', () => {
 
     const bar = await screen.findByTestId('daemon-status-bar');
     expect(bar).toHaveTextContent('Daemon running');
-    // Health tag copy was replaced with the lowercase `running` tag (AD-P2-5).
     expect(bar).not.toHaveTextContent('healthy');
     expect(screen.getByText('running')).toBeInTheDocument();
     expect(bar).not.toHaveTextContent(/reachable/i);
 
-    // State dot encodes health (present, green).
     expect(bar.querySelector('.bg-green-700')).not.toBeNull();
 
     const button = await screen.findByRole('button', { name: /Restart daemon/i });
@@ -145,7 +141,6 @@ describe('DaemonStatusBar lifecycle action', () => {
     renderInApp(<DaemonStatusBar />, { desktop });
     await screen.findByRole('button', { name: /Restart daemon/i });
 
-    // Simulate a transition to running; the restart button should remain.
     (
       desktop as unknown as {
         _triggerStatusChange: (status: DaemonStatus) => void;
@@ -169,15 +164,12 @@ describe('DaemonStatusBar lifecycle action', () => {
       desktop: makeDesktop({ state: 'running' }, { getDaemonStatus }),
     });
 
-    // Initial fetch on mount.
     await waitFor(() => expect(getDaemonStatus).toHaveBeenCalledTimes(1));
 
-    // Advance past the fallback interval.
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(getDaemonStatus).toHaveBeenCalledTimes(2);
 
-    // Cleanup.
     vi.useRealTimers();
   });
 });
@@ -220,7 +212,6 @@ describe('DaemonStatusBar agent badge (V1.117 P2 T3)', () => {
     });
 
     const badge = await screen.findByTestId('daemon-status-agent-badge');
-    // Override maps claude-native → "Claude"; version from the scan entry.
     await waitFor(() => {
       expect(badge).toHaveTextContent('Claude v1.0.42');
     });
@@ -240,7 +231,6 @@ describe('DaemonStatusBar agent badge (V1.117 P2 T3)', () => {
     });
 
     const badge = await screen.findByTestId('daemon-status-agent-badge');
-    // Falls back to the raw profile name; no " v..." suffix.
     await waitFor(() => {
       expect(badge).toHaveTextContent('Claude Code');
     });
@@ -271,7 +261,6 @@ describe('DaemonStatusBar agent badge (V1.117 P2 T3)', () => {
 });
 
 describe('DaemonStatusBar locale parity (V1.117 P2 T4)', () => {
-  // Isolate localStorage so the zh-CN preference does not leak into the other
   // describe blocks in this file (they do not clear localStorage themselves).
   afterEach(() => {
     window.localStorage.clear();
@@ -287,17 +276,14 @@ describe('DaemonStatusBar locale parity (V1.117 P2 T4)', () => {
     const bar = await screen.findByTestId('daemon-status-bar');
     // AC-P2-7: `running` tag is lowercase in BOTH locales (AD-P2-5 / grill-me #7).
     expect(screen.getByText('running')).toBeInTheDocument();
-    // AC-P2-8: zh-CN daemon-running label + agent badge placeholder.
     expect(bar).toHaveTextContent('守护进程运行中');
     expect(bar).toHaveTextContent('未选择智能体');
-    // The deprecated `healthy` / `健康` status-tag copy must not appear.
     expect(bar).not.toHaveTextContent('健康');
     expect(bar).not.toHaveTextContent('healthy');
   });
 });
 
 describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
-  // Isolate localStorage so the zh-CN preference does not leak into other
   // describe blocks (they do not clear localStorage themselves).
   afterEach(() => {
     window.localStorage.clear();
@@ -309,7 +295,6 @@ describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
       client: new BrowserClient(),
     });
 
-    // AC-P1-6 / AD-P1-5: the icon-only control must not be a bare "Restart" —
     // its accessible name names the daemon, and the hover tooltip (title)
     // carries the same object so users know what restarts.
     const restart = await screen.findByRole('button', { name: 'Restart daemon' });
@@ -324,7 +309,6 @@ describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
     });
 
     const badge = await screen.findByTestId('daemon-status-agent-badge');
-    // Visible label doubles as the accessible name; title provides the tooltip.
     expect(badge).toHaveAccessibleName('No agent');
     expect(badge).toHaveAttribute('title', 'No agent');
   });
@@ -342,7 +326,6 @@ describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
 });
 
 /**
- * Records react-router's current pathname on every render so a test can assert
  * where a navigation landed without mocking `useNavigate`.
  */
 function LocationSentinel({ onChange }: { onChange: (pathname: string) => void }) {

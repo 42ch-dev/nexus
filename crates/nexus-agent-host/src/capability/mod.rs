@@ -1,4 +1,4 @@
-//! Capability model, negotiation, and risk classification.
+//! Capability model, negotiation, and risk classification. See docs/specs/agents/agent-host.md.
 
 pub mod model;
 pub mod negotiation;

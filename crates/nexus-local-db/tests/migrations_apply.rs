@@ -4,7 +4,6 @@ async fn all_migrations_apply_to_fresh_db() {
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // Assert every expected table exists.
     for table in [
         "workspace_meta",
         "creators",
@@ -27,7 +26,6 @@ async fn all_migrations_apply_to_fresh_db() {
         assert_eq!(found.0, 1, "missing table: {table}");
     }
 
-    // Assert db_schema_version is seeded.
     // SAFETY: test-only — read-back verification of seeded version metadata.
     let v: (String,) =
         sqlx::query_as("SELECT value FROM workspace_meta WHERE key='db_schema_version'")
@@ -57,8 +55,6 @@ async fn migrations_are_idempotent() {
             .await
             .unwrap();
 
-    // A second dispatcher call must be a no-op: no migration row is applied
-    // again and no version is rewritten.
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
     // SAFETY: test-only — post-call snapshot of the same bookkeeping.
@@ -107,7 +103,6 @@ async fn retired_user_and_reference_tables_are_dropped() {
         assert_eq!(found.0, 0, "retired table still exists: {table}");
     }
 
-    // 32 was the schema line that still carried both tables.
     let versions = nexus_local_db::read_versions(&pool).await.unwrap();
     assert_eq!(
         versions.db_schema_version,

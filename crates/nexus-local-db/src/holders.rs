@@ -262,7 +262,6 @@ where
         return Ok(None);
     };
     let holder = validate_holder_row(row)?;
-    // The registry's exclusive-subject CHECK makes a subject mismatch
     // unreachable through writes; asserting it anyway keeps this read from
     // returning a holder the requested subject does not bind to.
     if holder.subject().as_ref() != Some(subject) {
@@ -359,7 +358,6 @@ async fn ensure_holder_in_tx(
     }
     let expected = subject.expected_holder_entry_id();
 
-    // 1. The subject must not already resolve to another id.
     let subject_column = match kind {
         "creator" => "creator_id",
         _ => "character_id",
@@ -381,7 +379,6 @@ async fn ensure_holder_in_tx(
         )));
     }
 
-    // 2. The derived id must not already belong to another subject.
     let by_id: Option<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT creator_id, character_id FROM knowledge_holders WHERE holder_entry_id = ?",
     )
@@ -401,7 +398,6 @@ async fn ensure_holder_in_tx(
         )));
     }
 
-    // 3. Register. `BEGIN IMMEDIATE` callers serialize the check-then-insert.
     let (creator_id, character_id) = match subject {
         HolderSubject::Creator(id) => (Some(id.clone()), None),
         HolderSubject::Character(id) => (None, Some(id.clone())),
@@ -541,12 +537,10 @@ mod tests {
             character_holder_entry_id("ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             PINNED_CHARACTER_HOLDER
         );
-        // Domain separation on the *same* subject string.
         assert_ne!(
             creator_holder_entry_id("subject_same"),
             character_holder_entry_id("subject_same")
         );
-        // Deterministic: a second call (a second process) is identical.
         assert_eq!(
             creator,
             creator_holder_entry_id("ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -572,7 +566,6 @@ mod tests {
 
         assert_eq!(created, creator_holder_entry_id("ctr_holder_a"));
 
-        // Idempotent: the same subject resolves the same id, no second row.
         let mut tx = crate::begin_immediate(&pool).await.unwrap();
         let again = ensure_creator_holder_in_tx(&mut tx, "ctr_holder_a")
             .await
@@ -598,7 +591,6 @@ mod tests {
     async fn subject_bound_to_another_id_is_a_hard_error() {
         let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_b").await;
-        // A foreign/hand-written registry row binds the subject to another id.
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
              VALUES ('hld_foreign', 'ctr_holder_b', datetime('now'))",
@@ -629,7 +621,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_creator_row(&pool, "ctr_holder_c").await;
         seed_creator_row(&pool, "ctr_holder_d").await;
-        // The id that `ctr_holder_c` must derive is already bound to another subject.
         sqlx::query(
             "INSERT INTO knowledge_holders (holder_entry_id, creator_id, created_at) \
              VALUES (?, 'ctr_holder_d', datetime('now'))",
@@ -677,7 +668,6 @@ mod tests {
             "the storage detail must keep the public code prefix, got {err}"
         );
 
-        // A correctly registered holder resolves; an unregistered id is absent.
         crate::ensure_creator_row(&pool, "ctr_derived", "Derived")
             .await
             .unwrap();

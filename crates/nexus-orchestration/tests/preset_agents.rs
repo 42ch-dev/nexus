@@ -13,8 +13,6 @@ fn test_capability_registry() -> nexus_capability::CapabilityRegistry {
     nexus_capability::CapabilityRegistry::with_builtins()
 }
 
-// ── Role parsing tests ──────────────────────────────────────────────────────
-
 #[test]
 fn parse_roles_with_recommended_skills() {
     let yaml = r#"
@@ -63,7 +61,6 @@ roles:
 #[test]
 #[allow(clippy::too_many_lines)]
 fn recommended_skills_format_validation() {
-    // Valid format: skill slug
     let yaml_valid = r#"
 preset:
   id: valid-format
@@ -90,7 +87,6 @@ roles:
     let caps = test_capability_registry();
     assert!(load_preset_from_str(yaml_valid, &caps).is_ok());
 
-    // Valid: simple single-char slug
     let yaml_single_char = r#"
 preset:
   id: single-char
@@ -116,7 +112,6 @@ roles:
 "#;
     assert!(load_preset_from_str(yaml_single_char, &caps).is_ok());
 
-    // Valid: hyphenated multi-word
     let yaml_hyphenated = r#"
 preset:
   id: hyphenated
@@ -142,7 +137,6 @@ roles:
 "#;
     assert!(load_preset_from_str(yaml_hyphenated, &caps).is_ok());
 
-    // Invalid: uppercase
     let yaml_uppercase = r#"
 preset:
   id: uppercase
@@ -172,7 +166,6 @@ roles:
         .iter()
         .any(|p| p.error.contains("invalid recommended_skills format")));
 
-    // Invalid: starts with digit
     let yaml_starts_digit = r#"
 preset:
   id: starts-digit
@@ -202,7 +195,6 @@ roles:
         .iter()
         .any(|p| p.error.contains("invalid recommended_skills format")));
 
-    // Invalid: contains spaces
     let yaml_spaces = r#"
 preset:
   id: has-spaces
@@ -232,7 +224,6 @@ roles:
         .iter()
         .any(|p| p.error.contains("invalid recommended_skills format")));
 
-    // Invalid: starts with hyphen
     let yaml_starts_hyphen = r#"
 preset:
   id: starts-hyphen
@@ -262,7 +253,6 @@ roles:
         .iter()
         .any(|p| p.error.contains("invalid recommended_skills format")));
 
-    // Invalid: ends with hyphen
     let yaml_ends_hyphen = r#"
 preset:
   id: ends-hyphen
@@ -360,8 +350,6 @@ roles:
         .iter()
         .any(|p| p.error.contains("duplicate role id: 'writer'")));
 }
-
-// ── Agent reference validation tests ────────────────────────────────────────
 
 #[test]
 fn agent_reference_to_unknown_role_rejected() {
@@ -478,11 +466,8 @@ inner_graphs:
     assert!(load_preset_from_str(yaml, &caps).is_ok());
 }
 
-// ── Backward compatibility tests ────────────────────────────────────────────
-
 #[test]
 fn preset_without_roles_loads_successfully() {
-    // Single-agent mode: no roles section
     let yaml = r#"
 preset:
   id: single-agent
@@ -507,7 +492,6 @@ states:
 
 #[test]
 fn preset_without_roles_inner_graph_without_agent_loads() {
-    // Inner graph nodes can omit agent field when no roles defined
     let yaml = r#"
 preset:
   id: no-roles-no-agent
@@ -539,7 +523,6 @@ inner_graphs:
 
 #[test]
 fn node_can_have_optional_agent_field() {
-    // Some nodes have agent, others don't
     let yaml = r#"
 preset:
   id: mixed-agent
@@ -583,8 +566,6 @@ inner_graphs:
     assert_eq!(graph.nodes[1].agent, None);
 }
 
-// ── Roundtrip serialization tests ───────────────────────────────────────────
-
 #[test]
 fn preset_with_roles_roundtrip_serializes() {
     let yaml = r#"
@@ -613,7 +594,6 @@ roles:
     let caps = test_capability_registry();
     let loaded = load_preset_from_str(yaml, &caps).unwrap();
 
-    // Serialize back to YAML and parse again
     let serialized = serde_yaml::to_string(&loaded.manifest).unwrap();
     let parsed: PresetManifest = serde_yaml::from_str(&serialized).unwrap();
     assert_eq!(parsed.roles.len(), 1);

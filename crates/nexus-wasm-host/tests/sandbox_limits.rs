@@ -103,7 +103,6 @@ fn big_memory_module() -> Vec<u8> {
 #[test]
 fn memory_cap_is_enforced_at_instantiation() {
     let engine = WasmEngine::new().unwrap();
-    // 64 pages = 4 MiB initial memory; the manifest tightens the cap to 1 MiB.
     let module = engine.load_module(&big_memory_module()).unwrap();
     let mut manifest = manifest();
     manifest.max_memory_mib = Some(1);
@@ -146,7 +145,6 @@ fn oversized_unexported_memory_module() -> Vec<u8> {
 #[test]
 fn memory_cap_covers_unexported_memories() {
     let engine = WasmEngine::new().unwrap();
-    // The exported memory (1 page) is inside the 1 MiB cap; only the
     // unexported memory (64 pages = 4 MiB) exceeds it.
     let module = engine
         .load_module(&oversized_unexported_memory_module())

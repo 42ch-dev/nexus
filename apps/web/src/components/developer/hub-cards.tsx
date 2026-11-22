@@ -1,5 +1,4 @@
 /**
- * Hub status cards (plan v1220 T2) — the four read-only sections of 操作台.
  *
  * Each card renders live data from existing daemon endpoints and owns its own
  * loading (`正在加载…`) / error (`加载失败：{reason}` + retry) state, so one

@@ -19,7 +19,6 @@ import {
   stringifyWire,
 } from '../dist/validate.js';
 
-// The version surfaces must agree: the platform manifest carries the same
 // version as the loader package (the packaging flow asserts the packed pair).
 // Deriving it here keeps this suite green across version bumps instead of
 // pinning the release literal.

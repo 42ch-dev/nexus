@@ -1,5 +1,4 @@
 /**
- * World KB authoring vocabulary + pure module serialization — extraction
  * baseline (p4 T2 / `R-V1203P2QC1-S001`).
  *
  * The holder vocabulary and the `modules.mental` / `modules.belief` builders

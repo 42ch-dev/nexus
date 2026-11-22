@@ -4,7 +4,6 @@ import type { LucideIcon } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 /**
- * SettingsLayout — DESIGN.md §Component Primitives (settings-layout).
  *
  * V1.150 P2 — L2 pattern component: the settings section nav rail + outlet
  * region promoted from the app frame (`settings-section-frame.tsx`).

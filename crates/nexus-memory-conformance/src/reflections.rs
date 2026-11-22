@@ -121,10 +121,6 @@ impl ReflectionTarget {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Protocol errors
-// ---------------------------------------------------------------------------
-
 /// Same `INVALID_INPUT` envelope the published validators emit: the offending
 /// request field in `details.field`.
 fn invalid_input(field: &str, message: impl Into<String>) -> SpokeReject {
@@ -195,10 +191,6 @@ async fn space_status(conn: &mut SqliteConnection, space_id: &str) -> Result<Str
     row.try_get("status").map_err(internal_failure)
 }
 
-// ---------------------------------------------------------------------------
-// Admission
-// ---------------------------------------------------------------------------
-
 impl FixtureMemoryProvider {
     /// One admission decision for a reflection op: cognition refusal, served
     /// space, then §6.5 grant coverage — the whole decision on the caller's
@@ -229,7 +221,6 @@ impl FixtureMemoryProvider {
                 "space {space_id} is not served by this fixture"
             )));
         }
-        // §6.5/MEM-R006: one current grant must cover the whole target.
         let grants = load_grants(conn, space_id).await?;
         if !is_authorized(
             &grants,
@@ -245,10 +236,6 @@ impl FixtureMemoryProvider {
         Ok(())
     }
 }
-
-// ---------------------------------------------------------------------------
-// Read ops: `memory.reflections.state` and `memory.reflections.list`
-// ---------------------------------------------------------------------------
 
 /// The fixture-private `basis_json` member a generate run pins beyond the four
 /// published `ReflectionBasis` fields. C-077's read-time exclusion needs the
@@ -822,7 +809,6 @@ impl FixtureMemoryProvider {
         );
         let state_digest = basis_digest(&canonical)?;
 
-        // The most recent surviving reflection pinned to exactly this
         // selection/filter: staleness compares against that pinned basis
         // (§7.26); with nothing published there is nothing to be stale
         // against, so `stale` is false.
@@ -918,7 +904,6 @@ impl FixtureMemoryProvider {
         let profiles = load_profile_revisions(conn, space_id, subject_id).await?;
         let tombstoned = tombstoned_record_ids(conn, space_id, subject_id).await?;
 
-        // C-077 read-time exclusion plus the optional restriction: a supplied
         // selection (or filter) keeps exactly the reflections pinned to it.
         let served: Vec<ServedReflection> = load_served_reflections(conn, space_id, subject_id)
             .await?
@@ -934,7 +919,6 @@ impl FixtureMemoryProvider {
             })
             .collect();
 
-        // §7.0.7/MEM-R026: the cursor binds the caller, the query and the
         // provider snapshot marker plus the engine policy, so any grant or
         // state change invalidates it even when the page's rows did not move.
         let snapshot = snapshot_marker(conn, space_id).await?;
@@ -969,7 +953,6 @@ impl FixtureMemoryProvider {
         };
         let mut reflections = Vec::with_capacity(page.len());
         for row in page {
-            // §7.26: authoritative staleness computed at read time against the
             // pinned basis; nothing stored is trusted for it.
             let digest =
                 current_digest_for(&row.selection, row.filter.as_ref(), &records, &profiles)?;
@@ -1006,10 +989,7 @@ impl FixtureMemoryProvider {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Generate: `memory.reflections.generate` — two-transaction pending→terminal
 // receipt flow with the GenerationPause/GenerationFailure fault points
-// ---------------------------------------------------------------------------
 
 /// The fixture's content-free generation cost: one published-pattern unit kind
 /// charged exactly once, on the terminal committed receipt (C-078). The kind
@@ -1198,7 +1178,6 @@ impl FixtureMemoryProvider {
             }
             ReplayResolution::Fresh => {}
         }
-        // Fresh work only — the replay above is exempt from every fresh-effect
         // gate (§7.0.5/MEM-R021/C-036). The §8.2 freeze gate: generate sits
         // outside the maintenance allowlist. Then the §7.7 subject lifecycle
         // gate: a fenced subject rejects every fresh subject write, while an
@@ -1250,7 +1229,6 @@ impl FixtureMemoryProvider {
             now,
         )
         .await?;
-        // §7.0.3 (inspector round 2): the same transaction 1 stamps this
         // instance as the lease owner with the generation deadline, so the
         // reopen recovery passes over a generation another instance is
         // executing right now and terminalizes only crash orphans.
@@ -1275,7 +1253,6 @@ impl FixtureMemoryProvider {
     ) -> Result<MemoryReceipt, SpokeReject> {
         let request = admitted.request();
         checked(validate_memory_reflections_generate(request))?;
-        // Bounded test-only admission pause before the writer transaction: a
         // competing identical admission can commit terminally while this one
         // waits, and this one then replays that terminal receipt (C-070/C-076).
         self.faults()
@@ -1283,7 +1260,6 @@ impl FixtureMemoryProvider {
             .await
             .map_err(|_| fault_before_effect(FaultPoint::AdmissionPause))?;
 
-        // Transaction 1: current authorization, replay resolution, the
         // fresh-effect gates (freeze, subject fence), §7.27 policy +
         // `expected_state_digest` CAS, then the pending receipt.
         let mut transaction = self.begin_write().await?;
@@ -1303,7 +1279,6 @@ impl FixtureMemoryProvider {
             }
             PendingGenerate::Staged(pending) => pending,
         };
-        // Pre-commit loss: dropping the staged transaction leaves no pending
         // receipt, dedup row or target behind.
         self.faults()
             .hold(FaultPoint::BeforeCommit)
@@ -1314,12 +1289,10 @@ impl FixtureMemoryProvider {
             return Err(outcome_uncertain());
         }
         transaction.commit().await.map_err(|_| commit_unknown())?;
-        // Armed before the operation: the pending receipt is durable and the
         // generation never ran (alternate C-015 shape).
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
             return Err(outcome_uncertain());
         }
-        // Bounded hold with the pending receipt observable (`status = pending`
         // over `memory.receipts.get`); it is also the arming window that
         // targets transaction 2 with the one-shot points.
         self.faults()
@@ -1327,12 +1300,10 @@ impl FixtureMemoryProvider {
             .await
             .map_err(|_| outcome_uncertain())?;
 
-        // The fixture-deterministic generation step (C-078 one-shot fail):
         // an honest failure is a terminal `failed` receipt with an error
         // envelope and retry class, and no cost is ever charged for it.
         let generation_failed = self.faults().trip(FaultPoint::GenerationFailure);
 
-        // Transaction 2: settle the pending receipt to exactly one terminal
         // outcome (the reflection row commits with it, MEM-R009). An abort
         // here leaves the pending receipt recoverable; the
         // never-return-to-pending rule keeps the settle one-way.
@@ -1383,7 +1354,6 @@ impl FixtureMemoryProvider {
             return Err(outcome_uncertain());
         }
         transaction.commit().await.map_err(|_| commit_unknown())?;
-        // Armed during the generation pause: the terminal receipt is durable
         // but the response is lost; a same-key replay returns it (C-070/C-071).
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
             return Err(outcome_uncertain());
@@ -1455,7 +1425,6 @@ async fn insert_generated_reflection(
         "state_digest": state_digest,
         PINNED_SOURCE_IDS_KEY: source_ids,
     });
-    // The published pattern types validate the only cost kind this fixture
     // mints; the extensions stay the empty map, so no extension key is minted.
     if ReflectionCostUnitKind::from_str(GENERATION_COST_UNIT_KIND).is_err()
         || ExtensionKey::from_str(GENERATION_COST_UNIT_KIND).is_err()
@@ -1507,7 +1476,6 @@ async fn insert_generated_reflection(
     .execute(&mut *conn)
     .await
     .map_err(internal_failure)?;
-    // One bump covers both the new row and its terminal receipt: they commit
     // in this same transaction, and cursors bind to this marker (MEM-R026).
     bump_snapshot(conn, space_id).await
 }
@@ -1544,7 +1512,6 @@ pub async fn terminalize_orphaned_generate_receipts(
     .collect::<Result<Vec<_>, sqlx::Error>>()?;
     for (space_id, receipt_id, owner_id) in orphans {
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-        // The settle guard is `owner_id IS ?`, so the parked row's own stamp
         // must ride along: every leased receipt carries a non-NULL owner, and
         // binding `None` here would match zero rows and fail every reopen
         // (§7.0.3, inspector round 3).
@@ -1572,10 +1539,7 @@ pub async fn terminalize_orphaned_generate_receipts(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Admission-rule tests (the §6.5 facet matrix and the honest refusals; the
 // serving selectors that drive these rules over loopback land in Task 6)
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -1652,9 +1616,7 @@ mod tests {
     #[test]
     fn c_075_subject_all_requires_unrestricted_grant() {
         assert!(admits(&[unrestricted(&["reflect"])], &selection_all()));
-        // `admin` implies `reflect` (§6.5).
         assert!(admits(&[unrestricted(&["admin"])], &selection_all()));
-        // An empty `context_ids` restriction is no restriction (the published
         // evaluator reads it as full coverage), so the negative cases here are
         // context-limited grants.
         for narrow in [
@@ -1739,8 +1701,6 @@ mod tests {
         assert!(!is_freeze_allowlisted("memory.reflections.generate"));
     }
 
-    // -- read-op helpers ------------------------------------------------------
-
     fn profiles() -> Vec<(String, i64)> {
         vec![("personality".to_owned(), 2)]
     }
@@ -1816,7 +1776,6 @@ mod tests {
             &["r-1".into(), "r-2".into()],
             &tombstoned
         ));
-        // Partial tombstone: the pinned set still has a live source.
         assert!(!source_set_tombstoned(
             &["r-1".into(), "r-2".into(), "r-3".into()],
             &tombstoned

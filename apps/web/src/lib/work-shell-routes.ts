@@ -1,5 +1,4 @@
 /**
- * Work-shell route detection — shared by RootLayout main wrapper and tests.
  *
  * `/works/:workId/*` uses the canvas-first shell (full-width main). The static
  * sibling routes `/works/chapters` and `/works/inspiration` are reserved and

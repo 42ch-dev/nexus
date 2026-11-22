@@ -1,4 +1,4 @@
-//! Capability model: host operations, events, descriptors, and DTOs.
+//! Capability model: host operations, events, descriptors, and DTOs. See docs/specs/agents/agent-host.md.
 //!
 //! Defines the normalized host operation and event types used across all provider
 //! adapters, the capability descriptor for negotiation, and supporting DTOs.
@@ -649,7 +649,6 @@ pub enum SessionState {
 mod descriptor_audit_tests {
     use super::*;
 
-    // ── DF-20: Capability truthfulness audit (AH2.1 / AH2.2) ──────────
     //
     // These tests verify that `CapabilityDescriptor::acp_full()` claims
     // match the `AcpProvider` implementation. The spec (agent-host.md §4.1.4

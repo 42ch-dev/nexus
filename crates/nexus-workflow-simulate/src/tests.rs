@@ -1,6 +1,8 @@
 //! Static-walk behavior: reachability, wait classification, nest rollup, determinism and the
 //! zero-dispatch proof. Fixtures are IR documents in their wire shape, parsed through the same
 //! generated contract the route carries.
+//!
+//! see docs/specs/orchestration/strategy-simulation.md
 
 use super::*;
 
@@ -289,7 +291,6 @@ const CAPABILITY_BEARING: &str = r#"{
 
 #[test]
 fn a_capability_bearing_document_simulates_without_resolving_the_capability() {
-    // The zero-dispatch property is structural: this crate links no registry to resolve
     // against, so the walk can only read the declared action.
     let trajectory = simulate_document(&document(CAPABILITY_BEARING))
         .expect("a capability-bearing document still simulates");

@@ -4,7 +4,6 @@ import { Label } from './label';
 import { Select } from './select';
 
 /**
- * One selectable entity in an EntityPickerField (e.g. a character
  * KnowledgeEntry in the selected World). Caller maps domain entries into
  * this shape; the picker never queries data itself.
  */

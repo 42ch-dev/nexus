@@ -7,7 +7,6 @@ import { cn } from '../lib/cn';
 import { Button } from './button';
 
 /**
- * Compute inspector content sections (V1.147 P2) — pure presentational
  * inspector content for a Narrative-layer Compute result node (behavior spec
  * §5 Inspector row).
  *
@@ -66,7 +65,6 @@ export interface ComputeInspectorSectionsProps {
   provenanceLabel: string;
   copy: ComputeInspectorSectionsCopy;
   /**
-   * Open Run hand-off — the caller navigates to the Run inspector
    * (`/modules?module=&run=` in the app). Rendered only when `runId`
    * is present. Optional: read-only inspections omit it.
    */

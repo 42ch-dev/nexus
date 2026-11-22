@@ -1,5 +1,4 @@
 /**
- * Memory family HTTP surface (P5-T2): the character-scoped memory/SOUL/ToM
  * routes and the creator-scope memory routes (P2-T2 bearer-isolated
  * authority). Every operation is a thin translation over the native family
  * surface — the stored Principal is minted natively, the per-Character
@@ -182,7 +181,6 @@ export function listCharacterTom(
   const worldId = searchParams.get('world_id');
   const cursor = searchParams.get('cursor') ?? undefined;
   if (bindingId === null || worldId === null) {
-    // Required wire members: absent → 400 before any native call.
     const field = bindingId === null ? 'binding_id' : 'world_id';
     throw new HttpError(400, 'invalid_input', `${field} is required`);
   }
@@ -197,7 +195,6 @@ export function listCharacterTom(
   );
 }
 
-// ── Creator-scope memory family ─────────────────────────────────────────────
 
 /** `POST /v1/daemon/memory/pending-review` — 201. The active-creator equality
  * check and the capture-field validation stay native. */

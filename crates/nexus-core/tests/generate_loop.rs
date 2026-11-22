@@ -248,7 +248,6 @@ async fn a_clean_request_materializes_round_one_and_commits_revision_one() {
 #[tokio::test]
 async fn semantic_warnings_ride_a_passing_round_and_never_block() {
     let setup = setup().await;
-    // A second node marked terminal is a TerminalConsistency warning, not an error.
     let request: GenerateRequest = serde_json::from_value(json!({
         "entry": "start",
         "terminal": ["done"],
@@ -469,7 +468,6 @@ async fn the_ceiling_is_three_rounds_and_the_fourth_materialization_never_runs()
     assert_eq!(details["rounds_attempted"], 3);
     assert_eq!(details["persisted"], false);
 
-    // The returned violations are round 3's, never the union of the rounds.
     let corrections = details["violations"].as_array().unwrap();
     let dangling = corrections
         .iter()

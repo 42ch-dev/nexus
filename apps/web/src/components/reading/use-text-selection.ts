@@ -1,5 +1,4 @@
 /**
- * useTextSelection — V1.89 Deeper Manuscript Reading.
  *
  * Captures text selections that fall inside a given container and converts them
  * to character offsets within the container's rendered text content. The
@@ -26,7 +25,6 @@ export interface TextSelectionState {
 }
 
 /**
- * Compute the plain-text offset of a DOM point inside a container by walking
  * all text nodes in document order.
  */
 function pointToOffset(container: HTMLElement, node: Node, nodeOffset: number): number {
@@ -44,7 +42,6 @@ function pointToOffset(container: HTMLElement, node: Node, nodeOffset: number): 
 }
 
 /**
- * Extract the selected text and start/end offsets relative to the container's
  * full text content.
  */
 function getSelectionOffsets(container: HTMLElement, range: Range): TextSelection {

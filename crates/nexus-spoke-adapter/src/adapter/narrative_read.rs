@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Ordered timeline-read facet — the adapter-owned counterpart to the
 //! `ScopeQueryPort::list_timeline_events` (V1.145 P3) unordered read.
 //!
@@ -83,7 +84,6 @@ impl NexusAdapter<'_> {
     ) -> SpokeResult<Vec<TimelineEvent>> {
         let pool = self.pool.clone();
         let world_id = scope.scope_id.clone();
-        // branch_id rides scope.extensions["nexus"] (spoke-native ≥ 0.6.0),
         // looked up via the typify ExtensionKey newtype — mirrors the
         // `scope_query_port::list_timeline_events` extraction.
         let branch_id = scope
@@ -99,7 +99,6 @@ impl NexusAdapter<'_> {
             &pool,
             &world_id,
             branch_id.as_deref(),
-            // No event_ids filter: the ordered view needs the full matching
             // set so the spoke helper can build a correct stable tail.
             &[],
         )
@@ -115,7 +114,6 @@ impl NexusAdapter<'_> {
             }
         };
 
-        // Sort purely by sequence_no so the spoke helper's "stable tail"
         // (un-listed events) is appended in deterministic sequence order —
         // matching the V1.143 T2/T3 stable-tail semantics the gateways
         // established (`list_timeline_events_scoped` with a branch already
@@ -124,14 +122,12 @@ impl NexusAdapter<'_> {
         let mut sorted = rows;
         sorted.sort_by_key(|e| e.sequence_no);
 
-        // Convert nexus TimelineEvent → spoke TimelineEvent via the V1.143
         // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
         // in nexus-narrative). Call-boundary §7 preserved: the spoke helper
         // receives only spoke wire types. The `Vec<TimelineEvent>`
         // annotation pins the `Into` target to the spoke type.
         let spoke_events: Vec<TimelineEvent> = sorted.into_iter().map(Into::into).collect();
 
-        // Delegate ordering to the spoke beat-assist helper (pure,
         // synchronous — no DB I/O inside). The helper returns the reordered
         // spoke events directly; since our return type is already spoke,
         // we surface its `SpokeResult` verbatim (Ok or Reject) with no
@@ -140,9 +136,6 @@ impl NexusAdapter<'_> {
     }
 }
 
-// ── Helpers (mirror scope_query_port's per-module convention) ──────────
-
-/// Construct the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// Mirrors `scope_query_port::nexus_scope_key` / `mca_read::nexus_scope_key`:
 /// the literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
@@ -172,9 +165,7 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
     })
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
 //
-// Migrated from the V1.143 T2/T3 ordering suites (`nexus-narrative`'s
 // in-memory `InMemoryNarrativeGateway::get_timeline_ordered` tests and
 // `nexus-local-db`'s `SqliteNarrativeGateway::get_timeline_ordered` parity
 // tests). The adapter is SQLite-backed (`NexusAdapter`), so the T3
@@ -257,7 +248,6 @@ mod tests {
             .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
     }
 
-    // T-mig-1 (covers T2a/T3a/T4a): explicit ids come first in requested
     // order; remaining events appended in sequence_no order (stable tail).
     // Storage is seeded with shuffled sequence_no assignments to prove the
     // ordering is driven solely by the explicit id list + sequence tail, not
@@ -268,7 +258,6 @@ mod tests {
         seed_world_shuffled(&pool).await;
 
         let adapter = NexusAdapter::new_host(pool);
-        // Request [evt_3, evt_1, evt_5] explicitly; remaining (evt_2 seq1,
         // evt_4 seq2) form the stable tail in sequence_no order.
         let ordered = match adapter
             .list_timeline_events_ordered(
@@ -295,7 +284,6 @@ mod tests {
             vec!["evt_3", "evt_1", "evt_5", "evt_2", "evt_4"],
             "explicit ids first in requested order, then stable tail in sequence_no order"
         );
-        // The scope filter narrowed to fbk_root; every returned event carries
         // that branch_id in extensions.nexus (conversion seam).
         let key = nexus_te_key();
         assert!(ordered.iter().all(|e| {
@@ -307,7 +295,6 @@ mod tests {
         }));
     }
 
-    // T-mig-2 (T3-Phase5 regression): ordering must NOT mutate event data.
     // The spoke facet returns the helper's spoke output directly (no reverse
     // nexus conversion), so a title=NULL / summary=NULL seeded event's
     // canonical_name (falls back to the id) and created_at must be byte-identical
@@ -327,7 +314,6 @@ mod tests {
             "manual",
         )
         .await;
-        // evt_1 seeded with title=NULL, summary=NULL, created_at=DB default
         // (SQLite datetime('now'), NOT RFC3339). The forward nexus→spoke
         // conversion sets canonical_name = id (the fallback chain) and parses
         // created_at to Option<DateTime<Utc>>. A lossy reverse would corrupt
@@ -338,7 +324,6 @@ mod tests {
         let adapter = NexusAdapter::new_host(pool.clone());
         let scope = ordered_scope("wld_nomut", Some("fbk_root"));
 
-        // Baseline: the same rows via the un-ordered spoke read.
         let baseline = match adapter.list_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("baseline read rejected: {r:?}"),
@@ -358,7 +343,6 @@ mod tests {
         assert_eq!(ordered.len(), 2);
         assert_eq!(ordered[0].timeline_event_id, "evt_1");
 
-        // canonical_name (the spoke "title" carrier) is untouched: for a
         // title=NULL/summary=NULL row it falls back to the event id — the
         // ordering op must not synthesize anything else.
         assert_eq!(ordered[0].canonical_name, b1.canonical_name);
@@ -367,13 +351,10 @@ mod tests {
             "evt_1",
             "canonical_name falls back to id for title=NULL/summary=NULL row"
         );
-        // created_at is the original parsed value, untouched by any round-trip.
         assert_eq!(ordered[0].created_at, b1.created_at);
-        // description (nexus summary carrier) preserved.
         assert_eq!(ordered[0].description, b1.description);
     }
 
-    // T-mig-3 (T2b/T3b): unknown ordered ids surface as a spoke reject
     // (InvalidInput — the validation-error class at the spoke boundary).
     // No panic; the helper's reject flows through verbatim.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -399,7 +380,6 @@ mod tests {
         );
     }
 
-    // T-mig-4 (brief requirement): duplicate ordered ids surface as a spoke
     // reject (InvalidInput). The spoke `order_timeline_events_by_ids` helper
     // rejects `orderedIds contains duplicate timeline_event_id values`; this
     // asserts the facet propagates that reject rather than de-duplicating.
@@ -430,7 +410,6 @@ mod tests {
         );
     }
 
-    // T-mig-5 (edge case, qc2 S-002 / qc3 F-003): empty `ordered_ids` returns
     // the full world set in `sequence_no` order. The spoke helper passes its
     // input through verbatim when no explicit ids pin the head (the ordered-id
     // set is empty, so the entire input forms the "stable tail"); the facet
@@ -469,7 +448,6 @@ mod tests {
         );
     }
 
-    // T-mig-6 (edge case, qc2 S-002 / qc3 F-003): a `scope` without
     // `extensions.nexus.branch_id` widens the world query to ALL branches (no
     // branch filter in `list_timeline_events_scoped`). Events from every branch
     // of the world are returned in stable `sequence_no` order — the facet's
@@ -489,7 +467,6 @@ mod tests {
             "manual",
         )
         .await;
-        // Three different branches interleaved by sequence_no:
         //   evt_a → fbk_root,   seq 2
         //   evt_b → fbk_alt,    seq 1
         //   evt_c → fbk_root,   seq 4
@@ -500,7 +477,6 @@ mod tests {
         seed::event(&pool, "evt_d", "wld_nb", "fbk_other", "story_advance", 3).await;
 
         let adapter = NexusAdapter::new_host(pool);
-        // Scope carries world_id only — no `extensions.nexus.branch_id`.
         let ordered = match adapter
             .list_timeline_events_ordered(&ordered_scope("wld_nb", None), &[])
             .await
@@ -523,7 +499,6 @@ mod tests {
             vec!["evt_b", "evt_a", "evt_d", "evt_c"],
             "no-branch scope → all branches in stable sequence_no order"
         );
-        // Confirm the result genuinely spans branches (not silently narrowed).
         let key = nexus_te_key();
         let branches: Vec<String> = ordered
             .iter()
@@ -557,9 +532,6 @@ mod tests {
         );
     }
 
-    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
-
-    /// DB failure (dropped table) on `list_timeline_events_ordered` surfaces
     /// `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_on_dropped_table_surfaces_internal_error() {

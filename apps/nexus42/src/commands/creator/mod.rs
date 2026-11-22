@@ -62,8 +62,6 @@ const EXPIRY_BUFFER_SECS: i64 = 10;
 /// Maximum number of auto-retry attempts for wrong answers (D4).
 const MAX_VERIFY_ATTEMPTS: u32 = 2;
 
-// ── Inlined types from init.rs (V1.22 deprecation cleanup) ──────────
-
 /// Init subcommands (formerly in `commands::init`).
 #[derive(Debug, Subcommand)]
 pub enum InitCommand {
@@ -250,7 +248,6 @@ async fn init_workspace(
         &display_name,
     )
     .await?;
-    // One locked write: the selection and the CLI's `workspace_path` handle
     // commit together, so a concurrent writer cannot land between them.
     select_workspace_via_core(
         &user_home,
@@ -326,7 +323,6 @@ pub enum CreatorCommand {
         command: works::WorksCommand,
     },
 
-    // ── Primary tier ────────────────────────────────────────────────
     /// Register a new Creator entity
     ///
     /// Creates a Creator identity (platform or local-only with `--local`).
@@ -434,7 +430,6 @@ pub enum CreatorCommand {
         command: inspector::InspectorCommand,
     },
 
-    // ── Platform bridge tier (optional; requires User login) ────────
     /// Show current Creator status and authentication state
     Status {
         /// Specific creator ID to check (default: active creator)
@@ -462,7 +457,6 @@ pub enum CreatorCommand {
         action: CredentialsAction,
     },
 
-    // ── Maintenance tier ────────────────────────────────────────────
     /// Seed demo data: creates a demo world, event, and KB block
     ///
     /// Idempotent by default — skips if demo world already exists.
@@ -563,8 +557,6 @@ fn validate_workspace_slug(slug: &str) -> Result<()> {
     validate_slug("workspace_slug", slug)
 }
 
-// ── Demo seed ───────────────────────────────────────────────────────
-
 /// Seed demo data for testing and development.
 ///
 /// Creates a demo world, event and KB block using the Plan 1 write APIs.
@@ -609,7 +601,6 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
         println!("Deleted existing demo data.");
     }
 
-    // 1. Create demo world
     let world = nexus_local_db::create_world(
         &pool,
         &creator_id,
@@ -622,7 +613,6 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     .map_err(|e| CliError::Other(format!("Failed to create demo world: {e}")))?;
     println!("✓ Demo world: {}", world.world_id);
 
-    // 2. Append demo event
     let event = nexus_local_db::append_event(
         &pool,
         &world.world_id,
@@ -636,7 +626,6 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
     .map_err(|e| CliError::Other(format!("Failed to create demo event: {e}")))?;
     println!("✓ Demo event: {}", event.event_id);
 
-    // 3. Create demo KB block
     let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
         &world.world_id,
         nexus_contracts::BlockType::Character,
@@ -686,7 +675,6 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
 
     match cmd {
         CreatorWorkspaceCommand::List => {
-            // The core home entry owns workspace discovery (creator dirs with an
             // operational `meta.json`); this leaf filters to the active creator
             // and marks the selected slug.
             let home = CoreHomeService::open(user_home()?).map_err(map_core_error)?;
@@ -739,7 +727,6 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 &workspace_name,
             )
             .await?;
-            // One locked write: the selection and the CLI's `workspace_path`
             // handle commit together (see `init_workspace`).
             select_workspace_via_core(&home, creator_id, &workspace_slug, Some(&creative_root))
                 .await?;
@@ -751,7 +738,6 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         CreatorWorkspaceCommand::Use { workspace_slug } => {
             validate_workspace_slug(&workspace_slug)?;
 
-            // The core home entry validates the workspace exists on disk under
             // this creator and commits the selection (guarded state-DB init +
             // `creators` row + `config.toml`).
             select_workspace_via_core(&user_home()?, creator_id, &workspace_slug, None).await?;
@@ -778,19 +764,16 @@ async fn register_creator(
     handle: Option<String>,
     local: bool,
 ) -> Result<()> {
-    // WS-B T4: validate name length (cheap check before regex)
     if name.len() > MAX_CREATOR_NAME_LENGTH {
         return Err(CliError::Other(format!(
             "Creator name exceeds maximum length ({MAX_CREATOR_NAME_LENGTH} bytes)"
         )));
     }
-    // --- Local-only mode (AC-V167-P2-1): delegate to identity machinery ---
     // `--local` conflicts with `--source`/`--handle` at the clap layer, so
     // platform-only concepts are guaranteed absent. No network is touched.
     if local {
         return register_local_creator(name).await;
     }
-    // Validate handle if provided
     let validated_handle = match &handle {
         Some(h) => {
             validate_handle(h)?;
@@ -798,10 +781,8 @@ async fn register_creator(
         }
         None => None,
     };
-    // --- Step 1: Obtain auth token ---
     let auth_store = auth::AuthStore::load()?;
 
-    // Try to find a user access token from the daemon-managed auth flow.
     // The PlatformClient requires a bearer token; if none is available,
     // name both exits so the user isn't stuck: authenticate, or go local.
     // Map only the no-token case to the dual-exit hint; any other error from
@@ -816,7 +797,6 @@ async fn register_creator(
         other => other,
     })?;
 
-    // --- Step 2: Create platform client and call register ---
     println!("Registering creator \"{name}\"...");
 
     let client = PlatformClient::new(&config.platform_url, &auth_token, &config.device_id)?;
@@ -835,7 +815,6 @@ async fn register_creator(
         &verification.verification_code[..verification.verification_code.len().min(16)]
     );
 
-    // --- Step 3: Check challenge expiry (with buffer) ---
     let expires_at = chrono::DateTime::parse_from_rfc3339(&verification.expires_at)?;
 
     let now = chrono::Utc::now();
@@ -850,7 +829,6 @@ async fn register_creator(
     let remaining_secs = (expires_at.timestamp() - now.timestamp()).max(0);
     println!("  Challenge expires in {remaining_secs}s");
 
-    // --- Step 4: Solve challenge ---
     println!("Solving challenge...");
 
     let answer: String = match solve_challenge(&verification.challenge_text) {
@@ -865,8 +843,6 @@ async fn register_creator(
         }
     };
 
-    // --- Step 5: Re-check challenge expiry before submit ---
-    // Solve may have taken time; re-check to give a clearer error than a
     // generic platform-side expiry response.
     let now_after_solve = chrono::Utc::now();
     if now_after_solve > buffered_expiry {
@@ -875,7 +851,6 @@ async fn register_creator(
         });
     }
 
-    // --- Step 6: Submit answer with auto-retry (D4: max 1 auto-retry) ---
     let verify_response = submit_with_retry(
         &client,
         &verification.verification_code,
@@ -884,7 +859,6 @@ async fn register_creator(
     )
     .await?;
 
-    // --- Step 7: Handle verification response ---
     match verify_response.status {
         VerifyStatus::Verified => {
             let api_key = verify_response
@@ -892,22 +866,18 @@ async fn register_creator(
                 .as_deref()
                 .unwrap_or(pending_api_key);
 
-            // Store credentials locally
             let mut store = auth::AuthStore::load()?;
             store.store_creator_api_key(creator_id, api_key)?;
 
-            // V1.16: populate CLI-local identity cache
             let identity_entry = CreatorIdentityEntry {
                 creator_id: creator_id.clone(),
                 handle: handle.clone(),
                 display_name: Some(name.clone()),
             };
             if let Err(e) = creator_identity::set_creator_identity(identity_entry) {
-                // Non-fatal: identity cache is best-effort display data
                 tracing::warn!("Failed to cache creator identity: {e}");
             }
 
-            // Set as active creator
             CliConfig::mutate(|config| {
                 config.active_creator_id = Some(creator_id.clone());
                 Ok(())
@@ -949,7 +919,6 @@ async fn register_creator(
 async fn register_local_creator(name: String) -> Result<()> {
     crate::commands::local_creator_bootstrap::bootstrap_local_creator(Some(name)).await?;
 
-    // The helper rendered the mint + active lines; add the one local-only
     // exit marker so the register flow still names its mode.
     println!("  Local-only (no platform) — no platform account created.");
 
@@ -998,13 +967,11 @@ async fn submit_with_retry(
                 }
             }
             VerifyStatus::Expired | VerifyStatus::Locked => {
-                // Non-retryable — return immediately
                 return Ok(response);
             }
         }
     }
 
-    // Exhausted retries — return the last wrong_answer response
     last_response.ok_or_else(|| {
         CliError::Other("Verification retry exhausted without a response".to_string())
     })
@@ -1015,7 +982,6 @@ async fn submit_with_retry(
 /// Tries to extract a user access token from the auth store.
 /// If no token is found, returns an error suggesting the user authenticate.
 fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
-    // V1.3 limitation: `obtain_auth_token` scans creator entries for
     // non-empty access_token as a proxy for the user's auth token.
     // A dedicated user token field (or platform session) would be more robust.
     // This is sufficient for the current CLI-only registration flow.
@@ -1118,7 +1084,6 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
     let cache = creator_identity::load_creator_identity_cache();
     let entry = creator_identity::get_creator_identity(&cache, &id);
 
-    // Per field: the core owner's value wins whenever it holds one.
     let handle = core.handle.or_else(|| entry.and_then(|e| e.handle.clone()));
     let display_name = core
         .display_name
@@ -1127,7 +1092,6 @@ fn creator_status(config: &CliConfig, creator_id: Option<String>) -> Result<()> 
     let handle_str = handle.as_deref().unwrap_or("-");
     let display_name_str = display_name.as_deref().unwrap_or("-");
 
-    // Auth indicators
     let has_creator_api_key = store.get_creator_api_key(&id).unwrap_or(None).is_some();
     let has_cached_token = store.is_creator_authenticated(&id);
 
@@ -1165,7 +1129,6 @@ fn use_creator(_config: &CliConfig, creator_ref: &str) -> Result<()> {
 
     CliConfig::mutate(|config| {
         config.active_creator_id = Some(resolved_id.clone());
-        // Clear workspace slug for the old creator ref and the resolved ID.
         config.active_workspace_slug_by_creator.remove(creator_ref);
         config.active_workspace_slug_by_creator.remove(&resolved_id);
         Ok(())
@@ -1234,7 +1197,6 @@ fn list_rows(
             .map(|r| (r.creator_id.as_str(), r))
             .collect();
 
-    // Gather all known creator IDs from the two platform sources (unchanged
     // from V1.16 behavior).
     let mut all_ids: Vec<String> = cache.creators.keys().cloned().collect();
     if let Some(creators) = &auth_store.creators {
@@ -1258,7 +1220,6 @@ fn list_rows(
             let local_row = local_by_id.get(id.as_str()).copied();
             let (handle, display_name) = local_row.map_or_else(
                 || {
-                    // Platform display metadata: the core owner's projection
                     // first, the CLI cache as the per-field fallback.
                     let core = core_home.map_or_default(|home| core_identity(home, &id));
                     let entry = creator_identity::get_creator_identity(cache, &id);
@@ -1366,7 +1327,6 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
     };
     let auth_store = crate::auth::AuthStore::load()?;
 
-    // Display metadata belongs to the core owner (see `list_rows`). A home the
     // owner cannot open degrades like the local-identity read above — the
     // platform rows still render from the CLI-local cache instead of the
     // listing failing over a source it has a fallback for.
@@ -1406,7 +1366,6 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Human default: additive ORIGIN column; existing column meanings and
     // platform values unchanged (local HANDLE renders `-`, PL-6). The CREATOR
     // ID column is padded to the widest id in the listing (never narrower
     // than the pre-existing 19), so 21-char `ctr_local*` ids align and
@@ -1467,7 +1426,6 @@ fn logout_creator(config: &CliConfig) -> Result<()> {
         return Ok(());
     };
 
-    // Always clear this creator's cached credentials
     let mut store = auth::AuthStore::load()?;
     if let Some(creators) = &mut store.creators {
         if creators.remove(&creator_id).is_some() {
@@ -1475,7 +1433,6 @@ fn logout_creator(config: &CliConfig) -> Result<()> {
         }
     }
 
-    // Clear the selection only when the locked document still selects this
     // creator: a concurrent A→B switch must survive this logout.
     CliConfig::mutate(|config| {
         if config.active_creator_id.as_deref() == Some(creator_id.as_str()) {
@@ -1507,7 +1464,6 @@ async fn cache_creator_locally(creator: &Creator) -> Result<()> {
     use crate::config::state_db_path;
     let db_path = state_db_path()?;
 
-    // Ensure parent directory exists
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1576,8 +1532,6 @@ mod tests {
         }
     }
 
-    // ── obtain_auth_token tests ──────────────────────────────────
-
     #[test]
     fn obtain_auth_token_finds_token_in_store() {
         let store = store_with_token("crt_test", "test_token_value");
@@ -1609,7 +1563,6 @@ mod tests {
         let mut store = AuthStore::default();
         store.creators = Some(map.into_iter().collect());
         let token = obtain_auth_token(&store).expect("should find token");
-        // With BTreeMap insertion, keys are ordered: "crt_a" < "crt_b".
         // HashMap iteration is non-deterministic, so we accept either token.
         assert!(token == "token_a" || token == "token_b");
     }
@@ -1628,8 +1581,6 @@ mod tests {
         let result = obtain_auth_token(&store);
         assert!(matches!(result, Err(CliError::AuthenticationRequired)));
     }
-
-    // ── CliError display tests for new variants ──────────────────
 
     #[test]
     fn challenge_failed_error_has_suggestion() {
@@ -1700,8 +1651,6 @@ mod tests {
         assert!(display.contains("2026-04-16T00:05:00.000Z"));
     }
 
-    // ── SyncError → CliError conversion tests ────────────────────
-
     #[test]
     fn sync_platform_error_maps_to_creator_registration_failed() {
         let sync_err = nexus_cloud_sync::errors::SyncError::PlatformError {
@@ -1729,7 +1678,6 @@ mod tests {
 
     #[test]
     fn sync_http_error_maps_to_cli_network_error() {
-        // Build a reqwest::Error via a builder that fails (no network needed).
         // Use reqwest's Error::from on a builder-level timeout which
         // doesn't require a real connection. However, since we can't easily
         // construct a reqwest::Error, we instead verify the mapping logic
@@ -1744,8 +1692,6 @@ mod tests {
             CliError::CreatorRegistrationFailed { status: 502, .. }
         ));
     }
-
-    // ── submit_with_retry tests (mock via wiremock) ──────────────
 
     #[tokio::test]
     async fn submit_retry_succeeds_on_first_attempt() {
@@ -1824,7 +1770,6 @@ mod tests {
 
         let mock_server = MockServer::start().await;
 
-        // First call: wrong_answer, second call: verified
         Mock::given(method("POST"))
             .and(path("/api/v1/creators/verify"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1882,8 +1827,6 @@ mod tests {
         assert_eq!(resp.remaining_attempts, Some(1));
     }
 
-    // ── Constants tests ──────────────────────────────────────────
-
     #[test]
     fn default_registration_source_is_cli() {
         assert_eq!(DEFAULT_REGISTRATION_SOURCE, "cli");
@@ -1899,8 +1842,6 @@ mod tests {
         assert_eq!(MAX_VERIFY_ATTEMPTS, 2);
     }
 
-    // ── Handle validation tests ─────────────────────────────────
-
     #[test]
     fn validate_handle_accepts_valid_handle() {
         assert!(validate_handle("valid-handle").is_ok());
@@ -1913,7 +1854,6 @@ mod tests {
 
     #[test]
     fn validate_handle_accepts_max_length() {
-        // 15 chars: starts/ends with [a-z0-9], interior 13 chars
         assert!(validate_handle("abcdefghijklmno").is_ok());
     }
 
@@ -1997,11 +1937,8 @@ mod tests {
 
     #[test]
     fn validate_handle_regex_is_frozen_spec_compliant() {
-        // Confirm the regex constant matches spec v3 §7 exactly
         assert_eq!(HANDLE_RE.as_str(), r"^[a-z0-9][a-z0-9._-]{2,13}[a-z0-9]$");
     }
-
-    // ── WS-B T4/T6: name max-length tests ──────────────────────
 
     #[test]
     fn max_creator_name_length_is_64() {
@@ -2011,7 +1948,6 @@ mod tests {
     #[test]
     fn name_exactly_64_chars_passes_length_check() {
         let name_64 = "a".repeat(64);
-        // Simulate the check logic
         assert!(name_64.len() <= MAX_CREATOR_NAME_LENGTH);
     }
 
@@ -2020,8 +1956,6 @@ mod tests {
         let name_65 = "a".repeat(65);
         assert!(name_65.len() > MAX_CREATOR_NAME_LENGTH);
     }
-
-    // ── DF-14: Staged e2e verification harness (gate-B1/B2) ─────────
 
     /// Test mode for the staged e2e verification harness.
     ///
@@ -2074,10 +2008,7 @@ mod tests {
     ) -> StagedE2eResult {
         let effective_url = match mode {
             TestMode::HappyPath => platform_url.to_string(),
-            TestMode::UpstreamTimeout => {
-                // Use a deliberately unreachable URL to trigger a timeout/connection error
-                "http://192.0.2.1:1".to_string()
-            }
+            TestMode::UpstreamTimeout => "http://192.0.2.1:1".to_string(),
         };
 
         let client = match PlatformClient::new(&effective_url, auth_token, device_id) {
@@ -2090,7 +2021,6 @@ mod tests {
             }
         };
 
-        // Gate-B1: Register creator on platform
         let register_result = client
             .register_creator(display_name, registration_source, handle)
             .await
@@ -2103,7 +2033,6 @@ mod tests {
             };
         };
 
-        // Gate-B2: Verify creator (using a placeholder answer — the e2e harness
         // focuses on platform connectivity and error shaping, not challenge solving)
         let verify_result = client
             .verify_creator(
@@ -2130,7 +2059,6 @@ mod tests {
 
         let mock = MockServer::start().await;
 
-        // Mock POST /api/v1/creators/register → valid registration
         Mock::given(method("POST"))
             .and(path("/api/v1/creators/register"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -2147,7 +2075,6 @@ mod tests {
             .mount(&mock)
             .await;
 
-        // Mock POST /api/v1/creators/verify → verified
         Mock::given(method("POST"))
             .and(path("/api/v1/creators/verify"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -2168,7 +2095,6 @@ mod tests {
         )
         .await;
 
-        // Gate-B1: register should succeed
         assert!(
             result.register.is_ok(),
             "gate-B1 register should succeed in HappyPath; got: {:?}",
@@ -2177,7 +2103,6 @@ mod tests {
         let register_resp = result.register.as_ref().expect("register response");
         assert_eq!(register_resp.creator_id, "crt_staged_e2e");
 
-        // Gate-B2: verify should succeed
         let verify_result = result
             .verify
             .as_ref()
@@ -2197,7 +2122,6 @@ mod tests {
     /// is shaped into a [`StagedPlatformError`] bucket.
     #[tokio::test]
     async fn creator_register_e2e_surfaces_platform_failure_context() {
-        // No mock server needed — UpstreamTimeout mode uses an unreachable URL
         let result = run_creator_register_e2e(
             "http://will-be-ignored.invalid", // Overridden by UpstreamTimeout mode
             "test_token",
@@ -2209,7 +2133,6 @@ mod tests {
         )
         .await;
 
-        // Gate-B1: register should fail with a timeout/connection error
         assert!(
             result.register.is_err(),
             "gate-B1 register should fail in UpstreamTimeout; got: {:?}",
@@ -2219,7 +2142,6 @@ mod tests {
         let err = result
             .register
             .expect_err("register should be Err in UpstreamTimeout");
-        // The error must be shaped into a deterministic bucket.
         match &err {
             StagedPlatformError::Timeout
             | StagedPlatformError::Platform { status: 0, .. }
@@ -2235,21 +2157,17 @@ mod tests {
             }
         }
 
-        // The error display must contain "timeout" or "platform" for CLI visibility
         let err_display = format!("{err}");
         assert!(
             err_display.contains("timeout") || err_display.contains("platform"),
             "error must contain 'timeout' or 'platform' for CLI visibility; got: {err_display}"
         );
 
-        // Gate-B2: verify should not be reached (None)
         assert!(
             result.verify.is_none(),
             "gate-B2 verify should not be reached when gate-B1 fails"
         );
     }
-
-    // ── I-000065 F1-R2: logout decides on the locked document ─────
 
     /// The selection is snapshotted before the lock is taken, so a concurrent
     /// A→B switch must survive `logout A`: only A's credentials are removed.
@@ -2277,7 +2195,6 @@ mod tests {
         );
         store.save().expect("seed auth store");
 
-        // Another writer switches the selection to B before logout locks.
         CliConfig::mutate(|config| {
             config.active_creator_id = Some("ctr_b".to_string());
             Ok(())
@@ -2304,8 +2221,6 @@ mod tests {
         );
     }
 
-    // ── V1.167 P2 T1: `creator register --local` ──────────────────
-
     /// (a) AC-V167-P2-1: local register in an isolated HOME mints a
     /// persistent `ctr_local*` identity and sets it active — with zero
     /// platform involvement (no auth token anywhere in the store).
@@ -2324,7 +2239,6 @@ mod tests {
         .await
         .expect("local register should succeed");
 
-        // Active creator must be set to the freshly minted local identity.
         let config = CliConfig::load().expect("reload config");
         let active = config
             .active_creator_id
@@ -2335,7 +2249,6 @@ mod tests {
             "expected a ctr_local* identity, got {active}"
         );
 
-        // V1.167 P2 T2 (AC-V167-P2-1 second half): the workspace state db
         // `creators` row must exist so `creator world create` passes its FK
         // precheck — same resolution seam as `creator world create`.
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
@@ -2358,7 +2271,6 @@ mod tests {
             "workspace creators row must exist for the registered local creator"
         );
 
-        // The identity must resolve through the shared resolution path as
         // a persistent (non-anonymous, non-platform) local identity.
         let resolved = crate::commands::system::identity::resolve_active_identity()
             .await
@@ -2395,7 +2307,6 @@ mod tests {
             .as_deref()
             .expect("active_creator_id should be set");
 
-        // Resolve the workspace state db exactly like `creator world create`.
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
         let pool = crate::db::Schema::init(&db_path)
             .await
@@ -2432,7 +2343,6 @@ mod tests {
         .expect_err("platform register without a token must fail");
 
         let display = format!("{err}");
-        // Frozen one-block hint copy (see the map_err in `register_creator`):
         // exact match after trim — a copy regression that drops or rewrites any
         // word must fail this test, not just the two exit names.
         assert_eq!(
@@ -2448,7 +2358,6 @@ mod tests {
     /// `--source` and `--handle` at the clap layer.
     #[test]
     fn register_local_conflicts_with_source_and_handle() {
-        // Full CLI command tree (same builder `system completion` uses).
         let command = crate::cli::build_command();
 
         for args in [
@@ -2466,13 +2375,10 @@ mod tests {
             );
         }
 
-        // `--local` alone (with the required --name) parses fine.
         let ok = command
             .try_get_matches_from(["nexus42", "creator", "register", "--local", "--name", "T"]);
         assert!(ok.is_ok(), "--local alone must parse: {ok:?}");
     }
-
-    // ── V1.176 P0 T3 (AR-90): creator list row resolution + --json DTO ──
 
     #[test]
     fn list_rows_marks_local_and_keeps_platform_byte_stable() {
@@ -2607,9 +2513,7 @@ mod tests {
 
     #[test]
     fn creator_id_column_width_fits_widest_id_floor_19() {
-        // No rows → pre-existing width.
         assert_eq!(creator_id_column_width(&[]), 19);
-        // Short platform-only ids keep the pre-existing width — the V1.176
         // layout stays byte-for-byte on a platform-only listing.
         let platform = ListRow {
             creator_id: "ctr_platabc".to_string(),
@@ -2619,7 +2523,6 @@ mod tests {
             origin: "platform",
         };
         assert_eq!(creator_id_column_width(std::slice::from_ref(&platform)), 19);
-        // Minted 21-char `ctr_local` ids (V1.176 P0 T1 format) widen the
         // column so HANDLE / ORIGIN stay aligned on local rows.
         let local = ListRow {
             creator_id: "ctr_localf0d65930e496".to_string(),

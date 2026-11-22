@@ -7,7 +7,6 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * CAP-001 / I-000125: `GET /v1/daemon/orchestration/capabilities` serves the
  * live registry rows in the hand-coded local wire shape (`camelCase` schemas).
  * The native lane is stubbed at the `ServiceCore.core` seam the handler reads.
  */
@@ -99,7 +98,6 @@ describe('capabilities route (CAP-001 / I-000125)', () => {
     const service = {
       domainOnly: true,
       core: {
-        // A profile with no execution owner refuses the registry probe with a
         // bare reason; the transport folds that into a generic 500 `internal`.
         listCapabilities: async () => {
           probed += 1;

@@ -6,6 +6,8 @@
 //! nest-child hash set. Nested members are hashed through the document body itself, so an
 //! expanded nest needs no extra input; a `defer_until_apply` child is unresolved by contract
 //! and is excluded until Apply records its hash.
+//!
+//! see docs/specs/contracts/canonical-hash.md.
 
 use crate::{WorkflowDocument, WorkflowNestBindingExpansion};
 use serde_json::Value;
@@ -41,7 +43,6 @@ impl std::error::Error for CanonicalHashError {}
 pub fn content_hash(document: &WorkflowDocument) -> Result<String, CanonicalHashError> {
     let mut body = serde_json::to_value(document)
         .map_err(|error| CanonicalHashError::Serialize(error.to_string()))?;
-    // The hash never covers itself: the candidate's optional `content_hash` is not identity.
     if let Value::Object(members) = &mut body {
         members.remove("content_hash");
     }
@@ -225,7 +226,6 @@ mod tests {
             content_hash(&missing),
             Err(CanonicalHashError::MissingMemberHash("nests[n1]".into()))
         );
-        // A deferred child is unresolved by contract: Apply records its hash later.
         assert!(content_hash(&deferred).is_ok());
     }
 }

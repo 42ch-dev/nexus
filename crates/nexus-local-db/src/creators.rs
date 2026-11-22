@@ -172,7 +172,6 @@ async fn delete_creator_in_tx(
     if in_use > 0 {
         return Err(LocalDbError::actor_in_use());
     }
-    // Holder first (it references the subject), then the subject — one
     // transaction, so a refusal anywhere leaves both rows untouched.
     sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ? AND creator_id = ?")
         .bind(&holder_entry_id)
@@ -328,7 +327,6 @@ mod tests {
         assert_eq!(row.1, "Local Materializer");
         assert_eq!(row.2, "active");
         assert_eq!(row.4, "{}");
-        // cached_at must be RFC3339 — mirrors the daemon helper's
         // `chrono::Utc::now().to_rfc3339()`.
         chrono::DateTime::parse_from_rfc3339(&row.3).expect("cached_at must be RFC3339");
     }
@@ -352,7 +350,6 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1, "re-running must not duplicate the row");
 
-        // UPDATE branch: a changed display name is applied in place.
         ensure_creator_row(&pool, "ctr_localIdem", "Renamed")
             .await
             .unwrap();

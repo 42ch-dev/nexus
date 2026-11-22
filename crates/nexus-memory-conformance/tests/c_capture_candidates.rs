@@ -82,7 +82,6 @@ async fn all_record_ids(actor: &Actor<'_>) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// C. Capture, idempotency and receipts
 // ---------------------------------------------------------------------------
 
 /// C-020: a capture receipt names its candidate and never the captured text;
@@ -102,7 +101,6 @@ async fn capture_receipt_is_content_free(matrix: Matrix) {
     );
     assert!(!serialized.contains("Mira"), "{committed}");
 
-    // Candidate visibility: pending, with the immutable capture placement.
     let listing = pending(&admin).await;
     let row = listing["candidates"]
         .as_array()
@@ -113,7 +111,6 @@ async fn capture_receipt_is_content_free(matrix: Matrix) {
     assert_eq!(row["status"], json!("pending"));
     assert_eq!(row["capture_scope"], shared_scope());
 
-    // Exclusion from recall (MEM-R004): nothing is retained yet.
     let recalled = recalled(&admin, json!({ "mode": "subject_all" })).await;
     assert_eq!(recalled["total_authorized"], json!(0), "{recalled}");
     assert_eq!(recalled["records"], json!([]));
@@ -264,7 +261,6 @@ async fn response_loss_replays_one_effect_pipeline(matrix: Matrix) {
 async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
 
-    // (A) Pre-COMMIT rollback: uncertain answer, no effect after the restart.
     matrix.arm_commit_boundary_failure();
     let staged = matrix
         .admin()
@@ -284,7 +280,6 @@ async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
         "the rolled-back attempt left no pending receipt"
     );
 
-    // (B) Original committed uncertainty: the commit happened, the response did
     // not, so the original receipt and effect are durable before the restart.
     matrix.arm_lost_response();
     let original = capture_body("k-c024-original", TEXT, &shared_scope());
@@ -306,7 +301,6 @@ async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
         "the original receipt is terminal (committed), not pending"
     );
 
-    // Resolution: same-key replay returns the ORIGINAL receipt and effect.
     let resolved = admin.capture(original.clone()).await;
     assert!(
         is_committed(&resolved),
@@ -394,7 +388,6 @@ async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut Owned
         "the refused foreign capture created no durable receipt for its key"
     );
 
-    // The refused request consumed nothing: once coverage exists the SAME key
     // commits and owns exactly the one new durable receipt and candidate.
     let peer_id = matrix.peer_principal().principal_id.clone();
     admin
@@ -680,7 +673,6 @@ async fn receipts_never_leak_deleted_content(matrix: Matrix) {
         .await;
     assert_eq!(result(&deleted)["tombstoned"], json!(true));
 
-    // Replays of the pre-deletion history still resolve to their receipts.
     let capture_replay = admin
         .capture(capture_body("k-c027-capture", TEXT, &shared_scope()))
         .await;
@@ -708,7 +700,6 @@ async fn receipts_never_leak_deleted_content(matrix: Matrix) {
         "the consumed shell carries no content: {shell}"
     );
 
-    // The record itself is a content-free tombstone now.
     let tombstone = admin.get_record(&record_id).await;
     assert_eq!(tombstone["record"]["content"]["text"], json!(""));
     assert!(!tombstone.to_string().contains("northern gate"));
@@ -741,7 +732,6 @@ async fn receipt_and_dedup_retention_windows(matrix: Matrix) {
     let live = matrix.admin().get_receipt(&first_id).await;
     assert_eq!(live["receipt"]["status"], json!("committed"));
 
-    // Past the body window: the body is gone, the key stays bound.
     matrix.expire_receipts(false, windows).await;
     let expired = matrix.admin().get_receipt(&first_id).await;
     assert_eq!(error_code(&expired), "RECEIPT_EXPIRED", "{expired}");
@@ -763,7 +753,6 @@ async fn receipt_and_dedup_retention_windows(matrix: Matrix) {
     );
     assert_eq!(ids(&pending(&matrix.admin()).await).len(), 1);
 
-    // Past the dedup window: the receipt is absent and the key is free again.
     matrix.expire_receipts(true, windows).await;
     let absent = matrix.admin().get_receipt(&first_id).await;
     assert_eq!(error_code(&absent), "NOT_FOUND", "{absent}");
@@ -829,7 +818,6 @@ async fn c_029_reconnect_preserves_principal_and_receipt_remote() {
 }
 
 // ---------------------------------------------------------------------------
-// D. Candidate lifecycle
 // ---------------------------------------------------------------------------
 
 /// C-030: candidate pages are bounded, complete and equal to the authorized set;
@@ -883,7 +871,6 @@ async fn candidate_pages_are_bounded_and_scoped(matrix: Matrix) {
     );
     assert_eq!(seen.len(), seeded.len(), "no row is paged twice: {seen:?}");
 
-    // A reviewer restricted to one context sees only the candidate it covers.
     let peer_id = matrix.peer_principal().principal_id.clone();
     let granted = admin
         .grant(json!({
@@ -903,7 +890,6 @@ async fn candidate_pages_are_bounded_and_scoped(matrix: Matrix) {
         "the scoped page is exactly the seeded authorized candidate in its context"
     );
 
-    // A real candidate outside that context and an id this store never held are
     // the same NOT_FOUND-class refusal (C-102 anti-oracle).
     let inaccessible = matrix.peer().get_candidate(&seeded[1]).await;
     let missing = matrix.peer().get_candidate("cnd_never_existed").await;
@@ -945,7 +931,6 @@ async fn review_consumes_and_creates_atomically(matrix: Matrix) {
         json!(TEXT),
         "a pending candidate still carries its proposed body: {captured_shell}"
     );
-    // Authoritative digest: §6.7 pins the JCS SHA-256 of the candidate content,
     // which the public pending projection exposes. Compute it before the body is
     // scrubbed; the consumed shell must retain exactly this value.
     let expected_digest =
@@ -1084,7 +1069,6 @@ async fn changed_target_under_a_retained_key_is_a_conflict(matrix: Matrix) {
         .await;
     assert!(is_committed(&dismissed), "{dismissed}");
 
-    // The same key over a different payload: the retained receipt binding
     // must answer with the digest conflict even though the named candidate
     // row does not exist.
     let changed = admin
@@ -1115,7 +1099,6 @@ async fn i305_changed_target_under_a_retained_key_is_a_conflict_remote() {
 async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let peer_id = matrix.peer_principal().principal_id.clone();
-    // One grant carrying both required capabilities over the candidate's shared
     // capture scope (the single-grant rule).
     let granted = matrix
         .admin()
@@ -1127,7 +1110,6 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .await;
     assert!(is_committed(&granted), "{granted}");
 
-    // Fixture target-arm lifecycle on real stale fences. The control handle is
     // kept ALIVE across each fence whenever the case is an observation
     // cancellation: with a live release sender, a stale arm would park the fence
     // until the arm bound, so a prompt refusal is causal. A dropped handle's
@@ -1181,7 +1163,6 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
 /// observation cancellation, replacement, controller loss and arm expiry.
 async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
     if matrix.kind() == Kind::Remote {
-        // Unpolled observation cancelled, handle retained.
         let unpolled = matrix.park_next_target("memory.subjects.fence");
         let mut observation = unpolled;
         {
@@ -1203,7 +1184,6 @@ async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
         drop(observation);
 
-        // Replacement: dropping the old handle must not clear the newer arm, and
         // the replacement is the one the fence really pauses on.
         let admin = matrix.admin();
         let old = matrix.park_next_target("memory.subjects.fence");
@@ -1227,7 +1207,6 @@ async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
             .expect("the replaced fence completes");
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
 
-        // Controller LOSS after take: the fence took the arm, the controller is
         // really dropped, and the fence reaches its ordinary refusal boundedly.
         let admin = matrix.admin();
         let mut loss = matrix.park_next_target("memory.subjects.fence");
@@ -1249,7 +1228,6 @@ async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
             .expect("the fence completes boundedly after controller loss");
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
 
-        // Controller RETAINED past the arm's own bound (expiry): the fence still
         // refuses boundedly, and the late release returns instead of hanging.
         let admin = matrix.admin();
         let mut expiry =
@@ -1282,7 +1260,6 @@ async fn race_two_reviews_at_the_same_candidate(
     matrix: &Matrix,
     candidate_id: &str,
 ) -> (Value, Value) {
-    // - Local: the held review owns the candidate's disposition section. The
     //   peer review's disposition acquisition reports that it is really about to
     //   block on that section — a provider-side acknowledgment of ITS arrival,
     //   not elapsed time and not an OS lock-wait claim.
@@ -1308,7 +1285,6 @@ async fn race_two_reviews_at_the_same_candidate(
     let mut peer_completed = None;
     match matrix.kind() {
         Kind::Local => {
-            // The held review owns the candidate's disposition section; the peer
             // review's acquisition reports that it is really about to block on
             // that section — a provider-side acknowledgment of ITS arrival.
             let waiter = Arc::new(tokio::sync::Notify::new());
@@ -1370,15 +1346,12 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
     let candidate_id = candidate_ids(&captured)[0].clone();
     let peer_id = matrix.peer_principal().principal_id.clone();
 
-    // 1-2. `review` alone and same-scope SEPARATE grants never admit.
     separate_grants_are_not_a_review_admission(&matrix, &candidate_id, &peer_id).await;
 
-    // 3. ONE grant carrying both capabilities over the same scope is admitted
     //    and the created record inherits the context placement verbatim.
     let record_id =
         dual_grant_promotes_with_inherited_context(&matrix, &candidate_id, &peer_id).await;
 
-    // 4. Shared visibility needs the explicit dual-authorized promote. The peer
     //    may read the context-placed record but cannot promote it (no `promote`
     //    coverage), and the state never widens.
     shared_promotion_needs_dual_authority(&matrix, &record_id).await;
@@ -1636,7 +1609,6 @@ async fn replay_does_not_recheck_current_fence_or_cas(matrix: Matrix) {
         commit_capture_and_review_before_fence(&matrix).await;
     let admin = matrix.admin();
 
-    // The specified operation: a CAPTURE replay is the stored receipt.
     let replay = admin.capture(body).await;
     assert_eq!(
         receipt_id(&replay),
@@ -1645,13 +1617,11 @@ async fn replay_does_not_recheck_current_fence_or_cas(matrix: Matrix) {
     );
     assert_eq!(candidate_ids(&replay), candidate_ids(&captured));
 
-    // Additional evidence: the review replay behaves the same way.
     let review_replay = admin
         .review_candidate(review_body(&candidate_id, 1, "k-c036-review"))
         .await;
     assert_eq!(receipt_id(&review_replay), receipt_id(&reviewed));
 
-    // A fresh operation still observes the fence.
     let fresh = admin
         .capture(capture_body("k-c036-fresh", TEXT, &shared_scope()))
         .await;
@@ -1706,7 +1676,6 @@ async fn binding_local_review_cannot_widen_visibility(matrix: Matrix, character:
     let admin = matrix.admin();
     let record_id = binding_local_review_promotes_in_place(&admin, subject, binding).await;
 
-    // Shared-only visibility never sees the binding-placed record.
     let shared_only = admin
         .recall(json!({
             "subject_id": subject,
@@ -1728,7 +1697,6 @@ async fn binding_local_review_cannot_widen_visibility(matrix: Matrix, character:
         .await;
     assert_eq!(own_binding["total_authorized"], json!(1), "{own_binding}");
 
-    // An explicit promote needs promote + records_write on both placements; an
     // unauthorized attempt changes nothing.
     let peer_id = matrix.peer_principal().principal_id.clone();
     let reader = admin
@@ -1766,7 +1734,6 @@ async fn binding_local_review_cannot_widen_visibility(matrix: Matrix, character:
         "the refused promotion did not widen the record"
     );
 
-    // The explicit authorized promote is the only widening path.
     let widened = admin
         .promote_record(json!({
             "record_id": record_id,

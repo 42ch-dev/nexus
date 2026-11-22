@@ -5,7 +5,6 @@ import { Button } from './button';
 
 describe('Button', () => {
   it('renders a native button with its accessible label', () => {
-    // Button is a thin re-export from @42ch/nexus-ui; the consumer-visible
     // contract is a real <button> whose accessible name comes from children.
     render(<Button variant="primary" size="default">Continue</Button>);
     const btn = screen.getByRole('button', { name: 'Continue' });
@@ -30,7 +29,6 @@ describe('Button', () => {
   });
 
   it('applies the token-backed primary rest/hover/active recipe', () => {
-    // jsdom runs without the built stylesheet (vitest `css: false`), so the
     // recipe is only observable through the token-backed utility classes on
     // the rendered element. Asserted minimally — rest fill, hover fill,
     // active fill, and the light/dark label pair — instead of pinning the

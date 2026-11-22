@@ -89,7 +89,6 @@ export function SessionsPage() {
                 card={{
                   sessionId: s.session_id,
                   shortId: shortId(s.session_id),
-                  // Locked v1.220 pill mapping — unchanged `statusVariant`,
                   // `completed` reads green and is told apart by its label.
                   status: {
                     label: humanizeStatus(s.status),

@@ -263,7 +263,6 @@ fn snapshot_with_lock(
     let config = match locked_read(nexus_home) {
         Ok(config) => config?,
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-            // I-000336: only the proven read-only home reads unlocked. The
             // classification lives in the lock owner and requires two
             // independent facts — a denied lock-file create/open AND the
             // lock entry's absence established by a separate stat — so a
@@ -386,7 +385,6 @@ impl CoreService {
                 ))))
             }
             MemoryProviderSelection::Remote(selection) => {
-                // Feature off: the static `memory_remote_disabled` refusal IS
                 // the behavior — no credential read, no socket, no fallback.
                 // Feature on: the real signed Connect open (§4.1), which fails
                 // the whole open on any credential/handshake/capability/space/
@@ -465,7 +463,6 @@ impl CoreService {
 
     async fn open_impl(options: CoreOpenOptions, expected: Option<&Path>) -> CoreResult<Self> {
         let nexus_home = nexus_home_layout::nexus_root_from_home(&options.user_home);
-        // A read-only open must not write: it reads a legacy `config.json`
         // snapshot in place and never migrates. Every writer keeps the
         // migration, so it still takes the lock, re-checks absence and
         // publishes atomically.
@@ -499,7 +496,6 @@ impl CoreService {
             return Err(CoreError::Uninitialized);
         }
 
-        // Pin the admission's canonical creative root HERE, once, before any
         // pool or owner exists: the native boot's Host probe boundary and the
         // hosted factory's workspace ports both bind this exact value, so a
         // selected-metadata write that lands between them cannot publish a
@@ -517,7 +513,6 @@ impl CoreService {
 
         let (pool, guarded) = Self::open_admissions(&db_path, &creator_id, options.access).await?;
 
-        // Pin the one provider authority this open serves the memory family
         // from (NXM-5 Task 2, N3 Task 3), built HERE beside the pool admission
         // so an E4 handler can never mint a second provider instance behind
         // the service. A failed pin (the real `memory_remote_disabled`
@@ -691,7 +686,6 @@ impl CoreService {
     /// by generation invalidation.
     pub(crate) fn verify_selected_context(&self) -> CoreResult<()> {
         if self.inner.access == CoreAccess::ReadOnly {
-            // The open promised not to write, so verification must read the
             // same lock-free snapshot the open used. The migration-aware
             // readers below would otherwise take the writer lock (and fail) on
             // a legacy home whose only config is `config.json`.
@@ -803,7 +797,6 @@ impl CoreService {
                 resource: "world_kb_patch: read-only core access".to_string(),
             });
         }
-        // v1.191 P1 T7 (durable §4.3): a World governance edit takes the World
         // **exclusive** knowledge lease before the authoring transaction opens
         // `BEGIN IMMEDIATE`, and a `character-private` audience additionally
         // takes the named Character's exclusive lease in the durable
@@ -835,7 +828,6 @@ impl CoreService {
                 );
             }
         }
-        // Retained route texture (daemon world-KB family): a foreign World is
         // refused by the typed ownership guard as 403 before any other
         // admission runs, so adding the read selection below cannot turn that
         // answer into an existence-revealing 404.
@@ -845,7 +837,6 @@ impl CoreService {
             principal.creator_id(),
         )
         .await?;
-        // Durable §5.1: World-KB authoring is Creator **management** authoring
         // on owned containers, so it reads and writes under the management
         // selection (owned World/Character/binding containers plus the
         // known-governance holder set) — server-chosen from stored state, never
@@ -930,7 +921,6 @@ impl CoreService {
         loop {
             let notified = self.inner.close_settled.notified();
             tokio::pin!(notified);
-            // Register BEFORE the check so a settlement that lands in between
             // cannot be missed.
             notified.as_mut().enable();
             let report = self
@@ -963,7 +953,6 @@ impl CoreService {
         self.inner.closing.store(true, Ordering::SeqCst);
         let inner = Arc::clone(&self.inner);
         tokio::spawn(async move {
-            // A drain that panicked must not strand every later close on a
             // report that never comes.
             if tokio::spawn(close_drain(Arc::clone(&inner))).await.is_err() {
                 publish_close_report(&inner, interrupted_close_report());
@@ -979,7 +968,6 @@ impl CoreService {
 /// pool closes, because drive cancellation, the bounded join and every final
 /// durable settlement run against a LIVE pool.
 async fn close_drain(inner: Arc<CoreInner>) {
-    // Close the start barrier BEFORE taking the slot. The retained start task
     // holds the shared half for the whole start (engine construction, recovery,
     // the install, or the settlement of an owner whose caller went away), so
     // this waits out every registered start instead of releasing the pool, the
@@ -1003,7 +991,6 @@ async fn close_drain(inner: Arc<CoreInner>) {
     if let Some(handle) = &execution_handle {
         handle.shutdown().await;
     }
-    // The pinned binding holds the local provider's OWN guarded pool (and the
     // writer admission behind it). A confirmed close settles that pool
     // explicitly — the provider owns the only handle to its admission — and
     // only then gives the binding up with this open's own pool. Otherwise a
@@ -1022,7 +1009,6 @@ async fn close_drain(inner: Arc<CoreInner>) {
     }
     drop(binding);
     inner.pool.close().await;
-    // A confirmed close gives up exactly the admission claim THIS open took
     // over the home, joiner included. The claim — not who created the entry —
     // is the lifetime: the retained entry and the OS locks behind it are
     // dropped only when the LAST live user releases, so closing one user never
@@ -1040,7 +1026,6 @@ async fn close_drain(inner: Arc<CoreInner>) {
     if let Some(guarded) = guarded {
         guarded.release_retained_admission();
     }
-    // `take` returned the handle, so ownership is settled; release the
     // per-DB fence so a later open of the same DB can claim it.
     #[cfg(feature = "execution")]
     if let Some(handle) = execution_handle {
@@ -1165,7 +1150,6 @@ mod tests {
         let writer_home = home_path.clone();
         let writer = std::thread::spawn(move || {
             let lock = nexus_home_layout::config_lock::acquire(&writer_home).expect("writer lock");
-            // The truncation an in-place rewrite exposes before its complete
             // body is written.
             std::fs::write(&writer_path, "").expect("truncate under the lock");
             truncated.send(()).expect("signal the truncated window");
@@ -1183,7 +1167,6 @@ mod tests {
 
         let reader_path = home_path;
         let reader = std::thread::spawn(move || selection_snapshot(&reader_path));
-        // Leave the reader time to reach the lock and wait behind the writer
         // (the lock's stale threshold is 10 s, far above this pause).
         std::thread::sleep(std::time::Duration::from_millis(300));
         release.send(()).expect("close the window");
@@ -1277,7 +1260,6 @@ mod tests {
             config_document(&remote_selection()),
         )
         .expect("config");
-        // No lock file exists and the home grants no write authority, so the
         // probe's create is denied the same way the acquisition was.
         std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o555))
             .expect("seal the nexus home");

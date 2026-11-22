@@ -18,7 +18,6 @@ import type { CoreServiceDiscovery } from '@42ch/nexus-contracts';
 import { HttpError } from './errors.js';
 
 /**
- * Launch/discovery file protocol (architecture §7, frozen before P5/P6).
  *
  * - Discovery record: `<user_home>/.nexus42/run/service.json`, written 0600 in
  *   a 0700 directory, published by atomic rename only after the listener, core
@@ -73,7 +72,6 @@ function assertRealDirectory(path: string): void {
 }
 
 /**
- * Create `path` as a real private directory: the per-level mkdir never
  * follows a planted symlink (it fails with EEXIST instead), and an existing
  * real directory — including a legacy permissive one — is forced back to
  * `mode` before anything is written beneath it.
@@ -138,7 +136,6 @@ function parseLockToken(raw: string | null): DiscoveryLockToken | null {
       return parsed as DiscoveryLockToken;
     }
   } catch {
-    // Corrupt lock: treated as stale by the acquire loop.
   }
   return null;
 }
@@ -162,7 +159,6 @@ function writeFileSyncExclusive(path: string, data: string, mode: number): void 
     try {
       closeSync(fd);
     } catch {
-      // The failing write already closed the descriptor.
     }
     rmSync(path, { force: true });
     throw error;
@@ -202,7 +198,6 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
           );
         }
       } else if (readLockTokenBytes(path) === raw) {
-        // Stale (dead owner) or corrupt. Clear it only when the file still
         // holds the exact bytes just judged stale: re-reading immediately
         // before the unlink closes the window where a successor's fresh
         // O_EXCL lock (a uuid this process never generated) could be deleted
@@ -215,7 +210,6 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
   try {
     return await fn();
   } finally {
-    // Release only if we still own the lock file (never delete a successor's).
     const holder = parseLockToken(readLockTokenBytes(path));
     if (holder?.token === token.token) {
       rmSync(path, { force: true });
@@ -291,7 +285,6 @@ export function readPublishedDiscovery(home: string): CoreServiceDiscovery | nul
   const path = discoveryRecordPath(home);
   let stats;
   try {
-    // lstat, never stat: a planted symlink at the leaf is refused, not read.
     stats = lstatSync(path);
   } catch {
     return null;

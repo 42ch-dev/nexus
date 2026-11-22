@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! World↔spoke conversion seams.
 //!
 //! Since V1.145 P1a the `KnowledgeEntryRecord ↔ spoke KnowledgeEntry` conversion seam

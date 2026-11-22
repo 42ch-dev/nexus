@@ -1,5 +1,4 @@
 /**
- * Settings Agent section — V1.103 P1 (G1 preselect).
  *
  * Mounts app-shared AgentPicker as a Settings section body. The saved profile
  * comes from the shared `useSavedAgentProfile` seam (desktop IPC / browser
@@ -67,7 +66,6 @@ function resolvePickerStatus(
 }
 
 /**
- * Apply a saved profile onto scan results: prefer launch-command match among
  * installed agents, then catalog-key match; otherwise use launchCommand as the
  * custom path. Returns whether a selection was applied.
  */
@@ -149,7 +147,6 @@ export function SettingsAgentSection() {
       const launchCommand =
         (agent?.launch_command ?? customCommand.trim()) ?? undefined;
       try {
-        // Transport-coherent with the read seam: desktop keeps the IPC store,
         // the browser writes the service the same seam reads.
         if (desktop) {
           await desktop.setAgentProfile(name, launchCommand);
@@ -177,13 +174,11 @@ export function SettingsAgentSection() {
     [client, commonT, desktop, qc, toast],
   );
 
-  // G1: once both the scan and the shared profile read settle, preselect the
   // saved profile (match by command / catalog key); null/unreadable falls back
   // to the first installed agent. Works in the browser too — the seam reads the
   // service there.
   useEffect(() => {
     if (didInitDefault) return;
-    // A failed profile read must not silently fall back to "first installed":
     // the error surface holds preselect until a refetch succeeds.
     if (scan.isLoading || scan.isError || saved.isLoading || saved.error) return;
     const scannedMaybe = scan.data?.agents;

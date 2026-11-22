@@ -121,8 +121,6 @@ async fn insert_driver_schedule(
     .unwrap();
 }
 
-// ── F-001: Cross-volume supervisor integration ─────────────────────────
-
 /// AC2 (F-001): After finalizing the last chapter of volume 1 in a
 /// two-volume work, the supervisor enqueues a produce schedule for
 /// volume 2 chapter 1 (not volume 1 chapter N+1).
@@ -134,16 +132,13 @@ async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
             .with_binding_provider("test-provider".to_string()),
     );
 
-    // Work: 2 volumes × 3 chapters = 6 total
     let mut work = test_work("wrk_xvol_1", 3, 6, true);
     work.current_stage = "persist".to_string();
     work.stage_status = "active".to_string();
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed chapters: vol 1 all finalized, vol 2 all not_started
     seed_multi_volume_chapters(&pool, "wrk_xvol_1", 2, 3, 1, 3).await;
 
-    // Insert the driver schedule (persist for vol1 ch3) as running
     insert_driver_schedule(
         &pool,
         "sch_xvol_persist_v1c3",
@@ -164,7 +159,6 @@ async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
     .await
     .unwrap();
 
-    // Mark stage as complete
     works::patch_work(
         &pool,
         "ctr_test",
@@ -178,7 +172,6 @@ async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
     .await
     .unwrap();
 
-    // Complete the persist schedule via the supervisor
     sup.on_schedule_terminal(
         "sch_xvol_persist_v1c3",
         nexus_contracts::local::schedule::ScheduleStatus::Completed,
@@ -186,7 +179,6 @@ async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
     .await
     .unwrap();
 
-    // Verify: the work should advance to produce stage
     let updated = works::get_work(&pool, "ctr_test", "wrk_xvol_1")
         .await
         .unwrap()
@@ -200,7 +192,6 @@ async fn f001_cross_volume_supervisor_enqueues_vol2_chapter1() {
         "should have a new driver schedule"
     );
 
-    // Verify: the volume-aware evaluator picks vol 2 ch 1, not vol 1 ch 4.
     // After the supervisor enqueues, the work is at produce/active, not persist/complete,
     // so re-evaluating gives NoAction. Instead verify via chapter row status.
     let v2c1_status: Option<String> = sqlx::query_scalar(
@@ -225,13 +216,11 @@ async fn f001_single_volume_all_finalized_marks_complete() {
     let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
-    // Work: 1 volume × 3 chapters = 3 total
     let mut work = test_work("wrk_xvol_2", 3, 3, true);
     work.current_stage = "persist".to_string();
     work.stage_status = "active".to_string();
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed chapters: vol 1 all finalized
     seed_multi_volume_chapters(&pool, "wrk_xvol_2", 1, 3, 1, 3).await;
 
     insert_driver_schedule(
@@ -297,7 +286,6 @@ async fn f001_volume_aware_evaluator_picks_vol2_ch1() {
     let work = test_work("wrk_xvol_3", 3, 6, true);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed: vol 1 all finalized, vol 2 all not_started
     seed_multi_volume_chapters(&pool, "wrk_xvol_3", 2, 3, 1, 3).await;
 
     let action = auto_chain::evaluate_after_persist_volume_aware(&pool, &work)
@@ -324,7 +312,6 @@ async fn f001_volume_aware_evaluator_work_complete() {
     let work = test_work("wrk_xvol_4", 6, 6, true);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed: all chapters finalized
     seed_multi_volume_chapters(&pool, "wrk_xvol_4", 2, 3, 2, 3).await;
 
     let action = auto_chain::evaluate_after_persist_volume_aware(&pool, &work)
@@ -340,8 +327,6 @@ async fn f001_volume_aware_evaluator_work_complete() {
     );
 }
 
-// ── V1.44 P2 (F-004): Volume propagation through supervisor chain ───────
-
 /// AC2 (F-004): After the supervisor enqueues a produce schedule for
 /// volume 2 chapter 1, the schedule's preset input should include the
 /// `volume` template var (alongside `chapter` and `work_id`).
@@ -351,14 +336,11 @@ async fn f004_supervisor_enqueue_includes_volume_in_preset_input() {
 
     let (_dir, pool) = test_pool().await;
 
-    // Work: 2 volumes × 3 chapters = 6 total
     let work = test_work("wrk_f004_1", 3, 6, true);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed: vol 1 all finalized, vol 2 all not_started
     seed_multi_volume_chapters(&pool, "wrk_f004_1", 2, 3, 1, 3).await;
 
-    // Build the schedule request via the volume-aware path
     let schedule_req = auto_chain::build_auto_chain_schedule(
         "produce",
         "ctr_test",
@@ -418,7 +400,6 @@ async fn f002_multi_volume_work_completed_all_volumes_finalized() {
     work.intake_status = "complete".to_string();
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed 2 volumes × 3 chapters = 6 rows
     seed_multi_volume_chapters(&pool, "wrk_f002_1", 2, 3, 2, 3).await;
 
     let completed = nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_1")
@@ -441,7 +422,6 @@ async fn f002_multi_volume_work_not_completed_partial_vol2() {
     work.intake_status = "complete".to_string();
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed with only vol 1 finalized
     seed_multi_volume_chapters(&pool, "wrk_f002_2", 2, 3, 1, 3).await;
 
     let completed = nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_2")

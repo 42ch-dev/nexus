@@ -1,5 +1,4 @@
 /**
- * Knowledge family HTTP surface (P1-T3 authority over the single Rust core):
  * Work/creator findings (including the tri-state PATCH, batch triage, stale
  * banner and retention prune) and reading depth (progress + annotations).
  * Scope validation, enum/transition validation, batch semantics and retention
@@ -28,7 +27,6 @@ import { HttpError } from './errors.js';
 import type { DomainRoute } from './routes.js';
 import { parseOptionalInteger, withPrincipal, wirePayload } from './world-kb.js';
 
-// ── Findings ───────────────────────────────────────────────────────────────
 
 /** `POST /v1/daemon/works/{work_id}/findings` — 201 created. */
 export function createFinding(
@@ -165,7 +163,6 @@ export function pruneFindings(
   );
 }
 
-// ── Reading depth ──────────────────────────────────────────────────────────
 
 /** `GET /v1/daemon/reading/progress?work_id=&chapter=&volume=` — `volume` is optional, defaults to 1. */
 export function getReadingProgress(
@@ -425,7 +422,6 @@ export const KNOWLEDGE_ROUTES: readonly DomainRoute[] = [
   },
 ];
 
-// ── local grammar helpers ──────────────────────────────────────────────────
 
 /** Bounded `limit` (1..100) for the offset/cursor pages this family serves. */
 function boundedLimit(searchParams: URLSearchParams): { limit?: number } {

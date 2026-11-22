@@ -26,7 +26,6 @@ function seedHome() {
 }
 
 /**
- * A valid seeded home whose `.nexus42/agent-host/config.toml` is a symlink to a
  * valid TOML holding default-safe values.
  *
  * `escape: false` points the link inside the expected config directory (the
@@ -220,7 +219,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
 
   test('host start failure after a successful core open leaves no owner', async () => {
     const binding = require(nodePath);
-    // Control: the same linked-config fixture with its target INSIDE the
     // expected config directory opens, so the failure below is attributable to
     // the escaped config path and nothing else about the fixture.
     const control = binding.open(
@@ -236,7 +234,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     );
     await control.close();
 
-    // A config link escaping `.nexus42/agent-host/` is read and admitted by
     // `validate_host_admission` (before the core opens) and rejected only by
     // `HostManager::start`'s config-path canonicalization — after the core has
     // already opened, which is the rollback branch under test.
@@ -258,7 +255,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     assert.equal(wire.code, 'forbidden');
     assert.equal(wire.details?.category, 'policy_denied');
 
-    // The environment survived with no retained owner: a fresh open succeeds and
     // reports the truth of the newly started host.
     const validHome = seedHome();
     const core = binding.open(
@@ -282,7 +278,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     const binding = require(nodePath);
     binding.forceUnconfirmedCleanup(true);
     try {
-      // 1) core opens, host.start rejects the escaped config path, and the
       //    rollback's cleanup reports unconfirmed, so its owners are retained.
       let failure = null;
       try {
@@ -302,7 +297,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       assert.equal(wire.code, 'forbidden');
       assert.equal(wire.details?.category, 'policy_denied');
 
-      // 2) while cleanup stays unconfirmed, further opens are denied and the
       //    retained owners survive (never replaced or dropped). Distinct fresh
       //    homes are used, so a denial can only come from the environment-wide
       //    retained-owner fence rather than from one home's own resources. The
@@ -330,7 +324,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
         assert.equal(deniedWire.details?.category, 'open_failed');
       }
 
-      // 3) a confirmed cleanup settles the retained owners and reopens.
       binding.forceUnconfirmedCleanup(false);
       const core = binding.open(
         JSON.stringify({ user_home: validHome, access: 'engine_owner', allow_uninitialized: false }),

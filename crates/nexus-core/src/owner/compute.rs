@@ -139,7 +139,6 @@ fn in_flight_key(store: &Path, operation_id: &str) -> (PathBuf, String) {
 /// A poisoned lock reports `false`, which degrades to the `uncertain`
 /// refusal — never to a claim of live ownership.
 fn receipt_owner_is_live(store: &Path, operation_id: &str) -> bool {
-    // The key (and its `canonicalize` syscall) is built BEFORE the lock is
     // taken: the registry mutex never spans a filesystem call.
     let key = in_flight_key(store, operation_id);
     IN_FLIGHT_RUNS
@@ -278,7 +277,6 @@ pub async fn compute_run(
 
     ensure_world_owned(pool, creator_id, &request.world_id).await?;
 
-    // v1.207 P3 (§B.1): a caller that supplies an `operation_id` owns its replay
     // identity. Resolve it and ask the receipt store FIRST (§B.3 step 2) —
     // before any run row exists and before the effect runs — so a retry after a
     // lost response is answered from the stored receipt instead of executing the
@@ -308,14 +306,12 @@ pub async fn compute_run(
     let module_version = cached.manifest.version.clone();
     let manifest = cached.manifest.clone();
 
-    // Resolve the run's branch BEFORE assembling input so the module observes
     // exactly the position snapshotted onto the run row.
     let (branch_id, timeline_head_event_id) =
         resolve_run_branch(pool, &request.world_id, request.branch_id.as_deref()).await?;
 
     let invocation_params = request.invocation_params.clone();
     let invocation_params_str = serde_json::to_string(&invocation_params).ok();
-    // The module input is a model-facing payload, so it reads through the
     // admitted Creator ActorView — never a management review (durable §4.1/§4.2).
     // A Creator whose holder registry row is missing refuses here instead of
     // falling back to a World-wide read.
@@ -351,7 +347,6 @@ pub async fn compute_run(
     .await
     .map_err(crate::error::local_db_err)?;
 
-    // v1.207 P3 (§B.2/§B.3): the run's durable receipt shadows the
     // `compute_sessions` transitions. §B.3 step 3 — the `running` receipt is
     // written BEFORE the effect (WASM execution + outcome persistence), so a
     // crash mid-run leaves a durable "the effect may have started" record
@@ -376,7 +371,6 @@ pub async fn compute_run(
     };
     let operation_id = identity.operation_id;
     let request_fingerprint = identity.request_fingerprint;
-    // The receipt-begin rendezvous seam (tests only; compiled out of production
     // builds). It lets a test force both same-id callers past their run-row
     // insert and the receipt pre-check before either reaches `begin_operation`,
     // so the post-insert first-writer-wins conflict is deterministic.
@@ -392,7 +386,6 @@ pub async fn compute_run(
     .await
     {
         Ok(outcome) => outcome,
-        // A concurrent first use under the same id with DIFFERENT args won the
         // receipt. Our freshly created run row never executed the module: settle
         // it (never the winner's receipt) so it is not left `running` forever —
         // an orphan only boot recovery would flag and Clear would never reach —
@@ -421,7 +414,6 @@ pub async fn compute_run(
     };
     match begin_outcome {
         BeginOutcome::Acquired(_) => {}
-        // Unreachable for a freshly generated run id (the receipt's subject is
         // the id itself). A caller-supplied id can lose a concurrent first-use
         // race here: settle our duplicate run row (never the owned receipt) and
         // answer from the receipt instead of running the effect twice.
@@ -444,12 +436,10 @@ pub async fn compute_run(
         }
     }
 
-    // §B.3 live-owner signal (v1.207 P3 wave 4): from here until the guard
     // drops, THIS process owns the effect for `operation_id` in THIS receipt
     // store, so a concurrent or retried call is answered with the typed Busy
     // refusal instead of `uncertain`.
     let _in_flight = InFlightComputeGuard::register(&core.inner.db_path, &operation_id);
-    // The live-owner rendezvous seam (tests only; compiled out of production
     // builds): the registered owner parks here so a test can issue a retry
     // against a KNOWN live owner deterministically.
     #[cfg(any(test, feature = "test-hooks"))]
@@ -469,7 +459,6 @@ pub async fn compute_run(
     let manifest_task = cached.manifest.clone();
     let input_task = compute_input.clone();
 
-    // `engine.compute` is CPU-bound for up to the wall-time budget: run it on
     // the blocking pool, never inline on an async worker (a long run would
     // stall the whole runtime).
     let compute_result = match tokio::task::spawn_blocking(move || {
@@ -480,7 +469,6 @@ pub async fn compute_run(
     {
         Ok(result) => result,
         Err(join_err) => {
-            // The blocking task panicked. Best-effort compensating persist so
             // the row is not stuck in 'running' forever; retries on the same
             // run_id are forbidden by the status guard.
             persist_failure(
@@ -502,12 +490,10 @@ pub async fn compute_run(
     let output = match compute_result {
         Ok(output) => output,
         Err(nexus_wasm_host::ComputeError::InputValidationFailed(entries)) => {
-            // Manifest validation failures are a CLIENT-input problem, not an
             // internal fault. The run still fails (row persisted Failed) and
             // the refusal stays an honest coded error with per-entry detail —
             // invalid entries are never silently skipped.
             let entries_value = serde_json::to_value(&entries).unwrap_or_else(|_| json!([]));
-            // The persisted row and the response carry the SAME structured
             // detail by construction, so `GET /runs/{id}` and the refusal
             // agree on `details.invalid_entries`.
             let details = json!({ "invalid_entries": entries_value });
@@ -536,7 +522,6 @@ pub async fn compute_run(
                 json!({ "code": error_code, "message": err.to_string() }),
             )
             .await;
-            // Sandbox limits are an input/budget refusal; everything else is
             // an internal fault. The code is preserved so the transport can
             // render the retained 422 body verbatim.
             if error_code == "internal" {
@@ -552,7 +537,6 @@ pub async fn compute_run(
         category: format!("serialize compute output: {e}"),
     })?;
     if let Err(db_err) = compute_runs::set_run_succeeded(pool, &run_id, &proposals_json).await {
-        // Compensating failure persist so the row is not stuck in 'running'
         // forever (it can never be accepted, and retries on the same run_id
         // are forbidden by the status guard).
         persist_failure(
@@ -578,7 +562,6 @@ pub async fn compute_run(
         &proposals_raw,
     )?;
 
-    // §B.3: settle the receipt terminally with the EXACT answer the caller got.
     // The receipt is the durable replay answer that OUTLIVES the run row — Clear
     // history can delete `compute_sessions`, so a replay must never depend on it
     // (and never fall back to re-running). Storing the answer also makes a
@@ -666,7 +649,6 @@ pub async fn accept_compute_run(
             category: format!("parse run proposals: {e}"),
         })?;
 
-    // Accept appends to the branch SNAPSHOTTED at run time, not the current
     // fork head — the fork may have moved between run and accept. Pre-fix
     // rows carry a NULL `branch_id`; fall back to the legacy constant to
     // preserve their behavior exactly.
@@ -687,7 +669,6 @@ pub async fn accept_compute_run(
 
     let accepted_at = chrono::Utc::now().to_rfc3339();
 
-    // Every delta target must resolve inside the run's world — a foreign
     // target rejects the whole accept (full rollback on drop).
     let state_delta_count = nexus_capability::state_delta::apply_state_delta_in_tx(
         &mut tx,
@@ -723,7 +704,6 @@ pub async fn accept_compute_run(
         {
             continue;
         }
-        // Canon (not provisional): an accepted Run is author-committed world
         // truth. Discard/failed paths never reach this write.
         let affected_json = if evt.affected_key_block_ids.is_empty() {
             None
@@ -745,7 +725,6 @@ pub async fn accept_compute_run(
             evt.summary.as_deref(),
             &provenance,
             affected_json.as_deref(),
-            // modules_json: compute proposals do not carry `modules` on the
             // domain wire; the persistence plumbing exists for future writers.
             None,
         )
@@ -756,7 +735,6 @@ pub async fn accept_compute_run(
         timeline_event_ids.push(result.event_id);
     }
 
-    // The CAS: `WHERE status = 'succeeded'` means a concurrent accept updates
     // zero rows, and the error rolls the whole transaction back.
     compute_runs::set_run_applied_in_tx(&mut tx, run_id, &accepted_at)
         .await
@@ -803,7 +781,6 @@ pub async fn discard_compute_run(
     let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
-    // Existence-opacity gate: an unknown id and a foreign-World run refuse
     // identically here (QC F-001 keeps the typed distinction internal).
     visible_run_or_hidden(run_visibility(pool, creator_id, run_id).await?, run_id)?;
 
@@ -860,7 +837,6 @@ pub async fn clear_compute_runs(
         .await
         .map_err(crate::error::local_db_err)?;
 
-    // The wire field is `i64` (the generated schema's integer) while SQLite
     // reports a `u64`. A row count is bounded by the table, so the conversion
     // is total in practice; refuse rather than truncate if it ever is not.
     let deleted = i64::try_from(deleted).map_err(|_| CoreError::Internal {
@@ -896,7 +872,6 @@ pub async fn list_compute_runs(
 
     let owned_worlds = list_owned_world_ids(pool, creator_id).await?;
 
-    // The wire carries an unbounded integer while the durable reader takes a
     // `u32`. A negative value is a client-input fault and is refused rather
     // than coerced into a page size the caller never asked for.
     let requested = limit.unwrap_or_else(|| i64::from(DEFAULT_RUN_LIST_LIMIT));
@@ -912,7 +887,6 @@ pub async fn list_compute_runs(
     let filters = RunListFilters {
         world_id,
         module_id,
-        // The generated status enum renders its exact wire spelling, which is
         // the durable column's vocabulary.
         status: status.map(|status| status.to_string()),
         creator_world_ids: Some(owned_worlds),
@@ -934,7 +908,6 @@ pub async fn list_compute_runs(
                 "succeeded" => NexusRunSummaryStatus::Succeeded,
                 "applied" => NexusRunSummaryStatus::Applied,
                 "discarded" => NexusRunSummaryStatus::Discarded,
-                // "failed" and anything else.
                 _ => NexusRunSummaryStatus::Failed,
             },
             created_at: parse_rfc3339(&r.created_at),
@@ -986,10 +959,6 @@ pub async fn get_compute_run(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Generated-DTO facade on the execution owner
-// ---------------------------------------------------------------------------
-
 /// The Compute operation surface the native/service boundary drives.
 ///
 /// Each method is a typed entry point over the authority functions above: the
@@ -1020,7 +989,6 @@ impl ExecutionHandle {
             .into_iter()
             .map(module_summary_row)
             .collect();
-        // The registry is compiled in and complete: there is no page 2.
         Ok(ListModulesResponse {
             items,
             has_more: false,
@@ -1122,10 +1090,6 @@ impl ExecutionHandle {
         crate::owner::compute::clear_compute_runs(core.as_ref(), principal, query).await
     }
 }
-
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
 
 /// Convert one registry summary into a list-response row.
 ///
@@ -1320,7 +1284,6 @@ async fn resolve_run_branch(
             })?;
             match branch_head {
                 Some(Some(head)) => Ok((req.to_string(), Some(head))),
-                // `Some(None)` / `None`: no event on that branch in this
                 // world, so the branch is unknown here.
                 Some(None) | None => Err(coded_refusal(
                     "invalid_input",
@@ -1407,7 +1370,6 @@ async fn persist_failure(pool: &sqlx::SqlitePool, operation_id: &str, run_id: &s
             error = %db_err,
             "compensating set_run_failed also failed"
         );
-        // The row did not flip, so the run's outcome is not durable: leave the
         // receipt `running`. Recovery classifies it as ambiguous and never
         // re-applies — the honest answer, not a fabricated `failed`.
         return;
@@ -1517,11 +1479,9 @@ pub async fn recover_stuck_compute_runs(
             .await
             .map_err(crate::error::local_db_err)?;
         let operation_id = receipt.as_ref().map(|row| row.operation_id.clone());
-        // At boot no run owner can still be live, so a `running` receipt is
         // an orphan by definition.
         let outcome = match classify_recovery(receipt.as_ref(), false) {
             RecoveryDecision::AnswerFromReceipt(terminal) => {
-                // The replay is answered FROM the receipt (§B.3 step 3): the
                 // complete stored terminal receipt travels out with the
                 // decision, so the caller never has to re-derive or re-apply.
                 ComputeRunRecoveryOutcome::AnsweredFromReceipt {
@@ -1559,7 +1519,6 @@ const fn compute_error_code(e: &nexus_wasm_host::ComputeError) -> &'static str {
         ComputeError::MemoryCapExceeded => "compute_memory_cap_exceeded",
         ComputeError::Trap { .. } => "compute_module_trapped",
         ComputeError::ModuleComputeFailed { .. } => "compute_module_error",
-        // Manifest-schema validation failures are input problems, not internal
         // faults. The aggregated per-entry form is handled with full detail in
         // `compute_run`; the single-aspect form falls through here.
         ComputeError::ManifestValidationFailed { .. } | ComputeError::InputValidationFailed(_) => {
@@ -1622,7 +1581,6 @@ async fn create_key_blocks_in_tx(
             category: format!("decode new_key_block owner: {e}"),
         })?;
 
-        // World-scoped insert lane: reject any non-World owner.
         if kb.world_id() != Some(world_id) {
             return Err(coded_refusal(
                 "invalid_input",
@@ -1634,7 +1592,6 @@ async fn create_key_blocks_in_tx(
             ));
         }
 
-        // The store primitive keeps the insert inside the caller's accept
         // transaction and populates `extensions_nexus_json` with the World
         // owner carrier. The settlement lane carries no governance: a proposal
         // may name a wire `owner`/`disclosure`, but the record is normalised
@@ -1651,7 +1608,6 @@ async fn create_key_blocks_in_tx(
             .insert_key_block_in_tx(&mut *tx, kb)
             .await
             .map_err(|e| match e {
-                // A refused record is a caller-input fault, not a storage
                 // fault: keep the coded `invalid_input` taxonomy the raw lane
                 // surfaced.
                 nexus_knowledge::world_kb::KbStoreError::Validation(_)
@@ -1778,7 +1734,6 @@ fn answer_from_receipt(receipt: &OperationReceipt, owner_is_live: bool) -> CoreR
             &receipt.operation_id,
             "its receipt is still `running` and its owner cannot be confirmed",
         )),
-        // `classify_recovery` never yields `ApplyOnce` for a present receipt;
         // refusing honestly beats a panic if that invariant ever changes.
         RecoveryDecision::ApplyOnce => Err(CoreError::Internal {
             category: "operation receipt classification returned ApplyOnce for a stored receipt"
@@ -1900,7 +1855,6 @@ fn build_run_response(
         category: format!("build run response: {err}"),
     })?;
 
-    // Response cap: when the full payload is over budget, truncate all four
     // proposal parts. The untruncated output remains durable on the row.
     if serde_json::to_vec(&response).unwrap_or_default().len() > RESPONSE_BYTE_CAP {
         return serde_json::from_value(json!({

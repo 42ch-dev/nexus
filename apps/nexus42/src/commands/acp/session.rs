@@ -21,8 +21,6 @@ use chrono::{DateTime, Utc};
 use clap::Subcommand;
 use nexus_acp_host::{SessionEntry, SessionManager};
 
-// ── Command definitions ────────────────────────────────────────────
-
 #[derive(Debug, Subcommand)]
 pub enum SessionCommand {
     /// List persisted ACP sessions
@@ -45,9 +43,6 @@ pub enum SessionCommand {
     },
 }
 
-// ── Command runner ──────────────────────────────────────────────────
-
-/// Run a session command.
 ///
 /// # Errors
 ///
@@ -66,10 +61,7 @@ pub fn run(command: SessionCommand, _config: &CliConfig) -> Result<()> {
     }
 }
 
-// ── Individual command implementations ──────────────────────────────
-
 fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
-    // Auto-cleanup expired sessions unless --all flag is set
     if !show_all {
         let removed = manager.cleanup_expired()?;
         if !removed.is_empty() {
@@ -84,14 +76,12 @@ fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Print table header
     println!(
         "{:<40} {:<15} {:<30} {:<20}",
         "SESSION ID", "AGENT", "WORKSPACE", "LAST USED"
     );
     println!("{}", "-".repeat(105));
 
-    // Print sessions sorted by last_used_at (most recent first)
     let mut sorted_sessions = sessions;
     sorted_sessions.sort_by_key(|b| std::cmp::Reverse(b.last_used_at));
 
@@ -123,7 +113,6 @@ fn run_list(manager: &SessionManager, show_all: bool) -> Result<()> {
 fn run_show(manager: &SessionManager, session_id: &str) -> Result<()> {
     let sessions = manager.load_sessions()?;
 
-    // Find session by exact or partial match
     let session = sessions
         .iter()
         .find(|s| {
@@ -139,7 +128,6 @@ fn run_show(manager: &SessionManager, session_id: &str) -> Result<()> {
 }
 
 fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
-    // Find the session first to show what we're deleting
     let sessions = manager.load_sessions()?;
     let session = sessions.iter().find(|s| {
         s.session_id.0.as_ref() == session_id || s.session_id.0.as_ref().starts_with(session_id)
@@ -154,7 +142,6 @@ fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
 
     let actual_session_id = session.session_id.clone();
 
-    // Delete the session
     let deleted = manager.delete_session(&actual_session_id)?;
 
     match deleted {
@@ -170,9 +157,6 @@ fn run_delete(manager: &SessionManager, session_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ── Helper functions ────────────────────────────────────────────────
-
-/// Print detailed session information.
 fn print_session_details(session: &SessionEntry) {
     println!("Session ID:    {}", session.session_id.0.as_ref());
     println!("Agent:         {}", session.agent_id);

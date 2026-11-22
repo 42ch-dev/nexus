@@ -4,7 +4,6 @@ import { render } from '@testing-library/react';
 import { TaskKindBadge } from './task-kind-badge';
 
 /**
- * V1.121 P1 T3 — TaskKindBadge tokenization (DESIGN.md
  * components.memory-task-kind-*).
  *
  * Pins: each known task-kind consumes the projected `memory-task-kind-*`

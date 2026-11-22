@@ -114,7 +114,6 @@ async fn simulate_returns_the_trajectory_for_a_candidate_document() {
     );
     assert_eq!(trajectory.simulation_level, "reachability");
 
-    // The hash proves the bridge: the wire document became the IR the walk hashed.
     let ir: WorkflowDocument = serde_json::from_str(CANDIDATE).expect("fixture is a valid IR");
     assert_eq!(
         trajectory.ir_content_hash,
@@ -135,7 +134,6 @@ async fn workflow_ir_reads_the_installed_strategy_as_a_candidate_document() {
     assert_eq!(document.state.to_string(), "candidate");
     assert!(!document.nodes.is_empty());
 
-    // The response IS the schema-owned DTO: a decode of its own serialization proves
     // the document the route serves round-trips through the wire shape.
     let wire = serde_json::to_value(&document).expect("document is serializable");
     let decoded: WireWorkflowDocument =

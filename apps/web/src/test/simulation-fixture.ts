@@ -1,5 +1,4 @@
 /**
- * Simulation fixtures — a minimal candidate IR and its trajectory for the
  * Approve-disclosure and canvas-overlay tests.
  */
 import type { SimulationTrajectory, WorkflowDocument } from '@42ch/nexus-contracts';

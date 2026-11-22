@@ -1,11 +1,5 @@
 #!/usr/bin/env node
 /**
- * P3-T1 — actual binary inspection for one target artifact.
- *
- * Reads the built artifact and reports what it *is*, not what it was meant to
- * be: container format and machine type, minimum OS / glibc symbol ceiling,
- * dependent libraries, the bundled SQLite link, and the toolchain that
- * produced it (architecture-contracts §9).
  *
  * Every measurement is either parsed from the file itself or taken from the
  * platform's own tooling. A missing measurement tool or a missing symbol is
@@ -69,13 +63,10 @@ function archiveEvidenceFile(path, tag) {
   try {
     renameSync(path, `${path.replace(/\.json$/, '')}.${tag}-${Date.now()}.json`);
   } catch {
-    // nothing left to archive (or it was already replaced) — the fresh write proceeds
   }
 }
 
 /**
- * A failed run must leave its own record: a stale `pass` document on disk would
- * otherwise be read as a green result by the matrix summary.
  */
 function writeFailEvidence(message, detail) {
   if (!state.evidencePath) return;
@@ -105,7 +96,6 @@ function writeFailEvidence(message, detail) {
       )}\n`,
     );
   } catch {
-    // the original failure is reported on stderr; a failed write must not mask it
   }
 }
 
@@ -167,8 +157,6 @@ function compareVersions(a, b) {
   }
   return 0;
 }
-
-// --- container / machine type ---------------------------------------------
 
 function detectContainer(buffer, target) {
   const spec = TARGETS[target];
@@ -254,8 +242,6 @@ function parsePe(buffer) {
   };
 }
 
-// --- platform inspections --------------------------------------------------
-
 function inspectDarwin(artifact, spec, findings) {
   const loadCommands = run('otool', ['-l', artifact], { forceNoShell: true });
   if (!loadCommands.available || loadCommands.status !== 0) {
@@ -268,7 +254,6 @@ function inspectDarwin(artifact, spec, findings) {
   findings.minimum_os_source = minosMatches[0] ? 'LC_BUILD_VERSION.minos' : versionMinMatches[0] ? 'LC_VERSION_MIN_MACOSX.version' : null;
   findings.deployment_target_env = process.env.MACOSX_DEPLOYMENT_TARGET ?? null;
 
-  // `otool -L` prints the LC_ID_DYLIB install name first. That entry is the
   // artifact's own identity (a Rust cdylib built by cargo carries its absolute
   // build path there), not a load dependency, so classify from the load
   // commands and drop the id from the dependency list.
@@ -325,7 +310,6 @@ function inspectLinux(artifact, spec, findings) {
   findings.rpath = [...dynamic.stdout.matchAll(/\((?:RPATH|RUNPATH)\)\s+Library (?:rpath|runpath): \[([^\]]+)\]/g)].map((m) => m[1]);
 
   const versionInfo = run('readelf', ['--version-info', artifact], { forceNoShell: true });
-  // The glibc ceiling is the set of *needed* version symbols. Version
   // definitions (`.gnu.version_d`) describe symbols this library exports and
   // must not be mixed into the requirement.
   const needsStart = versionInfo.stdout.indexOf('Version needs section');
@@ -411,8 +395,6 @@ function maxOf(versions) {
   return max;
 }
 
-// --- SQLite link -----------------------------------------------------------
-
 function sqliteEvidence(buffer, findings) {
   const external = (findings.needed_libraries ?? []).filter((library) => /sqlite/i.test(library));
   const externalDlls = (findings.imported_dlls ?? []).filter((dll) => /sqlite/i.test(dll));
@@ -440,8 +422,6 @@ function sqliteEvidence(buffer, findings) {
   };
 }
 
-// --- toolchain -------------------------------------------------------------
-
 function toolchainEvidence() {
   const versions = {};
   const capture = (key, command, args) => {
@@ -465,8 +445,6 @@ function toolchainEvidence() {
     vscmd_ver: process.env.VSCMD_VER ?? null,
   };
 }
-
-// --- main ------------------------------------------------------------------
 
 const args = parseArgs(process.argv.slice(2));
 const spec = TARGETS[args.target];

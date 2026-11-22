@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! `validate_and_store_mind_state` adapter-boundary gate tests (V1.164 P2
 //! layering fix) — the spoke `validate_mind_state` wire-shape gate lives at
 //! the adapter boundary (the sole `spoke-operations` consumer), NOT in
@@ -76,8 +77,6 @@ fn valid_envelope(holder_entry_id: &str) -> serde_json::Value {
     })
 }
 
-// ── gate success path (field mapping) ──────────────────────────
-
 #[tokio::test]
 async fn gate_stores_valid_mind_state_verbatim() {
     let (pool, _dir) = setup_db().await;
@@ -114,12 +113,9 @@ async fn gate_stores_valid_mind_state_verbatim() {
         row.extensions_json.as_deref(),
         Some(envelope["extensions"].to_string().as_str())
     );
-    // created_at / updated_at are store-stamped at insert (RFC 3339).
     assert_ne!(row.created_at, "");
     assert_ne!(row.updated_at, "");
 }
-
-// ── gate rejection paths ────────────────────────────────────────
 
 #[tokio::test]
 async fn gate_rejects_missing_holder_entry_id_and_persists_nothing() {

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Effective prerelease decision for a Nexus Release.
  *
  * The `new-release` dispatch toggle travels to the release run as a
  * `Nexus-Prerelease: true|false` trailer on the bump commit; the tag job reads
@@ -82,7 +81,6 @@ export function parsePrereleaseTrailer(message) {
 }
 
 /**
- * A release version carrying an `-alpha.N` / `-rc.N` suffix is always a
  * prerelease. An absent version contributes nothing; a version the grammar
  * cannot read fails closed to prerelease, matching the trailer stance.
  *

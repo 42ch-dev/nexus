@@ -114,7 +114,6 @@ impl User {
     }
     ///
     /// # Errors
-    /// Returns `Err(CloudDomainError::...)` if validation fails.
     ///
     /// # Errors
     /// Returns `Err(CloudDomainError::...)` if validation fails.

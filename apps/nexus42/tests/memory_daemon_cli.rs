@@ -111,7 +111,6 @@ async fn seed_pending_desc(env: &MemoryEnv, n: usize) {
     let seed = WorkspaceSeed::open(env).await;
     let base = chrono::Utc::now();
     for i in 0..n {
-        // `i` is bounded by the test's seed count (60), far below `i64::MAX`.
         let minutes_back = i64::try_from(i).expect("seed count fits in i64");
         let record = PendingReviewRecord {
             pending_id: format!("pending_test_{i}"),
@@ -148,8 +147,6 @@ async fn seed_fragment(env: &MemoryEnv) {
     seed.release().await;
 }
 
-// ── pending count ─────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_count_reports_seeded_depth() {
     let env = fresh_env().await;
@@ -180,8 +177,6 @@ async fn pending_count_zero_when_empty() {
     let text = stdout(&out);
     assert!(text.contains("0 pending review(s)"), "{text}");
 }
-
-// ── capture (default timestamp path) ──────────────────────────────────────
 
 /// `creator memory capture` runs through the real binary without `--created-at`,
 /// and re-running it replays instead of failing (NXM-6 fix round 1, F4/F5).
@@ -214,7 +209,6 @@ async fn capture_defaults_timestamp_and_replays_on_retry() {
     assert!(text.contains("pend_cli_capture"), "{text}");
     assert!(!text.trim_start().starts_with('{'));
 
-    // The default-timestamp retry replays: one queued row, no idempotency error.
     let out = env.cli(&args);
     assert!(
         out.status.success(),
@@ -246,8 +240,6 @@ async fn capture_defaults_timestamp_and_replays_on_retry() {
     );
 }
 
-// ── review drain ──────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_drains_small_queue() {
     let env = fresh_env().await;
@@ -256,7 +248,6 @@ async fn review_drains_small_queue() {
     let out = env.cli(&["creator", "memory", "review"]);
     assert!(out.status.success(), "review failed: {}", stderr(&out));
     let text = stdout(&out);
-    // Research digests classify as FragmentOnly → fragmented count ≥ 1.
     assert!(text.contains("fragmented="), "{text}");
 }
 
@@ -280,8 +271,6 @@ async fn review_empty_queue_prints_no_pending() {
     let text = stdout(&out);
     assert!(text.contains("No pending memories"), "{text}");
 }
-
-// ── pending-list --json ────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_list_json_emits_dto_verbatim() {
@@ -310,7 +299,6 @@ async fn fragments_json_emits_wrapper_dto() {
     let out = env.cli(&["creator", "memory", "fragments", "--json"]);
     assert!(out.status.success(), "fragments failed: {}", stderr(&out));
     let parsed: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("valid JSON");
-    // The wire shape is `{ "fragments": [ … ] }` — the wrapper, not a bare array.
     let fragments = parsed["fragments"]
         .as_array()
         .expect("fragments wrapper array");
@@ -327,7 +315,6 @@ async fn fragments_json_emits_wrapper_dto() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_show_finds_id_beyond_first_page() {
     let env = fresh_env().await;
-    // Row `pending_test_0` is newest → it lands on page 1; row 55 lands on
     // page 2 (newest-first DESC order, 50 rows/page).
     seed_pending_desc(&env, 60).await;
 
@@ -363,8 +350,6 @@ async fn pending_show_missing_id_past_first_page_fails_closed() {
     );
 }
 
-// ── migrate-legacy (P5) ───────────────────────────────────────────────────
-
 /// `creator memory migrate-legacy` runs the P5 pass on the real binary and is
 /// idempotent: the first call migrates the legacy rows and the bearer file, the
 /// second verifies the recorded manifest and reports no change.
@@ -397,7 +382,6 @@ async fn migrate_legacy_migrates_then_verifies() {
     assert_eq!(report["families"]["memory_fragments"], 1, "{report}");
     assert_eq!(report["families"]["memory_long_term"], 1, "{report}");
 
-    // After the marker the unified read path serves the migrated memory.
     let listed = env.cli(&["creator", "memory", "list"]);
     assert!(listed.status.success(), "stderr: {}", stderr(&listed));
     assert!(

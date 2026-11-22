@@ -1,5 +1,4 @@
 /**
- * Electron utility-process owner of the app-managed TypeScript service
  * (v1.192 P0-T4). Loaded only via `utilityProcess.fork` — never in the
  * sandboxed renderer.
  *
@@ -91,7 +90,6 @@ function closeBudgetExceeded(): Promise<never> {
 }
 
 /**
- * Cooperative close inside the frozen 5s budget. A confirmed report releases
  * the handle; an unconfirmed close retains it (and the published discovery) so
  * a retry can still confirm cleanup — never a successful forced cleanup.
  */
@@ -132,7 +130,6 @@ async function dispatch(request: UtilityRequest): Promise<unknown> {
       }
       state.running = running;
       state.serviceState = 'running';
-      // The published, schema-derived discovery of the service that just
       // reached readiness — the same record `startService` returns.
       post({ type: 'service-ready', generation: request.generation, discovery: running.discovery } satisfies ServiceReadyMessage);
       return { discovery: running.discovery };
@@ -173,7 +170,6 @@ async function handleMessage(raw: unknown): Promise<void> {
       inFlight = false;
     }
   } catch (error) {
-    // A frame that failed admission cannot be correlated beyond its own ids.
     post(utilityErr(generation, request_id, utilityMessageCode(error), utilityMessageText(error)));
   }
 }

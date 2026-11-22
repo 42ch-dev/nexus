@@ -1,5 +1,4 @@
 /**
- * WorkspacePathField — presentational workspace folder path + change action.
  *
  * Shared between Settings (settings-row) and the setup wizard (wizard-stack).
  * No daemon client, no desktop hooks; the host owns the picker orchestration.

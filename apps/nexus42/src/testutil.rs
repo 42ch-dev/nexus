@@ -33,7 +33,6 @@ static HOME_LOCK: Mutex<()> = Mutex::new(());
 /// // HOME is now set to a temp dir; will be restored on drop
 /// ```
 pub fn isolated_home() -> IsolatedHome {
-    // Recover from poisoned mutex — a panicking test should not cascade-fail
     // all subsequent tests that use isolated_home().
     let lock = HOME_LOCK
         .lock()
@@ -108,14 +107,12 @@ mod tests {
                 || home_path.starts_with("/var/folders"),
             "HOME should be a temp directory, not the real home"
         );
-        // Temp dir should still exist while guard is alive
         assert!(home_path.is_dir());
         drop(guard);
     }
 
     #[test]
     fn isolated_home_restores_original_home_on_drop() {
-        // Hold the process-wide lock for the WHOLE test: `HOME` is global, so
         // capturing "the original" and asserting restoration is only sound
         // while no sibling test can take the lock. Without this the test races
         // under `--test-threads>1` and fails intermittently.
@@ -124,12 +121,10 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let original = std::env::var("HOME").ok();
         {
-            // Non-locking constructor: this test already owns the lock.
             let _guard = IsolatedHome::with_caller_holding_lock();
             let during = std::env::var("HOME").expect("HOME should be set");
             assert_ne!(during, original.clone().unwrap_or_default());
         }
-        // Guard dropped above: HOME must be restored, and the lock we still
         // hold guarantees no sibling test changed it in the meantime.
         assert_eq!(
             std::env::var("HOME").ok(),

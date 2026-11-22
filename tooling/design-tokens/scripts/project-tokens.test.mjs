@@ -1,6 +1,5 @@
 /**
  * @nexus/design-tokens — compiler regression tests.
- *
  * Defend the parser/resolver edges that a plausible compiler defect would
  * break: missing references, cyclic references, light/dark leaf-parity, and
  * that compound SOUL / embedded color-mix values project their scalar member
@@ -66,7 +65,6 @@ test('null mapped scalar fails closed (no silent empty omission)', async () => {
   const doc = structuredClone(baseDark);
   doc.colors['brand-white'] = null;
   assert.throws(() => scalarFor(doc.colors['brand-white'], doc), /fail closed|empty value/);
-  // Use the real SSOT pair so a null brand leaf fails projectDesign (not a
   // missing-source-path artifact of the minimal fixture).
   const real = await loadDesignPair(process.cwd());
   const light = structuredClone(real.light);
@@ -88,11 +86,9 @@ test('missing brand snapshot key fails projectDesign (no empty generated literal
   const real = await loadDesignPair(process.cwd());
   const light = structuredClone(real.light);
   const dark = structuredClone(real.dark);
-  // Remove from BOTH themes so leaf-parity holds and the brand-snapshot
   // existence check is what fails closed (not a parity artifact).
   delete light.colors['brand-white'];
   delete dark.colors['brand-white'];
-  // Removing brand-white is a fail-closed failure: either the brand-snapshot
   // existence check, an unresolved ref elsewhere, or an empty-value guard —
   // projectDesign must never emit an empty generated literal. Assert generic
   // throw (any of these fail-closed paths is a correct rejection).
@@ -135,7 +131,6 @@ test('differing light/dark leaf paths are rejected', async () => {
 });
 
 test('projection emits known theme-specific, reference, and compound outputs', async () => {
-  // Known input (committed DESIGN.md / DESIGN.dark.md SSOT) -> known output:
   // assert the exact projected CSS strings for (a) distinct theme-specific
   // values, (b) an alias that resolves through a reference, and (c) a compound
   // recipe that projects its resolved color member. Without snapshotting the
@@ -146,15 +141,12 @@ test('projection emits known theme-specific, reference, and compound outputs', a
   const out = projectDesign(realPair);
   assert.ok(out.css.includes(':root {'));
   assert.ok(out.css.includes('.dark {'));
-  // Theme-specific distinct values (blue-700 differs by theme in the SSOT).
   assert.ok(out.css.includes('--color-blue-700: #3263C7;'));
   assert.ok(out.css.includes('--color-blue-700: #8EB1F4;'));
-  // Reference edge: shadow-card is an alias onto elevation-1; the projected
   // string carries the resolved shadow value, not "{elevation.elevation-1}".
   assert.ok(out.css.includes('--shadow-card: 0 1px 2px #181F2910;'));
   assert.ok(out.css.includes('--shadow-card: 0 1px 2px #080B1140;'));
   assert.ok(!out.css.includes('{elevation.'));
-  // Compound edge: soul-narrative-prose "{typography.X} @ {colors.gray-900}"
   // projects the referenced color member, never the source or an object.
   assert.ok(out.css.includes('--color-soul-narrative-prose: #2B3441;'));
   assert.ok(out.css.includes('--color-soul-narrative-prose: #DDE2E9;'));

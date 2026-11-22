@@ -1,5 +1,4 @@
 /**
- * App registry (plan v1219 Task 2 — Interfaces) — entrance scoping and the
  * lock-model contract: 作品 alone carries `lockedUntil: 'brief-saved'`; 会话/记忆
  * carry literal § Copy reasons with NO unlock path (D17).
  */

@@ -56,7 +56,6 @@ pub enum HostFunction {
 /// all four fragments. Omitted fields → no validation for that aspect.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[allow(clippy::derive_partial_eq_without_eq)]
-// ^ `serde_json::Value` in field types does not implement `Eq`.
 pub struct ModuleSchemas {
     /// Per-BlockType attribute shape fragments (immutable compute params).
     /// Keyed by `block_type` (e.g. "character"). Skipped if absent.
@@ -177,11 +176,6 @@ impl ModuleManifest {
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        // Required-field presence: the typed struct guarantees the fields
-        // exist; the meaningful check is that the identity/export strings
-        // are non-empty. `init_export` is deliberately excluded — the ABI
-        // allows an empty `init_export` when the module has no init export
-        // (the real host and existing host fixtures use `init_export: ""`).
         for (field, value) in [
             ("module_id", self.module_id.as_str()),
             ("name", self.name.as_str()),
@@ -193,11 +187,9 @@ impl ModuleManifest {
             }
         }
 
-        // `host_functions ⊆ ["kb_read", "narrative_query"]` is enforced
         // structurally by the `HostFunction` enum (serde rejects unknown
         // names at parse time), so no runtime check is needed here.
 
-        // Module-id path-safety (P0 QC fix wave, qc2 W-1): the id becomes a
         // directory name under `dist/<id>/` (build) and
         // `~/.nexus42/modules/<id>/` (install, the daemon's warm_dir scan
         // contract), so a traversal id must fail validation — `validate`
@@ -217,7 +209,6 @@ impl ModuleManifest {
             ));
         }
 
-        // The DR-49 pin: the ABI refuses V2 concepts.
         if self.nexus_abi_version != 1 {
             errors.push(format!(
                 "nexus_abi_version must be 1 (ABI V1), got {}",
@@ -354,7 +345,6 @@ mod tests {
 
     #[test]
     fn manifest_without_schemas_is_backward_compat() {
-        // V1.61 manifests omit `schemas` → deserializes with schemas = None.
         let json = r#"{
             "module_id": "legacy-mod",
             "name": "Legacy Module",
@@ -370,7 +360,6 @@ mod tests {
 
     #[test]
     fn manifest_with_empty_schemas_object() {
-        // A manifest with `schemas: {}` should parse with all sub-fields None.
         let json = r#"{
             "module_id": "empty-schemas",
             "name": "Empty Schemas",
@@ -393,7 +382,6 @@ mod tests {
 
     #[test]
     fn wasm_sha256_field_is_backward_compat_absent() {
-        // V1.154 manifests omit `wasm_sha256` → deserializes with None and
         // verification is skipped (legacy stat-fence fallback).
         let json = r#"{
             "module_id": "legacy-mod",
@@ -469,8 +457,6 @@ mod tests {
         );
     }
 
-    // ── validate() — mirrors `nexus-module-sdk`'s AR-6 validate tests ─────
-
     fn valid_manifest() -> ModuleManifest {
         ModuleManifest {
             module_id: "basic-combat".to_string(),
@@ -499,9 +485,6 @@ mod tests {
 
     #[test]
     fn validate_accepts_empty_init_export() {
-        // ABI §7.1: `init_export` may be empty when the module has no init
-        // export (the real host and existing host fixtures use
-        // `init_export: ""`). `compute_export` must still be non-empty.
         let mut m = valid_manifest();
         m.init_export = String::new();
         assert!(m.validate().is_ok());
@@ -530,10 +513,10 @@ mod tests {
     #[test]
     fn validate_rejects_bad_wasm_sha256_formats() {
         for bad in [
-            "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F", // uppercase
-            "abc",                                                              // too short
-            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6",  // 63 chars
-            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6g", // non-hex
+            "7ED89295BA49E06652EEF8E3A085FA35ABAE5FCCCC3DE3700B2F03CA098BCD6F",
+            "abc",
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6",
+            "7ed89295ba49e06652eef8e3a085fa35abae5fcccc3de3700b2f03ca098bcd6g",
         ] {
             let mut m = valid_manifest();
             m.wasm_sha256 = Some(bad.to_string());
@@ -600,7 +583,6 @@ mod tests {
 
     #[test]
     fn validate_rejects_path_traversal_module_id() {
-        // qc2 W-1: the module id becomes a directory name in the store —
         // traversal values must fail validation, not just the CLI guard.
         for bad in ["../evil", "a/b", "a\\b", "a..b", "a\u{0}b"] {
             let mut m = valid_manifest();

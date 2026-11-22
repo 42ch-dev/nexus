@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 /**
- * P3-T1 — empty-project install/run proof for one native target package.
  *
- * What this proves (PKG-1):
  *   - the local tarballs install into an empty, lockfile-free project with NO
  *     compiler/rustup available and no install-time script execution;
  *   - the installed `@42ch/nexus-native` facade fences the shipped manifest
@@ -93,7 +91,6 @@ function fail(message, detail) {
     try {
       writeEvidence({ fatal: message, fatal_detail: detail ?? null });
     } catch {
-      // the failure is already on stderr; a failed evidence write must not mask it
     }
   }
   process.exit(1);
@@ -136,7 +133,6 @@ function detectLibc() {
     const report = process.report?.getReport?.();
     if (report?.header?.glibcVersionRuntime) return 'glibc';
   } catch {
-    // fall through to musl
   }
   return 'musl';
 }
@@ -171,8 +167,6 @@ function parseArgs(argv) {
   return parsed;
 }
 
-// --- package/tarball helpers ----------------------------------------------
-
 function tar(argv, options = {}) {
   const res = run('tar', argv, options);
   if (res.status !== 0 && options.allowFailure !== true) {
@@ -186,7 +180,6 @@ function packedManifest(tarball) {
 }
 
 /**
- * Pack one workspace package into `packDir` and return the tarball path.
  *
  * Packing into a fresh directory is required: `pnpm pack` overwrites a
  * same-named tarball in place, so a "which new file appeared" diff against an
@@ -216,7 +209,6 @@ function workspacePackageDir(name) {
       try {
         if (JSON.parse(readFileSync(manifestPath, 'utf8')).name === name) return join(groupDir, entry);
       } catch {
-        // not a manifest we can use
       }
     }
   }
@@ -224,7 +216,6 @@ function workspacePackageDir(name) {
 }
 
 /**
- * Resolve the complete local install set: the loader, the target platform
  * package, and every non-optional dependency the packed loader declares. Any
  * dependency that is not a workspace package is an error — this proof never
  * reaches the registry.
@@ -256,8 +247,6 @@ function buildInstallSet(packDir, receipt) {
   return set;
 }
 
-// --- environment denial ----------------------------------------------------
-
 function writeDenyShims(projDir) {
   const denyBin = join(projDir, 'deny-bin');
   mkdirSync(denyBin, { recursive: true });
@@ -279,7 +268,6 @@ function writeDenyShims(projDir) {
 }
 
 /**
- * Child environment for install/run: a shim directory shadows every compiler
  * and rustup entry point, the rustup/cargo toolchain directories are dropped
  * from PATH, the toolchain env vars are removed, and CC/CXX/AR/LD are pointed
  * at the shims so a build tool that honours them is denied as well. Any
@@ -311,8 +299,6 @@ function deniedEnv(denyBin, denyLog) {
   }
   return { env, removed_path_entries: removed };
 }
-
-// --- home helpers ----------------------------------------------------------
 
 function homeDigest(home) {
   const entries = [];
@@ -383,8 +369,6 @@ function agentHostToml(python, fixture, logPath, extraEnv = {}) {
   for (const [key, value] of Object.entries(extraEnv)) lines.push(`${key} = "${value}"`);
   return `${lines.join('\n')}\n`;
 }
-
-// --- the generated consumer ------------------------------------------------
 
 const CONSUMER_SOURCE = `import { copyFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -566,8 +550,6 @@ main().catch((error) => {
 });
 `;
 
-// --- main ------------------------------------------------------------------
-
 const args = parseArgs(process.argv.slice(2));
 const spec = TARGETS[args.target];
 const outDir = resolve(args.out);
@@ -580,7 +562,6 @@ function archiveEvidenceFile(path, tag) {
   try {
     renameSync(path, `${path.replace(/\.json$/, '')}.${tag}-${Date.now()}.json`);
   } catch {
-    // nothing left to archive (or it was already replaced) — the fresh write proceeds
   }
 }
 
@@ -643,7 +624,6 @@ if (process.versions.node !== args.nodeVersion) {
 
 tar(['--version']);
 
-// 1. pack (or reuse) the local tarballs ------------------------------------
 state.phase = 'package';
 let receipt;
 if (existsSync(join(packDir, 'package-receipt.json'))) {
@@ -659,7 +639,6 @@ record('package_receipt_pass', receipt.status === 'pass', {
   tarballs: receipt.packages.map((entry) => entry.tarball_name ?? entry.tarball),
 });
 
-// 2. resolve the hermetic install set --------------------------------------
 state.phase = 'install-set';
 const installSet = buildInstallSet(packDir, receipt);
 state.evidence = {
@@ -680,7 +659,6 @@ state.evidence = {
   })),
 };
 
-// 3. empty temporary project -----------------------------------------------
 state.phase = 'empty-project';
 const projDir = mkdtempSync(join(tmpdir(), 'nexus-native-install-'));
 const dependencies = {};
@@ -708,10 +686,8 @@ state.evidence.install = {
   project_entries_before: readdirSync(projDir).sort(),
 };
 
-// 4. seed the disposable home (outer fixture, not part of the denial scope) --
 state.phase = 'seed-home';
 const home = join(projDir, 'home');
-// Canonical agent-host config expected by the merged native host:
 // crates/nexus-agent-host/src/config.rs agent_host_config_path().
 const agentHostConfigPath = join(home, '.nexus42', 'agent-host', 'config.toml');
 mkdirSync(dirname(agentHostConfigPath), { recursive: true });
@@ -748,7 +724,6 @@ const blockedConfigPath = join(projDir, 'agent-host.blocked.toml');
 writeFileSync(happyConfigPath, agentHostToml(python, fixture, fixtureLog));
 writeFileSync(blockedConfigPath, agentHostToml(python, fixture, fixtureLog, { BLOCK_PROMPT: '1' }));
 copyFileSync(happyConfigPath, agentHostConfigPath);
-// 5. install into the empty project with compilers denied -------------------
 state.phase = 'install';
 const installOut = join(projDir, 'install.log');
 const install = run('npm', ['install', '--omit=optional', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock'], {
@@ -799,7 +774,6 @@ record(
   { installed: join(installedPlatformPkg, 'package.json'), frozen: repoPlatformManifest },
 );
 
-// 6. positive run: real graph/create/update/provider/cancel/close -----------
 state.phase = 'positive-run';
 const positiveOut = join(projDir, 'positive.json');
 const positive = run(
@@ -856,12 +830,9 @@ if (!positiveUnusable) {
     happy.close,
   );
   const cancel = positiveResult.stages?.cancel ?? {};
-  // The accepted cancel outcome is required, not merely observed: `ok:true`
   // echoing the cancelled operation through the same session, plus a measured
   // duration. The reply and any error are retained so a non-ok or interrupted
   // cancel is visible in the evidence instead of passing as a timing sample.
-  // Whether the cancelled operation then declares its terminal inside the
-  // 2 s LIFE-2 budget remains P2's criterion; here it is recorded.
   record(
     'provider_cancel_accepted',
     cancel.cancel_accepted === true && typeof cancel.cancel_ms === 'number',
@@ -887,7 +858,6 @@ if (!positiveUnusable) {
   record('positive_result_json', false, positiveResult);
 }
 
-// 7. negative cases: reject before open, with no DB/effect ------------------
 state.phase = 'negative-cases';
 const otherTriple = Object.keys(TARGETS).find((triple) => triple !== args.target);
 const mutations = [
@@ -1014,9 +984,6 @@ for (const mutation of mutations) {
     }
   }
   const error = payload?.error ?? null;
-  // The negative consumer exits 0 when it observed a rejection and 1 when the
-  // open unexpectedly succeeded; either way the driver judges on the recorded
-  // observation, not on the exit code alone.
   const rejected = payload?.rejected === true && Boolean(error) && mutation.expect.test(error);
   const noEffect = before.digest === after.digest;
   negativeResults.push({
@@ -1039,7 +1006,6 @@ for (const mutation of mutations) {
 }
 state.evidence.negatives = negativeResults;
 
-// 8. no compiler was ever attempted, and no fixture child survived ----------
 state.phase = 'denial-and-reaping';
 const denyLines = readFileSync(denyLog, 'utf8').split('\n').filter(Boolean);
 record('no_compiler_invocation_attempted', denyLines.length === 0, { deny_log: denyLines });

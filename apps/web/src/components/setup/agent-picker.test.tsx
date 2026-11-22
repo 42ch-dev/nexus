@@ -1,5 +1,4 @@
 /**
- * AgentPicker presentational unit tests (V1.101 Task 2 + fix-wave B2).
  * V1.117 P1 T3: defaultGrid + moreAgents split; icon + displayName.
  */
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -51,7 +50,6 @@ const MORE_AGENTS: AgentPickerItem[] = [
   },
 ];
 
-// P2 (F3): Install/Docs render only on uninstalled cards. Link-chrome tests
 // target this fixture because installed cards no longer carry outbound links.
 const UNINSTALLED_WITH_LINKS: AgentPickerItem[] = [
   {
@@ -104,7 +102,6 @@ describe('AgentPicker', () => {
         onCustomLaunchChange={() => undefined}
       />,
     );
-    // P2: uninstalled cards are not selectable — no select button renders, so
     // outbound links can never nest inside one (the original B2 nested-
     // interactive bug class). Installed cards render no links at all.
     expect(screen.queryByTestId('agent-card-select-codex-native')).toBeNull();
@@ -625,7 +622,6 @@ describe('AgentPicker', () => {
     const installLinks = screen.getAllByRole('link', { name: /Install/i });
     await user.click(installLinks[0]);
     expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
-    // The rejection is surfaced via the callback so the host can toast (AD-P1-2).
     await vi.waitFor(() => {
       expect(onExternalUrlError).toHaveBeenCalledTimes(1);
     });
@@ -645,7 +641,6 @@ describe('AgentPicker', () => {
     );
 
     const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
-    // Middle-click fires `auxclick` with button === 1, not `click`. Without the
     // fix the native href would load the external page inside the webview.
     fireEvent(link, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
     expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
@@ -666,7 +661,6 @@ describe('AgentPicker', () => {
     );
 
     const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
-    // Cmd/Ctrl-click would otherwise open the href in a new webview tab.
     fireEvent.click(link, { metaKey: true });
     expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
     expect(openExternalUrl).toHaveBeenCalledTimes(1);
@@ -684,22 +678,15 @@ describe('AgentPicker', () => {
     );
 
     const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
-    // Browser builds keep target=_blank and must not attach an aux-click opener
     // — the browser handles middle-click natively (AC-P1-8).
     expect(link).toHaveAttribute('target', '_blank');
     fireEvent(link, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
-    // Nothing to assert besides "no opener ran" (jsdom does not navigate); the
     // contract is that the native href/target path stays intact.
     expect(link).toHaveAttribute('target', '_blank');
   });
 
-  // -------------------------------------------------------------------------
-  // P2 acceptance criteria (component layer)
-  // Spec: the v1.119 `setup-agent-picker-catalog` record (local).
-  // -------------------------------------------------------------------------
 
   it('AC-P2-3: installed cards render no Install/Docs links', () => {
-    // Even with installUrl + docsUrl populated, an installed card shows only
     // identity + Installed badge (no outbound link chrome).
     render(
       <AgentPicker
@@ -724,7 +711,6 @@ describe('AgentPicker', () => {
     expect(card.querySelector('a')).toBeNull();
     expect(screen.queryByRole('link', { name: /Install/i })).toBeNull();
     expect(screen.queryByRole('link', { name: /Docs/i })).toBeNull();
-    // Installed badge still renders.
     expect(screen.getByTestId('agent-card-installed-badge-claude-native')).toHaveTextContent(
       'Installed',
     );

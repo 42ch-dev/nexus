@@ -152,7 +152,6 @@ async fn direct_writer_reopens_after_rejected_mutation() {
     let (world_id, seeded_version) = seed_world_and_entity(fixture.home.path()).await;
     let stale_version = seeded_version - 1;
 
-    // ── 1. A real CLI mutation with a stale CAS is rejected. ──────────────
     let rejected = fixture
         .command()
         .args([
@@ -190,7 +189,6 @@ async fn direct_writer_reopens_after_rejected_mutation() {
         "{conflict}"
     );
 
-    // ── 2. Rejected without change: the graph still shows the seeded row. ──
     let (entity_id, version, canonical_name) = graph_entity(&fixture, &world_id);
     assert_eq!(entity_id, ENTITY_ID);
     assert_eq!(
@@ -202,7 +200,6 @@ async fn direct_writer_reopens_after_rejected_mutation() {
         "rejected mutation must not overwrite the canonical name"
     );
 
-    // ── 3. The next CLI writer reopens and commits. ───────────────────────
     let committed_version = seeded_version + 1;
     let reopened = fixture
         .command()
@@ -235,7 +232,6 @@ async fn direct_writer_reopens_after_rejected_mutation() {
     );
     assert!(text.contains(REOPENED_TITLE), "{text}");
 
-    // ── 4. The committed change is the replayed next revision. ────────────
     let (entity_id, version, canonical_name) = graph_entity(&fixture, &world_id);
     assert_eq!(entity_id, ENTITY_ID);
     assert_eq!(version, committed_version, "the reopened writer commits");
@@ -267,7 +263,6 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
     let fixture = DirectFixture::new().await;
     let (world_id, _) = seed_world_and_entity(fixture.home.path()).await;
     let lorebook = fixture.home.path().join("lorebook.json");
-    // One documented entry carrying an undocumented field: the converter emits
     // a Warning note, so the run has output of its own before it reaches the
     // core.
     std::fs::write(
@@ -284,7 +279,6 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
     )
     .expect("write lorebook");
 
-    // ── 1. A refused run prints nothing on stdout. ────────────────────────
     let refused = fixture
         .command()
         .args([
@@ -315,7 +309,6 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
         stderr(&refused)
     );
 
-    // ── 2. An admitted run still prints the notes, before its summary. ────
     let admitted = fixture
         .command()
         .args([
@@ -352,7 +345,6 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
         "the retained order is notes-then-summary: {text}"
     );
 
-    // ── 3. The writer is free again: the seam closed on this run. ─────────
     let reopened = fixture
         .command()
         .args(["creator", "world", "kb", "graph", "--world-id", &world_id])
@@ -479,7 +471,6 @@ fn anonymous_selection_is_refused_at_every_kb_entrance() {
     let pack_out = home.path().join("pack.json");
     let pack_out = pack_out.to_str().expect("utf-8 pack path");
     let entrances: [&[&str]; 4] = [
-        // Direct-core leaves (the seam's own consumers).
         &[
             "creator",
             "world",
@@ -504,7 +495,6 @@ fn anonymous_selection_is_refused_at_every_kb_entrance() {
             "--title",
             "Absent",
         ],
-        // Local leaves: `list` is pool-only, `pack export` hands that pool to a
         // core route, so both owe the same admission.
         &["creator", "world", "kb", "list", "wld_absent", "--json"],
         &[
@@ -604,7 +594,6 @@ async fn unreadable_workspace_db_is_not_reported_as_an_unset_selection() {
         db_path.display()
     );
 
-    // A self-referential symlink keeps the directory entry while making every
     // metadata lookup fail with `ELOOP` — a `NotFound`-free metadata error, and
     // one that does not depend on the test's uid (unlike a permission-only
     // probe, which root bypasses).

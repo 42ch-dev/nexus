@@ -49,24 +49,20 @@ describe('ProposalSections', () => {
     expect(screen.getByTestId('proposal-section-timeline-events')).toBeInTheDocument();
     expect(screen.getByTestId('proposal-section-new-knowledge')).toBeInTheDocument();
 
-    // Report: kind badge + key/value rows (kind key itself not repeated).
     expect(screen.getByTestId('proposal-report-kind')).toHaveTextContent('combat');
     expect(screen.getByText('damage')).toBeInTheDocument();
     expect(screen.getByText('6')).toBeInTheDocument();
 
-    // Knowledge updates: op badge + target + path.
     const delta = screen.getByTestId('proposal-delta-0');
     expect(delta).toHaveTextContent('sub');
     expect(delta).toHaveTextContent('char-brann');
     expect(delta).toHaveTextContent('character.current_hp');
 
-    // Timeline event: title, summary, affected count via caller formatter.
     const event = screen.getByTestId('proposal-event-evt_0');
     expect(event).toHaveTextContent('Aria strikes Brann');
     expect(event).toHaveTextContent('Brann takes 6 damage.');
     expect(event).toHaveTextContent('Affects 2 entries');
 
-    // New knowledge: title picked from the entry.
     expect(screen.getByTestId('proposal-new-entry-0')).toHaveTextContent('Bruised rib');
   });
 

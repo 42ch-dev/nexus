@@ -1,4 +1,4 @@
-//! Admission policy — provider/capability/session gates before launch and exec.
+//! Admission policy — provider/capability/session gates before launch and exec. See docs/specs/agents/agent-host.md.
 //!
 //! Runs before provider launch and before operation dispatch.
 //! ACP provider permissions delegate to `nexus_acp_host::PermissionPolicy` (R-003).

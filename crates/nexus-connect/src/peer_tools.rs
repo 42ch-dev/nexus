@@ -248,7 +248,6 @@ impl PeerToolRegistry {
 
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
 
-        // A same-peer reconnect evicts the peer's prior rows first
         // (deterministic last-wins).
         if let Some(prior) = inner.sessions.remove(peer_id) {
             for id in &prior.tool_ids {
@@ -258,7 +257,6 @@ impl PeerToolRegistry {
             }
         }
 
-        // The config guard is scoped to this block and dropped once the rank
         // vector is cloned; `inner` stays held for the whole admission.
         let (policy, peer_priority) = {
             let config_guard = self.config.lock().unwrap_or_else(PoisonError::into_inner);
@@ -281,7 +279,6 @@ impl PeerToolRegistry {
             match collision_decision(&id, peer_id, &inner.tools, policy, &peer_priority) {
                 CollisionDecision::Admit => {}
                 CollisionDecision::Preempt => {
-                    // The preempted peer's session record is untouched: its
                     // other rows keep dispatching. An in-flight invoke on the
                     // evicted row resolves as an honest per-call failure — the
                     // spine reads the registry at invoke time, so a rebound row
@@ -475,11 +472,6 @@ pub fn catalog_output_root_object(descriptor: &ToolDescriptor) -> bool {
         == Some("object")
 }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
-
-/// The per-tool named refusal chain.
 ///
 /// Order: grammar → reserved-ns → negotiated → allowlist. The duplicate-peer
 /// collision is deliberately NOT here: it is policy-aware and decided by

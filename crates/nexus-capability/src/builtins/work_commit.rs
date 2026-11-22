@@ -45,7 +45,6 @@ pub fn resolve_works_dirs(
 ) -> Result<(PathBuf, PathBuf), CapabilityError> {
     let workspace_root = executor.workspace_root()?;
     let works_dir = workspace_root.join("Works");
-    // The port always rebuilds `<workspace_root>/Works/<ref>/<child>` and the
     // real executor refuses any other parent only at commit — after the claim
     // and the mkdir. Confining the root here keeps a foreign or nested tree
     // from being mutated at all.
@@ -120,6 +119,7 @@ impl Drop for WorkRefClaim {
         // run from here. Drop cannot await; the runtime finishes the update.
         // shortcut: needs a live runtime — a cancellation while the runtime is
         // shutting down can miss the revert.
+        // upgrade: when the guard can run the revert without a live runtime.
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 if let Err(err) = restore_prior(&pool, &prior).await {
@@ -176,7 +176,6 @@ pub async fn claim_work_ref(
     requested: Option<&str>,
 ) -> Result<WorkRefClaim, CapabilityError> {
     let Some(pool) = pool else {
-        // No row to read: a partial re-init that excludes `work_ref` cannot
         // resolve the stored ref, so refuse instead of guessing.
         let Some(work_ref) = requested else {
             return Err(CapabilityError::InputInvalid(
@@ -576,7 +575,6 @@ mod tests {
     #[tokio::test]
     async fn a_late_novel_transaction_failure_restores_the_prior_ref() {
         let tmp = tempfile::tempdir().expect("tmpdir");
-        // The works row names a creator with no `creators` row, so
         // `create_world_tx` fails inside the chapters/world transaction AFTER
         // the scaffold files landed.
         let pool = pool_with_work(tmp.path(), Some("prior-ref"), None).await;
@@ -727,13 +725,11 @@ mod tests {
             }))
             .await
         });
-        // The claim is published before the first commit, so reaching the
         // hanging commit proves the claim is set when the future is dropped.
         reached.notified().await;
         run.abort();
         assert!(run.await.is_err(), "the scaffold run was cancelled");
 
-        // The drop guard restores on its own task; give it turns to land.
         let mut restored = false;
         for _ in 0..200 {
             if stored_identity(&pool).await.0.as_deref() == Some("prior-ref") {
@@ -764,7 +760,6 @@ mod tests {
             Some("claimed-ref")
         );
 
-        // Holding the only pooled connection keeps the compensating UPDATE
         // pending, so the restore below is cancelled mid-await.
         let held = pool.acquire().await.expect("occupy the only connection");
         let started = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -779,7 +774,6 @@ mod tests {
         assert!(restore.await.is_err(), "the restore was cancelled");
         drop(held);
 
-        // The guard restores on its own task; give it turns to land.
         let mut restored = false;
         for _ in 0..200 {
             if stored_identity(&pool).await.0.as_deref() == Some("prior-ref") {

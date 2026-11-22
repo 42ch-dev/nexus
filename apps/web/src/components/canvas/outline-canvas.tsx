@@ -1,5 +1,4 @@
 /**
- * Outline+Timeline canvas — interactive structure surface for a Work (V1.72 β;
  * V1.108 P0 spatial React Flow parity).
  *
  * Thin orchestrator + public re-export facade. V1.73 B5 (`R-V172P0-QC1-002`)
@@ -61,7 +60,6 @@ import type {
 } from '@42ch/nexus-contracts';
 
 /**
- * Stable empty projection payload — used while the Work has no scene/beat data
  * (or before the outline read resolves). Module-level so the projection memo
  * deps stay referentially stable across re-renders — no new object identity
  * per render.
@@ -71,13 +69,11 @@ const EMPTY_SCENE_BEAT_FIXTURE: SceneBeatFixturePayload = { scenes: [], beats: [
 export interface OutlineCanvasProps {
   workId: string;
   /**
-   * Optional chapter id to preselect on mount (V1.75 F-QC3-001). Read once from
    * the route's `?chapter=N` query param by {@link OutlinePage} and used to
    * seed {@link selectedChapterId}; later user clicks override it normally.
    */
   initialSelectedChapterId?: number | null;
   /**
-   * Optional Scene/Beat fixture payload (V1.109 C2 T4 — FB-C2-000/004).
    *
    * Explicit injection mode for Design Studio / component tests — a populated
    * or deliberately empty payload. Production callers omit it: the surface then
@@ -104,11 +100,9 @@ export function OutlineCanvas({
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [showAlt, setShowAlt] = useState(false);
   const qc = useQueryClient();
-  // Bumped after a successful refetch so the inspector's content editor resets
   // its local dirty state (e.g. following conflict resolution / reapply).
   const [contentVersion, setContentVersion] = useState(0);
 
-  // V1.111 P0 T4 — register the Outline graph↔list toggle in the palette. The
   // functional `setShowAlt(v => !v)` updater is used so the handler (captured
   // once on mount by `useRegisterCommand`) reads current state rather than the
   // mount-time value. No node-create command: the Outline canvas exposes no
@@ -128,7 +122,6 @@ export function OutlineCanvas({
 
   const chapters = useMemo(() => flattenPages(chaptersQuery.data), [chaptersQuery.data]);
 
-  // I-QC1-002 — auto-fetch all chapter pages so the spatial graph projects the
   // complete outline structure. Without this, paginated chapter data (20/page)
   // leaves volume→chapter edges pointing at unloaded chapter nodes. The graph
   // is a structural overview, so completeness matters more than lazy loading.
@@ -143,7 +136,6 @@ export function OutlineCanvas({
     return map;
   }, [chapters]);
 
-  // V1.200 DR-26 (Greptile wave A) — the Work's canonical `WorkOutline.scenes[]`
   // / `.beats[]` arrays are authoritative: with no explicit Studio/test fixture
   // the projection, the Scene/Beat inspectors and the alt view read those
   // arrays (the same WorkOutline read the authoring panel and the Timeline
@@ -152,7 +144,6 @@ export function OutlineCanvas({
   const canonicalSceneBeatFixture = useMemo<SceneBeatFixturePayload>(() => {
     if (!outline.data) return EMPTY_SCENE_BEAT_FIXTURE;
     const payload = sceneBeatPayloadFromOutline(outline.data);
-    // Keep the module-level identity while the Work genuinely has no
     // scene/beat data so the projection memo deps don't churn on re-render.
     return payload.scenes.length === 0 && payload.beats.length === 0
       ? EMPTY_SCENE_BEAT_FIXTURE
@@ -161,7 +152,6 @@ export function OutlineCanvas({
 
   const fixture = sceneBeatFixture ?? canonicalSceneBeatFixture;
 
-  // The alt view tells "no fixture" (undefined → chapters render with no
   // scene/beat chrome) apart from an active fixture (nested rows +
   // empty-under-chapter helper). Forward a canonical payload only once it has
   // content, so a genuinely scene-less Work keeps its honest empty chrome.
@@ -169,7 +159,6 @@ export function OutlineCanvas({
     sceneBeatFixture ??
     (fixture.scenes.length > 0 || fixture.beats.length > 0 ? fixture : undefined);
 
-  // V1.115 P1 T5 (R-V1109-P0-QC3-W002) — index scene titles for O(1) lookup so
   // `beatParentSceneTitle` is a `Map.get`, not an `Array.find` per render.
   // Mirrors the `chapterById` pattern; rebuilt only when `fixture.scenes`
   // changes (stable across renders on real Works where `fixture` is the
@@ -182,7 +171,6 @@ export function OutlineCanvas({
     return map;
   }, [fixture.scenes]);
 
-  // V1.115 P0 T1b — the orchestrator now consumes the shared `useCanvasSurface`
   // hook + `OutlineCanvasAdapter` (T1a). The projection memo, rfNodes/rfEdges
   // state, and the position-merge sync effect that previously lived in the
   // surface-specific `useOutlineCanvasGraph` hook are now provided by
@@ -198,7 +186,6 @@ export function OutlineCanvas({
   const surfaceQuery = useMemo<CanvasSurfaceQueryResult<OutlineSurfaceGraph>>(() => {
     const outlineData = outline.data;
     const workData = work.data;
-    // `data` is assembled only when all three queries have loaded so the
     // adapter's projectGraph always receives a complete graph payload.
     if (!outlineData || !workData) {
       return {
@@ -235,7 +222,6 @@ export function OutlineCanvas({
     chapters, fixture,
   ]);
 
-  // Mutable context ref — the adapter object is stable (created once); it reads
   // fresh values from this ref at projection/render time so the orchestrator
   // can update state without invalidating useCanvasSurface's memoized graph.
   const ctxRef = useRef<OutlineCanvasAdapterContext>({
@@ -256,7 +242,6 @@ export function OutlineCanvas({
   const adapter = useMemo(() => createOutlineCanvasAdapter(ctxRef), []);
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
-  // Selection state — previously owned by `useOutlineCanvasGraph`; now owned by
   // the orchestrator. `useCanvasSurface` exposes `selectedNodeId` (derived from
   // the RF node `selected` flag); the orchestrator resolves it to chapter /
   // scene / beat ids via the existing helpers so the StructurePanel,
@@ -267,7 +252,6 @@ export function OutlineCanvas({
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(null);
 
-  // Thin selection resolver — replaces the hook's selection-sync effect
   // (FB-C1-003 + FB-C2-002). Reads `surface.selectedNode` (which changes only
   // when the selected RF node changes) and resolves chapter / scene / beat ids
   // via the same helpers the hook used. Passing a one-node array to the helpers
@@ -308,7 +292,6 @@ export function OutlineCanvas({
 
   const selectedChapter = selectedChapterId ? chapterById.get(selectedChapterId) ?? null : null;
 
-  // V1.109 C2 T4 — resolve the selected Scene/Beat from the fixture payload +
   // selection state (FB-C2-002). The selection resolver above drives
   // `selectedSceneId` / `selectedBeatId` from RF graph-click; the orchestrator
   // resolves them against the fixture to get the entity data + parent title for
@@ -321,7 +304,6 @@ export function OutlineCanvas({
     ? fixture.beats.find((b) => b.beatId === selectedBeatId) ?? null
     : null;
 
-  // Parent titles for the *Part of* helper (Voice & Content lock).
   const sceneParentChapterTitle = selectedScene
     ? (() => {
         const ch = chapterById.get(selectedScene.chapterId);
@@ -339,7 +321,6 @@ export function OutlineCanvas({
     base: Omit<ConflictState, 'currentRevision' | 'conflictingPath'>,
   ) {
     if (!isOutlineConflictError(error)) return;
-    // Outline OCC 409 details carry `current_revision` (core_error.rs
     // OutlineConflict arm); `current_version` is the World-KB field name and
     // never appears on this envelope.
     const details = error.details as
@@ -352,7 +333,6 @@ export function OutlineCanvas({
     });
   }
 
-  // `onSuccess` lets the authoring panel clear a draft title only once its
   // write actually lands — a 409/422 refusal keeps the draft intact for retry.
   function handleStructure(request: OutlinePatchStructureRequest, onSuccess?: () => void) {
     const state: Omit<ConflictState, 'currentRevision' | 'conflictingPath'> = {
@@ -376,7 +356,6 @@ export function OutlineCanvas({
     );
   }
 
-  // Mirrors `handleStructure`: `onSuccess` lets the Timeline inspector clear
   // its bind drafts only once the write actually lands (V1.200 DR-26 round 2) —
   // a 409/422 refusal keeps the typed World-event draft for retry.
   function handleTimeline(request: TimelinePatchEventRequest, onSuccess?: () => void) {
@@ -392,7 +371,6 @@ export function OutlineCanvas({
   async function onUseCurrent() {
     setConflict(null);
     await outline.refetch();
-    // Also invalidate the per-chapter outline cache (useChapterOutline, read by
     // the content editor). The work-level outline.refetch() above does NOT touch
     // the chapter outline query; without this invalidation the forced content
     // reset below would reload stale chapter prose — silently showing outdated
@@ -402,7 +380,6 @@ export function OutlineCanvas({
     void qc.invalidateQueries({
       queryKey: [...queryKeys.chapters.outlines(), workId],
     });
-    // Force the content editor to discard its draft and reload the canonical
     // content. contentVersion is no longer bumped on ordinary patches, so this
     // bump is a reliable forced-reset signal that overrides the editor's
     // dirty/saving guard.
@@ -459,7 +436,6 @@ export function OutlineCanvas({
     );
   }
 
-  // Update the mutable adapter context every render (after early returns, before
   // JSX). The adapter object is stable, so useCanvasSurface's memoized graph
   // projection survives state changes; inspectors/alt-view rendered via the
   // adapter read fresh values from this ref at their render time.
@@ -517,7 +493,6 @@ export function OutlineCanvas({
           summaryText={summary}
           ariaLabel={t('outline.graphAriaLabel')}
           surfaceKey={`outline:${workId}`}
-          // v1.183 P0 QC fix (qc2 F-003): the Outline surface reads the
           // minimap with its own accent token, not the shell's strategy
           // default.
           minimapAccent="var(--color-canvas-outline-accent)"
@@ -621,7 +596,6 @@ export function OutlineCanvas({
 }
 
 /**
- * V1.200 DR-26 Task 3 — Scene/Beat authoring panel.
  *
  * Surfaces the four `outline.patch_structure` scene/beat operations (Task 2)
  * on the Outline canvas — the single authoring surface (the Work and World
@@ -681,7 +655,6 @@ function SceneBeatAuthoringPanel({
         chapter_id: chapterId,
         title: sceneTitle.trim(),
       },
-      // Clear the draft only once the write lands: a 409 / published refusal
       // (which opens the conflict modal) keeps the title for retry.
       () => setSceneTitle(''),
     );
@@ -692,7 +665,6 @@ function SceneBeatAuthoringPanel({
     if (isPending || title.length === 0) return;
     onPatchStructure(
       { ...base, operation: 'add_beat', scene_id: sceneId, title },
-      // Same success-gated clear as the scene draft above.
       () => setBeatTitles((prev) => ({ ...prev, [sceneId]: '' })),
     );
   }
@@ -766,7 +738,6 @@ function SceneBeatAuthoringPanel({
                 ? scene.title
                 : t('sceneBeatAuthoring.untitledScene');
 
-              // Cascade guard (V1.200 Greptile wave A) — removing a scene also
               // removes every beat it owns, so confirm first and name the
               // affected beats (`window.confirm`, the outline/inspector confirm
               // pattern). A scene with no beats removes directly.

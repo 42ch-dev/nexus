@@ -72,7 +72,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
     let db_path = workspace_state_db_path(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
     let creative_root = fixture.home.path().join("creative");
 
-    // The core resolves workspace files against the operational `meta.json`
     // `local_root` — the same key the CLI's own workspace registration writes.
     std::fs::create_dir_all(&creative_root).expect("materialize creative root");
     std::fs::write(
@@ -89,7 +88,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
     )
     .expect("write meta.json");
 
-    // A Work binds to an owned World, so the World comes first. Both go through
     // the core seam, which owns the ids, the ownership rows and the Work
     // directory.
     let core = CoreService::open(CoreOpenOptions {
@@ -132,7 +130,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // The finding rows go in after the Work row (they carry the Work key) and
     // are creator-scoped, exactly as the findings reads require.
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
@@ -165,7 +162,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
         finding_ids.push(finding_id);
     }
     pool.close().await;
-    // A CLI child must not be handed a home another writer still holds.
     release_retained_writer_guards(&db_path);
 
     FindingsEnv {
@@ -175,8 +171,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
         finding_ids,
     }
 }
-
-// ── works status — novel-only findings enrichment ─────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn status_json_enriches_novel_work_with_open_findings() {
@@ -190,7 +184,6 @@ async fn status_json_enriches_novel_work_with_open_findings() {
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0]["finding_id"], env.first_finding());
     assert_eq!(findings[0]["status"], "open");
-    // One open finding is far below the fetch cap, so no truncation marker.
     assert!(parsed.get("findings_truncated").is_none());
 }
 
@@ -203,8 +196,6 @@ async fn status_human_renders_open_findings_summary() {
     let text = stdout(&out);
     assert!(text.contains("findings: 1 open"), "{text}");
 }
-
-// ── works findings list ────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn findings_list_shows_seeded_finding() {
@@ -240,7 +231,6 @@ async fn findings_list_json_emits_dto_verbatim() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn findings_list_notes_has_more_when_paginated() {
-    // qc3 W-002: the human default must never look complete when it is not.
     // The core's default page is 100 findings; with 101 rows the DTO's
     // `pagination.has_more` is true and the human output must say so.
     let env = fresh_env(101).await;
@@ -251,8 +241,6 @@ async fn findings_list_notes_has_more_when_paginated() {
     assert!(text.contains("truncated"), "has_more note missing: {text}");
     assert!(text.contains("use --json"), "{text}");
 }
-
-// ── works findings set-status ──────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn set_status_open_to_triaged_succeeds() {
@@ -278,7 +266,6 @@ async fn set_status_open_to_triaged_succeeds() {
 async fn set_status_invalid_transition_surfaces_422() {
     let env = fresh_env(1).await;
 
-    // open → resolved is legal; resolved → open is NOT (terminal state).
     let first = env.cli(&[
         "creator",
         "works",
@@ -320,7 +307,6 @@ async fn set_status_invalid_transition_surfaces_422() {
 async fn set_status_self_loop_rejected() {
     let env = fresh_env(1).await;
 
-    // open → open is `from == to` — rejected as invalid_transition.
     let out = env.cli(&[
         "creator",
         "works",
@@ -343,7 +329,6 @@ async fn set_status_self_loop_rejected() {
 
 #[test]
 fn set_status_help_documents_transition_table() {
-    // The closed transition table is parser documentation; no home is needed.
     let out = Command::cargo_bin("nexus42")
         .expect("nexus42 binary")
         .args(["creator", "works", "findings", "set-status", "--help"])
@@ -357,8 +342,6 @@ fn set_status_help_documents_transition_table() {
     assert!(text.contains("duplicate"), "{text}");
     assert!(text.contains("terminal"), "{text}");
 }
-
-// ── world findings list (GET-only) ────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn world_findings_list_empty_world() {

@@ -109,14 +109,12 @@ impl RemoteMemoryService for FixtureMemoryService {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
         let scope = match raw_invoke::admission(&payload, op, &self.provider) {
             Ok(scope) => scope,
-            // The digest could not be taken over the received object, so no
             // typed decode may run: refuse the request instead of admitting it
             // without its replay identity.
             Err(reject) => return raw_invoke::normalize(SpokeResult::Reject(reject)),
         };
         let result = match scope {
             Some(scope) => {
-                // `payload` is moved into the service: the digest input and the
                 // executed request are the same object, never a copy.
                 raw_invoke::with_scope(scope, self.inner.invoke(peer_id, op, payload)).await
             }
@@ -125,10 +123,6 @@ impl RemoteMemoryService for FixtureMemoryService {
         raw_invoke::normalize(result)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Response plumbing
-// ---------------------------------------------------------------------------
 
 fn respond<T: DeserializeOwned>(body: Value) -> SpokeResult<T> {
     match serde_json::from_value(body) {
@@ -182,10 +176,6 @@ fn unsupported<T>(op: &str) -> SpokeResult<T> {
         details: Some(details),
     })
 }
-
-// ---------------------------------------------------------------------------
-// Mutation frame: target, authorization-before-replay, one-transaction effect
-// ---------------------------------------------------------------------------
 
 /// The content-free requirement one mutation had to satisfy: the published
 /// capability list plus the subject, placement-context, shared-visibility and
@@ -312,7 +302,6 @@ impl PrecheckRefusal {
             Self::Target => not_authorized(
                 "the authenticated principal holds no current grant covering this operation's target",
             ),
-            // Mirrors `records::record_absent` so a foreign record and a missing
             // one answer one indistinguishable refusal.
             Self::RecordAbsent => SpokeReject {
                 code: SpokeRejectCode::NotFound,
@@ -433,7 +422,6 @@ fn promote_target(
     source_context: Option<&str>,
     target: &PromoteScope,
 ) -> Result<OpTarget, SpokeReject> {
-    // §7.21 authorizes one grant over *both* placements: the receipt target
     // records the union of the source and target contexts, the shared facet
     // of either side, and both required capabilities.
     let (target_visibility, target_context) = match target {
@@ -501,19 +489,16 @@ impl FixtureMemoryProvider {
         refusal: PrecheckRefusal,
         now: DateTime<Utc>,
     ) -> Result<ReplayStep, SpokeReject> {
-        // The producer's own served-space refusal comes first: an unserved
         // space is NOT_FOUND, never a grant decision.
         self.require_served_space(space_id)?;
         let mutation = Mutation::keyed(op, idempotency_key, admitted);
         match resolve_replay(conn, space_id, principal_id, &mutation, now).await? {
-            // An existing binding authorized against its *retained* target
             // inside `resolve_replay`, in this same transaction. The operation's
             // current entity is irrelevant to it and is never re-derived here.
             ReplayResolution::Replayed(receipt) => Ok(ReplayStep::Replayed(receipt)),
             ReplayResolution::KeyReusable { receipt_id } => {
                 release_expired_binding_in_tx(conn, space_id, principal_id, &mutation, &receipt_id)
                     .await?;
-                // A released key is a fresh execution: the current target must
                 // authorize it before the effect.
                 self.require_target_authority(conn, principal_id, space_id, target, refusal, now)
                     .await?;
@@ -619,10 +604,6 @@ impl FixtureMemoryProvider {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The 25 base operations (§7.1–§7.28)
-// ---------------------------------------------------------------------------
-
 #[async_trait]
 impl MemoryPort for FixtureMemoryProvider {
     async fn describe(
@@ -630,7 +611,6 @@ impl MemoryPort for FixtureMemoryProvider {
         _principal: &Principal,
         _request: MemoryDescribeRequest,
     ) -> SpokeResult<MemoryDescribeResponse> {
-        // §7.1: no grant is required, only authenticated admission — which the
         // service face already performed. The capability list is honest for
         // this provider's construction shape.
         respond(describe_body(self.advertises_reflection()))
@@ -812,7 +792,6 @@ impl MemoryPort for FixtureMemoryProvider {
         principal: &Principal,
         request: MemorySubjectsEnsureRequest,
     ) -> SpokeResult<MemorySubjectsEnsureResponse> {
-        // §7.0.5's sole keyless mutation: no dedup namespace row exists, so a
         // keyless receipt records this outcome and can never be replayed.
         let op = "memory.subjects.ensure";
         let principal_id = principal_id(principal);
@@ -894,7 +873,6 @@ impl MemoryPort for FixtureMemoryProvider {
         let idempotency_key = request.idempotency_key.as_str().to_owned();
         let space_id = request.space_id.as_str().to_owned();
         let subject_id = request.subject_id.as_str().to_owned();
-        // The fence authority covers the operation's real target: a whole-subject
         // transition needs unrestricted coverage of the subject, a context
         // transition needs that one placement context.
         let target = match (capabilities_of(op), &request.target) {
@@ -914,7 +892,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // Test-only, op-targeted admission pause: after the typed decode and the
         // authenticated principal, before the operation's clock and its writer
         // transaction. Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
@@ -1092,7 +1069,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // Test-only, op-targeted admission pause: after the authenticated typed
         // admission and before the operation's clock and writer transaction.
         // Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
@@ -1139,7 +1115,6 @@ impl MemoryPort for FixtureMemoryProvider {
                 return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
-            // Only an authorization refusal is translated into the revoke
             // slice's one indistinguishable wording. A replay conflict, an
             // expired/retained outcome or a storage failure keeps its real
             // code and details (§14.2).
@@ -1237,7 +1212,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // Test-only, op-targeted admission pause: after the typed decode and the
         // authenticated principal, before the private slice opens its writer
         // transaction. Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
@@ -1374,7 +1348,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         let Some((subject_id, visibility, context)) = placement else {
-            // No stored placement to name a target from: let the records slice
             // answer its own uniform refusal, then discard the transaction.
             let outcome = self
                 .records_update_in_tx(&mut transaction, principal_id, admitted.request(), now)
@@ -1707,7 +1680,6 @@ impl MemoryPort for FixtureMemoryProvider {
         let space_id = request.space_id.as_str().to_owned();
         let subject_id = request.subject_id.as_str().to_owned();
         let idempotency_key = request.idempotency_key.as_str().to_owned();
-        // A profile is one subject-level trusted document: its write covers
         // shared document access, exactly as the profile slice authorizes it.
         let target = match capabilities_of(op) {
             Ok(capabilities) => OpTarget::new(capabilities, Some(&subject_id), &[], true, false),
@@ -1890,10 +1862,6 @@ impl MemoryPort for FixtureMemoryProvider {
         unsupported("memory.imports.discard")
     }
 }
-
-// ---------------------------------------------------------------------------
-// Request helpers shared by the mutation wrappers
-// ---------------------------------------------------------------------------
 
 /// The space, record and key of an update request (its variant selects the
 /// payload, never the identity).

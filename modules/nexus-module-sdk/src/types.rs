@@ -1,4 +1,5 @@
-//! Typed compute envelope skeleton (AR-3).
+//! see docs/specs/compute/compute-module-abi.md — typed compute envelope
+//! skeleton (AR-3).
 //!
 //! Field-level split, verified against
 //! `schemas/daemon-api/compute/compute-{input,output}.schema.json`: the

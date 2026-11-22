@@ -401,7 +401,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let module_dir = dir.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
-        // Reuse the embedded bytes/manifest so the user module is valid wasm.
         let bytes = embedded_module_bytes("basic-combat").unwrap();
         let manifest = embedded_module_manifest("basic-combat").unwrap();
         std::fs::write(module_dir.join("basic-combat.wasm"), bytes).unwrap();
@@ -417,7 +416,6 @@ mod tests {
         let engine = WasmEngine::new().unwrap();
         let cache = ModuleCache::new();
         let dir = tempfile::tempdir().unwrap();
-        // A subdir with only a .wasm (no manifest) must be skipped, not error.
         let partial = dir.path().join("partial");
         std::fs::create_dir_all(&partial).unwrap();
         std::fs::write(partial.join("partial.wasm"), b"not wasm anyway").unwrap();
@@ -472,7 +470,6 @@ mod tests {
             "same-id different-manifest-hash lookup must miss (manifest changed)"
         );
 
-        // Unchanged artifacts ⇒ get_or_compile is a pure cache hit (same
         // Arc — the timing-independent no-recompile observable).
         let second = cache
             .get_or_compile(&engine, "basic-combat", bytes, manifest)
@@ -482,7 +479,6 @@ mod tests {
             "unchanged artifacts must reuse the compiled module"
         );
 
-        // Greptile P1: MANIFEST-ONLY change — same wasm bytes, different
         // manifest (e.g. new sandbox overrides / schemas) ⇒ miss ⇒ fresh
         // compile serving the NEW manifest settings.
         let manifest_v2 = {
@@ -504,7 +500,6 @@ mod tests {
             "the fresh entry serves the NEW manifest settings"
         );
 
-        // Changed bytes under the same id ⇒ recompile ⇒ the entry is
         // OVERWRITTEN (the cache's only eviction), never duplicated. The
         // replacement is a minimal valid wasm module (magic + version, zero
         // sections) — different bytes that still compile.

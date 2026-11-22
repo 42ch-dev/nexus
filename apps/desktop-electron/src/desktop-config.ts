@@ -1,5 +1,4 @@
 /**
- * Desktop config, workspace resolution and setup bootstrap (v1.192 P0-T2).
  *
  * Main-process owner of `~/.nexus42/config.toml` (workspace root precedence,
  * entrance, `setup_completed`, creator switch, setup bootstrap) and of the
@@ -58,7 +57,6 @@ const ENTRANCE_VALUES: readonly string[] = ['developer', 'content-creator'];
 const DEFAULT_WORKSPACE_SLUG = 'default';
 
 /**
- * Daemon-home `config.toml` advisory lock — the ONE protocol its four
  * cross-process writers share (see `crates/nexus-core/src/config_lock.rs`,
  * `apps/nexus42/src/config.rs` and
  * `apps/nexus-service/src/agent-profile.ts`): exclusive create for the whole
@@ -71,7 +69,6 @@ const LOCK_STALE_MS = 10_000;
 const LOCK_BACKOFF_INITIAL_MS = 25;
 const LOCK_BACKOFF_CAP_MS = 500;
 /**
- * A steal retries while the stale file cannot be removed (a root-owned or
  * immutable file: EACCES/EPERM). Past this deadline the mutation fails instead
  * of hot-looping — the same 2× stale window the core and service writers use.
  */
@@ -84,7 +81,6 @@ const sleepFor = (ms: number): Promise<void> => {
 };
 
 /**
- * Release the lock, but only while this holder still owns it: a holder stalled
  * past the stale window is stolen, and unlinking on resume would delete the new
  * owner's lock and admit a third writer into the second's read-modify-write.
  * The whole line is the token, so the compare is byte-for-byte: a file that
@@ -93,7 +89,6 @@ const sleepFor = (ms: number): Promise<void> => {
 async function releaseConfigLock(lockPath: string, token: string): Promise<void> {
   try {
     const contents = await readFile(lockPath, 'utf8');
-    // Strip the single trailing newline acquire writes; the remaining line is
     // the ownership proof, compared whole rather than by a token suffix.
     if (contents.replace(/\n$/, '') !== token) {
       console.error(`[nexus-desktop] ${lockPath} was stolen; leaving the new owner's lock`);
@@ -111,14 +106,12 @@ async function releaseConfigLock(lockPath: string, token: string): Promise<void>
 }
 
 /**
- * Run one config read-modify-write while holding `lockPath`. A normal hold is
  * milliseconds; `LOCK_STALE_MS` is a stale heuristic, not proof of a crash — a
  * paused live holder can look stale, and stealing can transiently yield two
  * holders. Safe only while all four writers stay user-paced.
  */
 async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promise<T> {
   await mkdir(dirname(lockPath), { recursive: true });
-  // Ownership token line written into the lock file: release compares the
   // whole line before unlinking, so a stolen holder cannot delete the new
   // owner's lock.
   const token = `${process.pid} ${new Date().toISOString()} ${randomUUID()}`;
@@ -130,17 +123,14 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
     try {
       const lock = await open(lockPath, 'wx', 0o600);
       try {
-        // Diagnostics only; the age of a held lock comes from its mtime, and
         // the whole line is the ownership proof release compares.
         await lock.writeFile(`${token}\n`);
       } catch (err) {
-        // The create succeeded, so this attempt owns the file: release it
         // before failing, or the next writer stalls until the stale steal.
         await lock.close().catch(() => undefined);
         await rm(lockPath, { force: true }).catch(() => undefined);
         throw err;
       }
-      // A close failure cannot strand the lock — the caller's finally releases.
       await lock.close().catch(() => undefined);
       held = true;
     } catch (err) {
@@ -155,7 +145,6 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
         () => undefined, // Released between the create and the stat: retry now.
       );
       if (ageMs !== undefined && ageMs > LOCK_STALE_MS) {
-        // Stale age is a heuristic: two reclaimers can both unlink and create,
         // leaving two live holders, and a live slow holder can lose its lock.
         // Accepted only because all four writers are user-paced.
         try {
@@ -175,7 +164,6 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
             );
           }
         }
-        // Back off here too: an unremovable stale lock must not hot-loop.
         await sleepFor(backoff);
         backoff = Math.min(backoff * 2, LOCK_BACKOFF_CAP_MS);
       } else if (ageMs !== undefined) {
@@ -215,9 +203,6 @@ export type DesktopConfig = DesktopConfigHandlers & {
   resolveWorkspaceRoot(): Promise<string>;
 };
 
-// ---------------------------------------------------------------------------
-// TOML document helpers
-// ---------------------------------------------------------------------------
 
 /** A parsed TOML table (smol-toml plain object) is never an array or a date. */
 function isTomlTable(value: TomlValue | undefined): value is TomlTable {
@@ -230,7 +215,6 @@ function isTomlTable(value: TomlValue | undefined): value is TomlTable {
 }
 
 /**
- * smol-toml 1.9 returns every table as an `Object.create(null)` object
  * (prototype-pollution hardening, README "Key safety"). This module's contract
  * is an ordinary plain-object document — indexing, spreads and `{ ...doc }`
  * behave like any other object — so the parsed tree is deep-copied back onto
@@ -254,7 +238,6 @@ function toPlainToml(value: TomlValue): TomlValue {
 }
 
 /**
- * `ctr_local` + 12 hex characters — the generation pattern of
  * `nexus-creator/src/local_identity.rs` (first 12 hex chars of a UUID v4).
  */
 function generateLocalCreatorId(): string {
@@ -262,7 +245,6 @@ function generateLocalCreatorId(): string {
 }
 
 /**
- * Creator ids become path components outside this module
  * (`~/.nexus42/creators/<id>/…`), so separators and `..` are rejected here as
  * they were in the retired host's `validate_creator_id_safe`. Control
  * characters and the byte bound are already enforced by the frozen request
@@ -274,9 +256,6 @@ function assertSafeCreatorId(creatorId: string): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
 
 /**
  * Build the config handlers bound to one trusted home/documents pair.
@@ -301,7 +280,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   const defaultWorkspaceRoot = join(documentsPath, ...DEFAULT_WORKSPACE_SEGMENTS);
 
   /**
-   * Per-file mutation gates. Each holds the tail of its file's mutation chain,
    * so mutations of one file run strictly one at a time and a later mutation
    * always re-reads what an earlier one wrote.
    */
@@ -310,7 +288,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
 
   function serialized<T>(gate: { tail: Promise<unknown> }, run: () => Promise<T>): Promise<T> {
     const next = gate.tail.catch(() => undefined).then(run);
-    // The stored tail must never reject, or one failed mutation would poison
     // every later one.
     gate.tail = next.then(
       () => undefined,
@@ -320,7 +297,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   }
 
   /**
-   * Read one TOML document. A missing file is an empty document; an existing
    * file that cannot be read or parsed throws instead of degrading to `{}`, so
    * a corrupt document is never treated as absent.
    */
@@ -355,7 +331,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   }
 
   /**
-   * Publish a complete document through the native publisher.
    *
    * The publisher probes the target for write access, captures its access
    * policy, stages an owner-only copy in a sealed directory beside the target
@@ -377,7 +352,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   }
 
   /**
-   * Serialized read-modify-write: re-read inside the gate, then replace
    * atomically. With `lockPath` the whole read-modify-write also holds the
    * cross-process advisory lock.
    */
@@ -399,7 +373,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   }
 
   /**
-   * Strict string read for keys this module owns: absent (or empty) means unset,
    * a present non-string value means the document no longer means what it
    * claims — the retired host failed deserialization in exactly that case.
    */
@@ -413,7 +386,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   }
 
   /**
-   * Table this module owns, for writes: created when absent, an error when the
    * existing value is not a table (never silently replaced).
    */
   function ownedTableForWrite(doc: TomlTable, key: string, label: string): TomlTable {
@@ -444,7 +416,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
       creatorId !== undefined && byCreator !== undefined
         ? ownedString(byCreator, creatorId, `${configPath}: [workspace_path_by_creator]`)
         : undefined;
-    // Precedence: per-creator map → legacy mirror → default slug.
     return (
       perCreator ??
       ownedString(doc, 'workspace_path', configPath) ??
@@ -491,7 +462,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
           const doc = await readDocument(configPath);
           const existing = ownedString(doc, 'active_creator_id', configPath);
           if (existing !== undefined) {
-            // Never replaces an existing creator, and never rewrites the file.
             return { creator_id: existing, already_bootstrapped: true };
           }
           const creatorId = generateLocalCreatorId();
@@ -515,7 +485,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     },
 
     async set_entrance({ value }) {
-      // The handler boundary owns the enum check (retired `set_entrance`
       // validated on write). The frozen parser rejects a non-enum value in the
       // IPC path, but this exported map is also reachable directly — an
       // out-of-enum write must never reach the document.
@@ -548,7 +517,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
       for (const row of providers) {
         if (!isTomlTable(row) || row['protocol'] !== 'native_cli') continue;
         const name = row['id'];
-        // Skip malformed rows so a later valid native_cli can still preselect.
         if (typeof name !== 'string' || name.length === 0) continue;
         const command = row['command'];
         return typeof command === 'string'
@@ -565,7 +533,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
           throw desktopError('config_corrupt', `${agentProfilePath}: providers is not an array of tables`);
         }
         const providers: TomlValue[] = existing ?? [];
-        // Every existing row must be a table (retired `as_array_of_tables_mut`
         // rejected the wrong shape). A malformed owned value fails closed here
         // instead of being normalized in place and written back.
         for (const row of providers) {
@@ -576,7 +543,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
             );
           }
         }
-        // Upsert: the stored profile is the sole native_cli entry, so the agent
         // host and the Settings preselect (first native_cli) always agree.
         for (let index = providers.length - 1; index >= 0; index -= 1) {
           const row = providers[index];

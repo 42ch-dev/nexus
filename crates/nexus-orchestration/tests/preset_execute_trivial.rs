@@ -57,21 +57,17 @@ async fn linear_two_state_preset_executes_to_terminal() {
         .await
         .expect("start_session_with_graph");
 
-    // Step 1: should reach `start` which has ManualWait → WaitForInput.
     let out = engine.run_step(&sid).await.expect("run_step 1");
     assert!(
         out.is_waiting_for_input(),
         "first step should WaitForInput (manual exit_when): {out:?}"
     );
 
-    // Signal Resume to unblock the manual wait.
     engine
         .signal(&sid, nexus_orchestration::engine::EngineSignal::Resume)
         .await
         .expect("signal resume");
 
-    // Step 2+: engine advances to `end` (terminal) → Completed.
-    // The graph-flow engine may need a couple of steps to traverse:
     // - After resume, re-run `start` → Continue → moves to `end` (Paused)
     // - Next step runs `end` → End → Completed
     for _ in 0..16 {
@@ -135,20 +131,17 @@ async fn capability_enter_state_composites_correctly() {
         .await
         .expect("start_session_with_graph");
 
-    // Step 1: should reach WaitForInput (manual exit_when).
     let out = engine.run_step(&sid).await.expect("run_step 1");
     assert!(
         out.is_waiting_for_input(),
         "first step should WaitForInput: {out:?}"
     );
 
-    // Resume to unblock.
     engine
         .signal(&sid, nexus_orchestration::engine::EngineSignal::Resume)
         .await
         .expect("signal resume");
 
-    // Run steps until terminal or error.
     for _ in 0..16 {
         let o = engine.run_step(&sid).await.expect("run_step loop");
         if matches!(o, StepOutcome::Completed { .. }) {

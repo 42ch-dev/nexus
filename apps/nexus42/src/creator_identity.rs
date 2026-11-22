@@ -65,7 +65,6 @@ pub fn load_creator_identity_cache() -> CreatorIdentityCache {
 
     let mut cache: CreatorIdentityCache = serde_json::from_str(&content).unwrap_or_default();
 
-    // C-001: Validate all creator_id values loaded from disk.
     // A corrupt cache may contain entries with unsafe IDs (path traversal, etc.)
     // that bypass the write-time validate_creator_id_safe() check.
     let invalid_ids: Vec<String> = cache
@@ -98,12 +97,10 @@ pub fn save_creator_identity_cache(cache: &CreatorIdentityCache) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Advisory file lock — best-effort guard against concurrent RMW races.
     let lock_path = path.with_extension("json.lock");
     let _lock_guard = AdvisoryLock::acquire(&lock_path);
 
     let json = serde_json::to_string_pretty(cache)?;
-    // Use a unique temp path per call to avoid rename races when multiple
     // threads/processes write concurrently. Each writer gets its own tmp file
     // so one thread's rename cannot remove another's tmp prematurely.
     let unique = std::time::SystemTime::now()
@@ -125,7 +122,6 @@ impl AdvisoryLock {
     /// Try to acquire an exclusive advisory lock. Returns `None` (with a warning)
     /// if the lock cannot be acquired — the write proceeds without locking.
     fn acquire(lock_path: &std::path::Path) -> Option<Self> {
-        // Try exclusive creation — if the lock file exists, another process holds it.
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -138,7 +134,6 @@ impl AdvisoryLock {
 
 impl Drop for AdvisoryLock {
     fn drop(&mut self) {
-        // Lock file is removed on drop, releasing the advisory lock.
         // The File handle is closed when _lock_file is dropped.
     }
 }
@@ -157,8 +152,6 @@ pub fn get_creator_identity<'a>(
 /// # Errors
 ///
 /// Returns an error if the cache cannot be saved to disk.
-// TODO(V1.17): Consider migrating the identity cache to SQLite (nexus-local-db)
-// for proper concurrency safety beyond advisory locks.
 pub fn set_creator_identity(entry: CreatorIdentityEntry) -> Result<()> {
     let mut cache = load_creator_identity_cache();
     cache.creators.insert(entry.creator_id.clone(), entry);
@@ -180,24 +173,20 @@ pub fn set_creator_identity(entry: CreatorIdentityEntry) -> Result<()> {
 pub fn resolve_creator_ref(input: &str) -> Result<String> {
     let cache = load_creator_identity_cache();
 
-    // 1. Exact creator_id match
     if cache.creators.contains_key(input) {
         return Ok(input.to_string());
     }
 
-    // 2. Handle match
     for entry in cache.creators.values() {
         if entry.handle.as_deref() == Some(input) {
             return Ok(entry.creator_id.clone());
         }
     }
 
-    // 3. Path-safe fallback (backward compat)
     if crate::paths::validate_creator_id_safe(input).is_ok() {
         return Ok(input.to_string());
     }
 
-    // 4. Unsafe input — error
     Err(crate::errors::CliError::Other(format!(
         "Unknown creator reference {input:?}. \
          Use `nexus42 creator list` to see available creators, \
@@ -267,14 +256,12 @@ mod tests {
 
     #[test]
     fn resolve_exact_creator_id() {
-        // Build cache in-memory, test the matching logic directly.
         let mut cache = CreatorIdentityCache::default();
         cache.creators.insert(
             "ctr_alpha".to_string(),
             sample_entry("ctr_alpha", Some("alpha"), None),
         );
 
-        // Step 1: exact creator_id match
         assert!(cache.creators.contains_key("ctr_alpha"));
         let matched = cache.creators.get("ctr_alpha").expect("entry");
         assert_eq!(matched.creator_id, "ctr_alpha");
@@ -288,7 +275,6 @@ mod tests {
             sample_entry("ctr_alpha", Some("alpha"), None),
         );
 
-        // Step 2: handle match — loop through entries
         let found = cache
             .creators
             .values()
@@ -308,7 +294,6 @@ mod tests {
         );
         save_creator_identity_cache(&cache).expect("save");
 
-        // "alpha_handle_unique" should resolve to "ctr_alpha"
         let result = resolve_creator_ref("alpha_handle_unique").expect("resolve handle");
         assert_eq!(result, "ctr_alpha");
     }
@@ -317,7 +302,6 @@ mod tests {
     fn resolve_path_safe_unknown_passthrough() {
         let _home = crate::testutil::isolated_home();
 
-        // Empty cache — unknown but path-safe input should pass through
         let cache = CreatorIdentityCache::default();
         save_creator_identity_cache(&cache).expect("save");
 
@@ -338,8 +322,6 @@ mod tests {
         assert!(err.contains("Unknown creator reference"));
     }
 
-    // ── R-CREATOR-002: Concurrent write safety test ────────────────────
-
     #[test]
     fn concurrent_writes_dont_corrupt_file() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -347,7 +329,6 @@ mod tests {
 
         let _home = crate::testutil::isolated_home();
 
-        // Pre-populate so threads race on read-modify-write
         let mut initial = CreatorIdentityCache::default();
         initial
             .creators
@@ -380,21 +361,17 @@ mod tests {
             h.join().expect("thread should not panic");
         }
 
-        // At least some writes should succeed
         let successes = success_count.load(Ordering::Relaxed);
         assert!(
             successes > 0,
             "At least one concurrent write should succeed"
         );
 
-        // The final cache should be valid JSON and parseable
         let final_cache = load_creator_identity_cache();
-        // Base entry should survive
         assert!(
             final_cache.creators.contains_key("ctr_base"),
             "base entry should survive concurrent writes"
         );
-        // At least one thread entry should be present
         assert!(
             final_cache
                 .creators

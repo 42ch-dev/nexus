@@ -1,5 +1,4 @@
 /**
- * Inspiration pool query layer — key shape, page size and the exact
  * invalidation set (v1.222 P1 T1).
  *
  * The stale-Works-list risk on promote is the reason these cases exist: promote
@@ -75,7 +74,6 @@ function Harness() {
 }
 
 /**
- * Seeds one entry at each invalidatable key so `isInvalidated` is observable.
  * These seeds have no observer, so the test client's `gcTime: 0` would collect
  * them before the mutation settles.
  */

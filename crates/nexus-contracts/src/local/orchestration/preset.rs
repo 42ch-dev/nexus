@@ -1,4 +1,5 @@
-//! Preset manifest types — hand-written, per `schemas-boundary.md` §3.
+//! Preset manifest types — hand-written, per
+//! `docs/specs/architecture/schemas-external-consumer-boundary.md` ("Rule (authoritative)").
 //!
 //! These types represent the YAML schema for `preset.yaml` as defined in
 //! `orchestration-engine.md` §7.2 and §7.5.
@@ -15,10 +16,6 @@
 //! Backward compatible: presets without `roles` operate in single-agent mode.
 
 use serde::{Deserialize, Serialize};
-
-// ---------------------------------------------------------------------------
-// Top-level manifest
-// ---------------------------------------------------------------------------
 
 /// Root wrapper for a preset YAML file.
 ///
@@ -50,10 +47,6 @@ pub struct PresetManifest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<PresetRoleDefinition>,
 }
-
-// ---------------------------------------------------------------------------
-// PresetHeader
-// ---------------------------------------------------------------------------
 
 /// Metadata and configuration for the preset.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,10 +105,6 @@ pub struct PresetHeader {
     pub cli_args: Vec<PresetCliArg>,
 }
 
-// ---------------------------------------------------------------------------
-// WorldBinding (workflow-profile §5.3.4)
-// ---------------------------------------------------------------------------
-
 /// Preset-level World-binding requirement, declared as `preset.world_binding:`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldBinding {
@@ -132,10 +121,6 @@ pub enum WorldBindingMode {
     /// Legacy mode: a worldless run is not blocked.
     Optional,
 }
-
-// ---------------------------------------------------------------------------
-// PresetCliArg (V1.45 §3.3)
-// ---------------------------------------------------------------------------
 
 /// A single preset-specific CLI argument declared in `preset.yaml` (V1.45 §3.3).
 ///
@@ -199,10 +184,6 @@ pub enum RunIntent {
     SystemMaintenance,
 }
 
-// ---------------------------------------------------------------------------
-// StateDefinition
-// ---------------------------------------------------------------------------
-
 /// A single state in the outer state machine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateDefinition {
@@ -265,10 +246,6 @@ fn is_false(b: &bool) -> bool {
     !b
 }
 
-// ---------------------------------------------------------------------------
-// EnterAction
-// ---------------------------------------------------------------------------
-
 /// An action to execute when entering a state.
 ///
 /// Uses `#[serde(tag = "kind")]` for tag-based YAML variants:
@@ -310,10 +287,6 @@ pub enum EnterAction {
     },
 }
 
-// ---------------------------------------------------------------------------
-// ExitWhen
-// ---------------------------------------------------------------------------
-
 /// Condition that must be satisfied before transitioning.
 ///
 /// Uses `#[serde(tag = "kind")]` for tag-based YAML variants:
@@ -354,10 +327,6 @@ pub enum ExitWhen {
         duration: Option<String>,
     },
 }
-
-// ---------------------------------------------------------------------------
-// NextTarget (linear or conditional)
-// ---------------------------------------------------------------------------
 
 /// Transition target — linear ID or conditional form.
 ///
@@ -447,10 +416,6 @@ pub struct LabeledNext {
     /// Target state ID when the judge returns this label.
     pub target: String,
 }
-
-// ---------------------------------------------------------------------------
-// MergeKind (V1.52 T-B P1)
-// ---------------------------------------------------------------------------
 
 /// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
 ///
@@ -585,10 +550,6 @@ pub struct ConditionalRule {
     pub target: String,
 }
 
-// ---------------------------------------------------------------------------
-// InnerGraph
-// ---------------------------------------------------------------------------
-
 /// Definition of an inner graph (DAG of prompt/tool nodes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InnerGraph {
@@ -629,10 +590,6 @@ pub enum GraphNodeKind {
     AcpPrompt,
 }
 
-// ---------------------------------------------------------------------------
-// InitialAction (WS7 §7)
-// ---------------------------------------------------------------------------
-
 /// What action to take when a schedule starts using this preset.
 ///
 /// Declared at `preset.initial_action` level in the YAML manifest.
@@ -653,10 +610,6 @@ pub enum InitialAction {
         payload_kind: Option<String>,
     },
 }
-
-// ---------------------------------------------------------------------------
-// ContextUpdateHook (WS7 §7)
-// ---------------------------------------------------------------------------
 
 /// A hook that fires on state exit to update the schedule's `core_context`.
 ///
@@ -729,10 +682,6 @@ where
     Option::<serde_json::Value>::deserialize(deserializer).map(Some)
 }
 
-// ---------------------------------------------------------------------------
-// SignalBinding
-// ---------------------------------------------------------------------------
-
 /// A signal that can externally push the state machine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalBinding {
@@ -761,10 +710,6 @@ pub enum SignalActionKind {
     /// Force transition to a target state.
     ForceTransition,
 }
-
-// ---------------------------------------------------------------------------
-// PresetRoleDefinition (WS-E §7)
-// ---------------------------------------------------------------------------
 
 /// A role definition for multi-agent presets (`WS-E` §7).
 ///
@@ -797,10 +742,6 @@ pub struct PresetRoleDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommended_skills: Vec<String>,
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -1080,8 +1021,6 @@ states:
         }
     }
 
-    // ── WS-E T6: Roles and recommended_skills ──────────────────────────────
-
     #[test]
     fn parse_preset_with_roles() {
         let yaml = r#"
@@ -1172,7 +1111,6 @@ inner_graphs:
 
     #[test]
     fn preset_without_roles_is_backward_compatible() {
-        // Existing presets without roles should still parse correctly.
         let yaml = r#"
 preset:
   id: single-agent
@@ -1196,8 +1134,6 @@ states:
 
     #[test]
     fn role_without_recommended_skills_parses() {
-        // recommended_skills is optional (can be empty).
-        // Loader will reject empty recommended_skills during validation.
         let yaml = r#"
 preset:
   id: empty-roles
@@ -1223,8 +1159,6 @@ roles:
         assert_eq!(p.roles.len(), 1);
         assert_eq!(p.roles[0].recommended_skills, Vec::<String>::new());
     }
-
-    // ── V1.52 T-B P0: N-way labeled routing ─────────────────────────────
 
     #[test]
     fn parse_labeled_next_n_way_from_yaml_list() {
@@ -1276,7 +1210,6 @@ states:
 
     #[test]
     fn parse_labeled_next_two_way_like_binary_gonogo() {
-        // New form: 2-way labeled edges (equivalent to old binary GoNogo).
         let yaml = r"
 preset:
   id: labeled-2way
@@ -1321,7 +1254,6 @@ states:
 
     #[test]
     fn backward_compat_binary_gonogo_still_parses() {
-        // Old binary GoNogo shape should still parse as GoNogo.
         let yaml = r"
 preset:
   id: binary-gonogo
@@ -1416,8 +1348,6 @@ states:
         assert_eq!(back.preset.id, "roundtrip");
         assert!(back.roles.is_empty());
     }
-
-    // ── V1.52 T-B P1: Merge semantics ──────────────────────────────────
 
     #[test]
     fn parse_merge_all() {

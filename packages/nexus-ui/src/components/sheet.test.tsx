@@ -6,7 +6,6 @@ import '@testing-library/jest-dom/vitest';
 import { Sheet, SheetClose, SheetContent, SheetTrigger } from './sheet';
 
 /**
- * V1.148 P1 — promoted Sheet presentational primitive (DESIGN.md components.sheet).
  *
  * Pins: caller-owned copy (title/description/closeLabel), the v0.4 drawer
  * token recipe (scrim overlay, shadow-elevation-4, sheet width token), and

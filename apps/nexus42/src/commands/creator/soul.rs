@@ -235,7 +235,6 @@ mod tests {
 
     #[test]
     fn soul_command_enum_exists() {
-        // Verify the enum can be constructed (compile-time check)
         let _ = SoulCommand::Init;
         let _ = SoulCommand::Show;
         let _ = SoulCommand::Validate;
@@ -248,7 +247,6 @@ mod tests {
 
     #[test]
     fn push_personality_identity_is_never_fabricated() {
-        // No authored identity on the pushed record: no lines at all. The old
         // fallback printed an empty memory id and a made-up `personality_core`
         // kind (fix round 3, F5).
         assert_eq!(

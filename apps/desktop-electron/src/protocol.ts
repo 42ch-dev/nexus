@@ -1,5 +1,4 @@
 /**
- * Protocol + navigation policy for the Electron desktop shell (v1.192 P0-T1).
 /**
  * The production desktop scheme `nexus:` is the one host scheme: standard,
  * secure, fetch, streaming; packaged resources only under the canonical
@@ -61,9 +60,6 @@ function contentType(filePath: string): string {
   return MIME[ext] ?? 'application/octet-stream';
 }
 
-// ---------------------------------------------------------------------------
-// Production desktop scheme `nexus://app` (frozen host contract)
-// ---------------------------------------------------------------------------
 
 /** Privileges for `nexus` — must be registered before app ready (P0-T7 main). */
 export const DESKTOP_SCHEME_PRIVILEGES = {
@@ -90,9 +86,6 @@ export async function registerDesktopSchemes(): Promise<void> {
   protocol.registerSchemesAsPrivileged([{ ...DESKTOP_SCHEME_PRIVILEGES }]);
 }
 
-// ---------------------------------------------------------------------------
-// CSP — exact origins inserted by main only, never renderer strings, never `*`
-// ---------------------------------------------------------------------------
 
 export interface DesktopCspPolicy {
   /** Selected service origin, e.g. http://127.0.0.1:8420 (exact origin only). */
@@ -148,9 +141,6 @@ export function buildDesktopCsp(policy: DesktopCspPolicy): string {
   ].join('; ');
 }
 
-// ---------------------------------------------------------------------------
-// Asset path policy — packaged resources only, traversal + symlink safe
-// ---------------------------------------------------------------------------
 
 /**
  * True when the URL path attempts directory traversal (any `..` component
@@ -165,7 +155,6 @@ export function desktopPathHasTraversal(urlPath: string): boolean {
     return true;
   }
   if (decoded.includes('\0')) return true;
-  // Inspect the RAW decoded components: normalize() would lexically resolve
   // `..` segments (e.g. "a/../../b" → "../b") and hide the traversal attempt.
   const relative = decoded.replace(/^\/+/, '');
   return relative.split('/').includes('..');
@@ -239,20 +228,14 @@ export function allowDesktopNavigation(
   return isDesktopAppOrigin(url, options);
 }
 
-// ---------------------------------------------------------------------------
-// External URL policy — the single predicate lives in the shared host
 // contract (`isAllowedDesktopExternalUrl` in desktop-contract.ts); it is
 // re-exported here so existing protocol consumers keep one import site. The
 // implementation is NOT duplicated: raw-string C0/DEL + whitespace + size
 // checks run before WHATWG parsing, then http/https, nonempty host, no
 // userinfo.
-// ---------------------------------------------------------------------------
 
 export { isAllowedDesktopExternalUrl } from './desktop-contract.js';
 
-// ---------------------------------------------------------------------------
-// Desktop scheme registration
-// ---------------------------------------------------------------------------
 
 /**
  * Pure resolution chain of the `nexus` protocol handler: exact asset first;

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Unsigned Electron development driver.
  *
  * Both modes use the same prepared native payload, service build and host build.
  * Dist mode serves apps/web/dist through the nexus://app scheme; web mode owns
@@ -46,7 +45,6 @@ function commandLabel(command, args) {
 function signalProcessGroup(child, signal) {
   if (!child.pid) return;
   try {
-    // Detached children own their process group, so this also reaches Electron
     // helpers, the service utility and Vite's worker descendants.
     process.kill(-child.pid, signal);
   } catch (error) {
@@ -54,7 +52,6 @@ function signalProcessGroup(child, signal) {
       try {
         child.kill(signal);
       } catch {
-        // The child exited between the group and direct signal attempts.
       }
     }
   }
@@ -150,7 +147,6 @@ async function validateNativePayload() {
 }
 
 async function prepare(mode) {
-  // Build the TypeScript dependency closure explicitly; pnpm does not build
   // workspace dependencies merely because the service imports their packages.
   for (const packageName of [
     '@42ch/nexus-contracts',

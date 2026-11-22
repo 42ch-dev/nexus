@@ -51,7 +51,6 @@ function executionOrder(parsed: ParsedPreset): string[] {
       }
     }
   }
-  // Append any unreachable states so nothing is silently dropped.
   for (const s of manifest.states) if (!seen.has(s.id)) order.push(s.id);
   return order;
 }

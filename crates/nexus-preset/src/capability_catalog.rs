@@ -1,4 +1,5 @@
 //! Non-executable capability metadata shared with the runtime registry.
+// the canonical builtin table lives here; see docs/specs/agents/capability-registry.md.
 
 /// Input-schema lookup used by preset validation. `None` means unknown.
 pub trait CapabilityCatalog {
@@ -119,7 +120,6 @@ pub fn builtin_names() -> impl Iterator<Item = &'static str> {
 /// [`BUILTIN_CAPABILITIES`], searched by name. Unknown names fail closed.
 #[must_use]
 pub fn builtin_input_schema(name: &str) -> Option<&'static str> {
-    // The table is sorted by name (declaration order above).
     BUILTIN_CAPABILITIES
         .binary_search_by(|(declared, _)| (*declared).cmp(name))
         .ok()
@@ -139,7 +139,6 @@ pub const ACP_PROMPT_INPUT_SCHEMA: &str = r#"{
                     "default": "auto_grant_read_only",
                     "description": "Tool permission policy for this prompt"
                 }
-                // "_creator_id" and "_session_id" are injected by orchestration context,
                 // NOT accepted from user input (security: prevents cross-creator routing).
             }
         }"#;
@@ -334,7 +333,6 @@ mod tests {
                 "table entry '{name}' resolves through the public accessor"
             );
         }
-        // Unknown names fail closed through the same accessor.
         assert_eq!(builtin_input_schema("not.a.declared.builtin"), None);
     }
 

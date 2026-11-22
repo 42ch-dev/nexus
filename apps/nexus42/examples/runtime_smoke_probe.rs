@@ -63,13 +63,11 @@ fn probe_manifest() -> HostCapabilityManifest {
         namespaces: Vec::new(),
         roles: vec!["input-source".into()],
         schema_version: std::num::NonZeroU64::new(1).expect("non-zero"),
-        // V1.169 (0.11.1): honest empty tools declaration (no tool ABI served).
         tools: Vec::new(),
     }
 }
 
 #[tokio::main]
-// One linear arg-parse plus probe sequence; splitting it would scatter the
 // ordering the probe exists to observe.
 #[allow(clippy::too_many_lines)]
 async fn main() {
@@ -143,7 +141,6 @@ async fn main() {
         }
     };
 
-    // Dial the running host (bounded by the handshake timeout above).
     let session = match node
         .connect(parse_multiaddr(&addr).expect("host addr parses"))
         .await
@@ -161,7 +158,6 @@ async fn main() {
         session.remote_peer_id()
     );
 
-    // N-C2 read-half surface: the manifest advertises exactly the served ops.
     let manifest_json =
         serde_json::to_string(session.remote_manifest()).expect("manifest serializes");
     println!("MANIFEST_JSON={manifest_json}");
@@ -172,7 +168,6 @@ async fn main() {
         .map_or_default(|ops| ops.iter().filter_map(|op| op.as_str()).collect());
     println!("SERVED_OPS={}", served_ops.join(","));
 
-    // Refusal attribution (QC1-02). The wire family collapses every denial
     // into `op_unsupported`; the message is the observable discriminator, so
     // report BOTH a truly unserved op and a served op this peer's `op_scope`
     // excludes. The smoke asserts the second is specifically the op-scope
@@ -202,7 +197,6 @@ async fn main() {
         }
     }
 
-    // Opt-in retained half: `--world` seeds two stored entries through the
     // served `upsert` op (the session-alive proof after the refusal above);
     // `--compute-session` additionally runs the real compute lane. The module
     // bytes live host-locally (never peer-supplied).
@@ -308,7 +302,6 @@ async fn run_retained_ops(
                 computed.payload
             )
         })?;
-    // Print a tag, not the raw id: a session id is sensitive for the
     // cleartext-logging rule, and the proof only needs "this result belongs to
     // THAT session". The test derives the same tag with `DefaultHasher`, so
     // both sides must build with the same pinned toolchain.

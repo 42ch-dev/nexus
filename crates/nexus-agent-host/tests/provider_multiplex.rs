@@ -1,4 +1,4 @@
-//! Real maintained adapters and a Node `ProviderCallbacks` peer; no model calls.
+//! Real maintained adapters and a Node `ProviderCallbacks` peer; no model calls. See docs/specs/agents/agent-host.md.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -38,7 +38,6 @@ impl CallbackPort {
     fn spawn() -> Self {
         let module = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../packages/nexus-provider-acp/dist/index.js");
-        // This peer is a test transport for the actual callback, not an ACP
         // implementation. Build the package in the serialized validation window.
         let script = format!(
             r"
@@ -77,7 +76,6 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
 
     async fn exchange(&self, value: Value) -> ProviderResult<Value> {
         let mut peer = self.0.lock().await;
-        // The guard is released with its last use below (the lock is not held
         // across the response envelope construction).
         let mut bytes = serde_json::to_vec(&value).expect("peer request");
         bytes.push(b'\n');
@@ -109,7 +107,6 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
     #[allow(clippy::significant_drop_tightening)] // the guard owns the child across the wait
     async fn close(&self) {
         let mut peer = self.0.lock().await;
-        // Drop the pipe writer to deliver EOF; shutdown alone retains the handle.
         drop(peer.stdin.take());
         let status = tokio::time::timeout(Duration::from_secs(5), peer.child.wait())
             .await
@@ -232,7 +229,6 @@ async fn host_with_acp_fixture(root: &Path, acp_fixture: &str) -> Arc<HostManage
     };
     let catalog = ProviderCatalog::build_from_sources(&config, vec![], vec![]).expect("catalog");
     let host = Arc::new(HostManager::new());
-    // Explicit catalog only: never discover or call an installed real provider.
     for entry in &catalog.entries {
         let adapter = adapter_from_catalog_entry(
             entry,
@@ -371,7 +367,6 @@ async fn session_keeps_selected_provider_and_truthful_cancel() {
             }),
         };
         if matches!(provider, "claude-native" | "codex-native") {
-            // These native adapters cannot enforce workflow scopes. Refuse the
             // constrained request before testing their ordinary prompt path.
             let error = port
                 .call(call(
@@ -446,7 +441,6 @@ async fn session_keeps_selected_provider_and_truthful_cancel() {
         let record: Value = serde_json::from_str(line).expect("DSH record");
         assert_ne!(record["method"], "session/cancel");
     }
-    // No callback available means configured ACP remains the Rust LocalSet path.
     let rust_port = compose_provider_port(
         host.clone(),
         Arc::new(host.build_provider_port().await),
@@ -478,7 +472,6 @@ async fn native_control_cancel_uses_returned_id_and_preserves_completed_result()
     let tmp = tempfile::tempdir().expect("workspace");
     let root = tmp.path().canonicalize().expect("canonical workspace");
     let fixture = root.join("control-peer.py");
-    // A protocol peer, not a replacement adapter: control execution and cancel
     // travel through the maintained Rust ACP adapter and real HostManager.
     std::fs::write(
         &fixture,
@@ -560,7 +553,6 @@ for line in sys.stdin:
         if current.to_string() == op_id)
     );
 
-    // Confirm the selected real ACP connection received cancel, before shutdown
     // can send its separate cooperative cancellation notification.
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -588,7 +580,6 @@ for line in sys.stdin:
     .await
     .expect("peer receives cancel");
 
-    // The control RPC already succeeded before execute replied. Cancellation
     // does not roll it back or relabel its retained result as Cancelled.
     let batch = port
         .next(op_id.clone(), 16, 256 * 1024)

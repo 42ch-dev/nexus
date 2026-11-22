@@ -21,8 +21,6 @@ use nexus_contracts::BlockType;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-// ── Store Error ─────────────────────────────────────────────────────
-
 /// Error type for KB store operations.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum KbStoreError {
@@ -80,8 +78,6 @@ pub enum KbStoreError {
     #[error("validation error: {0}")]
     ValidationLegacy(String),
 }
-
-// ── KbStore Trait ───────────────────────────────────────────────────
 
 /// Trait for World-scoped KB graph storage operations.
 ///
@@ -154,8 +150,6 @@ pub trait KbStore {
     /// Sets status to `deleted`. The record is retained.
     async fn delete_knowledge_entry(&self, entry_id: &str) -> Result<(), KbStoreError>;
 }
-
-// ── Read selection (v1.191 P1 T2, durable §4.1) ─────────────────────
 
 /// Server-chosen read policy for one knowledge read (durable §4.1).
 ///
@@ -265,8 +259,6 @@ impl KnowledgeReadScope {
     }
 }
 
-// ── In-Memory Implementation ────────────────────────────────────────
-
 /// In-memory KB store for testing and development.
 ///
 /// Thread-safe via interior mutability (`std::sync::RwLock`).
@@ -373,7 +365,6 @@ impl Default for InMemoryKbStore {
     }
 }
 
-// `async` here is by trait contract, not by need: `KbStore` is async to
 // match the future SQLite backend (see the trait docs) and this in-memory
 // impl mirrors it. The methods perform no real async I/O, so clippy 1.98's
 // `unused_async_trait_impl` (new in 1.98, toolchain drift) is silenced.
@@ -383,7 +374,6 @@ impl KbStore for InMemoryKbStore {
         &self,
         kb: KnowledgeEntryRecord,
     ) -> Result<KbInsertResult, KbStoreError> {
-        // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
             crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
             crate::world_kb::errors::KbError::ValidationError(msg) => {
@@ -392,7 +382,6 @@ impl KbStore for InMemoryKbStore {
             other => KbStoreError::ValidationLegacy(other.to_string()),
         })?;
 
-        // Validate body semantics before persisting
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
             |e| match e {
                 crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
@@ -403,8 +392,6 @@ impl KbStore for InMemoryKbStore {
             },
         )?;
 
-        // v1.191 P1 T2: the native governance pair is validated on every write
-        // path.
         Self::validate_governance(&kb)?;
 
         let entry_id = kb.entry_id.clone();
@@ -412,7 +399,6 @@ impl KbStore for InMemoryKbStore {
         let created_at = kb.created_at.clone();
 
         {
-            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P1-S3
             // — concurrent-uniqueness race: InMemoryKbStore check+insert is not
             // atomic under concurrent access; acceptable for single-user daemon.
             let mut blocks = self.write_blocks()?;
@@ -442,7 +428,6 @@ impl KbStore for InMemoryKbStore {
         &self,
         world_id: &str,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
-        // v1.184 P1: `list_by_world` remains a World-scoped read — only
         // World-owned active records match (Character/binding rows carry a
         // `None` world_id and are excluded).
         let items: Vec<KnowledgeEntryRecord> = self
@@ -462,7 +447,6 @@ impl KbStore for InMemoryKbStore {
                 blocks
                     .values()
                     .filter(|kb| {
-                        // World-scoped query only (World-owned active records).
                         if kb.owner.world_id() != Some(query.world_id.as_str())
                             || !Self::is_active(kb)
                         {
@@ -494,7 +478,6 @@ impl KbStore for InMemoryKbStore {
                                 return false;
                             }
                         }
-                        // V1.61 P1: filter by computable flag
                         if let Some(want) = query.computable {
                             let is_computable =
                                 kb.body.as_ref().and_then(|b| b.computable).unwrap_or(false);
@@ -514,7 +497,6 @@ impl KbStore for InMemoryKbStore {
             matches = matches.into_iter().skip(offset).take(limit).collect();
             let has_more = offset + matches.len() < total_count;
 
-            // Release the read lock before constructing the result.
             drop(blocks);
 
             (matches, total_count, has_more)
@@ -562,7 +544,6 @@ impl KbStore for InMemoryKbStore {
     }
 
     async fn update_knowledge_entry(&self, kb: KnowledgeEntryRecord) -> Result<(), KbStoreError> {
-        // Validate canonical_name format/safety
         validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
             crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
             crate::world_kb::errors::KbError::ValidationError(msg) => {
@@ -571,7 +552,6 @@ impl KbStore for InMemoryKbStore {
             other => KbStoreError::ValidationLegacy(other.to_string()),
         })?;
 
-        // Validate body semantics before persisting
         validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
             |e| match e {
                 crate::world_kb::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
@@ -591,14 +571,11 @@ impl KbStore for InMemoryKbStore {
                 .get(&kb.entry_id)
                 .ok_or_else(|| KbStoreError::NotFound(kb.entry_id.clone()))?;
 
-            // v1.184 P1: the owner is immutable through patch APIs — moving
             // knowledge is explicit create/copy work.
             if existing.owner != kb.owner {
                 return Err(KbStoreError::ImmutableOwner(kb.entry_id.clone()));
             }
 
-            // v1.191 P1 T2 (durable §3): the ordinary store path carries
-            // content, not governance — the admitted audience-authoring
             // transaction is the only writer of holder_entry_id/disclosure, so
             // an ordinary update (compute, promote, sync) cannot transfer or
             // clear an existing private audience.
@@ -608,7 +585,6 @@ impl KbStore for InMemoryKbStore {
                 return Err(KbStoreError::ImmutableGovernance(kb.entry_id.clone()));
             }
 
-            // Re-check owner-scoped uniqueness if name or type changed
             if existing.canonical_name != kb.canonical_name || existing.block_type != kb.block_type
             {
                 Self::check_uniqueness(
@@ -637,8 +613,6 @@ impl KbStore for InMemoryKbStore {
     }
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -649,7 +623,6 @@ mod tests {
         KnowledgeEntryRecord::new(world_id, block_type, name)
     }
 
-    // T5: Same canonical_name in different block types is allowed
     #[tokio::test]
     async fn test_uniqueness_allows_different_type() {
         let store = InMemoryKbStore::new();
@@ -660,7 +633,6 @@ mod tests {
         assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
-    // T6: Same canonical_name + type in different worlds is allowed
     #[tokio::test]
     async fn test_uniqueness_allows_different_world() {
         let store = InMemoryKbStore::new();
@@ -671,7 +643,6 @@ mod tests {
         assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
-    // T7: Soft-deleted block does not block uniqueness re-insertion
     #[tokio::test]
     async fn test_deleted_allows_reinsertion() {
         let store = InMemoryKbStore::new();
@@ -681,12 +652,10 @@ mod tests {
 
         store.delete_knowledge_entry(&id).await.unwrap();
 
-        // Re-insert with same canonical_name + type should succeed
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");
         assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
-    // T8: Query with block_type filter
     #[tokio::test]
     async fn test_query_by_block_type() {
         let store = InMemoryKbStore::new();
@@ -711,7 +680,6 @@ mod tests {
         assert_eq!(result.total_count, 2);
     }
 
-    // T9: Query with canonical_name filter
     #[tokio::test]
     async fn test_query_by_canonical_name() {
         let store = InMemoryKbStore::new();
@@ -732,7 +700,6 @@ mod tests {
         assert_eq!(result.items[0].canonical_name, "Hero");
     }
 
-    // T10: Query with text search (matches canonical_name, summary, tags)
     #[tokio::test]
     async fn test_query_text_search() {
         let store = InMemoryKbStore::new();
@@ -757,28 +724,24 @@ mod tests {
         .unwrap();
         store.insert_knowledge_entry(kb2).await.unwrap();
 
-        // Search by canonical_name substring
         let r = store
             .query(&KbQuery::new("wld_1").with_text_search("knight"))
             .await
             .unwrap();
         assert_eq!(r.items.len(), 1);
 
-        // Search by summary substring
         let r = store
             .query(&KbQuery::new("wld_1").with_text_search("brooding"))
             .await
             .unwrap();
         assert_eq!(r.items.len(), 1);
 
-        // Search by tag
         let r = store
             .query(&KbQuery::new("wld_1").with_text_search("fantasy"))
             .await
             .unwrap();
         assert_eq!(r.items.len(), 1);
 
-        // Case-insensitive
         let r = store
             .query(&KbQuery::new("wld_1").with_text_search("DARK"))
             .await
@@ -786,7 +749,6 @@ mod tests {
         assert_eq!(r.items.len(), 1);
     }
 
-    // T11: Query with pagination
     #[tokio::test]
     async fn test_query_pagination() {
         let store = InMemoryKbStore::new();
@@ -801,7 +763,6 @@ mod tests {
                 .unwrap();
         }
 
-        // Page 1: limit=2, offset=0
         let r = store
             .query(&KbQuery::new("wld_1").with_limit(2).with_offset(0))
             .await
@@ -810,7 +771,6 @@ mod tests {
         assert_eq!(r.total_count, 5);
         assert!(r.has_more);
 
-        // Page 3: limit=2, offset=4
         let r = store
             .query(&KbQuery::new("wld_1").with_limit(2).with_offset(4))
             .await
@@ -820,7 +780,6 @@ mod tests {
         assert!(!r.has_more);
     }
 
-    // T12: Attach and retrieve SourceAnchors
     #[tokio::test]
     async fn test_attach_and_get_anchors() {
         let store = InMemoryKbStore::new();
@@ -838,7 +797,6 @@ mod tests {
         assert_eq!(fetched.len(), 2);
     }
 
-    // T13: Attach anchor to non-existent KnowledgeEntryRecord fails
     #[tokio::test]
     async fn test_attach_anchor_not_found() {
         let store = InMemoryKbStore::new();
@@ -850,7 +808,6 @@ mod tests {
         assert!(matches!(err, KbStoreError::NotFound(_)));
     }
 
-    // T14: Get anchors for block with none returns empty vec
     #[tokio::test]
     async fn test_get_anchors_empty() {
         let store = InMemoryKbStore::new();
@@ -862,7 +819,6 @@ mod tests {
         assert_eq!(anchors, Vec::<SourceAnchor>::new());
     }
 
-    // T15: Update a KnowledgeEntryRecord
     #[tokio::test]
     async fn test_update_knowledge_entry() {
         let store = InMemoryKbStore::new();
@@ -877,7 +833,6 @@ mod tests {
         assert_eq!(fetched.canonical_name, "Superhero");
     }
 
-    // T16: Update to conflicting canonical_name + block_type fails
     #[tokio::test]
     async fn test_update_conflict() {
         let store = InMemoryKbStore::new();
@@ -887,13 +842,11 @@ mod tests {
         let mut kb2 = make_block("wld_1", BlockType::Character, "Villain");
         store.insert_knowledge_entry(kb2.clone()).await.unwrap();
 
-        // Rename kb2 to "Hero" — should conflict with kb1
         kb2.canonical_name = "Hero".to_string();
         let err = store.update_knowledge_entry(kb2).await.unwrap_err();
         assert!(matches!(err, KbStoreError::Duplicate { .. }));
     }
 
-    // T17: Update non-existent KnowledgeEntryRecord fails
     #[tokio::test]
     async fn test_update_not_found() {
         let store = InMemoryKbStore::new();
@@ -902,7 +855,6 @@ mod tests {
         assert!(matches!(err, KbStoreError::NotFound(_)));
     }
 
-    // T19: Delete non-existent KnowledgeEntryRecord fails
     #[tokio::test]
     async fn test_delete_not_found() {
         let store = InMemoryKbStore::new();
@@ -910,7 +862,6 @@ mod tests {
         assert!(matches!(err, KbStoreError::NotFound(_)));
     }
 
-    // T20: Query scoped to different world returns nothing
     #[tokio::test]
     async fn test_query_world_isolation() {
         let store = InMemoryKbStore::new();
@@ -923,7 +874,6 @@ mod tests {
         assert_eq!(result.items, Vec::<KnowledgeEntryRecord>::new());
     }
 
-    // T21: Deprecated block does not block uniqueness
     #[tokio::test]
     async fn test_deprecated_allows_reinsertion() {
         let store = InMemoryKbStore::new();
@@ -933,12 +883,10 @@ mod tests {
         kb.status = KeyBlockStatus::Deprecated.as_str().to_string();
         store.update_knowledge_entry(kb).await.unwrap();
 
-        // Re-insert with same name + type should succeed
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");
         assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
 
-    // T22: Merged block does not block uniqueness
     #[tokio::test]
     async fn test_merged_allows_reinsertion() {
         let store = InMemoryKbStore::new();
@@ -951,8 +899,6 @@ mod tests {
         let kb2 = make_block("wld_1", BlockType::Character, "Hero");
         assert!(store.insert_knowledge_entry(kb2).await.is_ok());
     }
-
-    // ── P1 taxonomy tests (plan 2026-06-10-v1.40-world-kb-taxonomy T5) ──
 
     /// Helper: make a block with a novel body for taxonomy tests.
     fn make_novel_block(
@@ -975,7 +921,6 @@ mod tests {
         kb
     }
 
-    // AC1: Invalid wire block_type fails with structured error.
     // (BlockType is a Rust enum — unknown strings fail at deserialization,
     //  which is a structured parse error before reaching the store.
     //  This test confirms the validation path surfaces KbStoreError::Validation.)
@@ -985,29 +930,23 @@ mod tests {
     async fn test_block_type_enum_rejects_unknown_variant() {
         let json = r#"{"block_type": "unknown_type"}"#;
         let result = serde_json::from_str::<serde_json::Value>(json);
-        // The value parses as raw JSON but BlockType deserialization would fail.
         // nexus-kb validation layer relies on the typed enum.
-        assert!(result.is_ok()); // raw JSON parses
-                                 // Actual BlockType deserialization of "unknown_type" would fail:
+        assert!(result.is_ok());
         let bt_result = serde_json::from_value::<BlockType>(serde_json::json!("unknown_type"));
         assert!(bt_result.is_err());
     }
 
-    // AC2: Novel-profile ingest accepts minimum body per mapping table.
     // One happy-path per block_type (representative subset of mapping table).
     #[tokio::test]
     async fn test_novel_happy_path_per_block_type() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
 
-        // character → character
         let kb = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
-        // scene → location
         let kb = make_novel_block("wld_1", BlockType::Scene, "loc_neon_city", "location");
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
-        // organization → society
         let kb = make_novel_block(
             "wld_1",
             BlockType::Organization,
@@ -1016,28 +955,22 @@ mod tests {
         );
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
-        // conflict → rules
         let kb = make_novel_block("wld_1", BlockType::Conflict, "rule_magic_cost", "rules");
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
-        // item → economy
         let kb = make_novel_block("wld_1", BlockType::Item, "item_memory_crystal", "economy");
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
-        // info_point → foundation
         let kb = make_novel_block("wld_1", BlockType::InfoPoint, "fnd_cosmology", "foundation");
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
-        // event → background
         let kb = make_novel_block("wld_1", BlockType::Event, "evt_great_fire", "background");
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
 
-        // ability (no novel_category mapping, but novel mode allows any valid category)
         let kb = make_novel_block("wld_1", BlockType::Ability, "abl_shadow_walk", "character");
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
     }
 
-    // AC2 negative: Missing novel_category on character block fails in Novel mode.
     #[tokio::test]
     async fn test_novel_missing_category_rejected() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
@@ -1056,7 +989,6 @@ mod tests {
         );
     }
 
-    // AC3: (world_id, block_type, canonical_name) active uniqueness preserved on insert.
     // (Already covered by existing T4 test, but let's confirm in Novel mode.)
     #[tokio::test]
     async fn test_novel_uniqueness_preserved() {
@@ -1070,7 +1002,6 @@ mod tests {
         assert!(matches!(err, KbStoreError::Duplicate { ref name, .. } if name == "char_lin_xia"));
     }
 
-    // AC4: world_refs resolution — query by canonical_name after insert.
     // Simulates resolving world_refs like "char_lin_xia" against stored items.
     #[tokio::test]
     async fn test_world_refs_resolve_by_canonical_name() {
@@ -1082,7 +1013,6 @@ mod tests {
         let kb_loc = make_novel_block("wld_1", BlockType::Scene, "loc_neon_city", "location");
         store.insert_knowledge_entry(kb_loc).await.unwrap();
 
-        // Resolve "char_lin_xia"
         let result = store
             .query(&KbQuery::new("wld_1").with_canonical_name("char_lin_xia"))
             .await
@@ -1090,7 +1020,6 @@ mod tests {
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].block_type, BlockType::Character);
 
-        // Resolve "loc_neon_city"
         let result = store
             .query(&KbQuery::new("wld_1").with_canonical_name("loc_neon_city"))
             .await
@@ -1098,7 +1027,6 @@ mod tests {
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].block_type, BlockType::Scene);
 
-        // Non-existent ref returns empty
         let result = store
             .query(&KbQuery::new("wld_1").with_canonical_name("char_unknown"))
             .await
@@ -1106,11 +1034,9 @@ mod tests {
         assert_eq!(result.items, Vec::<KnowledgeEntryRecord>::new());
     }
 
-    // AC5: kb-extract prompt output schema is recognized by validation.
     // Parse a sample extract output matching the new prompt format.
     #[tokio::test]
     async fn test_kb_extract_output_passes_validation() {
-        // Sample LLM output matching the updated extract.md response format
         let extract_json = r#"{
             "block_type": "character",
             "canonical_name": "char_lin_xia",
@@ -1128,19 +1054,16 @@ mod tests {
 
         let value: serde_json::Value = serde_json::from_str(extract_json).unwrap();
 
-        // Verify block_type deserializes from wire snake_case
         let bt: BlockType = serde_json::from_value(value["block_type"].clone()).unwrap();
         assert_eq!(bt, BlockType::Character);
 
-        // Verify body passes novel validation
         let body: KnowledgeEntryBody = serde_json::from_value(value["body"].clone()).unwrap();
         assert!(validate_body(bt, Some(&body), ValidationMode::Novel).is_ok());
     }
 
-    // Confirm that generic store does NOT enforce novel_category.
     #[tokio::test]
     async fn test_generic_store_accepts_body_without_novel_category() {
-        let store = InMemoryKbStore::new(); // Generic mode by default
+        let store = InMemoryKbStore::new();
         let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "char_generic");
         kb.set_body(KnowledgeEntryBody {
             summary: Some("A generic character".to_string()),
@@ -1153,14 +1076,12 @@ mod tests {
         assert!(store.insert_knowledge_entry(kb).await.is_ok());
     }
 
-    // Novel mode update also validates body.
     #[tokio::test]
     async fn test_novel_update_validates_body() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let mut kb = make_novel_block("wld_1", BlockType::Character, "char_hero", "character");
         store.insert_knowledge_entry(kb.clone()).await.unwrap();
 
-        // Update to body missing novel_category should fail
         kb.set_body(KnowledgeEntryBody {
             summary: Some("updated".to_string()),
             attributes: Some(serde_json::json!({"traits": ["old"]})),
@@ -1174,8 +1095,6 @@ mod tests {
             matches!(err, KbStoreError::Validation(ref ve) if ve.message.contains("novel_category is required"))
         );
     }
-
-    // ── Computable query filter (V1.61 P1) ─────────────────────────
 
     fn make_computable_block(world_id: &str, name: &str, computable: bool) -> KnowledgeEntryRecord {
         let mut kb = KnowledgeEntryRecord::new(world_id, BlockType::Character, name);
@@ -1250,7 +1169,7 @@ mod tests {
             .await
             .unwrap();
 
-        let q = KbQuery::new("wld_1"); // computable defaults to None
+        let q = KbQuery::new("wld_1");
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 2);
     }
@@ -1258,7 +1177,6 @@ mod tests {
     #[tokio::test]
     async fn query_computable_with_computable_absent_in_body() {
         let store = InMemoryKbStore::new();
-        // Insert a block with no computable field at all (legacy block)
         let mut kb = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "Legacy");
         kb.set_body(KnowledgeEntryBody {
             summary: Some("legacy".to_string()),
@@ -1269,20 +1187,15 @@ mod tests {
         .unwrap();
         store.insert_knowledge_entry(kb).await.unwrap();
 
-        // Filtering for computable=true should exclude the legacy block
         let q = KbQuery::new("wld_1").with_computable(Some(true));
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 0);
 
-        // Filtering for computable=false should include the legacy block
         let q = KbQuery::new("wld_1").with_computable(Some(false));
         let result = store.query(&q).await.unwrap();
         assert_eq!(result.total_count, 1);
     }
 
-    // ── v1.191 P1 T2: native holder governance (durable §§1, 3) ─────────
-    //
-    // Domain-parity home for the governance contract: audience
     // omission/explicit semantics, the closed native pair, reserved-key
     // rejection, read-selection construction, and the ordinary store path's
     // refusal to move governance.
@@ -1361,7 +1274,6 @@ mod tests {
             "an omitted patch audience authors no governance column"
         );
 
-        // A content-only edit therefore keeps the stored private audience.
         let mut edited = store.get_knowledge_entry(&entry_id).await.unwrap();
         edited.canonical_name = "Private note v2".to_string();
         store.update_knowledge_entry(edited).await.unwrap();
@@ -1466,7 +1378,6 @@ mod tests {
             assert_eq!(&parsed, audience);
         }
 
-        // The enum-level snake_case spelling must not come back: the frozen
         // schemas and the generated DTOs use hyphenated tags only.
         assert!(
             serde_json::from_value::<KnowledgeAudience>(

@@ -1,5 +1,4 @@
 /**
- * Inline tintable Nexus mark — timeline geometry shared with `logo-mono.svg`.
  *
  * `logo-mono.svg` bakes the provenance grayscale gradient (light→black). This
  * component keeps a flat `currentColor` stroke/fill so buttons, badges, and
@@ -21,7 +20,6 @@ export interface NexusMarkProps {
   label?: string;
   className?: string;
   /**
-   * Rendered height in px. Width follows the timeline aspect ratio
    * (`logoMarkAspectRatio`) so the mark stays wide; override with CSS
    * `w-auto` + an explicit height class when preferred.
    */
@@ -49,18 +47,15 @@ function NexusMarkImpl({
     >
       <title id={titleId}>{label}</title>
       <g fill="none" stroke="currentColor" strokeLinecap="butt">
-        {/* Axis segments between node outer edges */}
         <path
           strokeWidth={3.5}
           d="M28 14 H64 M92 14 H128 M156 14 H192 M220 14 H256"
         />
-        {/* Ring nodes (left pair + right pair) */}
         <circle cx={14} cy={14} r={12.125} strokeWidth={3.75} />
         <circle cx={78} cy={14} r={12.125} strokeWidth={3.75} />
         <circle cx={206} cy={14} r={12.125} strokeWidth={3.75} />
         <circle cx={270} cy={14} r={12.125} strokeWidth={3.75} />
       </g>
-      {/* Solid center node */}
       <circle cx={142} cy={14} r={14} fill="currentColor" />
     </svg>
   );

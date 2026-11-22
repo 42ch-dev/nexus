@@ -199,7 +199,6 @@ pub async fn get_mind_state(
     pool: &SqlitePool,
     mind_state_id: &str,
 ) -> Result<Option<MindStateRow>, LocalDbError> {
-    // `mind_state_id as "mind_state_id!"` — SQLite describes a TEXT PRIMARY
     // KEY as nullable (sqlx 0.8.6), the non-null coercion matches the field.
     let row = sqlx::query_as!(
         MindStateRow,

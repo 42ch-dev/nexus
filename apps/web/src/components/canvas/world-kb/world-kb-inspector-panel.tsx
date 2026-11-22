@@ -1,5 +1,4 @@
 /**
- * World KB inspector panel (V1.74 A10 split).
  *
  * Routes the current selection to the appropriate inspector:
  * entity → EntityInspector, candidate → PromotionInspector, none → placeholder.

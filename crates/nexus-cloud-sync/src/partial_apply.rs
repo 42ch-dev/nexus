@@ -96,14 +96,7 @@ impl PartialApplyResult {
 
             match apply_status.as_str() {
                 "applied" => succeeded_deltas.push(info),
-                "rejected" => failed_deltas.push(info),
-                "skipped_dependency" => {
-                    // Skipped due to dependency failure — treat as failed
-                    failed_deltas.push(info);
-                }
-                _ => {
-                    failed_deltas.push(info);
-                }
+                _ => failed_deltas.push(info),
             }
         }
 
@@ -111,7 +104,6 @@ impl PartialApplyResult {
         let failed_count = failed_deltas.len();
         let total_count = succeeded_count + failed_count;
 
-        // Determine if the failed deltas are retryable.
         // Deltas with dependency skips are retryable once their dependencies are resolved.
         let retryable = failed_deltas.iter().all(|d| {
             d.apply_status == "skipped_dependency"

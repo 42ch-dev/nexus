@@ -1,5 +1,4 @@
 /**
- * CanvasSurfaceKind — V1.122 P1 T1.
  *
  * Pins the additive `"timeline"` peer surface value at two layers:
  *   1. Type-level: `CanvasSurfaceKind` accepts `'timeline'` (compile-time).
@@ -22,7 +21,6 @@ describe('CanvasSurfaceKind — V1.122 P1 T1 adds "timeline" peer surface', () =
   });
 
   it('preserves the existing surface kinds (additive only)', () => {
-    // The shipped kinds MUST remain so existing adapters stay valid.
     const strategy: CanvasSurfaceKind = 'strategy';
     const outline: CanvasSurfaceKind = 'outline';
     const worldKbEntities: CanvasSurfaceKind = 'world-kb-entities';
@@ -33,7 +31,6 @@ describe('CanvasSurfaceKind — V1.122 P1 T1 adds "timeline" peer surface', () =
   });
 
   it('CanvasSurfaceAdapter accepts a synthetic adapter with surfaceKind: "timeline"', () => {
-    // The contract CanvasShell + useCanvasSurface rely on to "register" a
     // surface is the shared `CanvasSurfaceAdapter` interface. A minimal
     // adapter declaring the Timeline surface MUST satisfy it.
     const synthetic: CanvasSurfaceAdapter<

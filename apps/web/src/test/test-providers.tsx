@@ -1,5 +1,4 @@
 /**
- * Test wrapper that mounts the React providers screens depend on.
  *
  * Mirrors src/main.tsx's provider stack (minus ThemeProvider localStorage side
  * effects, which screens do not exercise). Use `renderInApp` in component tests
@@ -20,7 +19,6 @@ import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { ToastProvider, Toaster } from '@/lib/use-toast';
 
 /**
- * Build a fresh QueryClient per test. Defaults are overridden so retries do not
  * re-fire handlers unexpectedly and errors surface immediately (no retry delay).
  */
 export function makeQueryClient(): QueryClient {
@@ -40,7 +38,6 @@ export const noopClient = {
 interface RenderInAppOptions extends Omit<RenderOptions, 'wrapper'> {
   client?: NexusClient;
   /**
-   * Desktop capabilities to inject (V1.66 desktop-mode tests). Omit (or `null`)
    * to simulate the browser build — `useDesktopCapabilities()` returns `null`
    * and native affordances hide.
    */

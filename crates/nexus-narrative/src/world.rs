@@ -152,8 +152,6 @@ impl World {
     }
 }
 
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
-
 impl From<nexus_contracts::World> for World {
     fn from(c: nexus_contracts::World) -> Self {
         Self {

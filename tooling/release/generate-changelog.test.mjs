@@ -164,13 +164,11 @@ test("resolveChangelogBase takes the semver maximum, not git's version sort", ()
   try {
     initGitRepo(dir);
     const baseline = commitFile(dir, "CHANGELOG.md", "# Changelog\n", "docs: add changelog");
-    // Both channels share a core: the stable outranks its own rc under the
     // module comparator even though `git tag --sort=-v:refname` reverses them.
     tagRelease(dir, "v0.2.0-rc.1", baseline);
     tagRelease(dir, "v0.2.0", baseline);
     assert.deepEqual(resolveChangelogBase(dir), { tag: "v0.2.0", source: "tag" });
 
-    // Unparseable `v*` refs are skipped rather than chosen.
     tagRelease(dir, "vnext", baseline);
     assert.deepEqual(resolveChangelogBase(dir), { tag: "v0.2.0", source: "tag" });
   } finally {

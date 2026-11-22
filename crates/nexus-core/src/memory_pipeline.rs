@@ -213,9 +213,6 @@ impl MemoryPipelineCtx {
     }
 }
 
-// ── Review pipeline ────────────────────────────────────────────────────────
-
-/// Maximum pending rows inspected per review call (V1.80 REL-01).
 pub const REVIEW_BATCH_LIMIT: i64 = 50;
 
 /// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
@@ -306,7 +303,6 @@ pub async fn process_bearer_review_batch(
         }
 
         let decision = nexus_creator_memory::review::classify_pending_review(&row.input);
-        // A row that has started runs to completion: the provider journals each
         // decision, and cancelling one mid-transaction can leave its target
         // unsettled, which would refuse the bearer's next read. The call budget
         // is therefore checked between rows, never inside one.
@@ -343,7 +339,6 @@ async fn consume_review_decision(
     };
 
     let decision = match action {
-        // Binding-local Character pending must stay binding-local: a
         // Promote decision on a World-life (binding) scope is coerced to
         // the fragment path so it retains binding provenance (blocking
         // binding removal via `binding_has_local_memory`) and only becomes
@@ -363,7 +358,6 @@ async fn consume_review_decision(
         },
         ReviewAction::FragmentOnly => fragment_decision(&row.input),
         ReviewAction::Drop => json!({ "action": "drop" }),
-        // MergeIntoExisting and TriggerSoulExperienceOnly are later features.
         _ => {
             tracing::debug!(
                 pending_id = %row.input.pending_id,
@@ -374,7 +368,6 @@ async fn consume_review_decision(
         }
     };
 
-    // D18: a binding-local candidate's dependency namespace is its binding; a
     // shared candidate (Creator arm or shared Character scope) carries none.
     let binding_id = if row.binding_local {
         row.input.scope_id.as_deref()
@@ -448,14 +441,12 @@ async fn promote_decision(
         )
         .await
         .map_err(|error| internal_err("promote_to_long_term_failed", error))?;
-    // The authored identity the CLI addresses a long-term memory by: the
     // promotion derives it from the pending row, because the retained file
     // promotion's slug came from its minted `memory_id` and a promoted record
     // with no slug cannot be listed, shown, edited or deleted
     // (fix round 1, Greptile `memory_pipeline.rs:441`).
     let memory_kind = nexus_creator_memory::review::task_kind_to_memory_kind(&input.task_kind);
     let memory_id = format!("mem_{}", input.pending_id);
-    // The prefix above is local, so a slug-less id is a broken invariant rather
     // than a pending row the pipeline can serve (fix round 3, F3).
     let slug = nexus_creator_memory::long_term_memory::slug_from_memory_id(&memory_id);
     let slug = slug.ok_or_else(|| {
@@ -511,7 +502,6 @@ impl PassthroughSummarizer {
     }
 }
 
-// `summarize` performs no async I/O (passthrough) — trait contract requires
 // `async`; clippy 1.98 `unused_async_trait_impl` is toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
 impl SessionDigestSummarizer for PassthroughSummarizer {

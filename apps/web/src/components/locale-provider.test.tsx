@@ -1,5 +1,4 @@
 /**
- * LocaleProvider coverage.
  *
  * Mirrors theme-provider.test.tsx to pin the architectural surface P1 inherits:
  * provider mount, default-locale detection (stored → system → fallback),
@@ -66,8 +65,8 @@ describe('LocaleProvider mount', () => {
 
 describe('LocaleProvider default-locale detection', () => {
   it('prefers a stored locale over the system preference', () => {
-    setNavigatorLanguage('zh-CN'); // OS says Chinese…
-    window.localStorage.setItem(STORAGE_KEY, 'en'); // …but stored says English.
+    setNavigatorLanguage('zh-CN');
+    window.localStorage.setItem(STORAGE_KEY, 'en');
     let current: LocalePreference = 'system';
     renderWith(<LocaleProbe onPreference={(p) => (current = p)} />);
     expect(current).toBe('en');
@@ -180,14 +179,11 @@ describe('useLocale outside provider', () => {
       useLocale();
       return null;
     }
-    // Silence the expected error noise in the test reporter.
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => render(<Orphan />)).toThrow(/useLocale must be used within a LocaleProvider/);
     spy.mockRestore();
   });
 });
-
-// ── helpers ─────────────────────────────────────────────────────────────────
 
 function LocaleProbeApi({
   onReady,

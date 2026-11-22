@@ -115,9 +115,6 @@ pub fn run(cmd: ComputeCommand, _config: &CliConfig, _output_format: &str) -> Re
     }
 }
 
-// ─── compute build ─────────────────────────────────────────────────────────
-
-/// Build a module daemon-free and stage the pair under `dist/<module_id>/`.
 #[allow(clippy::too_many_lines)]
 fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
     let module_dir = manifest_path.parent().ok_or_else(|| {
@@ -145,7 +142,6 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
     }
     let module_id = &manifest.module_id;
 
-    // The manifest-supplied id becomes a directory name under dist/ — apply
     // the same single-path-component safety rule as install before staging
     // (I4): a value containing `../` or an absolute path must not escape the
     // intended dist tree.
@@ -156,7 +152,6 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
         )
     })?;
 
-    // Same invocation the wasm-host build.rs uses (compile_module).
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
         .arg("--target")
@@ -196,7 +191,6 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
         ));
     }
 
-    // Locate the artifact. cdylib artifact names use underscores (crate name
     // `basic-combat` → `basic_combat.wasm`); CARGO_TARGET_DIR may relocate
     // the target dir (same resolution the wasm-host build.rs uses).
     let profile = if release { "release" } else { "debug" };
@@ -214,7 +208,6 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
         ));
     }
 
-    // Stage the pair under dist/<module_id>/; the source manifest is never
     // mutated (wasm-host build.rs precedent).
     let dist_dir = module_dir.join("dist").join(module_id);
     std::fs::create_dir_all(&dist_dir).map_err(|e| {
@@ -260,13 +253,9 @@ fn cmd_build(manifest_path: &Path, release: bool) -> Result<()> {
     Ok(())
 }
 
-// ─── compute validate ──────────────────────────────────────────────────────
-
-/// Validate a manifest (and optionally its `wasm_sha256` pairing).
 ///
 /// Exit 2 on manifest failure (field-level), exit 3 on pairing mismatch.
 fn cmd_validate(manifest_path: &Path, wasm_path: Option<&Path>, json_output: bool) -> Result<()> {
-    // A missing/unreadable manifest is a validation failure with the same
     // field-level shape as any other error — `--json` callers must get the
     // promised `{valid, manifest, errors}` document, not a bare message (I8).
     let manifest_bytes = match std::fs::read(manifest_path) {
@@ -300,7 +289,6 @@ fn cmd_validate(manifest_path: &Path, wasm_path: Option<&Path>, json_output: boo
         errors.extend(errs.into_iter().map(field_error));
     }
 
-    // qc2 W-1: the module id becomes a directory name under dist/ (build)
     // and ~/.nexus42/modules/<id>/ (install), so `validate` must not report
     // `valid: true` for a traversal id the authoring loop cannot stage —
     // build/install already reject it (exit 2); validate now agrees
@@ -313,7 +301,6 @@ fn cmd_validate(manifest_path: &Path, wasm_path: Option<&Path>, json_output: boo
     }
 
     if let Some(wasm_path) = wasm_path {
-        // qc2 S-1: `--wasm` requests pairing verification, so an absent
         // `wasm_sha256` cannot be paired — reject with the pairing exit
         // code (3) and a field-level error instead of silently passing
         // (mirrors `install`, which requires the hash, I10).
@@ -343,7 +330,6 @@ fn cmd_validate(manifest_path: &Path, wasm_path: Option<&Path>, json_output: boo
             }
         };
         if let Err(pair_err) = manifest.verify_wasm_sha256(&wasm_bytes) {
-            // AR-9: pairing mismatch is exit 3 (distinct from validation
             // failures, exit 2).
             return fail_validation(
                 manifest_path,
@@ -424,7 +410,6 @@ fn field_error(message: String) -> FieldError {
     let field = message
         .find('`')
         .and_then(|start| {
-            // Extract the bytes BETWEEN the two backticks — slicing up to
             // the closing backtick and re-splitting yields `missing field `,
             // not the field name (C1).
             message[start + 1..]
@@ -442,9 +427,6 @@ fn field_error(message: String) -> FieldError {
     FieldError { field, message }
 }
 
-// ─── compute install ───────────────────────────────────────────────────────
-
-/// Re-verify pairing and copy the pair into `~/.nexus42/modules/<id>/`.
 ///
 /// Exit vocabulary (I1): 2 = validation failure (bad module id, unreadable/
 /// unparseable manifest, `--module-id`/manifest identity mismatch), 3 =
@@ -457,7 +439,6 @@ fn cmd_install(
     wasm_path: &Path,
     json_output: bool,
 ) -> Result<()> {
-    // Path-traversal guard — the module id becomes a directory name.
     nexus_home_layout::validate_run_id_safe(module_id).map_err(|e| {
         compute_exit(
             exit::VALIDATION,
@@ -465,7 +446,6 @@ fn cmd_install(
         )
     })?;
 
-    // Manifest read/parse failures are validation failures (exit 2).
     let manifest_bytes = read_json_file(exit::VALIDATION, manifest_path, "manifest")?;
     let manifest: ModuleManifest = serde_json::from_slice(&manifest_bytes).map_err(|e| {
         compute_exit(
@@ -474,7 +454,6 @@ fn cmd_install(
         )
     })?;
 
-    // The advertised module-id/manifest identity must match (I2): staging a
     // manifest under a directory keyed by a different id would create an
     // invalid/ambiguous store pair no runtime loader can repair.
     if manifest.module_id != module_id {
@@ -487,7 +466,6 @@ fn cmd_install(
         ));
     }
 
-    // AR-9 pairing: install REQUIRES a content hash (I10). An absent
     // `wasm_sha256` bypasses the pairing requirement and permits a
     // manifest/wasm mismatch; the staged `build` output always injects one.
     if manifest.wasm_sha256.is_none() {
@@ -505,7 +483,6 @@ fn cmd_install(
         )
     })?;
 
-    // Re-verify pairing (AR-9): exit 3 on mismatch.
     manifest
         .verify_wasm_sha256(&wasm_bytes)
         .map_err(|e| compute_exit(exit::PAIRING, e))?;
@@ -539,9 +516,6 @@ fn cmd_install(
     Ok(())
 }
 
-// ─── shared helpers ────────────────────────────────────────────────────────
-
-/// Build a [`CliError::ComputeExit`] with an AR-9 exit code.
 fn compute_exit(code: i32, message: impl Into<String>) -> CliError {
     CliError::ComputeExit {
         code,
@@ -588,7 +562,6 @@ fn toolchain_home_context() -> String {
     };
     let resolution = |var: &str, default_subdir: &str| {
         let state = match std::env::var_os(var) {
-            // Present — displayable or not — is inherited by the child unchanged.
             Some(pin) if !pin.is_empty() => {
                 return format!(
                     "{var}={} (inherited from the calling environment)",
@@ -672,14 +645,12 @@ mod tests {
 
     #[test]
     fn field_error_extracts_unknown_field_backtick() {
-        // serde unknown-field errors also backtick the field name.
         let e = field_error("unknown field `battle_report_kind`, expected one of ...".to_string());
         assert_eq!(e.field, "battle_report_kind");
     }
 
     #[test]
     fn validation_failure_json_shape() {
-        // I8: the `--json` failure verdict is the promised
         // `{valid, manifest, errors}` shape with field-level errors.
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("manifest.json");
@@ -699,7 +670,6 @@ mod tests {
 
     #[test]
     fn cmd_validate_read_failure_exits_validation() {
-        // I8: a missing/unreadable manifest is a validation failure (exit 2)
         // routed through the same failure path as field errors.
         let dir = tempfile::tempdir().expect("tempdir");
         let missing = dir.path().join("missing.json");
@@ -724,7 +694,6 @@ mod tests {
 
     #[test]
     fn cmd_install_rejects_module_id_mismatch() {
-        // I2: `--module-id` must match `manifest.module_id` — a mismatch is
         // rejected before any copy (exit 2, validation).
         let dir = tempfile::tempdir().expect("tempdir");
         let manifest_path = dir.path().join("manifest.json");
@@ -742,13 +711,11 @@ mod tests {
             matches!(err, CliError::ComputeExit { code: 2, .. }),
             "id mismatch must exit 2, got {err}"
         );
-        // No store pair may be created.
         assert!(!dir.path().join(".nexus42").exists());
     }
 
     #[test]
     fn cmd_install_rejects_absent_hash() {
-        // I10: install REQUIRES `wasm_sha256` — an absent hash bypasses the
         // AR-9 pairing requirement and must be rejected (exit 3, pairing).
         let dir = tempfile::tempdir().expect("tempdir");
         let manifest_path = dir.path().join("manifest.json");
@@ -771,7 +738,6 @@ mod tests {
 
     #[test]
     fn cmd_build_rejects_path_traversal_module_id() {
-        // I4: the manifest-supplied module id becomes a directory name under
         // dist/ — a traversal value must be rejected before staging (exit 2).
         let dir = tempfile::tempdir().expect("tempdir");
         let manifest_path = dir.path().join("manifest.json");
@@ -791,7 +757,6 @@ mod tests {
 
     #[test]
     fn cmd_validate_rejects_path_traversal_module_id() {
-        // qc2 W-1: `validate` must not report a traversal module id as
         // valid — the id becomes a directory name under dist/ and the
         // module store, so the authoring loop's validator agrees with
         // build/install (exit 2, field-level error on module_id).
@@ -808,7 +773,6 @@ mod tests {
             matches!(err, CliError::ComputeExit { code: 2, .. }),
             "traversal module id must exit 2, got {err}"
         );
-        // The field-level module_id error shape is pinned by the hermetic
         // test (compute_cli.rs) and validation_failure_json tests.
     }
 
@@ -873,8 +837,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         assert_eq!(crate_name_from_cargo_toml(dir.path()), None);
     }
-
-    // ── T3 (v1.215 P1): fail-loud toolchain-home diagnostics ───────────────
 
     /// A `cargo` stand-in that writes `stderr_line` to stderr and exits with
     /// `exit_code` — the production build takes its failure path through a
@@ -987,7 +949,6 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn build_failure_names_the_defaulted_toolchain_home_resolution() {
-        // `HOME` is process-wide: hold the shared HOME lock for the whole
         // override/assertion window so sibling CLI tests cannot race it.
         let _home = crate::testutil::isolated_home();
         let stub = stub_cargo(1, "error: stub cargo failure");
@@ -1094,7 +1055,6 @@ mod tests {
             "an empty CARGO_HOME must be named as present-but-empty, not absent: {message}"
         );
 
-        // An empty `HOME` is present-but-empty too, and leaves nothing to default against.
         drop(env);
         let _env = HomeEnv::set(Path::new(""), Some(OsStr::new("/pinned/rustup")), None);
         let message = cmd_build(&manifest_path, false)

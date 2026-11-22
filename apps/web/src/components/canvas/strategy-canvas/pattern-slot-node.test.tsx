@@ -1,5 +1,4 @@
 /**
- * `PatternSlot` node (v239-p3-canvas-compose-ui T2/T3b).
  *
  * Collapsed render carries `{pattern_id, version, effect_class, slot_bindings}`;
  * the binding diagnostic names an unbound required slot on the node; the

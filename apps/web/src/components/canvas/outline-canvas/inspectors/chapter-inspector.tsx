@@ -1,5 +1,4 @@
 /**
- * Outline canvas — chapter inspector (V1.73 B5 split, `R-V172P0-QC1-002`;
  * V1.75 A3 mounts the outline-content editor below the metadata fields).
  *
  * Edits chapter outline metadata (title/slug/status/planned words/volume) via
@@ -61,7 +60,6 @@ export function ChapterInspector({
   const [planned, setPlanned] = useState('');
   const [volume, setVolume] = useState('');
 
-  // Reset local form when selection changes.
   useEffect(() => {
     if (!chapter) return;
     setTitle(titles?.[String(chapter.chapter)] ?? chapter.title ?? '');

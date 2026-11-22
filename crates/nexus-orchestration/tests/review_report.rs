@@ -31,8 +31,6 @@ use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
 
-// ── Fixtures ───────────────────────────────────────────────────────────────
-
 const CREATOR: &str = "ctr_review_report_test";
 
 fn novel_work(work_id: &str, work_ref: &str, chapter: i32, total: i32) -> WorkRecord {
@@ -145,7 +143,6 @@ struct FieldNamesCapture(Arc<Mutex<Vec<CapturedEvent>>>);
 struct FieldNameCollector(Vec<String>);
 
 impl Visit for FieldNameCollector {
-    // The default `record_*` impls in tracing 0.1.44 all delegate here, so
     // implementing only `record_debug` covers every field type (`?` Debug,
     // `%` Display, str, i64, …).
     fn record_debug(&mut self, field: &Field, _value: &dyn std::fmt::Debug) {
@@ -163,8 +160,6 @@ impl Layer<Registry> for FieldNamesCapture {
         });
     }
 }
-
-// ── Parsed path (spec §1.2) ────────────────────────────────────────────────
 
 /// AC1 (parsed path): a well-formed `review-report.md` with three Issues
 /// bullets yields three finding rows carrying the parsed kind/severity/body.
@@ -201,7 +196,6 @@ Solid chapter with a few craft issues.
     let rows = list_work_findings(&pool, "wrk_parsed").await;
     assert_eq!(rows.len(), 3);
 
-    // Sanity: every persisted finding has the V1.47 §8.2 required fields.
     for f in &rows {
         assert_eq!(f.work_id, "wrk_parsed");
         assert_eq!(f.status, "open");
@@ -211,7 +205,6 @@ Solid chapter with a few craft issues.
         assert_ne!(f.description, "");
     }
 
-    // Spot-check the kind set + the critical→blocker severity mapping.
     let mut kinds: Vec<String> = rows.iter().map(|f| f.kind.clone()).collect();
     kinds.sort();
     assert_eq!(kinds, vec!["craft", "plot_hole", "world_inconsistency"]);
@@ -225,7 +218,6 @@ Solid chapter with a few craft issues.
         "critical report severity maps to blocker per spec §1.2"
     );
 
-    // The parsed body should not carry the placeholder synthesis text.
     assert!(
         !blocker
             .description
@@ -311,8 +303,6 @@ async fn parsed_report_applies_executor_default_when_omitted() {
     );
 }
 
-// ── Fallback path (spec §1.3) ──────────────────────────────────────────────
-
 /// AC2 (fallback, missing file): when `review-report.md` does not exist,
 /// exactly one placeholder finding is persisted and the call succeeds.
 #[serial_test::serial]
@@ -323,7 +313,6 @@ async fn missing_report_falls_back_to_placeholder_finding() {
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_missing_review", "wrk_missing").await;
 
-    // Empty temp dir — no review-report.md anywhere.
     let ws_root = tempfile::tempdir().unwrap().keep();
 
     let count = auto_chain::persist_review_findings_for_schedule(
@@ -334,7 +323,6 @@ async fn missing_report_falls_back_to_placeholder_finding() {
     .await
     .expect("missing-report must NOT fail the persist call");
 
-    // Spec §8.2: ≥1 finding per review pass.
     assert!(
         count >= 1,
         "missing-report fallback must persist ≥1 placeholder finding; got {count}"
@@ -343,11 +331,9 @@ async fn missing_report_falls_back_to_placeholder_finding() {
     let rows = list_work_findings(&pool, "wrk_missing").await;
     assert_eq!(rows.len(), 1, "exactly one placeholder finding");
     let f = &rows[0];
-    // V1.47 placeholder shape.
     assert_eq!(f.kind, "craft");
     assert_eq!(f.severity, "info");
     assert_eq!(f.target_executor, "none");
-    // The body must carry the V1.47 marker so reviewers can tell this row
     // came from the fallback rather than the parsed path.
     assert!(
         f.description.contains("V1.47 P0: synthesized finding"),
@@ -367,7 +353,6 @@ async fn empty_issues_section_falls_back_to_placeholder_finding() {
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_empty_review", "wrk_empty").await;
 
-    // Report exists but has no Issues section — parser yields zero findings.
     let report = "\
 # Review Report
 
@@ -405,7 +390,6 @@ Adequate; no actionable issues this pass.
 #[serial_test::serial]
 #[tokio::test]
 async fn large_report_falls_back_to_placeholder() {
-    // 300 KiB of padding > 256 KiB cap. The literal mirrors the
     // `MAX_REVIEW_REPORT_BYTES` constant in `auto_chain.rs`; if that constant
     // changes, bump this fixture to match (the assert! below guards it).
     const CAP_BYTES: usize = 256 * 1024;
@@ -441,7 +425,6 @@ async fn large_report_falls_back_to_placeholder() {
     let rows = list_work_findings(&pool, "wrk_large").await;
     assert_eq!(rows.len(), 1, "exactly one placeholder finding");
     let f = &rows[0];
-    // V1.47 placeholder shape (not parsed fields).
     assert_eq!(f.kind, "craft");
     assert_eq!(f.severity, "info");
     assert_eq!(f.target_executor, "none");
@@ -483,7 +466,6 @@ async fn parsed_findings_transaction_commits_and_is_idempotent_on_retry() {
 ";
     let ws_root = write_report_file("tx-novel", report);
 
-    // First pass: transaction commits all three parsed findings.
     let count1 =
         auto_chain::persist_review_findings_for_schedule(&pool, "sch_tx_review", Some(&ws_root))
             .await
@@ -493,8 +475,6 @@ async fn parsed_findings_transaction_commits_and_is_idempotent_on_retry() {
     let rows1 = list_work_findings(&pool, "wrk_tx").await;
     assert_eq!(rows1.len(), 3, "transaction committed all 3 rows");
 
-    // Second pass: same schedule + same report → idempotent (ON CONFLICT
-    // DO NOTHING fires inside the transaction). The row count must not grow.
     let count2 =
         auto_chain::persist_review_findings_for_schedule(&pool, "sch_tx_review", Some(&ws_root))
             .await
@@ -548,7 +528,6 @@ async fn non_review_preset_is_noop_with_workspace_dir() {
     let work = novel_work("wrk_nonrev", "nonrev-novel", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Insert a non-review schedule directly.
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         r"INSERT INTO creator_schedules
@@ -581,8 +560,6 @@ async fn non_review_preset_is_noop_with_workspace_dir() {
         "non-review preset must not persist any findings"
     );
 }
-
-// ── W-3 (qc3): chapter field in fallback tracing spans ───────────────────
 
 /// AC (W-3, qc3): every fallback `tracing::warn!` in the producer path
 /// includes the `chapter` field per spec §1.3 (operator-debugging field for
@@ -618,7 +595,6 @@ async fn fallback_warn_includes_chapter_field() {
     works::create_work(&pool, &work).await.unwrap();
     insert_review_schedule(&pool, "sch_chapter_field", "wrk_chapter_field").await;
 
-    // Empty workspace dir → guarantees the missing-report fallback fires.
     let ws_root = tempfile::tempdir().unwrap().keep();
 
     let capture = FieldNamesCapture::default();
@@ -642,7 +618,6 @@ async fn fallback_warn_includes_chapter_field() {
          (persisted_count = {persisted_count}); got none"
     );
 
-    // Filter to WARN-level events (the fallback `warn!` calls). The success
     // `info!` from `persist_placeholder_finding` also carries `schedule_id`
     // but is not a fallback warn, so filter on level to isolate the warns.
     let warn_events: Vec<&CapturedEvent> = events

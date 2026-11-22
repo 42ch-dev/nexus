@@ -1,5 +1,4 @@
 /**
- * Conflict-modal chrome — shared presentational shell (V1.124 P2).
  *
  * Overlay + dialog + field-diff chips + action tray + optional side-by-side
  * review. Props-first strings (no `useTranslation`, no RF, no contracts, no
@@ -32,7 +31,6 @@ export interface ConflictModalChromeProps<T extends string = string> {
   title: string;
   description?: ReactNode;
   /**
-   * Node rendered after the server revision span in the description branch.
    * Additive (V1.73): lets domain variants append a trailing clause without
    * changing existing Strategy/Outline descriptions.
    */

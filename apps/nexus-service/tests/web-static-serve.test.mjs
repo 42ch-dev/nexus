@@ -26,7 +26,6 @@ const DISABLED_PORT = 18_532;
 const KEYED_PORT = 18_533;
 const ESCAPE_PORT = 18_535;
 
-// Root bypasses the file mode, so the unreadable-file case cannot be provoked.
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 
 const INDEX_HTML = '<!doctype html><html><body>nexus-web-fixture</body></html>';
@@ -41,7 +40,6 @@ function tempDir(prefix) {
 }
 
 /**
- * Built-SPA fixture: an `assets/` hit, an ordinary served file, a file whose
  * mode denies reading (metadata still resolves), and a symlink whose target
  * lives outside the root.
  */
@@ -63,7 +61,6 @@ function webDistFixture() {
 }
 
 /**
- * Dist whose `index.html` is a symlink to a file outside the root: the SPA
  * fallback must be refused exactly like a direct `/index.html` hit.
  */
 function escapingIndexFixture() {
@@ -78,7 +75,6 @@ function escapingIndexFixture() {
 }
 
 /**
- * Request helper over `node:http` with an explicit raw path: `fetch` and the
  * WHATWG URL parser both collapse `%2e%2e` dot segments before they reach the
  * server, which is exactly the traversal form under test.
  */
@@ -194,7 +190,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     test('a dot-segment alias to index.html keeps the entry-HTML no-store tier', async () => {
-      // `/assets/%2e%2e%2findex.html` normalizes to the root `index.html`; the
       // cache tier follows the served location, not the raw first segment.
       const res = await rawRequest(ENABLED_PORT, '/assets/%2e%2e%2findex.html');
       assert.equal(res.status, 200);
@@ -259,7 +254,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
       });
     }
 
-    // The admission guard clamps `..` at the request root, so these forms pass
     // its `/v1/` exclusion as non-API paths, then `path.resolve(root, …)` folds
     // them back to `<root>/v1/…`. The handler's resolve view is the serving
     // authority and must refuse that class rather than serve a `v1/` file or
@@ -275,7 +269,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
       });
     }
 
-    // The refusal folds case and Win32 trailing dots/spaces per segment as a
     // pure string check before `stat`, so these are 404 on every host even
     // where the fixture has no `v1/` tier (pre-fix they fell back to 200).
     for (const path of ['/V1/y', '/v1./y', '/v1%20/y']) {
@@ -290,7 +283,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     }
 
     test('a literal dist/v1 path is not the refused class', async () => {
-      // Only candidates whose normalized root-relative path is `v1`/`v1/…`
       // are refused; `<root>/dist/v1/y` keeps normal file-or-fallback rules
       // (a miss here, since the fixture has no `dist/` tier).
       const res = await rawRequest(ENABLED_PORT, '/dist/v1/y');
@@ -305,7 +297,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     test('a dot-segment /v1/ form keeps the byte-identical 501 envelope', async () => {
-      // `new URL()` collapses `/foo/../v1/...` to `/v1/...` for `matchRoute`,
       // while the raw target does not start with `/v1/`; the exclusion must
       // judge the normalized pathname too or this answers the SPA fallback 200.
       const direct = await rawRequest(ENABLED_PORT, '/v1/daemon/nope');
@@ -316,7 +307,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     test('a mixed dot-segment + percent-encoded /v1/ form keeps the byte-identical 501 envelope', async () => {
-      // `/foo/../%76%31/...`: `new URL()` collapses `..` but preserves
       // `%76%31`, and the raw target starts with `/foo/..`, so neither view
       // alone sees `/v1/`; the exclusion must decode AND dot-normalize the raw
       // target or this answers the SPA fallback 200. Both mixed forms share
@@ -338,7 +328,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     test('an empty-segment + `..` /v1 form keeps the byte-identical 501 envelope', async () => {
-      // `path.resolve` ignores duplicate slashes before folding dot segments,
       // so `..` must consume the real parent `a`, never the empty segment:
       // `/a//../%76%31/x` resolves to `<root>/v1/x` in the handler. The guard
       // collapse must agree or this answers the SPA fallback 200. Each pair
@@ -364,7 +353,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     test('a trailing `.` / `..` /v1 form keeps the byte-identical 501 envelope', async () => {
-      // Skipping empty and `.` segments makes `/v1/`, `/v1/.`, `/%76%31/.`
       // and `/%76%31/x/..` collapse to the same `/v1`, which `path.resolve`
       // also resolves to `<root>/v1`; the guard must admit that bare form or
       // the equivalent paths split between the API and static views.
@@ -386,7 +374,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     test('a decoded ? dot-segment /v1/ form keeps the byte-identical 501 envelope', async () => {
-      // `%3f` decodes to `?`: a filename character for the static handler's
       // `path.resolve`, URL structure for any re-parse. Both views must
       // segment the same string, or `foo?`/`..` collapses into the API domain
       // here while the handler serves the SPA fallback 200 instead.
@@ -398,7 +385,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     });
 
     test('a decoded # dot-segment /v1/ form keeps the byte-identical 501 envelope', async () => {
-      // `%23` decodes to `#`: same filename-character contract as `?`.
       const encoded = await rawRequest(ENABLED_PORT, '/%76%31/daemon/nope');
       const res = await rawRequest(ENABLED_PORT, '/foo%23/../%76%31/daemon/nope');
       assert.equal(res.status, 501);
@@ -435,7 +421,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
     );
 
     test('an open-success first-read failure is the 500 envelope, never the asset framing', async () => {
-      // `open` succeeds here; only the opened file's first read fails, which is
       // the failure QC3-002 flagged as swallowed onto a destroyed response.
       const probeHandle = await openFile(join(root, 'robots.txt'), 'r');
       const fileHandleProto = Object.getPrototypeOf(probeHandle);

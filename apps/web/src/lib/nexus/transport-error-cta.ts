@@ -1,5 +1,4 @@
 /**
- * Caller-owned copy resolver for `<TransportErrorBlock>` (V1.129 P1, QC1-F-001).
  *
  * The promoted primitive in `@42ch/nexus-ui` owns the per-kind CTA matrix but
  * does NOT import `react-i18next` — it renders English fallback copy by
@@ -25,7 +24,6 @@ function primaryCtaFor(kind: TransportErrorKind): TransportCtaKind {
       return 'openConnectionSettings';
     case 'tls':
       return 'useDesktopApp';
-    // daemon_down, http_fallback, timeout, unknown
     default:
       return 'retry';
   }

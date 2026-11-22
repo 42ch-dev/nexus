@@ -241,7 +241,6 @@ impl SyncClient {
             ));
         }
 
-        // Validate auth token format
         validate_auth_token(auth_token)?;
 
         let client = Client::builder()
@@ -251,7 +250,6 @@ impl SyncClient {
             // For HTTP/2, there's no direct size limit, but we can check Content-Length
             .build()?;
 
-        // Normalize base URL: remove trailing slash
         let base_url = platform_base_url.trim_end_matches('/').to_string();
 
         Ok(Self {
@@ -333,7 +331,6 @@ impl SyncClient {
 
         let status = response.status().as_u16();
 
-        // Check Content-Length header before reading body (SYNC-R5)
         if let Some(content_length) = response.headers().get(reqwest::header::CONTENT_LENGTH) {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
@@ -362,7 +359,6 @@ impl SyncClient {
             });
         }
 
-        // Parse response body as JSON to check for conflict indicators
         let body: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))?;
 
@@ -411,7 +407,6 @@ impl SyncClient {
 
         let status = response.status().as_u16();
 
-        // Check Content-Length header (SYNC-R5)
         if let Some(content_length) = response.headers().get(reqwest::header::CONTENT_LENGTH) {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
@@ -605,7 +600,6 @@ impl SyncClient {
             match request.send().await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    // Only retry on transient errors (connection, timeout)
                     if e.is_connect() || e.is_timeout() {
                         let err_str = e.to_string();
                         last_error = Some(e);
@@ -627,7 +621,6 @@ impl SyncClient {
             }
         }
 
-        // All retries exhausted
         Err(SyncError::HttpError(
             last_error.expect("retry loop exhausted without transient error"),
         ))
@@ -690,7 +683,6 @@ impl SyncClient {
 mod tests {
     use super::*;
 
-    // Valid auth token for tests (64+ chars, alphanumeric + hyphens + underscores + dots)
     const VALID_TOKEN: &str =
         "valid_token_1234567890123456789012345678901234567890123456789012345678901234567890";
 
@@ -717,7 +709,7 @@ mod tests {
 
     #[test]
     fn client_creation_rejects_short_token() {
-        let short_token = "short_token_123"; // 15 chars
+        let short_token = "short_token_123";
         let result = SyncClient::new("https://api.example.com", short_token);
         assert!(matches!(result, Err(SyncError::AuthTokenInvalid(_))));
         if let Err(SyncError::AuthTokenInvalid(msg)) = result {
@@ -796,7 +788,6 @@ mod tests {
             .timeout_secs(60)
             .build("https://api.example.com", VALID_TOKEN)
             .expect("build");
-        // Timeout is internal to client, we trust it's set correctly
         assert_ne!(client.base_url(), "");
     }
 
@@ -906,7 +897,6 @@ mod tests {
 
         let body = mock_response.to_string();
 
-        // Since we can't easily spin up a mock server in unit tests,
         // we test deserialization instead. The integration test with
         // a real mock server is covered by the push_response tests above.
 

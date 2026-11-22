@@ -95,7 +95,6 @@ pub async fn open_remote_binding(
             })?,
         ),
     };
-    // The identity this dial presents, and the identity the binding pins: the
     // Ed25519 PUBLIC peer id derived from the same loaded seed the signed hello
     // signs with. It is never the credential id, a path, a seed hash or a
     // payload principal (§5.1/D18).
@@ -136,7 +135,6 @@ pub async fn open_remote_binding(
     let adapter = match dialed {
         Ok(adapter) => adapter,
         Err(error) => {
-            // The SDK closes the session on its own handshake failures. Its
             // fail-closed pre-I/O refusal returns before an adapter exists, so
             // this end still owns the transport and closes it here.
             let _ = tokio::time::timeout(CONNECT_BOUND, transport.close()).await;
@@ -144,7 +142,6 @@ pub async fn open_remote_binding(
         }
     };
 
-    // From here the session is established but not yet pinned: the guard owns
     // its cleanup until a binding takes it (see `UndeliveredSession`).
     let session = UndeliveredSession::new(adapter);
 
@@ -161,7 +158,6 @@ pub async fn open_remote_binding(
                 access != CoreAccess::ReadOnly,
             ))
         }
-        // The explicit refusal is returned unchanged; the guard closes the
         // session on the way out, and the caller's failed-open path then
         // releases the pool admission.
         Err(error) => Err(error),
@@ -221,7 +217,6 @@ async fn admit(
             "the signed hello carried no remote manifest",
         )
     })?;
-    // The negotiated set is the intersection of the two authenticated hello
     // manifests. This dial's manifest advertises exactly the memory family it
     // is a client of, so the remote side must declare the same family.
     if !manifest
@@ -234,7 +229,6 @@ async fn admit(
             "the remote host did not negotiate the spoke-memory family",
         ));
     }
-    // The adapter ignores this value: the server maps the authenticated peer id
     // to its own stable principal (§4.1), so this is a label, never authority.
     let principal = client_principal(client_identity)?;
     let described = adapter

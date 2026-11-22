@@ -1,5 +1,4 @@
 /**
- * Hub status cards (plan v1220 T2) — live data per card, read-only surface,
  * per-card loading / error isolation (`正在加载…` / `加载失败：{reason}`), and
  * the Agent card's saved-profile query state.
  */
@@ -124,7 +123,6 @@ describe('HubCards', () => {
     expect(screen.getByTestId('hub-card-agent-version')).toHaveTextContent('1.2.3');
     expect(screen.getByTestId('hub-card-agent')).toHaveTextContent('Connected');
 
-    // 1 embedded + 1 user preset (`_system.b` is hidden); 2 live sessions
     // (`completed` is terminal).
     expect(await screen.findByTestId('hub-card-harness-counts')).toHaveTextContent(
       '2 presets · 2 running',
@@ -137,7 +135,6 @@ describe('HubCards', () => {
       'combat-engine · dice',
     );
 
-    // Cards navigate only — the links go to the owning rail apps.
     expect(screen.getByTestId('hub-card-agent-go')).toHaveAttribute('href', '/strategies');
     expect(screen.getByTestId('hub-card-harness-go')).toHaveAttribute('href', '/strategies');
     expect(screen.getByTestId('hub-card-modules-go')).toHaveAttribute('href', '/modules');
@@ -192,12 +189,10 @@ describe('HubCards', () => {
     expect(error).toHaveTextContent('Could not load: registry offline');
     expect(screen.queryByTestId('hub-card-modules-count')).not.toBeInTheDocument();
 
-    // The other three cards still render their live data.
     expect(await screen.findByTestId('hub-card-service-version')).toBeInTheDocument();
     expect(screen.getByTestId('hub-card-harness-counts')).toBeInTheDocument();
     expect(screen.getByTestId('hub-card-agent-name')).toBeInTheDocument();
 
-    // Retry re-runs the failing source and recovers the card.
     server.use(
       http.get('/v1/daemon/compute/modules', () => HttpResponse.json(MODULES_RESPONSE)),
     );
@@ -223,7 +218,6 @@ describe('HubCards', () => {
         return HttpResponse.json({
           items: [
             session('s3', 'running'),
-            // `_system.*` sessions stay excluded by the shared visibility filter.
             session('s4', 'running', '_system.boot'),
             session('s5', 'cancelled'),
           ],
@@ -237,7 +231,6 @@ describe('HubCards', () => {
       '2 presets · 1 running',
     );
     expect(requestedCursors).toEqual([null, 'page-2']);
-    // Within the cap the count stays exact — no lower-bound marker.
     expect(screen.queryByTestId('hub-card-harness-truncated')).not.toBeInTheDocument();
   });
 
@@ -261,7 +254,6 @@ describe('HubCards', () => {
     expect(screen.getByTestId('hub-card-harness-truncated')).toHaveTextContent(
       'Session history capped at 1000 sessions — more may exist.',
     );
-    // The walk stops at the documented cap instead of scanning unbounded.
     expect(requests).toBe(10);
   });
 
@@ -280,7 +272,6 @@ describe('HubCards', () => {
 
   it('keeps the Agent card loading while the profile read is pending', async () => {
     hubHandlers();
-    // `Promise.withResolvers` is ES2024; this app's TS lib is ES2022.
     const getAgentProfile = vi.fn(
       () =>
         new Promise<{ name: string }>((resolve) => {
@@ -305,12 +296,10 @@ describe('HubCards', () => {
     expect(error).toHaveTextContent('Could not load: profile ipc offline');
     expect(screen.queryByTestId('hub-card-agent-name')).not.toBeInTheDocument();
 
-    // Per-card isolation: the other sources are untouched.
     expect(await screen.findByTestId('hub-card-service-version')).toBeInTheDocument();
     expect(screen.getByTestId('hub-card-harness-counts')).toBeInTheDocument();
     expect(screen.getByTestId('hub-card-modules-count')).toBeInTheDocument();
 
-    // Retry re-runs the profile query and recovers the card.
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('hub-card-agent-name')).toHaveTextContent('my-agent');
     expect(screen.getByTestId('hub-card-agent')).toHaveTextContent('Connected');

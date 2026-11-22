@@ -90,7 +90,6 @@ describe('cleanup retry fence idempotency', () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // ignore
     }
     process.env.NEXUS_ACP_TEST_REAP_MS = prev;
   });
@@ -122,7 +121,6 @@ describe('cleanup retry fence idempotency', () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // ignore
     }
     process.env.NEXUS_ACP_TEST_REAP_MS = prev;
   });
@@ -146,7 +144,6 @@ describe('cleanup retry fence idempotency', () => {
       }
     };
     t.after(async () => {
-      // Only PIDs recorded by this test's freshly spawned protocol peers.
       for (const { pid } of starts()) if (alive(pid)) process.kill(pid, 'SIGKILL');
       await waitUntil(() => starts().every(({ pid }) => !alive(pid)));
       rmSync(workspace, { recursive: true, force: true });
@@ -190,7 +187,6 @@ readline.createInterface({input: process.stdin}).on('line', (line) => {
       } },
     });
 
-    // Both public launches enter before either fence exists. Their failed
     // session/new occurs after initialize's retained 10ms settle, exhausting
     // the 1ms deadline before cleanup; neither child may be signalled blindly.
     const failed = await Promise.all([
@@ -205,8 +201,6 @@ readline.createInterface({input: process.stdin}).on('line', (line) => {
     assert.equal(starts().length, 2);
     assert.ok(starts().every(({ pid }) => alive(pid)));
 
-    // Clock advancement deterministically spends the deadline before a reap;
-    // process identities, children, ACP traffic and public calls remain real.
     const expired = async (call) => {
       let now = Date.now();
       const clock = t.mock.method(Date, 'now', () => { now += 100; return now; });
@@ -218,9 +212,6 @@ readline.createInterface({input: process.stdin}).on('line', (line) => {
     assert.equal(starts().length, 2, 'a fenced retry must not spawn another child');
     assert.ok(starts().every(({ pid }) => alive(pid)));
 
-    // One TERM-resistant owner spends the entire recovery budget. A concurrent
-    // public retry must not join/re-enter cleanup, nor spend another full
-    // budget on the second owner.
     const recovering = provider.call(request('one', 100));
     const concurrent = await provider.call(request('two', 3000));
     assert.equal(concurrent.ok, false);
@@ -234,15 +225,12 @@ readline.createInterface({input: process.stdin}).on('line', (line) => {
     assert.equal(records().filter((record) => record.event === 'term').length, 1,
       'the request must not grant the second owner a fresh reap deadline');
 
-    // Only public launch retries settle these owners; no engine adoption,
-    // identity mutation or test settlement hook substitutes for recovery.
     const recovered = await provider.call(request('one', 5000));
     assert.equal(recovered.ok, true, JSON.stringify(recovered));
     assert.ok(recovered.session_id);
     assert.equal(starts().length, 3, 'exactly one replacement launch follows confirmed cleanup');
     assert.ok(starts().slice(0, 2).every(({ pid }) => !alive(pid)));
 
-    // Published-session fences stay on their original shutdown route.
     const shutdown = (deadlineMs) => provider.call({
       request_id: 'shutdown', method: 'shutdown', session_id: recovered.session_id,
       deadline_ms: deadlineMs, payload: {},

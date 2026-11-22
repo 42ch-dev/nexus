@@ -1,5 +1,5 @@
-//! `nexus-module-test` — ABI-conformance mini-host for Nexus compute modules
-//! (V1.170 P0, AR-10).
+//! see docs/specs/compute/compute-module-abi.md — `nexus-module-test`:
+//! ABI-conformance mini-host for Nexus compute modules (V1.170 P0, AR-10).
 //!
 //! A standalone, publishable test harness that module crates add as a
 //! host-target **dev-dependency**. It compiles a module's `.wasm` with
@@ -125,10 +125,8 @@ impl InvocationState {
         let mut key_blocks = HashMap::new();
         for kb in &input.key_blocks {
             if let Ok(json) = serde_json::to_value(kb) {
-                // Index `entry_id` first with `key_block_id` fallback (I7):
                 // the canonical fixture (and the real host's basic_combat
                 // fixture) use `key_block_id`, while spoke-produced blocks
-                // use `entry_id` — same accessor semantics as the SDK's
                 // `entry_id_of` (AR-3).
                 let id = kb
                     .get("entry_id")
@@ -155,12 +153,10 @@ impl InvocationState {
 }
 
 fn new_engine() -> Result<Engine, MiniHostError> {
-    // Match the real host's admission set in both invocations and ABI probes.
     let mut config = Config::new();
     config.wasm_gc(false);
     config.wasm_function_references(false);
     config.wasm_exceptions(false);
-    // Wasmtime 49 enables the wide-arithmetic proposal by default; the real
     // host disables it (`nexus-wasm-host/src/engine.rs`), so the mini-host must
     // reject the same modules — otherwise ABI probes would admit modules the
     // runtime host refuses.
@@ -193,13 +189,10 @@ pub fn run(
         .instantiate(&mut store, &module)
         .map_err(|e| MiniHostError::Instantiation(e.to_string()))?;
 
-    // Optional one-shot `init` (the manifest's `init_export`; a declared-but-
-    // not-exported name is skipped, exactly like the real host).
     if let Some(init) = optional_export::<(), ()>(&mut store, &instance, &manifest.init_export) {
         init.call(&mut store, ()).map_err(map_call_error)?;
     }
 
-    // The host places input and reserves output inside the module's own
     // linear memory through the module's allocator.
     let alloc = required_export::<u32, u32>(&mut store, &instance, "alloc")?;
     let in_len = u32::try_from(input_bytes.len()).unwrap_or(u32::MAX);
@@ -453,7 +446,6 @@ mod tests {
 
     /// A module that echoes a static envelope into the output buffer.
     fn echo_module_wat(envelope: &str) -> String {
-        // The envelope is embedded as a wat string literal — escape quotes.
         let escaped = envelope.replace('\\', "\\\\").replace('"', "\\\"");
         format!(
             r#"(module
@@ -542,7 +534,6 @@ mod tests {
 
     #[test]
     fn unwhitelisted_nexus_import_fails_instantiation() {
-        // The ABI whitelist is enforced by linker registration: a module
         // importing a function the manifest did not whitelist fails
         // instantiation even when it is not one of the real host functions.
         let wat = r#"(module
@@ -557,8 +548,6 @@ mod tests {
 
     #[test]
     fn init_declared_but_absent_is_skipped() {
-        // Declared `init_export` with no matching export → skipped (optional
-        // export), and compute still runs (returns -1 → ModuleFailed).
         let wat = r#"(module
   (memory (export "memory") 32)
   (global $heap (mut i32) (i32.const 1024))
@@ -587,7 +576,6 @@ mod tests {
         assert!(matches!(err, MiniHostError::Trap(_)), "{err}");
     }
 
-    // ── host-import probing (whitelisted imports, -1/-2 sentinels) ────────
 
     /// Module whose `compute` calls `kb_read` with a static id and copies the
     /// host response to a fixed probe address, returning the host's return
@@ -656,8 +644,6 @@ mod tests {
 
     #[test]
     fn kb_read_indexes_key_block_id_fallback() {
-        // I7: the canonical fixture (fixtures/combat-input.json) indexes its
-        // blocks by `key_block_id`, not `entry_id` — the mini-host must serve
         // `kb_read("kb_atk")` against it (fixture parity with the real host).
         let fixture: ComputeInput =
             serde_json::from_str(include_str!("../fixtures/combat-input.json"))
@@ -719,7 +705,6 @@ mod tests {
 
     #[test]
     fn manifest_whitelist_gates_host_imports() {
-        // A module calling kb_read while the manifest whitelists nothing →
         // the import is not linked → instantiation fails (whitelist
         // enforcement, like the real host).
         let wat = r#"(module
@@ -734,7 +719,6 @@ mod tests {
 
     #[test]
     fn rejects_newly_default_enabled_proposals() {
-        // Wasmtime 47+ enables the GC / function-references / exceptions
         // proposals by default; the mini-host pins them OFF to match the real
         // host's module-admission set. A module requiring the exceptions
         // proposal (`try_table`) must fail validation, not instantiate.

@@ -1,5 +1,4 @@
 /**
- * Profile switcher (plan v1219 T2) — product-behaviour tests:
  *
  *  - Dropdown renders creators from the surface; the active row carries ✓.
  *  - `SOUL {n}%` shows only when the surface supplies a value; silently
@@ -50,7 +49,6 @@ function renderSwitcher() {
 async function openMenu(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByTestId('profile-switcher'));
   const menu = await screen.findByTestId('profile-switcher-menu');
-  // Wait for the creators query so the rows are rendered before interacting.
   await screen.findAllByRole('menuitem');
   return menu;
 }
@@ -70,9 +68,7 @@ describe('ProfileSwitcher', () => {
     const aliceRow = screen.getByRole('menuitem', { name: /Alice/ });
     expect(aliceRow).toHaveTextContent('✓');
     expect(screen.getByRole('menuitem', { name: /Bob/ })).not.toHaveTextContent('✓');
-    // The wire contract carries no SOUL maturity → no fake number rendered.
     expect(screen.queryByTestId('soul-maturity')).not.toBeInTheDocument();
-    // Exact match: fails on the old double-＋ markup (＋＋ 新建 Creator…).
     expect(screen.getByTestId('profile-switcher-new')).toHaveTextContent(/^＋ 新建 Creator…$/);
   });
 
@@ -111,11 +107,9 @@ describe('ProfileSwitcher', () => {
     await waitFor(() => {
       expect(putBody).toEqual({ creator_id: 'creator-b' });
     });
-    // Context updated: the switcher button now shows Bob…
     await waitFor(() => {
       expect(screen.getByTestId('profile-switcher')).toHaveTextContent('Bob');
     });
-    // …and the ✓ moved to Bob's row on the next open.
     await user.click(screen.getByTestId('profile-switcher'));
     expect(await screen.findByRole('menuitem', { name: /Bob/ })).toHaveTextContent('✓');
   });

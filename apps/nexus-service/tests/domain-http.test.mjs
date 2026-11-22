@@ -10,7 +10,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
 /**
- * P5-T1 bounded integration target: the World / Work / content / knowledge
  * families over the real in-process service and the real native temporary
  * store. No mock forwards anything — persistence is observed through a full
  * service close + reopen on the same home, and conflicts are observed as the
@@ -78,7 +77,6 @@ describe('domain-http (P5-T1)', () => {
   });
 
   test('every assigned World/Work/content/knowledge route identity is mounted at its exact verb and tier', async () => {
-    // Enumeration is deliberately separate from the behavioral proof below:
     // this asserts the composer inventory, not handler behavior.
     const { DOMAIN_ROUTES } = await import(join(serviceRoot, 'dist/routes.js'));
     const inventory = DOMAIN_ROUTES.map((route) => ({
@@ -154,7 +152,6 @@ describe('domain-http (P5-T1)', () => {
         `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
     }
-    // Retired contract (v231): the routes are gone from the composer and no
     // sunset handler replaced them, so the framework fallback answers.
     for (const path of [
       '/v1/daemon/references',
@@ -166,7 +163,6 @@ describe('domain-http (P5-T1)', () => {
       assert.equal(retired.status, 501, retired.text);
       assert.equal(retired.payload.error.code, 'route_not_migrated');
     }
-    // Tier parity (daemon mod.rs authority): the Creator home family is
     // tier1 (API-key only, no active creator); every P5-T1 family route is
     // tier2. None is unguarded. (The runtime liveness family reconciled in
     // P5-T5 is unguarded by contract and is out of this task's scope.)
@@ -182,7 +178,6 @@ describe('domain-http (P5-T1)', () => {
   });
 
   test('work selection and world conflict persist over the real native store', async () => {
-    // 1. Work creation keeps the retained 201 seam.
     const created = await jsonFetch(`${baseUrl}/v1/daemon/works`, {
       method: 'POST',
       body: CREATE_WORK_BODY,
@@ -190,11 +185,9 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(created.status, 201, created.text);
     const workId = created.payload.work_id;
 
-    // 2. Selection is the durable pool-active mutation, not a session-local
     // echo: it returns the active pool entry and survives a full close.
     const selected = await jsonFetch(`${baseUrl}/v1/daemon/works/pool`, {
       method: 'POST',
-      // The P1-T1 authority (works.rs set_pool_active) accepts exactly this
       // action token; anything else is an invalid_action 400.
       body: { action: 'set_pool_active', work_id: workId },
     });
@@ -212,7 +205,6 @@ describe('domain-http (P5-T1)', () => {
     assert.ok(active, 'selection must persist across a service restart');
     assert.equal(active.work_id, workId);
 
-    // 3. World KB CAS: a stale expected version is a 409 with the structured
     // conflict details, and nothing is written.
     const stale = await jsonFetch(
       `${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/patch-entity`,
@@ -223,7 +215,6 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(stale.payload.error.details.entity_id, 'kb_cas');
     assert.equal(stale.payload.error.details.current_version, 2);
 
-    // 4. The retained 204 delete is bodiless and the deletion persists.
     const removed = await jsonFetch(`${baseUrl}/v1/daemon/works/${workId}`, {
       method: 'DELETE',
     });
@@ -234,7 +225,6 @@ describe('domain-http (P5-T1)', () => {
   });
 
   test('Timeline overview emits required nullable cursor', async () => {
-    // Terminal page: the seeded home holds fewer Worlds than the 20-row page
     // cap, so the overview ends here and the required nullable cursor must be
     // present as explicit null — never an omitted key.
     const terminal = await jsonFetch(`${baseUrl}/v1/daemon/timeline/overview`);
@@ -245,7 +235,6 @@ describe('domain-http (P5-T1)', () => {
     );
     assert.equal(terminal.payload.cursor, null);
 
-    // Non-terminal page: exceed the 20-World page cap so page 1 must carry a
     // usable string cursor, and its continuation page closes again.
     for (let i = 0; i < 21; i += 1) {
       const created = await jsonFetch(`${baseUrl}/v1/daemon/worlds`, {
@@ -310,7 +299,6 @@ describe('domain-http (P5-T1)', () => {
   });
 
   test('scene/beat authoring reaches the core owner over HTTP and persists', async () => {
-    // The native store's Work family resolves every filesystem path through
     // the selected workspace's registered `local_root`, so the durable proof
     // starts by registering one (with a real chapter SSOT beneath it).
     const creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-creative-'));
@@ -372,7 +360,6 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(addedScene.payload.new_revision, 1);
 
     const afterScene = await readOutline();
-    // F-3: one accepted add persists exactly one revision bump — read back from
     // the canonical outline, not the patch response envelope.
     assert.equal(
       afterScene.payload.outline_revision,
@@ -409,7 +396,6 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(beat.title, 'Inciting Moment');
     assert.equal(beat.status, 'completed');
 
-    // Persistence is observed through a full service close + reopen on the
     // same home: the authored ids and their parent relationships survive.
     await service.close();
     service = await startDomainService(home, 18_443);
@@ -421,7 +407,6 @@ describe('domain-http (P5-T1)', () => {
     assert.deepEqual(reopened.payload.scenes, afterBeat.payload.scenes);
     assert.deepEqual(reopened.payload.beats, afterBeat.payload.beats);
 
-    // A stale base_revision is refused with the typed OCC envelope — the same
     // `outline_conflict` class the core layer asserts in
     // `retained_outline_scene_beat_stale_revision_conflicts` — and the canonical
     // content/revision is untouched. The transport must render the coded 409,
@@ -443,7 +428,6 @@ describe('domain-http (P5-T1)', () => {
   });
 
   test('cross-surface World event binding binds, persists, unbinds and refuses a bad referent', async () => {
-    // A real creative root, registered the same way the scene/beat proof does.
     const creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-binding-'));
     const workspaceDir = join(
       home,
@@ -478,7 +462,6 @@ describe('domain-http (P5-T1)', () => {
     );
     assert.equal(reconciled.status, 200, reconciled.text);
 
-    // The referent is a real World KB event entity of the Work's bound World,
     // created through the mounted KB route rather than a fixture row.
     const referent = 'kb_e7e17aab';
     const seeded = await jsonFetch(
@@ -513,7 +496,6 @@ describe('domain-http (P5-T1)', () => {
     const afterAdd = await readOutline();
     const eventId = afterAdd.payload.timeline_events[0].event_id;
 
-    // Bind reaches the core owner over HTTP and the canonical GET serves it.
     const bound = await patchTimeline({
       base_revision: 1,
       operation: 'bind_world_event',
@@ -526,7 +508,6 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(afterBind.payload.outline_revision, 2);
     assert.equal(eventById(afterBind, eventId).world_event_id, referent);
 
-    // Persistence is observed through a full close + reopen on the same home.
     await service.close();
     service = await startDomainService(home, 18_444);
     baseUrl = service.url;
@@ -536,7 +517,6 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(reopened.payload.outline_revision, 2);
     assert.equal(eventById(reopened, eventId).world_event_id, referent);
 
-    // Unbind clears the stored binding with exactly one revision bump.
     const cleared = await patchTimeline({
       base_revision: 2,
       operation: 'unbind_world_event',
@@ -548,7 +528,6 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(afterUnbind.payload.outline_revision, 3);
     assert.equal(eventById(afterUnbind, eventId).world_event_id, undefined);
 
-    // A referent that is a bound-World entity but not an event is refused by
     // the core and nothing is persisted (kb_mod is a seeded character).
     const rejected = await patchTimeline({
       base_revision: 3,

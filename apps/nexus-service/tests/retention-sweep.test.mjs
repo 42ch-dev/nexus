@@ -9,7 +9,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
 /**
- * The admission-time retention sweep (`ageSettledActorOperations`) reads the
  * authority once per retained Actor record. Those reads are native crossings, so
  * the sweep must spend ONE principal for the whole arm and issue the reads as one
  * bounded wave — while every record keeps the verdict the sequential chain gave
@@ -27,7 +26,6 @@ let cfg;
 const ABSENT = Symbol('absent');
 
 before(async () => {
-  // The package `test` script builds once before `node --test`; a build here
   // would race the sibling suites rewriting the same `dist`. A stale or empty
   // `dist` fails here with the build hint, not as a misleading import error.
   const providerDist = join(serviceRoot, 'dist', 'provider.js');
@@ -43,7 +41,6 @@ before(async () => {
 });
 
 /**
- * One execute admission against the stubbed authority.
  *
  * `retained` are the Actor records the mirror already holds; `characterOf` and
  * `rowOf` answer each record's Character read and (on a Character miss) its
@@ -97,7 +94,6 @@ function admission({ retained = [], characterOf = () => ABSENT, rowOf = () => AB
       inFlight += 1;
       peak = Math.max(peak, inFlight);
       try {
-        // A turn of the event loop: a sequential chain shows one read in flight
         // at a time, a wave shows every record's read at once.
         await new Promise((resolve) => setImmediate(resolve));
         const character = characterOf(operationId);
@@ -160,14 +156,12 @@ describe('retention sweep (one principal, one wave)', () => {
       1,
       'the whole sweep must share one minted principal',
     );
-    // One mint for the execute itself and at most one for the sweep — never one
     // per record. The upper bound keeps the assertion off the exact internal
     // shape; the principal-identity assert above is the real contract.
     assert.ok(
       fixture.mints.length <= 2,
       `an admission of ${retained.length} retained records mints at most twice (minted ${fixture.mints.length})`,
     );
-    // One wave means every read of the arm is in flight at the same time: the
     // sweep has no chunking cap (the arm's retention cap is its bound), so a
     // partial peak is a regression to batched concurrency, not slack.
     assert.equal(
@@ -201,7 +195,6 @@ describe('retention sweep (one principal, one wave)', () => {
     assert.equal(held(settledCharacter), false, 'a settled Character operation is retired');
     assert.equal(held(creatorActor), true, 'a Creator Actor operation is kept by its generic row');
     assert.equal(held(agedOut), false, 'an operation the authority serves at all is retired');
-    // The generic row is consulted only where the Character arm is empty.
     assert.equal(fixture.genericReads.length, 2, 'only the two Character misses spend a generic read');
     assert.deepEqual(
       new Set(fixture.genericReads),

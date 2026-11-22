@@ -51,7 +51,6 @@ pub async fn queue_extract(
     work_id: Option<&str>,
     chapter: Option<i32>,
 ) -> Result<()> {
-    // QC2 W-004: reject negative/zero chapter values before opening the core,
     // so the legacy refusal wording is the one the caller reads. The producer
     // refuses the same input fail-closed for every other transport.
     if let Some(ch) = chapter {
@@ -60,7 +59,6 @@ pub async fn queue_extract(
         }
     }
 
-    // The queue is engine-owned job state (`kb_extract_jobs` is guarded to a
     // migration/engine writer), so the enqueue leaf takes the engine admission;
     // the direct-writer pool cannot write that table.
     let core = open_engine_owned_core(config).await?;

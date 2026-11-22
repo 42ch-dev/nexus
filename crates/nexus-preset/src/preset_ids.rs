@@ -164,7 +164,6 @@ mod tests {
                 NOVEL_REVIEW_MASTER_PRESET_ID,
             ]
         );
-        // Every member is a real embedded preset id (the cron evaluator
         // enqueues schedules with these ids).
         for id in cron_role_preset_ids() {
             assert!(

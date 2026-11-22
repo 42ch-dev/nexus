@@ -235,7 +235,6 @@ impl BundleBuilder {
     /// # Panics
     /// Panics if a timestamp is not valid RFC3339 format.
     pub fn validate(&self) -> Result<(), BundleValidationError> {
-        // Check timestamp monotonicity (non-decreasing RFC3339 timestamps)
         let mut prev_ts: Option<chrono::DateTime<chrono::Utc>> = None;
         for (index, delta) in self.deltas.iter().enumerate() {
             let ts = chrono::DateTime::parse_from_rfc3339(&delta.local_timestamp)
@@ -254,7 +253,6 @@ impl BundleBuilder {
             prev_ts = Some(ts);
         }
 
-        // Check for duplicate target_entity_id (when present)
         let mut seen_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for delta in &self.deltas {
             if let Some(ref id) = delta.target_entity_id {
@@ -290,7 +288,6 @@ impl BundleBuilder {
     /// generated contract type. That indicates a programmer error (malformed
     /// input), not a runtime condition.
     pub fn build(self) -> SyncResult<Bundle> {
-        // Validate required fields
         if self.deltas.is_empty() {
             return Err(SyncError::BundleEmptyDeltas);
         }
@@ -312,7 +309,6 @@ impl BundleBuilder {
         let bundle_id = format!("bdl_{}", Uuid::new_v4().simple());
         let now = chrono::Utc::now();
 
-        // Build base_versions (generated struct with typed fields).
         let base_versions = nexus_contracts::BundleBaseVersions {
             world_revision: self.base_world_revision,
             timeline_head_id: match &self.base_timeline_head_id {
@@ -322,7 +318,6 @@ impl BundleBuilder {
             canon_revision: self.base_canon_revision,
         };
 
-        // Convert deltas to Delta (generated contract type). typify inlines a
         // separate enum copy per schema (`DeltaDeltaType` vs the bundle's
         // `NexusDeltaDeltaType`); a JSON round-trip bridges them cleanly since
         // the drift gate proves wire equivalence.
@@ -444,7 +439,6 @@ mod tests {
             .build()
             .expect("should build");
 
-        // Bundle uses schema_version=1 (sync wire contract, separate from local API schemas)
         // LATEST_SCHEMA_VERSION may be higher due to local schemas like daemon-status-v2
         assert_eq!(bundle.schema_version, 1);
         assert_eq!(bundle.workspace_id.to_string(), "wrk_001");
@@ -576,8 +570,6 @@ mod tests {
         );
     }
 
-    // ── Validation tests ──────────────────────────────────────────────
-
     fn make_test_delta_with_timestamp(ts: &str) -> LocalDelta {
         LocalDelta {
             delta_type: DeltaType::KeyBlock,
@@ -624,7 +616,7 @@ mod tests {
     #[test]
     fn bundle_validation_rejects_non_monotonic_timestamps() {
         let base_ts = "2025-04-08T10:00:00Z";
-        let earlier_ts = "2025-04-08T09:00:00Z"; // Earlier than base
+        let earlier_ts = "2025-04-08T09:00:00Z";
 
         let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
             .submitting_creator_id("ctr_001")
@@ -637,7 +629,6 @@ mod tests {
             Err(BundleValidationError::NonMonotonicTimestamp { index: 1, .. })
         ));
 
-        // Check error message contains correct details
         if let Err(BundleValidationError::NonMonotonicTimestamp {
             index,
             timestamp,
@@ -652,9 +643,8 @@ mod tests {
 
     #[test]
     fn bundle_validation_allows_equal_timestamps() {
-        // Non-decreasing means >=, so equal timestamps should pass
         let ts1 = "2025-04-08T10:00:00Z";
-        let ts2 = "2025-04-08T10:00:00Z"; // Same as ts1
+        let ts2 = "2025-04-08T10:00:00Z";
 
         let builder = BundleBuilder::new("wrk_001", "wld_001", "ctr_001")
             .submitting_creator_id("ctr_001")
@@ -682,7 +672,7 @@ mod tests {
             delta_type: DeltaType::KeyBlock,
             operation: DeltaOperation::Update,
             target_entity_type: Some("character".to_string()),
-            target_entity_id: Some("kb_001".to_string()), // Same target_entity_id
+            target_entity_id: Some("kb_001".to_string()),
             payload: json!({"field": "value2"}),
             source_anchor: None,
             local_timestamp: ts.to_string(),
@@ -718,7 +708,7 @@ mod tests {
             delta_type: DeltaType::KeyBlock,
             operation: DeltaOperation::Update,
             target_entity_type: Some("character".to_string()),
-            target_entity_id: Some("kb_002".to_string()), // Different target_entity_id
+            target_entity_id: Some("kb_002".to_string()),
             payload: json!({"field": "value2"}),
             source_anchor: None,
             local_timestamp: ts.to_string(),
@@ -734,12 +724,11 @@ mod tests {
 
     #[test]
     fn bundle_validation_skips_none_target_entity_ids() {
-        // Create operations have target_entity_id = None, should not be checked for duplicates
         let ts = "2025-04-08T10:00:00Z";
 
         let delta1 = LocalDelta {
             delta_type: DeltaType::KeyBlock,
-            operation: DeltaOperation::Create, // Create has no target_entity_id
+            operation: DeltaOperation::Create,
             target_entity_type: Some("character".to_string()),
             target_entity_id: None,
             payload: json!({"display_name": "Character 1"}),
@@ -749,7 +738,7 @@ mod tests {
 
         let delta2 = LocalDelta {
             delta_type: DeltaType::KeyBlock,
-            operation: DeltaOperation::Create, // Another Create, also None
+            operation: DeltaOperation::Create,
             target_entity_type: Some("character".to_string()),
             target_entity_id: None,
             payload: json!({"display_name": "Character 2"}),

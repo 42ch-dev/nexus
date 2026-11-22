@@ -1,5 +1,4 @@
 /**
- * App shell (plan v1219 T2) — product-behaviour tests:
  *
  *  - Both entrances render the same shell with different rail contents.
  *  - Locked rail items render disabled with the § Copy reason as tooltip AND
@@ -22,7 +21,6 @@ import { RAIL_LOCK_REASON, type AppDef } from '@/lib/app-registry';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 
-// Keep the DOM focused on shell assertions.
 vi.mock('@/components/canvas/canvas-nav-commands', () => ({
   CanvasNavCommands: () => null,
 }));
@@ -131,7 +129,6 @@ describe('AppShell', () => {
 
   it('exposes Settings in the mobile nav linking to /settings', () => {
     useShellHandlers();
-    // The default settings section is develop-only, so the content-creator
     // entrance legitimately hides this entry; the developer nav carries it.
     renderShell('developer');
     const links = screen.getAllByRole('link').filter(
@@ -177,7 +174,6 @@ describe('AppRail — progressive activation', () => {
     expect(work).toHaveAttribute('aria-disabled', 'true');
     expect(work).toHaveAttribute('title', '完成 Brief 后解锁「作品」');
 
-    // Clicking the locked item shows the same sentence as a toast and does
     // NOT navigate — the load factory stays uninvoked.
     await user.click(work);
     expect(await screen.findByText('完成 Brief 后解锁「作品」')).toBeInTheDocument();

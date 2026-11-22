@@ -33,7 +33,6 @@ fn review_preset_has_required_capabilities() {
             .any(|c| c == "creator.inject_prompt"),
         "review preset must require creator.inject_prompt"
     );
-    // Review preset should NOT require kb.extract_work
     assert!(
         !loaded
             .manifest

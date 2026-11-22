@@ -1,5 +1,4 @@
 /**
- * World KB canvas adapter — projects the daemon graph + candidates into React
  * Flow nodes/edges and renders surface-specific chrome (inspectors, alt-view,
  * a11y summary).
  *
@@ -60,20 +59,17 @@ export interface WorldKbSurfaceGraph {
 export interface WorldKbCanvasAdapterContext {
   worldId: string;
   /**
-   * Kept for orchestrator-owned paths (conflict handling, relationship
    * inspector via InspectorPanel). The adapter's `renderInspector(node)` does
    * NOT route from this field — `node.data` is the authority
    * (R-V1114P0QC1-W002).
    */
   selection: Selection;
   /**
-   * Full entity list (including rejected) so `renderInspector` can resolve the
    * entity projection for ANY entity node from `node.data.keyBlockId`. This is
    * cross-node graph context, not per-node data.
    */
   entities: WorldKbEntityProjection[];
   /**
-   * Pending promotion candidates so `renderInspector` can resolve the candidate
    * projection from `node.data.candidateId`. Cross-node graph context.
    */
   candidates: WorldKbCandidateProjection[];
@@ -141,7 +137,6 @@ export function createWorldKbCanvasAdapter(
   ctxRef: MutableRefObject<WorldKbCanvasAdapterContext>,
 ): WorldKbCanvasAdapter {
   return {
-    // CanvasSurfaceKind currently distinguishes 'world-kb-entities' from
     // 'world-kb-relationships'; this surface is the entity projection.
     surfaceKind: 'world-kb-entities',
     nodeTypes: worldKbNodeTypes,
@@ -175,13 +170,11 @@ export function createWorldKbCanvasAdapter(
     },
 
     adaptConflict(_error) {
-      // World KB conflicts are write-boundary (entity / promote / relationship)
       // and are handled by WorldKbCanvasConflicts; no single query-level conflict
       // modal exists for this surface.
       return null as ConflictModalProps | null;
     },
 
-    // Future extension point: `renderEdgeInspector?(edge)` on
     // CanvasSurfaceAdapter would let surfaces own edge (relationship) selection
     // inspectors. Currently the relationship inspector stays orchestrator-owned
     // via InspectorPanel (R-V1114P0QC1-W002 known gap). Do NOT expand the
@@ -202,7 +195,6 @@ export function createWorldKbCanvasAdapter(
 }
 
 /**
- * Adapter-driven inspector for node-based selections (entity / candidate).
  *
  * Routes entity-vs-candidate from `node.data` — the contract `node` parameter
  * is the authority, NOT `ctxRef.current.selection` (R-V1114P0QC1-W002). The

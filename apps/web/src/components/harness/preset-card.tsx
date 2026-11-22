@@ -1,5 +1,4 @@
 /**
- * One Harness catalog row (plan v1220 T2): preset name, list facts, strategy
  * binding state, and running-session state.
  *
  * Author actions live on the row: the canvas drill-down (row name), the
@@ -63,7 +62,6 @@ export function PresetCard({
 }: PresetCardProps) {
   const { t } = useTranslation('strategies');
   const bound = Boolean(profile.data && profile.data.states.length > 0);
-  // "Not bound" is only claimable from a successful empty profile; a failed
   // read is unknown, exactly like the running column.
   const bindingBadge = profile.isError
     ? { variant: 'warning' as const, label: t('harness.bindingUnknown') }
@@ -83,7 +81,6 @@ export function PresetCard({
         ? { variant: 'neutral' as const, label: t('harness.runningLoading') }
         : running.truncated
           ? {
-              // A truncated walk is a lower bound even at zero: never `idle`.
               variant: running.count > 0 ? ('queued' as const) : ('neutral' as const),
               label: t('harness.runningTruncated', { count: running.count }),
             }

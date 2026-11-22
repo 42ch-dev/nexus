@@ -53,7 +53,6 @@ fn repo_root() -> std::path::PathBuf {
 }
 
 #[test]
-// Long integration test; splitting would obscure the end-to-end scenario
 #[allow(clippy::too_many_lines)]
 fn game_narrative_sample_validates_clean() {
     let caps = CapabilityRegistry::with_builtins();
@@ -64,12 +63,10 @@ fn game_narrative_sample_validates_clean() {
         bundle_root.display()
     );
 
-    // Real validator core: loader (structural + A3 path/assets) first...
     let loaded = load_preset(&bundle_root, &caps)
         .unwrap_or_else(|e| panic!("sample must load cleanly: {e:?}"));
     assert_eq!(loaded.id, "game-narrative");
 
-    // ...then the shared semantic surface + explicit A3 surfaces, asserting
     // zero error AND zero warning diagnostics.
     let semantic = validate_preset_semantic(&loaded.manifest, &caps);
     let assets = validate_assets_in_bundle(&loaded.manifest, &bundle_root);
@@ -86,7 +83,6 @@ fn game_narrative_sample_validates_clean() {
         );
     }
 
-    // Pin the scheduled-lane shape (P3 QC fix wave W1): scan+judge state
     // BEFORE extraction, then a separate extract state — the embedded
     // `research` scanning -> extracting pattern.
     let states = &loaded.manifest.states;
@@ -116,7 +112,6 @@ fn game_narrative_sample_validates_clean() {
         other => panic!("routing must use branches next, got: {other:?}"),
     }
 
-    // Scan state: cheap inventory capability + judge, NO extraction here.
     let scheduled_sweep = states
         .iter()
         .find(|s| s.id == "scheduled_sweep")
@@ -153,7 +148,6 @@ fn game_narrative_sample_validates_clean() {
         "GO must advance to the separate extract state"
     );
 
-    // Extract state: the inner graph runs extraction ONLY, after the judge.
     let sweep_extract = states
         .iter()
         .find(|s| s.id == "sweep_extract")
@@ -171,7 +165,6 @@ fn game_narrative_sample_validates_clean() {
         Some(NextTarget::Linear("done".to_string()))
     );
 
-    // The sweep graph must be extraction-only: no inventory node inside it
     // (the scan/judge lives in the scheduled_sweep state).
     let sweep_graph = &loaded.manifest.inner_graphs.as_ref().unwrap()["sweep_graph"];
     assert!(
@@ -200,7 +193,6 @@ fn game_narrative_sample_validates_clean() {
 
 #[test]
 fn dotted_preset_input_key_is_unreachable_in_expressions() {
-    // The context map is flat (`build_context_json` merges literal keys such
     // as "preset.input.mode"), but the grammar resolves `_context.a.b.c` by
     // walking nested objects — a literal dotted key is unreachable, so the
     // expression evaluates false even when the key is present.
@@ -213,7 +205,6 @@ fn dotted_preset_input_key_is_unreachable_in_expressions() {
          (this is why the sample routes lanes via _judge_result)"
     );
 
-    // The judge-written discriminator is the supported path: true when the
     // llm_judge exit wrote true, false when absent (fail-closed default).
     let judge_true = serde_json::json!({ "_judge_result": true });
     let judge_absent = serde_json::json!({});
@@ -226,7 +217,6 @@ fn dotted_preset_input_key_is_unreachable_in_expressions() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // `preset.yaml` <-> `WorkflowDocument` round trip (IR-primary authoring gate)
 // ---------------------------------------------------------------------------
 
@@ -440,7 +430,6 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     );
 
     for asset in &document.assets {
-        // The carrier references an asset by this same string, and `import_preset_bundle`
         // registers every asset as `id == path`: an id that names a different file than `path`
         // keeps the name set above intact and still hashes a template no carrier uses.
         assert_eq!(
@@ -449,7 +438,6 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
              `{}`) — re-import the bundle instead of editing `path` alone",
             asset.id, asset.path
         );
-        // `assets[].path` is document-controlled and this loop is the only reader of it, so the
         // loader's path-safety predicate (the one `validate_path_safety` applies to carrier
         // references) runs here: an escaping path is refused, not hashed.
         nexus_preset::loader::assert_template_file_safe(&asset.path).unwrap_or_else(|reason| {
@@ -470,7 +458,6 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
         );
     }
 
-    // The committed bytes must be exactly what `nexus42 preset export <dir>` writes —
     // not merely the same values — so a hand edit or a formatting drift reds here.
     let exported = export_preset(&document)
         .unwrap_or_else(|error| panic!("export {bundle}/workflow.json: {error}"));
@@ -735,11 +722,9 @@ fn every_documented_normalisation_is_cosmetic() {
 /// that does rewrite the bytes (I-000476) and the spellings the three bundles use.
 #[test]
 fn documented_shape_rewrites_and_stable_shapes_hold() {
-    // Both samples' spelling: a judged state's bare `next` survives unchanged.
     let bare = probe_export("    exit_when: {kind: llm_judge}\n    next: b\n");
     assert_eq!(bare["states"][0]["next"], Value::String("b".to_string()));
 
-    // I-000476: a judged zero-rule branch may export as that same bare `next` today, or keep its
     // `branches` shape once the exporter can tell the two apart. Either spelling must still point
     // at `b`: the assertion is the target, not the collapsed form, so the fix keeps it green while
     // a retargeted edge still fails.
@@ -752,7 +737,6 @@ fn documented_shape_rewrites_and_stable_shapes_hold() {
         "a judged state's zero-rule branch must still target `b`, whatever spelling it exports"
     );
 
-    // `examples/first-workflow` relies on this: a non-judged zero-rule branch keeps its shape.
     let kept = probe_export("    next: {branches: [], default: b}\n");
     assert_eq!(
         kept["states"][0]["next"]["branches"],
@@ -763,12 +747,10 @@ fn documented_shape_rewrites_and_stable_shapes_hold() {
         Value::String("b".to_string())
     );
 
-    // An explicit default is dropped from the export (`enter: []`, `terminal: false`).
     let explicit = probe_export("    enter: []\n    terminal: false\n    next: b\n");
     assert_eq!(explicit["states"][0].get("enter"), None);
     assert_eq!(explicit["states"][0].get("terminal"), None);
 
-    // The legacy `kind: conditional` spelling is rewritten to the `branches` form.
     let legacy = probe_export("    next: {kind: conditional, rules: [], default: b}\n");
     assert_eq!(
         legacy["states"][0]["next"]["branches"],

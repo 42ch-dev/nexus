@@ -1,5 +1,4 @@
 /**
- * Hub card — the read-only frame for one 操作台 status section (plan v1220 T1).
  *
  * A card carries a title, an optional status pill, its data body, and at most
  * one navigation link. The Hub aggregates state only: no form, no mutation —

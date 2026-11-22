@@ -72,9 +72,6 @@ impl From<OutlineFault> for CoreError {
     }
 }
 
-// ─── Internal frontmatter model ─────────────────────────────────────────────
-
-/// In-memory representation of the work outline markdown frontmatter.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct OutlineFrontmatter {
@@ -116,9 +113,6 @@ impl OutlineFrontmatter {
     }
 }
 
-// ─── Shared helpers ─────────────────────────────────────────────────────────
-
-/// Canonical relative path for the work-level outline markdown.
 fn outline_rel_path(work_ref: &str) -> String {
     format!("Works/{work_ref}/Outlines/outline.md")
 }
@@ -151,7 +145,6 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
         return None;
     }
     let after_open = &trimmed[3..];
-    // Find the closing `---` on its own line: it must be followed by `\n` or be
     // at end-of-string. Matching bare `\n---` would also accept substrings like
     // `\n---more` or an unquoted YAML block scalar line starting with `---`,
     // splitting the frontmatter prematurely (R-V172-GREPTILE-004).
@@ -162,7 +155,6 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
         if idx + 4 == after_open.len() {
             (idx, 4)
         } else {
-            // `---` is not on its own line (e.g. `\n---more`); malformed.
             return None;
         }
     };
@@ -182,7 +174,6 @@ async fn read_outline_file(
     rel_path: &str,
     chapters: &[WorkChapterRecord],
 ) -> Result<(OutlineFrontmatter, String), OutlineFault> {
-    // Use must_exist=false so a missing outline file is treated as a default
     // frontmatter rather than a path-guard error. The guard still verifies the
     // resolved path would live inside the workspace root.
     let path =
@@ -338,8 +329,6 @@ fn patch_ok(
     })
 }
 
-// ─── Outline validation rules (V1.73 β hardening, B1–B4) ────────────────────
-
 /// Maximum length of a chapter slug (kebab-case identifier).
 const MAX_SLUG_LEN: usize = 80;
 
@@ -376,7 +365,6 @@ fn validate_chapter_slug(
             warnings: vec![],
         });
     }
-    // Uniqueness within the Work (exclude the chapter being patched).
     if chapters
         .iter()
         .any(|r| r.chapter != current_chapter && r.slug.as_deref() == Some(slug))
@@ -603,7 +591,6 @@ async fn get_work_outline(
 ) -> Result<WorkOutline, OutlineFault> {
     let chapters = list_chapters(service, work_id).await?;
 
-    // A freshly created Work carries neither `work_ref` nor `story_ref`. Its
     // outline read degrades to the same default the missing-file path yields:
     // the default frontmatter is derived in memory from the Work's chapter
     // rows, is never persisted, and fabricates no ref or filesystem path.
@@ -637,7 +624,6 @@ async fn patch_outline_structure(
     let work_ref = resolve_work_ref(work)?;
     let rel_path = outline_rel_path(&work_ref);
 
-    // Pre-load chapter rows for defaulting and validation.
     let chapters = list_chapters(service, work_id).await?;
 
     let initial_frontmatter = read_outline_file(workspace_root, &rel_path, &chapters)
@@ -661,7 +647,6 @@ async fn patch_outline_structure(
     let lock =
         WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
-    // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
     let (mut frontmatter, body) = read_outline_file(workspace_root, &rel_path, &chapters).await?;
     if base_revision != frontmatter.outline_revision {
@@ -761,7 +746,6 @@ async fn patch_outline_chapter(
         });
     }
 
-    // Protect published chapters from any canvas outline edit (structural
     // metadata AND prose content — V1.75 extended the guard to `content`).
     if record.status == "published" && has_chapter_structural_edit(&req) {
         return Err(OutlineFault::BadRequest {
@@ -773,7 +757,6 @@ async fn patch_outline_chapter(
     let lock =
         WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
-    // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
     let (mut frontmatter, body) = read_outline_file(workspace_root, &rel_path, &chapters).await?;
     if base_revision != frontmatter.outline_revision {
@@ -857,7 +840,6 @@ async fn patch_timeline_event(
     let lock =
         WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
-    // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
     let (mut frontmatter, body) = read_outline_file(workspace_root, &rel_path, &chapters).await?;
     if base_revision != frontmatter.outline_revision {
@@ -897,8 +879,6 @@ async fn patch_timeline_event(
     patch_ok(frontmatter.outline_revision, Vec::new())
 }
 
-// ─── Patch application logic ────────────────────────────────────────────────
-
 async fn apply_structure_patch(
     service: &CoreService,
     work_id: &str,
@@ -921,14 +901,11 @@ async fn apply_structure_patch(
             let volume_id_i64 = i64::try_from(u64::from(volume_id)).unwrap_or(0);
 
             ensure_chapter_exists(chapters, chapter_id_i64)?;
-            // V1.73 B4 — block structural edits to published chapters.
             ensure_chapter_not_published(chapters, chapter_id_i64)?;
-            // V1.73 B2 — reject binding to a non-existent / out-of-range volume.
             validate_volume_target(frontmatter, volume_id_i64)?;
 
             let volume_id_i32 = i32::try_from(volume_id_i64).unwrap_or(1);
 
-            // Update the DB volume binding so `work_chapters` stays SSOT.
             let now = chrono::Utc::now().to_rfc3339();
             let patch = PatchChapterParams {
                 volume: Some(volume_id_i32),
@@ -953,7 +930,6 @@ async fn apply_structure_patch(
                 message: e.to_string(),
             })?;
 
-            // Re-sync the outline volume ordering.
             move_chapter_in_frontmatter(frontmatter, chapter_id_i64, volume_id_i64, chapters);
             Ok(())
         }
@@ -1003,7 +979,6 @@ fn move_chapter_in_frontmatter(
     let volume_id = std::num::NonZeroU64::new(u64::try_from(volume_id).unwrap_or(1))
         .unwrap_or(std::num::NonZeroU64::MIN);
     let vol1 = std::num::NonZeroU64::MIN;
-    // Remove the chapter from all existing volumes.
     for vol in &mut frontmatter.volumes {
         vol.chapter_ids.retain(|id| *id != chapter_id);
     }
@@ -1011,7 +986,6 @@ fn move_chapter_in_frontmatter(
         .volumes
         .retain(|vol| !vol.chapter_ids.is_empty());
 
-    // Append to the target volume, creating it if necessary.
     let target = frontmatter
         .volumes
         .iter_mut()
@@ -1028,14 +1002,12 @@ fn move_chapter_in_frontmatter(
         });
     }
 
-    // Ensure every chapter still appears somewhere; missing ones land in volume 1.
     let mut present: std::collections::HashSet<std::num::NonZeroU64> = frontmatter
         .volumes
         .iter()
         .flat_map(|vol| vol.chapter_ids.clone())
         .collect();
 
-    // Resolve the volume-1 slot once, creating it if absent, to avoid overlapping
     // mutable borrows inside the loop.
     let vol1_idx = if let Some(idx) = frontmatter
         .volumes
@@ -1060,19 +1032,15 @@ fn move_chapter_in_frontmatter(
         }
     }
 
-    // Drop the volume-1 placeholder if no chapters actually landed there.
     frontmatter
         .volumes
         .retain(|vol| !vol.chapter_ids.is_empty());
 
-    // Sort each volume's chapter list by chapter number for stable ordering.
     for vol in &mut frontmatter.volumes {
         vol.chapter_ids.sort_unstable();
     }
     frontmatter.volumes.sort_by_key(|vol| vol.volume_id);
 }
-
-// ─── Scene/beat authoring (V1.200 DR-26) ────────────────────────────────────
 
 /// Mint a scene/beat id: the `scn_`/`bet_` prefix plus a simple (hyphen-free)
 /// v4 UUID, i.e. 32 lowercase hex characters.
@@ -1177,7 +1145,6 @@ fn scene_remove(
     frontmatter
         .scenes
         .retain(|scene| scene.scene_id != scene_id);
-    // Cascade: a removed scene takes its beats with it in the same revision.
     frontmatter.beats.retain(|beat| beat.scene_id != scene_id);
     Ok(())
 }
@@ -1265,7 +1232,6 @@ async fn persist_chapter_outline_content(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("Works/{work_ref}/Outlines/chapters/ch{chapter:02}-outline.md"));
 
-    // If the column was empty, persist the derived path so subsequent reads
     // (V1.65 GET, the canvas inspector) find the file. This mirrors the
     // V1.65 PUT route's seeding behavior.
     if was_empty {
@@ -1285,7 +1251,6 @@ async fn persist_chapter_outline_content(
         })?;
     }
 
-    // Atomic write of prose to the per-chapter outline file. This is the
     // plain-content writer (distinct from this module's frontmatter+body
     // `atomic_write_outline`).
     crate::content::atomic_write_text(workspace_root, &outline_path, &content)
@@ -1311,11 +1276,9 @@ async fn apply_chapter_patch(
         validate_status_transition(&record.status, &status.to_string())?;
     }
 
-    // V1.73 B1 — validate slug format + Work-wide uniqueness before writing.
     if let Some(slug) = &req.set.slug {
         validate_chapter_slug(slug, chapter, chapters)?;
     }
-    // V1.73 B2 — validate volume binding target before moving the chapter.
     if let Some(volume_id) = req.set.volume {
         validate_volume_target(
             frontmatter,
@@ -1351,7 +1314,6 @@ async fn apply_chapter_patch(
             .map(std::string::ToString::to_string),
     };
 
-    // Persist slug/wc/volume/status to the chapter SSOT table.
     let now = chrono::Utc::now().to_rfc3339();
     work_chapters::patch_chapter(
         &service.inner.pool,
@@ -1367,14 +1329,12 @@ async fn apply_chapter_patch(
         message: e.to_string(),
     })?;
 
-    // Persist the UI-facing title in the outline frontmatter.
     if let Some(title) = req.set.title.clone() {
         frontmatter
             .chapter_titles
             .insert(chapter.to_string(), title);
     }
 
-    // Re-sync volume ordering when the volume binding changed.
     if has_volume_change {
         let new_volume = req.set.volume.unwrap_or_else(|| {
             std::num::NonZeroU64::new(u64::try_from(record.volume.unwrap_or(1)).unwrap_or(1))
@@ -1385,7 +1345,6 @@ async fn apply_chapter_patch(
         move_chapter_in_frontmatter(frontmatter, i64::from(chapter), new_volume_i64, &chapters);
     }
 
-    // V1.75 A2 — outline-prose content patch (canvas-pivot parity-close).
     //
     // The chapter outline prose lives in the per-chapter markdown file
     // referenced by `work_chapters.outline_path` (NOT the work-level
@@ -1434,7 +1393,6 @@ fn apply_timeline_patch(
             ValidatedBinding::Bind(referent) => {
                 timeline_bind_world_event(req, frontmatter, chapters, referent)
             }
-            // Unreachable: the async owner resolves and validates the referent
             // before this synchronous helper runs. Kept explicit so the two
             // halves cannot silently drift into an unvalidated write.
             ValidatedBinding::Unbind | ValidatedBinding::None => Err(OutlineFault::Internal {
@@ -1494,7 +1452,6 @@ fn timeline_remove_event(
     if frontmatter.timeline_events.len() == before {
         return Err(OutlineFault::NotFound(format!("event {event_id}")));
     }
-    // Also drop foreshadow edges touching this event.
     frontmatter
         .foreshadows
         .retain(|edge| edge.source_event_id != event_id && edge.target_event_id != event_id);
@@ -1548,7 +1505,6 @@ fn timeline_link_foreshadow(
             message: "link_foreshadow requires foreshadows_event_id".to_string(),
         })?;
 
-    // QC2-F002 — a foreshadow edge from an event to itself is nonsensical (an
     // event cannot foreshadow its own realization). Reject at the service
     // level so a bypass of the UI's `!==` guard cannot create a self-loop edge.
     if source == target {
@@ -1569,7 +1525,6 @@ fn timeline_link_foreshadow(
         .find(|e| e.event_id == target)
         .ok_or_else(|| OutlineFault::NotFound(format!("event {target}")))?;
 
-    // V1.73 B3 — enforce source-before-target temporal order. A foreshadow is
     // planted by the source event and realized by the target event, so the
     // source must be scheduled at or before the target's realization point.
     // An event's temporal coordinate is its `realizes_chapter_id`; both ends
@@ -1638,7 +1593,6 @@ fn timeline_unlink_foreshadow(
             message: "unlink_foreshadow requires foreshadows_event_id".to_string(),
         })?;
 
-    // QC2-F001 — verify both events still exist in `timeline_events`, mirroring
     // the link handler's existence checks. An edge can outlive its events if
     // the outline was edited outside the daemon (e.g. manual YAML edit removed
     // an event but left a dangling foreshadow entry). Without this guard the
@@ -1669,8 +1623,6 @@ fn timeline_unlink_foreshadow(
     }
     Ok(())
 }
-
-// ─── Cross-surface binding (V1.200 DR-26 / DF-V1123-CROSS-SURFACE-BINDING) ──
 
 /// The outcome of the authorized World read that gates a binding mutation.
 ///

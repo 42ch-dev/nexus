@@ -100,7 +100,6 @@ fn seed_home(tmp: &Path) {
     )
     .expect("write allowlist.json");
 
-    // v1.210 P3: pin the peer-tools event lane to an OS-assigned ephemeral
     // port. The lane then always binds (no machine-wide 8425 collision
     // dependence), and the printed `event_lane:` readiness line must name
     // the REAL bound port — never the configured `0` (the config echo the
@@ -185,7 +184,6 @@ fn seed_scoped_workspace(home: &Path) {
 /// `connect-host` on) when the test target builds; resolved through the
 /// standard workspace target layout.
 fn probe_binary() -> PathBuf {
-    // Same profile inference as the shipped host artifact: a custom profile's
     // probe lives under its own directory, never under `debug`.
     let (target, profile) = running_profile().unwrap_or_else(|error| panic!("{error}"));
     let exe = if cfg!(windows) {
@@ -315,7 +313,6 @@ fn shipped_runtime_binary() -> PathBuf {
             "connect-host",
         ])
         .args(profile_build_args(&profile))
-        // Pin the target root the inference resolved, so a relative
         // `CARGO_TARGET_DIR` cannot land the artifact elsewhere.
         .env("CARGO_TARGET_DIR", &target)
         .current_dir(&manifest_dir);
@@ -389,7 +386,6 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
             "/w/target",
             "ci",
         ),
-        // The Linux CI runner reports the build script's output directory.
         (
             "/home/runner/work/nexus/nexus/target/debug/build/nexus42/e614ca/out/nexus_runtime_smoke-e614ca",
             "/home/runner/work/nexus/nexus/target",
@@ -430,8 +426,8 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
 /// this test.
 ///
 /// shortcut: `DefaultHasher` is deterministic per toolchain, not per the Rust
-/// spec; if the probe and the test ever build with different compilers, switch
-/// to a fixed digest.
+/// spec, upgrade: switch to a fixed digest when the probe and the test build
+/// with different compilers.
 fn session_tag(session: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -592,7 +588,6 @@ fn spawn_runtime(home: &Path) -> (Child, Vec<String>, Vec<String>) {
         .spawn()
         .expect("spawn nexus-runtime");
 
-    // Drain both pipes through channels so the child can never block on a
     // full pipe; stderr lines are kept for failure diagnostics.
     let stdout = child.stdout.take().expect("runtime stdout");
     let stderr = child.stderr.take().expect("runtime stderr");
@@ -623,7 +618,6 @@ fn spawn_runtime(home: &Path) -> (Child, Vec<String>, Vec<String>) {
                 if let Some(rest) = line.trim().strip_prefix("listen:") {
                     listen_addrs.push(rest.trim().to_string());
                 }
-                // The readiness block ends with the Ctrl-C hint line.
                 if !listen_addrs.is_empty() && line.contains("press Ctrl-C to stop") {
                     break;
                 }
@@ -644,7 +638,6 @@ fn spawn_runtime(home: &Path) -> (Child, Vec<String>, Vec<String>) {
         );
     }
 
-    // Keep the stderr drain alive for the caller's lifetime (detached).
     std::mem::forget(stderr_rx);
     (child, ready_lines, listen_addrs)
 }
@@ -714,7 +707,6 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String], lane_endpoin
             .iter()
             .filter_map(|addr| multiaddr_endpoint(addr))
             .collect();
-        // The peer-tools event lane's WS endpoint (see the doc comment): the
         // seeded home pins `daemon.json` to port 0, so the lane always binds
         // an OS-assigned port and the readiness line discloses the real one.
         expected.push((lane_endpoint.0.clone(), lane_endpoint.1));
@@ -736,7 +728,6 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String], lane_endpoin
             String::from_utf8_lossy(&out.stderr)
         );
         let text = String::from_utf8_lossy(&out.stdout);
-        // THIS PID's own listeners, each already checked against the allowance.
         let mut listeners: Vec<Endpoint> = Vec::new();
         for line in text.lines().skip(1) {
             let Some((host, port)) = lsof_line_endpoint(line) else {
@@ -753,7 +744,6 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String], lane_endpoin
             listeners.push((host, port));
         }
 
-        // Protocol identity (check 2), attributed to THIS PID only: the
         // disclosed endpoint must be one the runtime actually holds. The
         // port-0 fixture guarantees the lane bound, so a readiness line that
         // named a config echo, the configured `0`, or a foreign endpoint
@@ -778,7 +768,6 @@ fn assert_no_http_listener(child_pid: u32, listen_addrs: &[String], lane_endpoin
     }
     #[cfg(not(unix))]
     {
-        // Structural no-op — see the doc comment.
         let _ = (child_pid, listen_addrs, lane_endpoint);
     }
 }
@@ -868,7 +857,6 @@ fn lane_socket_addr(endpoint: &Endpoint) -> Option<SocketAddr> {
 #[cfg(unix)]
 fn answers_plain_http(addr: SocketAddr, timeout: Duration) -> bool {
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, timeout) else {
-        // Nothing is listening there: whatever holds the port is not answering.
         return false;
     };
     let _ = stream.set_read_timeout(Some(timeout));
@@ -921,7 +909,6 @@ fn lsof_line_endpoint(line: &str) -> Option<Endpoint> {
 
 #[test]
 fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
-    // Real shapes from `lsof -nP -iTCP -sTCP:LISTEN -a -p <pid>`: IPv4
     // loopback (observed: `TCP 127.0.0.1:62488 (LISTEN)`), wildcard, and
     // bracketed IPv6 — the host travels with the port so the endpoint
     // allowance cannot be satisfied by a different interface.
@@ -940,7 +927,6 @@ fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
         Some(("::1".to_string(), 62086))
     );
 
-    // Regression guard: the vacuous pre-fix parser (`.last()` token, i.e.
     // always `(LISTEN)`) extracts no port from ANY real listener line, so
     // it could never fail the no-HTTP assertion. If this guard trips, the
     // assertion became vacuous again.
@@ -959,11 +945,9 @@ fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
         );
     }
 
-    // Malformed / non-listen lines are skipped, never mis-parsed.
     assert_eq!(lsof_line_endpoint("TCP 127.0.0.1:62488"), None);
     assert_eq!(lsof_line_endpoint(""), None);
 
-    // The printed Connect multiaddrs the allowance is derived from.
     assert_eq!(
         multiaddr_endpoint("/ip4/127.0.0.1/tcp/53843"),
         Some(("127.0.0.1".to_string(), 53843))
@@ -975,7 +959,6 @@ fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
     assert_eq!(multiaddr_endpoint("/ip4/127.0.0.1/udp/1"), None);
     assert_eq!(multiaddr_endpoint("not-a-multiaddr"), None);
 
-    // The lane endpoint is the documented loopback default — pinned as a
     // literal so a silent constant change cannot pass unnoticed.
     assert_eq!(peer_tools_lane_endpoint(), ("127.0.0.1".to_string(), 8425));
 }
@@ -1069,7 +1052,6 @@ fn spawn_control_server(behavior: HttpControl) -> SocketAddr {
                           s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n",
                     );
                 }
-                // A WS accept loop rejects a non-upgrade request by closing
                 // with no response.
                 HttpControl::Ws => {}
             }
@@ -1095,7 +1077,6 @@ fn answers_plain_http_discriminates_an_http_router_from_a_ws_accept() {
         "a WS accept loop must not be reported as HTTP"
     );
 
-    // An endpoint with nothing listening is not an HTTP listener either.
     let free = TcpListener::bind(("127.0.0.1", 0)).expect("reserve a free port");
     let unused = free.local_addr().expect("reserved addr");
     drop(free);
@@ -1123,29 +1104,24 @@ fn version_flag_prints_crate_version() {
     );
 }
 
-// One end-to-end scenario: seed, spawn, probe, assert. Splitting it would let a
 // later assertion pass against a runtime an earlier step never started.
 #[allow(clippy::too_many_lines)]
 #[test]
 fn headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener() {
-    // The advertised list is an exact record, not a prefix: a trailing op
     // (e.g. an unexpected served route) fails this line comparison.
     const SERVED_OPS_LINE: &str = "SERVED_OPS=upsert,promote,relate,check,assemble,compute,\
 tools.nexus.list_observed_peers,tools.nexus.list_modules";
     let tmp = tempfile::tempdir().expect("temp dir");
     seed_home(tmp.path());
-    // The retained half: stored scoped World + staged session (and, where the
     // wasm32 target exists, the installed deterministic module), all before
     // the runtime opens the DB.
     seed_scoped_workspace(tmp.path());
 
-    // Boot the real binary against the temp home. The guard kills the
     // child on EVERY exit path — success or panic — never orphaning it.
     let (child, ready_lines, listen_addrs) = spawn_runtime(tmp.path());
     let runtime_pid = child.id();
     let _guard = RuntimeGuard::new(child);
 
-    // 1. Readiness block: the required lines are present on stdout.
     let ready = ready_lines.join("\n");
     for expected in [
         "Connect Host (N-C2 E2) ready",
@@ -1161,7 +1137,6 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         );
     }
 
-    // 1b. Event-lane readiness (v1.210 P3 locked contract): the greppable
     //     `event_lane: ws://<host>:<port>/connect` line names the address
     //     the lane ACTUALLY bound. The hermetic home pins the lane to port
     //     0, so the printed port is the OS-assigned one — a config echo
@@ -1178,12 +1153,10 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         "the readiness line must name the bound port, not the configured 0"
     );
 
-    // 2. No HTTP/SPA listener: every TCP listener of the runtime process
     //    is one of its printed Connect listen addrs or the event lane
     //    endpoint the readiness line disclosed.
     assert_no_http_listener(runtime_pid, &listen_addrs, &lane_endpoint);
 
-    // 3. The reference probe peer dials the host and completes the
     //    signed-hello handshake; the manifest advertises exactly the served
     //    ops (writes, reads, compute) and the session stays usable.
     let host_peer = ready_lines
@@ -1199,7 +1172,6 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         probe_path.display()
     );
     let mut probe = Command::new(&probe_path);
-    // `--world` is always supplied: the probe proves the session still works
     // after the refusal with an in-scope `upsert`. The compute session is
     // added only where the module can be installed.
     probe.args([
@@ -1220,7 +1192,6 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         status.success(),
         "probe failed (status {status})\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    // The advertised list is an exact record, not a prefix: a trailing op
     // (e.g. an unexpected served route) fails this line comparison.
     assert!(
         stdout.lines().any(|line| line.trim() == SERVED_OPS_LINE),
@@ -1232,7 +1203,6 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
         );
     }
-    // Refusal attribution (QC1-02): the same `op_unsupported` code covers an
     // unserved op, an out-of-scope op and a malformed payload. The smoke only
     // claims the authorization boundary, so it must see the SERVED op refused
     // by this peer's `op_scope` reason — with the unserved control printed
@@ -1255,7 +1225,6 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         Ok(()),
         "the refusal must be the out-of-scope denial, not request validation:\n{stdout}\nstderr:\n{stderr}"
     );
-    // 3b. A REAL retained compute op ran end-to-end in the spawned process:
     //     the probe seeded both combatants over the served `upsert` and the
     //     host's compute lane executed the installed deterministic module,
     //     returning the staged 30 HP − (ATK 20 − DEF 5) = 15. The value is
@@ -1267,7 +1236,6 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         Ok(()),
         "the deterministic compute result must be exactly 15 HP:\n{stdout}\nstderr:\n{stderr}"
     );
-    // On a no-wasm host the compute half is absent by construction, and the
     // ignored test above names that skip; this assertion keeps the absence
     // explicit rather than letting a stray COMPUTE_OK line imply it ran.
     #[cfg(nexus42_no_wasm_target)]
@@ -1275,6 +1243,5 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         !stdout.contains("COMPUTE_OK"),
         "compute cannot run without the wasm32 target:\n{stdout}"
     );
-    // `_guard` drops here (and on any panic unwind above): the child is
     // killed and reaped on every path.
 }

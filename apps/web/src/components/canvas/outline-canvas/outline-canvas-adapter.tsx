@@ -1,5 +1,4 @@
 /**
- * Outline canvas adapter — projects the daemon outline + chapters into React
  * Flow nodes/edges and renders surface-specific chrome (inspectors, alt-view,
  * a11y summary).
  *
@@ -42,11 +41,6 @@ import { BeatInspector } from './inspectors/beat-inspector';
 import { ChapterInspector } from './inspectors/chapter-inspector';
 import { SceneInspector } from './inspectors/scene-inspector';
 
-// ---------------------------------------------------------------------------
-// Graph payload + node data union
-// ---------------------------------------------------------------------------
-
-/** Graph payload consumed by the Outline surface adapter. */
 export interface OutlineSurfaceGraph {
   outline: WorkOutline;
   chapters: ChapterSummary[];
@@ -54,7 +48,6 @@ export interface OutlineSurfaceGraph {
 }
 
 /**
- * Union of all Outline RF node data payloads. The adapter interface requires a
  * single `TNodeData`; `renderInspector` narrows by `node.type` before reading
  * kind-specific fields (each data shape carries `[key: string]: unknown`).
  */
@@ -65,12 +58,7 @@ export type OutlineNodeData =
   | OutlineBeatNodeData
   | OutlineTimelineEventNodeData;
 
-// ---------------------------------------------------------------------------
-// Adapter context (mutable; supplied by the orchestrator via a ref)
-// ---------------------------------------------------------------------------
-
 /**
- * Mutable context supplied by the orchestrator so the adapter can project the
  * graph, render inspectors / alt-view, and produce an a11y summary without
  * closing over stale values.
  *
@@ -78,13 +66,10 @@ export type OutlineNodeData =
  * object itself is stable and never recreated.
  */
 export interface OutlineCanvasAdapterContext {
-  // Projection-time i18n — localized "Chapter N" fallback for untitled chapters.
   translateFallback: (chapter: number) => string;
 
-  // Summary-time i18n — drives `outlineGraphSummary` interpolation.
   t: TFunction<'canvas'>;
 
-  // Inspector routing + ChapterInspector write-boundary props.
   workId: string;
   outline: WorkOutline | undefined;
   chapters: ChapterSummary[];
@@ -92,14 +77,12 @@ export interface OutlineCanvasAdapterContext {
   /** Always-defined fixture used to resolve Beat/Scene entities from node data. */
   fixture: SceneBeatFixturePayload;
   /**
-   * Fixture forwarded to the alt view. The orchestrator supplies the explicit
    * Studio/test `sceneBeatFixture` prop when present, else the Work's canonical
    * scenes/beats once they have content. `undefined` keeps the alt view's
    * honest empty chrome (no empty-under-chapter helper).
    */
   altViewSceneBeatFixture?: SceneBeatFixturePayload;
 
-  // ChapterInspector write-boundary handlers/state.
   onPatchChapter: (chapter: number, request: OutlinePatchChapterRequest) => void;
   onMove: (chapterId: number, volumeId: number) => void;
   patchChapterIsPending: boolean;
@@ -113,12 +96,7 @@ export type OutlineCanvasAdapter = CanvasSurfaceAdapter<
   OutlineEdgeData
 >;
 
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
-
 /**
- * Create a stable Outline canvas adapter.
  *
  * The adapter reads mutable values from the supplied context ref so the
  * orchestrator can update state without invalidating the hook's memoized graph
@@ -138,7 +116,7 @@ export function createOutlineCanvasAdapter(
     // chapter nodes have scene/beat children — exactly this pattern). The
     // projection's built-in deterministic grid layout (projectOutlineGraph)
     // supplies positions directly; useAutoLayout returns pass-through when
-    // layoutOptions is undefined. Upgrade path: fix the dagre compound-graph
+    // layoutOptions is undefined. upgrade: fix the dagre compound-graph
     // ranker issue, or switch to a layout engine that handles nesting (e.g.
     // elk-js), then restore `layoutOptions: { direction: 'LR' }`.
     layoutOptions: undefined,
@@ -158,7 +136,6 @@ export function createOutlineCanvasAdapter(
     },
 
     adaptConflict(_error) {
-      // Outline write-boundary conflicts (409 on patch) are surface-owned:
       // the orchestrator captures them via `captureConflictState` and renders
       // `OutlineConflictDialog` — a surface-specific modal whose props
       // (`ConflictState`) do not match the shared `ConflictModalProps` shape
@@ -183,12 +160,7 @@ export function createOutlineCanvasAdapter(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Inspector routing — chapter / scene / beat
-// ---------------------------------------------------------------------------
-
 /**
- * Adapter-driven inspector router. Reads the selected node's type and resolves
  * the matching entity (chapter / scene / beat) from the context ref, then
  * renders the appropriate inspector.
  *
@@ -208,7 +180,6 @@ function OutlineInspectorRouter({
 }) {
   const ctx = ctxRef.current;
 
-  // Beat node → BeatInspector (read-only).
   if (node.type === 'outline-beat') {
     const data = node.data as OutlineBeatNodeData;
     const beat = ctx.fixture.beats.find((b) => b.beatId === data.beatId) ?? null;
@@ -218,7 +189,6 @@ function OutlineInspectorRouter({
     return <BeatInspector beat={beat} parentSceneTitle={parentSceneTitle} />;
   }
 
-  // Scene node → SceneInspector (read-only).
   if (node.type === 'outline-scene') {
     const data = node.data as OutlineSceneNodeData;
     const scene = ctx.fixture.scenes.find((s) => s.sceneId === data.sceneId) ?? null;
@@ -228,7 +198,6 @@ function OutlineInspectorRouter({
     return <SceneInspector scene={scene} parentChapterTitle={parentChapterTitle} />;
   }
 
-  // Chapter / timeline-event / volume / default → ChapterInspector.
   if (!ctx.outline) return null;
 
   let chapter: ChapterSummary | null = null;
@@ -271,10 +240,6 @@ function resolveChapterDisplayTitle(
     ctx.translateFallback(chapterId),
   );
 }
-
-// ---------------------------------------------------------------------------
-// Alt-view wrapper — reads fresh outline/chapters from the context ref
-// ---------------------------------------------------------------------------
 
 function OutlineAltViewWrapper({
   ctxRef,

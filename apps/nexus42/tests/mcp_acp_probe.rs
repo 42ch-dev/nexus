@@ -14,7 +14,6 @@
 //! Both ACP roles run in-process over the SDK's `Channel::duplex()`; the SDK
 //! owns the JSON-RPC framing.
 
-// Justification (repo convention, cf. tests/works_api.rs): integration-test
 // assertions operate on fixed local fixtures where a panic IS the failure
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -111,7 +110,6 @@ async fn acp_session_delivers_generic_mcp_server_descriptors() {
 
     let agent_task = tokio::spawn(run_scripted_agent(agent_channel, evidence_tx));
 
-    // Client side: initialize, then newSession carrying all three generic
     // descriptor kinds.
     let client_result = Client
         .v1()

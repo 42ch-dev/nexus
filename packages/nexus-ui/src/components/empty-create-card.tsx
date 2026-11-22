@@ -3,7 +3,6 @@ import type { LucideIcon } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 /**
- * EmptyCreateCard — card-sized empty-state create affordance.
  *
  * V1.148 P1 — promoted presentational primitive (from apps/web
  * components/ui/empty-create-card.tsx). Matches the list-item card footprint

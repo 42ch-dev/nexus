@@ -182,7 +182,6 @@ pub fn write_outline_atomic(path: &Path, content: &str) -> std::io::Result<()> {
         Ok(())
     })();
     if result.is_err() && tmp_path.exists() {
-        // Best-effort cleanup of the orphaned temp file.
         let _ = std::fs::remove_file(&tmp_path);
     }
     result
@@ -305,7 +304,6 @@ async fn perform_advance(
 ) -> Result<AdvanceOutcome, AutoChronologyError> {
     let now = now_utc();
 
-    // Gate (shared): idempotent guard — do not clobber an existing outline.
     // `force` bypasses the guard (recovery path).
     let outline = outline_path(workspace_dir, work_ref, next_volume);
     if !force && outline.exists() {
@@ -320,7 +318,6 @@ async fn perform_advance(
         });
     }
 
-    // Step 1 (spec §4.2): transactional chapter seed + updated_at bump.
     // The DB tx commits FIRST (source of truth), before the outline file write.
     let seeded = chapter_count.max(0);
     let mut tx = pool
@@ -351,7 +348,6 @@ async fn perform_advance(
         .await
         .map_err(nexus_local_db::LocalDbError::from)?;
 
-    // Step 2 (spec §4.1): render + atomic outline write (post-commit).
     // If this fails, the DB tx is already committed; the outline is recoverable
     // (next tick for the auto path; `--force` for the manual path).
     let rendered = render_volume_outline(
@@ -368,7 +364,6 @@ async fn perform_advance(
     }
     write_outline_atomic(&outline, &rendered)?;
 
-    // Step 3 (spec §4.3): best-effort log entry.
     if let Err(e) = write_advance_log(
         workspace_dir,
         work_ref,
@@ -412,7 +407,6 @@ async fn advance_auto(
 ) -> Result<AdvanceOutcome, AutoChronologyError> {
     let work_id = &row.work_id;
 
-    // Gate 1: intake complete.
     if row.intake_status != "complete" {
         return Ok(skip(
             work_id,
@@ -420,11 +414,9 @@ async fn advance_auto(
             "intake incomplete",
         ));
     }
-    // Gate 2: no runtime lock.
     if row.runtime_lock_holder.is_some() {
         return Ok(skip(work_id, SkipReason::RuntimeLocked, "work is locked"));
     }
-    // Gate 3: not completion-locked (terminal "last planned volume" guard).
     if row.completion_locked_at.is_some() {
         return Ok(skip(
             work_id,
@@ -432,7 +424,6 @@ async fn advance_auto(
             "work completion-locked",
         ));
     }
-    // Gate 4: current volume fully finalized.
     let Some(prev_volume) = work_chapters::current_volume(pool, work_id).await? else {
         return Ok(skip(
             work_id,
@@ -451,7 +442,6 @@ async fn advance_auto(
     let next_volume = prev_volume + 1;
     let work_ref = row.work_ref.clone().unwrap_or_else(|| work_id.clone());
 
-    // The auto path seeds zero chapters (placeholder outline, spec §4.2).
     // Substitute the Work's stored title / total_planned_chapters into the
     // outline render (spec §4.1 step 3). The daemon never forces (no --force).
     perform_advance(
@@ -567,9 +557,7 @@ pub async fn run_one_tick(pool: &SqlitePool, workspace_dir: &Path) {
 /// Build a `Skipped` outcome + emit a `DEBUG`/`INFO` log line per spec §3.1.
 fn skip(work_id: &str, reason: SkipReason, note: &str) -> AdvanceOutcome {
     let level = match reason {
-        // spec §3.1: these two log at INFO.
         SkipReason::CompletionLocked | SkipReason::AlreadyAdvanced => tracing::Level::INFO,
-        // runtime lock + intake + volume finalize log at DEBUG (spec §3.1).
         _ => tracing::Level::DEBUG,
     };
     if level == tracing::Level::INFO {
@@ -593,7 +581,6 @@ fn now_utc() -> String {
 /// Falls back to `unknown-date` if the input does not contain a `-` (should
 /// not happen for `chrono::Utc::now().to_rfc3339()` output).
 fn now_utc_date(ts: &str) -> String {
-    // RFC 3339 dates start with YYYY-MM-DD; take the first 10 chars when they
     // look like a date, else fall back.
     if ts.len() >= 10 && ts.as_bytes()[4] == b'-' {
         ts[..10].to_string()
@@ -620,7 +607,6 @@ mod tests {
         assert!(out.contains("Volume 2 Outline — My Novel"));
         assert!(out.contains("Previous volume: 1"));
         assert!(out.contains("--volume 2"));
-        // No leftover tokens.
         assert!(!out.contains("{{"));
         assert!(!out.contains("}}"));
     }
@@ -628,7 +614,6 @@ mod tests {
     #[test]
     fn render_unset_total_shows_unset() {
         let out = render_volume_outline("wrk_1", "n", "T", 1, 2, None, "2026-06-18T10:00:00Z");
-        // total_planned_chapters is unreferenced in the current template body
         // (only in metadata), so just assert no tokens remain.
         assert!(!out.contains("{{"));
     }
@@ -639,7 +624,6 @@ mod tests {
         let target = dir.path().join("volume-2-outline.md");
         write_outline_atomic(&target, "hello").unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "hello");
-        // No leftover temp file.
         assert!(!target.with_extension("md.tmp").exists());
     }
 
@@ -648,7 +632,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("missing").join("volume-2-outline.md");
         assert!(write_outline_atomic(&target, "x").is_err());
-        // No temp file orphaned at the missing parent.
         assert!(!target.with_extension("md.tmp").exists());
     }
 
@@ -668,7 +651,6 @@ mod tests {
         write_advance_log(dir.path(), "nov", 2, 1, 0, "test", "2026-06-18T11:00:00Z").unwrap();
         let p = advance_log_path(dir.path(), "nov", "2026-06-18", 2);
         let content = std::fs::read_to_string(&p).unwrap();
-        // Two appends → two "Auto-Chronology Advance" headers.
         assert_eq!(content.matches("Auto-Chronology Advance").count(), 2);
         assert!(content.contains("Chapters seeded: 0"));
         assert!(content.contains("Trigger: test"));

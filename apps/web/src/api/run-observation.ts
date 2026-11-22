@@ -1,5 +1,4 @@
 /**
- * Run observation hook (v1.201 P1-T2, audit DIR-03) — the client-side state
  * machine over T1's `NexusClient.subscribeWorkflowEvents`.
  *
  * Frozen contract: `.agents/knowledge/api-design/sse-fetch-stream-consumer.md`
@@ -112,7 +111,6 @@ export interface RunObservationState {
   /** Current phase of the observed run's stream. */
   phase: RunObservationPhase;
   /**
-   * Every frame observed for this run, in ring order, each cursor `id` at most
    * once. `gap`/`history_unavailable` control frames are kept inline so the run
    * view can render where continuity was lost rather than smoothing over it.
    *
@@ -123,14 +121,12 @@ export interface RunObservationState {
    */
   events: WorkflowObservationFrame[];
   /**
-   * Monotonic publish revision: the number of frames retained for this run over
    * the current observation's lifetime. Every retained frame — a data frame or
    * an inline `gap`/`history_unavailable` control frame — advances it, so it is
    * the safe memoization key for a consumer deriving from `events`.
    */
   revision: number;
   /**
-   * Index into `events` of the first live-tail frame: `events.slice(0, liveFrom)`
    * is replayed history (the re-entered span plus the server's strictly-after
    * replay), `events.slice(liveFrom)` arrived once the view had caught up.
    *
@@ -159,7 +155,6 @@ const RECONNECT_BACKOFF_MS = [200, 400, 800];
 const MAX_RETAINED_EVENTS = 256;
 
 /**
- * Idle lifetime of a non-terminal run's retained observation once no view is
  * mounted on it. Five minutes matches React Query's default `gcTime`, which this
  * app leaves at its default (`main.tsx` configures only `staleTime`/`retry`), so
  * warm run-view retention expires on the same clock as every other cached
@@ -169,7 +164,6 @@ const MAX_RETAINED_EVENTS = 256;
 const RETAINED_IDLE_TTL_MS = 5 * 60_000;
 
 /**
- * Quiet period, measured from the attempt's first received frame, that ends the
  * catch-up burst and hands off to the live tail.
  */
 const CATCH_UP_SETTLE_MS = 120;
@@ -178,14 +172,12 @@ const CATCH_UP_SETTLE_MS = 120;
 const CATCH_UP_MAX_MS = 1_000;
 
 /**
- * Frame ceiling on the catch-up window. A burst arriving faster than
  * `CATCH_UP_SETTLE_MS` never goes quiet, and on a fast enough stream can still
  * outrun `CATCH_UP_MAX_MS`; the first frame past this total is the live tail.
  */
 const CATCH_UP_MAX_FRAMES = 64;
 
 /**
- * Durable run statuses that end the lifecycle — the core's
  * `SessionStatus::is_terminal` (`crates/nexus-orchestration/src/engine.rs`).
  * Every other status (and an unknown one) keeps the run's stream alive, so a
  * clean EOF under it is a transport failure, not a terminal state.
@@ -217,7 +209,6 @@ interface RetainedObservation {
 const retainedObservations = new Map<number, Map<string, RetainedObservation>>();
 
 /**
- * Connection identity of the client a view observes over. A rebuilt client
  * (daemon/client reconnect, changed endpoint or key) is a new instance and so a
  * new identity; the identity is a monotonic number rather than the instance
  * itself, and the WeakMap never pins a retired client alive. Identities are
@@ -253,7 +244,6 @@ function dropRetained(identity: number, sessionId: string): void {
 }
 
 /**
- * Drop entries no view is observing whose last activity is older than
  * `RETAINED_IDLE_TTL_MS`. Terminal runs are dropped immediately by the hook;
  * this is the bound for the non-terminal runs a user has navigated away from.
  * An entry with a mounted view is never swept: an observed run may legitimately
@@ -301,7 +291,6 @@ function retain(retained: RetainedObservation, frame: WorkflowObservationFrame):
 }
 
 /**
- * Index into `events` of the first live-tail frame — the `liveFrom` the run view
  * renders from.
  *
  * The boundary is *stored* as an append count
@@ -327,7 +316,6 @@ function cursorParts(cursor: string): { epoch: string; sequence: number } | null
 }
 
 /**
- * True when `id` names a cursor this view already holds (or one older than it)
  * — a re-delivered frame, which must never be appended twice. The server's
  * `Last-Event-ID` resume is strictly-after, with the sent cursor itself the
  * only inclusive redelivery, so a monotonic per-epoch comparison IS the
@@ -348,7 +336,6 @@ function isRefusal(error: unknown): error is NexusClientError {
 }
 
 /**
- * True when `cursor` is strictly newer than `previous` — the stream carried
  * data past the point `previous` named. A changing epoch is a different ring and
  * is never stale, and an unparsable pair falls back to plain inequality.
  */
@@ -363,7 +350,6 @@ function dataCursorAdvanced(cursor: string | null, previous: string | null): boo
 }
 
 /**
- * The resting observation for a run no subscription has published for yet —
  * also what a changed connection/run identity resets to (see the hook).
  */
 function coldStartState(): RunObservationState {
@@ -392,7 +378,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
   const [retryToken, setRetryToken] = useState(0);
   const [snapshot, setSnapshot] = useState<RunObservationState>(coldStartState);
 
-  // `snapshot` is component state, but the identity it was produced under (the
   // connection and the run) is not: `ClientProvider` can replace its client
   // without remounting this hook (`client-context.tsx`), and the subscription
   // effect only runs AFTER the render that saw the new client. Adjusting the
@@ -428,12 +413,10 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
     /** Catch-up frames received — the hard frame total that ends the window. */
     let catchUpFrames = 0;
 
-    // Re-entry restores what this run already emitted; a first view starts at
     // `connecting` and its frames are the live tail (there is no catch-up span).
     // A retained cursor IS the history: control frames alone are no catch-up.
     let phase: RunObservationPhase = retained.lastEventId !== null ? 'replaying' : 'connecting';
     let catchingUp = retained.lastEventId !== null;
-    // A re-entry starts with the whole retained window on the replay side of the
     // boundary; each catch-up frame re-arms it at the end of the window and the
     // handoff freezes it there (see `boundaryIndex`).
     if (catchingUp) retained.liveFromAppended = retained.appended;
@@ -468,7 +451,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
     };
 
     /**
-     * Arm/extend the catch-up window for one received frame. The quiet timer is
      * re-armed by every frame (a gap of `CATCH_UP_SETTLE_MS` hands off), while
      * the hard totals — `CATCH_UP_MAX_MS` since the first frame and
      * `CATCH_UP_MAX_FRAMES` received — are armed/charged once per catch-up and
@@ -510,7 +492,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             if (cancelled) return;
 
             if (frame.kind === 'gap') {
-              // The ring skipped a range this view never received. Record the
               // hole inline and KEEP CONSUMING: the server writes the frames it
               // still holds after the gap on this same stream, so aborting here
               // would throw away the retained events and reconnect into the very
@@ -527,14 +508,12 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             }
 
             if (frame.kind === 'history_unavailable') {
-              // The retained history is gone (restart/eviction). Reconnecting
               // would only loop this same close, so this ends in `terminal`.
               retain(retained, frame);
               outcome = 'unavailable';
               break;
             }
 
-            // The catch-up burst is anchored at the first frame this attempt
             // received — a re-delivered duplicate counts — so an attempt that
             // connects late still keeps its replay on the replay side.
             if (catchingUp) armCatchUp();
@@ -544,7 +523,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
             if (frame.kind === 'run_state') retained.latestStatus = frame.payload.status;
             retain(retained, frame);
 
-            // A frame arriving after a gap is what the ring retained past the
             // hole: the subscription is alive again, so the phase leaves
             // `gapped` while the marker itself stays inline in `events`.
             if (catchingUp) {
@@ -570,7 +548,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           (outcome === 'end' && retained.latestStatus !== null
             && TERMINAL_RUN_STATUS[retained.latestStatus] === true)
         ) {
-          // A terminal statement: `history_unavailable`, or a closed batch whose
           // latest durable status is terminal. The lifecycle is over and the run
           // is dropped from the retention map — a finished run is re-observable
           // from the server's own ring instead of being pinned for the session.
@@ -588,7 +565,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
         }
 
         if (gapReported && !dataCursorAdvanced(retained.lastEventId, gapCursor)) {
-          // The attempt ended — cleanly, or by throwing — at the gap it
           // reported: it never carried a data frame past it, so `Last-Event-ID`
           // still names exactly the range the ring just gapped. Reconnecting
           // would re-report the same gap and burn the budget on a reconnect that
@@ -602,7 +578,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
           return;
         }
 
-        // Every completed attempt charges the reconnect budget exactly once. A
         // clean EOF under a non-terminal (or unknown) status is a transport
         // failure, not an ending — the same episode a gapped stream that did
         // move past its gap belongs to. The budget is strictly monotonic within
@@ -614,7 +589,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
         consecutiveFailures += 1;
 
         if (consecutiveFailures > MAX_RECONNECT_ATTEMPTS) {
-          // The budget is spent. A clean END that is still gapped — necessarily
           // one that DID advance past its gap, since an unadvanced gapped end
           // rested above — keeps the gap affordance; a throw keeps its own
           // failure on screen instead of hiding it behind the gap the stream
@@ -634,7 +608,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
         phase = 'connecting';
         publish(null);
 
-        // `Promise.withResolvers` is ES2024; this app compiles against the
         // ES2022 lib (apps/web/tsconfig.json), so the executor form stays.
         await new Promise<void>((resolve) => {
           setTimeout(resolve, RECONNECT_BACKOFF_MS[consecutiveFailures - 1]);
@@ -650,7 +623,6 @@ export function useRunObservation(sessionId: string | null): RunObservationResul
       retained.subscribers -= 1;
       retained.lastActivity = Date.now();
       if (retained.subscribers > 0) return;
-      // The last view left: drop the entry once it has been idle past the TTL,
       // unless something re-observes the run first (that mount clears the timer).
       // The timer arms exactly one TTL after the last activity, so it runs the
       // same predicate as the access-time sweep rather than a second rule.

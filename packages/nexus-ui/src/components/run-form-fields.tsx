@@ -8,7 +8,6 @@ import { Label } from './label';
 import { Select } from './select';
 
 /**
- * JSON Schema fragment for one invocation property (manifest
  * `schemas.invocation.properties.*`). Structural — compatible with the
  * generated ModuleDetail manifest shape without importing wire DTOs.
  */
@@ -25,7 +24,6 @@ export interface InvocationSchemaProperty {
 }
 
 /**
- * JSON Schema fragment for a module invocation form (manifest
  * `schemas.invocation`).
  */
 export interface InvocationSchema {
@@ -77,7 +75,6 @@ function includesType(type: string | string[] | undefined, wanted: string[]): bo
 }
 
 /**
- * Field derivation per the V1.147 form contract (behavior spec §3):
  * `*_id` + required_key_block_types → entity picker; enum → select;
  * boolean → checkbox; number/integer → number input; string → text input;
  * anything else → unsupported note (Advanced raw-JSON path stays in the app).
@@ -179,8 +176,6 @@ export function RunFormFields({
         return (
           <div key={name} className="flex flex-col gap-1.5" data-field={name}>
             {kind === 'boolean' ? (
-              // Single label owning both the text and the checkbox (a11y —
-              // two labels targeting one control would double the announcement).
               <label className="flex h-10 items-center gap-2" htmlFor={id}>
                 {label} {requiredMark}
                 <input

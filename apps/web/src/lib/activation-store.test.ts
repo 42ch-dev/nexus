@@ -1,5 +1,4 @@
 /**
- * Activation store (plan v1219 § Shared interfaces 1) — per-creator local
  * unlock state; only `brief-saved` → `work` is writable this iteration (D26).
  */
 import { renderHook } from '@testing-library/react';
@@ -25,7 +24,6 @@ describe('activation store', () => {
     unlock('creator-a', 'work');
     expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify({ work: true }));
     expect(isUnlocked('creator-a', 'work')).toBe(true);
-    // Other creators are unaffected.
     expect(isUnlocked('creator-b', 'work')).toBe(false);
   });
 
@@ -54,7 +52,6 @@ describe('activation store', () => {
     const { result } = renderHook(() => useActivation('creator-a'));
     expect(result.current.isUnlocked('work')).toBe(false);
     act(() => {
-      // Another tab writes the map and fires the storage event; this tab's
       // snapshot version must bump or useSyncExternalStore bails out.
       window.localStorage.setItem(KEY, JSON.stringify({ work: true }));
       window.dispatchEvent(new StorageEvent('storage', { key: KEY }));

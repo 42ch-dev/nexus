@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Production `KnowledgeEntryPort` impl — routes `kb_key_blocks` storage
 //! through spoke's port surface with V1.73 CAS on the put path (spec §7.4 /
 //! §7.3).
@@ -78,7 +79,6 @@ impl NexusAdapter<'_> {
                         }),
                     )
                 } else {
-                    // stored_u < expected (== is impossible: CAS would have
                     // succeeded) — caller expects a revision the store has
                     // never reached.
                     reject(
@@ -95,7 +95,6 @@ impl NexusAdapter<'_> {
                 }
             }
             LocalDbError::VersionMismatch { actual: None, .. } => {
-                // Entry absent + `Some(expected)` — spec §7.4 row 3. The store
                 // has no revision at all; caller is ahead.
                 reject(
                     SpokeRejectCode::RevisionConflict,
@@ -109,7 +108,6 @@ impl NexusAdapter<'_> {
                     }),
                 )
             }
-            // V1.154 P2 (R3 closure, spec §3.2): a zero-row CAS caused by a
             // world mismatch must surface as `world_conflict`, never as a
             // generic OCC failure. The pinned `SpokeRejectCode` has no
             // conflict-class code, so the classification rides the
@@ -169,7 +167,6 @@ pub fn is_world_conflict_reject(reject: &SpokeReject) -> bool {
 #[async_trait]
 impl KnowledgeEntryPort for NexusAdapter<'_> {
     async fn get_knowledge_entry(&self, entry_id: &str) -> SpokeResult<KnowledgeEntry> {
-        // Request-bound scope (durable §4.1, v1.191 P1 T8): a KE load on a
         // host-only adapter fails closed instead of reading the world.
         let _selection = match self.require_read_scope("get_knowledge_entry") {
             Ok(selection) => selection,
@@ -177,7 +174,6 @@ impl KnowledgeEntryPort for NexusAdapter<'_> {
         };
         let world_entry = match self.load_admitted_entry(entry_id).await {
             Ok(Some(record)) => record,
-            // Hidden and absent are indistinguishable (durable §4.2): the same
             // not-found reject covers both.
             Ok(None) => {
                 return reject(
@@ -188,7 +184,6 @@ impl KnowledgeEntryPort for NexusAdapter<'_> {
             }
             Err(err) => return Self::map_get_err(err, entry_id),
         };
-        // Reuse the sole conversion seam (spec §7.1) — now free functions
         // in nexus-spoke-adapter (V1.145 P1a dep-graph reversal).
         SpokeResult::Ok(knowledge_record_to_spoke(&world_entry))
     }
@@ -198,7 +193,6 @@ impl KnowledgeEntryPort for NexusAdapter<'_> {
         entry: KnowledgeEntry,
         expected_base_revision: Option<u64>,
     ) -> SpokeResult<KnowledgeEntry> {
-        // Request-bound scope (durable §4.1, v1.191 P1 T8): no KE write
         // without an admitted selection — a host-only adapter rejects here
         // instead of mutating the world.
         if let Err(reject) = self.require_read_scope("put_knowledge_entry") {
@@ -224,7 +218,6 @@ async fn put_create(
     let store = SqliteKbStore::new(pool.clone());
     let entry_id = entry.entry_id.clone();
 
-    // Pre-check existence. (The underlying `kb_key_blocks_active_unique`
     // constraint is the true race guard; if a concurrent writer beats us the
     // Duplicate error from insert is also mapped to AlreadyExists below.)
     // L2 F1: the pre-check runs through the bound selection, so a row the
@@ -255,7 +248,6 @@ async fn put_create(
         }
     }
 
-    // Reuse the sole conversion seam (spec §7.1) — free function in
     // nexus-spoke-adapter (V1.145 P1a). Set the initial post-create revision
     // to 1 (matches the V1.73 NULL-normalization rule: the first successful
     // write sets revision = 1).
@@ -271,7 +263,6 @@ async fn put_create(
     };
     world_entry.revision = Some(1);
 
-    // Durable §9 (upsert): a write may only land in a container the bound
     // selection authorizes. The container comes from the candidate's narrative
     // owner axis (never from a client governance value), so an operation whose
     // grant points at another World/Character fails closed here.
@@ -286,7 +277,6 @@ async fn put_create(
         );
     }
 
-    // V1.145 P0 T2: build `extensions.nexus` JSON at the adapter boundary so
     // the storage layer stays spoke-unaware. Mirrors the UPDATE CAS path in
     // `run_cas_update_in_tx` (spec §7.4); the JSON is passed opaquely to
     // `insert_key_block_with_extensions_in_tx`. v1.184 P1: owner-aware;
@@ -356,7 +346,6 @@ async fn put_create(
                 "block_type": format!("{block_type:?}"),
             }),
         ),
-        // v1.184 P1 fix: caller-input failures (canonical-name/body
         // validation, the World-only creator_only invariant, and the
         // immutable-owner guard) are InvalidInput, never InternalError — the
         // latter is reserved for genuine storage failures.
@@ -517,7 +506,6 @@ pub(crate) async fn commit_compute_settlement(
             match run_cas_update_in_tx(&mut tx, adapter, &entry_id, &world_entry, expected).await {
                 SpokeResult::Ok(_) => {}
                 SpokeResult::Reject(r) => {
-                    // Drop tx without commit → rollback prior CAS writes.
                     return SpokeResult::Reject(r);
                 }
             }
@@ -580,13 +568,11 @@ async fn run_cas_update_in_tx(
         &nexus_extras_extension_map(world_entry.extensions_nexus_extras.as_ref()),
     ))
     .unwrap_or_default();
-    // V1.146 P4 T1: serialize modules_json for the CAS auxiliary update.
     let modules_json = world_entry
         .modules
         .as_ref()
         .map(|m| serde_json::to_string(m).unwrap_or_default());
 
-    // Native governance is immutable on the ordinary (port) update path
     // (durable §3, v1.191 P1 T8 — the replacement for the retired
     // `creator_only` flag check). The stored pair is read back inside the tx
     // and compared to the candidate *before* the CAS writes, but ONLY when the
@@ -614,7 +600,6 @@ async fn run_cas_update_in_tx(
     let stored = match adapter.load_admitted_entry(entry_id).await {
         Ok(Some(stored)) => stored,
         Ok(None) => {
-            // Same shape the CAS produces for an absent row: the caller is
             // ahead of the store, or the row is not theirs to see.
             return reject(
                 SpokeRejectCode::RevisionConflict,
@@ -636,7 +621,6 @@ async fn run_cas_update_in_tx(
             );
         }
     };
-    // Only a same-world governance change is an immutable-governance violation.
     // A different stored world falls through to the CAS, which classifies
     // world-conflict / not-found exactly as before.
     if stored.world_id() == world_entry.world_id()
@@ -650,10 +634,8 @@ async fn run_cas_update_in_tx(
             json!({ "entry_id": entry_id }),
         );
     }
-    // A missing row falls through to the CAS, which classifies NotFound /
     // CAS-miss exactly as before.
 
-    // v1.184 P1: the CAS update lane is World-owned only — a non-World
     // candidate cannot be patched through the world-scoped CAS (fails closed
     // rather than passing an empty world id into a same-world predicate).
     let Some(world_id) = world_entry.world_id() else {
@@ -680,7 +662,6 @@ async fn run_cas_update_in_tx(
         tx,
         entry_id,
         expected.cast_signed(),
-        // V1.154 P2 (R3 closure): the world bind is the stored-world
         // expected by the request — the candidate's claimed world, which the
         // invoke gate verified against the stored row (spec §3.1). If a
         // cross-process writer moved the row to another world between the
@@ -767,7 +748,6 @@ async fn put_create_in_tx(
     let store = SqliteKbStore::new(pool.clone());
     let entry_id = entry.entry_id.clone();
 
-    // L2 F1: same scoped pre-check as the port create path.
     match adapter.load_admitted_entry(&entry_id).await {
         Ok(Some(_)) => {
             return reject(
@@ -798,7 +778,6 @@ async fn put_create_in_tx(
     };
     world_entry.revision = Some(1);
 
-    // Same container admission as the port create path (durable §9): the
     // caller-owned-tx entry point is a KE-capable mutation, so it is bound to
     // the same request scope.
     if !adapter.admits_container(&world_entry.owner) {
@@ -889,8 +868,6 @@ async fn put_update_in_tx(
     SpokeResult::Ok(result)
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -956,7 +933,6 @@ mod tests {
     /// Build a spoke `KnowledgeEntry` fixture with a populated `extensions.nexus`
     /// (so it round-trips into the `kb_key_blocks` row that requires `world_id`).
     fn spoke_entry(entry_id: &str, canonical_name: &str, revision: Option<u64>) -> KnowledgeEntry {
-        // Round-trip through the sole conversion seam: build a KnowledgeEntryRecord
         // (which carries world_id natively), convert forward to spoke — this
         // guarantees the fixture satisfies the storage shape requirements
         // (world_id present under extensions.nexus; canonical_name format-valid).
@@ -977,8 +953,6 @@ mod tests {
             SpokeResult::Reject(r) => panic!("{label}: expected ok, got reject {r:?}"),
         }
     }
-
-    // ── get_knowledge_entry ───────────────────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_returns_not_found_for_missing_entry() {
@@ -1022,8 +996,6 @@ mod tests {
             SpokeResult::Reject(_) => panic!("expected ok"),
         }
     }
-
-    // ── put_knowledge_entry create path ───────────────────────────────
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_create_happy_path_bumps_revision_to_one() {
@@ -1100,8 +1072,6 @@ mod tests {
         }
     }
 
-    // ── put_knowledge_entry update path (CAS) ─────────────────────────
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_update_happy_path_bumps_revision() {
         let (pool, _dir) = fresh_pool().await;
@@ -1110,14 +1080,12 @@ mod tests {
         let adapter = scoped(pool);
         let entry = spoke_entry("kb_upd_happy", "UpdHappy", None);
 
-        // Create first (revision becomes 1).
         let created = match adapter.put_knowledge_entry(entry, None).await {
             SpokeResult::Ok(e) => e,
             SpokeResult::Reject(r) => panic!("create failed: {r:?}"),
         };
         assert_eq!(created.revision, Some(1));
 
-        // Update with expected_base_revision = Some(1). CAS accepts; revision
         // bumps to 2. Body / status / extensions all round-trip.
         let mut updated = created;
         updated.body.summary = Some("Updated summary".to_string());
@@ -1132,7 +1100,6 @@ mod tests {
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         }
 
-        // Verify the row persisted the post-CAS field update (status + body
         // must both be reflected on re-read through the conversion seam).
         match adapter.get_knowledge_entry("kb_upd_happy").await {
             SpokeResult::Ok(e) => {
@@ -1152,7 +1119,6 @@ mod tests {
         let adapter = scoped(pool);
         let entry = spoke_entry("kb_stale", "Stale", None);
 
-        // Create → revision 1. Bump to 2. Then attempt another update with
         // expected = 1 (caller read a stale base before the second writer
         // bumped). Store (2) > expected (1) → STORED_REVISION_STALE.
         let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
@@ -1184,7 +1150,6 @@ mod tests {
         let adapter = scoped(pool);
         let entry = spoke_entry("kb_conflict", "Conflict", None);
 
-        // Create → revision 1. Then attempt update with expected = 5 (caller
         // expects a revision the store has never reached). Store (1) <
         // expected (5) → REVISION_CONFLICT.
         let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
@@ -1212,7 +1177,6 @@ mod tests {
         let adapter = scoped(pool);
         let entry = spoke_entry("kb_absent", "Absent", None);
 
-        // No prior create — entry is absent. Caller passes expected = Some(3),
         // expecting a base the store has never reached. Per spec §7.4 row 3,
         // absent + Some(_) → REVISION_CONFLICT.
         match adapter.put_knowledge_entry(entry, Some(3)).await {
@@ -1254,14 +1218,10 @@ mod tests {
         );
     }
 
-    // ── V1.146 P0: InternalError on DB failure ─────────────────────────
-
-    /// DB failure (dropped table) on get surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
-        // Drop the table to simulate a DB-level failure.
         sqlx::query("DROP TABLE kb_key_blocks")
             .execute(&pool)
             .await
@@ -1310,13 +1270,11 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        // Create a real entry first so the update path is exercised.
         let adapter = scoped(pool.clone());
         let entry = spoke_entry("kb_upd_fail", "UpdFail", None);
         let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
-        // Drop the table to simulate a DB-level failure on update.
         sqlx::query("DROP TABLE kb_key_blocks")
             .execute(&pool)
             .await
@@ -1334,9 +1292,6 @@ mod tests {
         }
     }
 
-    // ── V1.146 P0: validation → InvalidInput (unchanged) ───────────────
-
-    /// Validation failure (missing `entry_id` / `canonical_name` — rejected by the
     /// spoke boundary before any DB I/O) still surfaces `InvalidInput`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn validation_still_rejects_invalid_input() {
@@ -1344,7 +1299,6 @@ mod tests {
         seed_world(&pool).await;
 
         let adapter = scoped(pool);
-        // put_create on already-existing entry — this is an OCC/domain signal,
         // NOT a storage failure; the DAO's pre-check returns `KnowledgeEntryAlreadyExists`.
         let entry = spoke_entry("kb_val_ae", "ValAE", None);
         let _ = unwrap_ok(
@@ -1363,7 +1317,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected AlreadyExists reject"),
         }
 
-        // get on non-existent entry still surfaces KnowledgeEntryNotFound
         match adapter.get_knowledge_entry("kb_never_created").await {
             SpokeResult::Reject(r) => {
                 assert_eq!(
@@ -1376,8 +1329,6 @@ mod tests {
         }
     }
 
-    // ── V1.146 P0: OCC rejects unchanged ───────────────────────────────
-    // The put_update_stale_rejects_stored_revision_stale and
     // put_update_conflict_rejects_revision_conflict tests above already
     // cover STORED_REVISION_STALE and REVISION_CONFLICT — they pass
     // unchanged (confirmed by the red-green run). No additional OCC test
@@ -1448,7 +1399,6 @@ mod tests {
         let created = unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
         assert_eq!(created.revision, Some(1));
 
-        // Attempt to author governance through the ordinary update → reject.
         let transfer = spoke_entry_private("kb_flag", "Flagged", "hld_test");
         match adapter.put_knowledge_entry(transfer, Some(1)).await {
             SpokeResult::Reject(r) => {
@@ -1461,7 +1411,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected InvalidInput reject"),
         }
 
-        // Storage unchanged: still a shared World row, revision still 1.
         let (kind, holder, disclosure, ext_json) =
             stored_owner_and_extensions(&pool, "kb_flag").await;
         assert_eq!(kind, "world");
@@ -1528,7 +1477,6 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_world(&pool).await;
 
-        // Seed a foreign-holder private row directly (the authoring path is
         // T7's; this test only needs the stored shape).
         let mut private = KnowledgeEntryRecord::new("wld_1", BlockType::Character, "HiddenNote");
         private.entry_id = "kb_hidden".to_string();
@@ -1597,7 +1545,6 @@ mod tests {
 
         let adapter = scoped(pool);
         let mut entry = spoke_entry("kb_ambig", "Ambig", None);
-        // Inject two typed owner keys — the conversion seam must fail closed.
         let key = spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
             .expect("nexus key is a valid extension key");
         if let Some(ns) = entry.extensions.get_mut(&key) {
@@ -1636,7 +1583,6 @@ mod tests {
         );
         assert_eq!(created.revision, Some(1));
 
-        // A different selection: same database, no authority over `wld_1`.
         let outsider = NexusAdapter::new(
             pool.clone(),
             KnowledgeReadScope::creator_management(
@@ -1691,7 +1637,6 @@ mod tests {
         );
         assert_eq!(created.revision, Some(1));
 
-        // Simulate a stored pre-cutover row: the cutover migration strips the
         // retired key, so a surviving row that still carries it is reproduced
         // directly in the extensions document.
         sqlx::query("UPDATE kb_key_blocks SET extensions_nexus_json = ? WHERE key_block_id = ?")
@@ -1702,7 +1647,6 @@ mod tests {
             .unwrap();
         let before = stored_row_fingerprint(&pool, "kb_prio").await;
 
-        // Same visible id, and the request itself carries the legacy key.
         let mut attempt = spoke_entry("kb_prio", "Prio", None);
         let key = spoke_schemas::knowledge_entry::ExtensionKey::try_from("nexus")
             .expect("nexus key is a valid extension key");
@@ -1810,7 +1754,6 @@ mod tests {
         let entry = spoke_entry("kb_bound_create", "BoundCreate", None);
         let entry_id = entry.entry_id.clone();
 
-        // The port method is now async: the closure returns the future and
         // the handler awaits it outside (with_bound_tx stays a sync
         // passthrough). UFCS keeps the future un-awaited inside the closure.
         let put_result = adapter

@@ -1,5 +1,4 @@
 /**
- * Work-profile SSOT (R-V167P1-QC1-S2).
  *
  * The canonical set of work profiles the Create-Work dialog admits. The
  * `value` is the wire identifier sent to the daemon and MUST match the

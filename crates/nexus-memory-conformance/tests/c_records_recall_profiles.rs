@@ -33,7 +33,6 @@ use support::{
 };
 
 // ---------------------------------------------------------------------------
-// Protocol request builders and observations
 // ---------------------------------------------------------------------------
 
 /// A scoped grant: `contexts` present means a context-restricted grant, with
@@ -329,7 +328,6 @@ async fn read_state(
 }
 
 // ---------------------------------------------------------------------------
-// E. Retained records
 // ---------------------------------------------------------------------------
 
 /// C-040 / MEM-R007: create/get/update/delete round trip, and a stale
@@ -392,7 +390,6 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
     assert_eq!(result(&updated)["record_id"], json!(record_id));
     assert_eq!(result(&updated)["revision"], json!(2));
 
-    // The stale precondition is the same request shape against revision 1.
     let stale = admin
         .update_record(json!({
             "record_id": record_id,
@@ -412,7 +409,6 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
     );
     assert_eq!(after_stale["kind"], json!("fact"));
 
-    // §7.0.4/MEM-R007: an update naming only the already-stored kind and
     // carrying no content is a genuine no-op — the receipt still commits and
     // its same-key replay resolves, while revision, kind, content, timestamps
     // and the record's own durable projection stay untouched.
@@ -472,7 +468,6 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
         after_no_op.publications, before_no_op.publications,
         "a no-op publishes no record file"
     );
-    // The legitimate receipt/dedup commit moves `data_version`, so the journal
     // count is the separate regression that a genuine no-op journals no record
     // effect. The fixture has no journal table and must not be made to claim one.
     match matrix.kind() {
@@ -514,13 +509,11 @@ async fn record_crud_and_stale_cas(matrix: Matrix) {
     assert!(is_committed(&deleted), "{deleted}");
     assert_eq!(result(&deleted)["tombstoned"], json!(true));
 
-    // An admin keeps audit visibility of the tombstone; the content is gone.
     let tombstoned = record_of(&admin.get_record(&record_id).await).clone();
     assert!(tombstoned["tombstone"].is_object(), "{tombstoned}");
     assert_eq!(tombstoned["content"]["text"], json!(""));
     assert_eq!(tombstoned["revision"], json!(3));
 
-    // Deleted records leave the default listing and recall.
     let listing = admin
         .list_records(record_list_request(subject_all(), None, None, None))
         .await;
@@ -572,7 +565,6 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
     let created = record_of(&admin.get_record(&record_id).await).clone();
     assert_eq!(created["revision"], json!(1));
 
-    // A changed kind is a real edit: exactly one revision.
     let kind_changed = admin
         .update_record(json!({
             "record_id": record_id,
@@ -588,7 +580,6 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
     assert_eq!(after_kind["kind"], json!("fact"));
     assert_eq!(after_kind["content"], created["content"]);
 
-    // An unchanged kind with no content changes nothing observable.
     let no_op = admin
         .update_record(json!({
             "record_id": record_id,
@@ -622,7 +613,6 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
     assert_eq!(after_no_op["created_at"], after_kind["created_at"]);
     assert_eq!(after_no_op["updated_at"], after_kind["updated_at"]);
 
-    // Any explicit content update is real, even byte-identical content.
     let identical = admin
         .update_record(json!({
             "record_id": record_id,
@@ -648,7 +638,6 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
     assert!(is_committed(&changed), "{changed}");
     assert_eq!(result(&changed)["revision"], json!(4));
 
-    // A stale precondition changes nothing.
     let stale = admin
         .update_record(json!({
             "record_id": record_id,
@@ -663,7 +652,6 @@ async fn revision_changes_once_per_real_update(matrix: Matrix) {
     assert_eq!(after_stale["revision"], json!(4));
     assert_eq!(after_stale["content"]["text"], json!("revision four"));
 
-    // A principal with no grant never reaches the CAS.
     let denied = matrix
         .peer()
         .update_record(json!({
@@ -761,7 +749,6 @@ async fn record_pages_are_bounded_and_stable(matrix: Matrix) {
         json!(true)
     );
 
-    // Independently seeded sets: five allowed rows, plus rows the peer must
     // never see — another subject's rows, another context, and a shared row.
     let mut allowed: Vec<(String, String)> = Vec::new();
     for index in 0..5 {
@@ -848,7 +835,6 @@ async fn record_pages_are_bounded_and_stable(matrix: Matrix) {
         vec![2, 2, 1]
     );
 
-    // Every served row: seeded content, the subject's placement, and the exact
     // expected id. Later pages are checked as strictly as the first.
     let expected = |id: &str| {
         allowed.iter().find(|(seeded, _)| seeded == id).map_or_else(
@@ -871,14 +857,12 @@ async fn record_pages_are_bounded_and_stable(matrix: Matrix) {
         }
     }
 
-    // The full traversal covers exactly the seeded authorized ids, once each.
     let mut seen: Vec<String> = first_ids.clone();
     let mut wanted: Vec<String> = allowed.iter().map(|(id, _)| id.clone()).collect();
     seen.sort();
     wanted.sort();
     assert_eq!(seen, wanted, "every page is exactly the authorized set");
 
-    // A complete second traversal is identical, not just its first page.
     let (second_pages, second_ids) = restricted_traversal(&matrix.peer(), selection(), 2, 5).await;
     assert_eq!(
         first_pages, second_pages,
@@ -925,11 +909,9 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         ),
     )
     .await;
-    // The entire seeded record, known before any refusal: the independent
     // oracle every refused promotion is compared against.
     let seeded = current_record(&matrix, &record_id).await;
 
-    // (a) No promotion authority: refused, no placement or revision change.
     let denied = matrix
         .peer()
         .promote_record(json!({
@@ -946,7 +928,6 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         "a refused promotion leaves the entire record unchanged"
     );
 
-    // (b) Frozen space: the maintenance allowlist refuses the promotion.
     let revision = admin.list_spaces().await["spaces"][0]["revision"]
         .as_u64()
         .expect("space revision");
@@ -977,7 +958,6 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         .await;
     assert!(is_committed(&unfrozen), "{unfrozen}");
 
-    // (c) Split capabilities: two individually insufficient grants whose union
     // carries `promote` and `records_write` must not authorize the promotion —
     // §6.5/§7.21 admit exactly one grant covering both capabilities and both
     // placements, never a union.
@@ -1019,7 +999,6 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         "the capability union never touched the entire record"
     );
 
-    // (d) Split placements: one grant covers the source context, another the
     // target. Neither alone covers both placements, so the promotion refuses.
     let source_only = admin
         .grant(scoped_grant(
@@ -1059,7 +1038,6 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         "the placement split never touched the entire record"
     );
 
-    // (e) One grant carrying both capabilities over source and target.
     let granted = admin
         .grant(scoped_grant(
             &["promote", "records_write"],
@@ -1099,7 +1077,6 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         moved["provenance"], seeded["provenance"],
         "the accepted promotion keeps the entire provenance, every declared field"
     );
-    // The declared provenance fields are actually present and typed.
     assert_eq!(
         moved["provenance"]["captured_by"],
         json!(admin.principal_id())
@@ -1118,7 +1095,6 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
         json!(seeded["revision"].as_u64().expect("revision") + 1),
         "only the intended placement change advances the revision"
     );
-    // Nothing else in the record moved: the top-level difference is exactly the
     // placement, the revision and (when the clock ticked) `updated_at`.
     let differing: Vec<String> = moved
         .as_object()
@@ -1136,7 +1112,6 @@ async fn record_promote_checks_grant_and_freeze(matrix: Matrix) {
     assert!(differing.iter().any(|key| key == "scope"));
     assert!(differing.iter().any(|key| key == "revision"));
 
-    // The same single grant does not reach shared placement without the
     // shared facet: the promotion is refused and changes nothing.
     let to_shared = matrix
         .peer()
@@ -1177,7 +1152,6 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
         .as_u64()
         .expect("describe advertises max_content_bytes");
 
-    // The published measure is the canonical serialization of the complete
     // `content` object: `{"text":"..."}` costs 11 bytes of framing.
     let framing = 11_u64;
     let at_bound =
@@ -1207,7 +1181,6 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
         "the at-bound write is stored whole and byte-identical, never truncated"
     );
 
-    // One byte over the advertised bound refuses before any effect.
     let over_bound =
         "b".repeat(usize::try_from(max_content_bytes - framing).expect("bound fits usize") + 1);
     let refused = admin
@@ -1241,7 +1214,6 @@ async fn advertised_content_bounds_are_enforced(matrix: Matrix) {
         "the refused oversize create wrote nothing: {listed}"
     );
 
-    // The same bound governs update.
     let update_refused = admin
         .update_record(json!({
             "record_id": record_id,
@@ -1342,7 +1314,6 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
     let receipt_id = receipt_id(&captured).to_owned();
     let candidate_id = candidate_ids(&captured)[0].clone();
 
-    // One read-only connection, opened AFTER the setup writes and BEFORE any
     // tested read, then held for the whole observation window: the
     // cursor-minting page, the read series and the continuation all happen
     // inside it. Its `data_version` changes only when another connection
@@ -1359,7 +1330,6 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         .await;
     let durable_before = observer.observe().await;
 
-    // First tested read: the page whose cursor the continuation reuses.
     let page = list_page(&admin, subject_all(), Some(1), None).await;
     let cursor = page["next_cursor"]
         .as_str()
@@ -1368,10 +1338,8 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
 
     let before = read_state(&admin, &shared, &contextual, &receipt_id, &candidate_id).await;
 
-    // The same reads again: nothing may move.
     let after = read_state(&admin, &shared, &contextual, &receipt_id, &candidate_id).await;
 
-    // The continuation is also inside the observed window.
     let continued = list_page(&admin, subject_all(), Some(1), Some(&cursor)).await;
     let continued_ids = page_ids(&continued);
 
@@ -1403,7 +1371,6 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
     );
     assert_ne!(continued_ids[0], page_ids(&page)[0]);
 
-    // The independent durable observation: the seeded receipt, record,
     // candidate, profile, subject and space rows, the held connection's
     // `data_version`, and the local published file projection are all
     // unchanged by the read series. A read that rewrote an existing receipt or
@@ -1414,7 +1381,6 @@ async fn base_read_operations_do_not_mutate(matrix: Matrix) {
         "no base read wrote a seeded durable row, advanced another connection's data_version, or published a file"
     );
 
-    // A separate baseline for the in-place write control: a legitimate commit
     // may move `data_version`, so it is measured against its own baseline and
     // never confused with read purity.
     let control_before = observer.observe().await;
@@ -1488,7 +1454,6 @@ async fn by_id_reads_recheck_current_authorization(matrix: Matrix) {
     )
     .await;
 
-    // Positive control: the peer reads the shared record under a grant that
     // covers shared placement.
     let grant = admin
         .grant(scoped_grant(
@@ -1509,7 +1474,6 @@ async fn by_id_reads_recheck_current_authorization(matrix: Matrix) {
     assert_eq!(visible["record_id"], json!(shared));
     assert_eq!(visible["content"]["text"], json!("shared by-id row"));
 
-    // Revoke that grant at its own revision: the next by-id read rechecks.
     let revoked = admin.revoke_grant(&grant_id, 1, "k-c047-revoke").await;
     assert!(is_committed(&revoked), "{revoked}");
     assert_eq!(result(&revoked)["revoked"], json!(true));
@@ -1521,7 +1485,6 @@ async fn by_id_reads_recheck_current_authorization(matrix: Matrix) {
         "a refused read is never served as an empty record: {denied}"
     );
 
-    // Placement change: a context-scoped grant saw the record, and the same
     // grant no longer covers it after the record moves to another context.
     let placed = create_record(
         &admin,
@@ -1575,7 +1538,6 @@ async fn c_047_by_id_reads_recheck_current_authorization_remote() {
 }
 
 // ---------------------------------------------------------------------------
-// F. Recall and read selection
 // ---------------------------------------------------------------------------
 
 /// Seed one record per placement for the recall selection scenarios.
@@ -1918,7 +1880,6 @@ async fn c_054_recall_never_returns_candidates_remote() {
 async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let admin = matrix.admin();
-    // Independently seeded rows: the expected id, text and serialized content
     // bytes are known before any provider answer and never derived from one.
     let texts: Vec<String> = [
         "harbor gate log: dawn watch",
@@ -1950,7 +1911,6 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
     }
     let seeded: Vec<String> = size_of.iter().map(|(id, _, _)| id.clone()).collect();
 
-    // The unbudgeted page establishes the provider's own rank order; its
     // contents and byte sizes are then checked against the independent seed.
     let full = admin
         .recall(recall_request(
@@ -1986,7 +1946,6 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
         );
     }
 
-    // Every row fits individually but no two fit together: the §9.3 hard byte
     // budget is a page SUM, so each page is exactly one row — a provider that
     // only checked each row on its own would serve two and pass a weaker test.
     let budget = u64::try_from(size_of[0].1).expect("size fits u64") * 2 - 1;
@@ -2013,7 +1972,6 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
             .await;
         let served = recalled_records(&page);
         assert_eq!(page["total_authorized"], json!(3));
-        // Each BUDGETED row is compared to the independent seed map: same
         // complete body and the same placement the record was written with —
         // an aggregate byte/order check alone would accept same-length text.
         for record in served {
@@ -2084,7 +2042,6 @@ async fn recall_enforces_utf8_budget_and_overflow(matrix: Matrix) {
         "the traversal covers exactly the seeded rows"
     );
 
-    // Bytes > budget while characters fit: a single multibyte body larger than
     // the budget is returned WHOLE and flagged, not dropped or truncated.
     let multibyte = "港の灯台が霧の中に浮かぶ".repeat(8);
     assert_eq!(
@@ -2237,7 +2194,6 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
         .to_owned();
     let selection = || selected_contexts(&[CONTEXT], false);
 
-    // Continuation under identical state succeeds.
     let page = list_page(&matrix.peer(), selection(), Some(1), None).await;
     assert_eq!(page["total_authorized"], json!(5), "{page}");
     let cursor = page["next_cursor"]
@@ -2256,7 +2212,6 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
     assert_eq!(page_ids(&continued).len(), 1, "{continued}");
     assert_ne!(page_ids(&continued), page_ids(&page));
 
-    // A different bound query (an added provenance filter) is a different
     // cursor scope: the same cursor is refused.
     let scope_changed = matrix
         .peer()
@@ -2274,7 +2229,6 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
     );
     assert_eq!(retry_class(&scope_changed), "terminal");
 
-    // A real change of the peer's effective records_read coverage: the wide
     // grant is revoked and replaced by a narrower one that still covers the
     // request, so authorization passes and the changed coverage alone must
     // invalidate the outstanding cursor.
@@ -2326,7 +2280,6 @@ async fn cursor_invalid_after_grant_or_state_change(matrix: Matrix) {
     assert!(!serialized.contains(&other_context));
     assert!(!serialized.contains(&foreign));
 
-    // A committed state change invalidates the cursor the same way.
     let before_state = list_page(&matrix.peer(), selection(), Some(1), None).await;
     let cursor = before_state["next_cursor"]
         .as_str()
@@ -2395,7 +2348,6 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
 
     let mut raw = matrix.raw_admin().await;
 
-    // The same session and authentication serve a valid recall first: its
     // payload carries the seeded record, so the raw route is not blanket-fail.
     let valid = raw
         .invoke(
@@ -2456,7 +2408,6 @@ async fn missing_or_null_selection_is_invalid_input(matrix: Matrix) {
     }
     raw.close().await.expect("the raw session settles");
 
-    // The typed positive control remains additional, not a replacement.
     let served = admin
         .recall(recall_request(
             SUBJECT,
@@ -2528,7 +2479,6 @@ async fn scoped_grant_cannot_widen_recall(matrix: Matrix) {
         );
     }
 
-    // The covered selection is served, so the refusals were scope, not absence.
     let served = matrix
         .peer()
         .recall(recall_request(
@@ -2628,14 +2578,12 @@ async fn ranking_is_deterministic_per_provider(matrix: Matrix) {
         "every authorized row is ranked exactly once: {sorted:?}"
     );
 
-    // The hint orders, it never filters: the row without it is still present.
     let texts = recalled_texts(&first);
     assert!(
         texts.iter().any(|text| text.contains("market noise")),
         "a non-matching hint never removes an authorized row: {texts:?}"
     );
 
-    // A budget never changes the ranking of the rows it does serve.
     let budgeted = admin
         .recall(recall_request(
             SUBJECT,
@@ -2728,7 +2676,6 @@ async fn provenance_filter_is_anded_with_placement(matrix: Matrix) {
         .await;
     assert!(is_committed(&grant), "{grant}");
 
-    // include_shared: placement admits CONTEXT + shared; the filter keeps w1.
     let both = matrix
         .peer()
         .recall(recall_request(
@@ -2759,7 +2706,6 @@ async fn provenance_filter_is_anded_with_placement(matrix: Matrix) {
     );
     assert_eq!(both["total_authorized"], json!(2));
 
-    // Without shared access the shared record is outside the placement, so the
     // matching provenance cannot surface it.
     let contexts_only = matrix
         .peer()
@@ -2793,7 +2739,6 @@ async fn c_059_provenance_filter_is_anded_with_placement_remote() {
 }
 
 // ---------------------------------------------------------------------------
-// G. Profile documents
 // ---------------------------------------------------------------------------
 
 /// C-060 / §6.8 + §10: an authored profile document is stored and served byte
@@ -2833,7 +2778,6 @@ async fn profile_content_is_byte_preserved(matrix: Matrix) {
     assert_eq!(profiles[0]["revision"], json!(1));
     assert_eq!(profiles[0]["updated_by"], json!(admin.principal_id()));
 
-    // A JSON-format body is preserved as authored, not reserialized.
     let json_body = "{\"n\": 1.0, \"text\": \"héllo\", \"nested\": null}";
     let written = admin
         .update_profile(profile_document_request(
@@ -2921,7 +2865,6 @@ async fn profile_update_enforces_cas(matrix: Matrix) {
     assert!(is_committed(&fresh), "{fresh}");
     assert_eq!(result(&fresh)["revision"], json!(2));
 
-    // Creating an existing kind with `expected_revision: null` is a conflict.
     let recreate = admin
         .update_profile(profile_document_request(
             SUBJECT,
@@ -2942,7 +2885,6 @@ async fn profile_update_enforces_cas(matrix: Matrix) {
         json!("# Mira\nsecond authored body")
     );
 
-    // The earlier revision token stays stale after the accepted write.
     let lost = admin
         .update_profile(profile_document_request(
             SUBJECT,
@@ -2992,7 +2934,6 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
         "every declared required kind is a name: {described}"
     );
 
-    // (1) Every actually declared required kind, read as a profile: absence is
     // honest-empty, never an error and never an empty *admission* success.
     let required_page = admin
         .get_profile(json!({ "subject_id": SUBJECT, "profile_kinds": required }))
@@ -3003,7 +2944,6 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
     );
     assert_eq!(profiles_of(&required_page).len(), 0);
 
-    // (2) An actually non-required kind that is also absent — derived from the
     // provider's own declaration, never a hardcoded name claimed to be all.
     let non_required = ["preferences", "notes-harbor", "custom"]
         .into_iter()
@@ -3018,7 +2958,6 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
     );
     assert_eq!(profiles_of(&optional_page).len(), 0);
 
-    // (3) Missing coverage is a typed authorization refusal, not empty data.
     let denied = matrix
         .peer()
         .get_profile(json!({ "subject_id": SUBJECT }))
@@ -3026,7 +2965,6 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED", "{denied}");
     assert!(denied.get("profiles").is_none(), "{denied}");
 
-    // (4) A missing capability is decided at dispatch, before profile policy.
     let mut raw = matrix.raw_admin().await;
     let unavailable = raw
         .invoke(
@@ -3045,7 +2983,6 @@ async fn profile_and_capability_admission_are_distinct(matrix: Matrix) {
     assert_eq!(error["code"], json!("capability_missing"), "{unavailable}");
     assert_eq!(error["details"]["retry_class"], json!("terminal"));
 
-    // The three N3-expressible outcomes are three distinct shapes.
     assert_ne!(error["code"], json!("NOT_AUTHORIZED"));
     assert_ne!(error["code"], json!("PROFILE_INCOMPLETE"));
     assert!(denied.get("profiles").is_none());
@@ -3103,7 +3040,6 @@ async fn capture_never_mutates_profile(matrix: Matrix) {
         "captured text never enters a trusted profile: {after}"
     );
 
-    // Recall is equally uninvolved: capture alone retains no record.
     let recalled = admin
         .recall(recall_request(
             SUBJECT,
@@ -3143,7 +3079,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     let admin = matrix.admin();
     let capability_kinds = ["transfer", "governance", "reflection"];
 
-    // Fresh provider: all-kinds and capability-kind reads are honest-empty.
     let all = admin.get_profile(json!({ "subject_id": SUBJECT })).await;
     assert!(
         profiles_of(&all).is_empty(),
@@ -3157,7 +3092,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         "capability concepts are not profile content kinds: {fake}"
     );
 
-    // Real authored kinds exist; the capability kinds still read empty.
     for (kind, body) in [
         ("personality", "# Mira\nauthored personality"),
         ("preferences", "{\"tone\": \"terse\"}"),
@@ -3199,7 +3133,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         );
     }
 
-    // (A) The real supported LOCAL selection: the public open pins the local
     // provider, serves a product memory read, and the pinned provider itself
     // serves no fabricated capability-kind document.
     let local = open_selected_local(SUBJECT, &capability_kinds).await;
@@ -3215,7 +3148,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         local.profiles
     );
 
-    // (B) The real supported REMOTE selection against a fresh fixture served
     // over signed loopback sessions, with the operator-provisioned credential
     // the selection names. The product read resolves the Creator's own provider
     // subject through `legacy::creator_subject_id`, so the SAME fixture and that
@@ -3232,7 +3164,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         SELECTION_CLIENT_SEED,
     )
     .await;
-    // The selection fixture starts without the subject; the signed operator
     // session ensures the actual Creator subject, so the profile read is a real
     // absent-kind read rather than a missing-subject refusal.
     let before_actor = before_open.actor(&selected_principal, &fixture.space_id);
@@ -3261,7 +3192,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         memory: Some(remote_selection(&fixture.space_id, &host)),
     })
     .await;
-    // Acquire the responder through the bounded result route: an open that
     // failed before dialing aborts and joins its own listener instead of
     // panicking, and that failure is recorded for the combined report.
     let responder = if opened.is_ok() {
@@ -3269,12 +3199,10 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
     } else {
         host.settle_failed().await
     };
-    // Observe the authenticated session state before any close runs.
     let established = match &responder {
         Ok(Some(responder)) => Some(responder.state().as_str().to_owned()),
         _ => None,
     };
-    // Collect the full original result without classifying it; the assertion
     // waits until every owner is settled.
     let product_read: Option<Result<i64, nexus_core::CoreError>> = match &opened {
         Ok(core) => Some(match core.active_principal().await {
@@ -3301,7 +3229,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         Err(error) => cleanup_errors.push(error),
     }
 
-    // The same fixture and the same Creator subject, now through a new signed
     // session after the open: still no capability-kind document.
     let after_open = open_endpoint(
         Arc::clone(&fixture.service),
@@ -3320,7 +3247,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         cleanup_errors.push(error);
     }
 
-    // (C) A host that negotiates no memory family fails the same selection on
     // capability grounds — the one capability-based selection failure the
     // existing interface expresses. The full original result is kept.
     let host = serve_selection_host(
@@ -3337,7 +3263,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         memory: Some(remote_selection(&fixture.space_id, &host)),
     })
     .await;
-    // Same bounded acquisition on the refusal path: the expected capability
     // refusal made a connection, so its responder is closed; a pre-connect
     // failure aborts and joins the listener with the failure recorded.
     let responder = if refused.is_ok() {
@@ -3367,7 +3292,6 @@ async fn selection_requires_no_fake_profile_kinds(matrix: Matrix) {
         cleanup_errors.push(error);
     }
 
-    // Every owner is settled; only now is the original outcome classified and
     // surfaced, beside all cleanup failures.
     let open_error = opened.as_ref().err();
     let refusal_error = refused.as_ref().err();
@@ -3438,7 +3362,6 @@ async fn c_064_early_selection_open_failure_settles_listener_and_fixture() {
     .await;
     let port = host.port();
 
-    // A disposable Core home with the operator credential removed: the public
     // open fails on the credential before dialing, so nothing ever connects.
     let home = SelectionHome::new(support::SELECTION_CREATOR, SELECTION_CLIENT_SEED);
     std::fs::remove_file(
@@ -3455,10 +3378,8 @@ async fn c_064_early_selection_open_failure_settles_listener_and_fixture() {
     })
     .await;
 
-    // The listener is owned by this control even though the open never dialed.
     let session = host.settle_failed().await;
     let port_released = TcpListener::bind(("127.0.0.1", port)).await.is_ok();
-    // The fixture still serves a real signed session after the early failure.
     let check = open_endpoint(
         Arc::clone(&fixture.service),
         &fixture.authority_host_id,
@@ -3521,7 +3442,6 @@ async fn c_064_selection_session_timeout_aborts_and_joins_listener() {
     .await;
     let port = host.port();
     let endpoint = host.endpoint.clone();
-    // A real TCP peer that completes the accept but never the websocket
     // handshake, so the owned listener task outlives the session deadline.
     let stalled = TcpStream::connect(endpoint.trim_start_matches("ws://"))
         .await
@@ -3529,7 +3449,6 @@ async fn c_064_selection_session_timeout_aborts_and_joins_listener() {
     let started = Instant::now();
     let session = host.session().await;
     let elapsed = started.elapsed();
-    // The deadline expired while the task was pending: the session must have
     // aborted and joined it, so its port is free before any other settlement.
     let port_released = TcpListener::bind(("127.0.0.1", port)).await.is_ok();
     let fixture_settle = fixture.settle().await;

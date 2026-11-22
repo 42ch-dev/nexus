@@ -383,7 +383,6 @@ impl OsSharedLock {
 
 impl Drop for OsSharedLock {
     fn drop(&mut self) {
-        // Released with the descriptor; an explicit unlock keeps the release
         // independent of when the file handle is finally closed.
         let _ = self.file.unlock();
     }
@@ -511,7 +510,6 @@ impl std::fmt::Debug for CharacterTransitionLease {
 
 impl std::fmt::Debug for KnowledgeEffectLeases {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Non-exhaustive: the held subject ids are not retained here, and the
         // guards must not be introspected beyond their counts.
         f.debug_struct("KnowledgeEffectLeases")
             .field("world_read_leases", &self.world_read.len())

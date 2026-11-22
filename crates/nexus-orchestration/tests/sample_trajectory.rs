@@ -42,7 +42,6 @@ fn the_sample_trajectory_walks_the_declared_default_judge_branch() {
         nexus_contracts::SimulationTrajectoryEffectSummary::External
     );
 
-    // `ir_content_hash` is recomputed from the IR, never echoed from the document.
     assert_eq!(trajectory.ir_content_hash.len(), 64);
     assert!(trajectory
         .ir_content_hash

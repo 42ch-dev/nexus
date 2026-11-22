@@ -218,7 +218,6 @@ impl PeerSessionManager {
             // counted twice nor missed. A call without a prior reservation
             // (defensive; e.g. direct unit usage) is a saturating no-op.
             self.release_in_flight();
-            // Explicitly drop the guard HERE — after the release — so the
             // insert + in-flight decrement stay in one lock scope (the
             // F-3 ordering invariant). An implicit drop would let clippy
             // tighten it to right after the insert and reopen the race.
@@ -226,7 +225,6 @@ impl PeerSessionManager {
             replaced
         };
         if let Some(old) = replaced_record {
-            // Deterministic last-wins: the replaced session is closed (the
             // old responder is torn down outside the lock — `close()` is
             // synchronous and spawns the transport teardown, so no lock is
             // held across a scheduling point).

@@ -58,8 +58,6 @@ fn assert_goto(action: &NextAction, expected: &str) {
     }
 }
 
-// ── Test 1: numeric threshold branch matches ──────────────────────────
-
 /// A preset with `branches` routing on a numeric threshold.
 /// When `score > 80`, routes to `high_path`; otherwise falls to `default: standard_path`.
 const THRESHOLD_YAML: &str = r#"
@@ -98,15 +96,11 @@ async fn expression_routes_to_high_path_when_score_above_threshold() {
     assert_goto(&action, "high_path");
 }
 
-// ── Test 2: no branch matches → default ───────────────────────────────
-
 #[tokio::test]
 async fn expression_routes_to_default_when_no_branch_matches() {
     let action = run_expression_route(THRESHOLD_YAML, &[("score", serde_json::json!(50))]).await;
     assert_goto(&action, "standard_path");
 }
-
-// ── Test 3: string equality multi-branch ──────────────────────────────
 
 /// A preset with multiple string-equality branches.
 const STRING_MATCH_YAML: &str = r#"
@@ -171,8 +165,6 @@ async fn expression_routes_to_default_for_unmatched_string() {
     assert_goto(&action, "unknown_path");
 }
 
-// ── Test 4: registry.refresh dependency → synthetic fallback ──────────
-
 /// A preset whose branch expression references `_context.registry_refresh.*`.
 /// Since the unwired test graph has no registry, `inject_registry_refresh_context`
 /// falls back to the synthetic output (`source: "synthetic"`), which the
@@ -215,14 +207,11 @@ states:
 
 #[tokio::test]
 async fn expression_routes_to_synthetic_when_registry_unwired() {
-    // The unwired graph has self.registry = None, so
     // inject_registry_refresh_context uses the synthetic fallback
     // (source = "synthetic"). The first branch should match.
     let action = run_expression_route(REGISTRY_DEP_YAML, &[]).await;
     assert_goto(&action, "synthetic_path");
 }
-
-// ── Test 5: compound boolean expression ───────────────────────────────
 
 /// A preset with a compound `&&` expression requiring two conditions.
 const COMPOUND_YAML: &str = r#"
@@ -276,8 +265,6 @@ async fn expression_compound_both_conditions_match_first_branch() {
 
 #[tokio::test]
 async fn expression_compound_partial_match_falls_to_second_branch() {
-    // score > 80 is true but status != 'active', so first branch fails.
-    // score > 60 is true, so second branch matches.
     let action = run_expression_route(
         COMPOUND_YAML,
         &[

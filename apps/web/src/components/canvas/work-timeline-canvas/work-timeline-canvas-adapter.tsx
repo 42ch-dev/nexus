@@ -1,5 +1,4 @@
 /**
- * Work Timeline canvas adapter — V1.123 P2 Task 2 (Narrative projection) +
  * Task 3 (Moment projection) + Task 4 (layer state) + V1.156 P2 T1 (Brief
  * layer projection).
  *
@@ -88,12 +87,10 @@ import type {
 import { sceneBeatPayloadFromOutline } from '../outline-canvas/graph-projection';
 import type { DirectedAxisSpineNodeData, MomentSpineConfig, NarrativeSpineConfig } from '../timeline-canvas/directed-axis-spine';
 import { SPINE_Y_OFFSET } from '../timeline-canvas/directed-axis-spine';
-// V1.160 P2 T1 — Work-Brief time-band rendering reuses the V1.159 era
 // forest + band renderer from the World Timeline verbatim (same
 // `buildEraTree` taxonomy, same `<BriefTimeBands />` panel — no fork).
 import { buildEraTree } from '../timeline-canvas/brief-era-tree';
 import { BriefTimeBands } from '../timeline-canvas/brief-time-bands';
-// V1.156 P2 T1 — Work-Brief reuses the World Timeline Brief projection
 // verbatim (same carrier `block_type=era`, same `TimelineNodeData` with
 // `layoutHint: 'brief'`); the Brief-era node component is picked from the
 // World registry so Work-Brief feel ≡ World-Brief feel (no new node
@@ -105,8 +102,6 @@ import {
 import { timelineNodeTypes } from '../timeline-canvas/timeline-node-types';
 import { workTimelineNodeTypes } from './work-timeline-node-types';
 import { renderWorkTimelineInspector } from './work-timeline-inspector';
-
-// ─── Public types (architect-locked §7.1) ──────────────────────────────────
 
 /** Single graph source — no wrapper, no join. Mirrors V1.122 §3.1. */
 export type WorkTimelineGraph = WorkOutline;
@@ -164,7 +159,6 @@ export interface WorkTimelineNodeData {
   /** Chapter this node realizes (event realizes_chapter_id; scene chapterId). */
   realizesChapterId?: number;
   /**
-   * Manuscript anchor badge data (Moment layer — chapter/scene link).
    * Present for scene + beat nodes when anchor data exists.
    */
   manuscriptAnchor?: {
@@ -175,7 +169,6 @@ export interface WorkTimelineNodeData {
   /** Event id (Narrative layer only). */
   eventId?: string;
   /**
-   * V1.163 P1 Task 3 — World Timeline Narrative event this Work event
    * realizes (`WorkOutline.timeline_events[].world_event_id`, additive Task 1
    * carrier). The value is a World KB entity `key_block_id` (`block_type=event`
    * KnowledgeEntry) — the World Timeline Narrative node id base. Present only
@@ -210,10 +203,7 @@ export type WorkTimelineEdgeData = {
   targetEventId?: string;
 };
 
-// ─── Adapter context ───────────────────────────────────────────────────────
-
 /**
- * Mutable context supplied by the orchestrator so the adapter can render
  * inspectors / wire "Edit in Outline" navigation without closing over stale
  * values. Read at render time from the ref; the adapter object itself stays
  * stable across renders (V1.114 §3.3.1 "stable factory that reads from a
@@ -229,7 +219,6 @@ export interface WorkTimelineCanvasAdapterContext {
   /** Optional bound World id (for P3 cross-surface navigation to World Timeline). */
   worldId?: string;
   /**
-   * V1.156 P2 T1 — the bound World's KB graph (Brief layer era data).
    * The Work Timeline Brief layer projects the bound World's Brief
    * (`WorldKbGraphResponse.entities[block_type=era]`) — Brief is World
    * spine; Work-Brief is a read-only projection (PD-2). The orchestrator
@@ -242,14 +231,12 @@ export interface WorkTimelineCanvasAdapterContext {
    */
   boundWorldGraph?: WorldKbGraphResponse;
   /**
-   * Optional `NexusClient` reference. The projection is a pure function of
    * the graph; the client slot exists so write-boundary isolation tests can
    * assert negative invocation against every forbidden method on a single
    * mocked client.
    */
   client?: unknown;
   /**
-   * "Edit in Outline" hand-off — fired when the user clicks the affordance
    * on a Moment scene/beat or a Narrative event. The orchestrator navigates
    * to `/works/:workId` (Outline surface) with state hinting which node to
    * focus. The adapter performs NO writes (architect-locked §6 — Moment
@@ -257,7 +244,6 @@ export interface WorkTimelineCanvasAdapterContext {
    */
   onEditInOutline?: (node: Node<WorkTimelineNodeData>) => void;
   /**
-   * P3 cross-surface navigation hand-off — fired when the user clicks "View
    * on World Timeline" on a Narrative event with a bound World event. The
    * orchestrator navigates to
    * `/worlds/:worldId/timeline?layer=narrative&event=:eventId`. Undefined
@@ -265,7 +251,6 @@ export interface WorkTimelineCanvasAdapterContext {
    */
   onViewOnWorldTimeline?: (node: Node<WorkTimelineNodeData>) => void;
   /**
-   * V1.108 Scene/Beat fixture — EXPLICIT injection mode only (Design
    * Studio / component tests). The canonical Moment carrier is the
    * `WorkOutline.scenes[]` / `.beats[]` wire (V1.200 DR-26), projected by
    * the adapter itself; production callers pass nothing here.
@@ -278,15 +263,12 @@ export interface WorkTimelineCanvasAdapterContext {
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
-// ─── Adapter interface (architect §7.1 — extends V1.114 CanvasSurfaceAdapter) ─
-
 export type WorkTimelineCanvasAdapter = CanvasSurfaceAdapter<
   WorkTimelineGraph,
   WorkTimelineNodeData,
   WorkTimelineEdgeData
 > & {
   /**
-   * V1.160 P2 T1 — Work-Brief time-band rendering slot (mirrors the World
    * Timeline adapter's V1.159 `renderBriefTimeBands`). Builds the era
    * forest from the bound World's KB graph (`buildEraTree`) and renders
    * the vertical time-band model (`<BriefTimeBands />`) that supersedes
@@ -329,10 +311,7 @@ export interface WorkTimelineLayerAdapter extends WorkTimelineCanvasAdapter {
   ): { nodes: Node<WorkTimelineNodeData>[]; edges: Edge<WorkTimelineEdgeData>[] };
 }
 
-// ─── Projection constants ──────────────────────────────────────────────────
-
 /**
- * Initial-position metrics for the Work Timeline Narrative + Moment layers.
  * The adapter sets `layoutOptions.hasSuppliedPositions = true` so
  * `useAutoLayout` honors these positions on first open and does NOT collapse
  * the projection onto dagre's generic graph layout. The author can still
@@ -363,7 +342,6 @@ const MOMENT_BEAT_STEP_Y = 44;
 const MOMENT_CHAPTER_STEP_X = 360;
 
 /**
- * Per-layer dagre layout options (architect §7.2).
  *
  * `layer-feel-differentiation.md` §2.3 + §2.4 locks the feel: Narrative
  * inherits the V1.122 LR balanced timeline; Moment prefers a vertical
@@ -410,10 +388,7 @@ function momentBeatNodeId(beatId: string): string {
   return `${MOMENT_BEAT_NODE_ID_PREFIX}${beatId}`;
 }
 
-// ─── Narrative projection (architect §7 + §8) ──────────────────────────────
-
 /**
- * Project `WorkOutline.timeline_events[]` onto the Work Timeline Narrative
  * when-axis (LR direction). Events are sorted by `realizes_chapter_id`
  * (numeric ascending; `undefined` tailing) then by `event_id`
  * (lexicographic). Events without a chapter anchor tail right on the same
@@ -435,7 +410,6 @@ function projectNarrativeLayer(graph: WorkTimelineGraph): {
 } {
   const events = graph.timeline_events ?? [];
 
-  // Sort: realizes_chapter_id ascending (undefined tails); event_id
   // lexicographic tiebreaker for stability across refetches.
   const sorted = [...events].sort((a, b) => {
     const aCh = a.realizes_chapter_id;
@@ -464,7 +438,6 @@ function projectNarrativeLayer(graph: WorkTimelineGraph): {
       data.realizesChapterId = evt.realizes_chapter_id;
       data.manuscriptAnchor = { chapterId: evt.realizes_chapter_id };
     }
-    // V1.163 P1 Task 3 — cross-surface event bind (Task 1 additive carrier).
     // Present only when the outline event realizes a World Narrative event;
     // the inspector's CTA deep-links to the specific World event when set.
     if (evt.world_event_id !== undefined && evt.world_event_id !== null) {
@@ -481,7 +454,6 @@ function projectNarrativeLayer(graph: WorkTimelineGraph): {
     };
   });
 
-  // V1.126 P1 — Work Timeline Narrative directed axis spine (decoration-only,
   // Y=0, appended after entity nodes). Uses event_id as tick markers for
   // cross-surface consistency with World Timeline Narrative.
   if (sorted.length > 0) {
@@ -509,7 +481,6 @@ function projectNarrativeLayer(graph: WorkTimelineGraph): {
 }
 
 /**
- * Derive `foreshadows` edges from `outline.foreshadows[]` (V1.72). Dangling
  * edges (source or target event absent from `timeline_events`) are dropped
  * — mirrors the V1.108 outline projection's dangling-edge guard.
  *
@@ -537,7 +508,6 @@ function deriveForeshadowEdges(graph: WorkTimelineGraph): Edge<WorkTimelineEdgeD
       target: narrativeEventNodeId(link.target_event_id),
       type: 'straight',
       data,
-      // Foreshadow edges reuse the V1.108 outline token; selectable +
       // focusable for a11y. Visual styling lands in P4 layer-feel polish.
       selectable: false,
       focusable: true,
@@ -547,10 +517,7 @@ function deriveForeshadowEdges(graph: WorkTimelineGraph): Edge<WorkTimelineEdgeD
   return edges;
 }
 
-// ─── Moment projection (architect §3 + §7 + §8 + layer-feel §2.4) ──────────
-
 /**
- * Project outline Scene/Beat data onto the Work Timeline Moment layer
  * (vertical scene-stack, TB direction).
  *
  * Carrier (V1.200 DR-26 swap): the canonical `WorkOutline.scenes[]` /
@@ -580,13 +547,11 @@ function projectMomentLayer(
 } {
   const payload = fixture ?? sceneBeatPayloadFromOutline(graph);
   if (payload.scenes.length === 0 && payload.beats.length === 0) {
-    // Honest empty-state — Task 7 owns the visible copy. The adapter's
     // contract is to emit zero nodes; the orchestrator renders the
     // empty-state panel when the active layer has no projectable data.
     return { nodes: [], edges: [] };
   }
 
-  // Group scenes by chapter so the vertical stack reads chapter → scene →
   // beat top-to-bottom. Chapter ordering is numeric ascending.
   const scenesByChapter = new Map<number, SceneFixture[]>();
   for (const scene of payload.scenes) {
@@ -599,10 +564,8 @@ function projectMomentLayer(
   const emittedSceneIds = new Set<string>();
   const nodes: Node<WorkTimelineNodeData>[] = [];
 
-  // Scene cards — vertical stack per chapter region (X groups by chapter).
   sortedChapterIds.forEach((chapterId, chapterIdx) => {
     const scenes = scenesByChapter.get(chapterId) ?? [];
-    // Stable sort by sceneId within the chapter so the stack is
     // deterministic across refetches.
     const sortedScenes = [...scenes].sort((a, b) => a.sceneId.localeCompare(b.sceneId));
     sortedScenes.forEach((scene, sceneIdx) => {
@@ -629,7 +592,6 @@ function projectMomentLayer(
     });
   });
 
-  // Beat pins — children of Scene cards conceptually; positioned in a
   // column next to / below their scene. Beats whose sceneId is absent
   // from the emitted scenes are dropped (mirrors V1.108 rf-projection
   // orphan guard).
@@ -641,7 +603,6 @@ function projectMomentLayer(
     else beatsByScene.set(beat.sceneId, [beat]);
   }
 
-  // Index scenes by id → position so beats can stack relative to their
   // scene's position.
   const scenePositionById = new Map<string, { x: number; y: number; chapterId: number }>();
   for (const node of nodes) {
@@ -687,7 +648,6 @@ function projectMomentLayer(
     });
   }
 
-  // V1.126 P1 — Moment directed axis spine (decoration-only, Y=0).
   // Density-encoded: segment length proportional to scene count per ND-A1.
   // This is a deliberate rhythm break from Brief+Narrative's time-span
   // convention (see spec ND-A1).
@@ -722,13 +682,10 @@ function projectMomentLayer(
     });
   }
 
-  // Moment layer: no explicit edges in V1.123 MVP. Beat succession within
   // scene is encoded spatially by the vertical stack (layer-feel §2.4).
   // `realizes_event` light links (beat → Narrative event) are P4 polish.
   return { nodes, edges: [] };
 }
-
-// ─── Brief projection (V1.156 P2 T1 — architect §3.3.3 amendment) ──────────
 
 /**
  * V1.156 P2 T1 — Work Timeline Brief layer projection. Completes the Work
@@ -771,7 +728,6 @@ function projectBriefLayer(
   edges: Edge<WorkTimelineEdgeData>[];
 } {
   if (!boundWorldGraph) {
-    // Honest empty-state — no bound World / no era data. The adapter's
     // contract is to emit zero nodes; the orchestrator renders the
     // empty-state panel when the active layer has no projectable data.
     return { nodes: [], edges: [] };
@@ -782,10 +738,7 @@ function projectBriefLayer(
   };
 }
 
-// ─── Layer-aware projection (architect §7.1) ───────────────────────────────
-
 /**
- * Project the Work Timeline graph for a specific layer.
  *
  * Narrative layer reads from `WorkOutline.timeline_events[]` (V1.72 wire).
  * Moment layer reads the canonical `WorkOutline.scenes[]` / `.beats[]`
@@ -818,8 +771,6 @@ export function projectWorkTimelineGraph(
   }
   return projectNarrativeLayer(graph);
 }
-
-// ─── Honest summary (architect §7) ─────────────────────────────────────────
 
 const ORDERING_DISCLAIMER =
   'Ordering inferred from chapter anchors and event ids; not a canonical chronology.';
@@ -866,10 +817,7 @@ export function summarizeWorkTimelineGraph(graph: WorkTimelineGraph): string {
   return summary;
 }
 
-// ─── Stable factory (architect §7.1 + V1.114 §3.3.1) ───────────────────────
-
 /**
- * Build a stable Work Timeline canvas adapter that reads mutable values
  * from the supplied context ref (V1.114 §3.3.1 "stable factory that reads
  * from a mutable `React.RefObject` context").
  *
@@ -905,7 +853,6 @@ export function createWorkTimelineCanvasAdapter(
   boundWorldGraph?: WorldKbGraphResponse,
 ): WorkTimelineLayerAdapter {
   return {
-    // V1.123 P2 Task 2 — the additive `'work-timeline'` value is part of
     // the `CanvasSurfaceKind` enum (extended in the same Task 2 commit so
     // the adapter typechecks). Task 5 owns the full peer-surface
     // integration (route + canvas-nav resolver + sidebar entry); the enum
@@ -914,7 +861,6 @@ export function createWorkTimelineCanvasAdapter(
     defaultLayer: 'narrative',
     nodeTypes: {
       ...workTimelineNodeTypes,
-      // V1.156 P2 T1 — Work-Brief reuses the World Timeline Brief era node
       // component + `TimelineNodeData` carrier (no new node component
       // family — layer-feel parity: Work-Brief feel ≡ World-Brief feel).
       // Only the Brief era type is picked from the World registry; the
@@ -930,7 +876,6 @@ export function createWorkTimelineCanvasAdapter(
           : NARRATIVE_LAYOUT_OPTIONS,
 
     projectGraph(graph) {
-      // Delegate to the active layer. The Moment projection reads the
       // V1.108 Scene/Beat fixture from `ctxRef.current.sceneBeatFixture`
       // (Moment-on-Outline carrier — frontend-only projection). The Brief
       // projection reads the bound World's kb/graph (era entities) from
@@ -947,7 +892,6 @@ export function createWorkTimelineCanvasAdapter(
     },
 
     projectGraphForLayer(graph, layer) {
-      // Public layer-aware projection. Reads the fixture from the context
       // for the Moment layer (carrier = V1.108 Scene/Beat fixture); reads
       // the bound World's graph for the Brief layer (carrier = V1.73
       // `WorldKbGraphResponse.entities[block_type=era]`).
@@ -963,7 +907,6 @@ export function createWorkTimelineCanvasAdapter(
     },
 
     adaptConflict(_error) {
-      // Orchestrator-owned — the orchestrator renders the Outline-flavored
       // conflict modal (`OutlineConflictError` 409 + `OutlineValidationError`
       // 422, V1.72 reused verbatim — no Work-Timeline-specific conflict DTO)
       // from the structured `WorkTimelineConflictInfo` parsed elsewhere.
@@ -972,7 +915,6 @@ export function createWorkTimelineCanvasAdapter(
     },
 
     renderInspector(node) {
-      // Task 6 — dispatch the selected node to the right Work Timeline
       // inspector by `node.data.nodeKind`. Reads the current `workId` from
       // the adapter context so the "Edit in Outline" CTA can navigate to
       // `/works/:workId/outline` without closing over a stale id.
@@ -996,7 +938,6 @@ export function createWorkTimelineCanvasAdapter(
       return summarizeWorkTimelineGraph(graph);
     },
 
-    // V1.160 P2 T1 — Work-Brief vertical time-band rendering (mirror the
     // World Timeline adapter's V1.159 `renderBriefTimeBands`). Builds the
     // era forest from the bound World's KB graph (`buildEraTree` — the
     // SAME graph read the Brief projection consumes:

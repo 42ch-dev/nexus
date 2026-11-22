@@ -44,10 +44,6 @@ import {
   ViTransportErrorAcceptanceFixtures,
 } from '@/fixtures/vi-aesthetic-retune-fixtures';
 
-/* ------------------------------------------------------------------ */
-/*  Shared helpers                                                      */
-/* ------------------------------------------------------------------ */
-
 function SectionHeading({
   id,
   children,
@@ -98,10 +94,6 @@ function MatrixRow({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Sub-nav                                                             */
-/* ------------------------------------------------------------------ */
 
 function SubNav() {
   const sections = [
@@ -154,10 +146,6 @@ function SubNav() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  1. Badge                                                            */
-/* ------------------------------------------------------------------ */
-
 function BadgeSection() {
   const variants = [
     { variant: 'neutral' as const, label: 'neutral' },
@@ -207,10 +195,6 @@ function BadgeSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  1a. Domain Badges                                                   */
-/* ------------------------------------------------------------------ */
-
 function humanizeDomainValue(value: string): string {
   return value
     .replace(/_/g, ' ')
@@ -234,7 +218,6 @@ function DomainBadgeSection() {
     { value: 'published', variant: 'preset' as const },
   ];
 
-  // Full literal class strings (no template interpolation) so Tailwind's
   // content scan picks up every token class — mirrors production
   // `findingStatusClasses` in apps/web/src/components/status-badge.tsx.
   const findingItems = [
@@ -270,7 +253,6 @@ function DomainBadgeSection() {
     },
   ];
 
-  // Mirrors production `taskKindClasses` in
   // apps/web/src/components/memory/task-kind-badge.tsx.
   const taskKindItems = [
     {
@@ -381,10 +363,6 @@ function DomainBadgeSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  2. Button                                                           */
-/* ------------------------------------------------------------------ */
-
 function ButtonSection() {
   const variants = [
     { variant: 'primary' as const, label: 'primary' },
@@ -478,10 +456,6 @@ function ButtonSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  3. Card                                                             */
-/* ------------------------------------------------------------------ */
 
 function CardSection() {
   return (
@@ -596,10 +570,6 @@ function CardSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  4. Dialog                                                           */
-/* ------------------------------------------------------------------ */
-
 function DialogSection() {
   return (
     <section data-testid="dialog-fixtures">
@@ -623,10 +593,6 @@ function DialogSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  4a. EmptyCreateCard (V1.148 P1)                                     */
-/* ------------------------------------------------------------------ */
-
 function EmptyCreateCardSection() {
   return (
     <section>
@@ -642,10 +608,6 @@ function EmptyCreateCardSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  5. Input                                                            */
-/* ------------------------------------------------------------------ */
 
 function InputSection() {
   return (
@@ -709,10 +671,6 @@ function InputSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  6. Label                                                            */
-/* ------------------------------------------------------------------ */
-
 function LabelSection() {
   return (
     <section data-testid="label-fixtures">
@@ -738,10 +696,6 @@ function LabelSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  7. Select                                                           */
-/* ------------------------------------------------------------------ */
-
 function SelectOptionList({ options }: { options: string[] }) {
   return (
     <>
@@ -755,7 +709,6 @@ function SelectOptionList({ options }: { options: string[] }) {
 }
 
 /**
- * Select gallery — V1.101 P2 visual acceptance fixtures.
  *
  * Source: `@42ch/nexus-ui` (promoted native `<select>`). Web keeps a thin
  * re-export under `apps/web/src/components/ui/select.tsx`.
@@ -932,10 +885,6 @@ function SelectSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  7a. Sheet (V1.148 P1)                                               */
-/* ------------------------------------------------------------------ */
-
 function SheetSection() {
   return (
     <section>
@@ -956,10 +905,6 @@ function SheetSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  8. States                                                           */
-/* ------------------------------------------------------------------ */
 
 function StatesSection() {
   return (
@@ -984,10 +929,6 @@ function StatesSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  9. Table                                                            */
-/* ------------------------------------------------------------------ */
-
 function TableSection() {
   return (
     <section>
@@ -1007,10 +948,6 @@ function TableSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  10. Tabs                                                            */
-/* ------------------------------------------------------------------ */
 
 function TabsSection() {
   const [tab, setTab] = useState('tab1');
@@ -1084,10 +1021,6 @@ function TabsSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  11. Textarea                                                        */
-/* ------------------------------------------------------------------ */
-
 function TextareaSection() {
   return (
     <section>
@@ -1151,10 +1084,6 @@ function TextareaSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  12. Form Field (composition fixture)                                  */
-/* ------------------------------------------------------------------ */
-
 function FormFieldSection() {
   const [hasError, setHasError] = useState(false);
   const fieldId = 'ff-name';
@@ -1176,7 +1105,6 @@ function FormFieldSection() {
         All IDs and copy are app-owned — the package controls are pure presentational.
       </p>
 
-      {/* Standard composition with error toggle */}
       <p className="text-label-14 text-gray-900 mb-4">
         Standard composition — label, control, helper, error
       </p>
@@ -1211,7 +1139,6 @@ function FormFieldSection() {
         </div>
       </MatrixCard>
 
-      {/* Required/optional + disabled */}
       <p className="text-label-14 text-gray-900 mb-4">
         Required, optional, and disabled variants
       </p>
@@ -1250,10 +1177,6 @@ function FormFieldSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  L2 pattern components (V1.149 / V1.150)                             */
-/* ------------------------------------------------------------------ */
 
 function FormSectionSection() {
   return (
@@ -1438,10 +1361,6 @@ function SettingsLayoutSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  13. Toast                                                          */
-/* ------------------------------------------------------------------ */
-
 function ToastSection() {
   return (
     <section>
@@ -1467,10 +1386,6 @@ function ToastSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  14. TransportErrorBlock                                            */
-/* ------------------------------------------------------------------ */
-
 function TransportErrorBlockSection() {
   return (
     <section>
@@ -1493,10 +1408,6 @@ function TransportErrorBlockSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  15. Compute Run Studio (V1.147 P1)                                   */
-/* ------------------------------------------------------------------ */
 
 function RunStudioSection() {
   return (
@@ -1523,10 +1434,6 @@ function RunStudioSection() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  16. Compute Timeline (V1.147 P2)                                     */
-/* ------------------------------------------------------------------ */
-
 function ComputeTimelineSection() {
   return (
     <section>
@@ -1539,7 +1446,7 @@ function ComputeTimelineSection() {
         (Narrative node body) and{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">ComputeInspectorSections</code>{' '}
         (node inspector content), composed with the shared{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-canvas/*</code>{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-canvas/{'/*'}</code>{' '}
         node shell. Variants: compute node alongside KB events (direct run /
         preset / summary-less / selected / dragging), inspector (direct /
         preset / sparse / read-only), Run Module entry chrome (toolbar + empty-state
@@ -1551,10 +1458,6 @@ function ComputeTimelineSection() {
     </section>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  Page                                                                */
-/* ------------------------------------------------------------------ */
 
 export function ComponentsPage() {
   return (

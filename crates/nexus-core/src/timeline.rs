@@ -160,14 +160,12 @@ impl CoreService {
     ) -> CoreResult<ListTimelineEventsResponse> {
         self.verify_principal(principal)?;
         let pool = &self.inner.pool;
-        // Ownership guard before any read: missing world → NotFound, not
         // owned → Forbidden. The denial renders with this route's retained
         // envelopes (`world {id} not found` / `you do not own this world`).
         check_world_owner(pool, &world_id, principal.creator_id())
             .await
             .map_err(WorldOwnerGuardFailure::into_timeline_error)?;
 
-        // The guard above proves the row exists; `fetch_optional` still
         // guards the concurrent-delete race. `root_fork_branch_id` unset →
         // legacy `fbk_root` fallback.
         let world_row: Option<Option<String>> = sqlx::query_scalar(
@@ -183,7 +181,6 @@ impl CoreService {
             })?
             .unwrap_or_else(|| ROOT_BRANCH_FALLBACK.to_string());
 
-        // The read always targets a single branch (explicit filter or the
         // World's current branch); keep the Option for the page-query
         // signature.
         let branch_filter = Some(
@@ -200,7 +197,6 @@ impl CoreService {
             .as_deref()
             .map(decode_events_cursor)
             .transpose()?;
-        // `list_timeline_events_page` takes `Option<(&str, i64)>`; the owned
         // decoded values are reborrowed here.
         let cursor_ref = cursor
             .as_ref()
@@ -210,7 +206,6 @@ impl CoreService {
             .limit
             .unwrap_or(EVENTS_DEFAULT_PAGE_SIZE)
             .min(EVENTS_MAX_PAGE_SIZE);
-        // W-1 (QC): `limit=0` must not report `has_more` — the wire contract
         // states `has_more` is equivalent to `next_cursor` being non-null,
         // and a `has_more=true, next_cursor=null` response would growth-loop
         // a keyset client (null cursor → re-request page 1). An empty page
@@ -222,7 +217,6 @@ impl CoreService {
                 next_cursor: None,
             });
         }
-        // Fetch one extra row to detect has_more.
         let rows = list_timeline_events_page(
             pool,
             &world_id,
@@ -235,7 +229,6 @@ impl CoreService {
         .await
         .map_err(|e| narrative_internal("timeline_events.page", &e))?;
 
-        // `fetch_limit = limit + 1`; more rows than `limit` means another
         // page. Rows are capped by the SQL LIMIT, so this cast cannot
         // truncate.
         #[allow(clippy::cast_possible_truncation)]
@@ -276,7 +269,6 @@ async fn overview_page(
     pool: &SqlitePool,
     query: CoreTimelineOverviewQuery,
 ) -> CoreResult<TimelineOverviewResponse> {
-    // Fetch one extra row to detect has_more.
     let fetch_limit = i64::try_from(OVERVIEW_PAGE_SIZE + 1).map_err(|_| CoreError::Internal {
         category: "timeline_overview: page size overflow".to_string(),
     })?;
@@ -476,7 +468,6 @@ fn event_info(r: TimelineEventPageRow) -> CoreResult<TimelineEventInfo> {
         source_command_id: r.source_command_id,
         metadata: parse_json_object(r.metadata_json.as_deref()).unwrap_or_default(),
         extensions: parse_json_object(r.extensions_nexus_json.as_deref()),
-        // V1.164 P3 T1 (AR-2): carry the functional-dialect modules verbatim
         // from `narrative_timeline_events.modules_json` (NULL → empty map,
         // omitted from the wire via `skip_serializing_if` — schema type
         // `object`, absent when unrecorded).

@@ -22,10 +22,6 @@
 //! `nexus-agent-host` `PROCESS_ENV_LOCK` (pub(crate), cross-crate
 //! inaccessible) is not needed here.
 
-// Test-only: adapters' execute/cancel return nested Results over async
-// streams; unwrapping in assertions keeps failure modes readable, and the
-// fixture harness (not product code) owns the panics. File-scoped to the
-// integration tests only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::unwrap_in_result)]
 
 use std::collections::HashMap;
@@ -150,8 +146,6 @@ async fn wait_for_log(path: &Path, needle: &str, timeout: Duration) -> bool {
     }
 }
 
-// ── Claude (stream-json) ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn claude_happy_path_conforms_except_missing_started() {
     let provider = ClaudeCliProvider::new(
@@ -185,7 +179,6 @@ async fn claude_mid_stream_tool_call_conforms_except_missing_started() {
         .await
         .expect("execute");
     let events = collect(stream).await;
-    // The tool_use block is AR-1-skipped by the mapper: no ToolCall event.
     assert!(
         !events.iter().any(|e| matches!(e, HostEvent::ToolCall(_))),
         "tool_use blocks carry no host event this iteration (AR-1): {events:?}"
@@ -239,7 +232,6 @@ async fn claude_cancel_terminates_fixture() {
         .await
         .expect("execute");
 
-    // Pump the first frame so the turn is visibly streaming.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::MessageDelta(_)));
     assert!(
@@ -265,8 +257,6 @@ async fn claude_cancel_terminates_fixture() {
     let report = run_conformance(stream_of(events), ConformanceConfig::default()).await;
     assert_only_missing_started(&report);
 }
-
-// ── Codex (app-server JSON-RPC) ────────────────────────────────────────
 
 #[tokio::test]
 async fn codex_happy_path_conforms() {
@@ -301,8 +291,6 @@ async fn codex_mid_stream_tool_call_conforms() {
         .await
         .expect("execute");
     let events = collect(stream).await;
-    // item/toolUse is an unknown method in codex-codes 0.146.4: parsed as
-    // Notification::Unknown and mapper-skipped (AR-1) — no ToolCall event.
     assert!(
         !events.iter().any(|e| matches!(e, HostEvent::ToolCall(_))),
         "tool-use notifications carry no host event this iteration (AR-1): {events:?}"
@@ -356,7 +344,6 @@ async fn codex_cancel_interrupts_turn() {
         .await
         .expect("execute");
 
-    // Pump the first frame so the turn is visibly streaming.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::OpStarted(_)));
 
@@ -414,8 +401,6 @@ async fn codex_mutated_frame_turns_runner_red() {
         "findings: {report}"
     );
 }
-
-// ── Dsh (deepseek-harness-sdk runtime) ──────────────────────────────────
 
 /// Hermetic dsh provider env (P0 T2): the SDK resolves/creates `DSH_HOME`
 /// at harness start, so every dsh conformance run gets an isolated
@@ -512,7 +497,6 @@ async fn dsh_mid_stream_tool_call_conforms() {
         .await
         .expect("execute");
     let events = collect(stream).await;
-    // The tool/call event is collected as raw noise by the SDK; the
     // normalized surface never surfaces tool calls (AR-6).
     assert!(
         !events.iter().any(|e| matches!(e, HostEvent::ToolCall(_))),
@@ -572,7 +556,6 @@ async fn dsh_cancel_is_honest_noop() {
         .await
         .expect("execute");
 
-    // Exactly one OpStarted precedes content (P0 T2); P1 maps committed
     // assistant/message units into MessageDelta before the terminal.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::OpStarted(_)));
@@ -589,7 +572,6 @@ async fn dsh_cancel_is_honest_noop() {
         "the turn must complete normally — dsh cancel is a documented no-op \
          (AR-6), the fixture is NOT terminated: {events:?}"
     );
-    // The fixture never saw a cancellation: its request log shows the
     // normal _spawn + initialize + session/prompt sequence (no cancel RPC
     // exists).
     let log_content = std::fs::read_to_string(&log).unwrap_or_default();
@@ -661,6 +643,5 @@ async fn dsh_partial_then_fail_conforms_with_one_terminal() {
         ),
         "{events:?}"
     );
-    // P1 maps non-success finish reasons to typed OpFailed categories; the
     // neutral runner's closed error_category set is unchanged in P1.
 }

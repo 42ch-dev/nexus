@@ -13,8 +13,6 @@
 
 use assert_cmd::Command;
 
-// =============================================================================
-// Part 2: V2 target contract tests (all active — no #[ignore] remains)
 //
 // These define the V2 command surface. Each test asserts that a canonical
 // top-level group exists with its expected subcommands. They were `#[ignore]`d
@@ -26,7 +24,6 @@ use assert_cmd::Command;
 //     and `v2_target_platform_exists`
 //   - Plan 4 (creator/knowledge): `v2_target_creator_subcommands`
 //   - Plan 2–4 together: `v2_only_five_visible_command_groups`
-// =============================================================================
 
 /// V2 Target: the user-visible top-level command groups:
 /// `acp`, `creator`, `platform`, `system`
@@ -56,7 +53,6 @@ fn v2_canonical_visible_command_groups() {
         );
     }
 
-    // Verify no legacy top-level commands leaked through.
     // These should all be moved under the V2 groups or removed.
     let legacy_commands = [
         "auth",
@@ -82,7 +78,6 @@ fn v2_canonical_visible_command_groups() {
     ];
 
     for legacy in &legacy_commands {
-        // We check that these do NOT appear as top-level Commands in help.
         // This is a simple substring check — clap's help format lists Commands:
         // on a line, so we look for "  {legacy}" pattern to reduce false positives.
         let as_top_level = format!("  {legacy}");
@@ -242,17 +237,8 @@ fn v2_target_system_subcommands() {
     }
 }
 
-// =============================================================================
-// Part 3: Plan 5 KB scope contract tests (must pass immediately)
-// =============================================================================
-
-// v231: `retired_kb_scope_flag_is_rejected` and `v2_target_kb_subcommands`
 // removed with the `creator kb` group (the parser now refuses the group; see
 // `kb_rescan_cli.rs`).
-
-// =============================================================================
-// Part 4: Plan 6 ACP execution path consolidation contract tests
-// =============================================================================
 
 /// V2 Target: `acp session --help` shows list, show, delete subcommands.
 #[test]
@@ -355,10 +341,6 @@ fn v2_target_system_doctor() {
     );
 }
 
-// =============================================================================
-// Part 5: Plan 7 Run and capability-call trace correlation contract tests
-// =============================================================================
-
 /// Verify `acp run --help` includes `--run-id` flag.
 #[test]
 fn acp_run_shows_run_id_flag() {
@@ -378,11 +360,6 @@ fn acp_run_shows_run_id_flag() {
     );
 }
 
-// =============================================================================
-// Part 6: V1.33 Work Experience Loop contract tests (must pass immediately)
-// =============================================================================
-
-// V1.45: `v133_creator_run_subcommands` removed — old subcommands (start, continue,
 // etc.) replaced by generic `creator run <preset_id>` dispatch; v1.193 P2-T1 then
 // removed that runner too, so these leaves are simply gone.
 
@@ -407,7 +384,6 @@ fn v141_creator_works_subcommands() {
     }
 }
 
-// V1.45: `v141_creator_run_start_from_work_flags`, `v141_creator_run_resume_reopen_flags`,
 // `v141_run_start_from_work_accepts_work_id`, `v141_resume_reopen_without_reason_rejects`
 // removed — old subcommands replaced by generic dispatch.
 
@@ -431,15 +407,9 @@ fn v141_pool_inspiration_help_disambiguates_from_work_log() {
     );
 }
 
-// V1.45: `v133_creator_run_start_requires_idea`, `v133_creator_run_continue_requires_note`,
 // `v136_creator_run_start_has_init_preset_flag` removed — old subcommands replaced by generic dispatch.
 
-// v1.193 P1-T1: `v133_system_preset_subcommands` and `v133_system_preset_list_flags`
 // removed with the PL-6 `system preset` forwarding alias.
-
-// =============================================================================
-// Part 7: V1.35 P2 — platform sync migration & deprecation contract tests
-// =============================================================================
 
 /// V1.35 P2: `platform sync --help` shows pull, push, status subcommands.
 #[test]
@@ -480,7 +450,6 @@ fn v135_root_help_shows_canonical_groups_and_no_top_level_sync() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    // The canonical V1.35 top-level groups MUST all appear.
     let expected = ["creator", "acp", "platform", "system"];
     for group in &expected {
         assert!(
@@ -489,7 +458,6 @@ fn v135_root_help_shows_canonical_groups_and_no_top_level_sync() {
         );
     }
 
-    // The top-level `sync` alias was removed in v1.193 P1-T6; the word "sync"
     // may still appear in long_about examples ("nexus42 platform sync pull")
     // which is intentional. So we check that `sync` does NOT appear as a
     // top-level Commands entry — i.e. not in the "Commands:" section after
@@ -512,7 +480,6 @@ fn v135_root_help_shows_canonical_groups_and_no_top_level_sync() {
 #[cfg(feature = "connect-host")]
 #[test]
 fn v1193_connect_help_describes_served_compute_surface() {
-    // clap wraps help text at the render width, so collapse whitespace (and
     // case) before matching the pinned phrases.
     fn flattened(args: &[&str]) -> String {
         let output = Command::cargo_bin("nexus42")
@@ -583,11 +550,6 @@ fn v135_root_long_about_mentions_creator_works_and_workspace() {
     );
 }
 
-// =============================================================================
-// Part 8: V1.35 P3 — Creator hub polish contract tests
-// =============================================================================
-
-// v231: `v135_kb_help_disambiguates_scopes` and
 // `v135_creator_help_mentions_kb_namespaces` removed with the `creator kb`
 // group.
 
@@ -604,17 +566,10 @@ fn v231_retired_creator_knowledge_and_reference_groups_are_unknown() {
     }
 }
 
-// v231: the `creator kb --help` scope tests were removed with the group.
-
-// V1.45: `v135_chain_novel_writing_defaults_true`,
 // `v135_chain_novel_writing_opt_out_syntax_accepted`,
 // `v136_start_help_mentions_auto_completion`,
 // `v137_stage_advance_has_force_gates_flags`, `v137_run_start_has_force_gates_flags`
 // removed — old subcommands replaced by generic dispatch with --force-gates/--reason.
-
-// =============================================================================
-// v1.193 P1-T1: `preset validate` is local-only; removed surfaces are unknown
-// =============================================================================
 
 /// Invalid bundle fixture: `preset.initial` names a state that does not
 /// exist — the structural defect `loader_validate_manifest_compat` rejects.
@@ -680,7 +635,6 @@ fn preset_validation_rejects_invalid_bundle_without_daemon() {
         "v1.193 P1-T1: the failure must be the retained validation verdict, not a transport error, got: {stderr}"
     );
 
-    // Read-only: validation does not rewrite or extend the bundle.
     assert_eq!(
         std::fs::read(&manifest).unwrap(),
         before,
@@ -696,7 +650,6 @@ fn preset_validation_rejects_invalid_bundle_without_daemon() {
         "v1.193 P1-T1: validation must not add files to the bundle"
     );
 
-    // The removed runner is an unknown subcommand — both in the bare help shape
     // and in the ID-bearing shape the deleted pre-parse interceptor used to
     // match (R-V1193-P1T1-PRESET-RUN-HELP-INTERCEPT): `--help` after a preset id
     // reached `extract_run_help_target`, which printed the manifest-enriched
@@ -731,7 +684,6 @@ fn preset_validation_rejects_invalid_bundle_without_daemon() {
         );
     }
 
-    // `--offline` is rejected, never treated as a synonym for the local path.
     let offline = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -745,10 +697,6 @@ fn preset_validation_rejects_invalid_bundle_without_daemon() {
         "v1.193 P1-T1: `--offline` must be an unexpected argument"
     );
 }
-
-// =============================================================================
-// Part 9: v1.193 P1-T4 local-service probe removal contract tests
-// =============================================================================
 
 /// v1.193 P1-T4 (AC2/AC5): `system debug dump-workspace` is a purely local
 /// snapshot. The `daemon_status` block was removed together with its loopback
@@ -770,7 +718,6 @@ fn workspace_dump_never_queries_local_service() {
     let home = tempfile::tempdir().expect("temp home");
     let cwd = tempfile::tempdir().expect("temp cwd");
 
-    // Counting loopback trap standing in for the configured local service.
     // Accept-and-close: a probe is counted, never answered.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
     listener
@@ -817,7 +764,6 @@ fn workspace_dump_never_queries_local_service() {
         .get_output()
         .clone();
 
-    // Drain window: a connection the child opened is queued and accepted here.
     std::thread::sleep(Duration::from_millis(100));
     stop.store(true, Ordering::SeqCst);
     accept_loop.join().expect("join probe listener");
@@ -874,10 +820,6 @@ fn system_debug_replay_delta_is_removed() {
     );
 }
 
-// =============================================================================
-// Part 10: v1.193 P1-T5 platform stub removal & retained cloud groups
-// =============================================================================
-
 /// Extract the `Commands:` block of a clap `--help` page (everything between the
 /// `Commands:` heading and the following `Options:` heading).
 fn help_commands_section(help: &str) -> String {
@@ -905,7 +847,6 @@ fn help_commands_section(help: &str) -> String {
 fn platform_retains_cloud_groups_without_local_launcher() {
     let home = tempfile::tempdir().expect("temp home");
 
-    // ── Retained cloud transport: `platform auth` ─────────────────────────
     let auth = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -922,7 +863,6 @@ fn platform_retains_cloud_groups_without_local_launcher() {
             "v1.193 P1-T5: `platform auth` must retain the '{leaf}' leaf: {auth_help}"
         );
     }
-    // `token` is `#[command(hide = true)]`: absent from help, still callable.
     Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -931,7 +871,6 @@ fn platform_retains_cloud_groups_without_local_launcher() {
         .assert()
         .success();
 
-    // ── Retained cloud transport: `platform sync` ─────────────────────────
     let sync = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -949,7 +888,6 @@ fn platform_retains_cloud_groups_without_local_launcher() {
         );
     }
 
-    // ── Retained local SSOT: `platform context assemble-moment` ───────────
     let context = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -965,7 +903,6 @@ fn platform_retains_cloud_groups_without_local_launcher() {
         "v1.193 P1-T5: `platform context` must retain the local assemble-moment SSOT: {context_help}"
     );
 
-    // ── Removed stubs are unknown subcommands (exit 2) ────────────────────
     let removed: [&[&str]; 7] = [
         &["platform", "explore", "browse"],
         &["platform", "explore", "search"],
@@ -993,7 +930,6 @@ fn platform_retains_cloud_groups_without_local_launcher() {
         );
     }
 
-    // ── No replacement local launcher or service group ────────────────────
     let platform = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -1020,10 +956,6 @@ fn platform_retains_cloud_groups_without_local_launcher() {
         );
     }
 }
-
-// =============================================================================
-// Part 11: v1.193 P1-T6 Model A / host-call / sync-alias entrance removal
-// =============================================================================
 
 /// v1.193 P1-T6 (AC1/AC2/AC3): the Model A MCP bridge (`mcp serve`), the raw
 /// `host-call` debug entry and the hidden top-level `sync` alias are no longer
@@ -1059,7 +991,6 @@ fn retired_operator_entrances_are_unknown() {
         );
     }
 
-    // The hidden `ops inspect` operator entry is retained — the Model A cut
     // removes routing, not the daemon-free inspector.
     Command::cargo_bin("nexus42")
         .unwrap()
@@ -1068,10 +999,6 @@ fn retired_operator_entrances_are_unknown() {
         .assert()
         .success();
 }
-
-// =============================================================================
-// Part 12: v1.193 P2-T1 Creator runner / Work execution-entry removal
-// =============================================================================
 
 /// Subcommand names the `Commands:` block of a clap `--help` page advertises.
 ///
@@ -1144,7 +1071,6 @@ fn retired_creator_execution_is_unknown() {
         );
     }
 
-    // The retained Creator group advertises only retained entries.
     let creator = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -1169,7 +1095,6 @@ fn retired_creator_execution_is_unknown() {
         );
     }
 
-    // The retained Work group advertises only retained entries.
     let works = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -1194,10 +1119,6 @@ fn retired_creator_execution_is_unknown() {
         );
     }
 }
-
-// =============================================================================
-// Part 13: v1.193 P2-T2 daemon group / daemon-run router removal
-// =============================================================================
 
 /// v1.193 P2-T2 (AC1/AC4): the whole `daemon` command group (service
 /// lifecycle, `ui`/`web`, and the `schedule` orchestration leaves) and the
@@ -1258,7 +1179,6 @@ fn daemon_tree_is_unknown() {
         );
     }
 
-    // The root help no longer lists the group nor teaches the removed leaf.
     let root = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -1279,7 +1199,6 @@ fn daemon_tree_is_unknown() {
         "v1.193 P2-T2: root help must not teach the removed daemon schedule leaf"
     );
 
-    // The retained groups still parse (the cutover removes routing, not them).
     for args in [
         ["creator", "--help"],
         ["acp", "--help"],
@@ -1294,10 +1213,6 @@ fn daemon_tree_is_unknown() {
             .success();
     }
 }
-
-// =============================================================================
-// Part 14: v1.215 P1-T5 creator primary-id positional cutover (compass D8)
-// =============================================================================
 
 /// v1.215 P1-T5 (compass D8): the three `creator` leaves whose only required
 /// object id is the command's primary target take that id as a positional
@@ -1315,7 +1230,6 @@ fn daemon_tree_is_unknown() {
 fn v1215_creator_primary_id_is_positional() {
     let home = tempfile::tempdir().expect("temp home");
 
-    // (leaf argv, positional placeholder shown in usage, removed id flag)
     let leaves: [(&[&str], &str, &str); 3] = [
         (
             &["creator", "world", "event-add"],
@@ -1337,7 +1251,6 @@ fn v1215_creator_primary_id_is_positional() {
     for (leaf, placeholder, removed_flag) in leaves {
         let leaf_label = leaf.join(" ");
 
-        // ── The new positional form is the advertised surface ─────────────
         let help = Command::cargo_bin("nexus42")
             .unwrap()
             .env("HOME", home.path())
@@ -1359,7 +1272,6 @@ fn v1215_creator_primary_id_is_positional() {
              {removed_flag}: {help_text}"
         );
 
-        // ── It parses: the next stop is the unnamed-creator refusal, not a
         //    clap usage error (exit 1, `Creator not selected.`). ───────────
         let positional = Command::cargo_bin("nexus42")
             .unwrap()
@@ -1386,7 +1298,6 @@ fn v1215_creator_primary_id_is_positional() {
             "v1.215 P1-T5: the declared refusal for `{leaf_label} <id>`: {positional_stderr}"
         );
 
-        // ── The removed flag spelling is refused by clap, and the usage page
         //    it prints names the new positional instead. ──────────────────
         let old = Command::cargo_bin("nexus42")
             .unwrap()

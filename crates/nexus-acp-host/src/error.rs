@@ -93,8 +93,6 @@ pub enum AcpError {
     Json(#[from] serde_json::Error),
 }
 
-// ── Constructors ──────────────────────────────────────────────────────
-
 #[allow(dead_code)]
 impl AcpError {
     /// Create a connection-failed error from a message string.
@@ -243,7 +241,6 @@ mod tests {
         let err = AcpError::agent_crashed(None, PathBuf::from("npx"), None);
         let msg = err.to_string();
         assert!(msg.contains("agent crashed"));
-        // Should not have a stderr hint line
         assert!(!msg.contains("stderr"));
     }
 
@@ -285,13 +282,11 @@ mod tests {
         let long_stderr = "x".repeat(300);
         let err = AcpError::agent_crashed(Some(1), PathBuf::from("agent"), Some(long_stderr));
         let msg = err.to_string();
-        // Should contain truncation marker
         assert!(msg.contains("..."));
     }
 
     #[test]
     fn source_chain_is_preserved() {
-        // `ConnectionFailed` carries an optional `#[source]` field: when set it
         // must stay reachable through `std::error::Error::source()`.
         let err = AcpError::connection_io(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
@@ -301,11 +296,9 @@ mod tests {
         assert_eq!(source.to_string(), "pipe broken");
         assert!(source.downcast_ref::<std::io::Error>().is_some());
 
-        // Without an underlying error there is nothing to report as source.
         let err = AcpError::connection_failed("pipe broken");
         assert!(std::error::Error::source(&err).is_none());
 
-        // `#[from]` variants forward the wrapped error as the source.
         let err: AcpError = std::io::Error::new(std::io::ErrorKind::NotFound, "missing").into();
         assert_eq!(
             std::error::Error::source(&err).map(ToString::to_string),
@@ -316,7 +309,6 @@ mod tests {
             .into();
         assert!(std::error::Error::source(&err).is_some());
 
-        // Variants wrapping no error report no source.
         assert!(std::error::Error::source(&AcpError::protocol("boom")).is_none());
     }
 }

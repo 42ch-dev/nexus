@@ -73,7 +73,6 @@ declare module 'node:fs' {
 }
 
 /**
- * Node 22 provides `Promise.withResolvers`, but this package compiles against an
  * older `lib`. Declaring the runtime surface here keeps the implementation free
  * of the executor anti-pattern without widening the compile target.
  */

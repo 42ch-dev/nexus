@@ -643,7 +643,6 @@ struct IntentRowRaw {
 
 impl IntentRowRaw {
     fn try_into_row(self) -> Result<CommitIntentRow, LocalDbError> {
-        // T1: bound the RAW column bytes first — never hand an unbounded
         // document to the JSON parser.
         if self.entries_json.len() > MAX_ENTRIES_JSON_BYTES {
             return Err(LocalDbError::ValidationError(format!(

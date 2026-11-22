@@ -26,7 +26,6 @@ impl Schema {
     ///
     /// Returns a `LocalDbError` if pool creation, migrations, or seeding fails.
     pub async fn init(db_path: &Path) -> Result<SqlitePool, nexus_local_db::LocalDbError> {
-        // Ensure parent directory exists before opening SQLite connection.
         if let Some(parent) = db_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
                 nexus_local_db::LocalDbError::IoWithPath {
@@ -35,7 +34,6 @@ impl Schema {
                 }
             })?;
         }
-        // P2 QC3 F-001: delegate to `init_pool` so the runtime/CLI boot path
         // shares the co-boot migration retry/backoff (open pool + migrations
         // with transient-retry + seed versions, in one call).
         nexus_local_db::init_pool(db_path).await
@@ -78,10 +76,8 @@ mod tests {
 
         let pool = Schema::init(&path).await.unwrap();
 
-        // Verify file exists
         assert!(path.exists());
 
-        // Verify schema initialized
         let tables_raw: Vec<Option<String>> =
             sqlx::query_scalar!("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
                 .fetch_all(&pool)

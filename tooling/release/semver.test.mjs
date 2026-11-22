@@ -26,7 +26,6 @@ test("isReleaseSemVer accepts clean X.Y.Z and -alpha.N / -rc.N", () => {
 
 test("isReleaseSemVer rejects malformed labels, numbers, build metadata and stray shapes", () => {
   for (const version of [
-    // Item 8 reject table.
     "0.2.0-alpha",
     "0.2.0-alpha.0",
     "0.2.0-alpha.01",
@@ -38,7 +37,6 @@ test("isReleaseSemVer rejects malformed labels, numbers, build metadata and stra
     "0.2.0-alpha.1+build",
     "0.2.0-",
     "01.2.0",
-    // Core-shape rejections retained from the clean-grammar table.
     "1.02.3",
     "1.2.03",
     "00.0.0",

@@ -1,5 +1,4 @@
 /**
- * Product preload bridge (v1.192 P0-T1) — the ONLY renderer surface:
  * `window.nexusDesktop` version 1.
  *
  * - No raw ipcRenderer exposure, no Node/process/env handles, no arbitrary
@@ -21,10 +20,8 @@
  * the mechanical preload-side implementation values, kept in lockstep by the
  * channel-parity test in tests/desktop-security.test.mjs.
  */
-/// <reference lib="dom" />
 import { contextBridge, ipcRenderer } from 'electron';
 
-// --- mirrors of desktop-contract.ts (canonical definitions live there) ---
 // Every mirror value is pinned against DESKTOP_BRIDGE_MANIFEST by
 // tests/desktop-security.test.mjs — a drift on either side fails the parity
 // lock. Keep in lockstep with desktop-contract.ts.
@@ -77,7 +74,6 @@ type DesktopBridge = {
   invoke(operation: DesktopOperation, payload?: unknown): Promise<unknown>;
   onStatusChanged(listener: (status: DaemonStatus) => void): () => void;
 };
-// --- end mirrors ---
 
 const encoder = new TextEncoder();
 
@@ -183,7 +179,6 @@ const bridge: DesktopBridge = {
   invoke,
   onStatusChanged(listener) {
     const handler = (_event: unknown, raw: unknown): void => {
-      // Invalid/oversized frames are dropped, never delivered to the SPA, and
       // Electron event objects never cross this boundary.
       if (isBoundedStatusFrame(raw)) listener(raw);
     };

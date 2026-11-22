@@ -1,5 +1,4 @@
 /**
- * App-side TS mirror of the capability catalog wire DTO (V1.172 — AR-40/AR-42).
  *
  * Mirrors `crates/nexus-contracts/src/local/orchestration/http.rs`
  * `CapabilityInfo` 1:1 (camelCase on the wire). The capabilities list

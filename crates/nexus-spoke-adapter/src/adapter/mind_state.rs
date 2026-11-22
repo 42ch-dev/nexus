@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! `MindState` write-path gate — the spec-conformant home of the spoke
 //! `validate_mind_state` wire-shape check (V1.164 P2 layering fix).
 //!
@@ -187,7 +188,6 @@ fn validated_mind_state_columns(value: &Value) -> Result<MindStateColumnValues<'
         ));
     };
 
-    // Checked conversion: `schema_version` must be a JSON integer within the
     // i64 domain (fail-closed) — a fractional, NaN, or huge value is rejected
     // rather than truncated or wrapped into a schema version.
     let schema_version = match state.get("schema_version") {

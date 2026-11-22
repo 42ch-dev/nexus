@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Assert a release version is a valid, unused, strictly increasing version.
  *
  * Checks, in order:
  *   1. the target is a release SemVer (X.Y.Z, X.Y.Z-alpha.N, or X.Y.Z-rc.N)

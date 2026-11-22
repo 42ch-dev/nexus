@@ -1,5 +1,4 @@
 /**
- * FindingsPage render + interaction tests — V1.91 P1 batch triage coverage.
  *
  * Exercises multi-select, bulk status transition, bulk target_executor
  * assignment, and client-side CSV export against the real BrowserClient + msw.
@@ -87,7 +86,6 @@ describe('FindingsPage', () => {
     await selectWork();
 
     const rowChecks = screen.getAllByRole('checkbox');
-    // Header checkbox + two row checkboxes.
     expect(rowChecks.length).toBeGreaterThanOrEqual(3);
     fireEvent.click(rowChecks[1]);
 
@@ -193,7 +191,6 @@ describe('FindingsPage', () => {
     URL.createObjectURL = createObjectURL;
     URL.revokeObjectURL = revokeObjectURL;
 
-    // Capture the created anchor to inspect download attributes.
     const originalCreateElement = document.createElement.bind(document);
     let capturedAnchor: HTMLAnchorElement | null = null;
     document.createElement = ((tagName: string, options?: ElementCreationOptions) => {

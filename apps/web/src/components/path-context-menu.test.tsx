@@ -1,5 +1,4 @@
 /**
- * PathContextMenu conditional-rendering tests (web-ui-design-requirements §6.4).
  *
  * §6.4 rules pinned here:
  *   - Browser mode renders **Copy Path only** — no greyed-out "Open With…"
@@ -47,7 +46,6 @@ function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabiliti
 
 describe('PathContextMenu conditional rendering (§6.4)', () => {
   it('browser mode renders Copy Path only (no native-action teasing)', () => {
-    // desktop omitted → useDesktopCapabilities() returns null → browser build.
     renderInApp(
       <PathContextMenu path="Works/WRK/Stories/ch01.md" pathLabel="Body" position={POS} onClose={() => {}} />,
     );
@@ -88,7 +86,6 @@ describe('PathContextMenu conditional rendering (§6.4)', () => {
   });
 
   it('surfaces the plain-language path-guard rejection toast on OutsideWorkspace', async () => {
-    // Mirrors the Rust PathGuardError for a path outside the workspace root.
     const openWith = vi.fn().mockRejectedValue({
       code: 'path_outside_workspace',
       message: 'Path not opened. The file is outside the active workspace.',

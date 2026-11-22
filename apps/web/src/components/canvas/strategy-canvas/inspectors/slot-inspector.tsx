@@ -1,5 +1,4 @@
 /**
- * Compose-path inspector for a selected `pattern_slot` node
  * (v239-p3-canvas-compose-ui T3): bind_slot writes, replace_subtree and
  * unnest. Binding inputs are per the pinned manifest's slot declarations;
  * a required slot with no binding names itself before approval can pass.

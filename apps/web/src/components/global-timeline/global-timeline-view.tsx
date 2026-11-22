@@ -1,5 +1,4 @@
 /**
- * Global Timeline view — V1.126 P2 (composite endpoint migration).
  *
  * Renders recent Timeline activity across all Worlds as a single list.
  * Uses one `useTimelineOverview` call instead of the old N=5–10 parallel
@@ -102,7 +101,6 @@ export function GlobalTimelineView() {
     };
   });
 
-  // V1.127 P0 T2: "Load more" pages past the daemon's 20-World page cap.
   // `hasNextPage` is true when the last overview page returned a non-null
   // next cursor (see useTimelineOverview.getNextPageParam).
   const footer = overview.hasNextPage ? (

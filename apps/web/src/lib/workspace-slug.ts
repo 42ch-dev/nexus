@@ -1,5 +1,4 @@
 /**
- * Workspace slug derivation (plan v1220 P3-T3).
  *
  * The single rule behind the create panel's auto-derived root preview. The
  * slug is client-proposed and core-validated: trim → lowercase → every maximal

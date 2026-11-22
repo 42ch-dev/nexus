@@ -189,8 +189,6 @@ mod tests {
 
     #[test]
     fn no_started_does_not_double_report_ordering() {
-        // The exactly-one-OpStarted invariant owns the missing-start case;
-        // ordering stays silent to avoid duplicate findings for one root cause.
         let events = vec![message_delta(), op_finished(FinishReason::EndTurn)];
         let findings = check(&events);
         assert!(findings.is_empty(), "expected no findings: {findings:?}");

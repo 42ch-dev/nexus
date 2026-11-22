@@ -3,7 +3,6 @@ import { type LabelHTMLAttributes, type Ref } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * Label — DESIGN.md §Component Primitives. label-14 weight 500; uses
  * gray-1000 text and is wired to its control via the standard `htmlFor`.
  *
  * Per the V1.100 form-field contract:

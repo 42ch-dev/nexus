@@ -48,14 +48,12 @@ use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
-// The preset profile family is generated one type per module; the lane de-duplicates
 // every `$ref` target to its standalone module, so import each type from the module
 // that owns it.
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_exit_when::PresetProfileExitWhen;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_lanes::PresetProfileLanes;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_next::PresetProfileNext;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::PresetProfileResponse;
-// Same family note as above, for the grouped listing: the core returns the
 // generated `preset_management` response (its `source` enum displays the real
 // `embedded` / `system` / `user` label), so the CLI reads that type directly
 // instead of the retired daemon client's private copy.
@@ -221,7 +219,6 @@ async fn list_presets(
     let core = open_direct_core(config).await?;
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
-        // A failure here is a real core refusal — surface it instead of
         // silently degrading the list to no presets (F-001 reliability nit).
         let response = core
             .list_presets(&principal)
@@ -672,7 +669,6 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 
     let file_path = std::path::Path::new(path);
 
-    // An explicit `*.ir.json` file selects direct IR validation; every other
     // path form keeps resolving through the YAML bundle rules below.
     if file_path
         .file_name()
@@ -687,7 +683,6 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
         return validate_workflow_ir_file(file_path);
     }
 
-    // Resolve the target file + optional bundle root (mirrors the daemon's
     // `infer_bundle_root`: only a file literally named `preset.yaml` has a
     // bundle root; a directory argument points at its preset.yaml).
     let (preset_yaml_path, bundle_root) = if file_path.is_dir() {
@@ -711,12 +706,10 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
         )));
     }
 
-    // Size limit (same 1 MiB limit the loader/daemon enforce).
     ensure_document_size(&preset_yaml_path, "Preset YAML")?;
 
     let yaml = std::fs::read_to_string(&preset_yaml_path)?;
 
-    // Parse + depth check (same path as `load_preset_from_str_with_limits`).
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(&yaml)
         .map_err(|e| CliError::Other(format!("preset YAML parse error: {e}")))?;
     let depth = yaml_value_depth(&yaml_value);
@@ -733,13 +726,11 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
-    // C2: loader-equivalent structural checks (same defects the runtime
     //     loader would reject).
     for problem in loader_validate_manifest_compat(&manifest, &caps) {
         errors.push(format!("{}: {}", problem.path, problem.error));
     }
 
-    // C3 + A5 + A3: shared validation facade. Bundle asset checks only run
     //     when the target resolves to a bundle root.
     let asset_result = bundle_root
         .as_deref()
@@ -784,7 +775,6 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     let document: WorkflowDocument = serde_json::from_str(&json)
         .map_err(|e| CliError::Other(format!("workflow IR parse error: {e}")))?;
 
-    // A document from a newer IR version cannot be interpreted here, so no
     // check below it is trustworthy: refuse it instead of letting the
     // exporter's refusal fall silent (the wording mirrors `export_preset`).
     if document.ir_version > SUPPORTED_IR_VERSION {
@@ -803,7 +793,6 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
-    // Q2 structural checks the semantic facade cannot see (dangling edge and
     // dependency targets, duplicate node ids, nest bindings, nest depth). They
     // run on every IR document, including the IR-only shapes that have no
     // manifest projection for the loader-level checks to inspect.
@@ -813,7 +802,6 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
 
     let caps = CapabilityRegistry::with_builtins();
 
-    // C2 is a manifest-level contract, so a manifest-expressible document is
     // projected back to run the same check the YAML path always runs; IR-only
     // shapes (joins, nest groups, pattern slots) have no manifest projection.
     if let Ok(manifest) = export_preset(&document) {
@@ -883,7 +871,6 @@ fn violation_path(violation: &Violation) -> String {
             format!("nests.{nest}.parent_node")
         }
         Violation::IncompleteNestChild { nest, .. } => format!("nests.{nest}.child"),
-        // The message carries the nest id / cycle path / depth, so one prefix
         // suffices for the document-wide nest violations.
         Violation::EmptyNestId { .. }
         | Violation::NestCycle { .. }
@@ -945,10 +932,6 @@ fn validation_response(
     }
     serde_json::Value::Object(resp)
 }
-
-// ---------------------------------------------------------------------------
-// Text renderers (pure over the daemon DTO — hermetically testable)
-// ---------------------------------------------------------------------------
 
 /// Render the human-readable profile text for `preset show`.
 ///
@@ -1120,10 +1103,6 @@ fn format_next(next: &PresetProfileNext) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1203,8 +1182,6 @@ mod tests {
         let result = PresetCli::try_parse_from(["preset"]);
         assert!(result.is_err());
     }
-
-    // ── V1.175 P1 Task 2: strategy patch leaves ────────────────────────
 
     #[test]
     fn preset_patch_state_parses() {
@@ -1338,8 +1315,6 @@ mod tests {
         }
     }
 
-    // ── W-002/F-001: list rows from the grouped core listing ────────────
-
     /// Grouped core-listing fixture with all three sources.
     fn grouped_fixture() -> ListPresetsResponse {
         use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::{
@@ -1379,7 +1354,6 @@ mod tests {
 
     #[test]
     fn list_rows_include_user_presets_with_real_source_labels() {
-        // W-002/F-001: user presets must appear and each row must carry its
         // real source (not a blanket "embedded").
         let rows = build_preset_rows(&grouped_fixture(), None);
         assert_eq!(rows.len(), 3);
@@ -1402,7 +1376,6 @@ mod tests {
 
     #[test]
     fn list_rows_intent_filter_applies_across_groups() {
-        // W-002/F-001: `--intent` filtering must work across all groups.
         let rows = build_preset_rows(&grouped_fixture(), Some("work_continue"));
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, "my-strategy");
@@ -1412,7 +1385,6 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, "novel-writing");
 
-        // No match → empty.
         let rows = build_preset_rows(&grouped_fixture(), Some("nonexistent-intent"));
         assert_eq!(
             rows,
@@ -1471,7 +1443,6 @@ mod tests {
     #[test]
     fn show_text_omits_absent_manifest_fields() {
         let profile = sample_profile();
-        // No roles, no enter actions, no exit_when/next → no invented rows.
         let text = format_profile_text(&profile);
         assert!(text.contains("(single-agent mode)"));
         assert!(!text.contains("exit_when:"));
@@ -1493,7 +1464,6 @@ mod tests {
         assert!(text.contains("wall-clock:  yes"));
         assert!(text.contains("session:     no"));
         assert!(text.contains("direct:      yes"));
-        // Lanes only — no orchestration sections, no cron authoring.
         assert!(!text.contains("States:"));
         assert!(!text.contains("Declared"));
         assert!(!text.contains("cron add"));
@@ -1503,7 +1473,6 @@ mod tests {
     fn show_json_serializes_dto_verbatim_camel_case() {
         let profile = sample_profile();
         let json = serde_json::to_value(&profile).unwrap();
-        // camelCase wire keys (AR-25: no CLI-local renaming).
         assert!(json.get("sourceHash").is_some());
         assert!(json.get("source_hash").is_none());
         assert!(json.get("requiredCapabilities").is_some());
@@ -1596,7 +1565,6 @@ states:
 
     #[test]
     fn local_validate_accepts_standalone_yaml_file() {
-        // A standalone YAML file (not named preset.yaml) skips asset checks.
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("strategy.yaml");
         std::fs::write(&file, LOCAL_VALID_YAML).unwrap();
@@ -1682,7 +1650,6 @@ states:
                 "IR is missing the YAML diagnostic `{error}`: {ir_errors:?}"
             );
         }
-        // The IR leg additionally names the dangling edge itself.
         assert!(
             ir_errors
                 .iter()
@@ -1749,7 +1716,6 @@ states:
             .unwrap(),
         )
         .unwrap();
-        // scheduled_sweep -> sweep_extract already exists; close the loop.
         ir["edges"].as_array_mut().unwrap().push(serde_json::json!({
             "id": "sweep_extract->scheduled_sweep",
             "from": "sweep_extract",

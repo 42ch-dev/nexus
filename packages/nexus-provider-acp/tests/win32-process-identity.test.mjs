@@ -11,7 +11,6 @@ import {
 } from '../dist/index.js';
 
 /**
- * Windows lane, exercised on Darwin through the injectable command seam.
  *
  * The point of these tests is that the Windows path performs a REAL identity
  * query and a REAL tree kill by command, and that the identity re-check gates the
@@ -121,7 +120,6 @@ describe('win32 owned-tree termination', () => {
           process_birth: '1699999999000',
           group_id: '4242',
         };
-        // reapChild re-checks identity, then signals the owned tree.
         await reapChild(child, bound, 50).catch(() => undefined);
 
         const kills = calls.filter((c) => c.args.includes('/T'));

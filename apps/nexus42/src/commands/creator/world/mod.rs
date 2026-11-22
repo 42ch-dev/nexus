@@ -258,7 +258,6 @@ async fn run_create(config: &CliConfig, title: &str) -> Result<()> {
 
 /// Run `creator world event-add`.
 #[allow(clippy::too_many_arguments)]
-// ^ justification: mirrors run_event_add's flat event-add field surface;
 // grouping the AR-5 observation flags into a struct would add indirection
 // for the two new callers (CLI + tests).
 async fn run_event_add(
@@ -273,10 +272,8 @@ async fn run_event_add(
 ) -> Result<()> {
     let pool = open_workspace_pool(config).await?;
 
-    // Build `modules.observation` from the AR-5 flags (None = unrecorded).
     let modules_json = build_observation_modules(observers, access)?;
 
-    // If no branch_id specified, look up the world's root_fork_branch_id
     let branch_id_resolved = if let Some(bid) = branch_id {
         bid.to_string()
     } else {
@@ -501,8 +498,6 @@ mod tests {
         command: WorldCommand,
     }
 
-    // ── AR-5: event-add observation flag parsing ──────────────────────
-
     #[test]
     fn event_add_parses_observer_and_access_flags() {
         let cli = WorldCli::try_parse_from([
@@ -562,11 +557,8 @@ mod tests {
         );
     }
 
-    // ── AR-5: observation modules builder (tri-state) ─────────────────
-
     #[test]
     fn build_observation_modules_none_without_flags() {
-        // (b) no observation flags → None → modules_json stays NULL at rest.
         assert!(
             build_observation_modules(&[], None).unwrap().is_none(),
             "no observation flags must yield no modules payload"
@@ -575,7 +567,6 @@ mod tests {
 
     #[test]
     fn build_observation_modules_observer_and_access() {
-        // (a) observer + access → observation object with both keys.
         let modules = build_observation_modules(
             &["kb_ana".to_string()],
             Some(r#"{"line_of_sight":true,"hearing_range":true}"#),
@@ -611,7 +602,6 @@ mod tests {
 
     #[test]
     fn build_observation_modules_zero_observers_with_access() {
-        // (c) explicit nobody: observers: [] + access (PD-9 empty state).
         let modules = build_observation_modules(&[], Some(r#"{"line_of_sight":true}"#))
             .unwrap()
             .expect("access without observers must produce a payload");
@@ -629,7 +619,6 @@ mod tests {
 
     #[test]
     fn build_observation_modules_rejects_non_object_access() {
-        // (d) non-object --access rejected at the CLI boundary.
         for bad in [r"[1,2,3]", r#""just a string""#, "42", "null"] {
             let err = build_observation_modules(&["kb_ana".to_string()], Some(bad)).unwrap_err();
             assert!(
@@ -651,7 +640,6 @@ mod tests {
 
     #[test]
     fn build_observation_modules_rejects_empty_observer() {
-        // (d) empty/whitespace observer values rejected.
         for bad in ["", "   "] {
             let err = build_observation_modules(&[bad.to_string()], None).unwrap_err();
             assert!(

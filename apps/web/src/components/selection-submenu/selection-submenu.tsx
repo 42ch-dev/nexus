@@ -92,7 +92,6 @@ export function SelectionSubmenu({
 
   useEffect(() => {
     if (!open || !anchorEl) return;
-    // Containment is the in-tree menu node only; there is no portal consumer of this submenu.
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
@@ -104,7 +103,6 @@ export function SelectionSubmenu({
 
   useEffect(() => {
     if (!open || !anchorEl) return;
-    // V1.127 P0 T4 (AC-V1127-4): dismiss on layout change. The popover is
     // `position: fixed` and its coordinates are computed once from the
     // anchor's rect at render (see below); scrolling the sidebar chrome's
     // `overflow-auto` <ul> or resizing the window moves the anchor but not

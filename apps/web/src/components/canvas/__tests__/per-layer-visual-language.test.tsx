@@ -1,5 +1,4 @@
 /**
- * Per-layer visual language differentiation — V1.123 P4 Task 2.
  *
  * Locks the per-layer feel contract at the visual + token dimension
  * (layer-feel-differentiation.md §2 + §6.1 + AC-V1123-20 "three feels
@@ -45,8 +44,6 @@ import {
 import type { TimelineNodeData } from '../timeline-canvas/timeline-canvas-adapter';
 import type { WorkTimelineNodeData } from '../work-timeline-canvas/work-timeline-canvas-adapter';
 
-// ─── Test setup ─────────────────────────────────────────────────────────────
-
 i18next.init({
   lng: 'en',
   resources: {
@@ -56,7 +53,6 @@ i18next.init({
 });
 
 function renderWithI18n(ui: ReactNode) {
-  // The node components render React Flow `<Handle>` which requires a
   // `ReactFlowProvider` ancestor. Wrap once per render — no need for a
   // real `<ReactFlow>` graph; the provider's store is enough for Handle
   // to mount cleanly in jsdom.
@@ -69,7 +65,6 @@ function renderWithI18n(ui: ReactNode) {
   );
 }
 
-// Minimal NodeProps stub — the node components forward to NodeChromeShell
 // which only reads `selected` / `dragging` (defaults) + `data` (typed).
 // `NodeProps` is generic over the node data; the test stubs pass plain
 // object data so we coerce via `unknown` to satisfy the prop shape.
@@ -83,8 +78,6 @@ function nodeProps<TData extends Record<string, unknown>>(data: TData): NodeProp
     dragging: false,
   } as unknown as NodeProps;
 }
-
-// ─── Brief-era node carries the Brief layer accent ──────────────────────────
 
 describe('TimelineBriefEraNode — Brief layer accent (P4 Task 2)', () => {
   it('renders the era-icon with text-canvas-layer-brief-accent (gold-bronze)', () => {
@@ -113,7 +106,6 @@ describe('TimelineBriefEraNode — Brief layer accent (P4 Task 2)', () => {
 
     const { container } = renderWithI18n(<TimelineBriefEraNode {...nodeProps(data)} />);
 
-    // The era-icon (Hourglass) carries the Brief layer accent class.
     const icon = container.querySelector('.text-canvas-layer-brief-accent');
     expect(icon).not.toBeNull();
     // The time-span badge (when both start + end are present) also carries
@@ -125,7 +117,6 @@ describe('TimelineBriefEraNode — Brief layer accent (P4 Task 2)', () => {
   });
 
   it('does NOT carry the worldkb-accent (P4 Task 2 migration: Brief has its own layer accent now)', () => {
-    // Regression guard: P1 shipped the Brief-era node with the worldkb
     // teal accent as a placeholder ("P4 may promote the accent to a
     // dedicated Brief-era token"). P4 Task 2 completes that migration.
     // The worldkb-accent class MUST NOT appear on the Brief-era node.
@@ -142,8 +133,6 @@ describe('TimelineBriefEraNode — Brief layer accent (P4 Task 2)', () => {
   });
 });
 
-// ─── Moment scene + beat nodes carry the Moment layer accent ────────────────
-
 describe('WorkTimelineMomentSceneNode + BeatNode — Moment layer accent (P4 Task 2)', () => {
   it('scene node renders scene-icon + manuscript-anchor with text-canvas-layer-moment-accent (ink)', () => {
     const data: WorkTimelineNodeData = {
@@ -158,11 +147,9 @@ describe('WorkTimelineMomentSceneNode + BeatNode — Moment layer accent (P4 Tas
 
     const { container } = renderWithI18n(<WorkTimelineMomentSceneNode {...nodeProps(data)} />);
 
-    // The scene-icon (BookMarked) carries the Moment layer accent class.
     const icon = container.querySelector('.text-canvas-layer-moment-accent');
     expect(icon).not.toBeNull();
 
-    // The manuscript-anchor badge also carries the Moment accent —
     // distinct from the Narrative event's worldkb-blue.
     const anchor = container.querySelector('span.text-canvas-layer-moment-accent');
     expect(anchor).not.toBeNull();
@@ -183,18 +170,15 @@ describe('WorkTimelineMomentSceneNode + BeatNode — Moment layer accent (P4 Tas
 
     const { container } = renderWithI18n(<WorkTimelineMomentBeatNode {...nodeProps(data)} />);
 
-    // The beat-icon (Milestone) carries the Moment layer accent class.
     const icon = container.querySelector('.text-canvas-layer-moment-accent');
     expect(icon).not.toBeNull();
 
-    // The manuscript-anchor badge (chapter/scene/beat) carries the accent.
     const anchor = container.querySelector('span.text-canvas-layer-moment-accent');
     expect(anchor).not.toBeNull();
     expect(anchor?.textContent).toContain('bt-1');
   });
 
   it('does NOT carry the outline-accent on icons (P4 Task 2 migration: Moment has its own layer accent)', () => {
-    // Regression guard: P2 shipped the Moment scene/beat icons with the
     // outline amber accent as a placeholder ("P4 may promote the accent to
     // a dedicated Moment token"). P4 Task 2 completes that migration. The
     // outline-accent class on icon/badge MUST NOT appear (the surface
@@ -211,17 +195,13 @@ describe('WorkTimelineMomentSceneNode + BeatNode — Moment layer accent (P4 Tas
 
     const { container } = renderWithI18n(<WorkTimelineMomentSceneNode {...nodeProps(sceneData)} />);
 
-    // SVG icon (BookMarked) and span badges — none should still carry the
     // outline-accent text color after the P4 Task 2 migration.
     expect(container.querySelector('.text-canvas-outline-accent')).toBeNull();
   });
 });
 
-// ─── Three-layer accent differentiation (consolidated AC-V1123-20) ───────────
-
 describe('Three-layer accent differentiation (AC-V1123-20 visual matrix)', () => {
   it('Brief, Narrative, Moment each render with a DISTINCT per-layer accent class', () => {
-    // Cross-layer acceptance: a screenshot of Brief / Narrative / Moment
     // side-by-side must distinguish the three instruments without reading
     // chrome labels. At the visual dimension, the per-layer accent triple
     // is the strongest differentiator — Brief (gold-bronze) / Narrative
@@ -253,11 +233,8 @@ describe('Three-layer accent differentiation (AC-V1123-20 visual matrix)', () =>
       <WorkTimelineMomentSceneNode {...nodeProps(momentSceneData)} />,
     );
 
-    // Brief carries the brief accent.
     expect(briefDom.querySelector('.text-canvas-layer-brief-accent')).not.toBeNull();
-    // Moment carries the moment accent.
     expect(momentDom.querySelector('.text-canvas-layer-moment-accent')).not.toBeNull();
-    // Brief does NOT carry the Moment accent (and vice versa).
     expect(briefDom.querySelector('.text-canvas-layer-moment-accent')).toBeNull();
     expect(momentDom.querySelector('.text-canvas-layer-brief-accent')).toBeNull();
   });

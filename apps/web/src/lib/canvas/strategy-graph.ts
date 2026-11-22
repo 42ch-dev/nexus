@@ -16,7 +16,7 @@
  * projection only — `wire_contracts_changed: FALSE`.
  *
  * simplify: layout is a naive BFS layering, not a full graph-layout engine.
- * Adequate for α (presets have ≤~10 outer states). Upgrade path: swap
+ * Adequate for α (presets have ≤~10 outer states). upgrade: swap
  * `layoutGraph` for dagre/elkjs when node counts grow or user dragging needs
  * stable ports — the node/edge output shape stays unchanged.
  */
@@ -46,7 +46,6 @@ export interface StrategyNodeData extends Record<string, unknown> {
   status?: string;
   description?: string;
   /**
-   * Static-simulation overlay: this state is a predicted parking point. It is
    * an over-approximation from the static walk, never a commitment that a run
    * pauses here.
    */
@@ -54,7 +53,6 @@ export interface StrategyNodeData extends Record<string, unknown> {
   /** Static-simulation overlay: an `llm_judge` state collapsed to its declared default branch. */
   branchNotExplored?: boolean;
   /**
-   * `pattern_slot` nodes (compose path only): the collapsed pin the slot carries.
    * Absent on every YAML-projected node, so the flag-off render is untouched.
    */
   patternId?: string;
@@ -106,14 +104,12 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
   const initialId = manifest.preset.initial;
   const terminalId = manifest.preset.terminal;
 
-  // ── Layers (BFS from initial) ────────────────────────────────────────────
   const layerOf = new Map<string, number>();
   if (initialId && byId.has(initialId)) {
     const queue: string[] = [initialId];
     layerOf.set(initialId, 0);
     while (queue.length > 0) {
       const id = queue.shift()!;
-      // Skip dangling ids — they may have been queued before we realized the
       // target doesn't exist in byId. The ValidationPanel surfaces these as
       // warnings; crashing here would hide that affordance entirely.
       const state = byId.get(id);
@@ -127,12 +123,10 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
       }
     }
   }
-  // Orphan states (unreachable from initial) get placed after the last layer.
   let maxLayer = -1;
   for (const l of layerOf.values()) if (l > maxLayer) maxLayer = l;
   for (const s of states) if (!layerOf.has(s.id)) layerOf.set(s.id, maxLayer + 1);
 
-  // Bucket states per layer to spread them horizontally.
   const byLayer = new Map<number, string[]>();
   for (const [id, layer] of layerOf) {
     const bucket = byLayer.get(layer) ?? [];
@@ -150,7 +144,6 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
   const nodes: Node<StrategyNodeData>[] = [];
   const edges: Edge<StrategyEdgeData>[] = [];
 
-  // ── Outer state nodes (+ group children for inner-graph states) ──────────
   for (const state of states) {
     const layer = layerOf.get(state.id) ?? 0;
     const x = xOf.get(state.id) ?? 0;
@@ -190,7 +183,6 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
       focusable: true,
     });
 
-    // Inner-graph child nodes live inside the group (parentId + extent:parent).
     if (isGroup && graphId) {
       const graph = manifest.inner_graphs![graphId];
       graph.nodes.forEach((inner, i) => {
@@ -218,7 +210,6 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
     }
   }
 
-  // ── Outer transition edges ───────────────────────────────────────────────
   for (const state of states) {
     const source = state.id;
     const next = state.next;
@@ -248,7 +239,6 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
     }
   }
 
-  // ── Inner-graph depends_on edges ─────────────────────────────────────────
   for (const state of states) {
     const graphId = innerGraphIdOf(state);
     if (!graphId) continue;
@@ -288,7 +278,6 @@ function pushOuterEdge(
     dangling.push(`${source} → ${target}`);
     return;
   }
-  // Multiple branches from the same source → same target (same transitionKind)
   // would otherwise collide on id. Append the current edges.length as a
   // disambiguator so React Flow keeps every conditional rule visible.
   edges.push({

@@ -317,10 +317,6 @@ impl CoreService {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Import: a partner bundle becomes a revision-1 candidate
-// ---------------------------------------------------------------------------
-
 /// Why a bundle import was refused. Nothing was written when one is returned.
 #[cfg(feature = "strategy-authoring")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -479,7 +475,6 @@ impl CoreService {
         })?;
         let strategy_id = imported.document.id.as_str().to_owned();
 
-        // The candidate read (`read_strategy_candidate`) prefers a stored row over the preset
         // resolution, so a row under an id the host already serves would shadow that preset for
         // compose and approve. Any other id defines a new strategy; see the doc comment.
         if strategy_id.starts_with("_system.")
@@ -488,7 +483,6 @@ impl CoreService {
             return Err(PresetImportRefusal::ReservedId { strategy_id }.into_error());
         }
 
-        // The row this import would write is revision 1, and the trajectory must hash THOSE bytes:
         // approve compares the recorded trajectory with a recomputation over the stored document,
         // so validating or simulating the revision-0 projection would store evidence that can
         // never match.

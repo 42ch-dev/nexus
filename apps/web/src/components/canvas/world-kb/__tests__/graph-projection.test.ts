@@ -1,5 +1,4 @@
 /**
- * World KB graph projection tests — pure adapter coverage (V1.73 P0 A6).
  *
  * Verifies the World → node/edge projection: lane layout, candidate trailing
  * lane, source-anchor edge derivation, lifecycle mapping, and the freshness
@@ -89,7 +88,6 @@ describe('lifecycleFromStatus', () => {
     expect(lifecycleFromStatus('confirmed')).toBe('confirmed');
     expect(lifecycleFromStatus('rejected')).toBe('rejected');
     expect(lifecycleFromStatus('merged')).toBe('merged');
-    // manual / unknown / empty normalize to confirmed.
     expect(lifecycleFromStatus('manual')).toBe('confirmed');
     expect(lifecycleFromStatus(undefined)).toBe('confirmed');
   });
@@ -104,11 +102,9 @@ describe('layoutNodes', () => {
     );
     const ids = nodes.map((n) => n.id);
     expect(ids).toEqual(['entity:a', 'entity:b', 'candidate:c']);
-    // Candidate x position is greater than both entity lanes (trailing lane).
     const candidateX = nodes.find((n) => n.id === 'candidate:c')!.position.x;
     const entityXs = nodes.filter((n) => n.id.startsWith('entity:')).map((n) => n.position.x);
     expect(candidateX).toBeGreaterThan(Math.max(...entityXs));
-    // …and it is EXACTLY one lane after the furthest OCCUPIED entity lane, not
     // after all 18 possible BlockTypes. A large unused gap would force fitView
     // to zoom out and push entities offscreen on a small world.
     const neighbor = layoutNodes(

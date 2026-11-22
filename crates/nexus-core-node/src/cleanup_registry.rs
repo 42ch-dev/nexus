@@ -110,20 +110,14 @@ pub fn stop_reaper(deadline: Instant) -> ReaperStop {
         }
         if handle.is_finished() {
             let _ = handle.join();
-            // Only this now-joined reaper consumed the stop flag; reset it so a
-            // future reaper for the remaining entries is not born stopped.
             owner.stop.store(false, Ordering::SeqCst);
         } else {
-            // Still running: keep the handle (never strand it) and leave the
-            // stop flag set so it exits as soon as it next polls.
             if let Ok(mut slot) = owner.handle.lock() {
                 *slot = Some(handle);
             }
             joined = false;
         }
     }
-    // Collect anything already finished so a stopped reaper cannot strand a
-    // worker that has completed.
     reap_completed();
     ReaperStop {
         joined,
@@ -343,7 +337,6 @@ mod tests {
         let _lock = crate::cleanup_registry::registry_test_lock();
         drain_registry();
 
-        // A worker that outlives the stop request.
         let done = Arc::new(AtomicBool::new(false));
         let handle = thread::spawn(|| {
             thread::sleep(Duration::from_millis(300));
@@ -352,8 +345,6 @@ mod tests {
         register_pending(handle, state, done);
         assert!(ensure_reaper_running(), "the reaper must be running");
 
-        // An already-expired deadline cannot join a live reaper; the handle must
-        // be retained rather than dropped/lost.
         let stop = stop_reaper(Instant::now());
         if !stop.joined {
             assert!(
@@ -366,8 +357,6 @@ mod tests {
             "an unfinished worker must remain tracked, never discarded"
         );
 
-        // A later stop with a real budget joins the reaper, and the worker is
-        // reaped once it finishes.
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let stop = stop_reaper(deadline);

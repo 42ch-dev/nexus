@@ -96,7 +96,6 @@ async fn queue_extract_and_status_round_trip() {
         lines[4]
     );
 
-    // Re-queue while the job is still `queued`: the store returns the same job
     // (no duplicate row), so the leaf renders the same "queued" line.
     let again = queue_extract(&fixture, &["kb_smoke", "--world-id", "wld_smoke"]);
     assert!(
@@ -112,7 +111,6 @@ async fn queue_extract_and_status_round_trip() {
         "{re_rendered}"
     );
 
-    // The list arm renders the header (twice, unchanged) plus exactly one job
     // row — the idempotency key never duplicates a row.
     let listed = extract_status(&fixture, &[]);
     assert!(
@@ -145,7 +143,6 @@ async fn queue_extract_and_status_round_trip() {
         "job row"
     );
 
-    // Detail arm: the same seven-line render the local implementation printed.
     let detail = extract_status(&fixture, &["--job-id", &job_id]);
     assert!(
         detail.status.success(),
@@ -163,7 +160,6 @@ async fn queue_extract_and_status_round_trip() {
     assert_eq!(detail_lines[5], "  Status:      queued");
     assert_eq!(detail_lines[6], format!("  Created:     {created_at}"));
 
-    // A non-`queued` existing job is what the "already exists" branch renders.
     // Move the row between runs on the fixture's own workspace DB (the CLI
     // child releases its admission when it exits).
     let db_path =
@@ -259,7 +255,6 @@ async fn refused_inputs_keep_their_legacy_wording() {
         stderr(&missing)
     );
 
-    // Neither refusal enqueued anything.
     let listed = extract_status(&fixture, &[]);
     assert!(listed.status.success(), "{}", stderr(&listed));
     assert_eq!(

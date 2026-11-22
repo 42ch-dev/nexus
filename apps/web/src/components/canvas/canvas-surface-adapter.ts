@@ -8,12 +8,10 @@ export type CanvasSurfaceKind =
   | 'outline'
   | 'world-kb-entities'
   | 'world-kb-relationships'
-  // V1.122 P1 T1 — additive peer surface. The Timeline hero surface projects
   // a World's `WorldKbGraphResponse` onto a left-to-right when-axis. Reuses
   // the V1.73/V1.74 World KB DTOs verbatim (wire_contracts_changed: false);
   // see `timeline-canvas/` + `iterations/v1.122/specs/timeline-canvas-architecture.md`.
   | 'timeline'
-  // V1.123 P2 Task 2 — additive Work Timeline peer surface (compiler-forced
   // scope expansion: the Work Timeline adapter declares
   // `surfaceKind: 'work-timeline'` and the enum must accept it for the
   // adapter to satisfy `CanvasSurfaceAdapter`). Task 5 owns the full peer
@@ -29,7 +27,6 @@ export interface CanvasSurfaceLayoutOptions {
   rankSep?: number;
   nodeSep?: number;
   /**
-   * When true, the surface projects meaningful node positions (e.g. persisted
    * author positions, or a deterministic layout it wants preserved) and
    * `useAutoLayout` must NOT override them on first open. The author can still
    * trigger an explicit `relayout()` to force dagre.

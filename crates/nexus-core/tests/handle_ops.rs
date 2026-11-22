@@ -104,7 +104,6 @@ async fn fixture() -> Fixture {
     let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("engine pool init");
-    // The PRODUCTION creation path, so the Creator's holder registry row is
     // materialized with it: the compute seam reads its module input through the
     // admitted Creator `ActorView`, which resolves that stable holder
     // (`require_creator_holder`, fail-closed) before any invocation runs.
@@ -253,7 +252,6 @@ async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
     request.force_gates = true;
     request.reason = Some("test bypass".to_string());
     request.agent_bindings = Some(default_bindings());
-    // No supervisor: the insert cannot run and the call is refused.
     let err = handle.add_schedule(&principal, request).await.unwrap_err();
     assert!(
         matches!(err, CoreError::NotFound { .. }),
@@ -268,7 +266,6 @@ async fn force_gates_bypass_is_audited_even_when_the_insert_is_refused() {
         "a refused bypass must still leave an audit row, got {rows:?}"
     );
 
-    // And the refused attempt published no schedule row.
     let scheduled: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE creator_id = ?")
             .bind(CREATOR)
@@ -394,7 +391,6 @@ async fn signal_schedule_refuses_foreign_owner() {
     let (core, handle) = open_handle(&f).await;
     let principal = core.active_principal().await.unwrap();
 
-    // Seed a schedule owned by ANOTHER creator straight into the durable store.
     sqlx::query(
         "INSERT INTO creator_schedules \
          (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, \
@@ -423,7 +419,6 @@ async fn signal_schedule_refuses_foreign_owner() {
         "a foreign schedule must be refused, got {err:?}"
     );
 
-    // The foreign row is untouched.
     let status: String = sqlx::query_scalar(
         "SELECT status FROM creator_schedules WHERE schedule_id = 'SCH-foreign'",
     )
@@ -498,7 +493,6 @@ async fn gated_preset_without_work_is_refused_before_any_write() {
     let (core, handle) = open_handle(&f).await;
     let principal = core.active_principal().await.unwrap();
 
-    // `research` declares gates; no `work_id` is supplied through input/seed.
     let mut request = request_for(CREATOR, "research");
     request.agent_bindings = Some(default_bindings());
     let err = handle.add_schedule(&principal, request).await.unwrap_err();
@@ -565,8 +559,6 @@ async fn force_gates_reason_rejects_oversize_and_control_characters() {
     assert_eq!(scheduled, 0, "a refused bypass must publish no row");
 }
 
-// ---------------------------------------------------------------------------
-// v1.193 P2-T9 — the compute seam on `ExecutionHandle`.
 //
 // MIGRATED from `nexus-daemon-runtime/tests/compute_runs_api.rs`: the daemon's
 // compute routes resolved an engine/cache/serializer from the HTTP state and
@@ -758,7 +750,6 @@ mod compute_seam {
             MODULE
         );
 
-        // Proposals alone changed nothing.
         assert_eq!(defender_hp(core.pool()).await, 30);
 
         let accepted = handle
@@ -768,7 +759,6 @@ mod compute_seam {
         assert_eq!(accepted.applied.state_delta_count, 1);
         assert_eq!(accepted.applied.events_created, 1);
         assert_eq!(accepted.timeline_event_ids.len(), 1);
-        // damage = max(0, 20 − 5) = 15.
         assert_eq!(defender_hp(core.pool()).await, 15);
     }
 

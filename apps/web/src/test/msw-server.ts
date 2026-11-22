@@ -1,5 +1,4 @@
 /**
- * Shared msw server for component/integration tests.
  *
  * Per src/test/setup.ts the server listens for the whole suite and resets
  * handlers between tests. Individual tests call `server.use(...)` to register
@@ -12,7 +11,6 @@ import { http, HttpResponse, type RequestHandler } from 'msw';
 import { setupServer } from 'msw/node';
 
 /**
- * Shell-wide baseline: the saved agent profile is read on every mount (topnav
  * agent chip, Hub Agent card, onboarding restore). Tests that are not about the
  * profile get "no profile saved"; profile tests override this with their own
  * handler via `useHandlers` (later handlers win in msw).

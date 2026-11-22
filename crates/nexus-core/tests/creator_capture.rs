@@ -123,7 +123,6 @@ async fn creator_capture_review_promote_round_trip() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // 1. capture: the typed Creator capability answers the retained DTO.
     let response = core
         .create_pending_review(&principal, capture_body(PENDING, CREATOR))
         .await
@@ -131,7 +130,6 @@ async fn creator_capture_review_promote_round_trip() {
     assert!(response.success);
     assert_eq!(response.pending_id, PENDING);
 
-    // 2. the captured row is the Creator pending-review DTO's row, with every
     // captured field preserved.
     let pending = core
         .list_pending_reviews(&principal, None, 50)
@@ -151,7 +149,6 @@ async fn creator_capture_review_promote_round_trip() {
         1
     );
 
-    // 3. an exact retry replays the capture instead of queueing a second row.
     let retry = core
         .create_pending_review(&principal, capture_body(PENDING, CREATOR))
         .await
@@ -162,7 +159,6 @@ async fn creator_capture_review_promote_round_trip() {
         1
     );
 
-    // 4. the capture is a provider candidate carrying the task-kind mapping
     // (`chapter` → the `story_summary` authored kind) and the world context.
     let candidates = pending_candidates(&core).await;
     assert_eq!(candidates.len(), 1, "one pending candidate");
@@ -183,7 +179,6 @@ async fn creator_capture_review_promote_round_trip() {
         "session_id is the source anchor"
     );
 
-    // 5. review + promote through the typed drain the `creator memory review`
     // command runs. The captured candidate is what it consumes; `chapter` with
     // a high-signal digest classifies as `PromoteToLongTerm`.
     let reviewed = core
@@ -201,7 +196,6 @@ async fn creator_capture_review_promote_round_trip() {
     assert_eq!(reviewed.processed, Some(1));
     assert_eq!(reviewed.has_more, Some(false));
 
-    // 6. the promoted record is the Creator's long-term memory now, and the
     // queue is consumed.
     let records = core
         .list_creator_memories(&principal)
@@ -223,7 +217,6 @@ async fn creator_capture_review_promote_round_trip() {
     );
     assert_eq!(pending_candidates(&core).await.len(), 0);
 
-    // 7. the review consumed the candidate, so a dismissal now is the retained
     // not-found answer — only a dismissal that itself consumed the row answers
     // success (fix round 4, F3).
     let late = core
@@ -237,7 +230,6 @@ async fn creator_capture_review_promote_round_trip() {
 /// them, and still equals the listed length across multiple pages.
 #[tokio::test]
 async fn creator_pending_count_matches_the_listed_length_across_pages() {
-    // 101 rows: one full provider page of 100 plus a second page.
     const TOTAL: usize = 101;
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
@@ -255,7 +247,6 @@ async fn creator_pending_count_matches_the_listed_length_across_pages() {
         "the count covers every provider page"
     );
 
-    // The listed length across two pages is the same number.
     let mut listed: Vec<String> = Vec::new();
     let mut cursor: Option<String> = None;
     loop {

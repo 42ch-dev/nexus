@@ -94,7 +94,6 @@ async fn list_identities() -> Result<()> {
         return Ok(());
     }
 
-    // Use resolve_active_identity for consistency (R4: unified resolution)
     let active_id = resolve_active_identity()
         .await
         .ok()
@@ -176,7 +175,6 @@ pub(crate) async fn create_identity(kind: IdentityKindArg, name: Option<String>)
     println!("  Ephemeral — data will be lost when this session ends");
     println!("  (run `nexus42 system identity create --persistent` for a saved identity)");
 
-    // Auto-set as active
     CliConfig::mutate(|config| {
         config.active_creator_id = Some(identity.creator_id);
         Ok(())
@@ -192,7 +190,6 @@ pub(crate) async fn create_identity(kind: IdentityKindArg, name: Option<String>)
 /// the identity exists and setting it active, the function returns the
 /// resolved identity so callers can use the same resolution path everywhere.
 async fn use_identity(creator_id: String) -> Result<()> {
-    // Verify identity exists
     let pool = open_global_db().await?;
     let _identity = get_local_identity(&pool, &creator_id).await?.ok_or_else(|| {
         CliError::Other(format!(
@@ -205,7 +202,6 @@ async fn use_identity(creator_id: String) -> Result<()> {
         Ok(())
     })?;
 
-    // Verify the resolution path works
     let resolved = resolve_active_identity().await?;
     match &resolved {
         Some(r) => {
@@ -217,7 +213,6 @@ async fn use_identity(creator_id: String) -> Result<()> {
             }
         }
         None => {
-            // Should not happen since we just set it, but handle gracefully
             println!("Active identity set to: {creator_id}");
         }
     }
@@ -274,7 +269,6 @@ pub async fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
         None => return Ok(None),
     };
 
-    // Check if it's a persistent identity in the DB
     let pool = open_global_db().await?;
     let row = get_local_identity(&pool, &creator_id).await?;
 
@@ -294,7 +288,6 @@ pub async fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
             }))
         }
         None => {
-            // The active_creator_id might be an anonymous identity that wasn't persisted
             if creator_id.starts_with("ctr_anon") {
                 Ok(Some(ResolvedIdentity {
                     creator_id,
@@ -306,7 +299,6 @@ pub async fn resolve_active_identity() -> Result<Option<ResolvedIdentity>> {
                     platform_creator_id: None,
                 }))
             } else {
-                // Might be a platform creator ID; return minimal info
                 Ok(Some(ResolvedIdentity {
                     creator_id,
                     identity_type: LocalIdentityType::Persistent,
@@ -352,25 +344,20 @@ mod tests {
 
     #[test]
     fn test_link_identity_rejects_invalid_platform_id() {
-        // Verify that invalid platform IDs are caught before DB call
         assert!(!is_valid_creator_id("invalid_id"));
         assert!(!is_valid_creator_id("ctr_"));
         assert!(!is_valid_creator_id("ctr_abc_def"));
         assert!(is_valid_creator_id("ctr_Platform123"));
     }
 
-    // ── R1: Additional test coverage for identity commands ─────────────
-
     #[test]
     fn test_identity_kind_arg_variants() {
-        // Verify all enum variants are accessible
         let _ = IdentityKindArg::Anonymous;
         let _ = IdentityKindArg::Persistent;
     }
 
     #[test]
     fn test_identity_command_enum_exhaustive() {
-        // Verify all command variants can be constructed
         let _ = IdentityCommand::List;
         let _ = IdentityCommand::Create {
             kind: IdentityKindArg::Anonymous,
@@ -390,7 +377,6 @@ mod tests {
 
     #[test]
     fn test_resolved_identity_uses_local_identity_type_enum() {
-        // R6: identity_type is now LocalIdentityType, not String
         let resolved = ResolvedIdentity {
             creator_id: "ctr_test".to_string(),
             identity_type: LocalIdentityType::Anonymous,
@@ -400,16 +386,12 @@ mod tests {
             platform_linked: false,
             platform_creator_id: None,
         };
-        // This compiles only if identity_type is LocalIdentityType
         let type_str: &str = resolved.identity_type.as_str();
         assert_eq!(type_str, "anonymous");
     }
 
-    // ── R3(identity): display_name validation tests ────────────────────
-
     #[test]
     fn test_display_name_whitespace_only_should_be_rejected() {
-        // Empty/whitespace names should be rejected — trimmed to empty
         let name = Some("   ".to_string());
         assert!(name
             .as_deref()
@@ -420,7 +402,6 @@ mod tests {
 
     #[test]
     fn test_display_name_should_be_trimmed() {
-        // Names with leading/trailing whitespace should be trimmed
         let name = Some("  Alice  ".to_string());
         let trimmed = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
         assert_eq!(trimmed, Some("Alice"));
@@ -428,7 +409,6 @@ mod tests {
 
     #[test]
     fn test_display_name_none_is_valid() {
-        // No name provided is fine
         let name: Option<String> = None;
         let trimmed = name.as_deref().map(str::trim).filter(|n| !n.is_empty());
         assert!(trimmed.is_none());

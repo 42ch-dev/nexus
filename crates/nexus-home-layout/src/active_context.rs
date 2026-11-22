@@ -12,7 +12,7 @@ const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
 /// On-disk `[memory_provider]` table of `~/.nexus42/config.toml`.
 ///
-/// Shape contract: `n3-provider-binding.md` §2.2. Remote carries only
+/// Shape contract: `docs/specs/architecture/spoke-memory-provider-binding.md`. Remote carries only
 /// references — never an identity seed, token, capability proof or credential
 /// body. Absent table and `kind = "local"` both select the local provider.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -126,7 +126,6 @@ impl CliConfigSnapshot {
         }
         let text = match std::fs::read_to_string(json_path) {
             Ok(text) => text,
-            // A concurrent loader can pass the same pre-lock check and complete
             // an *empty* legacy migration first: it renames the JSON away and
             // creates no TOML. Under this lock that is the documented "no legacy
             // document" state, not a read fault. Every other I/O error (and
@@ -143,7 +142,6 @@ impl CliConfigSnapshot {
         match serde_json::from_str::<Self>(&text) {
             Ok(cfg) => {
                 let toml_str = toml::to_string_pretty(&cfg)?;
-                // Publish atomically: a concurrent reader (including the
                 // lock-free `ReadOnly` snapshot, I-000291) must never see a
                 // truncated `config.toml` from this legacy migration.
                 crate::config_lock::publish_document(nexus_root, &toml_str)?;
@@ -189,7 +187,6 @@ impl CliConfigSnapshot {
     fn parse_legacy_document(json_path: &Path) -> Result<Self, anyhow::Error> {
         let text = match std::fs::read_to_string(json_path) {
             Ok(text) => text,
-            // A concurrent migrator can rename the file away between the
             // existence test and this read: the documented "no legacy document"
             // state, not a read fault.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -307,7 +304,6 @@ pub fn read_memory_provider_config(
     nexus_root: &Path,
 ) -> Result<Option<MemoryProviderConfig>, anyhow::Error> {
     let path = nexus_root.join("config.toml");
-    // I-000304: an absent entry is Local; a dangling config link's followed NotFound fails closed.
     match std::fs::symlink_metadata(&path) {
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -422,10 +418,8 @@ mod tests {
         let loader_root = root.clone();
         let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
 
-        // The migration passed its pre-check and is held before the lock.
         arrived.recv().expect("the migration reached the hold");
 
-        // A writer commits a newer document while the migration cannot run.
         crate::config_lock::publish_document(
             &root,
             "active_creator_id = \"ctr_new\"\n\n[agent_profile]\nname = \"kept\"\n",
@@ -489,10 +483,8 @@ mod tests {
         let loader_root = root.clone();
         let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
 
-        // The loader passed its pre-check and is held before the lock.
         arrived.recv().expect("the migration reached the hold");
 
-        // The concurrent loader completes the empty migration: the JSON is
         // renamed away and no TOML is created.
         {
             let _lock = crate::config_lock::acquire(&root).expect("the migration lock");
@@ -525,10 +517,8 @@ mod tests {
         let loader_root = root.clone();
         let loader = std::thread::spawn(move || CliConfigSnapshot::load(&loader_root));
 
-        // The migration passed its pre-lock probe and is held before the lock.
         arrived.recv().expect("the migration reached the hold");
 
-        // The entry appears as a link whose target does not exist.
         std::os::unix::fs::symlink("creatable.toml", root.join("config.toml"))
             .expect("dangling config link");
         release.send(()).expect("release the migration");

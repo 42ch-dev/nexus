@@ -85,8 +85,6 @@ async fn insert_finding(
     tx.commit().await.unwrap();
 }
 
-// ── insert + get (verbatim round-trip) ─────────────────────────
-
 #[tokio::test]
 async fn insert_world_finding_roundtrips_verbatim() {
     let (pool, _dir) = setup_db().await;
@@ -127,7 +125,6 @@ async fn insert_world_finding_roundtrips_verbatim() {
     assert_eq!(row.finding_id, "fnd_test_001");
     assert_eq!(row.world_id, "wld_findings_test");
     assert_eq!(row.schema_version, 1);
-    // Spoke vocabulary persists verbatim on the world path (AR-1) — no nexus
     // mapping.
     assert_eq!(row.severity, "warning");
     assert_eq!(row.status, "open");
@@ -171,15 +168,12 @@ async fn get_missing_world_finding_returns_none() {
     );
 }
 
-// ── list (world-scoped, newest-first) ───────────────────────────
-
 #[tokio::test]
 async fn list_by_world_orders_newest_first_with_finding_id_tiebreak() {
     let (pool, _dir) = setup_db().await;
     seed_world(&pool, "wld_findings_test").await;
     seed_world(&pool, "wld_other").await;
 
-    // Same created_at → finding_id ASC tiebreak (reversed key order on purpose).
     insert_finding(
         &pool,
         "fnd_zzz",
@@ -200,7 +194,6 @@ async fn list_by_world_orders_newest_first_with_finding_id_tiebreak() {
         100,
     )
     .await;
-    // Newer created_at sorts first.
     insert_finding(
         &pool,
         "fnd_newest",
@@ -221,7 +214,6 @@ async fn list_by_world_orders_newest_first_with_finding_id_tiebreak() {
         200,
     )
     .await;
-    // Other worlds are not returned.
     insert_finding(&pool, "fnd_other", "wld_other", "info", "open", None, 500).await;
 
     let rows = list_world_findings_by_world(&pool, "wld_findings_test", 10)
@@ -240,14 +232,11 @@ async fn list_by_world_orders_newest_first_with_finding_id_tiebreak() {
     assert_eq!(other.len(), 1);
     assert_eq!(other[0].finding_id, "fnd_other");
 
-    // World with no findings → empty list.
     let empty = list_world_findings_by_world(&pool, "wld_empty", 10)
         .await
         .unwrap();
     assert!(empty.is_empty());
 }
-
-// ── list (target-scoped) ────────────────────────────────────────
 
 #[tokio::test]
 async fn list_by_target_filters_within_world() {
@@ -306,23 +295,18 @@ async fn list_by_target_filters_within_world() {
         "target-scoped list must be newest-first and world-scoped"
     );
 
-    // Same target entry id in another world is not returned.
     let other = list_world_findings_by_target(&pool, "wld_other", "kb_bo", 10)
         .await
         .unwrap();
     assert_eq!(other.len(), 1);
     assert_eq!(other[0].finding_id, "fnd_other_bo");
 
-    // No rows for the target → empty list.
     let empty = list_world_findings_by_target(&pool, "wld_findings_test", "kb_missing", 10)
         .await
         .unwrap();
     assert!(empty.is_empty());
 }
 
-// ── list (SQL-side LIMIT bounding — Bugbot 4bad2fca) ────────────
-
-/// The world-scoped list is bounded SQL-side: a `cap + 1` probe returns
 /// exactly the newest `cap + 1` rows (so the caller can flag truncation
 /// honestly), the cap itself returns exactly `cap` rows, a limit beyond
 /// the row count returns everything, and a negative limit is clamped to
@@ -332,7 +316,6 @@ async fn list_by_world_respects_limit() {
     let (pool, _dir) = setup_db().await;
     seed_world(&pool, "wld_findings_test").await;
 
-    // 502 rows — the Bugbot 4bad2fca scenario (500-cap world + 2 overflow).
     for i in 0..502 {
         insert_finding(
             &pool,
@@ -346,7 +329,6 @@ async fn list_by_world_respects_limit() {
         .await;
     }
 
-    // Probe of cap + 1: newest 501 rows — the overflow row is included so
     // the caller sees `len > cap` and flags truncation honestly.
     let probe = list_world_findings_by_world(&pool, "wld_findings_test", 501)
         .await
@@ -354,20 +336,17 @@ async fn list_by_world_respects_limit() {
     assert_eq!(probe.len(), 501, "probe returns cap + 1 rows");
     assert_eq!(probe[0].finding_id, "fnd_bulk_501", "newest first");
 
-    // The cap itself: exactly 500 newest rows.
     let capped = list_world_findings_by_world(&pool, "wld_findings_test", 500)
         .await
         .unwrap();
     assert_eq!(capped.len(), 500, "cap returns exactly cap rows");
     assert_eq!(capped[0].finding_id, "fnd_bulk_501");
 
-    // Limit beyond the row count → everything (the `truncated: false` side).
     let all = list_world_findings_by_world(&pool, "wld_findings_test", 1_000)
         .await
         .unwrap();
     assert_eq!(all.len(), 502);
 
-    // Negative limit clamped to zero — SQLite would otherwise treat it as
     // "no limit" and silently reintroduce the unbounded query.
     let zero = list_world_findings_by_world(&pool, "wld_findings_test", -1)
         .await
@@ -401,8 +380,6 @@ async fn list_by_target_respects_limit() {
     assert_eq!(capped.len(), 3, "target-scoped list respects the limit");
     assert_eq!(capped[0].finding_id, "fnd_tgt_4", "newest first");
 }
-
-// ── FK integrity (DDL) ──────────────────────────────────────────
 
 #[tokio::test]
 async fn insert_with_unknown_world_fails_foreign_key() {

@@ -10,7 +10,6 @@ describe('deriveWorkspaceSlug', () => {
   });
 
   it('keeps leading/trailing separators out of the slug', () => {
-    // No ASCII alphanumerics at all → the whole (trimmed) name is hashed.
     expect(deriveWorkspaceSlug('--《剑与魔法》--')).toBe('ws-15daca83');
     expect(deriveWorkspaceSlug('  ·  hello  · ')).toBe('hello');
   });
@@ -19,7 +18,6 @@ describe('deriveWorkspaceSlug', () => {
     expect(deriveWorkspaceSlug('星际拓荒志')).toBe('ws-748324af');
     expect(deriveWorkspaceSlug('我的小说')).toBe('ws-20029f24');
     expect(deriveWorkspaceSlug('·—·')).toBe('ws-79c1da63');
-    // Deterministic for the same name, and the hash covers leading/trailing
     // whitespace only after trimming.
     expect(deriveWorkspaceSlug('  星际拓荒志 ')).toBe('ws-748324af');
   });

@@ -1,5 +1,4 @@
 /**
- * Timeline node body chrome — boundary + layer-accent rendering tests (V1.124).
  *
  * Boundary (architect contract studio-timeline-fixture-boundaries.md §5/§7):
  *   the extract MUST NOT import the React Flow package, the wire-contract
@@ -30,14 +29,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const EXTRACT_SOURCE_PATH = path.resolve(__dirname, 'timeline-node-chrome.tsx');
 
-// ---------------------------------------------------------------------------
-// Boundary — no RF / contracts / i18n in the extract module
-// ---------------------------------------------------------------------------
-
 describe('timeline-node-chrome presentational boundary', () => {
   it('does not import the React Flow package', () => {
     const source = readFileSync(EXTRACT_SOURCE_PATH, 'utf8');
-    // Task verify grep + boundary: no RF package specifier anywhere in the
     // extract (comments included — keep the file greppable-clean).
     expect(source).not.toMatch(/@xyflow\/react/);
   });
@@ -63,10 +57,6 @@ describe('timeline-node-chrome presentational boundary', () => {
     }
   });
 });
-
-// ---------------------------------------------------------------------------
-// Rendering — six chrome kinds + layer accents
-// ---------------------------------------------------------------------------
 
 describe('TimelineBriefEraChrome', () => {
   it('renders brief-accent on icon + time-span badge', () => {

@@ -120,7 +120,6 @@ describe('ConflictModal', () => {
   it('traps focus so Tab wraps from the last button to the first', async () => {
     const user = userEvent.setup();
     render(<ConflictModal {...baseProps} />);
-    // Move focus to the last button (Use current), then Tab should wrap to the first (Keep editing).
     const useCurrent = screen.getByRole('button', { name: /Use current/i });
     useCurrent.focus();
     await user.tab();

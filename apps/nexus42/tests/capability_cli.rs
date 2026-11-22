@@ -64,7 +64,6 @@ fn write_trio(root: &Path, name: &str, module_id: &str, wasm_bytes: &[u8]) -> st
 
 #[test]
 fn capability_group_is_hidden_from_root_help() {
-    // V1.35 lock posture (AR-41): callable but NOT advertised as a
     // top-level Commands entry (the word `capability` legitimately appears
     // in the `acp` description).
     let output = nexus42()
@@ -150,7 +149,6 @@ fn capability_validate_with_module_pair_ok_exits_zero() {
 #[test]
 fn capability_validate_invalid_exits_two_with_json() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // Uppercase segment violates the AR-34 name contract.
     let descriptor = dir.path().join("capability.json");
     std::fs::write(
         &descriptor,
@@ -210,7 +208,6 @@ fn capability_validate_rejects_underscore_leading_first_segment_exits_two() {
 #[test]
 fn capability_validate_pairing_mismatch_exits_three() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // Manifest declares the real wasm hash; the descriptor declares a
     // different one → descriptor-vs-manifest mismatch (exit 3).
     let wasm_bytes = b"wasm module bytes";
     let real_sha = sha256_hex(wasm_bytes);
@@ -298,7 +295,6 @@ fn write_module_id_mismatch_trio(
 
 #[test]
 fn capability_validate_module_id_mismatch_exits_two_with_json() {
-    // F1: descriptor `wasm.moduleId` ≠ manifest `module_id` is a
     // validation failure (exit 2) — hashes alone cannot pair the trio.
     // `--json` must carry the field-level error with BOTH ids.
     let dir = tempfile::tempdir().expect("tempdir");
@@ -322,7 +318,6 @@ fn capability_validate_module_id_mismatch_exits_two_with_json() {
 
 #[test]
 fn capability_install_rejects_module_id_mismatch_exits_two_no_dir() {
-    // F1: install must fail closed at exit 2 BEFORE any copy — no
     // `<name>/` dir appears under `~/.nexus42/capabilities/`.
     let dir = tempfile::tempdir().expect("tempdir");
     let (descriptor, module_dir) = write_module_id_mismatch_trio(dir.path(), "demo.pull");
@@ -419,7 +414,6 @@ fn capability_install_copies_trio_to_capabilities_dir() {
 #[test]
 fn capability_install_rejects_pairing_mismatch_exits_three() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // Manifest declares a hash that does not match the wasm bytes.
     let wasm_bytes = b"wasm module bytes";
     let module_dir = dir.path().join("module");
     std::fs::create_dir_all(&module_dir).unwrap();

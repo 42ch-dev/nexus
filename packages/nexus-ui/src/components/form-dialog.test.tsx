@@ -5,7 +5,6 @@ import '@testing-library/jest-dom/vitest';
 import { FormDialog } from './form-dialog';
 
 /**
- * V1.149 P1 — L2 pattern component (DESIGN.md components.form-dialog).
  *
  * Pins: caller-owned fields render inside a native form, submit/cancel
  * wiring, the inline error slot (role=alert + error-surface tokens), the
@@ -150,7 +149,6 @@ describe('FormDialog', () => {
       </FormDialog>,
     );
 
-    // Enter-key implicit submit path: a submit event on the form itself.
     const form = document.querySelector('form')!;
     fireEvent.submit(form);
     expect(onSubmit).not.toHaveBeenCalled();
@@ -171,7 +169,6 @@ describe('FormDialog', () => {
 
     const form = document.querySelector('form')!;
     fireEvent.submit(form);
-    // preventDefault keeps jsdom from attempting native navigation; the
     // dialog stays mounted and no reload wipes its state.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
@@ -211,7 +208,6 @@ describe('FormDialog', () => {
       </FormDialog>,
     );
 
-    // Radix attaches its document pointerdown listener after a tick.
     await new Promise((resolve) => setTimeout(resolve, 0));
     const overlay = container.ownerDocument.body.querySelector('.fixed.inset-0')!;
     fireEvent.pointerDown(overlay, { pointerType: 'mouse', bubbles: true, button: 0 });

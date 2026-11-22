@@ -1,5 +1,4 @@
 /**
- * World KB canvas adapter — inspector routing tests (V1.115 P0 T3 / W002).
  *
  * Verifies that `renderInspector(node)` routes entity-vs-candidate from the
  * passed `node.data` (the contract authority), NOT from `ctxRef.current.selection`.
@@ -23,7 +22,6 @@ import type {
 import { createWorldKbCanvasAdapter, type WorldKbCanvasAdapterContext } from '../world-kb-canvas-adapter';
 import type { WorldKbNodeData } from '../types';
 
-// Stub the data hooks so EntityInspector / PromotionInspector do not hit the
 // network. We are testing ROUTING (which inspector + which projection), not
 // submit behavior — that is covered by entity-inspector / promotion-inspector
 // test suites.
@@ -118,7 +116,6 @@ function candidateNode(id: string, name: string): Node<WorldKbNodeData> {
 function makeContext(overrides: Partial<WorldKbCanvasAdapterContext> = {}): WorldKbCanvasAdapterContext {
   return {
     worldId: 'w-1',
-    // Intentionally stale — the test verifies the adapter does NOT route here.
     selection: null,
     entities: [],
     candidates: [],
@@ -151,7 +148,6 @@ describe('WorldKbCanvasAdapter.renderInspector — node-parameter authority (W00
     const entityA = entity('kb-A', 'Aria Stormwind');
     const entityB = entity('kb-B', 'Bran Halloway');
     const ctxRef = { current: makeContext({
-      // selection points at entity B (stale / out of sync).
       selection: { kind: 'entity', node: { name: 'Bran Halloway' } as unknown as WorldKbNodeData, entity: entityB },
       entities: [entityA, entityB],
     }) };
@@ -161,7 +157,6 @@ describe('WorldKbCanvasAdapter.renderInspector — node-parameter authority (W00
 
     renderWith(<>{inspector}</>);
 
-    // EntityInspector seeds its title input from entity.canonical_name.
     // Must show Aria (the passed node), NOT Bran (the stale selection).
     expect(screen.getByDisplayValue('Aria Stormwind')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('Bran Halloway')).not.toBeInTheDocument();
@@ -171,7 +166,6 @@ describe('WorldKbCanvasAdapter.renderInspector — node-parameter authority (W00
     const candidateA = candidate('c-A', 'Elena Vale');
     const entityB = entity('kb-B', 'Bran Halloway');
     const ctxRef = { current: makeContext({
-      // selection points at an entity — totally wrong kind for the passed node.
       selection: { kind: 'entity', node: {} as unknown as WorldKbNodeData, entity: entityB },
       candidates: [candidateA],
       confirmedEntities: [entityB],
@@ -182,7 +176,6 @@ describe('WorldKbCanvasAdapter.renderInspector — node-parameter authority (W00
 
     renderWith(<>{inspector}</>);
 
-    // PromotionInspector shows the candidate canonical_name in a definition row.
     expect(screen.getByText('Elena Vale')).toBeInTheDocument();
     expect(screen.queryByText('Bran Halloway')).not.toBeInTheDocument();
   });

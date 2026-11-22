@@ -21,7 +21,6 @@ const FOREIGN_SESSION_ID = 'sess_foreign_observation';
 const AGENT_BINDINGS = { default: { provider_id: 'mock-acp' } };
 
 /**
- * P1-T3 bounded real-native target: the SAME-RUN observation transport
  * (`GET /v1/daemon/orchestration/sessions/{run_id}/events`).
  *
  * Every observation below comes from the real compiled native addon behind the
@@ -45,7 +44,6 @@ function resolvePython() {
 }
 
 /**
- * The selected ACP fixture peer with `OVERSIZED_UPDATE` on: its prompt reply is
  * one ~384 KiB chunk, so a run that walks several prompt boundaries pushes its
  * own ring past the frozen 1 MiB per-run byte cap and the ring trims its oldest
  * records — the condition a LATE subscriber must see as an explicit gap rather
@@ -66,7 +64,6 @@ OVERSIZED_UPDATE = "1"
 }
 
 /**
- * Seed one disposable home: the shared native wire fixture plus the two things
  * an initialized profile needs — the agent-host provider selection and the
  * selected workspace's registered creative root, written the way
  * `nexus42 creator workspace create --creative-root <abs>` writes it.
@@ -92,7 +89,6 @@ function seededHome() {
 }
 
 /**
- * One durable ROOT run row owned by a DIFFERENT creator, in the same workspace
  * store the service will open. It is written with the engine writer identity
  * the fixture's own `init_engine_pool` committed (the store validates every
  * write through connection-local scalar functions), so a subscription that
@@ -120,7 +116,6 @@ conn.commit()
 }
 
 /**
- * One prompt boundary followed by an unreachable-branch converge gate: the
  * admitted run dispatches a real `acp.prompt` (which publishes host-event
  * frames on its own ring) and then parks durably at the gate, so a subscriber
  * sees retained frames on a LIVE run — the state the same-run stream, its
@@ -160,7 +155,6 @@ states:
 }
 
 /**
- * Four oversized prompt boundaries in a row and a terminal state: this run's
  * ring exceeds its 1 MiB per-run byte cap while it is running, so its oldest
  * records are gone by the time a LATE subscriber arrives.
  */
@@ -222,7 +216,6 @@ async function jsonFetch(url, { method = 'GET', body, headers = {} } = {}) {
 }
 
 /**
- * Freeze a runnable applied identity for a scaffolded user preset.
  *
  * The intake has one arm: a user bundle runs the document its current apply
  * installed, and a bundle with no apply is refused before graph construction.
@@ -260,7 +253,6 @@ async function startServiceOn(home) {
 }
 
 /**
- * One SSE block's fields exactly as the wire carried them. `has('id')` is
  * load-bearing: a control frame that must NOT carry a cursor omits the `id`
  * LINE entirely, which is a different wire fact from `id: ` — an empty id
  * field would reset a client's last-event-id instead of leaving it alone.
@@ -297,7 +289,6 @@ function eventsUrl(base, runId) {
 }
 
 /**
- * The read side of ONE SSE response, kept across steps: the same connection is
  * read again after the run is signalled, so the live tail is observed on the
  * subscription that already delivered the retained replay — never a second
  * subscription pretending to be the same stream.
@@ -325,7 +316,6 @@ class EventReader {
   }
 
   /**
-   * The single outstanding read is cached and reused: a window that closes
    * early must not leave two readers racing for the same connection.
    */
   next() {
@@ -395,7 +385,6 @@ async function openEvents(base, runId, lastEventId) {
 }
 
 /**
- * Open one SSE request on a RAW socket and STOP READING the moment the status
  * line and headers have arrived.
  *
  * A paused TCP reader is the only way a test can hold a real socket closed: the
@@ -431,7 +420,6 @@ function openStalledEvents(url) {
 }
 
 /**
- * Decode HTTP/1.1 chunked framing.
  *
  * A response with no `Content-Length` is streamed as `Transfer-Encoding:
  * chunked`, so the raw bytes carry size lines an SSE parser must not see. A
@@ -472,7 +460,6 @@ function splitSseFrames(text) {
 }
 
 /**
- * Resume a stalled reader and collect everything the server still holds, until
  * the connection ends. `ended: false` means the server never closed it inside
  * the window — itself an observable outcome, not a timeout to ignore.
  */
@@ -509,7 +496,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   let drainTimeoutMs;
 
   /**
-   * Author one preset through the public surface, create one schedule of it and
    * wait for its owned run. Admission is asynchronous by contract, so the run
    * identity is observed by polling the public read, never assumed.
    *
@@ -554,7 +540,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     const runId = admitted.schedule.current_session_id;
 
     if (parked) {
-      // A still-driving run shows itself as `running` inside a quiet window;
       // only the committed gate park stays put.
       await waitFor(
         async () => {
@@ -573,7 +558,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   }
 
   before(async () => {
-    // The Rust addon carries the subscription family, the TS facade declares it
     // and the service compiles against that declaration: all three are built
     // here (each is incremental after the first run).
     assert.equal(
@@ -593,10 +577,8 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       0,
     );
 
-    // The first-pull gate defaults to 450 ms; this file holds many streams, so
     // it takes the retained test-only override to its smallest legal value.
     process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1';
-    // The transport and its writer are loaded from the SAME compiled modules the
     // in-process service uses, so the drain hook counter and the frozen drain
     // deadline below are the running transport's own, not a copy.
     ({ sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js')));
@@ -609,7 +591,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       yaml: observedParkPresetYaml,
       parked: true,
     }));
-    // A SECOND independent live run: the subscriber-permit case must not share
     // a ring with an earlier case whose readers may still be draining.
     ({ runId: capRunId } = await admitRun('p1t3-observe-cap', {
       yaml: observedParkPresetYaml,
@@ -624,7 +605,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   });
 
   test('same run replay: retained frames carry the inspected root run id and the cursor is exact', async () => {
-    // W4 is the authority for "this run": the stream must name THAT session id,
     // never a Host session and never a freshly created prompt.
     const inspected = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${parkRunId}`);
     assert.equal(inspected.status, 200, inspected.text);
@@ -656,7 +636,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
         `the durable run state is observable on its own ring: ${JSON.stringify(stream.frames.map((f) => f.event))}`,
       );
 
-      // A numeric-only cursor is NOT a substitute for the ring's
       // `<epoch>:<sequence>`: it is refused before any frame is written.
       const numeric = await jsonFetch(eventsUrl(base, parkRunId), {
         headers: { 'Last-Event-ID': '7' },
@@ -666,7 +645,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       assert.equal(numeric.payload.error.details?.field, 'last_event_id', numeric.text);
       assert.doesNotMatch(numeric.contentType, /event-stream/, numeric.contentType);
 
-      // A cursor AHEAD of the retained events is the same typed refusal.
       const epoch = stream.frames[0].id.slice(0, stream.frames[0].id.indexOf(':'));
       const future = await jsonFetch(eventsUrl(base, parkRunId), {
         headers: { 'Last-Event-ID': `${epoch}:99999999` },
@@ -674,7 +652,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       assert.equal(future.status, 400, future.text);
       assert.equal(future.payload.error.code, 'invalid_input', future.text);
 
-      // A cursor naming an epoch this process never minted is NOT an error: the
       // run is owned and readable, so the stream opens, carries ONE explicit
       // `history_unavailable` control frame and closes — never an invented
       // history and never a silent empty 200.
@@ -703,9 +680,7 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
         'the control frame names the public inspect URL of the SAME run',
       );
 
-      // Resume from an already-delivered frame: every frame the resumed
       // subscription delivers is strictly AFTER it, and the replay starts at the
-      // very next retained frame — no duplicate, no skipped handoff.
       const resumed = await openEvents(base, parkRunId, stream.frames[0].id);
       try {
         await resumed.read(1, 8_000);
@@ -730,7 +705,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   });
 
   test('same run replay: a disconnected reader releases the run subscriber permit', async () => {
-    // The per-run subscriber cap is the core ring's own limit (16). Holding
     // exactly that many open streams is how "released on disconnect" becomes
     // observable from outside: while they are held, the next subscription is the
     // pre-header refusal; after the readers leave, the permit is reusable.
@@ -750,7 +724,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       await response.body.cancel().catch(() => undefined);
     }
 
-    // The release belongs to the core owner and lands with the socket close, so
     // the permit must become reusable inside a bounded window.
     const reopened = await waitFor(
       async () => {
@@ -764,8 +737,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     );
     await reopened.body.cancel().catch(() => undefined);
 
-    // The runs are left exactly as admitted: releasing a reader never settles
-    // the run it was observing.
     const capInspect = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${capRunId}`);
     assert.equal(capInspect.status, 200, capInspect.text);
     assert.equal(capInspect.payload.session.status, 'paused', capInspect.text);
@@ -784,8 +755,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       assert.equal(cancelled.status, 200, cancelled.text);
       assert.equal(cancelled.payload.status, 'cancelled', cancelled.text);
 
-      // The SAME subscription must carry the live terminal frame and then end —
-      // a closed stream, not a hang and not a fabricated event.
       assert.equal(await stream.readToEnd(20_000), true, 'the stream closes after its durable final frame');
       const live = stream.frames.slice(replayed);
       assert.ok(live.length >= 1, 'the live tail must be delivered on the open subscription');
@@ -818,7 +787,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     });
     trimRunId = runId;
 
-    // The run reaches its declared terminal state through its own engine; its
     // ring then closes and stays readable as a terminal ring.
     await waitFor(
       async () => {
@@ -868,7 +836,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
         `the durable final frame is the last word: ${JSON.stringify(finalFrame.data)}`,
       );
 
-      // Reconnect from a delivered cursor: the tail after it is replayed
       // EXCLUSIVELY and in full, with no re-sent and no skipped frame.
       const cursorIndex = Math.max(0, stream.frames.length - 2);
       const cursor = stream.frames[cursorIndex].id;
@@ -889,7 +856,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   });
 
   /**
-   * S-003: the HTTP layer's `write() === false` → drain path, driven for real.
    *
    * The retained replay of the trim run is ~800 KiB across a handful of frames,
    * so a reader that STOPS READING (a paused raw TCP socket — the only way a test
@@ -914,7 +880,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
    * whichever branch the platform produces rather than pretending to force one.
    */
   test('same run replay: a stalled socket is bounded by the drain deadline, never a silent replay', async (t) => {
-    // What a healthy reader of this terminal ring receives, for the comparison
     // below.
     const complete = await openEvents(base, trimRunId);
     let retained;
@@ -934,7 +899,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       /^HTTP\/1\.1 200/,
       `an admitted observation opens on the raw socket: ${head.toString('utf8', 0, 80)}`,
     );
-    // The reader is paused from here on. Wait past the writer's drain deadline
     // before looking at the outcome, so a deadline that was going to expire has
     // expired.
     await delay(drainTimeoutMs + 1_500);
@@ -985,16 +949,12 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     service = await startServiceOn(home);
     base = service.url;
 
-    // A restart keeps the durable record: the same run is still inspectable and
     // still reports the cancel truth it settled with.
     const inspected = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${parkRunId}`);
     assert.equal(inspected.status, 200, inspected.text);
     assert.equal(inspected.payload.session.session_id, parkRunId, inspected.text);
     assert.equal(inspected.payload.session.status, 'cancelled', inspected.text);
 
-    // The ring did not survive the process, and the transport says exactly
-    // that: one control frame naming the same run and its inspect URL, then a
-    // closed stream — never a history it no longer holds.
     const stream = await openEvents(base, parkRunId);
     try {
       assert.equal(
@@ -1020,9 +980,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   });
 
   test('foreign run: unknown, foreign and child session ids close before any SSE header', async () => {
-    // Absent, foreign and child ids are ONE refusal: same status, same code, no
-    // payload — so an unauthorized observer cannot tell them apart, and no ring,
-    // epoch or cursor is consulted for any of them (S1-4 / O4).
     const refused = [];
     for (const id of [FOREIGN_SESSION_ID, 'sess_absent_observation', `${parkRunId}:child:step`]) {
       const response = await jsonFetch(eventsUrl(base, id));
@@ -1037,7 +994,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       `foreign, absent and child ids stay indistinguishable: ${refused.join(' | ')}`,
     );
 
-    // The identity really is observable: a run owned by the admitted creator
     // opens a stream on the very same route, so the refusal above is
     // authorization and not a missing route.
     const owned = await openEvents(base, capRunId);
@@ -1045,7 +1001,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     assert.ok(owned.frames.length >= 1, 'the owned run opens its stream on the same identity');
     await owned.disconnect();
 
-    // A query parameter this identity does not serve is refused, never silently
     // ignored into a full replay.
     const strayQuery = await jsonFetch(`${eventsUrl(base, capRunId)}?after_sequence=1`);
     assert.equal(strayQuery.status, 400, strayQuery.text);

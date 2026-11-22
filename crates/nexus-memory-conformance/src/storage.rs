@@ -21,7 +21,6 @@ impl FixtureStore {
         let options = SqliteConnectOptions::new()
             .filename(database_path)
             .create_if_missing(true)
-            // Two admitted clients write the same space, so readers must not
             // block the writer for the duration of a page read.
             .journal_mode(SqliteJournalMode::Wal);
         let pool = SqlitePoolOptions::new()

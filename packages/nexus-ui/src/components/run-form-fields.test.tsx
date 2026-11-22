@@ -92,29 +92,23 @@ describe('RunFormFields', () => {
       />,
     );
 
-    // enum → select with options
     const mode = screen.getByTestId('run-form-field-mode');
     expect(mode.tagName).toBe('SELECT');
     expect(within(mode).getByText('quick')).toBeInTheDocument();
-    // required marker
     expect(screen.getByText('Mode').parentElement?.textContent).toContain('*');
 
-    // number → input[type=number] with min/max
     const rounds = screen.getByTestId('run-form-field-rounds');
     expect(rounds).toHaveAttribute('type', 'number');
     expect(rounds).toHaveAttribute('min', '1');
     expect(rounds).toHaveAttribute('max', '20');
 
-    // boolean → checkbox
     const allowItems = screen.getByTestId('run-form-field-allow_items');
     expect(allowItems).toHaveAttribute('type', 'checkbox');
     expect(allowItems).toBeChecked();
 
-    // string → text input with description helper
     expect(screen.getByTestId('run-form-field-note')).toBeInTheDocument();
     expect(screen.getByText('Freeform note for the run.')).toBeInTheDocument();
 
-    // array → unsupported note
     expect(screen.getByTestId('run-form-field-tags-unsupported')).toHaveTextContent(
       'Not available in the guided form',
     );
@@ -142,7 +136,6 @@ describe('RunFormFields', () => {
       />,
     );
 
-    // `_id` name but no required_key_block_types → plain text input, not a picker.
     expect(screen.getByTestId('run-form-field-session_id')).toBeInTheDocument();
     expect(screen.queryByTestId('entity-picker-select')).not.toBeInTheDocument();
   });

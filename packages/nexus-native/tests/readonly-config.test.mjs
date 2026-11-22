@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Read-only legacy-snapshot loading through the real native binding.
 //
 // The Rust integration test (`crates/nexus-core/tests/readonly_config_open.rs`)
 // proves the service semantics; this suite proves the native prerequisite path

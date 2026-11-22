@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { cn } from './cn';
 
 /**
- * tailwind-merge registration regression — DESIGN.md v0.4 (V1.121).
  *
  * Threat model: the V1.94 silent-strip class of bug. Custom token-backed
  * utilities that tailwind-merge does not know are either misparsed
@@ -17,7 +16,6 @@ import { cn } from './cn';
  */
 describe('cn — v0.4 display typography tier (font-size group)', () => {
   it('keeps both the display size and a real text color (V1.94 threat)', () => {
-    // Must NOT collapse to 'text-white' — the display size is not a color.
     expect(cn('text-display-24', 'text-white')).toBe('text-display-24 text-white');
   });
 

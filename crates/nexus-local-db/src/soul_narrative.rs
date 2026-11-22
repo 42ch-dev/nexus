@@ -143,7 +143,6 @@ async fn update_stats_cache(
     cached: Option<&SoulNarrativeRecord>,
 ) -> Result<(), LocalDbError> {
     if cached.is_some() {
-        // Targeted UPDATE — don't touch narrative/generation metadata.
         sqlx::query!(
             "UPDATE memory_soul_narratives
              SET distinct_keyword_count_cache = ?, stats_fingerprint = ?
@@ -156,7 +155,6 @@ async fn update_stats_cache(
         .execute(pool)
         .await?;
     } else {
-        // Stats-only INSERT — narrative/generated_at are NULL.
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query!(
             "INSERT OR REPLACE INTO memory_soul_narratives
@@ -233,7 +231,6 @@ async fn compute_distinct_keyword_count(
             }
         }
         if distinct.len() >= DISTINCT_KEYWORD_THRESHOLD {
-            // Threshold-saturated count: the gate only needs `>= 20`, so stop
             // decoding as soon as we have 20 distinct keywords.
             return Ok(DISTINCT_KEYWORD_THRESHOLD);
         }
@@ -333,7 +330,6 @@ pub async fn soul_narrative_fragment_stats_readonly(
         }
     }
 
-    // Fingerprint mismatch or no cache row: compute soundly, persist nothing.
     let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id, world_id).await?;
 
     Ok((
@@ -355,7 +351,6 @@ pub async fn soul_narrative_fragment_stats(
     creator_id: &str,
     world_id: Option<&str>,
 ) -> Result<(SoulNarrativeFragmentStats, Option<SoulNarrativeRecord>), LocalDbError> {
-    // 1. Cheap SQL aggregates — always O(1) index scan, no row materialization.
     let fragment_count = if let Some(wid) = world_id {
         sqlx::query_scalar!(
             r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ? AND world_id = ?"#,
@@ -390,15 +385,12 @@ pub async fn soul_narrative_fragment_stats(
         .await?
     };
 
-    // 2. Build fingerprint from cheap aggregates.
     let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
 
-    // 3. Check the fingerprint cache for this (creator, world) scope.
     let cached = get_soul_narrative(pool, creator_id, world_id).await?;
 
     if let Some(ref c) = cached {
         if c.stats_fingerprint.as_deref() == Some(&fingerprint) {
-            // Fingerprint match → fragments unchanged since last compute.
             // Return cached distinct count — NO keyword streaming/decode.
             return Ok((
                 SoulNarrativeFragmentStats {
@@ -412,10 +404,8 @@ pub async fn soul_narrative_fragment_stats(
         }
     }
 
-    // 4. Fingerprint mismatch or no cache row → compute soundly.
     let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id, world_id).await?;
 
-    // 5. Persist stats cache (inserts stats-only row if none exists — G3 fix).
     update_stats_cache(
         pool,
         creator_id,
@@ -426,7 +416,6 @@ pub async fn soul_narrative_fragment_stats(
     )
     .await?;
 
-    // Re-read cache after possible stats-only insert so callers get the
     // freshly-persisted row (G3: fingerprint cache hit on next poll).
     let cached = if cached.is_some() {
         cached

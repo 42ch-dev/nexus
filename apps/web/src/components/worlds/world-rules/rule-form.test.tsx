@@ -1,5 +1,4 @@
 /**
- * RuleForm tests — V1.169 P2 T1 (DF-82 create form).
  *
  * Covers the four-family happy path + submit payload shape, the client
  * validation mirror (immediate interception; the API's field-level errors
@@ -127,11 +126,9 @@ describe('RuleForm — four-family happy path + submit payload shape', () => {
     renderForm(onClose);
 
     selectFamily('module_presence');
-    // Locked one-line family hint (plan table, verbatim).
     expect(screen.getByTestId('rule-form-family-help')).toHaveTextContent(
       'Matching entries must carry this module key.',
     );
-    // Locked field helpers (plan clarify, verbatim).
     expect(
       screen.getByText('A stable name you will recognize in the list.'),
     ).toBeInTheDocument();
@@ -150,7 +147,6 @@ describe('RuleForm — four-family happy path + submit payload shape', () => {
       constraint: { family: 'module_presence', module_key: 'belief' },
       status: 'active',
     });
-    // Success closes the form.
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
@@ -663,12 +659,10 @@ describe('RuleForm — submit attempts start from a clean error slate (bugbot 67
     fillNameAndSummary('Inverted cap', 'Min exceeds max.');
     fireEvent.change(screen.getByLabelText('Min observers'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '2' } });
-    // First submit fails client validation on the Min field (min > max).
     submit();
     await waitFor(() => expect(screen.getByText('Min must not exceed max.')).toBeInTheDocument());
     expect(capture.body).toBeUndefined();
 
-    // Fix the constraint by raising Max (that edit clears only the Max
     // field error, so the Min message is still stale) and resubmit: the
     // server rejects a *different* field, so the stale Min message must not
     // survive next to the new echo.
@@ -700,7 +694,6 @@ describe('RuleForm — submit attempts start from a clean error slate (bugbot 67
     submit();
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    // The form stays mounted (onClose is a no-op mock): no stale error may
     // linger next to the submitted fields.
     expect(screen.queryByText('Min must not exceed max.')).not.toBeInTheDocument();
   });
@@ -858,7 +851,6 @@ describe('RuleForm — edit mode: prefill round-trip (stored carrier → form �
     const onClose = vi.fn();
     renderEditForm(makeStoredRule(), onClose);
 
-    // Prefill: meta fields + the stored carrier deserialized into the form.
     expect((screen.getByLabelText('Constraint family') as HTMLSelectElement).value).toBe(
       'module_presence',
     );
@@ -872,7 +864,6 @@ describe('RuleForm — edit mode: prefill round-trip (stored carrier → form �
     submitEdit();
 
     await waitFor(() => expect(capture.body).toBeDefined());
-    // Untouched meta fields are not sent (AR-3); the carrier is whole replacement.
     expect(capture.body).toEqual({ constraint: { family: 'module_presence', module_key: 'belief' } });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
@@ -1057,7 +1048,6 @@ describe('RuleForm — edit mode: severity honesty (stored hint, no inert Defaul
 
     const severity = screen.getByLabelText('Severity') as HTMLSelectElement;
     expect(severity.value).toBe('warning');
-    // No silent no-op: "Default (warning)" cannot be chosen for a stored hint
     // (no null-clearing, AR-3) — the option is not rendered.
     expect(screen.queryByRole('option', { name: 'Default (warning)' })).not.toBeInTheDocument();
     expect(

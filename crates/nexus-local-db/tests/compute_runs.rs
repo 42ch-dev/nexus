@@ -30,8 +30,6 @@ async fn insert_and_succeed(pool: &sqlx::SqlitePool, world_id: &str, module_id: 
     run_id
 }
 
-// ── insert + get ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn insert_and_get_roundtrip() {
     let (pool, _dir) = setup_db().await;
@@ -117,8 +115,6 @@ async fn insert_with_module_version_and_params() {
     );
 }
 
-// ── status transitions (happy path) ─────────────────────────────
-
 #[tokio::test]
 async fn transition_to_succeeded() {
     let (pool, _dir) = setup_db().await;
@@ -168,7 +164,6 @@ async fn transition_to_applied_in_tx() {
         .await
         .unwrap();
 
-    // Set succeeded first (precondition for applied)
     set_run_succeeded(&pool, &run_id, r#"{"state_delta":[]}"#)
         .await
         .unwrap();
@@ -206,13 +201,10 @@ async fn transition_to_discarded() {
     assert!(row.updated_at.is_some());
 }
 
-// ── guard: transition from wrong status errors ──────────────────
-
 #[tokio::test]
 async fn set_succeeded_guard_requires_running() {
     let (pool, _dir) = setup_db().await;
     let run_id = insert_and_succeed(&pool, "world-g1", "mod-g1").await;
-    // Already succeeded — second succeed call must fail
     let err = set_run_succeeded(&pool, &run_id, r#"{"x":1}"#)
         .await
         .unwrap_err();
@@ -226,7 +218,6 @@ async fn set_failed_guard_requires_running() {
         .await
         .unwrap();
     set_run_failed(&pool, &run_id, r#"{"e":1}"#).await.unwrap();
-    // Already failed — second fail must error
     let err = set_run_failed(&pool, &run_id, r#"{"e":2}"#)
         .await
         .unwrap_err();
@@ -236,7 +227,6 @@ async fn set_failed_guard_requires_running() {
 #[tokio::test]
 async fn set_applied_guard_requires_succeeded() {
     let (pool, _dir) = setup_db().await;
-    // Running run — cannot apply directly
     let run_id = insert_run(&pool, "world-g3", "mod-g3", None, None, None, None)
         .await
         .unwrap();
@@ -245,7 +235,6 @@ async fn set_applied_guard_requires_succeeded() {
     let err = set_run_applied_in_tx(&mut tx, &run_id, accepted_at)
         .await
         .unwrap_err();
-    // TX is dirty — rollback is fine
     let _ = tx.rollback().await;
     assert_constraint_violation(&err, "not in 'succeeded' status");
 }
@@ -257,7 +246,6 @@ async fn set_applied_guard_requires_succeeded_after_failed() {
         .await
         .unwrap();
     set_run_failed(&pool, &run_id, r"{}").await.unwrap();
-    // Failed → cannot accept
     let accepted_at = "2026-07-31T12:00:00+00:00";
     let mut tx = pool.begin().await.unwrap();
     let err = set_run_applied_in_tx(&mut tx, &run_id, accepted_at)
@@ -270,7 +258,6 @@ async fn set_applied_guard_requires_succeeded_after_failed() {
 #[tokio::test]
 async fn set_discarded_guard_requires_succeeded() {
     let (pool, _dir) = setup_db().await;
-    // Running run — cannot discard directly
     let run_id = insert_run(&pool, "world-g4", "mod-g4", None, None, None, None)
         .await
         .unwrap();
@@ -283,12 +270,9 @@ async fn set_discarded_on_already_discarded_errors() {
     let (pool, _dir) = setup_db().await;
     let run_id = insert_and_succeed(&pool, "world-g5", "mod-g5").await;
     set_run_discarded(&pool, &run_id).await.unwrap();
-    // Second discard → error
     let err = set_run_discarded(&pool, &run_id).await.unwrap_err();
     assert_constraint_violation(&err, "not in 'succeeded' status");
 }
-
-// ── guard: transition on nonexistent run_id errors ──────────────
 
 #[tokio::test]
 async fn transition_nonexistent_run_errors() {
@@ -314,8 +298,6 @@ async fn transition_nonexistent_run_errors() {
     assert_constraint_violation(&err, "not in 'succeeded' status");
 }
 
-// ── rollback: applied_in_tx rolls back correctly ────────────────
-
 #[tokio::test]
 async fn applied_in_tx_rollback_preserves_status() {
     let (pool, _dir) = setup_db().await;
@@ -328,24 +310,19 @@ async fn applied_in_tx_rollback_preserves_status() {
         .unwrap();
     assert_eq!(affected, 1);
 
-    // Rollback — status must revert to succeeded.
     // (We cannot verify inside the tx via get_run because pool reads from a
     // different connection and WAL mode hides uncommitted writes.)
     tx.rollback().await.unwrap();
 
     let row = get_run(&pool, &run_id).await.unwrap().unwrap();
     assert_eq!(row.status, RUN_STATUS_SUCCEEDED);
-    // accepted_at must NOT have been persisted
     assert!(row.accepted_at.is_none());
 }
-
-// ── list + pagination ───────────────────────────────────────────
 
 #[tokio::test]
 async fn list_runs_pagination() {
     let (pool, _dir) = setup_db().await;
 
-    // Insert 3 runs
     let r1 = insert_run(&pool, "world-list", "mod-a", None, None, None, None)
         .await
         .unwrap();
@@ -356,20 +333,17 @@ async fn list_runs_pagination() {
         .await
         .unwrap();
 
-    // Page 1: limit 2
     let filters = RunListFilters::default();
     let (items1, cursor1) = list_runs(&pool, &filters, None, 2).await.unwrap();
     assert_eq!(items1.len(), 2);
     assert!(cursor1.is_some());
 
-    // Page 2: use cursor
     let (items2, cursor2) = list_runs(&pool, &filters, cursor1.as_deref(), 2)
         .await
         .unwrap();
     assert_eq!(items2.len(), 1);
     assert!(cursor2.is_none());
 
-    // All 3 ids should be unique
     let mut all_ids: Vec<String> = items1
         .iter()
         .chain(items2.iter())
@@ -416,13 +390,11 @@ async fn list_runs_orders_newest_first() {
 
     let filters = RunListFilters::default();
     let (items1, cursor1) = list_runs(&pool, &filters, None, 2).await.unwrap();
-    // Newest first: r3, then r2.
     assert_eq!(items1.len(), 2);
     assert_eq!(items1[0].run_id, r3, "newest run must come first");
     assert_eq!(items1[1].run_id, r2);
     assert!(cursor1.is_some());
 
-    // Page 2 continues in the same ordering (r1 last).
     let (items2, cursor2) = list_runs(&pool, &filters, cursor1.as_deref(), 2)
         .await
         .unwrap();
@@ -548,8 +520,6 @@ async fn list_runs_empty() {
     assert!(cursor.is_none());
 }
 
-// ── unique run_id violation ─────────────────────────────────────
-
 #[tokio::test]
 async fn insert_run_unique_id_violation() {
     let (pool, _dir) = setup_db().await;
@@ -573,8 +543,6 @@ async fn insert_run_unique_id_violation() {
     assert!(result.is_err(), "duplicate run_id insert should fail");
 }
 
-// ── adapter-style row coexistence ───────────────────────────────
-
 #[tokio::test]
 async fn adapter_row_with_null_run_id_coexists() {
     let (pool, _dir) = setup_db().await;
@@ -589,29 +557,22 @@ async fn adapter_row_with_null_run_id_coexists() {
     .await
     .unwrap();
 
-    // Insert a direct-lane row — run_id is set, session_id is NULL.
     let run_id = insert_run(&pool, "world-c", "mod-c", None, None, None, None)
         .await
         .unwrap();
 
-    // Both coexist without conflict.
     let direct = get_run(&pool, &run_id)
         .await
         .unwrap()
         .expect("direct row must exist");
     assert_eq!(direct.run_id, run_id);
 
-    // The adapter row should NOT appear in list_runs (which filters WHERE run_id IS NOT NULL).
     let filters = RunListFilters::default();
     let (items, _) = list_runs(&pool, &filters, None, 10).await.unwrap();
     assert!(items.iter().any(|r| r.run_id == run_id));
-    // Adapter row (NULL run_id) not returned.
     assert_eq!(items.len(), 1);
 }
 
-// ── helpers ─────────────────────────────────────────────────────
-
-/// Assert `err` is a `ConstraintViolation` whose message contains `fragment`.
 fn assert_constraint_violation(err: &LocalDbError, fragment: &str) {
     let msg = format!("{err}");
     assert!(

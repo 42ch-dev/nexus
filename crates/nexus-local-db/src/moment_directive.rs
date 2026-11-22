@@ -257,7 +257,6 @@ pub async fn get_by_id(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // `directive_id!` — SQLite describes a TEXT PRIMARY KEY as nullable,
         // the macro needs the non-null coercion for the `String` field;
         // `clear_on_scene_change: bool` — the column is INTEGER, the struct
         // field is `bool` (explicit decode override).
@@ -360,7 +359,6 @@ pub async fn decrement_ttl_by(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
         // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET ttl_remaining = MAX(ttl_remaining - ?, 0),
@@ -401,10 +399,8 @@ pub async fn clear_on_scene_change(
     directive_id: &str,
     now: i64,
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
-    // Single round-trip `UPDATE … RETURNING` (QC3-S002) — see `decrement_ttl`.
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
         // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET status = 'expired', expires_at = ?, updated_at = ?
@@ -516,7 +512,6 @@ async fn get_active_by_scope(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // Column annotations as in `get_by_id` (SQLite TEXT-PK nullability
         // quirk + INTEGER→bool decode override).
         "SELECT directive_id as \"directive_id!\",
                 creator_id, scope_kind, scope_id, body, insert_depth,
@@ -648,7 +643,6 @@ mod tests {
             .await
             .unwrap()
             .is_some());
-        // A different creator never sees the directives.
         assert!(get_active_for_work(&pool, "ctr_other", "wrk_1")
             .await
             .unwrap()
@@ -704,12 +698,10 @@ mod tests {
         assert_eq!(after.ttl_remaining, 0);
         assert_eq!(after.status, "expired");
         assert!(after.expires_at.is_some());
-        // Expired rows no longer inject.
         assert!(get_active_for_work(&pool, "ctr_test", "wrk_1")
             .await
             .unwrap()
             .is_none());
-        // Idempotent: further decrements are no-ops.
         assert!(decrement_ttl(&pool, "dir_1", now + 2)
             .await
             .unwrap()
@@ -760,7 +752,6 @@ mod tests {
         assert_eq!(row.status, "expired");
         assert!(row.expires_at.is_some());
 
-        // Clearing an already-empty scope reports false.
         let again = clear(&pool, "ctr_test", scope_kind::WORK, "wrk_1", now + 2)
             .await
             .unwrap();
@@ -812,7 +803,6 @@ mod tests {
         let row = get_by_id(&pool, "dir_1").await.unwrap().unwrap();
         assert_eq!(row.last_focused_event_id.as_deref(), Some("evt_a"));
 
-        // NULL anchor clears the stored state.
         let cleared_anchor = update_lifecycle_anchor(&pool, "dir_1", None, now + 2)
             .await
             .unwrap();
@@ -832,7 +822,6 @@ mod tests {
         .await
         .unwrap();
 
-        // No anchor yet for either work.
         assert_eq!(
             get_chapter_anchor(&pool, "dir_1", "wrk_a").await.unwrap(),
             None
@@ -842,7 +831,6 @@ mod tests {
             None
         );
 
-        // Each work records its own chapter observation.
         upsert_chapter_anchor(&pool, "dir_1", "wrk_a", 1, now + 1)
             .await
             .unwrap();
@@ -859,7 +847,6 @@ mod tests {
             Some(4)
         );
 
-        // Upsert overwrites the pair's own value only.
         upsert_chapter_anchor(&pool, "dir_1", "wrk_a", 3, now + 2)
             .await
             .unwrap();
@@ -885,7 +872,6 @@ mod tests {
         .await
         .unwrap();
 
-        // 3 chapter advances between assembles ⇒ 3 decrements.
         let after = decrement_ttl_by(&pool, "dir_1", 3, now + 1)
             .await
             .unwrap()
@@ -906,7 +892,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Delta larger than the remaining TTL caps at 0 and expires.
         let after = decrement_ttl_by(&pool, "dir_1", 5, now + 1)
             .await
             .unwrap()

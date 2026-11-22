@@ -65,12 +65,10 @@ impl CoreService {
                 resource: "world_pack_import: read-only core access".to_string(),
             });
         }
-        // Retained pack-family envelope (`world_kb::guards`): the typed
         // ownership guard runs before the selection is derived, so a foreign
         // World keeps the cross-author 403 and only a missing World is the
         // `world {id}` 404 — exactly as the export arm renders it.
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
-        // Durable §5.1: pack import is Creator management authoring on the
         // owned World, so the orchestrator persists under the management
         // selection (server-chosen from stored ownership + the holder
         // registry, never from the pack).
@@ -155,7 +153,6 @@ impl CoreService {
         holder_map: Vec<HolderMapping>,
     ) -> CoreResult<PackImportResponse> {
         self.verify_principal(principal)?;
-        // Same retained envelope as the import arm: ownership refusal first,
         // then the selection. A dry run never renders a different refusal.
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         let (read_scope, _) = crate::actor_knowledge::management_read_scope(
@@ -246,7 +243,6 @@ impl CoreService {
     /// unregistered (fenced) pools, malformed packs, inadmissible holder
     /// mappings and fatal storage errors.
     #[doc(hidden)]
-    // transitional: single deletion owner P6-T1; no new callers
     pub async fn import_legacy_world_pack(
         pool: &SqlitePool,
         creator_id: &str,
@@ -258,7 +254,6 @@ impl CoreService {
         if creator_id.trim().is_empty() {
             return Err(CoreError::AuthRequired);
         }
-        // Verified admission against core stored state (P0 QC fix): the
         // caller must exist in the stored creator state and own the target
         // World. The retained CLI open path registers its pool as the
         // `bootstrap` writer, so the pool's registration identity is no
@@ -275,7 +270,6 @@ impl CoreService {
             return Err(CoreError::AuthRequired);
         }
         guards::require_world_owner(pool, world_id, creator_id).await?;
-        // Admission uses the same connection identity and epochs as the
         // writer protocol triggers. The supplied pool is never re-opened or
         // promoted to a writer.
         let mut connection = pool.acquire().await.map_err(|e| db_err(&e))?;
@@ -288,7 +282,6 @@ impl CoreService {
                 resource: "world_pack_import: read-only legacy pool".to_string(),
             });
         }
-        // Fail fast when this connection carries no live registered writer
         // (protocol inactive, mode/epoch drift): the triggers would fence
         // every write anyway.
         let live_writer: i64 = sqlx::query_scalar(
@@ -332,7 +325,6 @@ impl CoreService {
     /// Rejects empty/unknown creators, foreign/missing Worlds and unreadable
     /// stored original JSON.
     #[doc(hidden)]
-    // transitional: single deletion owner P6-T1; no new callers
     pub async fn review_legacy_world_pack_import(
         pool: &SqlitePool,
         creator_id: &str,
@@ -362,7 +354,6 @@ impl CoreService {
     /// Rejects empty/unknown creators, foreign/missing Worlds, storage and
     /// pack projection errors.
     #[doc(hidden)]
-    // transitional: single deletion owner P6-T1; no new callers
     pub async fn export_legacy_world_pack(
         pool: &SqlitePool,
         creator_id: &str,
@@ -410,7 +401,6 @@ async fn run_world_pack_import(
             reason: e.to_string(),
         }
     })?;
-    // Adoption is resolved through the same authoring admission an authored
     // audience uses, before any atom is examined: an inadmissible mapping fails
     // the whole import with zero atom writes instead of silently quarantining.
     let resolved_mappings = resolve_holder_map(pool, creator_id, world_id, &holder_map).await?;
@@ -657,7 +647,6 @@ fn governance_disposition(
     }
     let Some(foreign_holder_id) = original_owner else {
         if original_disclosure.is_some() {
-            // `owner-private` without a holder: no identity to resolve, so the
             // atom is held rather than stored as a holderless disclosure.
             return GovernanceDisposition::Quarantine(QuarantineReason::UnresolvedHolder);
         }
@@ -1027,7 +1016,6 @@ async fn import_pack(
         target_entry_ids.insert(e.entry_id.clone());
     }
 
-    // Pack-level source anchors: only persisted when requested. Nexus has no
     // standalone SourceAnchor store yet — skip silently (export emits empty).
     let _anchors = if include_anchors {
         pack.source_anchors.as_deref()
@@ -1035,7 +1023,6 @@ async fn import_pack(
         None
     };
 
-    // The untransformed pack atoms, index-aligned with `pack.entries`.
     let source_entries: Vec<serde_json::Value> = pack
         .source
         .get("entries")
@@ -1063,7 +1050,6 @@ async fn import_pack(
             continue;
         };
 
-        // ── Identity safety (durable §6) ──────────────────────────────
         //
         // Read the atom's *original* wire governance before anything else can
         // touch the entry. The disposition is decided on these values only: a
@@ -1075,7 +1061,6 @@ async fn import_pack(
             .as_ref()
             .map(|disclosure| disclosure.as_str().to_string());
 
-        // The retired legacy visibility key is refused with the stable reason,
         // never reinterpreted as `owner-private` and never carried into a row
         // (durable §5/§6). Checked before persistence so the dry-run reports it
         // too.
@@ -1097,7 +1082,6 @@ async fn import_pack(
         ) {
             GovernanceDisposition::Shared => None,
             GovernanceDisposition::Adoption(governance) => {
-                // Native adoption: the atom keeps its own disclosure and takes
                 // the permitted local holder the explicit mapping authorized.
                 let Some(local_holder) = governance.holder_entry_id.as_deref() else {
                     summary.entries.rejected += 1;
@@ -1146,10 +1130,8 @@ async fn import_pack(
             }
         };
 
-        // ── Entry ID collision (global PK, world-scoped semantics) ─────
         if let Ok(existing_by_id) = store.get_knowledge_entry(&entry.entry_id).await {
             if existing_by_id.world_id() == Some(world_id) {
-                // Same-world re-import: when entry_id and canonical_name both
                 // match, this is the same entry — honor conflict policy.
                 // If canonical_name or block_type differs, honor conflict policy on
                 // the entry_id collision (cannot safely overwrite a different entry).
@@ -1237,7 +1219,6 @@ async fn import_pack(
                         .await?;
                     }
                     ConflictPolicy::Overwrite => {
-                        // Overwrite replaces the existing entry's body even when
                         // the imported entry changed canonical_name or block_type.
                         // The entry_id is the anchor; identity drift is the edit.
                         remap.insert(pack_entry_id.clone(), existing_by_id.entry_id.clone());
@@ -1261,7 +1242,6 @@ async fn import_pack(
                 continue;
             }
 
-            // Foreign-world PK: remap via canonical-name match when possible.
             if let Ok(Some(existing_name_match)) = store
                 .get_active_by_unique_key(world_id, &entry.canonical_name, entry_type)
                 .await
@@ -1330,7 +1310,6 @@ async fn import_pack(
             continue;
         }
 
-        // ── Canonical-name collision ─────────────────────────────────────
         if let Ok(Some(existing_name)) = store
             .get_active_by_unique_key(world_id, &entry.canonical_name, entry_type)
             .await
@@ -1386,7 +1365,6 @@ async fn import_pack(
             continue;
         }
 
-        // ── No collision → create ──────────────────────────────────────
         if dry_run {
             record_entry(
                 &mut summary,
@@ -1426,7 +1404,6 @@ async fn import_pack(
         }
     }
 
-    // ── Phase 2: relations ─────────────────────────────────────────────
     for mut relation in pack.relations {
         let pack_relation_id = relation.relation_id.clone();
         let resolved_from = remap
@@ -1852,7 +1829,6 @@ async fn import_overwritten_entry(
             outcome: ImportOutcome::Created,
             ..
         } => {
-            // V1.155 P2 T3 (R-V1152P0-001): the provenance column is now
             // stamped atomically inside the CAS update tx (adapter
             // `run_cas_update_in_tx` → `update_key_block_auxiliary_fields_in_tx`),
             // so the former separate `stamp_import_provenance_column` UPDATE
@@ -1996,7 +1972,6 @@ async fn quarantine_pack_atom(
     reason: QuarantineReason,
     dry_run: bool,
 ) -> Result<(), PackImportError> {
-    // The immutable original atom JSON is the **document's own** atom value: it
     // is read from the untransformed pack (`ParsedPack::source`) and serialized
     // once, so nothing about the typed entry (defaults, rebuilt extensions,
     // field order) can reach the quarantine row.
@@ -2080,7 +2055,6 @@ async fn persist_entry_upsert(
         };
     };
 
-    // Adopted atom: join the atom's native write and its quarantine removal in
     // one caller-owned transaction (the same bound-transaction seam the
     // candidate-adopt path uses).
     let tx = match pool.begin().await {
@@ -2304,7 +2278,6 @@ fn review_to_response(review: ImportQuarantineReview) -> CoreResult<PackImportRe
         .atoms
         .into_iter()
         .map(|atom| {
-            // The wire carries the **value of the stored original bytes**: the
             // verbatim stored JSON is parsed once here, so what leaves the
             // boundary is the pack document's atom, never a typed
             // re-serialization of the entry.
@@ -2371,7 +2344,6 @@ const fn review_reason_to_wire(
 }
 
 async fn resolve_world_title(pool: &sqlx::SqlitePool, world_id: &str) -> CoreResult<String> {
-    // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
     let title: Option<String> =
         sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
             .bind(world_id)
@@ -2386,7 +2358,6 @@ async fn resolve_world_title(pool: &sqlx::SqlitePool, world_id: &str) -> CoreRes
 }
 
 async fn resolve_creator_string(pool: &sqlx::SqlitePool, creator_id: &str) -> CoreResult<String> {
-    // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
     let display_name: Option<String> =
         sqlx::query_scalar("SELECT display_name FROM creators WHERE creator_id = ?")
             .bind(creator_id)
@@ -2406,7 +2377,6 @@ async fn load_pack_anchors(
 ) -> CoreResult<Vec<nexus_spoke_adapter::SourceAnchor>> {
     let mut anchors = Vec::new();
     for entry_id in entry_ids {
-        // Runtime query: mirrors `world_kb.rs` pattern; table schema is stable.
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT source_anchor_json FROM kb_source_anchors WHERE key_block_id = ? ORDER BY anchor_ordinal ASC",
         )

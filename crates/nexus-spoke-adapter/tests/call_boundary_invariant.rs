@@ -1,4 +1,5 @@
 //! # Call-boundary invariant static check (spec §7 enforcement)
+//! enforcement of docs/specs/architecture/spoke-adapter-architecture.md §7.
 //!
 //! Regression guard proving the adapter crate does NOT reimplement any
 //! [`spoke_operations`] lifecycle invariant. It reads the adapter source text
@@ -74,7 +75,6 @@ fn count_spoke_operations_calls(text: &str) -> usize {
     let mut from = 0usize;
     while let Some(relative) = text[from..].find(SPOKE_OPERATIONS_PREFIX) {
         let after_prefix = from + relative + SPOKE_OPERATIONS_PREFIX.len();
-        // Advance the search cursor past this occurrence regardless of
         // whether the tail matches — the prefix cannot overlap itself, so
         // there is no risk of double-counting or looping forever.
         from = after_prefix;
@@ -82,7 +82,6 @@ fn count_spoke_operations_calls(text: &str) -> usize {
         let tail = &text[after_prefix..];
         let tail_bytes = tail.as_bytes();
 
-        // First char of the identifier must be [a-z_].
         let Some(&first) = tail_bytes.first() else {
             continue;
         };
@@ -90,7 +89,6 @@ fn count_spoke_operations_calls(text: &str) -> usize {
             continue;
         }
 
-        // Consume the rest of the identifier: [a-z0-9_]*.
         let mut cursor = 1usize;
         while cursor < tail_bytes.len() {
             let c = tail_bytes[cursor];
@@ -101,14 +99,12 @@ fn count_spoke_operations_calls(text: &str) -> usize {
             }
         }
 
-        // Consume optional ASCII whitespace (\s* restricted to ASCII, which
         // is all Rust source whitespace here).
         let mut after_ws = cursor;
         while after_ws < tail_bytes.len() && tail_bytes[after_ws].is_ascii_whitespace() {
             after_ws += 1;
         }
 
-        // A trailing `(` makes this a call site.
         if after_ws < tail_bytes.len() && tail_bytes[after_ws] == b'(' {
             count += 1;
         }
@@ -156,7 +152,6 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
     const KEYWORDS: [&str; 5] = ["match", "if", "for", "while", "loop"];
     let bytes = line.as_bytes();
 
-    // Identifier byte test: ASCII alphanumeric or `_`. Inlined (rather than
     // extracted to a shared helper) to match the existing style in
     // [`count_spoke_operations_calls`] and keep the matcher self-contained.
     let is_ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
@@ -166,7 +161,6 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
         while let Some(relative) = line[from..].find(keyword) {
             let start = from + relative;
             let end = start + keyword.len();
-            // Advance the search cursor past this occurrence so progress is
             // guaranteed (each keyword is non-empty) and overlapping
             // matches are not double-counted.
             from = end;
@@ -191,7 +185,6 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
 /// or that drops the left/right boundary test, fails here loudly.
 #[test]
 fn helper_contains_control_flow_keyword_at_boundary_semantics() {
-    // Positive: keyword at the start of the line.
     assert!(contains_control_flow_keyword_at_boundary(
         "match x { _ => () }"
     ));
@@ -218,7 +211,6 @@ fn helper_contains_control_flow_keyword_at_boundary_semantics() {
         "let x = f(); match x { _ => () }"
     ));
 
-    // Negative: keyword glued to identifier bytes on one side.
     assert!(!contains_control_flow_keyword_at_boundary(
         "let matcher = build();"
     ));
@@ -231,11 +223,9 @@ fn helper_contains_control_flow_keyword_at_boundary_semantics() {
     assert!(!contains_control_flow_keyword_at_boundary(
         "items.for_each(|i| take(i));"
     ));
-    // `for_each`: the `.` before `for` passes the left boundary, but the
     // `_` after `for` is an identifier byte, so the right boundary fails
     // and the helper correctly does NOT trigger.
 
-    // Negative: keyword absent entirely.
     assert!(!contains_control_flow_keyword_at_boundary("let x = 1 + 2;"));
     assert!(!contains_control_flow_keyword_at_boundary(
         "fn wrapper() { validate(x) }"

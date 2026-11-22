@@ -26,7 +26,7 @@ use crate::{ComputeInput, ComputeOutput, HostContext, WasmEngine, WasmModule};
 /// Size of the output buffer the host reserves in module memory. Generous by
 /// design — a basic-combat `ComputeOutput` is a few KiB; 1 MiB covers far richer
 /// modules without forcing a second round-trip.
-const OUTPUT_BUFFER_BYTES: u32 = 1 << 20; // 1 MiB
+const OUTPUT_BUFFER_BYTES: u32 = 1 << 20;
 
 /// Maximum recursion depth for JSON-Schema validation (qc3 W-001).
 /// Covers any realistic compute-envelope depth (`KeyBlocks` × attributes/state ×
@@ -51,7 +51,6 @@ impl WasmEngine {
         manifest: &ModuleManifest,
         input: &ComputeInput,
     ) -> Result<ComputeOutput> {
-        // --- Pre-invocation manifest-schema validation (V1.62) ------------
         if let Some(schemas) = &manifest.schemas {
             let input_value = serde_json::to_value(input)?;
             validate_compute_input(&input_value, schemas)?;
@@ -88,8 +87,6 @@ impl WasmEngine {
         input_bytes: &[u8],
         sandbox: ResolvedSandbox,
     ) -> Result<ComputeOutput> {
-        // --- 0. Structured memory-cap pre-check (V1.206 P2 site 2) -----------
-        // wasmtime 49.0.1 exposes no typed limiter-denial error: the
         // instantiation-time `StoreLimits` refusal is a formatted string
         // ("memory minimum size of N pages exceeds memory limits"), so the
         // class cannot be recovered by downcasting. Compare every declared
@@ -100,7 +97,6 @@ impl WasmEngine {
             return Err(ComputeError::MemoryCapExceeded);
         }
 
-        // --- 1. Fresh per-invocation store (snapshot + memory cap) ----------
         let limits = StoreLimitsBuilder::new()
             .memory_size(sandbox.max_memory_bytes)
             .build();
@@ -112,23 +108,17 @@ impl WasmEngine {
         let mut store = Store::new(&self.engine, state);
         store.limiter(|s| &mut s.limits);
 
-        // Fuel budget for this invocation.
         store.set_fuel(sandbox.fuel)?;
 
-        // --- 2. Wall-time watchdog (epoch interruption) ---------------------
         store.epoch_deadline_trap();
         store.set_epoch_deadline(1);
         let cancelled = Arc::new(AtomicBool::new(false));
         let watchdog = spawn_watchdog(self.engine.clone(), sandbox.wall_time, cancelled.clone());
 
-        // --- 3–4. Instantiate, init, compute --------------------------------
         let outcome = self.invoke_module(&mut store, module, manifest, input_bytes);
 
-        // --- 5. Reap the watchdog -------------------------------------------
         cancelled.store(true, Ordering::SeqCst);
         if let Some(handle) = watchdog {
-            // Best-effort join; the thread exits promptly once `cancelled` is set
-            // or after sleeping `wall_time` (whichever comes first).
             let _ = handle.join();
         }
         outcome
@@ -148,14 +138,11 @@ impl WasmEngine {
             .instantiate(&mut *store, &module.module)
             .map_err(ComputeError::Wasmtime)?;
 
-        // Optional one-shot `init`.
         if let Some(init) = optional_export::<(), ()>(&mut *store, &instance, &manifest.init_export)
         {
             map_call_result(init.call(&mut *store, ()))?;
         }
 
-        // `alloc` export: host places input and reserves output inside the
-        // module's own linear memory.
         let alloc = required_export::<u32, u32>(&mut *store, &instance, "alloc")?;
         let in_len = u32::try_from(input_bytes.len()).unwrap_or(u32::MAX);
         let in_ptr = map_call_result(alloc.call(&mut *store, in_len))?;
@@ -167,7 +154,6 @@ impl WasmEngine {
         let out_cap = OUTPUT_BUFFER_BYTES;
         let out_ptr = map_call_result(alloc.call(&mut *store, out_cap))?;
 
-        // `compute`.
         let compute = required_export::<(u32, u32, u32, u32), i64>(
             &mut *store,
             &instance,
@@ -185,10 +171,6 @@ impl WasmEngine {
             return Err(ComputeError::OutputBufferTooSmall(written));
         }
 
-        // Read + deserialize the 4-part envelope. Validate `battle_report`
-        // against the manifest schema from the raw JSON first — typify's typed
-        // `ComputeOutputBattleReport` only materializes declared properties
-        // (`kind`); module-specific fields live in additionalProperties.
         let mut out_bytes = vec![0u8; written];
         memory.read(&*store, out_ptr as usize, &mut out_bytes)?;
         let raw: Value = serde_json::from_slice(&out_bytes)
@@ -228,7 +210,6 @@ use serde_json::Value;
 fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> {
     let mut entry_failures: Vec<EntryValidationFailure> = Vec::new();
 
-    // -- key_block_attributes -------------------------------------------------
     if let Some(ref kb_attrs) = schemas.key_block_attributes {
         let empty = vec![];
         let key_blocks = input
@@ -236,19 +217,13 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
             .and_then(Value::as_array)
             .unwrap_or(&empty);
         for (i, kb) in key_blocks.iter().enumerate() {
-            // V1.147 P0: ComputeInput.key_blocks carries spoke KnowledgeEntry
-            // JSON since V1.139 (type field `entry_type`); fall back to the
-            // legacy domain `block_type` so domain-shaped fixtures keep
-            // validating (e.g. nexus-wasm-host/tests/basic_combat.rs).
             let block_type = kb
                 .get("entry_type")
                 .and_then(Value::as_str)
                 .or_else(|| kb.get("block_type").and_then(Value::as_str))
                 .unwrap_or("");
             let result = kb_attrs.get(block_type).map_or_else(
-                // F-005 hardening (V1.147 P0 fix wave): when the manifest
                 // DECLARES key_block_attributes, an unresolvable or
-                // uncovered entry type is a manifest/input contract breach —
                 // reject fail-closed instead of silently skipping the entry.
                 || {
                     Err(ComputeError::ManifestValidationFailed {
@@ -271,7 +246,6 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
         }
     }
 
-    // -- key_block_state ------------------------------------------------------
     if let Some(ref kb_state) = schemas.key_block_state {
         let empty = vec![];
         let key_blocks = input
@@ -279,16 +253,12 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
             .and_then(Value::as_array)
             .unwrap_or(&empty);
         for (i, kb) in key_blocks.iter().enumerate() {
-            // V1.147 P0: spoke `entry_type` first, legacy `block_type` fallback
-            // (see key_block_attributes loop above).
             let block_type = kb
                 .get("entry_type")
                 .and_then(Value::as_str)
                 .or_else(|| kb.get("block_type").and_then(Value::as_str))
                 .unwrap_or("");
             let result = kb_state.get(block_type).map_or_else(
-                // F-005 hardening: fail-closed when key_block_state is
-                // declared, mirroring the key_block_attributes rule.
                 || {
                     Err(ComputeError::ManifestValidationFailed {
                         path: format!("key_blocks[{i}]"),
@@ -304,12 +274,6 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                         .get("body")
                         .and_then(|b| b.get("state"))
                         .and_then(|s| s.get(block_type));
-                    // Skip validation if state is absent or null. State may not
-                    // yet be initialized for newly-created computable blocks
-                    // (e.g. a character participating in its first combat scene);
-                    // modules handle missing state via their own fallback chains
-                    // (see `basic-combat/src/lib.rs` HP fallback logic). This
-                    // mirrors the `invocation` null-skip just below.
                     match state {
                         Some(state) if !state.is_null() => {
                             let path = format!("key_blocks[{i}].body.state.{block_type}");
@@ -329,17 +293,12 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
         }
     }
 
-    // All-or-nothing: any failing entry fails the whole invocation with
-    // per-entry detail (V1.147 P3 F2) — no silent skip of invalid entries.
     if !entry_failures.is_empty() {
         return Err(ComputeError::InputValidationFailed(entry_failures));
     }
 
-    // -- invocation -----------------------------------------------------------
     if let Some(ref invocation_schema) = schemas.invocation {
         let inv = input.get("invocation");
-        // Skip validation if invocation is absent or null (invocation is
-        // optional in ComputeInput).
         if let Some(inv) = inv {
             if !inv.is_null() {
                 validate_against_schema(
@@ -382,7 +341,6 @@ fn collect_entry_failure(
             });
         }
         Err(other) => {
-            // Unreachable today (validate_against_schema only emits
             // ManifestValidationFailed); keep the failure honest if that
             // ever changes.
             entry_failures.push(EntryValidationFailure {
@@ -427,7 +385,6 @@ fn validate_against_schema(
         return Ok(()); // empty / non-object schema → pass
     };
 
-    // `type` check — string form, or union form (array of type names).
     // Union support (V1.147 P0): spoke attribute values round-trip as floats
     // (`20.0`), so module manifests declare `["integer", "number"]` and the
     // validator must accept a value matching ANY member.
@@ -444,7 +401,6 @@ fn validate_against_schema(
         }
     }
 
-    // `const` check
     if let Some(const_val) = obj.get("const") {
         if instance != const_val {
             return Err(ComputeError::ManifestValidationFailed {
@@ -454,7 +410,6 @@ fn validate_against_schema(
         }
     }
 
-    // `required` — only for objects
     if let Some(instance_obj) = instance.as_object() {
         if let Some(required) = obj.get("required").and_then(Value::as_array) {
             for req in required {
@@ -468,8 +423,6 @@ fn validate_against_schema(
             }
         }
 
-        // `properties` — validate each declared property, and collect declared
-        // keys for the `additionalProperties` check below.
         let declared_keys: Option<std::collections::HashSet<&str>> =
             if let Some(properties) = obj.get("properties").and_then(Value::as_object) {
                 for (prop_name, prop_schema) in properties {
@@ -489,7 +442,6 @@ fn validate_against_schema(
                 None
             };
 
-        // `additionalProperties`: if false and instance has undeclared keys, flag
         if obj.get("additionalProperties") == Some(&Value::Bool(false)) {
             let declared = declared_keys.unwrap_or_default();
             for key in instance_obj.keys() {
@@ -503,7 +455,6 @@ fn validate_against_schema(
         }
     }
 
-    // `minimum` — only for numbers
     if let Some(min) = obj.get("minimum").and_then(Value::as_i64) {
         if let Some(n) = instance.as_i64() {
             if n < min {
@@ -515,7 +466,6 @@ fn validate_against_schema(
         }
     }
 
-    // `items` — for arrays, validate each element against the items schema
     if let Some(instance_arr) = instance.as_array() {
         if let Some(items_schema) = obj.get("items") {
             for (i, elem) in instance_arr.iter().enumerate() {
@@ -602,11 +552,6 @@ pub struct ResolvedSandbox {
     wall_time: Duration,
 }
 
-// ---------------------------------------------------------------------------
-// Error mapping
-// ---------------------------------------------------------------------------
-
-/// Map a wasmtime call result, translating fuel/epoch traps into typed errors.
 ///
 /// # Runtime memory-growth semantics (V1.206 P2 site 2)
 ///
@@ -693,10 +638,6 @@ where
         .map_err(|_| ComputeError::MissingExport(name.to_string()))
 }
 
-// ---------------------------------------------------------------------------
-// Wall-time watchdog
-// ---------------------------------------------------------------------------
-
 fn spawn_watchdog(
     engine: wasmtime::Engine,
     wall_time: Duration,
@@ -705,10 +646,6 @@ fn spawn_watchdog(
     thread::Builder::new()
         .name("nexus-wasm-watchdog".into())
         .spawn(move || {
-            // Sleep in small chunks so that, once `compute()` finishes and sets
-            // `cancelled`, this thread exits within `STEP` instead of blocking
-            // the caller's `join()` for the full `wall_time`. Epoch is only
-            // bumped if the budget truly elapses without cancellation.
             const STEP: Duration = Duration::from_millis(25);
             let mut elapsed = Duration::ZERO;
             while elapsed < wall_time {
@@ -733,10 +670,6 @@ mod tests {
     use crate::manifest::ModuleSchemas;
     use nexus_compute_policy::{DEFAULT_FUEL, DEFAULT_MEMORY_MIB, DEFAULT_WALL_TIME};
     use serde_json::json;
-
-    // ------------------------------------------------------------------
-    // validate_against_schema unit tests
-    // ------------------------------------------------------------------
 
     #[test]
     fn valid_object_passes_type_check() {
@@ -780,7 +713,6 @@ mod tests {
             },
             "required": ["base_atk", "max_hp"]
         });
-        // Instance is missing `base_atk`.
         let instance = json!({"max_hp": 100});
         let err = validate_against_schema(
             &instance,
@@ -893,7 +825,6 @@ mod tests {
                 }
             }
         });
-        // Missing body.attributes.base_atk
         let instance = json!({"body": {"attributes": {}}});
         let err = validate_against_schema(
             &instance,
@@ -911,10 +842,6 @@ mod tests {
             other => panic!("expected ManifestValidationFailed, got {other:?}"),
         }
     }
-
-    // ------------------------------------------------------------------
-    // validate_compute_input tests
-    // ------------------------------------------------------------------
 
     fn make_schemas() -> ModuleSchemas {
         ModuleSchemas {
@@ -967,7 +894,6 @@ mod tests {
     #[test]
     fn missing_required_attribute_fails_with_json_path() {
         let schemas = make_schemas();
-        // Missing `base_atk` (required).
         let input = json!({
             "key_blocks": [{
                 "entry_id": "kb_striker",
@@ -1014,16 +940,12 @@ mod tests {
 
     #[test]
     fn declared_schemas_reject_unknown_key_block_type() {
-        // F-005 hardening (V1.147 P0 fix wave): when the manifest DECLARES
         // key_block_attributes, an entry whose type is not covered by the
-        // schema map is a contract breach — reject fail-closed instead of
         // silently skipping validation.
         let schemas = ModuleSchemas {
             key_block_attributes: Some([("monster".to_string(), json!({"type": "object"}))].into()),
             ..Default::default()
         };
-        // key_block type is "character", but schema only covers "monster" →
-        // previously skipped (fail-open); now rejected.
         let input = json!({
             "key_blocks": [{
                 "block_type": "character",
@@ -1034,7 +956,6 @@ mod tests {
         match err {
             ComputeError::InputValidationFailed(entries) => {
                 assert_eq!(entries.len(), 1, "exactly one failing entry: {entries:?}");
-                // No `entry_id` on the fixture → positional fallback label.
                 assert_eq!(entries[0].entry_id, "key_blocks[0]");
                 assert!(
                     entries[0].reason.contains("unknown key_block type"),
@@ -1048,7 +969,6 @@ mod tests {
 
     #[test]
     fn all_invalid_entries_reported_without_silent_skip() {
-        // V1.147 P3 F2: all-or-nothing manifest validation — every invalid
         // entry is reported (entry id + reason), never silently skipped.
         let schemas = make_schemas();
         let input = json!({
@@ -1057,13 +977,11 @@ mod tests {
                     "entry_id": "kb_broken_a",
                     "block_type": "character",
                     "body": {"attributes": {"max_hp": 100}}
-                    // missing base_atk + base_def
                 },
                 {
                     "entry_id": "kb_broken_b",
                     "block_type": "character",
                     "body": {"attributes": {"base_atk": 10}}
-                    // missing max_hp + base_def
                 }
             ]
         });
@@ -1085,7 +1003,6 @@ mod tests {
 
     #[test]
     fn statless_entry_failure_reason_carries_field_path() {
-        // F2 dogfood: an entry that fails the manifest (missing required
         // attribute) surfaces an honest per-entry failure with the failing
         // field path, instead of a generic internal error.
         let schemas = make_schemas();
@@ -1094,7 +1011,6 @@ mod tests {
                 "entry_id": "kb_statless",
                 "block_type": "character",
                 "body": {"attributes": {"max_hp": 100, "base_atk": 5}}
-                // base_def missing
             }]
         });
         let err = validate_compute_input(&input, &schemas).unwrap_err();
@@ -1119,7 +1035,6 @@ mod tests {
 
     #[test]
     fn no_declared_key_block_schema_means_no_validation() {
-        // Domain-shape fallback preserved: when the manifest declares NO
         // key_block schema map (None), entries of any type pass untouched
         // (fixtures and schema-less modules keep working).
         let schemas = ModuleSchemas {
@@ -1138,7 +1053,6 @@ mod tests {
 
     #[test]
     fn empty_schemas_object_no_validation() {
-        // schemas is Some but all sub-fields are None → no validation.
         let schemas = ModuleSchemas::default();
         let input = json!({"key_blocks": [{"block_type": "character", "body": {}}]});
         assert!(validate_compute_input(&input, &schemas).is_ok());
@@ -1146,8 +1060,6 @@ mod tests {
 
     #[test]
     fn basic_combat_manifest_parses_with_schemas() {
-        // Ensure the real basic-combat manifest.json from the module directory
-        // deserializes correctly (embedded copy used at runtime).
         let manifest_json = include_str!("../../../modules/basic-combat/manifest.json");
         let m: ModuleManifest = serde_json::from_str(manifest_json).unwrap();
         let schemas = m.schemas.expect("basic-combat should have schemas");
@@ -1157,18 +1069,12 @@ mod tests {
         assert!(schemas.battle_report.is_some());
     }
 
-    // ------------------------------------------------------------------
-    // Depth-limit tests (qc3 W-001 fix)
-    // ------------------------------------------------------------------
-
     #[test]
     fn deeply_nested_properties_rejected_by_depth_limit() {
-        // Adversarial schema: 100 levels of nested `properties`.
         let mut schema = json!({"type": "integer"});
         for _ in 0..100 {
             schema = json!({"type": "object", "properties": {"a": schema}});
         }
-        // Matching instance: 100 levels of nested objects.
         let mut instance = json!(42);
         for _ in 0..100 {
             instance = json!({"a": instance});
@@ -1189,8 +1095,6 @@ mod tests {
 
     #[test]
     fn deeply_nested_items_rejected_by_depth_limit() {
-        // Adversarial instance: 100 levels of nested arrays.
-        // Schema mirrors the depth so each level validates.
         let mut schema = json!({"type": "integer"});
         for _ in 0..100 {
             schema = json!({"type": "array", "items": schema});
@@ -1213,10 +1117,6 @@ mod tests {
         }
     }
 
-    // ------------------------------------------------------------------
-    // PR-review fixes (Issue 1 + Issue 2)
-    // ------------------------------------------------------------------
-
     #[test]
     fn empty_battle_report_schema_accepts_null() {
         // Issue 1 regression: an empty schema `{}` accepts null per
@@ -1236,9 +1136,6 @@ mod tests {
             "empty schema should accept null: {result:?}"
         );
 
-        // Sanity: an object-typed schema still rejects null (the legitimate
-        // case the pre-check was trying to handle, now handled by the
-        // schema's own `type` keyword).
         let object_schema = json!({"type": "object"});
         let err = validate_against_schema(
             &Value::Null,
@@ -1276,7 +1173,6 @@ mod tests {
             ..Default::default()
         };
 
-        // Block with NO state initialized — must pass validation.
         let input = json!({
             "key_blocks": [{
                 "block_type": "character",
@@ -1289,8 +1185,6 @@ mod tests {
             "absent state should skip validation, got: {result:?}"
         );
 
-        // Sanity: block with state PRESENT but wrong type still fails
-        // (skipping null doesn't disable validation for non-null bad shapes).
         let input_bad = json!({
             "key_blocks": [{
                 "block_type": "character",
@@ -1313,10 +1207,6 @@ mod tests {
             other => panic!("expected InputValidationFailed, got {other:?}"),
         }
     }
-
-    // ------------------------------------------------------------------
-    // resolve_sandbox clamp tests
-    // ------------------------------------------------------------------
 
     fn make_manifest(
         module_id: &str,
@@ -1406,7 +1296,6 @@ mod tests {
 
     #[test]
     fn resolve_sandbox_mixed_overrides() {
-        // Fuel lower (wins), memory higher (clamped), wall-time absent (default).
         let engine = WasmEngine::new().unwrap();
         let low_fuel = DEFAULT_FUEL / 4;
         let high_mem = DEFAULT_MEMORY_MIB * 8;

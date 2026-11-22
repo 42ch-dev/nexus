@@ -111,7 +111,6 @@ describe('CreatorShellContent', () => {
         mode="create-inline"
         canCreateWorld
         labels={INLINE_CREATE_LABELS}
-        // Two worlds → no single-world preselect; the author must choose.
         worlds={[...WORLD_OPTIONS, { value: 'world-2', label: 'Briar Archive' }]}
         onWorldSubmit={() => {}}
         onWorkSubmit={onWorkSubmit}
@@ -123,7 +122,6 @@ describe('CreatorShellContent', () => {
     fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
     fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
 
-    // All text fields filled but no World chosen — the daemon would 400
     // `world_id_required`, so the submit stays disabled.
     expect(screen.getByLabelText('Work world')).toHaveValue('');
     expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
@@ -149,13 +147,11 @@ describe('CreatorShellContent', () => {
 
     fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
 
-    // Read error (not the genuine empty state) renders an alert with the
     // error copy instead of the empty "No worlds available" option.
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText('Failed to load worlds')).toBeInTheDocument();
     expect(screen.queryByText('No worlds available')).not.toBeInTheDocument();
 
-    // Fill every required text field so submit-readiness is attributable to
     // the World state alone — the submit must STILL stay blocked under the
     // read error (not merely because the fields are blank).
     fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
@@ -164,7 +160,6 @@ describe('CreatorShellContent', () => {
     expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
     expect(onWorkSubmit).not.toHaveBeenCalled();
 
-    // Retry is wired to the parent's refetch.
     fireEvent.click(within(alert).getByRole('button'));
     expect(onWorldsRetry).toHaveBeenCalledTimes(1);
   });
@@ -187,11 +182,9 @@ describe('CreatorShellContent', () => {
     fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
     const alert = screen.getByRole('alert');
 
-    // Error → retry: the Retry control asks the parent to refetch.
     fireEvent.click(within(alert).getByRole('button'));
     expect(onWorldsRetry).toHaveBeenCalledTimes(1);
 
-    // Recovery: the refetch succeeds, so the parent rerenders with worlds and
     // no error. Fill the text fields — the single-world preselect plus the
     // filled fields make the submit enabled and the payload complete.
     rerender(<CreatorShellContent {...props} worlds={WORLD_OPTIONS} onWorldsRetry={onWorldsRetry} />);
@@ -227,7 +220,6 @@ describe('CreatorShellContent', () => {
     );
 
     fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
-    // Exactly one World → preselected automatically.
     await vi.waitFor(() =>
       expect(screen.getByLabelText('Work world')).toHaveValue('world-1'),
     );

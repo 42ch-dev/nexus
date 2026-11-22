@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * States — DESIGN.md §Component Primitives/States + §Voice & Content.
  *
  * V1.148 P1 — promoted presentational primitives (from apps/web
  * components/ui/states.tsx). Pure presentational: caller-owned copy via props
@@ -15,8 +14,6 @@ import { cn } from '../lib/cn';
  */
 
 /**
- * Spinner — DESIGN.md §Motion. A small rotating loader used in loading states.
- * Honors prefers-reduced-motion via the global CSS rule (animation-duration 0).
  */
 export function Spinner({ className }: { className?: string }) {
   return (

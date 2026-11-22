@@ -47,7 +47,6 @@ pub fn validate_slug_name(slug: &str) -> Result<(), &'static str> {
     if slug.ends_with(char::is_whitespace) {
         return Err("must not end with whitespace");
     }
-    // Windows reserves the STEM with any extension (`CON.txt`, `nul.backup`)
     // and ignores everything after the first dot when resolving the device, so
     // the comparison is on the part before it. A dot in the tail is otherwise
     // legal (`my.con`).
@@ -90,13 +89,11 @@ mod tests {
             ("a\nb", "must not contain control characters"),
             ("novel.", "must not end with '.'"),
             ("novel ", "must not end with whitespace"),
-            // A tab is a control character first; a plain trailing space is the
             // whitespace rule Windows silently strips.
             ("novel\t", "must not contain control characters"),
             ("con", "must not be a reserved device name"),
             ("CON", "must not be a reserved device name"),
             ("lpt9", "must not be a reserved device name"),
-            // Windows reserves the stem regardless of extension.
             ("CON.txt", "must not be a reserved device name"),
             ("nul.backup", "must not be a reserved device name"),
             ("Aux.v2.yaml", "must not be a reserved device name"),

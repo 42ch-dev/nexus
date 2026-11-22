@@ -169,7 +169,6 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     let control_read = unsafe {
         GetSecurityDescriptorControl(descriptor_pointer, &raw mut control, &raw mut revision)
     };
-    // D39: all four accessor statuses are aggregated, so any zero refuses the
     // transition before the DACL/protection derivation below.
     let read = owner_read & group_read & dacl_read & control_read;
     if read == 0 {
@@ -181,7 +180,6 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     } else {
         ptr::null()
     };
-    // A protected DACL must stay protected; an inherited one must stay
     // inheritable, or the replacement silently changes the effective policy.
     let protection = if control & SE_DACL_PROTECTED != 0 {
         PROTECTED_DACL_SECURITY_INFORMATION
@@ -400,12 +398,10 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has no verifiable owner or DACL",
         ));
     }
-    // The owner SID lives inside the returned descriptor: its readable extent
     // ends at the bytes the second query actually wrote (`needed`), not at
     // the allocation's spare capacity or padding.
     let descriptor_end = (descriptor.as_ptr() as usize).checked_add(needed as usize);
     let owner_start = owner as usize;
-    // Fixed-prefix readability before the metadata read: the whole minimal
     // `SID` representation (revision, count, identifier authority, one
     // subauthority slot) must lie inside the returned bytes.
     if !descriptor_end.is_some_and(|end| {
@@ -418,7 +414,6 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has an invalid owner security identifier",
         ));
     }
-    // Bounded safety metadata (D45), then the complete count-dependent
     // enclosure, before any unbounded SID validator or comparison.
     let owner_count = advertised_subauthority_count(owner);
     if !descriptor_end.is_some_and(|end| {
@@ -472,7 +467,6 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         if got == 0 {
             return Err(io::Error::last_os_error());
         }
-        // NonNull enforces only nonnull; it does not establish native extent, alignment or lifetime.
         let ace = match ptr::NonNull::new(ace) {
             Some(ace) => ace,
             None => {
@@ -491,10 +485,8 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         // boundary, so this four-byte, four-aligned header read is in extent.
         let header = unsafe { &*ace.as_ptr().cast::<ACE_HEADER>() };
         match header.AceType {
-            // A denied ACE only narrows access; it grants nobody anything.
             ACCESS_DENIED_ACE_TYPE => {}
             ACCESS_ALLOWED_ACE_TYPE => {
-                // The fixed-prefix guard: a record whose documented
                 // `AceSize` does not cover the header, the mask and the
                 // complete minimal `SID` structure (revision, subauthority
                 // count, identifier authority and one subauthority slot)
@@ -520,7 +512,6 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
                 // the fixed SID structure is readable before validation.
                 let allowed = unsafe { &*ace.as_ptr().cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
-                // Bounded safety metadata (D45): the count byte's fixed
                 // prefix was proved readable by the extent guard above, and
                 // only then is the complete count-dependent enclosure
                 // checked, before any unbounded SID validator or comparison.

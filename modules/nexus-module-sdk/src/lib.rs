@@ -1,4 +1,5 @@
-//! Official SDK for Nexus compute modules (V1.170 P0, AR-1..AR-6).
+//! see docs/specs/compute/compute-module-abi.md — official SDK for Nexus
+//! compute modules (V1.170 P0, AR-1..AR-6).
 //!
 //! A compute module is a **stateless pure function**: it receives a
 //! [`ComputeInput`] envelope from the host and returns a 4-part
@@ -43,10 +44,6 @@ pub use manifest::{
 };
 pub use types::{ComputeInput, ComputeOutput, DeltaOp, StateDeltaOp, WorldRef};
 
-// Global allocator for wasm32-unknown-unknown (std provides none on this
-// target). dlmalloc grows linear memory on demand; the host's memory cap
-// bounds it. Host-target builds keep std's allocator so SDK unit tests run
-// on the host.
 #[cfg(target_arch = "wasm32")]
 #[global_allocator]
 static A: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
@@ -144,13 +141,10 @@ mod tests {
     fn nexus_entry_macro_expands_to_working_exports() {
         nexus_entry!(echo_compute);
 
-        // `init` is a no-op export.
         init();
 
-        // `alloc` returns a pointer into a leaked buffer (no crash on host).
         let _ptr = alloc(16);
 
-        // `compute` with an empty input must return the InputMalformed
         // sentinel (-1) without dereferencing the (null) pointers.
         assert_eq!(compute(0, 0, 0, 0), -1);
     }

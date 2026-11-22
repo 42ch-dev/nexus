@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
 # check-codegen-callsite-coverage.sh — typify struct-literal callsite gate
 # (R-V1163P2QC1-002 / V1.163 P1 failure class).
 #
@@ -21,7 +20,6 @@
 #   bash tooling/check-codegen-callsite-coverage.sh
 # After regen:
 #   pnpm run codegen:verify
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

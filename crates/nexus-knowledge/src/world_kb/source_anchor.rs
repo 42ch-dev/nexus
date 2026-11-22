@@ -102,7 +102,6 @@ impl SourceAnchor {
     }
 }
 
-// NOTE (V1.139 P1 T2): the legacy `From<NexusSourceAnchor>` / `From<NexusSourceAnchorStorySummaryRefsItem>`
 // conversions were removed — those `nexus_contracts::domain::*` types were deleted in P0
 // (`key-block.schema.json` removed). The spoke-side anchor mapping now lives in
 // `knowledge_entry.rs` (`nexus_anchor_to_spoke` / `spoke_anchor_to_nexus`), the wire-boundary

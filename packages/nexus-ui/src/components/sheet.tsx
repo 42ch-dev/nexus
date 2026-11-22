@@ -24,9 +24,6 @@ export interface SheetContentProps {
   title: string;
   description?: string;
   /**
-   * Accessible name for the dismiss control — caller-owned copy. Falls back
-   * to the app `en` locale string ("Close dialog"); apps/web overrides with
-   * its i18n default through the wrapper.
    */
   closeLabel?: string;
   /** Only `end` (right rail) is used today; kept for symmetry with DESIGN patterns. */

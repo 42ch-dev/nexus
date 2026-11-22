@@ -10,7 +10,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
 /**
- * Host-side regression for the shared SSE writer's TERMINAL marker (P1-T3 L2
  * Critical): a retained gap slot recorded AFTER the hub's terminal sorts after
  * it by sequence, so a stale/cursorless replay must END at the terminal frame —
  * never write the gap behind it onto the wire.
@@ -50,7 +49,6 @@ describe('sse-writer-terminal (shared writer terminal marker)', () => {
     const plan = hub.planReplay(undefined);
     assert.equal(plan.kind, 'all', 'a cursorless replay replays every retained frame');
 
-    // The real response the writer writes to: every byte it emits is observed.
     const chunks = [];
     const res = new EventEmitter();
     res.write = (chunk) => {
@@ -62,7 +60,6 @@ describe('sse-writer-terminal (shared writer terminal marker)', () => {
     res.end = () => {};
     const writer = new sse.SseWriter(res, hub);
 
-    // The Host replay loop's own stop condition: the terminal frame ends the
     // replay, so nothing retained behind it can reach the wire.
     let endedAtTerminal = false;
     for (const frame of plan.frames) {
@@ -98,7 +95,6 @@ const gapPayload = (operationId, padding) => ({
 });
 
 /**
- * Padding that makes one control frame exactly `SSE_RESERVED_CONTROL_BYTES`
  * long, measured on throwaway hubs (same idiom as the 4 KiB bound case in
  * `security-stream.test.mjs`). Every operation id has the same width, so the
  * measured padding reproduces the bound on every hub.
@@ -125,7 +121,6 @@ const measureControlSlotPadding = (OperationEventHub, reservedControlBytes) => {
 };
 
 /**
- * Fill one hub's two control slots to the per-hub ceiling: the retained
  * terminal (`OpFinished`) and the resync gap a stream ends with. Both frames are
  * exactly `SSE_RESERVED_CONTROL_BYTES`, so
  * `retainedMemoryBytes() - chargedBytes()` is exactly the
@@ -141,7 +136,6 @@ const fillControlSlots = (hub, padTerminal, padGap) => ({
 const controlBytesOf = ({ hub }) => hub.retainedMemoryBytes() - hub.chargedBytes();
 
 /**
- * Saturate the combined control reserve with the populations it is derived
  * from — retained terminal provider hubs, live provider-only hubs, retained
  * Actor hubs, and the stream-pinned retirements the registry defers — each
  * holding both of its maximum-size control slots. Returns the fixture so a case
@@ -178,7 +172,6 @@ const saturateCombinedReserve = async () => {
     return newHub(id);
   };
 
-  // Actor mirror arm: the Actor retention path (`markActorOperation`, the one
   // admission every Actor stream performs), at its own bound.
   for (let index = 0; index < cfg.REGISTRY_MAX_ACTOR_OPERATIONS; index += 1) {
     const id = OPERATION_ID('a', index);
@@ -190,7 +183,6 @@ const saturateCombinedReserve = async () => {
     );
     admit(id, newHub(id), arms.actor);
   }
-  // Stream-pinned retirements: a live reader is reading when the row's release
   // is requested, so `disposeOperation` defers it to that reader's detach and the
   // row keeps charging the reserve until then. This arm is the terminal one
   // because its bound is a FIFO: a deferred row leaves the queue without being
@@ -209,7 +201,6 @@ const saturateCombinedReserve = async () => {
       terminalTranscript: null,
     });
     const hub = newHub(id);
-    // A session shutdown retires the row while its reader is still mid-stream.
     registry.removeSession(id);
     assert.equal(
       registry.operationRecord(id)?.operationId,
@@ -218,12 +209,10 @@ const saturateCombinedReserve = async () => {
     );
     admit(id, hub, arms.pinned);
   }
-  // Retained terminal provider arm.
   for (let index = 0; index < cfg.REGISTRY_MAX_TERMINAL_OPERATIONS; index += 1) {
     const id = OPERATION_ID('t', index);
     admit(id, openProvider(id, 'finished'), arms.terminal);
   }
-  // Live provider-only arm.
   for (let index = 0; index < cfg.MAX_ACTIVE_PROVIDER_OPERATIONS; index += 1) {
     const id = OPERATION_ID('n', index);
     admit(id, openProvider(id, 'started'), arms.active);
@@ -244,7 +233,6 @@ const releaseAll = ({ budget, registry, arms }) => {
 };
 
 /**
- * The control reserve is a *combined* ceiling: the provider-only arms and the
  * Actor mirror arm charge the same pool, and a retirement the registry could not
  * apply because a live stream was still reading it holds its hub's slots until
  * that reader detaches. These cases saturate every population at the per-hub
@@ -261,7 +249,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
     const { cfg, budget, registry, arms } = fixture;
     try {
       const hubs = [...arms.terminal, ...arms.actor, ...arms.pinned, ...arms.active];
-      // Each arm at its own bound: the four populations the reserve is sized for.
       const expectedHubs =
         cfg.REGISTRY_MAX_TERMINAL_OPERATIONS +
         cfg.MAX_ACTIVE_PROVIDER_OPERATIONS +
@@ -278,7 +265,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
         'the control reserve must cover exactly these populations',
       );
 
-      // Every admitted hub keeps both typed endings, at the maximum slot size.
       for (const entry of hubs) {
         const { id, hub, terminal, gap } = entry;
         assert.equal(terminal?.wireBytes, cfg.SSE_RESERVED_CONTROL_BYTES, `${id} must retain its typed terminal`);
@@ -292,7 +278,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
         assert.equal(controlBytesOf(entry), 2 * cfg.SSE_RESERVED_CONTROL_BYTES);
       }
 
-      // The proven population consumes the reserve exactly — no byte is left.
       const charged = hubs.reduce((total, entry) => total + controlBytesOf(entry), 0);
       assert.equal(charged, cfg.SSE_CONTROL_RESERVED_TOTAL_BYTES);
       assert.equal(
@@ -309,7 +294,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
         `the combined proof must stay inside the ceiling: ${proof.totalBytes} > ${proof.ceilingBytes}`,
       );
 
-      // Wire behaviour at the ceiling: the hub that closed the reserve still
       // delivers its typed terminal, and the replay ends there.
       const last = hubs[hubs.length - 1];
       const chunks = [];
@@ -342,7 +326,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
         false,
         'the proven population must consume the reserve exactly',
       );
-      // The registry is the admission authority for every live row, so a row it
       // was not sized for is refused whole: no record, no session state, no hub —
       // and no control byte returned, because nothing was released or retained.
       const id = OPERATION_ID('x', 1);
@@ -404,7 +387,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
       }
       assert.ok(hub.evictionWatermark() > 1, 'the hub must have evicted history for a stale plan');
 
-      // Byte-exact exhaustion: the remaining reserve stands for the rest of the
       // proven population, so the ending below has nothing left to charge. That
       // is the one state the admission bounds keep the registry from growing
       // into — and it must stay diagnosable if it is ever reached.
@@ -459,7 +441,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
     try {
       assert.equal(budget.tryReserveControlBytes(1), false, 'the fixture must start saturated');
 
-      // The stream-pinned arm: the deferred retirement lands at the reader's
       // detach, and exactly that arm's slots come back — no more, no less.
       for (const { id } of arms.pinned) registry.detachOperationStream(id);
       for (const { id } of arms.pinned) {
@@ -474,7 +455,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
       assert.equal(budget.tryReserveControlBytes(1), false, 'and exactly its slots');
       budget.releaseControlBytes(pinnedBytes);
 
-      // The capped arms retire through their own paths.
       for (const { id } of arms.actor) registry.retireActorOperation(id);
       for (const { id } of arms.terminal) registry.removeSession(id);
       for (const { id } of arms.active) registry.removeSession(id);
@@ -496,7 +476,6 @@ describe('combined control reserve (terminal + active + Actor + stream-pinned hu
 });
 
 /**
- * A hub exists for a row the registry retains, and the bounds in the reserve
  * derivation are enforced on the *production* creation routes, not just counted:
  * the Actor execute registration, the live provider-only dispatch, and the cold
  * hydration of a natively-live operation. Each case drives the real function
@@ -555,7 +534,6 @@ describe('provider lane admission (execute registration)', () => {
           operationIds.push(operationId);
           return { operation_id: operationId, session_id: actorSessionId, status: 'started' };
         },
-        // The authority still serves every run: the age sweep is not what bounds
         // the arm here — the retention bound itself is under test.
         hostCharacterOperation: async (principal, operationId) => ({
           operation_id: operationId,
@@ -590,7 +568,6 @@ describe('provider lane admission (execute registration)', () => {
       );
       assert.notEqual(registry.operationRecord(operationIds[total - 1]), undefined, 'the newest row is retained');
 
-      // No hub outside the proof: a hub exists exactly for the rows retained.
       for (const operationId of operationIds) {
         assert.equal(
           registry.hubForOperation(operationId) !== undefined,
@@ -599,7 +576,6 @@ describe('provider lane admission (execute registration)', () => {
         );
       }
 
-      // Every retained row still keeps both of its typed endings, and the whole
       // arm's measured charge stays inside the reserve the proof derives.
       let charged = 0;
       for (const record of retained) {
@@ -621,8 +597,6 @@ describe('provider lane admission (execute registration)', () => {
         `the retained Actor arm must leave the rest of the reserve free: ${charged}`,
       );
 
-      // A retirement request under a live reader is deferred to that reader's
-      // detach, never applied under the stream it is reading.
       const pinned = retained[0].operationId;
       registry.attachOperationStream(pinned);
       registry.retireActorOperation(pinned);
@@ -630,8 +604,6 @@ describe('provider lane admission (execute registration)', () => {
       registry.detachOperationStream(pinned);
       assert.equal(registry.operationRecord(pinned), undefined, 'the deferred retirement lands at the last detach');
 
-      // Settled-row preservation: a later mark is admission, not observation, so
-      // it never rewinds the row it already holds.
       const settledId = retained[1].operationId;
       const terminalEvent = { OpFinished: { reason: 'end_turn' } };
       assert.equal(registry.finishOperation(settledId, terminalEvent, 'the captured transcript'), true);
@@ -673,7 +645,6 @@ describe('provider lane admission (execute registration)', () => {
                 },
               }
             : {},
-        // Every dispatched execute stays in flight: none of them has registered
         // a row yet when the next request arrives — the exact race the cap missed
         // when it only read the registered rows.
         providerCall: (request) => {
@@ -693,7 +664,6 @@ describe('provider lane admission (execute registration)', () => {
           (error) => error,
         ),
       );
-      // Every request has to resolve its native session read first: a couple of
       // macrotasks let all of them reach admission while none has registered a
       // row yet — the exact race a cap that reads only registered rows misses.
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -720,7 +690,6 @@ describe('provider lane admission (execute registration)', () => {
         'the admitted dispatches are the live population',
       );
 
-      // The admitted population keeps its typed endings, and the arm at the cap
       // still refuses the next dispatch *before* it reaches the provider.
       const liveRows = registry.actorBackedOperations().length;
       assert.equal(liveRows, 0, 'no admitted provider-only row may be marked Actor-backed');
@@ -771,7 +740,6 @@ describe('provider lane admission (execute registration)', () => {
     const coldSessionId = randomUUID();
     const coldOperationId = OPERATION_ID('h', cfg.MAX_ACTIVE_PROVIDER_OPERATIONS);
     try {
-      // The mirror holds the live population the transport admitted.
       for (let index = 0; index < cfg.MAX_ACTIVE_PROVIDER_OPERATIONS; index += 1) {
         const sessionId = randomUUID();
         const operationId = OPERATION_ID('h', index);
@@ -794,7 +762,6 @@ describe('provider lane admission (execute registration)', () => {
       const service = {
         providerRegistry: registry,
         core: {
-          // Native truth for the cold session and its running operation.
           hostQuery: async (request) => {
             if (request.query === 'get_operation') {
               return {
@@ -847,7 +814,6 @@ describe('provider lane admission (execute registration)', () => {
       );
       budget.releaseControlBytes(cfg.SSE_CONTROL_RESERVED_TOTAL_BYTES);
 
-      // The hydration path asks the one registration authority to admit the row,
       // so the refusal is also observable there — with nothing retained.
       assert.equal(
         registry.registerOperation({
@@ -862,9 +828,7 @@ describe('provider lane admission (execute registration)', () => {
         'the registration authority must refuse the cold live row',
       );
 
-      // Positive control: with one slot released, the same cold operation is
       // admitted and ends its stream with the typed terminal the authority
-      // delivered — the refusal above was capacity, not a broken lane.
       registry.removeSession(liveSessions[0]);
       const priorDelay = process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
       process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1';

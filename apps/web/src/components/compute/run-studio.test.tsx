@@ -39,7 +39,6 @@ import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
 import { renderInApp } from '@/test/test-providers';
 
-// I-000084 container wiring probe: jsdom's own `summary.click()` writes the
 // `open` attribute, so the DOM cannot distinguish a correct `advanced` wiring
 // from a no-op `onOpenChange` or a hardcoded literal. Observe the
 // container→chrome prop boundary instead, and keep the real chrome markup for
@@ -78,7 +77,6 @@ const MODULE: ModuleDetail = {
   init_export: 'init',
   description: 'A simple combat resolution module.',
   author: 'Nexus Team',
-  // No `required` fields → the Run button only needs a World selection.
   schemas: { invocation: { type: 'object', properties: {}, required: [] } },
 };
 
@@ -172,11 +170,9 @@ describe('RunStudio deep-link `?run=` re-sync (V1.147 PR #194)', () => {
 
     const view = renderStudio('run-a');
 
-    // Deep link run-a opens its inspector.
     expect(await screen.findByText('Run A timeline event')).toBeInTheDocument();
     expect(screen.getByTestId('run-inspector')).toBeInTheDocument();
 
-    // Same route element, new `?run=` value (compute node B "Open Run") — the
     // inspector must follow the prop, not stay on the stale run.
     view.rerender(<RunStudio module={MODULE} initialRunId="run-b" />);
 
@@ -190,7 +186,6 @@ describe('RunStudio deep-link `?run=` re-sync (V1.147 PR #194)', () => {
     const view = renderStudio('run-a');
     expect(await screen.findByText('Run A timeline event')).toBeInTheDocument();
 
-    // `?run=` removed (module switch deletes the param, or the author clears
     // it) — the open inspector must close.
     view.rerender(<RunStudio module={MODULE} initialRunId={undefined} />);
 
@@ -229,7 +224,6 @@ describe('RunStudio deep-link `?run=` re-sync (V1.147 PR #194)', () => {
     const view = renderStudio('run-a');
     expect(await screen.findByText('Run A timeline event')).toBeInTheDocument();
 
-    // Fresh run after the deep link: the POST-success inspector takes over.
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
     await user.selectOptions(screen.getByTestId('run-studio-world'), 'w1');
     await waitFor(() => expect(screen.getByTestId('run-studio-run')).toBeEnabled());
@@ -237,7 +231,6 @@ describe('RunStudio deep-link `?run=` re-sync (V1.147 PR #194)', () => {
     expect(await screen.findByText('Fresh run event')).toBeInTheDocument();
     expect(screen.queryByText('Run A timeline event')).not.toBeInTheDocument();
 
-    // The parent re-renders with the SAME `?run=run-a` value (runs-list
     // refresh etc.) — the sync effect must not re-open the stale deep-linked
     // run over the fresh-run inspector.
     view.rerender(<RunStudio module={MODULE} initialRunId="run-a" />);
@@ -267,10 +260,8 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
 
     const view = renderStudio('run-a', 'w1');
 
-    // Deep link `?world=w1` pre-fills the selector.
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
 
-    // Same route element, new `?world=` value (second Timeline Run Module
     // entry) — the selector must follow the prop, not stay on the stale
     // World (a Run would otherwise execute against the wrong World).
     view.rerender(<RunStudio module={MODULE} initialRunId="run-a" initialWorldId="w2" />);
@@ -290,11 +281,9 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     const view = renderStudio(undefined, 'w1');
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
 
-    // The author picks a different World manually.
     await user.selectOptions(screen.getByTestId('run-studio-world'), 'w2');
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w2'));
 
-    // The parent re-renders with the SAME `?world=w1` value (runs-list
     // refresh etc.) — the sync effect must not force the selector back.
     view.rerender(<RunStudio module={MODULE} initialRunId={undefined} initialWorldId="w1" />);
     expect(screen.getByTestId('run-studio-world')).toHaveValue('w2');
@@ -306,7 +295,6 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     const view = renderStudio('run-a', 'w1');
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
 
-    // `?world=` removed (param deleted, browser back) — the selector resets
     // to the empty placeholder, mirroring the round-1 `?run=` removal close.
     view.rerender(<RunStudio module={MODULE} initialRunId="run-a" initialWorldId={undefined} />);
 
@@ -325,7 +313,6 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
 
-    // Populate the guided form AND the Advanced JSON escape hatch.
     const field = await screen.findByTestId('run-form-field-difficulty');
     await user.type(field, 'hard');
     expect(field).toHaveValue('hard');
@@ -336,7 +323,6 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     expect(jsonArea).toHaveValue('{"difficulty":"hard"}');
     expect(screen.getByTestId('run-studio-run')).toBeEnabled();
 
-    // Same route element, new `?world=` value — the invocation state must
     // reset exactly like the manual World switch (the old World's params must
     // never be submitted against the new World).
     view.rerender(<RunStudio module={MODULE_WITH_FIELD} initialWorldId="w2" />);
@@ -345,7 +331,6 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     const clearedField = await screen.findByTestId('run-form-field-difficulty');
     expect(clearedField).toHaveValue('');
     expect(screen.getByTestId('run-studio-json-textarea')).toHaveValue('{}');
-    // `jsonDirty` is reset too: enablement falls back to the guided required
     // gate, which is unsatisfied after the reset.
     expect(screen.getByTestId('run-studio-run')).toBeDisabled();
   });
@@ -362,13 +347,11 @@ describe('RunStudio deep-link `?world=` re-sync (V1.147 PR #194)', () => {
     const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
 
-    // Manual World switch, then populate the guided form for the new World.
     await user.selectOptions(screen.getByTestId('run-studio-world'), 'w2');
     const field = await screen.findByTestId('run-form-field-difficulty');
     await user.type(field, 'hard');
     expect(field).toHaveValue('hard');
 
-    // The parent re-renders with the SAME `?world=w1` value (runs-list
     // refresh etc.) — the sync effect must neither force the selector back
     // nor clear the author's values.
     view.rerender(<RunStudio module={MODULE_WITH_FIELD} initialWorldId="w1" />);
@@ -395,13 +378,11 @@ describe('RunStudio module-switch re-sync (V1.147 PR #194 round 4)', () => {
     const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
 
-    // Populate the guided form for the first module.
     const field = await screen.findByTestId('run-form-field-difficulty');
     await user.type(field, 'hard');
     expect(field).toHaveValue('hard');
     expect(screen.getByTestId('run-studio-run')).toBeEnabled();
 
-    // The author clicks another module (same route element; the new module's
     // detail is cached so the studio stays mounted) — the previous module's
     // params must not be submittable against the new module.
     view.rerender(<RunStudio module={MODULE_OTHER} initialWorldId="w1" />);
@@ -410,7 +391,6 @@ describe('RunStudio module-switch re-sync (V1.147 PR #194 round 4)', () => {
       expect(screen.getByTestId('run-form-field-difficulty')).toHaveValue(''),
     );
     expect(screen.getByTestId('run-studio-run')).toBeDisabled();
-    // The World selection is a shared axis — the module switch must not reset it.
     expect(screen.getByTestId('run-studio-world')).toHaveValue('w1');
   });
 
@@ -421,7 +401,6 @@ describe('RunStudio module-switch re-sync (V1.147 PR #194 round 4)', () => {
     const view = renderStudio(undefined, 'w1', MODULE_WITH_FIELD);
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'));
 
-    // Populate the Advanced JSON escape hatch (enablement comes from the
     // valid JSON object, not the guided `required` gate).
     await user.click(screen.getByText('Advanced: edit invocation JSON'));
     const jsonArea = screen.getByTestId('run-studio-json-textarea');
@@ -429,14 +408,12 @@ describe('RunStudio module-switch re-sync (V1.147 PR #194 round 4)', () => {
     expect(jsonArea).toHaveValue('{"difficulty":"hard"}');
     expect(screen.getByTestId('run-studio-run')).toBeEnabled();
 
-    // `?module=` deep-link switch (second Timeline "Run Module" entry on
     // another module — search-params-only navigation, studio stays mounted).
     view.rerender(<RunStudio module={MODULE_OTHER} initialWorldId="w1" />);
 
     await waitFor(() =>
       expect(screen.getByTestId('run-studio-json-textarea')).toHaveValue('{}'),
     );
-    // `jsonDirty` is reset: enablement falls back to the guided gate, which
     // is unsatisfied after the reset.
     expect(screen.getByTestId('run-studio-run')).toBeDisabled();
   });
@@ -467,13 +444,11 @@ describe('RunStudio module-switch re-sync (V1.147 PR #194 round 4)', () => {
     const view = renderStudio(undefined, 'w1', MODULE);
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
 
-    // Fresh run with NO `?run=` in the URL: the inspector renders from
     // `latestRun`, which the run re-sync effect never sees.
     await user.click(screen.getByTestId('run-studio-run'));
     expect(await screen.findByText('Fresh run event')).toBeInTheDocument();
     expect(screen.getByTestId('run-inspector')).toBeInTheDocument();
 
-    // Module switch (user click): the stale fresh-run inspector from the
     // previous module must close even though `initialRunId` never changed.
     view.rerender(<RunStudio module={MODULE_OTHER} initialWorldId="w1" />);
 
@@ -519,7 +494,6 @@ describe('RunStudio branch pre-fill (`?branch=` — Bugbot 1)', () => {
     useHandlers(...branchRunHandlers([{ world_id: 'w1', title: 'Test World' }], runBodies));
     const user = userEvent.setup();
 
-    // Timeline Run Module entry from a forked-branch view (`?branch=fbk_fork_1`).
     renderStudio(undefined, 'w1', MODULE, 'fbk_fork_1');
     await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
 
@@ -551,7 +525,6 @@ describe('RunStudio branch pre-fill (`?branch=` — Bugbot 1)', () => {
 
 describe('RunStudio deep-linked Run load failure (P2-T4)', () => {
   /**
-   * A `?run=` deep link whose detail read fails — e.g. Clear history deleted
    * the terminal run, or the daemon is unreachable — must report the failure.
    * Rendering nothing left the author with a blank space where the inspector
    * belongs and no way to retry.
@@ -579,7 +552,6 @@ describe('RunStudio deep-linked Run load failure (P2-T4)', () => {
     expect(await screen.findByText('Could not load this Run')).toBeInTheDocument();
     expect(screen.queryByTestId('run-inspector')).not.toBeInTheDocument();
 
-    // Retry is the author's only path back — it must re-issue the read.
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
   });
@@ -587,7 +559,6 @@ describe('RunStudio deep-linked Run load failure (P2-T4)', () => {
 
 describe('RunStudio failed-Run review (P2-T4)', () => {
   /**
-   * A Run that executed and failed is a first-class review state (product
    * §2/S2-3): the inspector shows the failure and its code, and offers no
    * Accept/Discard — there are no proposals to apply.
    */
@@ -619,7 +590,6 @@ describe('RunStudio failed-Run review (P2-T4)', () => {
 
 describe('RunStudio Advanced disclosure wiring (I-000084)', () => {
   /**
-   * The container owns `advancedOpen` and must hand both halves of the pair to
    * the chrome. jsdom flips the `<details open>` attribute on its own, so the
    * prop boundary is the only honest observation point: a literal `open`, a
    * no-op `onOpenChange`, or a hardcoded `open: true` all pass an attribute

@@ -1,5 +1,4 @@
 /**
- * brief-time-bands — V1.159 P1 Task 2 component tests.
  *
  * Covers the SDD task brief's seven required cases:
  *   1. renders_flat_eras_as_depth_0_bands   — no nesting; all bands at root
@@ -26,8 +25,6 @@ import { renderInApp } from '@/test/test-providers';
 
 import { buildEraTree, type EraTreeNode } from '../brief-era-tree';
 import { BriefTimeBands } from '../brief-time-bands';
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function eraEntity(
   overrides: Partial<WorldKbEntityProjection> &
@@ -106,8 +103,6 @@ function bandOf(container: HTMLElement, eraId: string): HTMLElement {
   return el;
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 describe('BriefTimeBands', () => {
   it('renders_flat_eras_as_depth_0_bands', () => {
     const tree = buildEraTree(
@@ -121,11 +116,9 @@ describe('BriefTimeBands', () => {
 
     const { container } = renderBands(tree);
 
-    // Every flat era renders as its own band at depth 0.
     expect(screen.getAllByTestId('brief-time-band')).toHaveLength(3);
     expect(container.querySelectorAll('[data-depth="0"]')).toHaveLength(3);
     expect(container.querySelectorAll('[data-depth="1"]')).toHaveLength(0);
-    // Depth-0 bands are not collapsible — no toggles.
     expect(screen.queryByTestId('brief-time-band-toggle')).toBeNull();
     expect(screen.getByText('First Age')).toBeInTheDocument();
     expect(screen.getByText('Second Age')).toBeInTheDocument();
@@ -147,8 +140,6 @@ describe('BriefTimeBands', () => {
 
     const { container } = renderBands(tree);
 
-    // Child bands carry more left padding than their parent (indent step =
-    // 24px per depth level).
     expect(bandOf(container, 'kb-kingdom').parentElement).toHaveStyle({
       paddingLeft: '0px',
     });
@@ -178,7 +169,6 @@ describe('BriefTimeBands', () => {
 
     const { container } = renderBands(tree);
 
-    // kingdom/age/sub-age map to distinct DESIGN.md token colors.
     expect(bandOf(container, 'kb-kingdom').style.backgroundColor).toBe('var(--color-amber-900)');
     expect(bandOf(container, 'kb-age').style.backgroundColor).toBe('var(--color-amber-800)');
     expect(bandOf(container, 'kb-sub-age').style.backgroundColor).toBe('var(--color-gray-700)');
@@ -197,7 +187,6 @@ describe('BriefTimeBands', () => {
 
     const badge = screen.getByTestId('brief-time-band-type-badge');
     expect(badge).toBeInTheDocument();
-    // Freeform era_type renders verbatim on the badge.
     expect(badge).toHaveTextContent('age');
   });
 
@@ -210,7 +199,6 @@ describe('BriefTimeBands', () => {
     renderBands(tree);
 
     expect(screen.queryByTestId('brief-time-band-type-badge')).toBeNull();
-    // Legacy untyped eras still render as default-colored bands.
     expect(screen.getByText('First Age')).toBeInTheDocument();
   });
 
@@ -229,7 +217,6 @@ describe('BriefTimeBands', () => {
 
     const { container } = renderBands(tree);
 
-    // A depth>0 band with children is collapsible; children visible by
     // default (expanded). The depth-1 age band owns the Early Epoch child.
     const toggles = screen.getAllByTestId('brief-time-band-toggle');
     expect(toggles).toHaveLength(1);
@@ -237,17 +224,14 @@ describe('BriefTimeBands', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(bandOf(container, 'kb-epoch')).toBeInTheDocument();
 
-    // Click toggles children hidden.
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(
       container.querySelector('[data-era-id="kb-epoch"][data-testid="brief-time-band"]'),
     ).toBeNull();
-    // Parent + sibling bands remain visible.
     expect(bandOf(container, 'kb-age')).toBeInTheDocument();
     expect(bandOf(container, 'kb-kingdom')).toBeInTheDocument();
 
-    // Click again restores children.
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(bandOf(container, 'kb-epoch')).toBeInTheDocument();
@@ -271,7 +255,6 @@ describe('BriefTimeBands', () => {
 
     const snippet = screen.getByTestId('brief-time-band-summary');
     expect(snippet).toHaveTextContent(summary);
-    // Truncated presentation: clamped to two lines, full text on hover.
     expect(snippet).toHaveClass('line-clamp-2');
     expect(snippet).toHaveAttribute('title', summary);
     expect(container.querySelectorAll('[data-testid="brief-time-band-summary"]')).toHaveLength(1);

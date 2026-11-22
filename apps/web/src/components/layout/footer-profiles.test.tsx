@@ -257,9 +257,7 @@ describe('FooterProfiles', () => {
   });
 });
 
-// ── CreateCreatorDialog classified error region (V1.129 P0 T4) ──────────────
 //
-// The dialog consumes `NexusClientError.kind` and renders the matching
 // headline + body + CTA from the spec table. We drive each kind by injecting a
 // stub NexusClient whose `createCreator` rejects with a pre-classified error,
 // so the dialog UX is tested independently of the classifier (covered in
@@ -267,7 +265,6 @@ describe('FooterProfiles', () => {
 // § Dialog UX contract for the locked copy + CTA table.
 
 /**
- * Build a NexusClient stub whose `createCreator` rejects with a NexusClientError
  * carrying the given kind. Other NexusClient methods stay no-op rejects so the
  * dialog renders without a real transport.
  */
@@ -353,7 +350,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     expect(
       within(region).getByRole('button', { name: /Open Connection Settings/i }),
     ).toBeInTheDocument();
-    // Secondary CTA is Retry for network per spec table.
     expect(
       within(region).getByRole('button', { name: /Retry/i }),
     ).toBeInTheDocument();
@@ -392,7 +388,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     await openCreateDialogAndSubmit();
     const region = await screen.findByTestId('create-creator-transport-error');
 
-    // Click Retry; expect createCreator to be invoked a second time with the
     // same payload. The transport will still reject (the stub always rejects),
     // so the dialog stays open and the region remains visible.
     await userEvent.setup().click(
@@ -406,7 +401,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
   });
 
   it('does not surface the classified region for HTTP errors (no kind)', async () => {
-    // HTTP errors carry a status + code (fromBody) but no `kind` — they are
     // handled by the global toast via useCreateCreator.onError, not the
     // dialog's transport-recovery region.
     useHandlers(
@@ -426,22 +420,18 @@ describe('CreateCreatorDialog classified transport error UX', () => {
 
     await openCreateDialogAndSubmit();
 
-    // Wait a tick for the mutation to settle; the classified region must never mount.
     await waitFor(() =>
       expect(screen.queryByTestId('create-creator-transport-error')).not.toBeInTheDocument(),
     );
   });
 
-  // ── QC3-F-001 regression: primary CTA onClick must branch per kind ──────────
   //
-  // The primary CTA's label varies per `primaryCtaForKind`, so its click handler
   // must vary the same way: `openConnectionSettings` navigates, `useDesktopApp`
   // is informational (no-op), `retry` re-submits. These tests pin the contract
   // for each branch so a future regression that re-hardcodes `handleRetry` is
   // caught immediately.
 
   /**
-   * Render FooterProfiles alongside a Routes tracker that surfaces a marker when
    * the router lands on `/settings/advanced`. The dialog's
    * `handleOpenConnectionSettings` calls `navigate('/settings/advanced#connection')`,
    * which this marker verifies.
@@ -474,21 +464,16 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     await openCreateDialogAndSubmit();
 
     const region = await screen.findByTestId('create-creator-transport-error');
-    // The initial form submit already triggered one createCreator call.
     expect(client.createCreator).toHaveBeenCalledTimes(1);
 
-    // Click the PRIMARY CTA by testid so the assertion is surgical — it
     // targets the button whose onClick the QC3-F-001 fix branched, regardless
     // of label collisions with the secondary CTA on other kinds.
     await user.click(within(region).getByTestId('create-creator-error-primary'));
 
-    // Navigation must have happened.
     await waitFor(() =>
       expect(screen.getByTestId('nav-settings-advanced')).toBeInTheDocument(),
     );
-    // The dialog closes as part of handleOpenConnectionSettings.
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    // Regression guard: createCreator was NOT invoked a second time.
     expect(client.createCreator).toHaveBeenCalledTimes(1);
   });
 
@@ -503,19 +488,14 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     const region = await screen.findByTestId('create-creator-transport-error');
     expect(client.createCreator).toHaveBeenCalledTimes(1);
 
-    // Click the primary CTA ("Use Desktop App") — should be a true no-op.
     await user.click(within(region).getByTestId('create-creator-error-primary'));
 
-    // No second mutate call.
     expect(client.createCreator).toHaveBeenCalledTimes(1);
-    // No navigation — the settings marker must not appear.
     expect(screen.queryByTestId('nav-settings-advanced')).not.toBeInTheDocument();
-    // The dialog stays open (onOpenChange was never called).
     expect(screen.getByTestId('create-creator-transport-error')).toBeInTheDocument();
   });
 
   it('regression guard: retry-default kinds still re-submit via the primary CTA (QC3-F-001)', async () => {
-    // For `daemon_down`, primaryCtaForKind returns 'retry'. The primary CTA's
     // onClick must still call mutate (regression guard against accidentally
     // breaking the retry branch while adding the openConnectionSettings /
     // useDesktopApp branches).
@@ -533,7 +513,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
 
     await waitFor(() => expect(client.createCreator).toHaveBeenCalledTimes(2));
     expect(client.createCreator).toHaveBeenNthCalledWith(2, { display_name: 'Carol' });
-    // No navigation — retry keeps the user in the dialog.
     expect(screen.queryByTestId('nav-settings-advanced')).not.toBeInTheDocument();
   });
 });

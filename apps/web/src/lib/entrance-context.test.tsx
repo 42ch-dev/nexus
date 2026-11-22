@@ -1,5 +1,4 @@
 /**
- * Entrance provider resolution semantics (V1.170 P1 — AR-16 / AR-20).
  *
  * Precedence: URL override > stored > default; invalid values ignored; no
  * write on unset; provider never rewrites the URL. The desktop IPC pair is a
@@ -56,7 +55,6 @@ function ipcDesktop(overrides: {
   getEntrance?: () => Promise<EntranceId>;
   setEntrance?: (value: EntranceId) => Promise<void>;
 } = {}) {
-  // renderInApp always mounts SetupCompletedProvider, which reads
   // `getSetupCompleted` on mount when a desktop is injected.
   return {
     getSetupCompleted: async () => true,
@@ -154,7 +152,6 @@ describe('EntranceProvider resolution (AR-16/AR-20)', () => {
     });
     await waitFor(() => expect(probe.get()?.entrance).toBe('developer'));
     expect(probe.get()?.isLoading).toBe(false);
-    // Desktop first-run is the wizard (AR-17) — never the identity page.
     expect(probe.get()?.isFirstRun).toBe(false);
   });
 

@@ -208,8 +208,6 @@ async fn stored_summary(fixture: &DirectFixture, entry_id: &str) -> Option<Strin
     })
 }
 
-// ── entity patch ───────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn entity_patch_updates_title_and_bumps_version() {
     let fixture = DirectFixture::new().await;
@@ -272,7 +270,6 @@ async fn entity_patch_stale_version_surfaces_conflict() {
     let world_id = create_world(&fixture);
     let entity_id = seed_entity(&fixture, &world_id).await;
 
-    // Bump the entity to revision 1 via a first patch.
     let first = kb_cli(
         &fixture,
         &[
@@ -294,7 +291,6 @@ async fn entity_patch_stale_version_surfaces_conflict() {
         stderr(&first)
     );
 
-    // Replay with the stale version 0 → 409 world_kb_conflict.
     let out = kb_cli(
         &fixture,
         &[
@@ -312,7 +308,6 @@ async fn entity_patch_stale_version_surfaces_conflict() {
     );
     assert!(!out.status.success(), "stale patch should fail");
     let err = stderr(&out);
-    // v1.189 P1-T3: graph/patch now ride the core direct-writer, not the
     // daemon HTTP route. The locked direct-core error contract keeps the same
     // structured `world_kb_conflict` surface: the stable code, the row's
     // current version, the caller's expected version (so a stale CAS names
@@ -372,8 +367,6 @@ async fn entity_patch_help_documents_expected_version_retry() {
     assert!(text.contains("refetch the graph"), "{text}");
 }
 
-// ── kb graph ──────────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn kb_graph_lists_entity_with_version() {
     let fixture = DirectFixture::new().await;
@@ -405,7 +398,6 @@ async fn kb_graph_json_emits_dto_verbatim() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn kb_graph_notes_relationship_cap_when_hit() {
-    // qc3 W-002: the graph read caps the relationship projection at 1000 stored
     // relationships with no wire `truncated` flag; when the count hits the cap
     // the human output must state plainly that the graph may be truncated (the
     // note itself is honest about the missing flag).
@@ -428,8 +420,6 @@ async fn kb_graph_notes_relationship_cap_when_hit() {
     );
     assert!(text.contains("no wire `truncated` flag"), "{text}");
 }
-
-// ── pack export + dry run: the CLI surface itself ─────────────────────────
 
 /// `creator world kb pack export` and `pack import --dry-run` run end to end
 /// against the real binary on the direct-core seam: the export writes the
@@ -466,14 +456,12 @@ async fn pack_export_and_dry_run_without_server() {
     let entries = pack["entries"].as_array().expect("entries array");
     assert_eq!(entries.len(), 1, "the seeded entity must be exported");
     assert_eq!(entries[0]["entry_id"], entity_id);
-    // Private facts of the only admitted holder are not exported without the
     // explicit `--include-owned-private` intent.
     assert!(
         text.contains("shared rows only"),
         "scope line missing: {text}"
     );
 
-    // Dry run with the overwrite policy: the plan says the row would be
     // replaced, and nothing is written — the body still reads as stored.
     let dry = kb_cli(
         &fixture,
@@ -502,8 +490,6 @@ async fn pack_export_and_dry_run_without_server() {
         "the dry run must not rewrite the stored row"
     );
 }
-
-// ── pack import: holder governance without a server ───────────────────────
 
 /// A pack atom governed by an unmapped foreign holder must stay quarantined —
 /// **not** published as the importing Creator's own private fact — and the
@@ -544,7 +530,6 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
     )
     .expect("write pack");
 
-    // ── Unmapped import: quarantined, never stored ─────────────────────
     let out = kb_cli(
         &fixture,
         &[
@@ -577,7 +562,6 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         err.contains("rejected"),
         "a quarantined atom is not a plain success: {err}"
     );
-    // The atom stayed OUT of the KB stores: nothing was published under the
     // importing Creator's own holder (and nothing under any other).
     assert_eq!(
         stored_governance(&fixture, "kb_governed_foreign").await,
@@ -585,11 +569,9 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         "an unmapped foreign atom must never be stored"
     );
 
-    // The reported batch id is the one the review arm accepts.
     let batch_id = reported_batch_id(&text);
     assert!(batch_id.starts_with("pib_"), "{batch_id}");
 
-    // ── Review arm: read-only, original governance verbatim ────────────
     let review = kb_cli(
         &fixture,
         &["pack", "import", &world_id, "--review-import", &batch_id],
@@ -620,7 +602,6 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         "the review arm never writes"
     );
 
-    // ── Explicit adoption: the operator's own mapping lands the row ─────
     let adopted = kb_cli(
         &fixture,
         &[

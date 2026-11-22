@@ -141,7 +141,6 @@ pub async fn persist_review_findings_for_schedule(
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
 ) -> Result<usize, AutoChainError> {
-    // R-V147P0-06 (V1.48 P0 T3): hoisted to `preset_ids` SSOT; referenced
     // from the supervisor terminal guard and the STAGE_PRESET_ALLOWLIST too.
     use nexus_preset::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID as REVIEW_PRESET_ID;
 
@@ -160,7 +159,6 @@ pub async fn persist_review_findings_for_schedule(
     .map_err(nexus_local_db::LocalDbError::from)?;
 
     let Some(row) = row else {
-        // Schedule row missing — nothing to do (caller already updated status).
         tracing::debug!(
             schedule_id,
             "review-findings: schedule row not found; skipping"
@@ -179,7 +177,6 @@ pub async fn persist_review_findings_for_schedule(
         .map_err(|e| AutoChainError::InvalidState(format!("decode work_id: {e}")))?;
 
     if preset_id != REVIEW_PRESET_ID {
-        // Not a review schedule — no-op.
         return Ok(0);
     }
 
@@ -191,7 +188,6 @@ pub async fn persist_review_findings_for_schedule(
         return Ok(0);
     };
 
-    // Work row may be missing for malformed schedules; log + return.
     let work = match works::get_work(pool, &creator_id, &work_id).await {
         Ok(Some(w)) => w,
         Ok(None) => {
@@ -205,7 +201,6 @@ pub async fn persist_review_findings_for_schedule(
         Err(e) => return Err(AutoChainError::from(e)),
     };
 
-    // Derive chapter context from Work's current_chapter (V1.38 §4.5.2).
     // `current_chapter` is 0 until first finalize; treat 0 as Work-level.
     let chapter: Option<i64> = if work.current_chapter > 0 {
         Some(i64::from(work.current_chapter))
@@ -238,7 +233,6 @@ pub async fn persist_review_findings_for_schedule(
         }
     }
 
-    // ── V1.47 placeholder synthesis (fallback per spec §1.3) ───────────────
     persist_placeholder_finding(
         pool,
         &work,
@@ -265,7 +259,6 @@ async fn persist_placeholder_finding(
     work_ref_or_id: &str,
     schedule_id: &str,
 ) -> Result<usize, AutoChainError> {
-    // Synthesize the minimum viable review finding per spec §8.2.
     let chapter_ctx = chapter.map_or_else(|| "work-level".to_string(), |c| format!("chapter {c}"));
     let title = format!("Review pass completed ({chapter_ctx})");
     let description = format!(
@@ -281,7 +274,6 @@ async fn persist_placeholder_finding(
     let verdict = ReviewVerdictFinding {
         work_id: work_id.to_string(),
         chapter,
-        // Safe defaults per spec §8.2 + §2.1; the synthesized finding is
         // intentionally non-disruptive (`info` severity, `none` executor).
         severity: "info".to_string(),
         title,
@@ -289,9 +281,7 @@ async fn persist_placeholder_finding(
         target_executor: "none".to_string(),
         creator_id: creator_id.to_string(),
         kind: "craft".to_string(),
-        // Optional — no rule suggestion in the synthesized path.
         rule_suggestion: None,
-        // V1.47 P0 fix (qc1 W-2): pass the originating schedule_id so the
         // INSERT is idempotent — a second terminal transition for the same
         // review schedule is a no-op (partial unique index
         // `findings_unique_review_per_chapter`).
@@ -309,7 +299,6 @@ async fn persist_placeholder_finding(
             Ok(1)
         }
         Err(e) => {
-            // R-V139P1-W-6: log + propagate so the caller can record the
             // failure without blocking the terminal transition.
             tracing::warn!(
                 schedule_id,
@@ -368,7 +357,6 @@ async fn try_persist_parsed_findings(
                 );
                 return Ok(Some(count));
             }
-            // Parsed rows existed but none persisted (e.g. idempotent
             // conflict). Fall through to placeholder synthesis so the
             // spec §8.2 "≥1 finding per review pass" guarantee holds.
             tracing::debug!(
@@ -420,7 +408,6 @@ async fn try_persist_parsed_findings(
                  falling back to V1.47 placeholder synthesis"
             );
         }
-        // V1.48 P0-fix1 (qc3 W-1): bounded-read cap exceeded. `chapter`
         // included per spec §1.3 (qc3 W-3 adds it to every fallback arm).
         Err(ReportLoadError::TooLarge {
             size_bytes,
@@ -437,7 +424,6 @@ async fn try_persist_parsed_findings(
                  falling back to V1.47 placeholder synthesis"
             );
         }
-        // V1.49 P3 (R-V148P0-W1): resolved path escaped Works/<work_ref>/.
         // qc3 W-3: `chapter` included on every fallback arm.
         Err(ReportLoadError::PathEscape {
             work_ref: ref escaped,
@@ -508,7 +494,6 @@ fn load_and_parse_review_report(
     workspace_dir: &std::path::Path,
     work_ref: &str,
 ) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
-    // V1.49 P3 (R-V148P0-W1): defense-in-depth path guard. Reject traversal
     // segments in `work_ref` BEFORE constructing the path, then verify (after
     // confirming the file exists) that the resolved report stays under the
     // canonicalized `Works/<work_ref>/` subtree. This blocks path traversal
@@ -534,7 +519,6 @@ fn load_and_parse_review_report(
         Err(e) => return Err(ReportLoadError::Read(report_path, e)),
     };
 
-    // Canonical guard: the resolved report must live under the canonicalized
     // `Works/<work_ref>/` subtree. Catches symlink escape (e.g. `Works/<work_ref>`
     // itself being a symlink pointing outside the workspace). `canonicalize`
     // succeeds here because `metadata` already confirmed the file exists.
@@ -599,7 +583,6 @@ async fn persist_parsed_findings(
     schedule_id: &str,
 ) -> Result<usize, AutoChainError> {
     let mut inserted = 0usize;
-    // V1.48 P0-fix1 (qc3 W-2): one transaction wraps the whole batch so N
     // parsed findings cost one DB round-trip envelope (BEGIN + N inserts via
     // the `_tx` DAO variant + COMMIT) instead of N independent round-trips.
     let mut tx = pool.begin().await.map_err(|e| {
@@ -620,19 +603,16 @@ async fn persist_parsed_findings(
         "review-findings: persisting parsed findings in single transaction"
     );
     for (idx, finding) in parsed.findings.iter().enumerate() {
-        // Truncate body to a safe upper bound to avoid DB bloat. The from-review
         // DAO already enforces rule_suggestion size; the body uses the same
         // finding.description column.
         const BODY_MAX_CHARS: usize = 2_000;
         let body: String = if finding.body.len() > BODY_MAX_CHARS {
-            // Collect char units to avoid splitting a UTF-8 boundary.
             finding.body.chars().take(BODY_MAX_CHARS).collect()
         } else {
             finding.body.clone()
         };
 
         let title_preview: String = body.chars().take(80).collect();
-        // Per-finding source id — distinct from the bare `schedule_id` used
         // by the V1.47 placeholder path (so they cannot collide on the
         // partial unique index), and stable across retries (same schedule +
         // same report → same indices → same conflict resolution = no-op).
@@ -649,7 +629,6 @@ async fn persist_parsed_findings(
             rule_suggestion: finding.rule_suggestion.clone(),
             source_schedule_id: Some(source_schedule_id),
         };
-        // `_tx` variant executes against the shared transaction.
         match findings::create_finding_from_review_tx(&mut tx, &verdict).await {
             Ok(_) => inserted += 1,
             Err(e) => {
@@ -678,17 +657,14 @@ async fn persist_parsed_findings(
 /// Returns the appropriate `ChainAction` to execute.
 #[must_use]
 pub fn evaluate_next_step(work: &WorkRecord) -> ChainAction {
-    // If auto-chain is disabled, no automatic advancement
     if !work.auto_chain_enabled {
         return ChainAction::NoAction;
     }
 
-    // If the auto-chain was interrupted, don't resume automatically
     if work.auto_chain_interrupted {
         return ChainAction::NoAction;
     }
 
-    // If work is already completed, nothing to do
     if work.status == "completed" {
         return ChainAction::NoAction;
     }
@@ -696,12 +672,10 @@ pub fn evaluate_next_step(work: &WorkRecord) -> ChainAction {
     let current_stage = work.current_stage.as_str();
     let current_idx = stage_index(current_stage).unwrap_or(0);
 
-    // After persist (last FL-E stage): check for chapter loop or work completion
     if current_stage == "persist" && work.stage_status == "complete" {
         return evaluate_after_persist(work);
     }
 
-    // After any other stage completes: advance to the next stage
     if work.stage_status == "complete" && current_idx < FL_E_STAGES.len() - 1 {
         let next_idx = current_idx + 1;
         if let Some(&next_stage) = FL_E_STAGES.get(next_idx) {
@@ -712,7 +686,6 @@ pub fn evaluate_next_step(work: &WorkRecord) -> ChainAction {
         }
     }
 
-    // Intake stage with status "skipped" — advance to research
     if current_stage == "intake" && work.stage_status == "skipped" {
         return ChainAction::AdvanceStage {
             work_id: work.work_id.clone(),
@@ -737,13 +710,11 @@ fn evaluate_after_persist(work: &WorkRecord) -> ChainAction {
     let current_chapter = work.current_chapter;
 
     if total_chapters <= 0 {
-        // No chapter tracking — single-pass work, mark complete
         return ChainAction::WorkComplete {
             work_id: work.work_id.clone(),
         };
     }
 
-    // Check if there are more chapters to process
     // current_chapter is the latest finalized chapter number
     if current_chapter < total_chapters {
         let next_chapter = current_chapter + 1;
@@ -753,7 +724,6 @@ fn evaluate_after_persist(work: &WorkRecord) -> ChainAction {
             next_volume: 1, // V1.42: single-volume path defaults to 1
         }
     } else {
-        // All chapters finalized
         ChainAction::WorkComplete {
             work_id: work.work_id.clone(),
         }
@@ -781,7 +751,6 @@ pub async fn evaluate_after_persist_volume_aware(
         });
     }
 
-    // Try volume-aware next chapter selection
     let next =
         nexus_local_db::work_chapters::next_chapter_volume_aware(pool, &work.work_id).await?;
 
@@ -826,7 +795,6 @@ pub fn build_auto_chain_schedule(
     let work_ref = work.work_ref.clone();
     let chapter_label = chapter.map(stage_gates::chapter_label);
 
-    // Fix W-2: when the stage is produce (following research), include the
     // research artifacts directory in the preset input so produce can see
     // research-derived material (AC2, AC3).
     let research_artifacts_dir = if stage == "produce" {
@@ -885,7 +853,6 @@ pub async fn update_checkpoint(
     };
 
     if let Some(ch) = chapter {
-        // For chapter loop, the current_chapter update happens at finalize time
         // (via novel_chapter_transition). We don't advance it here.
         // But we need to set the stage to "produce" for the new chapter.
         let _ = ch; // chapter is used for the schedule input, not the patch
@@ -908,7 +875,6 @@ pub async fn mark_work_completed(
 ) -> Result<WorkRecord, AutoChainError> {
     let now = chrono::Utc::now().to_rfc3339();
 
-    // Step 1: DB patch — status + novel_completion_status + completion_locked_at
     let patch = WorkPatch {
         status: Some("completed".to_string()),
         current_stage: Some("persist".to_string()),
@@ -924,13 +890,11 @@ pub async fn mark_work_completed(
         .await
         .map_err(AutoChainError::from)?;
 
-    // Step 1.5: Update pool entry to `completed` (DF-61 §5.4).
     // The pool row may not exist if the Work was created outside the
     // selection pool (e.g., `creator run start`).
     match novel_pool_entries::mark_pool_entry_completed_for_work(pool, creator_id, work_id).await {
         Ok(()) => {}
         Err(e) => {
-            // Pool update failed — clear completion_locked_at so the
             // supervisor retries on the next tick (qc2 W-03, qc3 F-003).
             tracing::error!(
                 target: "novel.completion",
@@ -958,7 +922,6 @@ pub async fn mark_work_completed(
         }
     }
 
-    // Step 2: Write completion-lock file (best-effort; non-blocking for Work completion)
     if let Some(ref _work_ref) = updated.work_ref {
         let lock = CompletionLock {
             schema_version: 1,
@@ -966,7 +929,6 @@ pub async fn mark_work_completed(
             locked_at: now.clone(),
             reason: "completion".to_string(),
         };
-        // We don't have workspace_dir here — the caller (supervisor) should
         // write the lock file after calling this function if they have the path.
         // For now, we log an info-level note. The actual file I/O is done by
         // the supervisor or CLI layer that has access to the workspace dir.
@@ -1077,11 +1039,9 @@ pub async fn set_driver(
     Ok(())
 }
 
-// Fix A (W-A): Shared enqueue logic — single source of truth for ACH schedule
 // ID minting, pending INSERT, and set_driver. Used by both the supervisor
 // terminal hook and the boot recovery path to eliminate duplication.
 
-// V1.48 P1 (overlay §2 Consumer): render the open-findings prompt block
 // for the produce stage with a selected chapter. Returns `None` when the
 // stage is not `produce`, no chapter is selected, no actionable findings
 // exist, or the DAO errors (best-effort: logs and proceeds without the
@@ -1209,7 +1169,6 @@ pub async fn promote_foreshadowing_for_schedule(
         return Ok(0);
     };
     let Some(ws_dir) = workspace_dir else {
-        // Hermetic DB-only tests / no workspace bound — nothing to promote.
         tracing::debug!(
             schedule_id,
             "foreshadowing-promote: no workspace_dir; skipping"
@@ -1307,7 +1266,6 @@ async fn promote_outlines_in(
                 }
             }
             Err(e) => {
-                // Conflicting-description duplicate etc. — surface to the
                 // operator without aborting the remaining outlines or the
                 // terminal transition.
                 tracing::warn!(
@@ -1391,7 +1349,6 @@ fn enqueue_descriptor_json(
         nexus_session_storage::run_state::AgentBinding,
     >,
 ) -> Result<Vec<u8>, AutoChainError> {
-    // N-5/N-5b/N-15: stamp the REAL content-addressed source identity
     // (manifest + referenced template bytes) — never a zero placeholder.
     // Admission validates the stored identity against the current load and
     // builds the runner from the frozen identity, so a changed/shadowed
@@ -1461,7 +1418,6 @@ pub async fn enqueue_auto_chain_schedule(
     >,
     source_run_id: Option<&str>,
 ) -> Result<String, AutoChainError> {
-    // I-9: the schedule INSERT and the Work driver-pointer update commit in
     // ONE transaction so a concurrent tick can never observe a partial
     // Work-pointer/schedule state. The runtime lock is acquired after
     // commit (it is a separate resource, not part of the schedule row).
@@ -1499,7 +1455,6 @@ pub async fn enqueue_auto_chain_schedule(
             Ok(schedule_id)
         }
         Err(e) if source_run_id.is_some() && is_source_run_conflict(&e) => {
-            // T3 (A3): a duplicate terminal callback / restart already
             // created the child for this source run. Roll back (the child
             // INSERT failed) and load the already-created child — never
             // mint a second schedule.
@@ -1555,7 +1510,6 @@ async fn acquire_auto_chain_runtime_lock(
     work_id: &str,
     schedule_id: &str,
 ) {
-    // V1.42 P0 (T3): Acquire runtime lock for this schedule.
     // Holder format: `daemon:schedule:<schedule_id>`.
     let holder = nexus_local_db::runtime_lock::schedule_holder(schedule_id);
     let ttl = nexus_local_db::runtime_lock::ttl_from_env();
@@ -1574,7 +1528,6 @@ async fn acquire_auto_chain_runtime_lock(
                 existing_holder = %existing,
                 "runtime_lock: could not acquire for auto-chain (locked by another process)"
             );
-            // Continue — auto-chain will skip if Work is locked at next tick.
         }
         Err(e) => {
             tracing::warn!(
@@ -1583,7 +1536,6 @@ async fn acquire_auto_chain_runtime_lock(
                 error = %e,
                 "runtime_lock: failed to acquire for auto-chain"
             );
-            // Non-fatal — the schedule was already enqueued.
         }
     }
 }
@@ -1619,7 +1571,6 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
     >,
     source_run_id: Option<&str>,
 ) -> Result<String, AutoChainError> {
-    // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt
     // block when the produce stage targets a selected chapter. The DAO
     // reads through the pool (the findings table is not part of the
     // settlement transaction).
@@ -1638,7 +1589,6 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
         AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
     })?;
 
-    // Fix A: Single source of truth for ACH schedule ID format.
     // R-V139P0-W-B: append per-process monotonic counter for collision resistance.
     // Pure-timestamp IDs could collide under millisecond-granule concurrent enqueue;
     // the counter provides unique suffix without adding a new crate dependency.
@@ -1658,7 +1608,6 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
     // (`driven_v1`).
 
     let preset_version = preset_version_for_id(&schedule_req.preset_id);
-    // N-5: freeze the ACTUAL structured input the builder prepared
     // (work_id, stage, chapter, research artifacts, open_findings_block,
     // volume, …) plus the schedule's agent bindings into the durable
     // descriptor — never an empty map. Admission reconstructs the run
@@ -1668,7 +1617,6 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
         .as_ref()
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default();
-    // N-15: resolve and persist the REAL source identity or reject before
     // row publication — never a zero-hash placeholder.
     let descriptor = enqueue_descriptor_json(
         creator_id,
@@ -1703,13 +1651,11 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
         AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
     })?;
 
-    // N-3: the row is not admissible until its core-context version record
     // is durable. Seed version 0 from the prepared seed (the same text the
     // public add path would persist) inside the SAME transaction.
     let seed_text = schedule_req.seed.as_deref().unwrap_or_default().to_string();
     seed_core_context_version(tx, &schedule_id, &seed_text).await?;
 
-    // Update the Work checkpoint to point at the new driver schedule —
     // atomically with the schedule row (I-9).
     let now = chrono::Utc::now().to_rfc3339();
     let patch = WorkPatch {
@@ -1748,7 +1694,6 @@ pub async fn enqueue_auto_chain_schedule_in_tx(
 #[allow(clippy::match_same_arms)]
 fn preset_version_for_id(preset_id: &str) -> i64 {
     match preset_id {
-        // V1.48 P1: bumped 7 → 8 — added `open_findings_block` template var
         // to outline_chapter and draft_chapter prompt contracts (new prompt
         // input, not a breaking state-machine change, but versioned up so
         // pre-V1.48 schedules are correctly identified).
@@ -1756,7 +1701,6 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         "research" => 2,
         "novel-review-master" => 3,
         "kb-extract" => 3,
-        // V1.50 T-A P1 (R-V150P1CRONBW-05 / qc3 W-003): explicit arms for the
         // cron-triggered presets so the evaluator never silently stamps a
         // stale `preset_version` through the `_` fallback. `novel-brainstorm`
         // ships at v1 (embedded-presets/novel-brainstorm/preset.yaml).
@@ -1767,10 +1711,8 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         // `preset_version_mapping_matches_yaml_includes_cron_presets` test
         // enforces the sync for both presets.
         "novel-brainstorm" | "novel-write" => 1,
-        // V1.60 P1: `script-writing` — LLM-driven act/dialogue drafting
         // for script Works. Ships at v1 (embedded-presets/script-writing/preset.yaml).
         "script-writing" => 1,
-        // V1.61 P3: `combat-engine` — WASM combat resolution preset.
         // Ships at v1 (embedded-presets/combat-engine/preset.yaml).
         "combat-engine" => 1,
         // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
@@ -1808,7 +1750,6 @@ pub async fn enqueue_review_master_schedule(
         nexus_session_storage::run_state::AgentBinding,
     >,
 ) -> Result<String, AutoChainError> {
-    // R-V147P0-05 (hotfix H-1): append a per-process monotonic counter suffix
     // (mirrors `ACH_COUNTER` / R-V139P0-W-B) so two enqueues in the same
     // millisecond produce distinct PKs. Without this, the
     // `retained_execution_contracts::stale_finding_sweep_repeats_without_panicking`
@@ -1849,7 +1790,6 @@ pub async fn enqueue_review_master_schedule(
     ] {
         input.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
-    // N-15: resolve and persist the REAL source identity or reject before
     // row publication — never a zero-hash placeholder.
     let descriptor = enqueue_descriptor_json(
         creator_id,
@@ -1859,7 +1799,6 @@ pub async fn enqueue_review_master_schedule(
         input,
         agent_bindings,
     )?;
-    // N-3: the row is not admissible until its core-context version record
     // is durable. Insert + seed commit in ONE transaction.
     let mut tx = nexus_local_db::begin_immediate(pool)
         .await
@@ -1931,7 +1870,6 @@ pub async fn enqueue_cron_schedule(
         nexus_session_storage::run_state::AgentBinding,
     >,
 ) -> Result<String, AutoChainError> {
-    // CRON prefix + timestamp + per-process counter (collision-resistant,
     // mirrors `ACH_COUNTER` / `RVM_COUNTER`). Two roles firing in the same
     // millisecond must produce distinct PKs.
     let counter = CRON_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1970,7 +1908,6 @@ pub async fn enqueue_cron_schedule(
     ] {
         input.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
-    // N-15: resolve and persist the REAL source identity or reject before
     // row publication — never a zero-hash placeholder.
     let descriptor = enqueue_descriptor_json(
         creator_id,
@@ -1980,7 +1917,6 @@ pub async fn enqueue_cron_schedule(
         input,
         agent_bindings,
     )?;
-    // N-3: the row is not admissible until its core-context version record
     // is durable. Insert + seed commit in ONE transaction.
     let mut tx = nexus_local_db::begin_immediate(pool)
         .await
@@ -2097,8 +2033,6 @@ mod tests {
             lineage_from_work_id: None,
         }
     }
-
-    // ── evaluate_next_step tests ──────────────────────────────────────
 
     #[test]
     fn intake_complete_advances_to_research() {
@@ -2268,8 +2202,6 @@ mod tests {
         );
     }
 
-    // ── Fix A (W-A): enqueue_auto_chain_schedule shared helper ─────────
-
     #[tokio::test]
     async fn enqueue_helper_success_path() {
         let db = tempfile::Builder::new()
@@ -2304,13 +2236,11 @@ mod tests {
         .await
         .unwrap();
 
-        // Verify schedule ID format
         assert!(
             sid.starts_with("ACH"),
             "schedule ID should start with ACH: {sid}"
         );
 
-        // Verify schedule was inserted as pending
         let status: Option<String> =
             sqlx::query_scalar("SELECT status FROM creator_schedules WHERE schedule_id = ?")
                 .bind(&sid)
@@ -2324,7 +2254,6 @@ mod tests {
             "schedule should be pending"
         );
 
-        // Verify driver_schedule_id was set on the work
         let updated = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_test")
             .await
             .unwrap()
@@ -2375,9 +2304,6 @@ mod tests {
         );
     }
 
-    // ── R-V147P0-05 (hotfix H-1): RVM schedule_id PK collision regression ────
-
-    /// Regression for R-V147P0-05: two `enqueue_review_master_schedule` calls
     /// landing in the same `%Y%m%d%H%M%S%3f` millisecond granule MUST produce
     /// distinct `schedule_id` PKs. Before the fix, the second INSERT collided
     /// on the PK and surfaced as a flake in
@@ -2405,7 +2331,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Fire two enqueues back-to-back. Even if both land in the same ms
         // granule, the counter suffix must keep the PKs distinct.
         let sid_a = enqueue_review_master_schedule(
             &pool,
@@ -2433,7 +2358,6 @@ mod tests {
             "both ids must keep the RVM prefix: sid_a={sid_a} sid_b={sid_b}"
         );
 
-        // Both rows must be present in the table (no PK collision).
         let n: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM creator_schedules \
              WHERE preset_id = 'novel-review-master' AND work_id = ?",
@@ -2448,9 +2372,6 @@ mod tests {
         );
     }
 
-    // ── V1.39 P0.5 (T6): research-stage wiring integration tests ───────
-
-    /// AC1: research preset schedule has `fl_e_stage` = "research" and includes
     /// `creative_brief` + `inspiration_log` in the seed (same surface produce reads).
     #[test]
     fn research_schedule_seed_includes_context_for_produce() {
@@ -2462,9 +2383,7 @@ mod tests {
         let seed: serde_json::Value =
             serde_json::from_str(&req.seed.expect("seed must be set")).unwrap();
 
-        // fl_e_stage annotation
         assert_eq!(seed["fl_e_stage"], "research");
-        // creative_brief and inspiration_log are the shared surface
         // that produce reads — research can enrich these.
         assert!(seed["creative_brief"].is_string());
         assert!(seed["inspiration_log"].is_string());
@@ -2482,7 +2401,6 @@ mod tests {
 
         let input = req.input.expect("input must be set");
         assert_eq!(input["fl_e_stage"], "produce");
-        // These are the same fields research enriches, confirming
         // the downstream produce stage can see research-derived material.
         assert!(input.get("creative_brief").is_some());
         assert!(input.get("inspiration_log").is_some());
@@ -2494,7 +2412,6 @@ mod tests {
     #[test]
     fn produce_schedule_includes_research_artifacts_dir() {
         let mut work = work_at("produce", "active", 1, 5);
-        // Simulate: driver_schedule_id is the research schedule that just completed
         work.driver_schedule_id = Some("ACH20260609120000000".to_string());
         let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1), None, None)
             .expect("produce should have a preset");
@@ -2532,7 +2449,6 @@ mod tests {
     /// (verifies `evaluate_next_step` for the research-middle position).
     #[test]
     fn full_chain_intake_research_produce_advances() {
-        // intake complete → advance to research
         let work = work_at("intake", "complete", 0, 3);
         assert_eq!(
             evaluate_next_step(&work),
@@ -2542,7 +2458,6 @@ mod tests {
             }
         );
 
-        // research complete → advance to produce
         let work = work_at("research", "complete", 0, 3);
         assert_eq!(
             evaluate_next_step(&work),
@@ -2552,7 +2467,6 @@ mod tests {
             }
         );
 
-        // produce complete (ch1 of 3) → advance to review (not NextChapter)
         let work = work_at("produce", "complete", 1, 3);
         assert_eq!(
             evaluate_next_step(&work),
@@ -2570,7 +2484,6 @@ mod tests {
     fn preset_version_mapping_matches_yaml_includes_cron_presets() {
         use nexus_preset::read_embedded_template;
 
-        // R-V150P1CRONBW-05 (qc3 W-003): both cron-triggered preset ids are
         // iterated here so a future `version:` bump cannot drift silently.
         // `novel-write` ships in V1.51 T-A P2 (R-V150P1CRONBW-01 closed).
         let known_ids = [
@@ -2580,21 +2493,16 @@ mod tests {
             "kb-extract",
             "novel-brainstorm",
             "novel-write",
-            // V1.55 P2: game-bible design-writing preset (Master Depth 3.5)
             "design-writing",
-            // V1.60 P1: script-writing preset (Depth 3.5)
             "script-writing",
-            // V1.61 P3: combat-engine preset (WASM compute)
             "combat-engine",
         ];
 
         for preset_id in &known_ids {
             let mapping_version = preset_version_for_id(preset_id);
 
-            // Find the embedded preset
             let yaml_path = format!("{preset_id}/preset.yaml");
             let Some(yaml_str) = read_embedded_template(preset_id, "preset.yaml") else {
-                // Only `novel-write` is expected to be deferred. Any OTHER
                 // missing YAML is a real drift → panic.
                 assert_eq!(
                     *preset_id, "novel-write",
@@ -2608,7 +2516,6 @@ mod tests {
                 continue;
             };
 
-            // Extract version: field from YAML
             let yaml_version = yaml_str
                 .lines()
                 .find_map(|line| {
@@ -2671,16 +2578,12 @@ mod tests {
         );
     }
 
-    // V1.49 P3 (R-V148P0-W1) ────────────────────────────────────────────────
-
-    /// `load_and_parse_review_report` must reject a `work_ref` that would
     /// escape `Works/<work_ref>/` (path traversal / separators) BEFORE any
     /// filesystem access, returning `ReportLoadError::PathEscape`.
     #[test]
     fn load_and_parse_review_report_rejects_path_outside_work_dir() {
         let tmp = tempfile::tempdir().expect("tempdir");
 
-        // Traversal segments in work_ref — the canonical "Works/<work_ref>/../../../etc/passwd"
         // shape from the plan, expressed via the work_ref parameter.
         let traversal = load_and_parse_review_report(tmp.path(), "../../../etc/passwd");
         assert!(
@@ -2688,14 +2591,12 @@ mod tests {
             "traversal work_ref must be rejected before FS access, got {traversal:?}"
         );
 
-        // A path separator in work_ref must also be rejected.
         let with_sep = load_and_parse_review_report(tmp.path(), "foo/bar");
         assert!(
             matches!(with_sep, Err(ReportLoadError::PathEscape { .. })),
             "work_ref containing '/' must be rejected, got {with_sep:?}"
         );
 
-        // A clean work_ref whose report is simply absent returns Missing, NOT
         // PathEscape — proving the guard does not over-reject legitimate refs.
         let missing = load_and_parse_review_report(tmp.path(), "clean-novel");
         assert!(

@@ -233,7 +233,6 @@ async fn recovery_conflict_blocks_subsequent_write() {
     let ws = tempfile::tempdir().unwrap();
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
-    // A corrupt (unparsable) intent row is an unresolvable recovery state.
     sqlx::query(
         "INSERT INTO workspace_commit_intents (session_id, workspace_root, revision, request_digest, state, entries_json) \
          VALUES (?, ?, 'rev_bad', 'dig', 'applying', 'not-json')",
@@ -245,7 +244,6 @@ async fn recovery_conflict_blocks_subsequent_write() {
     .unwrap();
     let err = mgr.startup_recovery().await.unwrap_err();
     assert!(matches!(err, SessionError::RecoveryConflict(_)));
-    // The next write is fenced by the unresolved intent, not committed.
     let err = mgr
         .commit_session_durable(&session, &[create_change("blocked.txt", b"x")], &root)
         .await
@@ -266,7 +264,6 @@ async fn retained_owner_survives_caller_drop() {
     mgr.startup_recovery().await.expect("startup");
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // Deterministic rendezvous at the owner's admission boundary — no sleeps.
     let gate = Arc::new(OwnerGate::for_session(session.to_string()));
     set_owner_gate(Some(Arc::clone(&gate)));
 
@@ -279,12 +276,9 @@ async fn retained_owner_survives_caller_drop() {
             .await
     });
 
-    // The owner task has been admitted (claim held) and is parked.
     gate.admitted.notified().await;
-    // Cancel the awaiting caller, then release the owner.
     caller.abort();
     gate.proceed.notify_one();
-    // The retained owner settles on its own: no polling window.
     gate.settled.notified().await;
     set_owner_gate(None);
 
@@ -344,7 +338,6 @@ async fn delete_detects_target_recreated_after_capture() {
     mgr.startup_recovery().await.expect("startup");
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // Deterministic injection EXACTLY in the capture/finalize window: the hook
     // fires after the delete captured the original and before it finalizes.
     let target = ws.path().join("d.txt");
     set_after_delete_capture_hook(Some(Arc::new(move || {
@@ -370,7 +363,6 @@ async fn delete_detects_target_recreated_after_capture() {
         matches!(err, SessionError::Internal(_) | SessionError::Io(_)),
         "a re-created target after capture must never finalize a delete, got {err:?}"
     );
-    // The external writer's bytes survive untouched.
     assert_eq!(
         std::fs::read(ws.path().join("d.txt")).unwrap(),
         b"recreated-by-external-writer"
@@ -480,7 +472,6 @@ async fn malformed_manifest_base64_bodies_are_refused() {
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // Malformed bodies: truncated quad, wrong/embedded padding, non-canonical
     // trailing bits, interior whitespace, and URL-safe symbols that the
     // standard alphabet does not accept. None may create a file.
     for malformed in [
@@ -517,7 +508,6 @@ async fn malformed_manifest_base64_bodies_are_refused() {
         );
     }
 
-    // Control on the same session: the identical call path accepts a
     // well-formed body, so the refusals above are the decode boundary.
     let content = b"v1.191 base64 boundary";
     mgr.commit_session_durable(&session, &[create_change("accepted.txt", content)], &root)
@@ -529,7 +519,6 @@ async fn malformed_manifest_base64_bodies_are_refused() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Concurrent session consumption
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -650,7 +639,6 @@ async fn concurrent_commit_session_has_one_winner() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Manifest validation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -682,7 +670,6 @@ async fn manifest_validation_rejects_a_symlink_in_a_modify_path() {
         .expect("content hashes");
     let stored_hash = stored.hashes.get("real.txt").cloned().expect("tracked");
 
-    // Swap the tracked file for a symlink pointing OUTSIDE the workspace root.
     let outside = tempfile::tempdir().unwrap();
     std::fs::write(outside.path().join("secret.txt"), b"secret-outside").unwrap();
     std::fs::remove_file(ws_dir.path().join("real.txt")).unwrap();
@@ -794,7 +781,6 @@ async fn recoverable_create_modify_delete_and_idempotent_retry() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Preset workflow over live workspace state
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -917,14 +903,12 @@ async fn preset_graph_branches_on_live_committed_workspace_state() {
         root.clone(),
     )));
 
-    // Phase 1: nothing committed for this workspace -> the branch must resolve
     // to `pending_state`, proving the state is not a constant.
     assert_eq!(
         routed_state(&engine, &registry, "pre-commit").await,
         "pending_state"
     );
 
-    // Phase 2: commit through the production capability path (registry ->
     // WorkspaceCommitExecutor -> shared manager -> DB + files).
     let opened = registry
         .get("workspace.open")
@@ -965,7 +949,6 @@ async fn preset_graph_branches_on_live_committed_workspace_state() {
     assert_eq!(intent.revision, revision);
     assert_eq!(intent.state, nexus_local_db::IntentState::Committed);
 
-    // Phase 3: the same preset now observes the committed state and branches
     // the other way — resolved live from the shared manager, not a fixture.
     assert_eq!(
         routed_state(&engine, &registry, "post-commit").await,

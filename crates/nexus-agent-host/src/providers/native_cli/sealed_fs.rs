@@ -31,6 +31,8 @@
 //! handful of operations the sealed recipe needs, Unix-only. Callers on
 //! unsupported targets fail sealed provisioning closed rather than
 //! silently weakening it.
+//!
+//! See docs/specs/agents/agent-host.md
 
 use std::ffi::OsStr;
 use std::io::Write;
@@ -97,7 +99,6 @@ pub fn check_dir_boundary(fd: &OwnedFd, require_owner: bool) -> Result<(), Strin
 pub fn inode_of(fd: &OwnedFd) -> Result<(u64, u64), String> {
     let stat = rustix::fs::fstat(fd)
         .map_err(|error| format!("could not stat a pinned descriptor ({})", errno_name(error)))?;
-    // `dev_t`/`ino_t` are OPAQUE identity values, not numbers: on Darwin a
     // high-bit device id can be negative as a signed integer while being a
     // perfectly valid identity. Widening through `as` preserves the bit
     // pattern and therefore the identity; rejecting "negative" values would
@@ -129,7 +130,6 @@ fn walk_absolute(path: &Path, create_missing: bool) -> Result<OwnedFd, String> {
         .map_err(|error| format!("could not open the filesystem root ({})", errno_name(error)))?;
     for component in path.components() {
         let name = match component {
-            // Root is where the walk starts; `.` is kernel-resolved relative
             // to the pinned descriptor. Neither contributes a component.
             std::path::Component::RootDir | std::path::Component::CurDir => continue,
             std::path::Component::Normal(name) => name,
@@ -149,7 +149,6 @@ fn walk_absolute(path: &Path, create_missing: bool) -> Result<OwnedFd, String> {
                         )
                     },
                 )?;
-                // A second no-follow open catches a swapped/symlinked
                 // entry even if the create raced one.
                 let next = open_dir_at(&fd, name).map_err(|error| {
                     format!(
@@ -192,7 +191,6 @@ pub fn ensure_dir_at(dirfd: &OwnedFd, name: &str, mode: RawMode) -> Result<Owned
                     errno_name(error)
                 )
             })?;
-            // A second no-follow open catches a swapped/symlinked entry
             // even if the create raced one.
             let fd = open_dir_at(dirfd, name).map_err(|error| {
                 format!(
@@ -315,7 +313,6 @@ pub fn remove_tree_at(dirfd: &OwnedFd, name: &str) -> Result<(), String> {
                 )
             })
         }
-        // A swapped lexical leaf that is now a symlink or file: unlink the
         // anchor entry directly — never follow it to the target.
         Err(rustix::io::Errno::LOOP | rustix::io::Errno::NOTDIR) => {
             rustix::fs::unlinkat(dirfd, name, AtFlags::empty()).map_err(|error| {
@@ -353,7 +350,6 @@ fn empty_dir_at(fd: &OwnedFd) -> Result<(), String> {
             continue;
         }
         match open_dir_at(fd, OsStr::from_bytes(name.to_bytes())) {
-            // A real directory: empty it recursively, then remove it.
             Ok(sub_fd) => {
                 empty_dir_at(&sub_fd)?;
                 rustix::fs::unlinkat(fd, name, AtFlags::REMOVEDIR).map_err(|error| {
@@ -363,7 +359,6 @@ fn empty_dir_at(fd: &OwnedFd) -> Result<(), String> {
                     )
                 })?;
             }
-            // A symlink or non-directory entry: unlink it directly —
             // never followed (ELOOP/ENOTDIR from the no-follow open).
             Err(rustix::io::Errno::LOOP | rustix::io::Errno::NOTDIR) => {
                 rustix::fs::unlinkat(fd, name, AtFlags::empty()).map_err(|error| {
@@ -391,7 +386,6 @@ mod tests {
     #[test]
     fn ancestor_symlink_is_rejected_without_writes() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        // macOS tempdirs live under the symlinked `/var`: callers resolve
         // the anchor once (as `provision` does) before the no-follow pin.
         let canonical_temp = std::fs::canonicalize(temp_dir.path()).expect("canonical temp");
         let elsewhere = temp_dir.path().join("elsewhere");
@@ -446,7 +440,6 @@ mod tests {
         let sub = mkdir_exclusive_at(&leaf, "sub", 0o700).expect("create sub");
         write_file_exclusive_at(&sub, "state", b"x").expect("write nested");
         write_file_exclusive_at(&leaf, "patch", b"y").expect("write file");
-        // A symlink inside the tree is unlinked, never followed.
         let outside = temp_dir.path().join("outside");
         std::fs::create_dir_all(&outside).expect("outside dir");
         std::fs::write(outside.join("keep"), b"keep").expect("keep file");

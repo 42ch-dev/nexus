@@ -60,8 +60,6 @@ fn cli(fixture: &DirectFixture, args: &[&str]) -> Output {
         .expect("spawn nexus42")
 }
 
-// ── State leaf ─────────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_state_renames_and_bumps_revision() {
     let d = DirectFixture::new().await;
@@ -92,7 +90,6 @@ async fn patch_state_renames_and_bumps_revision() {
     assert!(yaml.contains("revision: 2"), "{yaml}");
     assert!(yaml.contains("id: begin"), "{yaml}");
     assert!(yaml.contains("Renamed start state"), "{yaml}");
-    // The rename rewrites references: initial + next targets.
     assert!(yaml.contains("initial: begin"), "{yaml}");
     assert!(yaml.contains("next: end"), "{yaml}");
 }
@@ -133,7 +130,6 @@ async fn patch_state_stale_revision_surfaces_conflict() {
     let d = DirectFixture::new().await;
     seed_bundle(d.home.path(), "test-strategy");
 
-    // base_revision 0 vs current 1 → 409 strategy_conflict.
     let out = cli(
         &d,
         &[
@@ -152,7 +148,6 @@ async fn patch_state_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry HTTP 409: {err}");
-    // All four conflict fields render: current revision, conflicting node,
     // conflicting path, recovery hint.
     assert!(err.contains("current_revision"), "stderr: {err}");
     assert!(err.contains("node_id"), "stderr: {err}");
@@ -192,7 +187,6 @@ async fn patch_state_unknown_strategy_surfaces_404() {
 async fn patch_state_malformed_bundle_surfaces_bad_request() {
     let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
-    // Corrupt the bundle: drop the 'states' array so the core seam rejects
     // the patch. Its internal code (`strategy_invalid`) is outside the public
     // code allowlist, so it degrades to the coarse `bad_request` — the CLI
     // must surface the public code, not the internal classification.
@@ -250,14 +244,11 @@ async fn patch_state_requires_set_flag() {
     );
 }
 
-// ── Transition leaf ────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_transition_update_rewires_target() {
     let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
-    // Real rewire: start -> end becomes start -> draft. 'draft' has no
     // outgoing transition, so it is a valid (terminal-by-absence) target.
     let out = cli(
         &d,
@@ -297,7 +288,6 @@ async fn patch_transition_create_branch() {
     let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
-    // 'draft' has no outgoing transition (and is not terminal), so a
     // branch create seeds a conditional map with a default target.
     let out = cli(
         &d,
@@ -397,8 +387,6 @@ async fn patch_transition_missing_old_target_fails_fast() {
     );
 }
 
-// ── Prompt leaf ────────────────────────────────────────────────────────────
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_prompt_writes_template_and_bumps_revision() {
     let d = DirectFixture::new().await;
@@ -408,7 +396,6 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
     std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
     std::fs::write(&template_path, "# Hello\n").expect("write template");
 
-    // Distinct source file with different contents — the body assertion
     // below proves the core wrote the NEW bytes, not the pre-existing
     // template (a skipped write would leave the old body in place).
     let source_path = bundle_dir.join("prompts/start.new.md");
@@ -519,7 +506,6 @@ async fn patch_prompt_stdin_writes_template() {
     std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
     std::fs::write(&template_path, "# Hello\n").expect("write template");
 
-    // `--file -` reads the template body from stdin (the `creator soul`
     // stdin convention claimed in cli-spec §6.2G.4).
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
         .args([
@@ -564,8 +550,6 @@ async fn patch_prompt_stdin_writes_template() {
     let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
     assert!(yaml.contains("revision: 2"), "{yaml}");
 }
-
-// ── Help documents the retry guidance ─────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_help_documents_base_revision_retry() {

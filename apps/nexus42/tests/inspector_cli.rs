@@ -214,7 +214,6 @@ async fn inspector_moment_supports_work_and_stage_flags() {
     );
     let json: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("json packet");
     assert!(json["modules"].is_object(), "{json}");
-    // No directive is seeded, so the packet's moment_directive is the "none"
     // status shape — success itself proves the core accepted the work→world
     // binding (a mismatch surfaces 400).
     assert_eq!(json["moment_directive"]["status"], "none", "{json}");
@@ -284,7 +283,6 @@ async fn inspector_foreign_world_rejected_403() {
 async fn inspector_hidden_from_creator_help_but_usable() {
     let env = fresh_env().await;
 
-    // PL-6: `creator --help` must NOT list the hidden inspector group.
     let help = env.cli(&["creator", "--help"]);
     assert!(help.status.success());
     let text = stdout(&help);
@@ -297,7 +295,6 @@ async fn inspector_hidden_from_creator_help_but_usable() {
         "reading should be visible:\n{text}"
     );
 
-    // But the hidden group still resolves its own help.
     let hidden = env.cli(&["creator", "inspector", "--help"]);
     assert!(
         hidden.status.success(),

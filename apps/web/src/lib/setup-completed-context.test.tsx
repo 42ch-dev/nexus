@@ -18,7 +18,6 @@ function TestController() {
       <button onClick={() => void refresh()}>Refresh</button>
       <button
         onClick={() => {
-          // Await path so IPC rejection is handled (rollback assertion).
           void setCompleted(true).catch(() => undefined);
         }}
       >
@@ -72,7 +71,6 @@ describe('SetupCompletedProvider', () => {
       { client: statusClient(() => Promise.resolve({ workspace_initialized: true })) },
     );
 
-    // Nothing is assumed before the probe resolves (SetupGate waits on this).
     expect(screen.getByTestId('loading')).toHaveTextContent('true');
     await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
@@ -98,7 +96,6 @@ describe('SetupCompletedProvider', () => {
       { client: statusClient(() => Promise.reject(new Error('daemon down'))) },
     );
 
-    // The service-unavailable surface owns this state (T4): the app must never
     // silently claim an initialized shell when the service cannot be reached.
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
     expect(screen.getByTestId('completed')).toHaveTextContent('false');
@@ -196,7 +193,6 @@ describe('SetupCompletedProvider', () => {
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
     await user.click(screen.getByRole('button', { name: 'Finish' }));
 
-    // Optimistic: React state flips before IPC settles so gated navigate is safe.
     expect(screen.getByTestId('completed')).toHaveTextContent('true');
     expect(setSetupCompleted).toHaveBeenCalledWith(true);
     resolveIpc();
@@ -226,7 +222,6 @@ describe('SetupCompletedProvider', () => {
     expect(screen.getByTestId('completed')).toHaveTextContent('true');
     await user.click(screen.getByRole('button', { name: 'Clear' }));
 
-    // R1: stay true until IPC succeeds — avoids stale true after clear.
     expect(setSetupCompleted).toHaveBeenCalledWith(false);
     expect(screen.getByTestId('completed')).toHaveTextContent('true');
     resolveIpc();

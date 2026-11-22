@@ -159,7 +159,6 @@ pub async fn claim_prompt_injections(
         return Ok(Vec::new());
     }
 
-    // Update status to claimed within the same transaction.
     let placeholders: Vec<String> = (2..=ids.len() + 1).map(|i| format!("?{i}")).collect();
     let sql = format!(
         "UPDATE creator_prompt_injections

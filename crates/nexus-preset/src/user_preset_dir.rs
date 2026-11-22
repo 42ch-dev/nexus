@@ -18,11 +18,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
-/// A discovered user preset with its directory origin.
 #[derive(Debug, Clone)]
 pub struct UserPresetEntry {
     /// The preset's ID (same as the directory name).
@@ -58,11 +53,6 @@ pub struct UserPresetWarning {
     pub message: String,
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Scan the user preset directory and load all discovered presets.
 ///
 /// Location: `<nexus_home>/presets/<name>/`
 ///
@@ -78,7 +68,6 @@ pub struct UserPresetWarning {
 pub fn scan_user_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> UserPresetScanResult {
     let user_dir = nexus_home.join("presets");
 
-    // Missing directory = no user presets (not an error).
     if !user_dir.exists() {
         tracing::debug!(?user_dir, "user preset directory does not exist — skipping");
         return UserPresetScanResult::default();
@@ -86,7 +75,6 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> Use
 
     let mut result = UserPresetScanResult::default();
 
-    // Read directory entries and filter (skip _, . prefixed, non-dirs, missing preset.yaml).
     let entries = match std::fs::read_dir(&user_dir) {
         Ok(entries) => entries,
         Err(e) => {
@@ -102,7 +90,6 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> Use
     for entry in entries.flatten() {
         let path = entry.path();
 
-        // Only process directories.
         if !path.is_dir() {
             continue;
         }
@@ -112,17 +99,14 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> Use
             None => continue,
         };
 
-        // Skip system-prefixed directories (starting with `_`).
         if dir_name.starts_with('_') {
             continue;
         }
 
-        // Skip hidden directories (starting with `.`).
         if dir_name.starts_with('.') {
             continue;
         }
 
-        // Skip directories without preset.yaml.
         let preset_yaml_path = path.join("preset.yaml");
         if !preset_yaml_path.exists() {
             result.warnings.push(UserPresetWarning {
@@ -132,7 +116,6 @@ pub fn scan_user_presets(nexus_home: &Path, caps: &dyn CapabilityCatalog) -> Use
             continue;
         }
 
-        // Track mtime for cache invalidation.
         if let Ok(metadata) = std::fs::metadata(&preset_yaml_path) {
             if let Ok(mtime) = metadata.modified() {
                 result.mtimes.insert(dir_name.clone(), mtime);
@@ -230,7 +213,6 @@ pub fn load_user_preset_from_dir(
         }
     };
 
-    // A user preset is a directory bundle: it knows its source identity
     // (A2/A7) — content hash over the manifest + every referenced asset.
     let mut loaded = loaded;
     loaded.source_identity = Some(
@@ -274,7 +256,6 @@ pub fn find_user_preset<'a>(
 pub fn is_scan_cache_fresh(result: &UserPresetScanResult, nexus_home: &Path) -> bool {
     let user_dir = nexus_home.join("presets");
 
-    // If directory doesn't exist but we had results, cache is stale.
     if !user_dir.exists() {
         return result.presets.is_empty() && result.warnings.is_empty();
     }
@@ -301,7 +282,6 @@ pub fn is_scan_cache_fresh(result: &UserPresetScanResult, nexus_home: &Path) -> 
         }
         current_count += 1;
 
-        // Check mtime for known presets.
         if let Some(&cached_mtime) = result.mtimes.get(&dir_name) {
             if let Ok(metadata) = std::fs::metadata(path.join("preset.yaml")) {
                 if let Ok(current_mtime) = metadata.modified() {
@@ -311,18 +291,12 @@ pub fn is_scan_cache_fresh(result: &UserPresetScanResult, nexus_home: &Path) -> 
                 }
             }
         } else {
-            // New preset not in cache — stale.
             return false;
         }
     }
 
-    // If count differs, something was removed — stale.
     current_count == result.presets.len()
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -369,7 +343,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create my-strategy/ with valid preset.yaml
         let strategy_dir = base.join("my-strategy");
         fs::create_dir_all(&strategy_dir).unwrap();
         fs::write(strategy_dir.join("preset.yaml"), minimal_yaml()).unwrap();
@@ -388,7 +361,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create _system/maintenance/ (should be skipped by user scanner)
         let system_dir = base.join("_system");
         fs::create_dir_all(&system_dir).unwrap();
         fs::write(system_dir.join("preset.yaml"), "bogus").unwrap();
@@ -406,7 +378,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create .hidden/ (should be skipped)
         let hidden_dir = base.join(".hidden");
         fs::create_dir_all(&hidden_dir).unwrap();
         fs::write(hidden_dir.join("preset.yaml"), "bogus").unwrap();
@@ -424,7 +395,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create broken/ with invalid YAML
         let broken_dir = base.join("broken");
         fs::create_dir_all(&broken_dir).unwrap();
         fs::write(broken_dir.join("preset.yaml"), "not valid yaml: [").unwrap();
@@ -444,7 +414,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create empty/ with no preset.yaml
         let empty_dir = base.join("empty");
         fs::create_dir_all(&empty_dir).unwrap();
 
@@ -463,12 +432,10 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create strategy-a/
         let dir_a = base.join("strategy-a");
         fs::create_dir_all(&dir_a).unwrap();
         fs::write(dir_a.join("preset.yaml"), minimal_yaml()).unwrap();
 
-        // Create strategy-b/ with a different preset
         let yaml_b = r"
 preset:
   id: strategy-b
@@ -548,15 +515,12 @@ states:
         assert_eq!(loaded.loaded.id, "test-strategy");
     }
 
-    // ── R-M1-W06: HashMap index + mtime cache tests ────────────────
-
     #[test]
     fn find_user_preset_is_o1_with_index() {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create 3 presets.
         for name in ["alpha", "beta", "gamma"] {
             let dir = base.join(name);
             fs::create_dir_all(&dir).unwrap();
@@ -568,13 +532,11 @@ states:
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 3);
-        // O(1) lookup via index should find all three.
         assert!(find_user_preset(&result, "alpha").is_some());
         assert!(find_user_preset(&result, "beta").is_some());
         assert!(find_user_preset(&result, "gamma").is_some());
         assert!(find_user_preset(&result, "nonexistent").is_none());
 
-        // Verify index maps to correct entries.
         let alpha = find_user_preset(&result, "alpha").unwrap();
         assert_eq!(alpha.id, "alpha");
     }
@@ -585,7 +547,6 @@ states:
         let nexus_home = tmp.path().to_path_buf();
         let base = nexus_home.join("presets");
 
-        // Create 5 presets.
         for i in 0..5 {
             let name = format!("preset-{i}");
             let dir = base.join(&name);
@@ -598,7 +559,6 @@ states:
         let result = scan_user_presets(&nexus_home, &caps);
 
         assert_eq!(result.presets.len(), 5);
-        // The index should have exactly as many entries as presets.
         assert_eq!(result.index.len(), result.presets.len());
     }
 
@@ -635,7 +595,6 @@ states:
         let result = scan_user_presets(&nexus_home, &caps);
         assert!(is_scan_cache_fresh(&result, &nexus_home));
 
-        // Modify the file (wait briefly to ensure different mtime on fast systems).
         let updated_yaml = minimal_yaml().replace("test-strategy", "modified");
         std::thread::sleep(std::time::Duration::from_millis(10));
         fs::write(dir.join("preset.yaml"), updated_yaml).unwrap();
@@ -660,7 +619,6 @@ states:
         let result = scan_user_presets(&nexus_home, &caps);
         assert!(is_scan_cache_fresh(&result, &nexus_home));
 
-        // Add a new preset.
         let new_dir = base.join("new-preset");
         fs::create_dir_all(&new_dir).unwrap();
         let yaml = minimal_yaml().replace("test-strategy", "new-preset");
@@ -686,7 +644,6 @@ states:
         let result = scan_user_presets(&nexus_home, &caps);
         assert!(is_scan_cache_fresh(&result, &nexus_home));
 
-        // Remove the preset.
         fs::remove_dir_all(&dir).unwrap();
 
         assert!(

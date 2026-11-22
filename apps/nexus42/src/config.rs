@@ -200,7 +200,6 @@ impl CliConfig {
     }
 
     fn load_from_nexus_home(nexus: &Path) -> anyhow::Result<Self> {
-        // Migration writes `config.toml`, so it takes the writer lock. Probe
         // first so a plain read does not contend with the other writers.
         if toml_entry_absent(&nexus.join("config.toml"))? && nexus.join("config.json").exists() {
             Self::migrate_legacy_json(nexus)?;
@@ -308,7 +307,6 @@ impl CliConfig {
             Err(error) => return Err(error.into()),
         };
         if content.trim().is_empty() {
-            // Empty JSON file — just rename it and fall back to defaults
             std::fs::rename(&json_path, nexus.join("config.json.migrated"))?;
             return Ok(());
         }
@@ -344,7 +342,6 @@ impl CliConfig {
         nexus: &Path,
         run: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
-        // `with_config_lock` runs the closure at most once, right after the
         // lock is taken; `None` therefore means it never ran it.
         let mut outcome: Option<anyhow::Result<T>> = None;
         nexus_core::with_config_lock(nexus, || {
@@ -377,7 +374,6 @@ impl CliConfig {
             Self::migrate_legacy_json_locked(&nexus)?;
             let mut config = Self::read_document_for_mutation(&nexus)?;
             let outcome = run(&mut config)?;
-            // Atomic publication: a concurrent lock-free reader (the Core
             // `ReadOnly` snapshot, I-000291) must never see a truncated
             // document and read "no `[memory_provider]`" as the local default.
             nexus_home_layout::config_lock::publish_document(
@@ -1012,7 +1008,6 @@ mod tests {
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
-        // Write a legacy config.json with non-default values
         let json_content = r#"{
   "active_creator_id": "ctr_test",
   "platform_url": "https://custom.api.io",
@@ -1023,23 +1018,19 @@ mod tests {
 
         let result = CliConfig::load().expect("load should succeed");
 
-        // Verify values were loaded correctly
         assert_eq!(result.active_creator_id.as_deref(), Some("ctr_test"));
         assert_eq!(result.platform_url, "https://custom.api.io");
         assert_eq!(result.daemon_url, "http://127.0.0.1:9999");
 
-        // Verify config.toml was created
         assert!(
             nexus_dir.join("config.toml").exists(),
             "config.toml should be created"
         );
 
-        // Verify config.toml content is valid TOML
         let toml_content = std::fs::read_to_string(nexus_dir.join("config.toml")).unwrap();
         let loaded: CliConfig = toml::from_str(&toml_content).unwrap();
         assert_eq!(loaded.active_creator_id.as_deref(), Some("ctr_test"));
 
-        // Verify config.json was renamed to config.json.migrated
         assert!(
             !nexus_dir.join("config.json").exists(),
             "config.json should be renamed"
@@ -1058,15 +1049,12 @@ mod tests {
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
-        // Write an empty config.json
         std::fs::write(nexus_dir.join("config.json"), "").expect("write empty json");
 
         let result = CliConfig::load().expect("load should succeed");
 
-        // Should return defaults
         assert_eq!(result.active_creator_id, None);
 
-        // config.json should be renamed
         assert!(nexus_dir.join("config.json.migrated").exists());
     }
 
@@ -1078,7 +1066,6 @@ mod tests {
             .join(".nexus42");
         std::fs::create_dir_all(&nexus_dir).expect("create nexus dir");
 
-        // Write a config.toml directly
         let toml_content = r#"active_creator_id = "ctr_direct"
 platform_url = "https://direct.api.io"
 "#;
@@ -1210,7 +1197,6 @@ platform_url = "https://direct.api.io"
 
         let (_home, nexus_dir) = isolated_nexus_dir();
         let lock_path = nexus_dir.join("config.toml.lock");
-        // A foreign process holds the lock: created out of band, never through
         // this writer's helper.
         std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
 
@@ -1270,7 +1256,6 @@ platform_url = "https://direct.api.io"
             "the CLI write must wait for config.toml.lock"
         );
 
-        // The service/desktop commit while the CLI waits for the lock: both
         // its selection and its `agent_profile` table must survive the CLI's
         // write that follows.
         std::fs::write(
@@ -1360,7 +1345,6 @@ platform_url = "https://direct.api.io"
             "the migration must not write config.toml while the lock is held"
         );
 
-        // A concurrent writer commits the TOML first; the migration must leave
         // that document (and its foreign table) alone.
         std::fs::write(
             &config_path,
@@ -1546,13 +1530,11 @@ platform_url = "https://direct.api.io"
     fn preflight_acceptance_is_mutation_acceptance() {
         let (_home, nexus_dir) = isolated_nexus_dir();
 
-        // Absent document: both accept (first-time configuration keeps
         // working).
         CliConfig::preflight_document(&nexus_dir)
             .expect("the preflight accepts an absent document");
         CliConfig::mutate(|_| Ok(())).expect("the mutation accepts an absent document");
 
-        // A corrupt document: both refuse through the same parse rule, with
         // the same refusal.
         std::fs::write(nexus_dir.join("config.toml"), "not toml {{{{").expect("seed corrupt");
         let preflight = CliConfig::preflight_document(&nexus_dir)
@@ -1565,7 +1547,6 @@ platform_url = "https://direct.api.io"
             "one refusal rule means one refusal text"
         );
 
-        // An existing entry that cannot be read — a directory at the
         // document path, the portable dangling-link stand-in — refuses both
         // with the same read refusal.
         std::fs::remove_file(nexus_dir.join("config.toml")).expect("drop the corrupt document");

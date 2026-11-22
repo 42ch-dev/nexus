@@ -232,7 +232,6 @@ async fn recover_applying_intent_locked(
     };
 
     if intent.entries.is_empty() {
-        // Legacy or corrupt intents with no recovery identity: nothing was
         // applied, so this intent can only roll back.
         db::update_intent_state(
             mgr.pool().as_ref(),
@@ -277,7 +276,6 @@ async fn recover_applying_intent_locked(
             )
             .await;
         }
-        // The commit is settled; the per-entry stage/backup material is now
         // dead weight and is removed only after the durable settle.
         for entry in &intent.entries {
             scope.cleanup_entry(
@@ -354,7 +352,6 @@ async fn rollback_intent_locked(
 
     test_crash_if!("during_rollback");
 
-    // Restore every preimage FIRST, and clean nothing up yet: while the intent
     // is still `rolling_back` the stage/backup artifacts are the evidence a
     // replayed rollback needs, and removing a restored delete target before the
     // rollback is durable is exactly the corruption this ordering prevents.
@@ -382,12 +379,10 @@ async fn rollback_intent_locked(
 
     test_crash_if!("after_rollback_restore_before_finalize");
 
-    // Durable rolled-back transition BEFORE any artifact removal.
     db::finalize_rolled_back_intent(mgr.pool().as_ref(), &intent.revision, &intent.session_id)
         .await
         .map_err(|e| SessionError::Database(e.to_string()))?;
 
-    // Settled: removal is best-effort. A crash here leaves dead material that
     // the startup sweep reaps WITHOUT replaying the rollback, so recovery can
     // never delete a live restored file.
     for entry in &intent.entries {
@@ -592,7 +587,6 @@ fn plan_commit_entries(
             None
         };
 
-        // Plan the restore mode from the live target BEFORE any bytes are
         // written: rolling back a modify/delete must restore the original
         // permission bits, and the write-ahead intent row is the only place
         // that mode can survive a crash mid-staging.
@@ -750,7 +744,6 @@ pub(crate) async fn commit_recoverable(
 
     crate::scope::enforce_active_workspace_root(&row.workspace_root, active_workspace_root).await?;
 
-    // Canonical form first: the digest and the mutation order below are both
     // derived from it, so a reordered-equivalent retry is identical.
     let changes = normalize_changes(changes)?;
     let changes = changes.as_slice();
@@ -797,7 +790,6 @@ pub(crate) async fn commit_recoverable(
 
     mgr.validate_contract_manifest(session_id, changes).await?;
 
-    // Held across scope open, mode planning, claim, staging, and apply: the
     // planned restore mode is read from the LIVE target, so a preceding
     // in-process commit must not be able to change that target while this
     // commit is still planning.
@@ -859,12 +851,10 @@ pub(crate) async fn commit_recoverable(
 
     if let Err(e) = staging {
         if is_simulated_test_crash(&e) {
-            // Simulated crash: keep BOTH the durable intent and the partial
             // artifact set, so startup recovery still has the identities it
             // needs to roll the set back.
             return Err(e);
         }
-        // Confirm the full planned artifact set is gone BEFORE the durable
         // ledger is deleted: the intent row is the only record of which
         // artifacts belong to this commit, so deleting it first could strand
         // copies on disk with no recovery identity. Unconfirmed cleanup
@@ -924,10 +914,8 @@ pub(crate) async fn commit_recoverable(
             };
 
             return match rollback {
-                // Rollback settled the intent; it removed its own per-entry
                 // stage/backup material, so there is nothing left to clean.
                 Ok(()) => Err(SessionError::Io(e.to_string())),
-                // Rollback could not settle. The conflict evidence (stage and
                 // backup files plus the persisted `recovery_conflict` row)
                 // MUST survive for operator recovery — never clean it up, and
                 // never report success.
@@ -941,7 +929,6 @@ pub(crate) async fn commit_recoverable(
 
     test_crash_if!("before_finalize");
 
-    // Durable committed transition FIRST. Stage/backup artifacts are the
     // recovery evidence for an unsettled intent, so none of them may be
     // removed while the intent is still `applying`.
     let finalized =
@@ -954,7 +941,6 @@ pub(crate) async fn commit_recoverable(
 
     test_crash_if!("after_finalize_before_cleanup");
 
-    // The commit is durable; artifact removal is now best-effort. A crash here
     // leaves dead material behind, which the startup sweep reaps without
     // reapplying anything and without raising a conflict.
     cleanup_staged(&scope, &staged);
@@ -1020,7 +1006,6 @@ pub(crate) async fn commit_recoverable_owned(
     changes: Vec<WorkspaceChangeEntry>,
     active_workspace_root: String,
 ) -> Result<CommitOutcome, SessionError> {
-    // ATOMIC admission: registered before the close boundary can be closed, or
     // refused. The guard moves INTO the retained owner below, so a waiter that
     // disconnects (or is cancelled) cannot release it.
     let admission = mgr.admit_commit()?;
@@ -1062,7 +1047,6 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager, root_filter: O
 
     for (session_id, workspace_root, entries_json) in rows {
         if let Some(active_root) = root_filter {
-            // A bundle admitted for one root must not unlink another root's
             // artifacts, even dead ones.
             if crate::scope::enforce_active_workspace_root(&workspace_root, active_root)
                 .await
@@ -1071,7 +1055,6 @@ async fn cleanup_settled_artifacts(mgr: &WorkspaceSessionManager, root_filter: O
                 continue;
             }
         }
-        // FAIL CLOSED: this document names the files we are about to unlink, so
         // it goes through the full raw-size/entry/path/artifact-basename
         // validation before any filesystem work. A malformed row is skipped
         // whole — nothing is deleted and the evidence survives.
@@ -1145,7 +1128,6 @@ pub(crate) async fn startup_recovery_owned(
     if mgr.recoverable_config().is_none() {
         return run_recovery(&mgr, scope).await;
     }
-    // ATOMIC admission: registered before the close boundary can be closed, or
     // refused. The guard moves INTO the retained owner below, so a waiter that
     // disconnects (or is cancelled) cannot release it.
     let admission = mgr.admit_commit()?;
@@ -1198,7 +1180,6 @@ pub(crate) async fn startup_recovery_all(
     };
     settle_unsettled_intents(mgr, intents).await?;
 
-    // Unsettled work is resolved above; only now reap material belonging to
     // commits that already reached the durable committed transition.
     cleanup_settled_artifacts(mgr, None).await;
     Ok(())
@@ -1261,7 +1242,6 @@ async fn settle_unsettled_intents(
             intent.state,
             db::IntentState::Applying | db::IntentState::RollingBack
         ) {
-            // The pass holds its admission and the crash-consistent on-disk
             // state (claim held, artifacts applied or staged) is about to
             // change: the gated rendezvous lets a test cancel the awaiting
             // caller exactly here.

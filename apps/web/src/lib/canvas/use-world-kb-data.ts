@@ -1,5 +1,4 @@
 /**
- * World KB canvas data hooks — TanStack Query bindings for the V1.73 P0 slice.
  *
  * Read the entity graph + pending candidates and expose the two patch
  * mutations (`world_kb.patch_entity`, `world_kb.promote_candidate`). Mutations
@@ -97,7 +96,6 @@ export function usePatchWorldKbEntity(worldId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId ?? '') });
     },
     onError: (error) => {
-      // 409 conflicts → inspector renders the conflict modal; 422 validation →
       // inspector renders inline field errors. Mirror the promotion path's
       // non-conflict guard (extended to also skip 422 validation) so everything
       // else (500/403/dropped network) is surfaced as a toast instead of being
@@ -123,7 +121,6 @@ export function usePromoteWorldKbCandidate(worldId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
     },
     onError: (error) => {
-      // 409 conflicts are resolved by the promotion inspector's conflict modal;
       // only surface non-conflict failures as toasts.
       if (!isWorldKbConflictError(error)) {
         errorToast(error, 'error.couldNotPromoteWorldKbCandidate');
@@ -190,7 +187,6 @@ export function usePatchWorldKbRelationship(worldId: string | undefined) {
     },
     onError: (error) => {
       if (isWorldKbConflictError(error)) {
-        // A 409 means the expected_version is stale (concurrent modification).
         // Refetch the graph so the client reconciles to canonical state — this
         // also covers the remove/delete path, where there is no draft to reapply
         // but the UI must not stay on a stale snapshot. Callers (inspector/

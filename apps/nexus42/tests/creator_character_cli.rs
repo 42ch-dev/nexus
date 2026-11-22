@@ -469,7 +469,6 @@ async fn unrepresentable_expected_revision_is_refused_not_wrapped() {
         .unwrap()
         .to_string();
 
-    // `u64::MAX` exceeds every stored `i64` revision: the leaf must refuse it
     // rather than cast it into a negative revision that addresses a different
     // row revision.
     let overflow = actor.cli(&[
@@ -849,7 +848,6 @@ async fn knowledge_show_edit_remove_summary_journey() {
     assert!(clear_body["summary"].is_null());
     let rev3 = clear_body["item"]["revision"].as_u64().unwrap();
 
-    // The stored revision advanced with each write, so the pre-edit revision is
     // now stale: the CAS must refuse it instead of deleting the row.
     let stale = actor.cli(&[
         "creator",
@@ -919,7 +917,6 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         oversized.to_str().unwrap(),
     ]);
     assert!(!out.status.success(), "expected failure: {}", stderr(&out));
-    // The precheck wording is emitted **only** by the metadata precheck in
     // `read_file_bounded` (`cannot read …` is the read failure), so naming the
     // metadata size is direct evidence of the precheck path. The v1.193
     // direct-core seam admits the writer before this leaf validates, so the
@@ -934,7 +931,6 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         "the refusal must name the metadata size, not a post-read length: {err}"
     );
 
-    // The refusal is zero-mutation: nothing reached the stored rows.
     let listed = actor.cli(&[
         "creator",
         "character",
@@ -1012,7 +1008,6 @@ async fn knowledge_add_world_owner_rejects_summary_at_cli_layer() {
         );
     }
 
-    // The narrowing is the summary, not World ownership: the same create
     // without a summary still lands.
     let allowed = actor.cli(
         &base

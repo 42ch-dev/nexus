@@ -54,7 +54,6 @@ export function ScaffoldPresetDialog({
       onOpenChange(false);
       onCreated?.(res.id);
     } catch {
-      // Error toast already fired by the mutation's onError callback.
     }
   }
 

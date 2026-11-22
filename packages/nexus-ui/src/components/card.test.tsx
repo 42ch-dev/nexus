@@ -5,18 +5,11 @@ import '@testing-library/jest-dom/vitest';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './card';
 
 describe('Card', () => {
-  // --- base rendering ---
-
-
   it('renders children inside Card', () => {
     render(<Card><span data-testid="child">Hello</span></Card>);
     expect(screen.getByTestId('child')).toBeInTheDocument();
     expect(screen.getByText('Hello')).toBeInTheDocument();
   });
-
-  // --- interactive elevation recipe (V1.121 v0.4 — DESIGN.md §Elevation) ---
-
-
 
   it('keeps structural classes and merges className when interactive', () => {
     render(<Card interactive className="work-card" data-testid="card">Merge</Card>);
@@ -24,7 +17,6 @@ describe('Card', () => {
     expect(el).toHaveClass('work-card');
   });
 
-  // --- CardTitle ---
 
   it('renders CardTitle as a heading element', () => {
     render(<CardTitle>Project Name</CardTitle>);
@@ -37,13 +29,7 @@ describe('Card', () => {
     expect(el).toHaveClass('brand-title');
   });
 
-  // --- CardDescription ---
 
-
-  // --- CardContent ---
-
-
-  // --- composition (full card) ---
 
   it('composes all sub-primitives correctly', () => {
     render(
@@ -63,7 +49,6 @@ describe('Card', () => {
     expect(screen.getByText('Description text here.')).toBeInTheDocument();
   });
 
-  // --- className merge (cn integration) for each sub-primitive ---
 
   it('merges custom className on Card', () => {
     render(<Card className="extra-card" data-testid="merge-card">CardMerge</Card>);
@@ -90,7 +75,6 @@ describe('Card', () => {
     expect(screen.getByTestId('merge-cc')).toHaveClass('prose');
   });
 
-  // --- ref-as-prop for Card ---
 
   it('passes the ref on Card', () => {
     let ref: HTMLDivElement | null = null;

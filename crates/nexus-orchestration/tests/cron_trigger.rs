@@ -18,7 +18,6 @@ use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 
 mod common;
 
-// ============================================================================
 // Test helpers
 // ============================================================================
 
@@ -34,7 +33,6 @@ fn make_schedule(id: &str, creator: &str, scheduled_at: Option<i64>) -> Schedule
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: scheduled_at.map(|t| t.to_string()),
-        // Use schedule ID as label to avoid duplicate detection
         label: Some(id.to_string()),
         created_at: String::new(),
         updated_at: String::new(),
@@ -42,7 +40,6 @@ fn make_schedule(id: &str, creator: &str, scheduled_at: Option<i64>) -> Schedule
     }
 }
 
-// ============================================================================
 // TDD Test 1: Clock poller triggers Pending Schedule at scheduled_at
 // ============================================================================
 
@@ -51,18 +48,15 @@ async fn r21_clocked_tick_triggers_at_scheduled_at() {
     let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Schedule with scheduled_at = 2000 (not yet due at now=1000)
     let schedule = make_schedule("S01", "creator-1", Some(2000));
     supervisor.insert_pending(schedule).await.unwrap();
 
-    // Status should be Pending (not yet due)
     assert_eq!(
         supervisor.status_of("S01").await.unwrap(),
         ScheduleStatus::Pending,
         "schedule should be Pending before scheduled_at"
     );
 
-    // Tick at now=1000: S01 not due yet (scheduled_at=2000 > now=1000)
     supervisor.tick_clocked(1000).await.unwrap();
     assert_eq!(
         supervisor.status_of("S01").await.unwrap(),
@@ -70,7 +64,6 @@ async fn r21_clocked_tick_triggers_at_scheduled_at() {
         "schedule should remain Pending when scheduled_at > now"
     );
 
-    // Tick at now=2000: S01 is now due
     supervisor.tick_clocked(2000).await.unwrap();
     assert_eq!(
         supervisor.status_of("S01").await.unwrap(),
@@ -79,7 +72,6 @@ async fn r21_clocked_tick_triggers_at_scheduled_at() {
     );
 }
 
-// ============================================================================
 // TDD Test 2: Duplicate-fire prevention
 // ============================================================================
 
@@ -88,11 +80,9 @@ async fn duplicate_fire_prevention_same_schedule_admitted_once() {
     let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Schedule due immediately (scheduled_at = 500 < now=1000)
     let schedule = make_schedule("S02", "creator-2", Some(500));
     supervisor.insert_pending(schedule).await.unwrap();
 
-    // First tick at now=1000: S02 should be admitted
     supervisor.tick_clocked(1000).await.unwrap();
     assert_eq!(
         supervisor.status_of("S02").await.unwrap(),
@@ -100,11 +90,9 @@ async fn duplicate_fire_prevention_same_schedule_admitted_once() {
         "schedule should be Running after first tick (admitted)"
     );
 
-    // Second tick in same cycle: S02 should NOT be double-admitted
     // Duplicate prevention is handled by tick_clocked()'s re-entrancy guard
     // and the status check in the UPDATE WHERE clause.
     supervisor.tick_clocked(1000).await.unwrap();
-    // Status should remain Running, not transition twice
     assert_eq!(
         supervisor.status_of("S02").await.unwrap(),
         ScheduleStatus::Running,
@@ -112,7 +100,6 @@ async fn duplicate_fire_prevention_same_schedule_admitted_once() {
     );
 }
 
-// ============================================================================
 // TDD Test 3: Mixed batch — admit due, keep future Pending
 // ============================================================================
 
@@ -121,13 +108,11 @@ async fn mixed_batch_admits_due_and_keeps_future_pending() {
     let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Multiple schedules due at different times
-    let s1 = make_schedule("S03", "creator-3a", Some(500)); // due now
-    let s2 = make_schedule("S04", "creator-3b", Some(1500)); // future
+    let s1 = make_schedule("S03", "creator-3a", Some(500));
+    let s2 = make_schedule("S04", "creator-3b", Some(1500));
     supervisor.insert_pending(s1).await.unwrap();
     supervisor.insert_pending(s2).await.unwrap();
 
-    // Tick at now=1000: S03 is due (500 <= 1000), S04 is not (1500 > 1000)
     supervisor.tick_clocked(1000).await.unwrap();
     assert_eq!(
         supervisor.status_of("S03").await.unwrap(),
@@ -135,7 +120,6 @@ async fn mixed_batch_admits_due_and_keeps_future_pending() {
         "S03 should be Running after tick (scheduled_at=500 < now=1000)"
     );
 
-    // S04 should NOT be started yet (scheduled_at=1500 > now=1000)
     assert_eq!(
         supervisor.status_of("S04").await.unwrap(),
         ScheduleStatus::Pending,
@@ -143,7 +127,6 @@ async fn mixed_batch_admits_due_and_keeps_future_pending() {
     );
 }
 
-// ============================================================================
 // TDD Test 4: DST / clock-jump safety
 // ============================================================================
 
@@ -152,14 +135,11 @@ async fn dst_clock_jump_recomputes_next_run() {
     let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Simulate DST transition: clock jumps forward 1 hour
     // Real time: 02:00 → 03:00 (spring forward)
 
-    // Schedule due at 02:30 (9000 seconds)
     let schedule = make_schedule("S05", "creator-4", Some(9000));
     supervisor.insert_pending(schedule).await.unwrap();
 
-    // Tick at now=7200 (02:00): S05 not yet due (scheduled_at=9000 > now=7200)
     supervisor.tick_clocked(7200).await.unwrap();
     assert_eq!(
         supervisor.status_of("S05").await.unwrap(),
@@ -167,7 +147,6 @@ async fn dst_clock_jump_recomputes_next_run() {
         "schedule should remain Pending before DST jump"
     );
 
-    // DST spring forward: clock jumps to 03:00 (10800 seconds).
     // scheduled_at=9000 is now in the past, so the schedule is due.
     supervisor.tick_clocked(10800).await.unwrap();
     assert_eq!(
@@ -177,25 +156,19 @@ async fn dst_clock_jump_recomputes_next_run() {
     );
 }
 
-// ============================================================================
 // Existing supervisor behavior: scheduled_at is ignored in current tick()
 // ============================================================================
 
 #[tokio::test]
 async fn current_tick_ignores_scheduled_at_field() {
-    // This test verifies current behavior: tick() ignores scheduled_at.
-    // Once WS-D scheduler is implemented, this test will change.
     let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
 
-    // Schedule with future scheduled_at (9999-01-01)
     let schedule = make_schedule("S-FUTURE", "creator-future", Some(253_402_300_799));
     supervisor.insert_pending(schedule).await.unwrap();
 
-    // Current tick() ignores scheduled_at and admits immediately
     supervisor.tick().await.unwrap();
 
-    // S-FUTURE should be Running (current tick doesn't filter by scheduled_at)
     assert_eq!(
         supervisor.status_of("S-FUTURE").await.unwrap(),
         ScheduleStatus::Running,

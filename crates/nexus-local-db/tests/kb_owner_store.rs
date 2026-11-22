@@ -42,9 +42,6 @@ const BINDING_2: &str = "awb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 /// can be removed without violating the governance FK.
 const ORPHAN_CHARACTER: &str = "chr_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
-// ── Pool / seed helpers (same shapes as kb_owner_scope_migration.rs) ──────
-
-/// Fully migrated, protocol-admitted pool. The KB tables carry writer
 /// guards whose scalar functions are connection-local, so fixture writes must
 /// go through the production factory rather than a raw pool.
 async fn migrated_pool() -> (SqlitePool, tempfile::TempDir) {
@@ -154,9 +151,6 @@ fn record_with_body(owner: &KnowledgeOwnerRef, name: &str) -> KnowledgeEntryReco
     rec
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────
-
-/// World golden: the legacy World-owned behavior is unchanged end to end.
 #[tokio::test]
 async fn world_owner_round_trip_preserves_legacy_behavior() {
     let (pool, _dir) = migrated_pool().await;
@@ -177,13 +171,11 @@ async fn world_owner_round_trip_preserves_legacy_behavior() {
         Some("Aria summary")
     );
 
-    // Legacy world-scoped reads see the row.
     let listed = store.list_by_world(WORLD_A).await.unwrap();
     assert_eq!(listed.len(), 1);
     let queried = store.query(&KbQuery::new(WORLD_A)).await.unwrap();
     assert_eq!(queried.total_count, 1);
 
-    // World-scoped active uniqueness still rejects a same-name duplicate.
     let dup = record_with_body(&KnowledgeOwnerRef::world(WORLD_A), "Aria");
     let err = store.insert_knowledge_entry(dup).await.unwrap_err();
     assert_eq!(
@@ -195,7 +187,6 @@ async fn world_owner_round_trip_preserves_legacy_behavior() {
         }
     );
 
-    // The persisted owner columns + extensions metadata are the World shape,
     // and an ordinary create carries no governance (shared is the absence of
     // both columns, durable §3).
     let (kind, world_id, character_id, binding_id, holder, disclosure, extensions) =
@@ -232,7 +223,6 @@ async fn character_owner_round_trip_without_world_fabrication() {
         "an ordinary create leaves governance unset"
     );
 
-    // Invisible to legacy world-scoped reads.
     assert_eq!(
         store.list_by_world(WORLD_A).await.unwrap(),
         [] as [nexus_knowledge::world_kb::KnowledgeEntryRecord; 0]
@@ -246,7 +236,6 @@ async fn character_owner_round_trip_without_world_fabrication() {
         0
     );
 
-    // Owner-scoped listing finds it.
     let owned = store
         .list_by_owner(&KnowledgeOwnerRef::character(CHARACTER_1))
         .await
@@ -254,7 +243,6 @@ async fn character_owner_round_trip_without_world_fabrication() {
     assert_eq!(owned.len(), 1);
     assert_eq!(owned[0].entry_id, entry_id);
 
-    // No fabricated world anywhere in storage.
     let (kind, world_id, character_id, binding_id, _, _, extensions) =
         raw_owner_row(&pool, &entry_id).await;
     assert_eq!(kind, "character");
@@ -328,19 +316,16 @@ async fn owner_and_governance_are_immutable_through_update() {
     let entry_id = rec.entry_id.clone();
     store.insert_knowledge_entry(rec).await.unwrap();
 
-    // Owner change (World A → Character) is rejected.
     let mut moved = store.get_knowledge_entry(&entry_id).await.unwrap();
     moved.owner = KnowledgeOwnerRef::character(CHARACTER_1);
     let err = store.update_knowledge_entry(moved).await.unwrap_err();
     assert_eq!(err, KbStoreError::ImmutableOwner(entry_id.clone()));
 
-    // World → other World is still an owner change.
     let mut moved = store.get_knowledge_entry(&entry_id).await.unwrap();
     moved.owner = KnowledgeOwnerRef::world(WORLD_B);
     let err = store.update_knowledge_entry(moved).await.unwrap_err();
     assert_eq!(err, KbStoreError::ImmutableOwner(entry_id.clone()));
 
-    // A governance flip through the ordinary store path is rejected: audience
     // authoring owns that transition, `KbStore::update` is not a transfer
     // mechanism (durable §3).
     let mut flipped = store.get_knowledge_entry(&entry_id).await.unwrap();
@@ -349,14 +334,12 @@ async fn owner_and_governance_are_immutable_through_update() {
     let err = store.update_knowledge_entry(flipped).await.unwrap_err();
     assert_eq!(err, KbStoreError::ImmutableGovernance(entry_id.clone()));
 
-    // The stored row is untouched.
     let (kind, world_id, _, _, holder, disclosure, _) = raw_owner_row(&pool, &entry_id).await;
     assert_eq!(kind, "world");
     assert_eq!(world_id.as_deref(), Some(WORLD_A));
     assert_eq!(holder, None);
     assert_eq!(disclosure, None);
 
-    // A same-owner body update still works.
     let mut same = store.get_knowledge_entry(&entry_id).await.unwrap();
     same.body = Some(KnowledgeEntryBody {
         summary: Some("revised".to_string()),
@@ -398,7 +381,6 @@ async fn unknown_nexus_extension_keys_round_trip_all_owners() {
         );
         assert_eq!(got.owner, owner);
 
-        // And the extras survive an update cycle too.
         store.update_knowledge_entry(got).await.unwrap();
         let got = store.get_knowledge_entry(&entry_id).await.unwrap();
         assert_eq!(
@@ -425,7 +407,6 @@ async fn owner_scoped_active_uniqueness_via_store() {
         ))
         .await
         .unwrap();
-    // Cross-owner same-name is accepted.
     store
         .insert_knowledge_entry(record_with_body(
             &KnowledgeOwnerRef::character(CHARACTER_1),
@@ -433,7 +414,6 @@ async fn owner_scoped_active_uniqueness_via_store() {
         ))
         .await
         .unwrap();
-    // Same-owner duplicate is rejected with the owner on the error.
     let err = store
         .insert_knowledge_entry(record_with_body(
             &KnowledgeOwnerRef::character(CHARACTER_1),
@@ -451,7 +431,6 @@ async fn owner_scoped_active_uniqueness_via_store() {
     );
 }
 
-// ── v1.191 P1 T6 — pre-limit native visibility (durable §4.2) ──────────────
 //
 // One fixture: two Creators, two Characters, two Worlds and three bindings,
 // with shared, creator-private, Character-private, foreign-holder-private and
@@ -483,7 +462,6 @@ fn governed_entry(
     row.holder_entry_id = holder.map(str::to_string);
     row.disclosure = disclosure.map(str::to_string);
     row.body = Some(KnowledgeEntryBody {
-        // Every row carries a searchable term; the hidden ones carry the
         // *same* term as a visible row so a leaking search is observable in
         // both the count and the snippet.
         summary: Some(format!("{name} beacon note")),
@@ -537,7 +515,6 @@ async fn seed_visibility_fixture(pool: &SqlitePool) -> VisibilityFixture {
 
     let store = SqliteKbStore::new(pool.clone());
     let rows = vec![
-        // World A — hidden rows deliberately lead the order.
         governed_entry(
             KnowledgeOwnerRef::world(WORLD_A),
             "WorldCreatorPrivate",
@@ -580,7 +557,6 @@ async fn seed_visibility_fixture(pool: &SqlitePool) -> VisibilityFixture {
             Some(&character_1_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
-        // Character 1 container: a foreign-holder private row (storable: the
         // holder exists, the container is the Character's own) between two
         // eligible rows.
         governed_entry(
@@ -604,7 +580,6 @@ async fn seed_visibility_fixture(pool: &SqlitePool) -> VisibilityFixture {
             Some(&character_1_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
-        // Character 2 and binding 2 are outside CHARACTER_1's selection.
         governed_entry(
             KnowledgeOwnerRef::character(CHARACTER_2),
             "Char2Private",
@@ -633,7 +608,6 @@ async fn seed_visibility_fixture(pool: &SqlitePool) -> VisibilityFixture {
             Some(&character_2_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
-        // Another World of the same Creator: authorized for management, never
         // for a World-scoped Character selection.
         governed_entry(
             KnowledgeOwnerRef::world(WORLD_B),
@@ -750,7 +724,6 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
         "the World container pages only its eligible rows"
     );
 
-    // The same walk over the Character and binding containers keeps the
     // foreign-holder private row and the other binding's rows out.
     assert_eq!(
         paged_names(
@@ -771,7 +744,6 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
         vec!["Bind1Shared", "Bind1Private"]
     );
 
-    // A page boundary that a post-filter would turn into a phantom empty page:
     // the first World page of a 2-row window starts after two hidden rows.
     let first_page = store
         .list_by_owner_keyset(&world_owner, None, 2, &selection)
@@ -800,7 +772,6 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
         "the page after the cursor holds the next eligible row, not a hidden one"
     );
 
-    // Complete snapshots are the same eligible sets, and an owner outside the
     // selection yields nothing (no widening by asking for a foreign container).
     assert_eq!(
         visible_names(&store, &selection).await,
@@ -857,7 +828,6 @@ async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
             .clone()
     };
 
-    // Eligible: the shared World row, the Character's own private World row, and
     // the selection's binding-local row.
     let admitted = store
         .list_entries_by_ids_admitted(
@@ -881,7 +851,6 @@ async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
         "an admitted id resolves to its eligible row"
     );
 
-    // Hidden for this selection: another holder's private World row, a foreign
     // creator's private World row, another Character's private World row, and a
     // shared row of an unauthorized World.
     let hidden = store
@@ -901,13 +870,11 @@ async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
         "a hidden id is indistinguishable from a missing one: {hidden:?}"
     );
 
-    // The unscoped by-id read still returns those rows, so the empty result is
     // the selection's eligibility and not an absent or malformed row.
     for name in ["WorldCreatorPrivate", "WorldBShared"] {
         store.get_knowledge_entry(&id_of(name)).await.unwrap();
     }
 
-    // A requested id that was never stored is simply absent (never an error).
     assert_eq!(
         store
             .list_entries_by_ids_admitted(&["kb_never_stored".to_string()], &selection)
@@ -927,7 +894,6 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
     let store = SqliteKbStore::new(pool.clone());
     let selection = character_1_view(&fixture);
 
-    // Every row carries the term "beacon"; a hidden World row carries it too.
     let unscoped = store.query(&KbQuery::new(WORLD_A)).await.unwrap();
     assert_eq!(
         unscoped.total_count, 6,
@@ -966,7 +932,6 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
         );
     }
 
-    // A term only a hidden row matches yields an empty, zero-count result even
     // though the row exists and matches for the unscoped path.
     let hidden_term = store
         .query(&KbQuery::new(WORLD_A).with_text_search("worldcreatorprivate"))
@@ -989,7 +954,6 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
         "a hidden match is not scored, counted or returned"
     );
 
-    // A World the selection never authorized yields the empty result, not a
     // filtered view of another World.
     let foreign = store
         .query_with_scope(
@@ -1000,7 +964,6 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
         .unwrap();
     assert_eq!((foreign.items.len(), foreign.total_count), (0, 0));
 
-    // Management review searches the owned known-private rows too — every
     // World-A row but the foreign holder's.
     let management = store
         .query_with_scope(
@@ -1071,21 +1034,16 @@ async fn v1191_holder_visibility_detail_hidden_is_absent() {
         "a binding-owned row in this Character's own binding stays readable"
     );
 
-    // Every refused id is observably identical to a never-written one: private
     // to another holder, in another container (World / other Character / other
     // binding / other World), or absent.
     let absent = read("kb_never_written").await.unwrap();
     assert_eq!(absent, None, "an absent row is absent");
     for refused in [
-        // Same container, `owner-private` under a holder that is not this
         // Character's.
         "Char1ForeignHolderPrivate",
-        // World container (a World-owned row is never in a Character container).
         "WorldChar1Private",
-        // Another Character's container and another binding's provenance.
         "Char2Private",
         "Bind2Private",
-        // Another World entirely.
         "WorldBShared",
     ] {
         let got = read(&fixture.ids[refused]).await.unwrap();
@@ -1095,7 +1053,6 @@ async fn v1191_holder_visibility_detail_hidden_is_absent() {
         );
     }
 
-    // The requested container is authorized first: a Character the caller does
     // not own is the retained not-found shape, never a row.
     let foreign = nexus_local_db::get_actor_knowledge_entry(
         &pool,
@@ -1112,7 +1069,6 @@ async fn v1191_holder_visibility_detail_hidden_is_absent() {
         "a foreign requested Character is not-found, got {foreign:?}"
     );
 
-    // The holder is read from the registry, never derived: a missing registry
     // row fails closed with `holder_state_invalid` (no provisioning, no
     // silently derived predicate). A Character with no knowledge rows is used
     // so the registry DELETE is not blocked by the governance FK.
@@ -1158,7 +1114,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
         "a Character view: own holder + authorized containers, nothing else"
     );
 
-    // The second Character sees its own private rows only.
     let character_2_scope = KnowledgeReadScope::actor_view(
         fixture.character_2_holder.clone(),
         vec![
@@ -1177,7 +1132,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
             && !character_2_names.contains(&"Char1Private".to_string()),
         "a Character view never inherits another holder's private rows: {character_2_names:?}"
     );
-    // Shared rows stay visible to both Characters (no shared row is hidden by
     // the cutover), and the Character-global row of the other Character is not
     // binding-local.
     assert!(character_2_names.contains(&"WorldShared".to_string()));
@@ -1187,7 +1141,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
         "another Character's global sharing stays in that Character's container"
     );
 
-    // The Creator's own ActorView holds the Creator holder, so the
     // creator-private World row is visible and the Characters' private rows
     // are not: management review is never implied by an ActorView.
     let creator_scope = KnowledgeReadScope::actor_view(
@@ -1218,10 +1171,8 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
             "a Creator ActorView does not inherit the management known-governance set: {hidden}"
         );
     }
-    // The foreign holder's private row in the same container stays invisible.
     assert!(!creator_names.contains(&"WorldForeignHolderPrivate".to_string()));
 
-    // CreatorManagement: owned containers + known-governance holders, so every
     // owned private row is reviewable — and only those.
     let management = creator_management(&fixture);
     let management_names = visible_names(&store, &management).await;
@@ -1254,7 +1205,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
          they are shared"
     );
 
-    // The holder set is what gates a private row, not the container: adding
     // the other Creator's holder admits exactly that row (and only it).
     let widened = KnowledgeReadScope::creator_management(management.containers().to_vec(), {
         let mut holders = management.authorized_holders().to_vec();
@@ -1330,7 +1280,6 @@ async fn v1191_holder_visibility_unknown_and_malformed_governance_refused() {
         "an unregistered holder is refused by the registry FK, got {unregistered:?}"
     );
 
-    // None of the refused rows reached storage, so the selection is unchanged.
     assert_eq!(
         visible_names(&store, &character_1_view(&fixture))
             .await
@@ -1344,7 +1293,6 @@ async fn v1191_holder_visibility_unknown_and_malformed_governance_refused() {
         .unwrap();
     assert_eq!(raw, 1, "only the fixture's World-B row exists");
 
-    // Every hidden fixture row is still hidden from the selection, one by one.
     let hidden_names = visible_names(&store, &character_1_view(&fixture)).await;
     for hidden in HIDDEN_FROM_CHARACTER_1 {
         assert!(

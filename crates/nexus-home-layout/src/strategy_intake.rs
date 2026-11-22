@@ -11,6 +11,8 @@
 //! default-off was removed at v1.244.0 (I-000509): a config that still names it
 //! is refused with the replacement named, never mapped silently onto `ir-only`.
 //! The import/export surface has no removal boundary.
+//!
+//! see docs/specs/orchestration/strategy-composition.md
 
 use std::path::Path;
 

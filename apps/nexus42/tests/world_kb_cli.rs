@@ -32,10 +32,6 @@ fn summary_of(block: &KnowledgeEntryRecord) -> Option<&str> {
     block.body.as_ref().and_then(|b| b.summary.as_deref())
 }
 
-// =============================================================================
-// CLI surface (assert_cmd)
-// =============================================================================
-
 /// `creator world kb --help` lists the author and the rebound extract/rescan
 /// leaves.
 ///
@@ -160,10 +156,6 @@ fn world_kb_delete_help_shows_yes_flag() {
         "delete --help must list the -y short form: {help_text}"
     );
 }
-
-// =============================================================================
-// Hermetic round-trip (fresh pool per test — no $HOME, no daemon)
-// =============================================================================
 
 /// `kb_list` returns the seeded block (human + JSON paths do not error).
 #[tokio::test]

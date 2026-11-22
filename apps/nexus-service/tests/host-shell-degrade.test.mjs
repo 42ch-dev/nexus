@@ -7,7 +7,6 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * I-000123: the service-only shell (a fresh home opened with
  * `allow_uninitialized`) has no Host authority until a workspace selection
  * promotes the core. The onboarding wizard calls the tier1 Agent-Host routes
  * BEFORE that promotion, so their native `uninitialized` rejection must degrade

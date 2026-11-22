@@ -68,7 +68,6 @@ async fn v148_serial_resume_draft_no_duplicate_row() {
     .await
     .unwrap();
 
-    // Seed a single chapter and transition it to draft.
     nexus_local_db::work_chapters::seed_chapters(
         &pool,
         work_id,
@@ -90,7 +89,6 @@ async fn v148_serial_resume_draft_no_duplicate_row() {
     .await
     .unwrap();
 
-    // Precondition: exactly one chapter row exists.
     let before_count = nexus_local_db::work_chapters::count_chapters(&pool, work_id)
         .await
         .unwrap();
@@ -99,7 +97,6 @@ async fn v148_serial_resume_draft_no_duplicate_row() {
         "setup should create exactly one chapter row"
     );
 
-    // Resume selection should return the existing draft row, not create another.
     let next = nexus_local_db::work_chapters::next_chapter(&pool, work_id)
         .await
         .unwrap();
@@ -117,7 +114,6 @@ async fn v148_serial_resume_draft_no_duplicate_row() {
         "resume selection must not create a duplicate chapter row (§4.5.7 #4)"
     );
 
-    // The Work is not complete while its only chapter is draft.
     let completed = nexus_local_db::work_chapters::is_work_completed(&pool, work_id)
         .await
         .unwrap();
@@ -165,7 +161,6 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
     .await
     .unwrap();
 
-    // Pre-seed chapter 1 as draft in DB (this row exists but the file will
     // claim it is finalized — DB must win per §4.5.3).
     nexus_local_db::work_chapters::seed_chapters(
         &pool,
@@ -188,7 +183,6 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
     .await
     .unwrap();
 
-    // Create Stories/ with two files:
     // - ch01-finalized.md: frontmatter says finalized, but DB says draft.
     // - ch02-extra.md: no DB row, so reconcile should create one.
     let stories_dir = tmp.path().join("Works").join(work_ref).join("Stories");
@@ -209,7 +203,6 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
         .await
         .unwrap();
 
-    // ch01: DB status preserved (SSOT), word_count mirrored, frontmatter
     // re-synced → counts as both updated and resynced.
     // ch02: new row from file → counts as created.
     assert_eq!(report.created, 1, "ch02 file should create one new DB row");
@@ -226,7 +219,6 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
         "no rows are identical to filesystem state"
     );
 
-    // DB status for ch01 must remain draft (SSOT).
     let ch1 = nexus_local_db::work_chapters::get_chapter(&pool, work_id, 1, 1)
         .await
         .unwrap()
@@ -236,20 +228,17 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
         "DB status must win over filesystem frontmatter per §4.5.3"
     );
 
-    // File content for ch01 must be preserved (body still readable).
     let ch1_file = std::fs::read_to_string(stories_dir.join("ch01-finalized.md")).unwrap();
     assert!(
         ch1_file.contains("Draft body still here."),
         "reconcile must preserve chapter file content"
     );
 
-    // After reconcile, file frontmatter should be re-synced to DB status.
     assert!(
         ch1_file.contains("status: draft"),
         "reconcile should re-sync file frontmatter to DB status per §4.5.3"
     );
 
-    // ch02 row should have been created from the file.
     let ch2 = nexus_local_db::work_chapters::get_chapter(&pool, work_id, 2, 1)
         .await
         .unwrap()

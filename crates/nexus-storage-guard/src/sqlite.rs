@@ -197,7 +197,6 @@ fn register_scalar(
     if status == SQLITE_OK {
         Ok(())
     } else {
-        // Registration failed: SQLite already invoked `destroy_userdata` once.
         // Manual free here would double-free (sqlite3.h:5444-5452).
         Err(sqlx::Error::Configuration(
             format!("sqlite3_create_function_v2({name}) failed: {status}").into(),

@@ -37,6 +37,5 @@ fn locked_error_matches_pattern_for_exit_code() {
         holder_name: "test".to_string(),
         stale: false,
     };
-    // Verify the matches! pattern used in main.rs works correctly.
     assert!(matches!(err, CliError::Locked { .. }));
 }

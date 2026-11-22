@@ -1,5 +1,4 @@
 /**
- * Outline canvas custom node types — rendering for the node kinds produced by
  * the RF projection (`rf-projection.ts`; canvas-strategy-surface.md §3.3
  * surface 2 + §3.4).
  *
@@ -31,12 +30,7 @@ import { STATUS_LABEL_KEYS, STATUS_OPTIONS } from './graph-projection';
 import { OutlineSceneNode, OutlineBeatNode } from './scene-beat-nodes';
 import { NodeChromeShell } from '../presentational/node-chrome-shell';
 
-// ---------------------------------------------------------------------------
-// Status → token (canvas-outline-chapter-card-status-* — DESIGN.md)
-// ---------------------------------------------------------------------------
-
 /**
- * Maps a chapter status to the `canvas-outline-chapter-card-status-*` CSS
  * variable name (per DESIGN.md). DESIGN.md ships three status tokens
  * (pending/drafted/completed); the five-value `ChapterStatus` enum maps as
  * follows (V1.72 compass token alias):
@@ -56,7 +50,6 @@ function statusColorVar(status: ChapterStatus): string {
 }
 
 /**
- * AA text step per status (v1.183 P0 R-V1121P3T4-O001, AR-3): label-12 pill
  * text on the 12% status tint uses the hue's existing `-1000` step (DESIGN.md
  * §Contrast rule — body-copy status text uses `*-1000` on its tinted fill);
  * the raw `*-700` status color fails AA on light tints. pending → gray-1000,
@@ -74,11 +67,6 @@ function statusTextColorVar(status: ChapterStatus): string {
   return `var(${STATUS_TEXT_TOKEN_VAR[status]})`;
 }
 
-// ---------------------------------------------------------------------------
-// Volume node
-// ---------------------------------------------------------------------------
-
-/** Volume lane node — label + chapter count, uses `canvas-outline-volume-fill`. */
 export const OutlineVolumeNode = memo(function OutlineVolumeNode({
   data,
   selected,
@@ -105,11 +93,6 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
   );
 });
 
-// ---------------------------------------------------------------------------
-// Chapter node
-// ---------------------------------------------------------------------------
-
-/** Chapter card node — title, status paint dot, slug, word count. */
 export const OutlineChapterNode = memo(function OutlineChapterNode({
   data,
   selected,
@@ -148,11 +131,6 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
   );
 });
 
-// ---------------------------------------------------------------------------
-// Timeline event node
-// ---------------------------------------------------------------------------
-
-/** Timeline event lane node — title, realizes-chapter hint. */
 export const OutlineTimelineEventNode = memo(function OutlineTimelineEventNode({
   data,
   selected,
@@ -187,10 +165,6 @@ export const OutlineTimelineEventNode = memo(function OutlineTimelineEventNode({
   );
 });
 
-// ---------------------------------------------------------------------------
-// nodeTypes map (consumed by CanvasShell — mirrors strategy-nodes.tsx pattern)
-// ---------------------------------------------------------------------------
-
 export const outlineNodeTypes = {
   'outline-volume': OutlineVolumeNode,
   'outline-chapter': OutlineChapterNode,
@@ -199,9 +173,6 @@ export const outlineNodeTypes = {
   'outline-beat': OutlineBeatNode,
 } as const;
 
-// Re-export for consumers that inspect status options from this barrel.
 export { STATUS_OPTIONS };
-// Re-export Scene/Beat data interfaces + components for type-only consumers
-// (projection in Task 2 will import these when emitting scene/beat nodes).
 export type { OutlineSceneNodeData, OutlineBeatNodeData, OutlineSceneStatus } from './scene-beat-nodes';
 export { OutlineSceneNode, OutlineBeatNode } from './scene-beat-nodes';

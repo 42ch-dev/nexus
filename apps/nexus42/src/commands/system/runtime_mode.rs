@@ -54,14 +54,12 @@ fn show(config: &CliConfig) {
         }
     );
 
-    // Display degradation policy info (if available)
     if let Some(snapshot) = config.degradation_snapshot() {
         println!();
         println!("--- Degradation Status ---");
         println!("State: {}", snapshot.state.display_label());
         println!("Failure count: {}", snapshot.failure_count);
         if let Some(hc) = &snapshot.last_health_check {
-            // Parse ISO 8601 back to a displayable time; fall back to raw string on parse error.
             let time_str = chrono::DateTime::parse_from_rfc3339(&hc.checked_at).map_or_else(
                 |_| hc.checked_at.clone(),
                 |dt| dt.format("%H:%M:%S").to_string(),
@@ -87,7 +85,6 @@ fn show(config: &CliConfig) {
 }
 
 fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
-    // NOTE (S-007): Not warning about the daemon when setting runtime mode is an
     // intentional UX choice. Users who run `nexus42 system runtime-mode set` are expected
     // to manage the daemon lifecycle themselves — they either restart the daemon
     // to pick up the new mode, or they understand that the daemon uses the mode
@@ -105,12 +102,10 @@ fn set(config: &CliConfig, mode_str: &str) -> Result<()> {
 
     println!("Switching runtime mode: {old_mode} → {new_mode}");
 
-    // Warn about platform requirements
     if new_mode.allows_platform() {
         println!("Note: {new_mode} mode requires platform connectivity for some operations.");
     }
 
-    // Persist
     CliConfig::mutate(|config| {
         config.runtime_mode = new_mode;
         Ok(())
@@ -148,7 +143,6 @@ mod tests {
     #[test]
     fn show_without_degradation_outputs_basic_info() {
         let config = CliConfig::default();
-        // Capture stdout
         let mut buf = Vec::new();
         show_to(&config, &mut buf).expect("show_to");
         let output = String::from_utf8(buf).expect("utf8 output");
@@ -189,7 +183,6 @@ mod tests {
         show_to(&config, &mut buf).expect("show_to");
         let output = String::from_utf8(buf).expect("utf8 output");
         assert!(output.contains("State: Forced local_only"));
-        // No last health check line when None
         assert!(!output.contains("Last health check:"));
     }
 

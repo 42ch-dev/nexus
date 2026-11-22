@@ -86,8 +86,6 @@ async fn seed_slot_fixture(kb: &InMemoryKbStore) {
             "kb_uk",
             serde_json::json!({"constant": true, "priority": 10, "position_hint": "sideways"}),
         ),
-        // Non-constant band: fires on "king" (present in the Stage-0 scan
-        // text) — must sort AFTER the constant band despite the higher
         // priority (V1.149 spec §4 within-slot rule).
         (
             "LoreMidC",
@@ -118,9 +116,6 @@ async fn slots_actioning_routes_and_orders_end_to_end() {
     let ctx = assemble_moment(&request, &narrative, &kb).await;
     let kb_text = ctx.world_kb.clone().expect("world_kb must be present");
 
-    // 1. Slot sections render in the locked emit order (spec §2 / Q5):
-    //    World (Before) → fallback → World (After) → Outlet: aether →
-    //    Outlet: zone.z (sorted) → Style (Post-History).
     let pos_before = kb_text.find("### World (Before)").expect("before slot");
     let pos_after = kb_text.find("### World (After)").expect("after slot");
     let pos_outlet_a = kb_text.find("### Outlet: aether").expect("outlet aether");
@@ -136,8 +131,6 @@ async fn slots_actioning_routes_and_orders_end_to_end() {
         "slot emit order must be before → after → outlets (sorted) → style"
     );
 
-    // 2. The fallback block sits between the before and after slots and has
-    //    no sub-heading of its own.
     let fallback_segment = &kb_text[pos_before..pos_after];
     assert!(
         fallback_segment.contains("- **LoreMidA**")
@@ -147,10 +140,6 @@ async fn slots_actioning_routes_and_orders_end_to_end() {
         "default fallback entries must render between the before and after slots"
     );
 
-    // 3. Within-slot order = V1.149 priority-then-order with the constant
-    //    band first: LoreMidC (non-constant, priority 100) sorts after the
-    //    constant band despite the higher priority; the constant entries
-    //    keep priority desc.
     let pos_mid_a = kb_text.find("- **LoreMidA**").expect("LoreMidA");
     let pos_mid_b = kb_text.find("- **LoreMidB**").expect("LoreMidB");
     let pos_depth = kb_text.find("- **DepthLore**").expect("DepthLore");
@@ -164,7 +153,6 @@ async fn slots_actioning_routes_and_orders_end_to_end() {
         "fallback order must be constant band (priority desc) then non-constant"
     );
 
-    // 4. Routing table: each hinted entry lands in exactly its slot.
     let before_segment = &kb_text[..pos_after];
     assert!(
         before_segment.contains("- **WorldBefore**")
@@ -183,13 +171,11 @@ async fn slots_actioning_routes_and_orders_end_to_end() {
         "style.post_history routes to the reserved tail slot, not an open outlet"
     );
 
-    // 5. P0 reservation: no Moment Directive section renders.
     assert!(
         !ctx.to_full_context().contains("## Moment Directive"),
         "reserved directive slot must stay empty in P0"
     );
 
-    // 6. All ten fired entries are present exactly once (nothing dropped).
     for name in [
         "WorldBefore",
         "LoreMidA",

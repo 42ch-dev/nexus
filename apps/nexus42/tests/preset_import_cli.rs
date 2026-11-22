@@ -110,7 +110,6 @@ async fn preset_import_prints_the_candidate_and_the_trajectory_approve_accepts()
         "the printed trajectory must be the walk of the stored bytes"
     );
 
-    // The stored row is the conflict on a second import: the source cannot overwrite it.
     let again = fixture
         .command()
         .args(["preset", "import", bundle.to_str().expect("utf-8 path")])

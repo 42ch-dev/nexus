@@ -545,8 +545,6 @@ impl EnvState {
             JsOperationStatus::Finished | JsOperationStatus::Failed => {
                 self.record_js_operation_terminal(session_id, operation_id, status);
             }
-            // Batch events never derive these; only the cancel path settles
-            // `Cancelled` and `Running` is the pre-terminal state.
             JsOperationStatus::Running | JsOperationStatus::Cancelled => {}
         }
     }
@@ -565,9 +563,6 @@ impl EnvState {
         let Some(core) = self.journal_core() else {
             return Ok(());
         };
-        // The operation record keeps its launch identity: the status write
-        // carries the real owning session and provider id, never blanks that
-        // would clobber the stored identity columns.
         let (session_id, provider_id) = self
             .with_js_state(|s| {
                 s.operation(operation_id).and_then(|op| {
@@ -616,9 +611,6 @@ impl EnvState {
 
     pub async fn publish_open(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Open;
-        // The close signal is a level, not a pulse: reopening must clear it or
-        // every later callback would observe "closing" and be rejected. Only the
-        // `false` transition is broadcast on open; the next close sets it again.
         self.close_watch.send_replace(false);
     }
 
@@ -629,7 +621,6 @@ impl EnvState {
     pub async fn publish_closed(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closed;
         self.clear_service_only_uninitialized();
-        // The retained JS provider adapter belongs to this open only; a later
         // open installs its own.
         self.js_provider_port
             .lock()
@@ -668,7 +659,6 @@ impl EnvState {
         self.closing
             .store(self.generation.load(Ordering::SeqCst), Ordering::SeqCst);
         self.close_notify.notify_waiters();
-        // `send_replace` always updates the stored value, so a receiver created
         // after this point still observes the closed state.
         self.close_watch.send_replace(true);
     }
@@ -743,7 +733,6 @@ impl EnvState {
                                     quiesce_pending.push("actor-quiesce-deadline".to_string());
                                     false
                                 } else {
-                                    // Bounded by the same absolute deadline: the
                                     // joins inside are deliberately unbounded
                                     // (the authority retains its drain
                                     // ownership), so an expired budget cancels
@@ -804,10 +793,6 @@ impl EnvState {
                                         service.close(),
                                     )
                                     .await;
-                                    // `cleanup_confirmed` needs the existing
-                                    // core/JS-owner settlement too (contract
-                                    // §3): an unconfirmed report retains the
-                                    // owner instead of reading `Ok` as success.
                                     let confirmed = match settled {
                                         Ok(Ok(report)) => {
                                             let confirmed = report.cleanup_confirmed;
@@ -839,8 +824,6 @@ impl EnvState {
                             None => true,
                             Some(authority) => {
                                 let released = if ordered_close_unconfirmed {
-                                    // The ordered close has not reached this
-                                    // authority's settlement: it owns the Actor
                                     // drains a retry must re-join, so both it
                                     // and its manager/`LocalSet` stay retained.
                                     host_pending.push(
@@ -878,8 +861,6 @@ impl EnvState {
                                         }
                                     }
                                 };
-                                // A join that could not settle inside the budget
-                                // hands its `JoinHandle` to tracked cleanup
                                 // straight away, so a retained authority never
                                 // leaves a detached `LocalSet` thread behind.
                                 if let Some(handle) = authority
@@ -902,9 +883,6 @@ impl EnvState {
                         };
 
                         if core_released && host_released {
-                            // Owned sessions confirmed clean: the process
-                            // reaper is stopped inside the remaining budget so
-                            // it cannot outlive this finalize.
                             let stop = super::cleanup_registry::stop_reaper(deadline);
                             if !stop.joined || stop.pending_entries > 0 {
                                 let mut pending = work_state.pending_operations_snapshot().await;
@@ -1026,8 +1004,6 @@ mod tests {
 
     /// Wait for the race-free close signal, bounded.
     async fn wait_closed(mut rx: tokio::sync::watch::Receiver<bool>) -> bool {
-        // Bind the result before returning: a tail expression's temporaries are
-        // dropped after the locals they borrow.
         let waited =
             tokio::time::timeout(Duration::from_secs(5), rx.wait_for(|closed| *closed)).await;
         waited.is_ok()
@@ -1048,7 +1024,6 @@ mod tests {
             "a close that already happened must be observed, not lost"
         );
 
-        // Contrast: a `Notify` waiter registered after the notify never fires.
         // This is the exact lost-wake the versioned signal replaces, and it shows
         // the assertion above is meaningful rather than trivially true.
         let notify_waiter =
@@ -1102,7 +1077,6 @@ mod tests {
             "a reopened environment must not keep signalling closed"
         );
 
-        // And a later close is still observed.
         state.begin_close();
         let rx_after = state.close_watch();
         let closed = tokio::time::timeout(Duration::from_secs(2), wait_closed(rx_after)).await;
@@ -1143,7 +1117,6 @@ mod tests {
         assert!(state.try_reserve_js_session());
         state.record_js_session("sess-1".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-1", "op-1".to_string());
-        // Active op is live and queryable with the admitted provider id.
         let session = state
             .with_js_state(|s| s.session("sess-1").cloned())
             .flatten()
@@ -1155,8 +1128,6 @@ mod tests {
             .flatten()
             .unwrap();
         assert_eq!(op.status.wire(), "running");
-        // A real terminal event clears the active op and retains the terminal:
-        // detected without mutating, then applied — the durable mirror runs
         // between the two in production (LIFE-3).
         let (status, session_id) = state
             .detect_js_batch_terminal("op-1", &[op_finished("op-1")])
@@ -1199,7 +1170,6 @@ mod tests {
         let state = EnvState::new();
         state.record_js_session("sess-2".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-2", "op-y".to_string());
-        // An accepted cancel for `op-x` while `op-y` is the session's active
         // operation settles exactly `op-x` and never touches `op-y`.
         state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Cancelled);
         assert_eq!(
@@ -1222,13 +1192,11 @@ mod tests {
             "running",
             "cancel(op-x) must not mark the session's active op op-y cancelled"
         );
-        // Active-op clearing is preserved only when it matches the targeted op.
         let session = state
             .with_js_state(|s| s.session("sess-2").cloned())
             .flatten()
             .unwrap();
         assert_eq!(session.active_operation_id.as_deref(), Some("op-y"));
-        // A later terminal event must never downgrade the settled `cancelled`.
         state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Finished);
         assert_eq!(
             state
@@ -1276,7 +1244,6 @@ mod tests {
             retained, JS_MAX_TERMINAL_OPERATIONS,
             "terminal history must be bounded"
         );
-        // A duplicate terminal upserts rather than appending.
         state.record_js_operation_terminal("sess-4", "op-5", JsOperationStatus::Failed);
         assert_eq!(
             state.with_js_state(|s| s.terminal.len()).unwrap(),
@@ -1315,7 +1282,6 @@ mod tests {
             assert!(reserved <= JS_PROVIDER_MAX_ACTIVE_SESSIONS);
         }
         assert_eq!(reserved, JS_PROVIDER_MAX_ACTIVE_SESSIONS);
-        // Releasing a reservation frees exactly one slot.
         state.release_js_session_reservation();
         assert!(state.try_reserve_js_session());
     }
@@ -1363,7 +1329,6 @@ mod tests {
     async fn journal_failures_are_propagated_not_discarded() {
         let (_tmp, state) = open_env_with_core().await;
         let core = state.journal_core().expect("core installed");
-        // Fail the journal by closing the owning service behind the env's
         // back; the owned seam must surface the failure, not swallow it.
         core.close().await.expect("close");
         assert!(
@@ -1407,8 +1372,6 @@ mod tests {
             .journal_operation_status("op-ok", "cancelled")
             .await
             .expect("terminal upsert succeeds");
-        // A cancelled operation is already terminal: settlement has nothing to
-        // settle and reports zero affected rows, not an error.
         let settled = core.settle_provider_orphans().await.expect("settlement");
         assert_eq!(settled, 0);
         state

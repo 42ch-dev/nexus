@@ -86,7 +86,6 @@ pub fn spawn_cron_supervisor(
         );
 
         let mut ticker = tokio::time::interval(config.interval);
-        // `Delay` keeps ticks spaced after a long pause (e.g. laptop sleep);
         // avoids piling cron evaluations onto the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -118,14 +117,11 @@ pub async fn run_one_tick(
     binding_provider: Option<&str>,
 ) {
     let now = chrono::Utc::now();
-    // Step 1: evaluate per-Work crons → enqueue pending schedules.
     let summary =
         cron_eval::evaluate_cron_fires(pool, Some(workspace_dir), now, binding_provider).await;
-    // Step 2: admit due pending schedules (including any just enqueued).
     // `tick_clocked` filters by `scheduled_at <= now` (cron schedules have no
     // `scheduled_at`, so they are on-demand-admissible).
     if summary.fired > 0 {
-        // Only trigger admission when we actually enqueued something — avoids a
         // redundant full-table scan on idle ticks (the supervisor's tick_inner
         // loads all active schedules every call).
         if let Err(e) = supervisor.tick_clocked(now.timestamp()).await {

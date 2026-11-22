@@ -151,7 +151,6 @@ const FRAGMENT_DIGEST: &str =
 const OVER_LIMIT_BODY_BYTES: usize = 70_000;
 
 // ---------------------------------------------------------------------------
-// Signed loopback provider
 // ---------------------------------------------------------------------------
 
 fn manifest(host_id: &str) -> HostCapabilityManifest {
@@ -273,7 +272,6 @@ async fn responder_of(
 }
 
 // ---------------------------------------------------------------------------
-// The disposable home, the selection and the open
 // ---------------------------------------------------------------------------
 
 /// One disposable user home, bootstrapped through the real public home
@@ -599,7 +597,6 @@ impl Provider {
 }
 
 // ---------------------------------------------------------------------------
-// Nexus-side observation helpers
 // ---------------------------------------------------------------------------
 
 async fn core_db(env: &Env) -> SqlitePool {
@@ -647,7 +644,6 @@ async fn object_facts(pool: &SqlitePool, binding_id: &str) -> Vec<(String, Strin
 }
 
 // ---------------------------------------------------------------------------
-// Legacy no-read traps
 // ---------------------------------------------------------------------------
 
 /// Withhold every legacy memory surface for the rest of the lifecycle and
@@ -744,7 +740,6 @@ async fn assert_no_local_memory(env: &Env) {
 }
 
 // ---------------------------------------------------------------------------
-// Provider-side observation helpers
 // ---------------------------------------------------------------------------
 
 /// One durable provider record row.
@@ -829,7 +824,6 @@ async fn provider_receipts(pool: &SqlitePool, op: &str) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// Fixture setup through the real public Core actor surface
 // ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &Principal, title: &str) -> String {
@@ -932,7 +926,6 @@ fn classified_refusal(
 }
 
 // ---------------------------------------------------------------------------
-// Creator record reads and writes
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -943,7 +936,6 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
     let principal = core.active_principal().await.expect("active principal");
     let subject_id = legacy::creator_subject_id(&env.creator_id);
 
-    // The traps are armed BEFORE the first record operation and stay armed for
     // the whole lifecycle below.
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
@@ -998,7 +990,6 @@ async fn creator_create_commits_one_provider_record(
         .create_creator_memory(principal, SLUG, "story_summary", BODY)
         .await
         .expect("create the Creator memory"));
-    // A taken slug is the retained `Ok(false)` answer and writes nothing.
     assert!(
         !core
             .create_creator_memory(principal, SLUG, "story_summary", BODY)
@@ -1037,7 +1028,6 @@ async fn creator_create_commits_one_provider_record(
         json!(format!("prn_{}", peer_id(&CLIENT_SEED))),
         "the provider sees the authenticated peer's opaque principal, not a credential id"
     );
-    // The loaded credential's own id and signing seed are the material the dial
     // used; neither is content the provider is asked to store.
     for column in ["content_json", "provenance_json"] {
         for secret in [CREDENTIAL_ID, hex(&CLIENT_SEED).as_str()] {
@@ -1079,7 +1069,6 @@ async fn creator_list_and_slug_read_serve_the_pinned_space(
     assert_eq!(listed["scope"]["visibility"], json!("shared"));
     assert_eq!(listed["content"]["text"], json!(BODY));
 
-    // GET by authored slug: the by-id probe misses on the provider and the
     // authored-kind list resolves the record, both in the pinned space.
     let got = core
         .get_creator_memory(principal, SLUG)
@@ -1118,7 +1107,6 @@ async fn creator_update_and_stale_read_are_exact(
     );
     assert_eq!(provider_receipts(pool, "memory.records.update").await, 1);
 
-    // A caller whose read is stale is refused before the write, in the retained
     // `version_mismatch` shape, and the provider is untouched. (The provider's
     // own stale-revision CAS is reached in the promotion target below.)
     let stale = core
@@ -1139,7 +1127,6 @@ async fn creator_update_and_stale_read_are_exact(
         "a refused update commits nothing"
     );
 
-    // The edited body is what the read now serves.
     let edited = core
         .get_creator_memory(principal, SLUG)
         .await
@@ -1267,7 +1254,6 @@ async fn read_only_core_refuses_creator_record_writes(
 }
 
 // ---------------------------------------------------------------------------
-// Character fragment reads and promotion
 // ---------------------------------------------------------------------------
 
 /// Rewrites the committed promotion receipt one provider returns, so the Core
@@ -1343,7 +1329,6 @@ async fn a_mismatched_promotion_receipt_keeps_the_record_dependency_live() {
     );
     nexus.close().await;
 
-    // A receipt for another request: the mismatch fails closed, statically.
     rewrite.store(true, Ordering::SeqCst);
     let error = core
         .promote_character_fragment(&principal, character_id.clone(), record_id.clone(), 0)
@@ -1422,7 +1407,6 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     )
     .await;
 
-    // A second writer changes the other fragment between the caller's read and
     // its revision-checked write: the caller's DTO revision 0 is now stale.
     let (adapter, sdk_responder) =
         second_writer_edit_makes_the_caller_revision_stale(&provider, &second).await;
@@ -1742,7 +1726,6 @@ async fn stale_and_archived_promotions_are_refused(
     assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 2);
     pool.close().await;
 
-    // The per-Character activity lease is this branch's outer admission: an
     // archived Character is refused there, before any provider read or write.
     core.transition_character(
         principal,
@@ -1780,7 +1763,6 @@ async fn stale_and_archived_promotions_are_refused(
 }
 
 // ---------------------------------------------------------------------------
-// The Character fragment family under a real whole-body rewrite
 // ---------------------------------------------------------------------------
 
 /// N2's adoption maps a reviewed `FragmentOnly` product **to** a `fact` record;
@@ -1816,7 +1798,6 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
 
-    // A generic provider-native `fact` under the same subject must never be
     // served as a fragment.
     let native_id = provider_native_fact_is_not_a_family_row(
         &core,
@@ -1829,7 +1810,6 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     )
     .await;
 
-    // Capture the provider's own state before the refusals.
     let facts_before =
         family_refusal_baseline(&env, &provider, &rewritten, &native_id, &binding_id).await;
 
@@ -2171,7 +2151,6 @@ async fn valid_fragment_promotes_and_stays_representable(
     assert!(promoted.fragment.binding_id.is_none());
     assert_eq!(promoted.fragment.revision, 1);
     assert_eq!(promoted.fragment.session_id.as_str(), control_session);
-    // A valid shared fragment stays served: its session identity is the
     // representation, not a binding-scoped fact.
     let shared = core
         .list_character_memory_fragments(principal, character_id.to_owned(), None, 50, 0)
@@ -2200,7 +2179,6 @@ async fn valid_fragment_promotes_and_stays_representable(
         SpokeResult::Ok(_) => {}
         SpokeResult::Reject(reject) => panic!("the post-promotion rewrite commits: {reject:?}"),
     }
-    // The promoted record is shared, so no binding scopes its origin facts: it is
     // unproven rather than falsely claimed as known, and still never an Internal.
     let retried = core
         .promote_character_fragment(principal, character_id.to_owned(), control.to_owned(), 1)
@@ -2225,7 +2203,6 @@ async fn valid_fragment_promotes_and_stays_representable(
 }
 
 // ---------------------------------------------------------------------------
-// The fragment page window at the real consumer boundary
 // ---------------------------------------------------------------------------
 
 /// The page window is counted in FAMILY rows. Interleaved generic records — a
@@ -2248,7 +2225,6 @@ async fn fragment_page_windows_count_only_the_family() {
     let binding_b = add_binding(&core, &principal, &character_id, &world_b).await;
     let subject_id = legacy::character_subject_id(&character_id);
 
-    // Binding A: three reviewed fragments.
     review_family_binding(
         &core,
         &principal,
@@ -2263,7 +2239,6 @@ async fn fragment_page_windows_count_only_the_family() {
     let (native_id, unrelated_id) =
         create_generic_family_records(&adapter, &provider, &subject_id, &binding_a).await;
 
-    // The page window counts family rows only: the interleaved native fact is
     // never served and never consumes a slot, so `offset`/`has_more` describe
     // the three fragments alone.
     family_pages_skip_generic_records(
@@ -2276,7 +2251,6 @@ async fn fragment_page_windows_count_only_the_family() {
     )
     .await;
 
-    // By id the unrelated-family record keeps the retained non-fragment answer.
     unrelated_family_promotion_is_refused(
         &core,
         &principal,
@@ -2286,7 +2260,6 @@ async fn fragment_page_windows_count_only_the_family() {
     )
     .await;
 
-    // Binding B: a DAMAGED fragment-origin record older than two valid
     // fragments, so a small first page never reaches it.
     let damaged_id =
         create_damaged_fragment_record(&adapter, &provider, &subject_id, &binding_b).await;
@@ -2377,7 +2350,6 @@ async fn create_generic_family_records(
         .as_str()
         .expect("the provider-assigned record id")
         .to_string();
-    // A legal generic `fact` naming the UNRELATED `memory_long_term` family: a
     // family string that is not the Character one is not Character-fragment
     // origin, so this must stay a generic record.
     let unrelated = match adapter
@@ -2616,7 +2588,6 @@ async fn pages_and_promotion_report_the_damaged_fragment(
 }
 
 // ---------------------------------------------------------------------------
-// Real provider contention and the during-call response history
 // ---------------------------------------------------------------------------
 
 /// One real causal window inside one Core call.
@@ -2757,14 +2728,12 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
     let env = Env::boot("R3 Race Owner").await;
     let provider = Provider::open().await;
 
-    // The dedicated setup session creates two reviewed binding-local fragments.
     let race = race_setup_fragments(&env, &provider).await;
     let character_id = &race.character_id;
     let binding_id = &race.binding_id;
     let cas_record = &race.cas_record;
     let commit_record = &race.commit_record;
 
-    // (a) Pre-CAS window: the writer advances the record after Core's validated
     // read and before the promotion, so the promotion meets the real provider
     // CAS. The provider/D18 observations run before any session cleanup.
     let (cas_refused, cas_handles) =
@@ -2772,7 +2741,6 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
     assert_pre_cas_window_refusal(&env, &provider, cas_record, binding_id, &cas_refused).await;
     close_race_handles(&provider, cas_handles).await;
 
-    // (b) Post-commit window: the writer rewrites the record after the promotion
     // committed and before the original response returns.
     let (promoted, commit_handles) =
         run_writer_after_promotion_commit(&env, &provider, character_id, commit_record).await;
@@ -3169,7 +3137,6 @@ async fn assert_committed_promotion_state(
 }
 
 // ---------------------------------------------------------------------------
-// Recall and the pinned space
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -3196,11 +3163,9 @@ async fn recall_and_record_reads_use_the_pinned_remote_space() {
         .expect("the provider-assigned record id")
         .to_string();
 
-    // Recall has no Core product caller on this slice, so it is driven over the
     // SDK's own signed session against the same durable provider.
     recall_over_the_signed_session(&provider, &subject_id, &record_id).await;
 
-    // The durable write and its reads all carry the provider's own space.
     let pool = provider.pool().await;
     let space: String = sqlx::query("SELECT space_id FROM records WHERE record_id = ?")
         .bind(&record_id)
@@ -3286,7 +3251,6 @@ async fn recall_over_the_signed_session(provider: &Provider, subject_id: &str, r
         "the authorized set is non-empty"
     );
 
-    // A space this provider does not serve is its definite absence: the product's
     // pinned space is the provider's own, never a local default that would answer
     // here.
     match adapter
@@ -3310,7 +3274,6 @@ async fn recall_over_the_signed_session(provider: &Provider, subject_id: &str, r
 }
 
 // ---------------------------------------------------------------------------
-// Static, whitelisted refusals
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -3323,7 +3286,6 @@ async fn remote_record_refusals_stay_static_without_peer_text() {
 
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
-    // A body the record call accepts but the provider's own `max_content_bytes`
     // refuses: the refusal is genuinely the provider's, mapped by the safe
     // whitelist rather than copied through.
     let sentinel = "r3-peer-text-sentinel";
@@ -3348,7 +3310,6 @@ async fn remote_record_refusals_stay_static_without_peer_text() {
         "the provider's own message never travels with a refusal: {shown}"
     );
 
-    // A record the provider has never seen is the proven definite absence, which
     // the retained slug read renders as `None` (the same whitelisted class drives
     // the shortcut), and a second miss writes nothing.
     assert!(core

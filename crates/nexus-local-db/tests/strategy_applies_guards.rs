@@ -87,14 +87,12 @@ async fn an_apply_naming_another_strategys_approval_is_rejected() {
     insert_approval(&pool, STRATEGY_B, "approval-b", "hash-b").await;
 
     for (label, strategy, approval_id, content_hash) in [
-        // B's approval under A's strategy.
         (
             "another strategy's approval",
             STRATEGY_A,
             "approval-b",
             "hash-b",
         ),
-        // A's own approval labelled with a hash it does not carry.
         (
             "a hash the approval does not have",
             STRATEGY_A,
@@ -111,7 +109,6 @@ async fn an_apply_naming_another_strategys_approval_is_rejected() {
         );
     }
 
-    // The pin rejects only the mismatched pair: the approval's own pair is admitted.
     insert_apply(&pool, "apply-1", STRATEGY_A, "approval-a", "hash-a", None)
         .await
         .expect("the named approval's own strategy and hash are admitted");
@@ -124,7 +121,6 @@ async fn the_migration_applies_to_a_database_that_already_holds_rows() {
     let (pool, _dir) = pool().await;
     insert_approval(&pool, STRATEGY_A, "approval-a", "hash-a").await;
 
-    // Return the database to the shape it had before this migration: its triggers go with the
     // table, and sqlx only re-applies a migration whose record is gone.
     sqlx::query("DROP TABLE strategy_applies")
         .execute(&pool)
@@ -189,7 +185,6 @@ async fn a_superseding_apply_leaves_exactly_one_current_row() {
     .await
     .unwrap();
 
-    // Both rows stay readable; only the successor-less one is current.
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM strategy_applies")
         .fetch_one(&pool)
         .await
@@ -249,7 +244,6 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
         "{replace}"
     );
 
-    // B's apply exists, so this link names a real row — of the wrong strategy.
     let cross = insert_apply(
         &pool,
         "apply-a-2",
@@ -267,7 +261,6 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
         "{cross}"
     );
 
-    // Nothing was rewritten or lost: both rows read back exactly as written, and A's own current
     // row is still the one a same-strategy supersede would name.
     let applied_by: String =
         sqlx::query_scalar("SELECT applied_by FROM strategy_applies WHERE apply_id = 'apply-a'")

@@ -1,5 +1,4 @@
 /**
- * Entrance-scoped app registry (plan v1219 Task 2 — Interfaces).
  *
  * One rail item = one app = one route-level lazy chunk. `load` factories are
  * dynamic imports resolved through `React.lazy` at the route boundary

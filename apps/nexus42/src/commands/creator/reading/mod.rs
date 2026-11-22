@@ -207,7 +207,6 @@ pub async fn run(cmd: ReadingCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // `None` is a settled verb that prints nothing (`--json` on a delete).
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
     }
@@ -303,8 +302,6 @@ async fn run_annotation(
     }
 }
 
-// ── Shared helpers ────────────────────────────────────────────────────────
-
 /// Parse a 1-based chapter number into the typed `NonZeroU64` key.
 ///
 /// # Errors
@@ -385,8 +382,6 @@ fn render_progress(resp: &ReadingProgressResponse) -> String {
     let _ = write!(out, "  updated: {}", resp.updated_at);
     out
 }
-
-// ── Progress leaves ───────────────────────────────────────────────────────
 
 /// `creator reading progress get` — read persisted scroll progress.
 ///
@@ -494,8 +489,6 @@ async fn progress_clear(
         "Cleared reading progress for {work_id} volume {volume} chapter {chapter}."
     )))
 }
-
-// ── Annotation leaves ─────────────────────────────────────────────────────
 
 /// `creator reading annotation list` — list annotations for a work + chapter.
 ///

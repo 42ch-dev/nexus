@@ -1,5 +1,4 @@
 /**
- * World KB canvas projection types (canvas-strategy-surface.md §3.4).
  *
  * These mirror the design-language contracts `WorldKbNodeData` /
  * `WorldKbEdgeData` from the Draft spec, now backed by the V1.73 generated
@@ -133,7 +132,6 @@ export function lifecycleFromStatus(status: string | undefined): EntityLifecycle
   if (s === 'pending') return 'pending';
   if (s === 'rejected') return 'rejected';
   if (s === 'merged') return 'merged';
-  // confirmed, manual, empty, or any unrecognized → confirmed (terminal-ish display).
   return 'confirmed';
 }
 

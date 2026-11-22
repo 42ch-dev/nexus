@@ -1,5 +1,4 @@
 /**
- * Status badge for the world-scoped rules section (V1.166 P2, PD-1/PD-2).
  *
  * The spoke rule-status vocabulary renders VERBATIM — `draft | active |
  * deprecated` and any open string — so authors see exactly what auto-include
@@ -25,7 +24,6 @@ export function worldRuleStatusVariant(
     case 'draft':
       return 'neutral'; // staged, not evaluated — muted
     default:
-      // Open-string fallback — unknown status keeps the neutral tone and
       // renders verbatim (never coerced to a different vocabulary).
       return 'neutral';
   }

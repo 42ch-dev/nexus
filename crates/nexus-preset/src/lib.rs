@@ -31,11 +31,6 @@ pub use workflow_ir::{
     FsAssetSource, PresetIrImport, WorkflowIrError,
 };
 
-// ---------------------------------------------------------------------------
-// Embedded presets
-// ---------------------------------------------------------------------------
-
-/// Embedded presets directory, compiled into the binary at build time.
 ///
 /// Location: `crates/nexus-preset/embedded-presets/`
 /// Structure per §7.1: `<preset-id>/preset.yaml` + `prompts/*.md`
@@ -67,7 +62,6 @@ pub fn load_embedded_preset(
     id: &str,
     caps: &dyn CapabilityCatalog,
 ) -> Result<LoadedPreset, PresetLoadError> {
-    // Read preset.yaml from the embedded tree.
     let preset_file = EMBEDDED_PRESETS
         .get_file(format!("{id}/preset.yaml"))
         .ok_or_else(|| PresetLoadError::NotFound {
@@ -85,7 +79,6 @@ pub fn load_embedded_preset(
         })?;
 
     let mut loaded = load_preset_from_str(yaml, caps)?;
-    // An embedded preset knows its source identity (A2/A7): content hash
     // over the manifest + every referenced asset from the compiled-in tree.
     loaded.source_identity = Some(loader::preset_source_identity(
         &loaded.manifest,
@@ -210,14 +203,12 @@ pub fn required_prompt_roles(
     for state in &manifest.states {
         if let Some(exit_when) = &state.exit_when {
             if matches!(exit_when, ExitWhen::LlmJudge { .. }) {
-                // The judge capability (`judge.llm`) resolves the `default`
                 // role binding at prompt time.
                 required.insert("default".to_string());
             }
         }
         for action in &state.enter {
             if let EnterAction::InnerGraph { name } = action {
-                // The manifest's node list is the source of truth for
                 // agent references; the built graph mirrors it.
                 if let Some(ig) = manifest.inner_graphs.as_ref().and_then(|igs| igs.get(name)) {
                     for node in &ig.nodes {
@@ -239,7 +230,6 @@ pub fn required_prompt_roles(
     required
 }
 
-// ---------------------------------------------------------------------------
 // Composable search order: user → system → embedded
 // ---------------------------------------------------------------------------
 
@@ -270,7 +260,6 @@ pub fn resolve_preset(
     nexus_home: &Path,
     caps: &dyn CapabilityCatalog,
 ) -> Result<LoadedPreset, PresetLoadError> {
-    // 1. Try user presets (unless the ID starts with `_system.`).
     if !id.starts_with("_system.") {
         let user_result = user_preset_dir::scan_user_presets(nexus_home, caps);
         if let Some(entry) = user_preset_dir::find_user_preset(&user_result, id) {
@@ -279,25 +268,20 @@ pub fn resolve_preset(
         }
     }
 
-    // 2. Try system presets (qualified IDs like `_system.maintenance`).
     let system_result = system_preset_dir::scan_system_presets(nexus_home, caps);
     if let Some(entry) = system_preset_dir::find_system_preset(&system_result, id) {
         tracing::debug!(preset_id = %id, source = "system", "resolved preset from system directory");
         return Ok(entry.loaded.clone());
     }
 
-    // 3. Fall back to embedded presets.
     match load_embedded_preset(id, caps) {
         Ok(loaded) => {
             tracing::debug!(preset_id = %id, source = "embedded", "resolved preset from embedded");
             Ok(loaded)
         }
-        Err(PresetLoadError::NotFound { .. }) => {
-            // Embedded preset not found — return a comprehensive error.
-            Err(PresetLoadError::NotFound {
-                preset_id: id.to_string(),
-            })
-        }
+        Err(PresetLoadError::NotFound { .. }) => Err(PresetLoadError::NotFound {
+            preset_id: id.to_string(),
+        }),
         Err(e) => Err(e),
     }
 }
@@ -328,12 +312,10 @@ pub fn lookup_preset_by_id(
     nexus_home: &Path,
     caps: &dyn CapabilityCatalog,
 ) -> Option<LoadedPreset> {
-    // System-qualified IDs require the full scan — bail early.
     if id.starts_with("_system.") {
         return None;
     }
 
-    // 1. Direct user preset path.
     let user_yaml = nexus_home.join("presets").join(id).join("preset.yaml");
     if user_yaml.is_file() {
         match std::fs::read_to_string(&user_yaml) {
@@ -362,7 +344,6 @@ pub fn lookup_preset_by_id(
         }
     }
 
-    // 2. Embedded preset.
     match load_embedded_preset(id, caps) {
         Ok(loaded) => {
             tracing::debug!(preset_id = %id, source = "embedded-direct", "resolved preset via direct embedded lookup");
@@ -422,10 +403,6 @@ pub fn read_embedded_template(preset_id: &str, template_path: &str) -> Option<St
         .and_then(|f| f.contents_utf8().map(std::string::ToString::to_string))
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,9 +413,8 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 9); // V1.52 T-A P0: outline_review state + outline-exit prompt
+        assert_eq!(loaded.version, 9);
 
-        // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
             loaded
                 .manifest
@@ -448,9 +424,6 @@ mod tests {
             "P3 novel-writing should not have inner graphs"
         );
 
-        // Verify outer graph has 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
-
-        // Verify source hash is non-trivial.
         assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
     }
@@ -474,7 +447,6 @@ mod tests {
                 "`{id}` declares another id than its catalog name"
             );
 
-            // A document's id is what the fence resolves its bundle by; a name nobody can load
             // (`essay` declaring `essay-init`) would leave its templates unresolvable.
             let document = workflow_ir::import_preset_manifest(&loaded.manifest)
                 .expect("embedded preset projects into IR");
@@ -523,10 +495,8 @@ mod tests {
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
-        // V1.52 T-A P0: 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
         assert_eq!(loaded.manifest.states.len(), 6);
 
-        // Verify state IDs.
         let state_ids: Vec<&str> = loaded
             .manifest
             .states
@@ -540,14 +510,12 @@ mod tests {
         assert!(state_ids.contains(&"finalize_commit"));
         assert!(state_ids.contains(&"done"));
 
-        // Verify finalize uses llm_judge exit (P3 T7: 五问 quality gate).
         let finalize = loaded
             .manifest
             .states
             .iter()
             .find(|s| s.id == "finalize")
             .expect("finalize state should exist");
-        // P4 fix wave: finalize has NO enter actions.
         assert!(
             finalize.enter.is_empty(),
             "finalize should have no enter actions (deferred to finalize_commit)"
@@ -564,7 +532,6 @@ mod tests {
             }
             other => panic!("expected llm_judge exit_when for finalize, got: {other:?}"),
         }
-        // P4 fix wave: finalize transitions to finalize_commit, not done.
         match &finalize.next {
             Some(manifest::NextTarget::Linear(target)) => {
                 assert_eq!(target, "finalize_commit");
@@ -572,7 +539,6 @@ mod tests {
             other => panic!("finalize next should be Linear(finalize_commit), got: {other:?}"),
         }
 
-        // Verify done is terminal.
         let done = loaded
             .manifest
             .states
@@ -587,7 +553,6 @@ mod tests {
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
-        // Collect all prompt_file references from manifest states.
         let mut prompt_files: Vec<&str> = loaded
             .manifest
             .states
@@ -603,14 +568,12 @@ mod tests {
             })
             .collect();
 
-        // Collect template_file references from context_update hooks.
         for s in &loaded.manifest.states {
             if let Some(ref hook) = s.context_update {
                 prompt_files.push(&hook.template_file);
             }
         }
 
-        // Collect template_file references from inner graph nodes.
         if let Some(ref igs) = loaded.manifest.inner_graphs {
             for ig in igs.values() {
                 for node in &ig.nodes {
@@ -621,7 +584,6 @@ mod tests {
             }
         }
 
-        // Collect template_file references from exit_when llm_judge gates.
         for s in &loaded.manifest.states {
             if let Some(manifest::ExitWhen::LlmJudge {
                 ref template_file, ..
@@ -631,7 +593,6 @@ mod tests {
             }
         }
 
-        // V1.52 T-A P0: 4 prompt references (2 enter + 2 exit_when):
         // outline-chapter.md, draft-chapter.md, outline-exit.md, finalize-exit.md.
         // No context_update hooks or inner graphs in P3 preset.
         assert_eq!(
@@ -656,7 +617,6 @@ mod tests {
             "expected finalize-exit.md reference"
         );
 
-        // Verify the embedded directory has only current prompt files.
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-writing/prompts")
             .expect("novel-writing/prompts dir should exist");
@@ -666,8 +626,6 @@ mod tests {
             "expected at least 12 current embedded prompt files, got {prompt_count}"
         );
     }
-
-    // ── WS-A T4: Composable search order ─────────────────────────────────
 
     #[test]
     fn resolve_preset_finds_embedded_preset_by_default() {
@@ -686,7 +644,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
 
-        // Create a user preset with the same ID as an embedded preset.
         let bundle_dir = nexus_home.join("presets").join("novel-writing");
         fs::create_dir_all(&bundle_dir).unwrap();
         let override_yaml = r#"
@@ -741,15 +698,12 @@ states:
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
 
-        // Create the _system/maintenance/ preset
         ensure_maintenance_preset(nexus_home).unwrap();
 
         let caps = BuiltinCapabilityCatalog;
         let loaded = resolve_preset("_system.maintenance", nexus_home, &caps).unwrap();
         assert_eq!(loaded.id, "maintenance");
     }
-
-    // ── WS-A T7: Integration — user preset loads end-to-end ──────────
 
     #[test]
     fn user_preset_loads_end_to_end() {
@@ -758,7 +712,6 @@ states:
         let tmp = tempfile::tempdir().unwrap();
         let nexus_home = tmp.path();
 
-        // Create a full user preset at ~/.nexus42/presets/test-strategy/
         let bundle_dir = nexus_home.join("presets").join("test-strategy");
         fs::create_dir_all(&bundle_dir).unwrap();
 
@@ -794,20 +747,15 @@ states:
         )
         .unwrap();
 
-        // Resolve via the composable search order.
         let caps = BuiltinCapabilityCatalog;
         let loaded = resolve_preset("test-strategy", nexus_home, &caps).unwrap();
 
-        // Verify it loaded from user source (not embedded).
         assert_eq!(loaded.id, "test-strategy");
         assert_eq!(loaded.version, 1);
         assert_eq!(loaded.manifest.states.len(), 2);
         assert_eq!(loaded.manifest.states[0].id, "start");
         assert!(loaded.manifest.states[1].terminal);
 
-        // Verify it has an outer graph.
-
-        // Verify source hash is valid.
         assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
     }
@@ -817,18 +765,14 @@ states:
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
-        // WS-E T6: Verify roles section
         assert_eq!(loaded.roles.len(), 2);
         assert!(loaded.roles.iter().any(|r| r.id == "writer"));
         assert!(loaded.roles.iter().any(|r| r.id == "reviewer"));
 
-        // Verify writer role has recommended_skills
         let writer = loaded.roles.iter().find(|r| r.id == "writer").unwrap();
         assert_eq!(writer.recommended_skills.len(), 1);
         assert_eq!(writer.recommended_skills[0], "novel-writing-assistant");
     }
-
-    // ── P3: Agentic Pattern Preset tests ────────────────────────────────
 
     #[test]
     fn list_embedded_presets_includes_novel_chapter_review() {
@@ -856,13 +800,9 @@ states:
         assert_eq!(loaded.id, "novel-chapter-review");
         assert_eq!(loaded.version, 1);
 
-        // Linear state machine: load_chapter → review → done
-
-        // Source hash is non-trivial
         assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
 
-        // Single-agent preset — no roles
         assert!(
             loaded.roles.is_empty(),
             "novel-chapter-review should not have roles"
@@ -874,7 +814,6 @@ states:
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("novel-chapter-review", &caps).unwrap();
 
-        // load_chapter state uses capability enter (creator.inject_prompt)
         let load_chapter = loaded
             .manifest
             .states
@@ -886,7 +825,6 @@ states:
             "load_chapter state should have enter capability"
         );
 
-        // review state uses capability enter (creator.inject_prompt)
         let review = loaded
             .manifest
             .states
@@ -898,7 +836,6 @@ states:
             "review state should have enter capability"
         );
 
-        // done is terminal
         let done = loaded
             .manifest
             .states
@@ -915,7 +852,6 @@ states:
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("novel-chapter-review", &caps).unwrap();
 
-        // Verify the two prompt files referenced by the manifest exist.
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-chapter-review/prompts")
             .expect("novel-chapter-review/prompts dir should exist");
@@ -925,7 +861,6 @@ states:
             "expected 2 embedded prompt files for novel-chapter-review, got {prompt_count}"
         );
 
-        // The manifest references prompts/load-chapter.md and prompts/review-report.md
         // via `EnterAction::Capability { args: { prompt_file: ... } }`.
         let prompt_refs: Vec<String> = loaded
             .manifest
@@ -960,9 +895,6 @@ states:
         assert_eq!(loaded.id, "memory-augmented");
         assert_eq!(loaded.version, 1);
 
-        // Linear state machine: recall → generate → persist → done
-
-        // One inner graph: generate_graph
         assert!(
             loaded
                 .manifest
@@ -972,17 +904,14 @@ states:
             "expected generate_graph inner graph"
         );
 
-        // Output binding
         assert_eq!(
             loaded.output_bindings.get("generate_graph").unwrap(),
             "generate_with_context.text"
         );
 
-        // Source hash is non-trivial
         assert_ne!(loaded.source_hash.as_slice(), &[] as &[u8]);
         assert_ne!(loaded.source_hash, [0u8; 32]);
 
-        // Single-agent preset — no roles
         assert!(
             loaded.roles.is_empty(),
             "memory-augmented should not have roles"
@@ -994,7 +923,6 @@ states:
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("memory-augmented", &caps).unwrap();
 
-        // recall state uses creator.read_memory
         let recall = loaded
             .manifest
             .states
@@ -1005,7 +933,6 @@ states:
         match &recall.enter[0] {
             manifest::EnterAction::Capability { name, args } => {
                 assert_eq!(name, "creator.read_memory");
-                // Verify args contain keyword reference
                 assert!(args.is_some());
                 let args = args.as_ref().unwrap();
                 assert!(args.get("keyword").is_some());
@@ -1013,13 +940,11 @@ states:
             other => panic!("expected capability enter for recall, got: {other:?}"),
         }
 
-        // recall exit_when is rule
         assert!(
             matches!(recall.exit_when, Some(manifest::ExitWhen::Rule)),
             "expected rule exit_when for recall"
         );
 
-        // generate state uses inner_graph
         let generate = loaded
             .manifest
             .states
@@ -1034,7 +959,6 @@ states:
             other => panic!("expected inner_graph enter for generate, got: {other:?}"),
         }
 
-        // persist state uses creator.write_memory
         let persist = loaded
             .manifest
             .states
@@ -1053,7 +977,6 @@ states:
             other => panic!("expected capability enter for persist, got: {other:?}"),
         }
 
-        // done is terminal
         let done = loaded
             .manifest
             .states
@@ -1068,7 +991,6 @@ states:
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("memory-augmented", &caps).unwrap();
 
-        // Verify prompt file in generate_graph
         if let Some(ref igs) = loaded.manifest.inner_graphs {
             let gen_nodes = &igs["generate_graph"].nodes;
             assert_eq!(gen_nodes[0].id, "generate_with_context");
@@ -1078,7 +1000,6 @@ states:
             );
         }
 
-        // Verify all 3 prompt files exist in the embedded directory
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("memory-augmented/prompts")
             .expect("memory-augmented/prompts dir should exist");
@@ -1104,7 +1025,6 @@ states:
             "memory-augmented must be in embedded presets"
         );
 
-        // Existing presets still present
         assert!(
             presets.iter().any(|p| p == "novel-writing"),
             "novel-writing must still be present"
@@ -1114,7 +1034,6 @@ states:
             "kb-extract must still be present"
         );
 
-        // Total count: at least novel-writing + kb-extract + research +
         // soul-experience-refresh + novel-chapter-review + memory-augmented = 6
         assert!(
             presets.len() >= 6,
@@ -1123,16 +1042,12 @@ states:
         );
     }
 
-    // ── P2 B1/B2: Embedded preset smoke discovery + P1 gate ─────────────
-
-    /// Collect all asset file references from a manifest and check they exist
     /// in the embedded presets directory.
     fn check_embedded_asset_existence(
         preset_id: &str,
         manifest: &manifest::PresetManifest,
         errors: &mut Vec<String>,
     ) {
-        // Collect template_file / prompt_file / system_prompt_file references.
         let asset_refs = validation::collect_asset_file_references(manifest);
 
         for (dot_path, rel_path) in &asset_refs {
@@ -1160,7 +1075,6 @@ states:
         let mut all_warnings: Vec<String> = Vec::new();
 
         for preset_id in &preset_ids {
-            // Step 1: Load the preset (runs structural validation in the loader).
             let loaded = match load_embedded_preset(preset_id, &caps) {
                 Ok(l) => l,
                 Err(e) => {
@@ -1169,13 +1083,11 @@ states:
                 }
             };
 
-            // Step 2: Run P1 semantic validation (A2: reachability, terminal
             // consistency, id match, inner graph refs; A4: capability compat).
             let semantic_result = validation::validate_preset_semantic(&loaded.manifest, &caps);
             for d in &semantic_result.diagnostics {
                 match d.severity {
                     validation::DiagnosticSeverity::Error => {
-                        // Known false positive: orchestration-layer args
                         // (prompt_file, vars) that don't appear in
                         // creator.inject_prompt's input_schema because the
                         // engine resolves them before calling the capability.
@@ -1204,7 +1116,6 @@ states:
                 }
             }
 
-            // Step 3: Run path safety checks (A3 structural).
             let path_result = validation::validate_path_safety(&loaded.manifest);
             for d in &path_result.diagnostics {
                 if d.severity == validation::DiagnosticSeverity::Error {
@@ -1215,11 +1126,9 @@ states:
                 }
             }
 
-            // Step 4: Check asset file existence in the embedded dir.
             check_embedded_asset_existence(preset_id, &loaded.manifest, &mut all_errors);
         }
 
-        // Report warnings but only fail on errors.
         if !all_warnings.is_empty() {
             eprintln!(
                 "embedded preset validation warnings (non-blocking):\n{}",
@@ -1236,11 +1145,9 @@ states:
 
     #[test]
     fn kb_extract_inner_graph_is_wired() {
-        // B3: Verify kb-extract's extraction_graph is referenced by an enter action.
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("kb-extract", &caps).unwrap();
 
-        // The extracting state must have an inner_graph enter action.
         let extracting = loaded
             .manifest
             .states
@@ -1256,7 +1163,6 @@ states:
             "kb-extract 'extracting' state must reference extraction_graph via inner_graph enter action"
         );
 
-        // Also verify the P1 validator produces no orphan warnings for extraction_graph.
         let result = validation::validate_preset_semantic(&loaded.manifest, &caps);
         let orphan_warnings: Vec<_> = result
             .warnings()
@@ -1273,7 +1179,6 @@ states:
 
     #[test]
     fn memory_augmented_rule_exit_is_explicit_always_true() {
-        // B5 (TD-V131-08): Verify that the recall state's `exit_when: kind: rule`
         // is the explicit always-true form. ExitWhen::Rule is a unit variant
         // whose contract is "transition as soon as enter action completes".
         // This test locks that contract.
@@ -1287,7 +1192,6 @@ states:
             .find(|s| s.id == "recall")
             .expect("memory-augmented must have a 'recall' state");
 
-        // Must use ExitWhen::Rule (always-true / immediate transition).
         assert!(
             matches!(recall.exit_when, Some(manifest::ExitWhen::Rule)),
             "recall state must use exit_when: kind: rule (explicit always-true)"
@@ -1296,7 +1200,6 @@ states:
 
     #[test]
     fn embedded_preset_validation_catches_structurally_invalid_preset() {
-        // B2: Verify the smoke test machinery would catch a bad preset.
         // We construct a manifest with a known structural issue and verify
         // the validator detects it.
         let yaml = r"
@@ -1330,7 +1233,6 @@ states:
             result.diagnostics
         );
 
-        // Must have at least a MissingCapability error.
         assert!(
             result
                 .diagnostics
@@ -1343,7 +1245,6 @@ states:
 
     #[test]
     fn unknown_capability_arg_drift_is_not_downgraded() {
-        // W-002: Prove the smoke test's CapabilityArgDrift downgrade is
         // scoped to creator.inject_prompt only. A synthetic preset that omits
         // a required arg for a different capability must still surface as an
         // error (not silently downgraded to a warning).
@@ -1373,7 +1274,6 @@ states:
         let caps = BuiltinCapabilityCatalog;
         let result = validation::validate_preset_semantic(&manifest, &caps);
 
-        // kb.extract_work requires creator_id (omitted) → Error-severity
         // CapabilityArgDrift. Must NOT be downgraded (only creator.inject_prompt
         // gets the downgrade).
         let has_drift_error = result.errors().any(|d| {
@@ -1387,8 +1287,6 @@ states:
             result.diagnostics
         );
     }
-
-    // ── V1.39 P2: novel-brainstorm + novel-review-master ──────────────
 
     #[test]
     fn list_embedded_presets_includes_novel_brainstorm() {
@@ -1416,10 +1314,8 @@ states:
         assert_eq!(loaded.id, "novel-brainstorm");
         assert_eq!(loaded.version, 1);
 
-        // State machine: gather → synthesize → done
         assert_eq!(loaded.manifest.preset.initial, "gather");
 
-        // Verify linear transitions
         assert!(loaded.manifest.states.iter().any(|s| {
             s.id == "gather" && s.next == Some(manifest::NextTarget::Linear("synthesize".into()))
         }));
@@ -1427,7 +1323,6 @@ states:
             s.id == "synthesize" && s.next == Some(manifest::NextTarget::Linear("done".into()))
         }));
 
-        // Auto-chain compatible: exit_when uses llm_judge (not manual)
         let gather = loaded
             .manifest
             .states
@@ -1439,13 +1334,11 @@ states:
             "gather must use llm_judge exit for auto-chain compatibility"
         );
 
-        // Gates present under preset section
         assert!(
             !loaded.manifest.preset.gates.is_empty(),
             "novel-brainstorm must have preset gates"
         );
 
-        // Prompt templates exist
         assert!(
             read_embedded_template("novel-brainstorm", "prompts/gather-findings.md").is_some(),
             "gather-findings.md prompt must exist"
@@ -1464,10 +1357,8 @@ states:
         assert_eq!(loaded.id, "novel-review-master");
         assert_eq!(loaded.version, 3);
 
-        // State machine: present → await_decision → sync_world_kb → done
         assert_eq!(loaded.manifest.preset.initial, "present");
 
-        // Verify linear transitions
         assert!(loaded.manifest.states.iter().any(|s| {
             s.id == "present"
                 && s.next == Some(manifest::NextTarget::Linear("await_decision".into()))
@@ -1480,7 +1371,6 @@ states:
             s.id == "sync_world_kb" && s.next == Some(manifest::NextTarget::Linear("done".into()))
         }));
 
-        // Human-in-loop: exit_when uses manual (not auto-chain)
         let present = loaded
             .manifest
             .states
@@ -1492,13 +1382,11 @@ states:
             "present must use manual exit for human-in-loop"
         );
 
-        // Gates present under preset section
         assert!(
             !loaded.manifest.preset.gates.is_empty(),
             "novel-review-master must have preset gates"
         );
 
-        // Prompt templates exist
         assert!(
             read_embedded_template("novel-review-master", "prompts/present-findings.md").is_some(),
             "present-findings.md prompt must exist"

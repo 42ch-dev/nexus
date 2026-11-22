@@ -851,7 +851,6 @@ fn cognition_refusal(present: bool) -> Option<ProviderError> {
     })
 }
 
-// ── Reflection read-time basis mechanism (§7.25–§7.27, N4-R) ────────────
 //
 // Staleness is computed, never stored (C-042/MEM-R013): every read recomposes
 // the canonical basis object over the *current* authorized set and compares
@@ -952,7 +951,6 @@ fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> 
                 .all(|context_id| requested_ids.contains(context_id))
                 && (!*include_shared || *requested_shared)
         }
-        // A pin reaching past its request's scope — `subject_all` under a
         // restricted request, context pins under `shared_only` — is uncovered.
         _ => false,
     }
@@ -1481,7 +1479,6 @@ impl LocalMemoryProvider {
                 )))
             }
         };
-        // The attempt itself (fix round 4, finding R4-F3): the non-blocking
         // probe decides whether this acquisition is contended, so a test can
         // observe a real lock wait instead of a pre-lock rendezvous. The probe
         // also takes the section when free, so the blocking `lock()` below runs
@@ -1637,7 +1634,6 @@ impl LocalMemoryProvider {
         expected_revision: Option<i64>,
         idempotency_key: &str,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
-        // The section must belong to the row's owner, not to whatever subject the
         // caller named (fix round 4, finding R4-F1): resolving the stored owner
         // before locking means a caller can never consume A while holding B's
         // section, interleaving A's review drain. The probe authorizes the
@@ -1668,7 +1664,6 @@ impl LocalMemoryProvider {
             Some(owner) => owner,
             None => subject_id,
         };
-        // The consumption decision holds the bearer's disposition section (fix
         // round 2, finding F1): a legacy review drain holds the same section
         // across its consumed-check, classification and persistence, so a
         // dismissal can never commit in between.
@@ -1777,7 +1772,6 @@ impl LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // §7.15: `review` *and* `records_write`, both covering the candidate's
         // capture scope — created records inherit that placement verbatim.
         let admission = Admission {
             op,
@@ -2115,7 +2109,6 @@ impl LocalMemoryProvider {
             visibility: Placement::SHARED,
             context_id: None,
         };
-        // §7.21: `promote` + `records_write` over BOTH placements.
         let admission = Admission {
             op,
             space_id: &self.space_id,
@@ -2297,8 +2290,6 @@ fn principal_id(principal: &schemas::Principal) -> &str {
 fn expected_revision(value: NonZeroU64) -> i64 {
     i64::try_from(value.get()).unwrap_or(i64::MAX)
 }
-
-// ── Content-family projections and requirements (§6.6–§6.8) ────────────
 
 /// §6.6/§6.7 placement projection: `context_id` is present iff the visibility is
 /// `context` — the conditional both the table CHECK and the wire shape carry.
@@ -2711,7 +2702,6 @@ impl LocalMemoryProvider {
             payload_digest: &digest,
         };
         let subject_id = request.subject_id.as_str();
-        // §7.11: `capture_scope` is the admitted placement and becomes the
         // candidate's immutable authorization fence.
         let placement = match &request.capture_scope {
             schemas::memory_capture_request::PlacementScope::Shared => Placement {
@@ -2744,7 +2734,6 @@ impl LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return Ok(deny(&error)),
         };
-        // spoke-schemas 0.16.0: capture-request anchors became Option<...>
         // (absent = None, serialized as null); the stored provenance must stay
         // the published `anchors` array shape (may be empty), never null.
         let anchors = match to_json(&request.anchors, "capture anchors") {
@@ -2763,7 +2752,6 @@ impl LocalMemoryProvider {
             "rationale_codes": classification.rationale_codes,
         });
         let occurred_at = request.occurred_at.map(storage::timestamp);
-        // §7.11/§6.7: the advisory classifier can leave a capture with no
         // candidate at all; that is a committed outcome with its count recorded.
         let keep_existing = candidate_id.is_some();
         let candidate_id = candidate_id.map_or_else(storage::mint_candidate_id, str::to_string);
@@ -3054,7 +3042,6 @@ impl LocalMemoryProvider {
             request.kinds.join(","),
             request.include_tombstoned
         );
-        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its marker
         // is verified against the snapshot the page was read in.
         let (offset, claimed) =
             match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
@@ -3241,7 +3228,6 @@ impl MemoryPort for LocalMemoryProvider {
             .kind
             .as_ref()
             .map(|kind| (kind.ns.as_str(), kind.id.as_str()));
-        // The sole `idempotency_key` exemption (§7.0.5): a keyless receipt sits
         // outside the dedup namespace, so every ensure records its own outcome.
         let ctx = OpContext {
             space_id: request.space_id.as_str(),
@@ -3263,7 +3249,6 @@ impl MemoryPort for LocalMemoryProvider {
             principal_id,
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
-            // §7.5: a fenced or archived subject rejects its writes, checked in
             // the same transaction as the get-or-create.
             subject_gate: Some(request.subject_id.as_str()),
             placement_gate: None,
@@ -3285,7 +3270,6 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemorySubjectsGetRequest,
     ) -> SpokeResult<schemas::MemorySubjectsGetResponse> {
         let principal_id = principal_id(principal);
-        // §7.6/S-4: the "any live grant" test and the subject row are one read
         // transaction on the store's clock.
         match self
             .store
@@ -3325,7 +3309,6 @@ impl MemoryPort for LocalMemoryProvider {
             schemas::memory_subjects_fence_request::Action::Unfence => FenceAction::Unfence,
             schemas::memory_subjects_fence_request::Action::Archive => FenceAction::Archive,
         };
-        // §6.5/§7.7: authorization is bound to what the op actually touches — a
         // context fence needs coverage of THAT context, and a whole-subject
         // fence/archive needs unrestricted coverage of the subject.
         let mut requirement = admin_requirement(Some(request.subject_id.as_str()));
@@ -3383,14 +3366,12 @@ impl MemoryPort for LocalMemoryProvider {
         let principal_filter = request.principal_id.as_ref().map(|value| value.as_str());
         let subject_filter = request.subject_id.as_ref().map(|value| value.as_str());
         let limit = page_limit(request.limit);
-        // §7.0.7/MEM-R026: the cursor's offset selects the SQL page; its claim is
         // verified after the read, because the scope names the principal filter
         // that read resolves.
         let page_offset = match claimed_offset(cursor_text(request.cursor.as_ref())) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
-        // §7.0.7/§7.8/S-4: the `admin` verdict, the page and its invalidation
         // marker are ONE read transaction on the store's clock, and the returned
         // filter is the one that read actually applied.
         let (rows, marker, filter, more) = match self
@@ -3483,7 +3464,6 @@ impl MemoryPort for LocalMemoryProvider {
             shared_access,
             expires_at,
         };
-        // §7.9: admission uses the ISSUED grant's scope — a subject-scoped admin
         // delegates within its own subject — and non-amplification is evaluated
         // on the same grant set, inside the transaction that inserts the grant.
         let requirements = [admin_requirement(subject_id)];
@@ -3521,7 +3501,6 @@ impl MemoryPort for LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // `memory.grants.revoke` is on the §8.2 allowlist, so an incident can be
         // contained while the space is frozen.
         let requirements = [admin_requirement(None)];
         let admission = Admission {
@@ -3549,7 +3528,6 @@ impl MemoryPort for LocalMemoryProvider {
         }
     }
 
-    // ── Content families ───────────────────────────────────────────────
     //
     // Every mutating op here follows the same §7.0 discipline as the control
     // families:
@@ -3566,7 +3544,6 @@ impl MemoryPort for LocalMemoryProvider {
     ) -> SpokeResult<schemas::MemoryCaptureResponse> {
         match self.capture_request(principal, request, None, None).await {
             Ok(result) => result,
-            // Only a named binding can fail this way, and this entry point
             // names none.
             Err(error) => deny(&store_error(StoreError::Database(error))),
         }
@@ -3594,7 +3571,6 @@ impl MemoryPort for LocalMemoryProvider {
             ),
             status.as_deref().unwrap_or("*")
         );
-        // §7.0.7/MEM-R026: the cursor's offset selects the authorized page; its
         // marker is verified against the snapshot the page was read in.
         let (offset, claimed) =
             match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
@@ -3665,7 +3641,6 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCandidatesDismissRequest,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
-        // Whichever op consumes a candidate, it holds the owning bearer's
         // disposition section (fix round 3, finding F1): the legacy review drain
         // holds the same section across its consumed-check and classification.
         let _disposition = match self
@@ -3688,7 +3663,6 @@ impl MemoryPort for LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // §7.14: `review` covering the candidate's immutable `capture_scope`.
         let admission = Admission {
             op,
             space_id: request.space_id.as_str(),
@@ -3725,7 +3699,6 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
             return deny(&ProviderError::from_reject(reject, "decision"));
         }
-        // A review consumes the candidate exactly as a dismissal does, so it
         // takes the owning bearer's disposition section too (fix round 3,
         // finding F1).
         let _disposition = match self
@@ -3794,7 +3767,6 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return deny(&error),
         };
-        // spoke-schemas 0.16.0: request anchors became Option<...> (serialized
         // null when absent); the stored provenance keeps the published array
         // shape (may be empty), not null.
         let anchors = match to_json(&request.anchors, "record anchors") {
@@ -3802,7 +3774,6 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(anchors) => anchors,
             Err(error) => return deny(&error),
         };
-        // §6.6/§10: `captured_by`/`captured_at` are provider-populated; the
         // context claims are recorded verbatim and never authorize anything.
         let provenance = json!({
             "source_context_ids": request.source_context_ids.unwrap_or_default(),
@@ -3911,7 +3882,6 @@ impl MemoryPort for LocalMemoryProvider {
                 }
             }
         };
-        // §7.21: `promote` + `records_write` over BOTH placements.
         let admission = Admission {
             op,
             space_id: request.space_id.as_str(),
@@ -3972,7 +3942,6 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // §9.1: authorization + selection + filter are applied by the read path,
         // so the authorized set — never the raw table — is what gets ranked.
         let (rows, marker, total) = match self
             .store
@@ -3993,9 +3962,7 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(page) => page,
             Err(error) => return deny(&store_error(error)),
         };
-        // The recall budget is a byte/item bound over a Rust-ranked list.
         let total = usize::try_from(total).unwrap_or(usize::MAX);
-        // §9.2: the query decides the ordering, so a cursor continues only the
         // ranking it was minted under (MEM-R026).
         let terms = policy::query_terms(request.query.as_deref().unwrap_or_default());
         let scope = format!(
@@ -4065,7 +4032,6 @@ impl MemoryPort for LocalMemoryProvider {
                 request.subject_id.as_str()
             )));
         };
-        // §7.23: absent kinds are honest-empty, never invented and never an error.
         let mut bodies = Vec::new();
         for row in profile::select(rows, &request.profile_kinds) {
             match profile_body(&row) {
@@ -4109,7 +4075,6 @@ impl MemoryPort for LocalMemoryProvider {
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
             subject_gate: Some(subject_id),
-            // Profiles are subject-level documents with no placement (§6.8).
             placement_gate: None,
             freeze_gated: true,
         };
@@ -4140,7 +4105,6 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryReceiptsGetRequest,
     ) -> SpokeResult<schemas::MemoryReceiptsGetResponse> {
-        // §7.28: the sole uncertainty-resolution channel (MEM-R010). Read-only
         // (MEM-R011), content-free (§6.10/MEM-R022), and admissible only under the
         // caller's *current* authorization (MEM-R018/R021).
         let stored = match self
@@ -4155,7 +4119,6 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(stored) => stored,
             Err(error) => return deny(&store_error(error)),
         };
-        // §7.0.3 async receipts (reflection generate): a pending receipt IS the
         // poll answer — generation in progress, no effect and no cost yet
         // (C-015/C-070). Journaled pending states keep the uncertain-error
         // answer below: their pending means an unpublished file effect, not
@@ -4171,13 +4134,10 @@ impl MemoryPort for LocalMemoryProvider {
                 Ok(body) => respond(json!({ "receipt": body })),
                 Err(error) => deny(&error),
             },
-            // §5.2 step 2: durable but not consistent yet — the channel answers
             // the pending state instead of a terminal receipt.
             |error| deny(&error),
         )
     }
-
-    // ── Sub-capability gated (N4-R reflection family) ──────────────────
 
     async fn get_reflection_state(
         &self,
@@ -4221,7 +4181,6 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // §7.25: the basis is published content-free and its digest is composed
         // over the *current* authorized basis (C-042 — no eager invalidation
         // writes exist), so every basis-affecting fact shows up at the next
         // read. The basis and the visible reflections come from ONE store
@@ -4257,7 +4216,6 @@ impl MemoryPort for LocalMemoryProvider {
         };
         let (profile_kinds, missing_required_profile_kinds) =
             profile_projection(&snapshot.profile_revisions);
-        // The read-side narrowing is the same one `list` uses: the newest
         // envelope this caller may see under this selection and provenance
         // filter, excluding tombstoned-basis rows (C-077) — read in the same
         // snapshot as the basis above. With no envelope to compare against,
@@ -4286,7 +4244,6 @@ impl MemoryPort for LocalMemoryProvider {
         if !self.reflections {
             return unsupported(OP_REFLECTIONS_LIST);
         }
-        // An absent selection is a subject-wide listing, so its admission
         // demands the same unrestricted grant an explicit `subject_all` does;
         // a present one is covered like any other read selection (C-075).
         let selection = request.selection.as_ref().map(wire_read_selection);
@@ -4314,7 +4271,6 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // MEM-R026: the cursor binds everything that decides the page — the
         // op, space, subject, the selection/filter resolution actually applied
         // and the engine policy version. Any other request under it is
         // `CURSOR_INVALID`.
@@ -4336,7 +4292,6 @@ impl MemoryPort for LocalMemoryProvider {
                 Ok(page) => page,
                 Err(error) => return deny(&error),
             };
-        // §7.26: every envelope this caller may see under this selection,
         // staleness recomputed per row against its pinned basis (the stored
         // write-time cache is never served), tombstoned-basis rows excluded
         // (C-077). The marker covers the whole visible set plus every record
@@ -4398,7 +4353,6 @@ impl MemoryPort for LocalMemoryProvider {
                 details: None,
             });
         }
-        // Generate is the cost-bearing mutation: its admission checks current
         // coverage before any receipt disclosure, but the §8.2 freeze gate
         // does not run here — the store's transaction gate applies freeze to
         // fresh work only, after replay resolution (§7.0.5/MEM-R021/C-036),
@@ -4415,7 +4369,6 @@ impl MemoryPort for LocalMemoryProvider {
         {
             return deny(&error);
         }
-        // The §7.0.3 two-transaction flow: the store commits the pending
         // receipt (transaction 1 — the point of no return) inside the same
         // transaction that rechecks authorization, the §7.25 CAS and the
         // sufficiency verdicts, then generation runs deterministically over
@@ -4439,7 +4392,6 @@ impl MemoryPort for LocalMemoryProvider {
             placement_gate: None,
             freeze_gated: true,
         };
-        // Verbatim pins for the columns Task 1 staged (see
         // [`pinned_request_shapes`]).
         let (selection_json, filter_json) = match pinned_request_shapes(&request) {
             Ok(pins) => pins,
@@ -4689,7 +4641,6 @@ mod tests {
             }
         }
 
-        // The reported triple now ranks by instant: A < B < C and therefore
         // A < C, with no cycle.
         assert_eq!(
             created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.900Z"),
@@ -4704,7 +4655,6 @@ mod tests {
             Ordering::Less
         );
 
-        // One sort yields exactly one ranking, parseable instants first and
         // the unparseable class last in raw-text order.
         let mut sorted = values;
         sorted.sort_by(|left, right| created_at_cmp(left, right));

@@ -46,7 +46,6 @@ function requirePlainObject(value: unknown, label: string): Record<string, unkno
 }
 
 function optionalString(value: unknown, field: string): string | undefined {
-  // Generated optional scalars are `type: string`: only an absent (undefined)
   // property is legal. `null` is a type violation, not absence.
   if (value === undefined) return undefined;
   if (typeof value !== 'string') {
@@ -73,7 +72,6 @@ function expectPattern(value: string, pattern: RegExp, field: string): void {
 }
 
 /**
- * Validate an `actor_ref` against the generated closed sum and return the
  * admitted generated value. A malformed value is `invalid_input`; a valid one
  * is dispatched to the native Host authority unchanged.
  */
@@ -99,7 +97,6 @@ function validateViewpoint(value: unknown): SessionViewpoint {
   rejectUnknownKeys(vp, ['world_id', 'binding_id', 'branch_id', 'event_id'], 'viewpoint');
   expectPattern(expectString(vp.world_id, 'viewpoint.world_id'), /^wld_[a-zA-Z0-9]+$/, 'viewpoint.world_id');
   const viewpoint: SessionViewpoint = { world_id: vp.world_id as string };
-  // An own property must be a valid string; only absence is legal, never null.
   if (hasOwn(vp, 'binding_id')) {
     expectPattern(expectString(vp.binding_id, 'viewpoint.binding_id'), /^awb_[0-9a-f]{32}$/, 'viewpoint.binding_id');
     viewpoint.binding_id = vp.binding_id as string;
@@ -116,7 +113,6 @@ function validateViewpoint(value: unknown): SessionViewpoint {
 }
 
 /**
- * Enforce the generated `CreateSessionRequest` shape before any Host/provider
  * effect: plain object only, required/typed optional fields, a valid
  * actor/viewpoint pair, and no unknown keys. Malformed values are
  * `invalid_input` (400). A valid pair is returned as the admitted generated
@@ -132,7 +128,6 @@ function validateCreateSessionRequest(body: unknown): CreateSessionRequest {
   const cwd = optionalString(req.cwd, 'cwd');
   const model = optionalString(req.model, 'model');
   const mode = optionalString(req.mode, 'mode');
-  // The actor/viewpoint pair is detected by own-property presence, so an explicit
   // `null` is treated as present-and-invalid rather than absent.
   const hasActor = hasOwn(req, 'actor_ref');
   const hasViewpoint = hasOwn(req, 'viewpoint');
@@ -144,7 +139,6 @@ function validateCreateSessionRequest(body: unknown): CreateSessionRequest {
   if (model !== undefined) validated.model = model;
   if (mode !== undefined) validated.mode = mode;
   if (hasActor) {
-    // Validate shape first: a malformed ref is invalid_input. `requirePlainObject`
     // rejects null with 400, and only the admitted generated values are kept.
     validated.actor_ref = validateActorRef(req.actor_ref);
     validated.viewpoint = validateViewpoint(req.viewpoint);
@@ -159,7 +153,6 @@ type ValidatedOperation =
   | { kind: 'set_mode'; mode: string };
 
 /**
- * Enforce the generated `ExecuteOperationRequest` oneOf before any provider
  * effect. A malformed branch is `invalid_input` (400); all three generated
  * branches are served.
  */
@@ -216,7 +209,6 @@ async function providerCall(service: ServiceCore, request: ProviderCall): Promis
 }
 
 /**
- * Fresh native truth for one session, or `null` when the Host authority has no
  * row for it (unknown id, or no attached authority at all). Every session
  * command resolves its placement here first: an Actor session is recognized
  * from the authority's own row, never from a request payload or a cache guess.
@@ -256,7 +248,6 @@ function recordFromSession(session: SessionResponse): ProviderSessionRecord {
 }
 
 /**
- * Resolve one session's placement before any effect. Fresh native truth decides
  * Actor versus provider-only; the mirror is consulted only when the authority
  * has no row at all, and even then its Actor marker was copied from native
  * truth when the session was created or hydrated.
@@ -300,7 +291,6 @@ async function nativeOperationRow(
     return response.operation ?? null;
   } catch (error) {
     const mapped = mapNativeError(error);
-    // Absence, never a client error: a resource the authority does not hold, or
     // an authority that is not attached at all. Both mean "no row", so the
     // caller's cache/absence arm decides; every other rejection propagates.
     if (mapped.code !== 'not_found' && !isAbsentHostError(mapped)) throw mapped;
@@ -309,7 +299,6 @@ async function nativeOperationRow(
 }
 
 /**
- * Whether the core authority owns this id as an Actor operation.
  *
  * Ownership is resolved from the mirror's own Actor mark — copied from native
  * admission, or from the authority's own read — and, when the mirror holds no
@@ -353,7 +342,6 @@ async function isActorOwnedOperation(service: ServiceCore, operationId: string):
  */
 async function ageSettledActorOperations(service: ServiceCore): Promise<void> {
   const records = service.providerRegistry.actorBackedOperations();
-  // No record, no crossing: an idle arm mints nothing here.
   if (records.length === 0) return;
   const retire = await withPrincipal(service, async (principal) =>
     Promise.all(
@@ -361,10 +349,8 @@ async function ageSettledActorOperations(service: ServiceCore): Promise<void> {
         parseUuid(record.operationId, 'operation_id');
         const character = await characterOperationRead(service, principal, record.operationId);
         if (character) {
-          // A Character operation's own outcome is its liveness.
           return character.run_status !== 'running';
         }
-        // A Creator Actor operation keeps the generic observation: its own
         // authority row is what makes it live; a miss retires it.
         return (await nativeOperationRow(service, record.operationId)) === null;
       }),
@@ -376,7 +362,6 @@ async function ageSettledActorOperations(service: ServiceCore): Promise<void> {
 }
 
 /**
- * `GET /v1/daemon/agent-host/operations/{operation_id}` Character arm: the
  * authority's own `CharacterOperationResult`, or `null` when the id is not a
  * live/retained core-indexed Character operation (the caller then keeps the
  * generic provider-only/recovered-journal answer).
@@ -392,7 +377,6 @@ export async function lookupCharacterOperation(
 }
 
 /**
- * One record's Character read under an already-minted principal: `null` when the
  * authority serves no such Character operation (the id is not live/retained, or
  * the authority is not attached), every other rejection mapped and propagated.
  */
@@ -411,7 +395,6 @@ async function characterOperationRead(
 }
 
 /**
- * Domain-only profiles own no provider lane: the agent-host session family is
  * outside the retained profile, not an unmigrated route. The distinct
  * `not_supported` code lets a client tell the two 501s apart.
  */
@@ -426,7 +409,6 @@ function refuseDomainOnly(): never {
 export async function createProviderSession(service: ServiceCore, body: unknown): Promise<SessionResponse> {
   if (service.domainOnly) refuseDomainOnly();
   const req = validateCreateSessionRequest(body);
-  // Actor mode is served by the ONE core Host authority: it admits the stored
   // Actor/binding/World, owns the session identity and echoes the pair. The
   // provider-only lane below never sees an Actor request, so a failed admission
   // can never degrade into a legacy provider session.
@@ -470,7 +452,6 @@ export async function shutdownProviderSession(service: ServiceCore, sessionId: s
   parseUuid(sessionId, 'session_id');
   const placement = await resolveSessionPlacement(service, sessionId);
   if (placement.actorBacked) {
-    // The authority owns the release: it cancels the session's live Actor work
     // through the same manager and confirms the session shutdown before it
     // reports success, then retires the Actor reuse state.
     const reply = await withPrincipal(service, (principal) =>
@@ -515,14 +496,12 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     const reply = await withPrincipal(service, (principal) =>
       service.core.hostExecuteOperation(principal, sessionId, request),
     );
-    // The mirror keeps delivery bookkeeping only (the hub and the bounded
     // terminal retention); terminal truth stays the authority's
     // `character_operation` read, never a guess from the mirror. Age the arm
     // first: the authority settles Actor runs with or without a subscriber, so
     // this admission is where the mirror learns which of its Actor records the
     // authority no longer serves.
     await ageSettledActorOperations(service);
-    // The mirror retains this row only inside the Actor arm's bound: an arm full
     // of rows pinned by live readers retains nothing here, and this Host must not
     // create a hub the registry does not hold — that hub would keep charging
     // control slots the reserve proof excludes. The stream's own admission
@@ -544,7 +523,6 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     }
     return reply;
   }
-  // Transport admission: reserve one live-operation slot *synchronously, before
   // the provider effect*, named by this dispatch's own request id. The cap counts
   // reservations, so concurrent requests cannot all pass the same free-slot check
   // and then each register a row — a stalled/hung population can no longer grow
@@ -555,7 +533,6 @@ export async function executeProviderOperation(service: ServiceCore, sessionId: 
     throw new HttpError(503, 'busy', 'too many active provider operations');
   }
   try {
-    // The provider protocol accepts the Rust HostOperation wire shape, not the
     // public HTTP request. A legacy session cannot authorize memory capture.
     if (req.kind === 'prompt' && req.remember === true) {
       throw new HttpError(422, 'invalid_input', 'remember requires an admitted Character session');
@@ -620,7 +597,6 @@ export async function cancelProviderOperation(service: ServiceCore, operationId:
   if (op.providerId === DSH_PROVIDER_ID) {
     throw new HttpError(501, 'route_not_migrated', 'DSH provider does not support cancellation');
   }
-  // Terminal truth may arrive as a hydrated native status (no local event yet),
   // so a null `terminalEvent` alone must never authorise a cancel dispatch.
   if (op.terminalEvent || isTerminalOperationStatus(op.status)) {
     throw new HttpError(409, 'busy', 'operation already terminal', { resource: `operation:${operationId}` });
@@ -632,7 +608,6 @@ export async function cancelProviderOperation(service: ServiceCore, operationId:
     deadline_ms: PROVIDER_DEFAULT_DEADLINE_MS,
     payload: {},
   });
-  // Settle the cached record so the accepted cancel is observable and no longer
   // charges the live-operation cap; native truth (journal + EnvState) matches.
   service.providerRegistry.settleOperationStatus(operationId, 'cancelled');
   return { operation_id: operationId, status: 'cancelled' };
@@ -656,7 +631,6 @@ export async function lookupProviderSession(service: ServiceCore, sessionId: str
     active_op_id: cached.activeOpId ?? undefined,
     model: cached.model,
   };
-  // The mirror is a cache of native truth: an Actor session keeps its echoed
   // pair (copied from the authority when it was created or hydrated) so a cold
   // or restart-level read never downgrades it to a provider-only session.
   if (cached.actorRef !== undefined) response.actor_ref = cached.actorRef;
@@ -672,7 +646,6 @@ export async function lookupProviderOperation(
   const native = await nativeOperationRow(service, operationId);
   if (native) return native;
   const cached = service.providerRegistry.operationRecord(operationId);
-  // The mirror speaks only for provider-only operations. An Actor operation's
   // truth is the authority's own, so with no native row it is absent — never a
   // stale mirror row served as a generic provider-only observation.
   if (!cached || cached.actorBacked === true) return null;
@@ -741,7 +714,6 @@ async function assertKnownOperation(service: ServiceCore, operationId: string): 
     terminalEvent: null,
     terminalTranscript: null,
   };
-  // A live row the mirror has no room for is simply not cached: native truth
   // still answers this caller, and the mirror's live population stays at the cap
   // the control reserve is proven against (`registerOperation` refuses it whole).
   service.providerRegistry.registerOperation(record);

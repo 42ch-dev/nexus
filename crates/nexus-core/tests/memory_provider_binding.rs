@@ -359,7 +359,6 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
         );
         assert!(core.close().await.expect("close").cleanup_confirmed);
 
-        // The exclusive migration fence is the real OS-lock probe: it succeeds
         // only when no writer admission — the core's or the dropped provider's
         // — still holds the shared migration lock.
         let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&env.db_path())
@@ -390,7 +389,6 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     let db_path = env.db_path();
     let home = env.user_home.clone();
 
-    // Migrate and seed the workspace *without* provisioning it, so whatever is
     // in `memory_spaces` later is the measured open's own required write.
     let bootstrap = init_guarded_pool(&db_path, CREATOR)
         .await
@@ -400,10 +398,8 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         eventual_fence(&db_path).await,
         "the bootstrap admission is fully released before the measured open"
     );
-    // Only an id outside this set can belong to the measured open.
     let known_writers = writer_ids(&db_path).await;
 
-    // The publication lease the open must take inside `provision` before it may
     // write, held here from before the spawn. Its descriptor conflicts with the
     // open's exactly as another process's would.
     let publish_root = db_path
@@ -429,16 +425,13 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
             async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await },
         );
 
-    // Step 1: the measured open registers a writer id that did not exist before
     // the spawn, so every following observation is about this invocation. A
     // finished task here means the lease did not hold it, which must fail.
     let measured_writer = open_registered_writer(&mut observer, &opening, &known_writers).await;
 
-    // Step 2: the seed write, proven by the change row only this writer id
     // produces for workspace_meta.
     opened_seed_write(&mut observer, &opening, &measured_writer).await;
 
-    // Step 3 — the stage itself, by construction. The seeded open cannot pass
     // `provision`'s publication-lease wait while this test holds it, so the
     // provisioning transaction cannot run. Give it an unambiguous opportunity
     // to do so anyway: while the lease is held no duration can let it through,
@@ -475,7 +468,6 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the task was really cancelled, not completed"
     );
 
-    // Releasing the lease lets the abandoned native wait end; it takes the
     // lease only to give it straight back, so the workspace lease is free again.
     // The cancelled open's own OS admission ends with it, proved while this
     // process is still alive.
@@ -493,7 +485,6 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the cancelled open never reached its required provisioning write"
     );
 
-    // The abandoned wait released the workspace publication gate: a fresh open
     // on the same workspace still completes, so no wait or lease leaked.
     let reopened = tokio::time::timeout(
         std::time::Duration::from_secs(30),
@@ -617,7 +608,6 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
     let env = Env::new(None);
     let db_path = env.db_path();
 
-    // A live adopted user: the engine owner keeps the workspace and its memory.
     let engine = CoreService::open(env.options(None))
         .await
         .expect("live engine owner");
@@ -631,7 +621,6 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         0
     );
 
-    // A valid SQLite fixture that makes the provisioning write fail while every
     // read still works: a trigger on the grant table rejects the bootstrap
     // grant insert. The workspace stays migrated and readable.
     let raw = raw_pool(&db_path).await;
@@ -654,7 +643,6 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         "the failure is the real provisioning write, got {rendered}"
     );
 
-    // The failed open took nothing from the adopted user: it still reads and
     // still holds its own admission.
     assert_eq!(
         engine
@@ -670,7 +658,6 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         "the adopted engine admission is still held"
     );
 
-    // Settle the real user, then the fence must become free: nothing of the
     // failed open may still hold the workspace.
     assert!(engine.close().await.expect("close").cleanup_confirmed);
     assert!(
@@ -698,7 +685,6 @@ async fn pending_guarded_migration_runs_after_a_normal_provider_close() {
     );
     assert!(core.close().await.expect("close").cleanup_confirmed);
 
-    // Make a real migration pending: drop one applied row the embedded
     // migrator re-applies (its SQL is idempotent).
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", env.db_path().display()))
         .await
@@ -851,7 +837,6 @@ async fn creator_close_keeps_a_joined_adopter_and_a_third_join() {
         0
     );
 
-    // The creator's open ends here — a failed pin takes the same release.
     assert!(creator.close().await.expect("close").cleanup_confirmed);
 
     let third = CoreService::open(env.options(None))

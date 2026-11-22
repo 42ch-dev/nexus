@@ -14,7 +14,6 @@ use std::process::Command;
 const TARGET: &str = "wasm32-unknown-unknown";
 
 fn main() {
-    // Declare the custom cfg flag early so rustc does not warn about
     // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
 
@@ -22,11 +21,9 @@ fn main() {
     let sysroot = sysroot_of(&rustc);
     let rustlib = sysroot.join("lib/rustlib");
 
-    // Installing or removing the target changes this directory, not a package
     // file, so a warm build cache would otherwise keep a stale cfg. A missing
     // directory makes Cargo rerun every build, which is the safe direction.
     println!("cargo:rerun-if-changed={}", rustlib.display());
-    // RUSTC selects which sysroot is read above, so a different compiler must
     // be re-probed even when its sysroot directory looks unchanged.
     println!("cargo:rerun-if-env-changed=RUSTC");
 

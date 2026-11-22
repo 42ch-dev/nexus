@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
 # check-module-sdk-drift.sh — Compute-module SDK drift gate (V1.170 P0, AR-7)
 #
 # Three gates (all python3 — python3 is already used in ci.yml):
@@ -26,7 +25,6 @@
 # Exit codes:
 #   0 — All wire fields mirrored in the SDK AND fixtures are value-identical
 #   1 — Drift detected
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

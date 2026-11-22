@@ -1,5 +1,4 @@
 /**
- * World KB graph projection — World → entity/candidate nodes + typed
  * relationship edges + source-anchor provenance edges
  * (canvas-strategy-surface.md §3.3 surface 3 + §3.4).
  *
@@ -59,7 +58,6 @@ const ORIGIN_X = 40;
 const ORIGIN_Y = 40;
 
 /**
- * Build a deterministic lane+row layout key per BlockType so entities of the
  * same kind stack vertically and kinds spread horizontally across the canvas.
  */
 function laneIndexOf(kind: BlockType): number {
@@ -127,7 +125,6 @@ export function layoutNodes(
     });
   }
 
-  // Pending candidates stack in one dedicated lane AFTER the furthest entity
   // lane actually occupied (lane 0 when no entities). Basing this on the
   // maximum occupied lane — not on all 18 possible BlockTypes — keeps the graph
   // compact: a world with a few entity kinds must not leave ~17 empty lanes of
@@ -165,7 +162,6 @@ export function deriveEdges(
       target: `entity:${anchor.key_block_id}`,
       type: 'straight',
       data,
-      // V1.121 P3 T2 — consume the v0.4 source-anchor-edge token
       // (`canvas-worldkb-source-anchor-edge` = purple-700 in both themes per
       // the P0 chromatic hygiene table). Previously relied on React Flow's
       // default stroke, leaving the provenance edge off-token.

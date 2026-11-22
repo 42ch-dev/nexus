@@ -1,5 +1,4 @@
 /**
- * First World step — creator onboarding (plan v1219-onboarding T3; prototype
  * `onboarding-v3.html` S3).
  *
  * Presentation only: the shell owns the finish sequence (creator bootstrap →
@@ -65,7 +64,6 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
   const [showRoot, setShowRoot] = useState(false);
   const activeWorkspace = useActiveWorkspaceQuery();
 
-  // Never a hardcoded path: only the root the service reports for the selected
   // workspace (D25 — the base note claims no absolute path).
   const workspaceRoot = activeWorkspace.data?.creative_root ?? null;
   const trimmed = name.trim();

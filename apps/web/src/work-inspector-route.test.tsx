@@ -1,5 +1,4 @@
 /**
- * Assembly Inspector route — P1 T3 (DF-76) IA placement coverage.
  *
  * Pins the creator-area entry point: `/works/:workId/inspector` mounts inside
  * `WorkShellLayout` as a Control-Room-style sibling of outline/timeline/
@@ -64,7 +63,6 @@ function makePacket(): MomentInspectResponse {
 }
 
 function makeClient(packet: MomentInspectResponse): NexusClient {
-  // BrowserClient base so MSW intercepts the real `getWork` path; override
   // `inspectMoment` so the inspector query resolves deterministically.
   const base = new BrowserClient();
   return Object.assign(base, {
@@ -142,9 +140,7 @@ describe('Assembly Inspector route (V1.151 P1 T3)', () => {
       { timeout: 5000 },
     );
 
-    // The shell layout is present (creator-area nesting verified).
     expect(screen.getByTestId('work-shell-layout')).toBeInTheDocument();
-    // Fired + missed trace rows render from the route response.
     expect(screen.getByTestId('trace-entry-king-entry')).toHaveTextContent(/Fired/);
     expect(screen.getByTestId('trace-entry-bandit-entry')).toHaveTextContent(/Missed/);
   });
@@ -184,7 +180,6 @@ describe('Assembly Inspector route (V1.151 P1 T3)', () => {
       { timeout: 5000 },
     );
 
-    // No inspection fires without a world to assemble over.
     expect(client.inspectMoment).not.toHaveBeenCalled();
   });
 });

@@ -130,7 +130,6 @@ fn chain_fragment(id: &str, next: &str) -> serde_json::Value {
 fn write_declaring_package(home: &Path, id: &str, slots: &str, fragment: &serde_json::Value) {
     let directory = home.join("patterns").join(id);
     std::fs::create_dir_all(&directory).unwrap();
-    // The manifest schema requires `slots`; an empty declaration is a top-level key.
     let empty_slots = if slots.is_empty() {
         "slots = []\n\n"
     } else {
@@ -248,7 +247,6 @@ async fn approve_freezes_one_snapshot_bound_to_the_simulated_content() {
 #[tokio::test]
 async fn a_resolved_fragment_with_a_dangling_edge_is_refused_by_approve() {
     let setup = setup().await;
-    // The candidate pins `outer`; `outer` pins `inner` without recording a hash, so rewriting
     // `inner` is not a pin mismatch — it is a fragment bytes the approval has to read.
     write_declaring_package(
         &setup.home,
@@ -383,7 +381,6 @@ async fn a_changed_pinned_package_is_refused_naming_package_and_both_hashes() {
         .expect("the nest records the resolved pin");
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // Same id and version, different fragment bytes: the pin no longer identifies the bytes.
     write_package(&setup.home, "approve-step", "changed bytes");
 
     let error = setup
@@ -441,7 +438,6 @@ async fn a_pin_whose_package_is_absent_is_refused_naming_the_pin() {
         .expect("the nest records the resolved pin");
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // The package is gone, so the recorded hash names bytes no registry serves: there is no
     // scanned hash to compare, and the refusal must not pretend there is one.
     std::fs::remove_dir_all(setup.home.join("patterns").join("gone-step")).unwrap();
 
@@ -499,7 +495,6 @@ async fn an_unresolvable_pin_refuses_before_the_slots_it_declares() {
     let revision = composed.candidate.revision;
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // The manifest still parses, so the package keeps its declared required slot; the body is gone,
     // so the pin it recorded cannot be confirmed.
     std::fs::remove_file(
         setup

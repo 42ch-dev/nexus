@@ -1,5 +1,4 @@
 /**
- * Transition / edge inspector section — displays the scalar `next` transition.
  *
  * The rendered document is never the preset YAML this section would write, so
  * the field is shown with the route that does reach it instead of a Save.

@@ -195,8 +195,6 @@ fn approve_request(request: StrategyApproveRequest) -> Result<(u64, Option<Simul
 fn compose_response(
     outcome: nexus_core::ComposeOutcome,
 ) -> std::result::Result<StrategyComposeResponse, nexus_core::CoreError> {
-    // The IR document and this contract's inlined copy are two generated facades over one JSON
-    // shape, so the boundary joins them the same way simulate does.
     let document = serde_json::to_value(&outcome.candidate.document)
         .and_then(serde_json::from_value)
         .map_err(|error| nexus_core::CoreError::Internal {
@@ -304,11 +302,9 @@ async fn publish_execution_owner(
         .await
     {
         Ok(handle) => Some(handle.engine_epoch()),
-        // A workspace that cannot host an owner is the ONE shape this profile
         // reports as "no engine epoch": the admission pinned no usable creative
         // root, so the caller publishes the null sentinel.
         Err(ExecutionOpenError::Workspace(CoreError::Uninitialized)) => None,
-        // Every other workspace refusal keeps its neutral class on the wire.
         Err(ExecutionOpenError::Workspace(err)) => {
             return Err(core_error::napi_error_from_domain(err));
         }
@@ -371,7 +367,6 @@ impl NativeCore {
             .inner
             .host_authority()
             .ok_or_else(core_error::napi_error_host_not_started)?;
-        // The attached authority's manager IS the manager the open started with
         // the admitted pinned-root configuration: readiness and the hosted
         // execution owner borrow that same instance instead of a second one.
         publish_execution_owner(&core, providers, host.manager()).await
@@ -411,7 +406,6 @@ impl NativeCore {
 
         core.retire_execution().await;
 
-        // Re-read the document the save just wrote and re-admit its catalog,
         // then run the manager start against the SAME manager the authority
         // exposes, so `selected_providers_ready` reads the saved selection.
         let admission = crate::lifecycle::validate_host_admission(&home)
@@ -420,7 +414,6 @@ impl NativeCore {
             .active_principal()
             .await
             .map_err(core_error::napi_error_from_domain)?;
-        // The probe boundary is the same pinned creative root the open used;
         // an admission without one keeps the owner-less shape (no fabricated
         // readiness).
         let probe_owner = core.admission_creative_root().map(|root| {
@@ -452,9 +445,6 @@ impl NativeCore {
         publish_execution_owner(&core, providers, manager).await
     }
 
-    // ── Durable schedule mutations (P3 ExecutionHandle authority) ───────────
-
-    /// `GET /v1/daemon/orchestration/capabilities` — the live capability
     /// registry rows the established owner's engine reads.
     ///
     /// Rows use the hand-coded local wire shape (`camelCase` schemas,
@@ -539,9 +529,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Durable control reads + core-context edits (P0-T6) ──────────────────
-
-    /// `GET /v1/daemon/orchestration/schedules`.
     ///
     /// The query crosses as the generated public DTO (`deny_unknown_fields`:
     /// a key outside the schema is a typed client refusal), and the response is
@@ -635,9 +622,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Compute module/run/transaction surface (v1.195 P2-T3) ───────────────
-
-    /// `GET /v1/daemon/compute/modules` — the installed module registry (C1).
     ///
     /// Machine capability rather than creator state, so there is no
     /// per-creator filter — but the principal is still verified, and the
@@ -793,9 +777,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Same-run event subscriptions (P1-T3) ────────────────────────────────
-
-    /// `GET /v1/daemon/orchestration/sessions/{run_id}/events` — open ONE
     /// authorized subscription to a durable root run's bounded event stream.
     ///
     /// The generated request DTO crosses as an owned buffer (`deny_unknown_fields`:
@@ -870,9 +851,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Preset authoring (P3 authority) ─────────────────────────────────────
-
-    /// `GET /v1/daemon/presets`.
     #[napi]
     pub async fn list_presets(&self, principal_handle: String) -> Result<Buffer> {
         self.json_call(principal_handle, async move |core, principal| {
@@ -988,9 +966,6 @@ impl NativeCore {
         .await
     }
 
-    // ── Strategy edits (P3 authority) ───────────────────────────────────────
-
-    /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch`.
     #[napi]
     pub async fn patch_strategy_state(
         &self,
@@ -1095,9 +1070,6 @@ impl NativeCore {
 
         let body: GenerateBody = decode(request_json, "request")?;
         self.json_call(principal_handle, async move |core, principal| {
-            // The executor the owner drives, never a second Host client: the HTTP surface corrects
-            // through the same provider selection a run uses, and `None` when the transport attached
-            // no model.
             let corrector = core.execution().and_then(|owner| owner.prompt_executor());
             let outcome = core
                 .generate_strategy_candidate(
@@ -1322,8 +1294,6 @@ mod tests {
 
     #[test]
     fn unselected_catalog_presence_is_never_readiness() {
-        // A perfectly available catalog with no selected provider: the profile
-        // has nothing it can dispatch to, so it is not ready.
         let config = AgentHostConfig::default();
         assert!(!selected_providers_available(
             &config,
@@ -1333,7 +1303,6 @@ mod tests {
 
     #[test]
     fn unprobed_or_unavailable_selected_provider_is_not_ready() {
-        // Selected but never probed (the owner-less start marks the row
         // unavailable) — or probed and unavailable: both are not ready.
         let config = AgentHostConfig {
             providers: vec![configured("dsh-native", true)],
@@ -1355,7 +1324,6 @@ mod tests {
 
     #[test]
     fn disabled_selection_does_not_pass_and_partial_selection_does_not_pass() {
-        // A disabled entry is not a selection: nothing is selected.
         let only_disabled = AgentHostConfig {
             providers: vec![configured("dsh-native", false)],
             ..AgentHostConfig::default()
@@ -1364,7 +1332,6 @@ mod tests {
             &only_disabled,
             &catalog(vec![entry("dsh-native", true)])
         ));
-        // Every selected provider must be available: one unrelated healthy row
         // never substitutes for an unavailable selected one.
         let both = AgentHostConfig {
             providers: vec![configured("dsh-native", true), configured("mock-acp", true)],

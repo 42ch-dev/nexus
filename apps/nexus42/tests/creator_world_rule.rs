@@ -130,10 +130,6 @@ async fn stored_rules_including(
 const MODULE_PRESENCE_CARRIER: &str = r#"{"family":"module_presence","module_key":"characters"}"#;
 const OBSERVER_CARDINALITY_CARRIER: &str = r#"{"family":"observer_cardinality","min":0,"max":3}"#;
 
-// =============================================================================
-// CLI surface (assert_cmd)
-// =============================================================================
-
 /// The real binary renders the same core projection: `creator world rule list
 /// --json` against the hermetic home (no server, no Node child). The in-process
 /// seed core is closed first so the child admits its own direct writer.
@@ -258,10 +254,6 @@ fn world_rule_add_help_shows_flags() {
     }
 }
 
-// =============================================================================
-// Round-trip (one hermetic direct-core home per test — no $HOME, no daemon)
-// =============================================================================
-
 /// add → stored `status=active` → list (human + JSON) → deactivate →
 /// stored `status=deprecated`; list still shows the row (all statuses).
 #[tokio::test]
@@ -290,7 +282,6 @@ async fn add_list_deactivate_round_trip() {
         rule_id.len()
     );
 
-    // Stored truth: default status=active (auto-include needs no step).
     let rows = stored_rules(&env, WORLD).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].rule_id, rule_id);
@@ -312,7 +303,6 @@ async fn add_list_deactivate_round_trip() {
         "constraint is projected first-class from extensions.nexus.constraint"
     );
 
-    // list: human + JSON paths do not error.
     rule_list(&env.core, &env.principal, WORLD, false, false)
         .await
         .unwrap();
@@ -320,7 +310,6 @@ async fn add_list_deactivate_round_trip() {
         .await
         .unwrap();
 
-    // deactivate: spoke vocabulary "deprecated" (never "inactive").
     rule_deactivate(&env.core, &env.principal, WORLD, &rule_id)
         .await
         .expect("deactivate on an owned world must succeed");
@@ -329,7 +318,6 @@ async fn add_list_deactivate_round_trip() {
     assert_eq!(rows[0].status.as_deref(), Some("deprecated"));
     assert_ne!(rows[0].status.as_deref(), Some("inactive"), "spoke vocab");
 
-    // list after deactivate still shows the row (all statuses visible).
     rule_list(&env.core, &env.principal, WORLD, false, false)
         .await
         .unwrap();
@@ -382,8 +370,6 @@ async fn json_summary_shape_projects_carrier_first_class() {
     );
 }
 
-// ── Malformed carrier rejects (core member-aware gate, fail early) ─────
-
 /// Each malformed carrier is rejected with a message naming the offending
 /// member, and nothing is written to storage. The closed-shape grammar is
 /// owned by the spoke adapter behind the core seam (`constraint.<member>`);
@@ -392,45 +378,36 @@ async fn json_summary_shape_projects_carrier_first_class() {
 async fn malformed_carrier_rejects_naming_member_no_write() {
     let env = fresh_env().await;
     let cases: &[(&str, &str)] = &[
-        // non-object JSON (CLI boundary: the request carries a JSON object)
         (r"[1,2,3]", "constraint must be a JSON object"),
         (r#""tone""#, "constraint must be a JSON object"),
-        // unknown family
         (
             r#"{"family":"tone","module_key":"x"}"#,
             r#"unknown family "tone""#,
         ),
-        // entry-level field outside the closed set
         (
             r#"{"family":"required_field","field":"body.plot"}"#,
             r#"unknown "field" value "body.plot""#,
         ),
-        // required_field with none of the operand forms
         (
             r#"{"family":"required_field"}"#,
             r#"missing required member "field""#,
         ),
-        // required_field with both operand forms (entry field + module_key)
         (
             r#"{"family":"required_field","field":"body.summary","module_key":"characters"}"#,
             "entry-level",
         ),
-        // min > max
         (
             r#"{"family":"observer_cardinality","min":5,"max":3}"#,
             r#""min" (5) must not exceed "max" (3)"#,
         ),
-        // empty module_key
         (
             r#"{"family":"module_presence","module_key":""}"#,
             r#""module_key" must be a non-empty string"#,
         ),
-        // unknown extra member (closed shapes)
         (
             r#"{"family":"module_presence","module_key":"x","bogus":1}"#,
             r#"unknown member "bogus""#,
         ),
-        // invalid JSON entirely (CLI boundary)
         ("{not json", "invalid JSON"),
     ];
 
@@ -517,8 +494,6 @@ async fn entry_type_with_entry_family_carrier_accepted() {
     assert_eq!(rows[0].target_entry_types, vec!["character".to_string()]);
 }
 
-// ── Ownership guards (named reject, no write) ─────────────────────────
-
 /// Foreign world (active creator does not own it) → named reject, no write.
 #[tokio::test]
 async fn add_on_foreign_world_rejected_no_write() {
@@ -543,7 +518,6 @@ async fn add_on_foreign_world_rejected_no_write() {
         "named reject naming the world, got: {msg}"
     );
 
-    // The core refuses the read of a foreign World too, so the write refusal
     // is asserted on the owned World staying empty.
     assert!(stored_rules(&env, WORLD).await.is_empty());
 }
@@ -554,7 +528,6 @@ async fn add_on_foreign_world_rejected_no_write() {
 #[tokio::test]
 async fn deactivate_cross_world_rule_rejected_naming_rule_id() {
     let env = fresh_env().await;
-    // The rule lives in a second World of the SAME creator.
     let cross_world_rule_id = rule_add(
         &env.core,
         &env.principal,
@@ -612,8 +585,6 @@ async fn deactivate_on_foreign_world_rejected() {
         .expect_err("foreign world must reject");
     assert!(err.to_string().contains("does not own"), "got: {err}");
 }
-
-// ── --status staging ──────────────────────────────────────────────────
 
 /// `--status draft` creates a row whose stored status is `draft` — it stays
 /// out of the auto-include set (status filtering is the adapter boundary,
@@ -675,10 +646,6 @@ async fn non_core_status_rejected_no_write() {
     );
 }
 
-// =============================================================================
-// Archive lifecycle (V1.198 §13: terminal, retained, hidden by default)
-// =============================================================================
-
 /// `archive` writes the terminal `archived` status, retains the row and
 /// succeeds idempotently on repetition. The default read omits it; only the
 /// explicit inclusion returns it.
@@ -723,7 +690,6 @@ async fn archive_round_trip_terminal_retained_and_idempotent() {
         "archiving retains the carrier"
     );
 
-    // Repetition is retry-safe for scripts and loses no field.
     rule_archive(&env.core, &env.principal, WORLD, &rule_id)
         .await
         .expect("repeating archive must succeed");
@@ -762,7 +728,6 @@ async fn archive_transitions_from_each_prior_status() {
         .rule_id;
         ids.push((name.to_string(), id));
     }
-    // The third row reaches `deprecated` through the CLI seam, not at create.
     let deprecated_id = ids.last().expect("three seeded rules").1.clone();
     rule_deactivate(&env.core, &env.principal, WORLD, &deprecated_id)
         .await
@@ -1061,7 +1026,6 @@ async fn archived_row_refuses_status_exit_and_create_archived() {
     assert_eq!(stored[0].status.as_deref(), Some("archived"));
     assert_eq!(stored[0].canonical_name, "Terminal rule");
 
-    // `--status archived` is refused at create (archive is a transition only).
     let err = rule_add(
         &env.core,
         &env.principal,

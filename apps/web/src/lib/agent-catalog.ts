@@ -12,14 +12,12 @@ export interface AgentOverride {
   installUrl?: string;
   iconUrl?: string;
   /**
-   * When `true`, the row is omitted from **both** the default grid and the
    * More list (hard exclude). Used for ACP wrappers (P2: `claude-acp`,
    * `codex-acp`).
    */
   excludeFromPicker?: boolean;
   priority?: number;
   /**
-   * Optional static description fallback used when the scan returns no
    * description for this key (P2: native Claude/Codex). EN-only product
    * string — does not enter locale catalogs.
    */
@@ -34,7 +32,6 @@ export interface AgentCatalogOverrides {
 
 export interface AgentCatalogItem {
   /**
-   * Stable catalog key — the canonical agent identity used for override /
    * whitelist lookup and the default-grid / more-agents split. MAY be shared
    * by more than one scan row (e.g. two `claude` installs both resolve to
    * `claude-native`). Use {@link pickerId} for selection.
@@ -57,7 +54,6 @@ export interface AgentCatalogItem {
   installUrl?: string | null;
   docsUrl?: string | null;
   /**
-   * Hard-exclude flag: when `true`, the row never appears in the default grid
    * or the More list. Mirrors {@link AgentOverride.excludeFromPicker}.
    */
   excludeFromPicker: boolean;
@@ -93,7 +89,6 @@ const NATIVE_LAUNCH_MAP: Record<string, string> = {
 };
 
 /**
- * Extract the binary basename from a launch command — mirrors the basename
  * logic in `launchCommandMatches` (`apps/web/src/api/queries.ts`).
  *
  * The daemon PATH-scan emits the **full resolved binary path** (e.g.
@@ -128,7 +123,6 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
   const whitelistUrl = resolveInstallUrl(key);
   return {
     id: key,
-    // Single-entry default: equals the catalog key. Collision-safe suffixing
     // happens at the list level in `resolveCatalogItems` (needs full-set
     // context).
     pickerId: key,
@@ -175,7 +169,6 @@ export function resolveCatalogItems(entries: AgentScanEntry[]): AgentCatalogItem
 }
 
 /**
- * Sort comparator: `priority` asc (undefined last), then `displayName` asc.
  * Used for curated tiers in {@link defaultGridEntries}.
  */
 function byPriorityThenDisplayName(

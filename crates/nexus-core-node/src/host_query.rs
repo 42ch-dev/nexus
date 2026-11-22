@@ -89,9 +89,6 @@ pub fn deny_actor_provider_ids(
     }
     if let Some(raw) = operation_id {
         if let Ok(uuid) = Uuid::parse_str(raw) {
-            // Either index: an operation reserved with a recorded Character
-            // outcome, or one registered before the Host bound it to its
-            // session. The retired-session case is covered by the session
             // check, and a terminal record keeps its operation id until the
             // core's bounded eviction.
             if authority.owns_actor_operation(&HostOperationId(uuid)) {
@@ -208,8 +205,6 @@ async fn native_session_rows(
         }
         match list.pagination.next_cursor {
             Some(cursor) => next = Some(cursor),
-            // A full page without a cursor cannot be followed; the rows already
-            // drained are the complete authority view.
             None => return Ok(rows),
         }
     }
@@ -229,7 +224,6 @@ pub async fn dispatch_host_query(
             let health = response
                 .health
                 .ok_or_else(core_error::open_reason_internal)?;
-            // Native precedence: only count JS sessions that are not already
             // represented in the core-authorized native registry, so a collision
             // cannot double-count a session or its operation.
             let native = native_session_rows(&authority, &principal, None).await?;
@@ -323,8 +317,6 @@ pub async fn dispatch_host_query(
             let raw = request.session_id.as_deref().ok_or_else(|| {
                 core_error::open_reason_invalid_input("get_session requires session_id")
             })?;
-            // A raw comparison is safe and never parses a JS id: every native
-            // session id is a UUID, so a JS-shaped id can never collide.
             let native = native_session_rows(&authority, &principal, None).await?;
             if let Some(row) = native.into_iter().find(|row| row.session_id == raw) {
                 return Ok(CoreHostQueryResponse {
@@ -336,7 +328,6 @@ pub async fn dispatch_host_query(
                     scan: None,
                 });
             }
-            // JS branch: raw-id compare.
             let js = state.with_js_state(|s| s.session(raw).cloned()).flatten();
             if let Some(record) = js {
                 return Ok(CoreHostQueryResponse {
@@ -354,12 +345,6 @@ pub async fn dispatch_host_query(
             let raw = request.operation_id.as_deref().ok_or_else(|| {
                 core_error::open_reason_invalid_input("get_operation requires operation_id")
             })?;
-            // Native branch first for a UUID, matching GetSession precedence. The
-            // row set is the authority's owner-scoped view; the wire status is
-            // the manager session-state projection, which the row does not carry.
-            // The durable journal fallback stays AFTER the JS branch below, so a
-            // provider-only operation id is never preempted by its own journal
-            // row.
             if let Ok(uuid) = Uuid::parse_str(raw) {
                 let op_id = HostOperationId(uuid);
                 let native = native_session_rows(&authority, &principal, None).await?;
@@ -392,7 +377,6 @@ pub async fn dispatch_host_query(
                     }
                 }
             }
-            // JS branch: raw-id compare (adapter ids are arbitrary strings).
             if let Some(op) = state.with_js_state(|s| s.operation(raw)).flatten() {
                 return Ok(CoreHostQueryResponse {
                     operation: Some(NexusAgentHostOperationResponse {
@@ -408,8 +392,6 @@ pub async fn dispatch_host_query(
                     scan: None,
                 });
             }
-            // Durable journal fallback: after a restart the in-memory state is
-            // gone, but a previously active op is still queryable as
             // interrupted, read through the CoreService-owned journal.
             if let Some(core) = state.journal_core() {
                 if let Ok(Some((operation_id, session_id, _provider_id, status))) =

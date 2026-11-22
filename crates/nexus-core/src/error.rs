@@ -281,7 +281,6 @@ pub fn local_db_err(e: LocalDbError) -> CoreError {
         LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        // v1.207 P3 (§B.1/§C): the frozen `operation_id_conflict` refusal for a
         // receipt write that collides on the first-writer-wins `operation_id`.
         // The code is the contract; the transport decides its status.
         LocalDbError::OperationIdConflict { operation_id } => CoreError::Coded {
@@ -324,7 +323,6 @@ pub fn actor_db_err(e: LocalDbError) -> CoreError {
             message: code.message().to_string(),
         },
         LocalDbError::HolderStateInvalid { reason } => {
-            // The registry detail stays in the log; the wire keeps the stable
             // `holder_state_invalid` code and its fixed product message (§2.2).
             tracing::debug!(target: "actors.holder_state", %reason, "holder registry state refused on a normal read");
             CoreError::ActorConflict {

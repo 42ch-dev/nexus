@@ -218,7 +218,6 @@ fn actor_knowledge_patch_is_no_op(
     if !name_unchanged || !summary_unchanged {
         return Ok(false);
     }
-    // An authored governance pair that already equals the stored pair is a
     // no-op too — an explicit `shared` on a shared row (or the same private
     // audience re-sent) may not bump either revision.
     if let Some(governance) = governance {
@@ -415,7 +414,6 @@ pub async fn get_actor_knowledge_entry(
     let Some(row) = row else {
         return Ok(None);
     };
-    // Defense in depth: re-check the same rule in Rust so a future SQL change
     // cannot silently widen this read.
     if !row_in_character_retained_read_scope(pool, owner_creator_id, &row, character_id).await? {
         return Ok(None);
@@ -723,7 +721,6 @@ async fn apply_actor_knowledge_patch(
             expected_revision,
         )
         .await?;
-        // The audience is resolved against stored state **in this
         // transaction** (durable §3): ownership/activity, the World-row active
         // binding and the fail-closed registry read all see the same snapshot
         // as the write below.
@@ -768,7 +765,6 @@ async fn apply_actor_knowledge_patch(
             governance,
         )
         .await?;
-        // v1.191 P1 T7 (durable §4.3): a binding-owned authoring write bumps
         // its owning Character, never a World — the binding has no revision of
         // its own — and a Character-owned write bumps that Character.
         crate::kb_store::bump_character_knowledge_revision_tx(&mut tx, character_id).await?;

@@ -10,7 +10,6 @@ pub mod http;
 
 use serde::{Deserialize, Serialize};
 
-// Re-export core context types at the schedule module level
 pub use core_context::*;
 
 /// Schedule ID — ULID, user-addressable.

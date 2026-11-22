@@ -84,7 +84,6 @@ async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
     )
     .await
     .unwrap();
-    // create_world mints its own world_id; rewrite it to a known value so the
     // capability admission gate and KB queries can target it deterministically.
     sqlx::query("UPDATE narrative_worlds SET world_id = ? WHERE owner_creator_id = ?")
         .bind(world_id)
@@ -162,7 +161,6 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
     let registry = CapabilityRegistry::with_builtins_and_pool(pool);
     let loaded = load_embedded_preset("combat-engine", &registry).expect("preset loads");
     assert_eq!(loaded.id, "combat-engine");
-    // requires_capabilities must include narrative.compute (V1.61 P3).
     assert!(
         loaded
             .manifest
@@ -172,7 +170,6 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
             .any(|c| c == "narrative.compute"),
         "combat-engine must require narrative.compute"
     );
-    // And the capability must be KNOWN to this registry — in the corrected
     // C3 contract shape the executable lookup misses it (the plain builtin
     // registry attaches no engine binding), while the name stays reserved
     // and known metadata resolves without constructing an executor.
@@ -204,13 +201,11 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     seed_creator(&pool, "ctr_e2e").await;
     seed_world(&pool, "ctr_e2e", "wld_e2e").await;
 
-    // Hero: atk 20, def 5, hp 80. Villain: atk 10, def 0, hp 120.
     // basic-combat picks the first two character blocks → Hero attacks Villain.
     // damage = max(0, 20 − 0) = 20 → Villain hp 120 → 100. Hero unchanged.
     let hero = seed_character(&pool, "wld_e2e", "Hero", 20, 5, 80, 80).await;
     let villain = seed_character(&pool, "wld_e2e", "Villain", 10, 0, 120, 120).await;
 
-    // Sanity: the computable filter returns both characters.
     let kb_store = SqliteKbStore::new(pool.clone());
     let q = KbQuery::new("wld_e2e").with_computable(Some(true));
     let snapshot = kb_store.query(&q).await.unwrap();
@@ -237,7 +232,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     let output = match result {
         Ok(o) => o,
         Err(e) => {
-            // Graceful degradation: a module trap must NOT crash; instead a
             // compute_error timeline event is recorded (compass T4).
             let timeline = timeline_event_count(&pool, "wld_e2e").await;
             assert!(
@@ -248,7 +242,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         }
     };
 
-    // ── battle_report ──
     let report: &Value = output
         .get("battle_report")
         .expect("battle_report present in output");
@@ -257,7 +250,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         "typed battle_report must carry kind; module-specific fields are validated pre-deserialize"
     );
 
-    // Combat math is validated via applied state_delta side effects below.
     assert_eq!(
         output["state_delta_applied"], 1,
         "exactly one state_delta (defender HP sub) expected"
@@ -273,7 +265,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         "attacker (Hero) HP must be unchanged by a single combat resolution"
     );
 
-    // ── timeline events ──
     assert_eq!(
         output["timeline_events_created"], 1,
         "basic-combat emits exactly one timeline event"
@@ -281,13 +272,11 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     let db_events = timeline_event_count(&pool, "wld_e2e").await;
     assert_eq!(db_events, 1, "timeline event must persist in the DB");
 
-    // ── new_key_blocks (basic-combat emits none) ──
     assert_eq!(
         output["new_key_blocks_created"], 0,
         "basic-combat does not emit new key blocks"
     );
 
-    // ── H1 regression guard (R-V161P3-CORR-002): cross-world block injection
     // is rejected. Drive the capability with a module that emits a block for a
     // different world would require a hostile module; instead assert the guard
     // logic by checking the world_id re-assertion path is in place via the

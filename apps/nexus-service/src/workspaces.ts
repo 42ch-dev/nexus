@@ -1,5 +1,4 @@
 /**
- * Workspace family HTTP surface (plan v1219-shell-and-access T4, extended by
  * v1220 P3-T2): home-level discovery, the active-selection read, set-active,
  * and create over the frozen `workspace` wire contracts
  * (`schemas/daemon-api/workspace/…`).
@@ -57,7 +56,6 @@ export async function listWorkspaces(
       : discovered.items.filter((item) => item.creator_id === creatorId);
   if (cursor !== null) {
     const position = items.findIndex((item) => cursorOf(item) === cursor);
-    // An unknown cursor must not silently re-serve page one: the caller would
     // page over data it already received (or over a changed list) believing it
     // continued. The retained validation style is a 400 `invalid_input`.
     if (position < 0) {
@@ -95,7 +93,6 @@ export function getActiveWorkspace(service: ServiceCore): Promise<ActiveWorkspac
 }
 
 /**
- * Serializes every owner-lifecycle mutation per service: select+promote and
  * the provider save → engine-restart sequence. Two concurrent finish requests
  * must not both observe an uninitialized shell and publish two cores, and a
  * provider save must never interleave with a selection that rebuilds the same
@@ -129,7 +126,6 @@ export function setActiveWorkspace(
     const response = await service.core.selectWorkspace(request);
     service.creatorId = response.creator_id;
     service.workspaceSlug = response.workspace_slug;
-    // A status-only shell publishes the full core in process once a workspace
     // is selected, so the first-run flow completes without a restart. Readiness
     // is claimed only after promotion (and, for a provider profile, the
     // execution owner) succeeded.
@@ -141,14 +137,12 @@ export function setActiveWorkspace(
 /**
  * Promote the status-only shell and publish the runtime readiness facts.
  *
- * The flag is written last: a failed promotion keeps `workspace_initialized`
  * false (the request fails and may be retried); the native side is idempotent
  * once the core is published, so a retry only re-attempts the missing step.
  */
 async function promoteShell(service: ServiceCore): Promise<void> {
   await service.core.promoteCore();
   if (service.domainOnly) {
-    // The domain-only profile owns no execution engine (openServiceCore's
     // same post-open facts).
     service.providerReady = true;
     service.engineEpoch = 0;

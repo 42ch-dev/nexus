@@ -3,7 +3,6 @@ import { type HTMLAttributes, type Ref } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * Card — DESIGN.md §Component Primitives/Card.
  *
  * Rest surface: background-100 fill, gray-alpha-400 border, radius-card,
  * space-6 padding, shadow-card (alias → elevation-1).
@@ -46,8 +45,6 @@ CardHeader.displayName = 'CardHeader';
 
 export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
   /**
-   * Typography voice — DESIGN.md `components.card.title.voice` (V1.121 v0.4,
-   * additive opt-in per P0 spec T8).
    *
    * - `'interface'` (default): sans `text-heading-16 font-heading` treatment —
    *   unchanged; used on all interface cards (settings, dialogs, dashboards).
@@ -65,7 +62,6 @@ function CardTitle({ className, voice = 'interface', ref, ...props }: CardTitleP
     <h3
       ref={ref}
       className={cn(
-        // Content voice intentionally omits `leading-tight`: display-20 supplies line-height.
         voice === 'content'
           ? 'text-display-20 font-heading tracking-tight'
           : 'text-heading-16 font-heading leading-tight tracking-tight',

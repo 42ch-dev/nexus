@@ -23,15 +23,12 @@
  */
 import { BookMarked, Flag, Hourglass, Milestone } from 'lucide-react';
 
-// ─── World Timeline — Brief-era ─────────────────────────────────────────────
-
 export interface TimelineBriefEraChromeProps {
   /** Canonical era name (already resolved; wrapper applies unnamed fallback). */
   title: string;
   /** Block-type pill label (e.g. "Era") — plain string, no contracts. */
   blockTypeLabel: string;
   /**
-   * Resolved time-span text (`start → end`, start-only, or end-only).
    * `null` → render the temporal-unknown pill with `temporalUnknownLabel`.
    */
   timeSpan: string | null;
@@ -42,7 +39,6 @@ export interface TimelineBriefEraChromeProps {
   /** Optional world-summary line (clamped). */
   worldSummary?: string;
   /**
-   * Resolved source-anchor count label (e.g. "3 source anchors").
    * Version suffix is appended by this chrome as ` · v{version}`.
    */
   sourceAnchorLabel: string;
@@ -112,8 +108,6 @@ export function TimelineBriefEraChrome({
   );
 }
 
-// ─── World Timeline — Event ─────────────────────────────────────────────────
-
 export interface TimelineEventChromeProps {
   title: string;
   blockTypeLabel: string;
@@ -168,8 +162,6 @@ export function TimelineEventChrome({
   );
 }
 
-// ─── World Timeline — KeyBlock Context cluster ──────────────────────────────
-
 export interface TimelineKeyBlockChromeProps {
   title: string;
   blockTypeLabel: string;
@@ -209,13 +201,10 @@ export function TimelineKeyBlockChrome({
   );
 }
 
-// ─── Work Timeline — Narrative event ────────────────────────────────────────
-
 export interface WorkTimelineNarrativeEventChromeProps {
   title: string;
   eventId: string;
   /**
-   * Resolved chapter-anchor badge text (e.g. "Ch. 3"), or null →
    * `noChapterLabel` pill.
    */
   chapterAnchor: string | null;
@@ -277,8 +266,6 @@ export function WorkTimelineNarrativeEventChrome({
   );
 }
 
-// ─── Work Timeline — Moment scene ───────────────────────────────────────────
-
 export interface WorkTimelineMomentSceneChromeProps {
   title: string;
   sceneId: string;
@@ -330,8 +317,6 @@ export function WorkTimelineMomentSceneChrome({
     </>
   );
 }
-
-// ─── Work Timeline — Moment beat ────────────────────────────────────────────
 
 export interface WorkTimelineMomentBeatChromeProps {
   title: string;

@@ -310,7 +310,6 @@ impl ConflictResolver {
     /// Determine the resolution strategy for a conflict response.
     #[must_use]
     pub fn resolve(conflict: &ConflictResponse) -> ConflictResolution {
-        // Use per-conflict hints if all agree
         let hints: Vec<&ConflictResolution> = conflict
             .conflicts
             .iter()
@@ -321,7 +320,6 @@ impl ConflictResolver {
             return conflict.suggested_resolution();
         }
 
-        // If all hints agree, use that; otherwise, manual review
         let first = hints[0];
         if hints.iter().all(|h| *h == first) {
             first.clone()
@@ -563,8 +561,6 @@ mod tests {
         let recovered: ConflictDetail = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(detail, recovered);
     }
-
-    // ── retry_after tests (SYNC-R11) ────────────────────────────
 
     #[test]
     fn conflict_response_parse_retry_after() {

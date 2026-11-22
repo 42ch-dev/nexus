@@ -224,7 +224,6 @@ pub struct KnowledgeEntryRecord {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
-    // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance (entity-scope-model.md §5.5.7)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_work_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -365,7 +364,6 @@ impl KnowledgeEntryRecord {
         self.owner.world_id()
     }
 
-    // NOTE (V1.145 P1a): the lifecycle methods that delegate status transitions
     // to spoke-operations (`confirm` / `deprecate` / `merge_into` / `delete`)
     // moved to `nexus_spoke_adapter::conversion::KnowledgeEntryRecordSpokeExt`. They
     // could not stay here because they call spoke-operations through the
@@ -397,7 +395,6 @@ impl KnowledgeEntryRecord {
         visible_manifests: &[&str],
     ) -> Result<(), KbError> {
         if let Some(ref anchor) = self.source_anchor {
-            // Check refs point to visible manifests in same world
             anchor.validate_refs(world_id, visible_manifests)?;
         }
         Ok(())
@@ -470,7 +467,6 @@ impl KnowledgeEntryRecord {
 
 // ── Native holder governance (v1.191 P1 T2, durable §§1/3) ────────────────
 //
-// The closed author-facing audience, its omission semantics, the native
 // validation of the two governance columns, and the raw-input gate that keeps
 // legacy/reserved keys from being silently dropped by deserialization.
 // Admission (`nexus-core`) resolves *which* holder a private audience names;
@@ -773,7 +769,6 @@ pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), Res
 
 // ── Mental-layer dialect raw types (V1.164 P2 T1, l5-mind) ────────────────
 //
-// Typed serde raw intermediates for the spoke `modules.mental` (nine-field)
 // and `modules.belief` (proposition array) dialects, following the
 // `ActivationConfigRaw` precedent (`nexus-spoke-adapter/src/adapter/
 // activation.rs`): serde types over the handbook shape where the
@@ -973,8 +968,6 @@ pub fn validate_character_tom_belief_row(
     let order = row.order.ok_or_else(|| {
         KbError::ValidationError("Character ToM belief row requires order".into())
     })?;
-    // Closed order space: every value outside 1..=2 (including negatives)
-    // rejects deterministically — no unreachable arm, no panic path.
     if !(1..=2).contains(&order) {
         return Err(KbError::ValidationError(format!(
             "Character ToM belief order must be 1 (L1) or 2 (L2), got {order}"
@@ -992,7 +985,6 @@ pub fn validate_character_tom_belief_row(
             )));
         }
     } else {
-        // order == 2 (guard above closed the space to 1..=2).
         if !is_character_subject_id(holder) {
             return Err(KbError::ValidationError(format!(
                 "L2 belief holder must be a Character id (chr_*), got {holder}"
@@ -1092,14 +1084,12 @@ pub fn validate_belief_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> 
             ));
             continue;
         };
-        // Typed failures are member-addressed: probe each present member
         // alone through the handbook raw type, so member names and their
         // serde reasons come from `BeliefPropositionRaw` itself. An unknown
         // key is ignored by serde (PD-13) and never fails this probe; only a
         // mistyped handbook member does.
         let mut mistyped = false;
         for (member, member_value) in members {
-            // Borrowed singleton probe: serde reads the one member through its
             // generic map deserializer, so no per-member object is built and an
             // unknown key stays ignored (PD-13).
             let probe = MapDeserializer::new(std::iter::once((member.as_str(), member_value)));
@@ -1231,7 +1221,6 @@ mod tests {
         assert_eq!(kb.world_id(), Some("wld_test123"));
         assert!(kb.entry_id.starts_with("kb_"));
     }
-    // ── v1.184 P1 T2: closed owner ref + constructors ─────────────────
 
     #[test]
     fn test_world_convenience_constructor_sets_world_owner() {
@@ -1266,7 +1255,6 @@ mod tests {
 
     #[test]
     fn test_owner_kind_matches_db_vocabulary() {
-        // The `kind()` strings are the `owner_kind` CHECK vocabulary verbatim.
         assert_eq!(KnowledgeOwnerRef::world("w").kind(), "world");
         assert_eq!(KnowledgeOwnerRef::character("c").kind(), "character");
         assert_eq!(
@@ -1333,8 +1321,6 @@ mod tests {
             .is_err());
     }
 
-    // ── State roundtrip (V1.61 P1) ─────────────────────────────────
-
     #[test]
     fn test_state_roundtrip_serialize_deserialize_preserves_state() {
         let body = KnowledgeEntryBody {
@@ -1368,7 +1354,6 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_without_state_and_computable() {
-        // Legacy KnowledgeEntryRecord without state/computable should roundtrip correctly
         let body = KnowledgeEntryBody {
             summary: Some("Old block".to_string()),
             attributes: None,
@@ -1406,8 +1391,6 @@ mod tests {
             .unwrap()
             .contains_key("character"));
     }
-
-    // ── Mental-layer dialect (V1.164 P2 T1, l5-mind) ─────────────────
 
     /// Fixture entry carrying the handbook `modules.mental` subset +
     /// `modules.belief` rows (worked-example box/basket story).
@@ -1519,7 +1502,6 @@ mod tests {
 
     #[test]
     fn test_paper_alias_row_is_not_produced_and_does_not_round_trip() {
-        // AC-V1164-7 / TL-5: a row using the OmniToM paper aliases
         // `actor` / `knowledge_access` / `mental_source` is not produced by
         // the parse type and does not round-trip as-is.
         let alias_row = serde_json::json!({
@@ -1531,11 +1513,9 @@ mod tests {
         });
         let parsed: BeliefPropositionRaw =
             serde_json::from_value(alias_row.clone()).expect("raw type ignores unknown keys");
-        // Handbook fields are not populated from paper aliases.
         assert_eq!(parsed.holder, None);
         assert_eq!(parsed.access, None);
         assert_eq!(parsed.source, None);
-        // Re-emission never contains the aliases and differs from the input
         // (the typed form is handbook-names only).
         let emitted = serde_json::to_value(&parsed).unwrap();
         assert_ne!(emitted, alias_row);
@@ -1555,8 +1535,6 @@ mod tests {
         let late = stored_created_at_order_millis("2026-01-01T10:00:00.123300Z").unwrap();
         assert_eq!(early, late);
     }
-
-    // ── v1.184 P4 T1: legacy pin + Character ToM belief admission ─────
 
     #[test]
     fn legacy_mental_belief_modules_fixture_round_trips_unchanged() {
@@ -1617,9 +1595,7 @@ mod tests {
             source: Some("Perception".into()),
             context: Some("Neutral".into()),
         };
-        // Missing order rejects.
         assert!(validate_character_tom_belief_row(&base, viewer).is_err());
-        // Negative, zero, and above-2 orders reject deterministically (C1:
         // no unreachable!/panic path — every value outside 1..=2 errors).
         for bad in [-2, -1, 0, 3, 4, i64::MIN, i64::MAX] {
             let row = BeliefPropositionRaw {
@@ -1634,8 +1610,6 @@ mod tests {
             );
         }
     }
-
-    // ── V1.203 P2: authored module-dialect seam ───────────────────────
 
     #[test]
     fn validate_mental_module_accepts_objects_and_rejects_non_object() {
@@ -1660,7 +1634,6 @@ mod tests {
 
     #[test]
     fn validate_belief_module_pins_field_mapped_prefix() {
-        // A bad closed label carries the row index and the member name; a
         // legal row ahead of it reports nothing.
         assert_eq!(
             validate_belief_module(&serde_json::json!([
@@ -1672,17 +1645,14 @@ mod tests {
                     .to_string()
             ]
         );
-        // A non-object element is row-addressed without a member.
         assert_eq!(
             validate_belief_module(&serde_json::json!(["row"])),
             vec!["modules.belief.0: must be a belief proposition object".to_string()]
         );
-        // A non-array value is dialect-addressed.
         assert_eq!(
             validate_belief_module(&serde_json::json!({"holder": "kb_ana"})),
             vec!["modules.belief: must be an array".to_string()]
         );
-        // Every closed label across the handbook table is accepted.
         assert_eq!(
             validate_belief_module(&serde_json::json!([{
                 "holder": "world",
@@ -1718,9 +1688,6 @@ mod tests {
 
     #[test]
     fn validate_belief_module_reports_mistyped_members_by_name() {
-        // A known string member with a non-string value is member-addressed
-        // (`modules.belief.<index>.<member>`), carrying the raw type's serde
-        // reason — not the row-level fallback.
         assert_eq!(
             validate_belief_module(&serde_json::json!([
                 {"holder": "kb_ana", "order": 1, "truth": 17},
@@ -1729,15 +1696,12 @@ mod tests {
                 "modules.belief.0.truth: invalid type: integer `17`, expected a string".to_string()
             ]
         );
-        // `order` is the raw type's integer member; a string loses its prefix
-        // without this correction.
         assert_eq!(
             validate_belief_module(&serde_json::json!([{"order": "first"}])),
             vec![
                 "modules.belief.0.order: invalid type: string \"first\", expected i64".to_string()
             ]
         );
-        // A genuinely non-object row keeps the row-level fallback.
         assert_eq!(
             validate_belief_module(&serde_json::json!([42])),
             vec!["modules.belief.0: must be a belief proposition object".to_string()]
@@ -1746,7 +1710,6 @@ mod tests {
 
     #[test]
     fn validate_observation_module_shape_rules() {
-        // Explicit empty observers is the PD-9 claim: accepted, as is an
         // absent key and an unknown inner key.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"observers": []})),
@@ -1764,12 +1727,10 @@ mod tests {
             })),
             [] as [std::string::String; 0]
         );
-        // Non-object access is rejected with the member-qualified prefix.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"access": ["kb_ana"]})),
             vec!["modules.observation.access: must be a JSON object".to_string()]
         );
-        // Non-array observers and empty entries.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"observers": "kb_ana"})),
             vec!["modules.observation.observers: must be an array".to_string()]
@@ -1778,17 +1739,12 @@ mod tests {
             validate_observation_module(&serde_json::json!({"observers": ["kb_ana", " "]})),
             vec!["modules.observation.observers: entry 1 must be a non-empty string".to_string()]
         );
-        // A non-object observation value is dialect-addressed.
         assert_eq!(
             validate_observation_module(&serde_json::json!([1, 2])),
             vec!["modules.observation: must be an object".to_string()]
         );
     }
 
-    // Minimum ratio by which the removed singleton copy must out-allocate the
-    // real belief-member probe. Measured 6 vs 3212 allocations on this fixture
-    // (~535x); 8x leaves room for payload/allocator drift while still failing
-    // if the copy lands on the measured path.
     const COPY_MARGIN: u64 = 8;
 
     /// p4 t3 fix wave 1 — allocation regression check for the belief-member probe.
@@ -1803,7 +1759,6 @@ mod tests {
     #[test]
     fn belief_member_probe_does_not_materialise_a_singleton_object() {
         const MEMBER: &str = "unknown_belief_member";
-        // Fixture prepared outside the measured region: 64 unknown keys x 16
         // unknown leaf objects, each leaf its own allocation.
         let payload = {
             let mut member_payload = serde_json::Map::new();
@@ -1827,10 +1782,8 @@ mod tests {
         row.insert(MEMBER.to_string(), payload.clone());
         let module = serde_json::Value::Array(vec![serde_json::Value::Object(row)]);
 
-        // Warm the thread-local counter outside the measured regions.
         let _ = allocation_counter::measure(|| {});
 
-        // The removed shape: one owned singleton object per member, holding a
         // deep copy of the member value.
         let singleton_copy = allocation_counter::measure(|| {
             let singleton = serde_json::Value::Object(
@@ -1842,7 +1795,6 @@ mod tests {
             black_box(validate_belief_module(black_box(&module)));
         });
 
-        // The real probe is compared against the removed singleton-copy shape
         // instead of against absolute counts, so allocator/profile drift that
         // moves both readings together does not flake while a copy
         // re-appearing on the measured path still fails.

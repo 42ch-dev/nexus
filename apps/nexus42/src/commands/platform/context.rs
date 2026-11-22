@@ -145,16 +145,13 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             )
             .await?;
 
-            // None means --emit-packet already wrote JSON to stdout;
             // skip normal context output.
             let Some(ctx) = maybe_ctx else {
                 return Ok(());
             };
 
-            // Print full context to stdout
             println!("{}", ctx.to_full_context());
 
-            // Print summary to stderr
             eprintln!("\n--- Moment Assembly (local persistent) ---");
             eprintln!("Stage-0: present");
             eprintln!(
@@ -199,13 +196,11 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
 pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
     let mode = config.runtime_mode();
 
-    // If snapshot exists with non-Normal state, restore directly without
     // replaying failures (avoids unintended re-degradation — C-001).
     if let Some(snap) = config.degradation_snapshot() {
         if snap.state != crate::domain::degradation::DegradationState::Normal {
             return DegradationGuard::restore_from_snapshot(snap, mode);
         }
-        // Normal state with failures: replay to restore failure_count only
         let mut guard = DegradationGuard::with_defaults(mode);
         for _ in 0..snap.failure_count {
             guard.record_platform_result(false, None);
@@ -248,7 +243,6 @@ async fn assemble_local_with_routing(
     let mut guard = create_degradation_guard(config);
     let context = assemble_context(config, &mut guard, hint, max_tokens, include_fragments).await?;
 
-    // Display degradation state if degraded
     if guard.degradation_state().is_degraded() {
         eprintln!(
             "⚠ Degradation: {} (failures: {})",
@@ -259,7 +253,6 @@ async fn assemble_local_with_routing(
 
     println!("{context}");
 
-    // Persist degradation state
     save_degradation_guard(&guard)?;
 
     Ok(())
@@ -289,7 +282,6 @@ pub async fn assemble_context(
 
     match mode.inner() {
         RuntimeMode::LocalOnly => {
-            // Stage-0 only — no platform dependency
             let stage0 =
                 build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
             Ok(if max_tokens.is_some() {
@@ -299,7 +291,6 @@ pub async fn assemble_context(
             })
         }
         RuntimeMode::LocalFirst | RuntimeMode::CloudEnhanced => {
-            // Two-stage: try platform, fallback to Stage0
             let platform_result = try_platform_assemble(config, hint);
 
             if let Some(response) = platform_result {
@@ -309,7 +300,6 @@ pub async fn assemble_context(
                 let two_stage = build_two_stage_from_local(&stage0, response, mode);
                 Ok(two_stage.assemble())
             } else {
-                // Platform failed — record and fall back to Stage0
                 guard.record_platform_result(false, Some("assemble unavailable".to_string()));
                 let stage0 =
                     build_stage0_from_local(config, hint, max_tokens, include_fragments).await?;
@@ -336,7 +326,6 @@ async fn build_stage0_from_local(
         )
     })?;
 
-    // 1+2. The SOUL document and the long-term memories are the provider's own
     // surfaces (NXM-6): one read-only core serves both, so assembly keeps
     // working beside a running daemon and never opens a bearer file.
     let (personality, experience, long_term_memories) =
@@ -364,14 +353,12 @@ async fn build_stage0_from_local(
         })
         .await?;
 
-    // 3. Build fragment keywords (best-effort from daemon, optional)
     let fragment_keywords = if include_fragments {
         collect_fragment_keywords(config).await
     } else {
         Vec::new()
     };
 
-    // 4. Build Stage0Assembly
     Ok(Stage0Assembly {
         personality,
         experience,
@@ -418,7 +405,6 @@ fn stage0_memories(records: Vec<RetainedRecord>) -> Vec<RetainedRecord> {
 /// When the direct platform context API becomes available, this function
 /// should be updated to call it directly (not via daemon proxy).
 fn try_platform_assemble(_config: &CliConfig, _hint: Option<&str>) -> Option<AssembleResponse> {
-    // KCA-002 B2: Daemon proxy route retired.
     // Future: call platform context API directly when available.
     tracing::debug!(
         "Platform context API not yet wired for direct call; using in-process Stage0 assembly"
@@ -463,7 +449,6 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
         }
     };
 
-    // Gracefully handle 404 (endpoint may not be implemented yet)
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         tracing::debug!("Daemon does not implement /v1/daemon/memory/fragments, skipping");
         return Vec::new();
@@ -485,7 +470,6 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
         }
     };
 
-    // Extract keywords from fragment records
     let mut keywords = Vec::new();
     if let Some(fragments) = data.get("fragments").and_then(|v| v.as_array()) {
         for fragment in fragments {
@@ -501,8 +485,6 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
 
     keywords
 }
-
-// ── V1.26: Three-domain Moment assembly (persistent stores) ─────────
 
 /// Open a shared `SqlitePool` for persistent stores.
 async fn open_shared_pool(config: &CliConfig) -> Result<sqlx::SqlitePool> {
@@ -615,7 +597,6 @@ pub async fn run_assemble_moment(
     packet_out: Option<&str>,
     stage: Option<&str>,
 ) -> Result<Option<MomentContext>> {
-    // V1.149 P0 T2: activation is DEFAULT-ON. The env off-switch
     // (NEXUS_MCA_LORE_ACTIVATION=off|0|false, case-insensitive) restores
     // V1.146 flag-off semantics; any other value (incl. unset, empty, =1)
     // keeps activation on (spec §6).
@@ -630,7 +611,6 @@ pub async fn run_assemble_moment(
 
     let pool = open_shared_pool(config).await?;
     let narrative = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
-    // V1.145 P2 — the MCA WorldKB read now crosses the spoke-adapter boundary:
     // `SpokeBackedKbStore` routes `query` through `NexusAdapter`'s
     // scoped read (storage → spoke `KnowledgeEntry` → `KnowledgeEntryRecord` via the
     // `spoke_to_knowledge_record` conversion seam), matching `SqliteKbStore::query`
@@ -642,7 +622,6 @@ pub async fn run_assemble_moment(
     // invocation, shared by the KB store and the hop-edge read.
     let view_scope = creator_view_scope(&pool, config, world_id).await?;
     let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone(), view_scope.clone());
-    // V1.149 P1: preload the world's confirmed relation edges for relation-hop
     // expansion when activation is on (off-switch ⇒ no hop load; spec §6).
     // The edge source is the inherent `NexusAdapter::list_hop_edges_for_world`
     // — spoke `RelationPort` is get/put only, so the storage list primitive
@@ -663,7 +642,6 @@ pub async fn run_assemble_moment(
             .ok()
             .filter(|edges| !edges.is_empty())
     };
-    // Build Stage0Assembly — load from creator memory if available
     let stage0 = build_stage0_from_local(config, hint, max_tokens, include_fragments)
         .await
         .unwrap_or_else(|_| Stage0Assembly {
@@ -676,10 +654,8 @@ pub async fn run_assemble_moment(
             max_tokens,
         });
 
-    // Build MomentRequest with KB query + budget fields
     let mut request = MomentRequest::new(stage0).with_world(wid);
 
-    // V1.150 P1 (DF-75): Moment Directive scope resolution is keyed on the
     // creator + work of the moment (spec §3.2). The active creator is always
     // threaded through; the work is optional — a raw world assembly applies
     // the World override directly.
@@ -711,13 +687,11 @@ pub async fn run_assemble_moment(
             request = request.with_kb_block_type(bt);
         }
     }
-    // V1.149 P0 T2: `MomentRequest` defaults to activation ON; only the
     // off-switch needs an explicit call here.
     if activation_off {
         request = request.with_activation_enabled(false);
     }
 
-    // V1.150 P2 (DF-75, spec §4 / Q4 lock): generation-stage wire. The
     // preset runner / schedule path drives assembly through this CLI entry
     // and threads the stage it is executing via `--stage` (see
     // `guides/generation-trigger-wiring.md`). Unknown values degrade to
@@ -734,7 +708,6 @@ pub async fn run_assemble_moment(
         }
     }
 
-    // V1.149 P1: relation-hop expand — pass the preloaded edges and the
     // caller hop cap. `hop_max_tokens` is set to the full cross-domain
     // budget; MCA refines it to the spec Q1 remainder (personality never
     // truncated + world_state + timeline + primary-KB reservations) at the
@@ -746,7 +719,6 @@ pub async fn run_assemble_moment(
         }
     }
 
-    // Call assemble_moment with persistent stores. V1.150 P1: the Moment
     // Directive store (composition-root adapter over the same pool) is wired
     // here — an active directive renders into the reserved `moment.directive`
     // slot and its TTL / scene-change lifecycle runs. When no directive is
@@ -758,18 +730,14 @@ pub async fn run_assemble_moment(
     let directives = nexus_core::LocalDirectiveStore::new(pool);
     let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
 
-    // V1.146 P4 T3: emit diagnostic inspector packet when --emit-packet is set.
     if emit_packet {
         emit_inspector_packet(&ctx, packet_out)?;
         if packet_out.is_some() {
-            // JSON written to file; normal context output should follow.
             Ok(Some(ctx))
         } else {
-            // JSON written to stdout; suppress normal context output.
             Ok(None)
         }
     } else if inspect {
-        // V1.151 P0 T4: --inspect renders the same enriched packet (T1's
         // relocated builder) as a human-readable view. Observation only —
         // the assembled output is untouched (AC-I6). Mirrors the
         // --emit-packet stdout suppression: the view replaces the context.
@@ -822,7 +790,6 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
 
     let mut out = String::new();
 
-    // ── Activation trace ──────────────────────────────────────────────
     out.push_str("## Activation trace\n");
     let trace = packet["modules"]["activation_trace"].as_array();
     let slot_by_entry: HashMap<&str, &str> = packet["slot_map"]
@@ -842,7 +809,6 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
                     if let Some(slot) = slot_by_entry.get(id) {
                         writeln!(out, "      slot: {slot}").ok();
                     }
-                    // Hop depth / origin only when the packet carries them
                     // (not emitted today; forward-compatible, spec §2 H4).
                     if let Some(depth) = entry.get("hop_depth").and_then(serde_json::Value::as_u64)
                     {
@@ -863,7 +829,6 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
         _ => out.push_str("  (no activation trace entries)\n"),
     }
 
-    // ── Slot map ──────────────────────────────────────────────────────
     out.push_str("\n## Slot map\n");
     match packet["slot_map"].as_array() {
         Some(entries) if !entries.is_empty() => {
@@ -876,7 +841,6 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
         _ => out.push_str("  (empty)\n"),
     }
 
-    // ── Budget ────────────────────────────────────────────────────────
     out.push_str("\n## Budget\n");
     let budget = &packet["budget"];
     let est = |key: &str| budget[key].as_u64().unwrap_or(0);
@@ -896,7 +860,6 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
     writeln!(out, "  cap: {cap}").ok();
     writeln!(out, "  remaining: {remaining}").ok();
 
-    // ── Moment Directive ──────────────────────────────────────────────
     out.push_str("\n## Moment Directive\n");
     let directive = &packet["moment_directive"];
     let status = directive["status"].as_str().unwrap_or("none");
@@ -939,7 +902,6 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
 mod tests {
     use super::*;
 
-    // Import activation types for inspector packet tests.
     use nexus_moment_context_assembly::assemble_moment;
     use nexus_spoke_adapter::adapter::activation::ActivationTraceEntry;
 
@@ -947,7 +909,6 @@ mod tests {
     #[test]
     fn context_command_no_assemble_local() {
         let source = include_str!("context.rs");
-        // Strip test module to avoid false positives
         let non_test = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             !non_test.contains("AssembleLocal"),
@@ -1004,14 +965,12 @@ mod tests {
         use nexus_local_db::kb_store::seed as kb_seed;
         use nexus_local_db::narrative_gateway::seed as narrative_seed;
 
-        // Create fresh SQLite DB
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
         nexus_local_db::seed_versions(&pool).await.unwrap();
 
-        // Seed world + event (narrative_seed::world also seeds the creator for FK)
         narrative_seed::world(
             &pool,
             "wld_test",
@@ -1032,7 +991,6 @@ mod tests {
         )
         .await;
 
-        // Seed KB block (no need to call kb_seed::world — world already seeded above)
         kb_seed::knowledge_entry(
             &pool,
             "kb_hero",
@@ -1043,12 +1001,10 @@ mod tests {
         )
         .await;
 
-        // Build persistent stores from the pool
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
 
-        // Build request
         let stage0 = Stage0Assembly {
             personality: "Test personality.".to_string(),
             experience: "Test experience.".to_string(),
@@ -1060,10 +1016,8 @@ mod tests {
         };
         let request = MomentRequest::new(stage0).with_world("wld_test");
 
-        // Run assembly
         let ctx = assemble_moment(&request, &narrative, &kb).await;
 
-        // Verify world state from persistent store
         assert!(
             ctx.world_state.is_some(),
             "world_state should be present from persistent store"
@@ -1073,13 +1027,11 @@ mod tests {
             "world state should contain seeded title"
         );
 
-        // Verify timeline from persistent store
         assert!(
             ctx.timeline.is_some(),
             "timeline should be present from persistent store"
         );
 
-        // Verify KB from persistent store
         assert!(
             ctx.world_kb.is_some(),
             "world_kb should be present from persistent store"
@@ -1089,7 +1041,6 @@ mod tests {
             "KB should contain seeded key block name"
         );
 
-        // Verify full context assembles correctly
         let full = ctx.to_full_context();
         assert!(full.contains("## World State"));
         assert!(full.contains("## Timeline"));
@@ -1143,14 +1094,12 @@ mod tests {
     /// (world state, timeline, world KB).
     #[tokio::test]
     async fn assemble_moment_persistent_three_domains() {
-        // Create fresh SQLite DB
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
         nexus_local_db::seed_versions(&pool).await.unwrap();
 
-        // Seed demo data: world + event + KB block (same as demo seed)
         nexus_local_db::narrative_gateway::seed::world(
             &pool,
             "wld_demo",
@@ -1180,12 +1129,10 @@ mod tests {
         )
         .await;
 
-        // Build persistent stores from the pool
         let narrative =
             nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool.clone());
         let kb = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
 
-        // Build request
         let stage0 = Stage0Assembly {
             personality: "Test personality.".to_string(),
             experience: "Test experience.".to_string(),
@@ -1197,10 +1144,8 @@ mod tests {
         };
         let request = MomentRequest::new(stage0).with_world("wld_demo");
 
-        // Run assembly
         let ctx = assemble_moment(&request, &narrative, &kb).await;
 
-        // Verify ALL three domains are present
         assert!(
             ctx.world_state.is_some(),
             "world_state should be present from persistent store"
@@ -1224,14 +1169,11 @@ mod tests {
             "KB should contain demo key block name"
         );
 
-        // Verify full context
         let full = ctx.to_full_context();
         assert!(full.contains("## World State"));
         assert!(full.contains("## Timeline"));
         assert!(full.contains("## World Knowledge Base"));
     }
-
-    // ── T6.7 / T6.8: Mode-aware routing tests ────────────────────────────
 
     /// Helper: create a minimal `Stage0Assembly` for routing tests.
     fn make_test_stage0() -> Stage0Assembly {
@@ -1274,17 +1216,14 @@ mod tests {
         let guard = DegradationGuard::with_defaults(mode);
         let stage0 = make_test_stage0();
 
-        // Build the output using Stage0 directly (simulating what assemble_context does)
         let output = stage0.assemble();
 
-        // Verify Stage0 ordering (no platform sections)
         assert!(output.contains("## Personality"));
         assert!(output.contains("Creative and bold."));
         assert!(output.contains("## Experience"));
         assert!(output.contains("10 years of writing."));
         assert!(output.contains("Write chapter 3."));
 
-        // No platform-specific sections should appear
         assert!(
             !output.contains("### Platform Memory Items"),
             "Stage0 output should not contain platform memory section"
@@ -1294,7 +1233,6 @@ mod tests {
             "Stage0 output should not contain timeline section"
         );
 
-        // Guard should remain in Normal state (no platform call attempted)
         assert_eq!(
             guard.degradation_state(),
             crate::domain::degradation::DegradationState::Normal
@@ -1310,18 +1248,15 @@ mod tests {
         let stage0 = make_test_stage0();
         let platform_response = make_platform_response();
 
-        // Simulate successful platform call → TwoStageAssembly
         guard.record_platform_result(true, None);
         let two_stage = build_two_stage_from_local(&stage0, platform_response, mode);
         let output = two_stage.assemble();
 
-        // Verify TwoStage output includes both local and platform data
         assert!(output.contains("## Personality"));
         assert!(output.contains("Creative and bold."));
         assert!(output.contains("### Fragment keywords"));
         assert!(output.contains("plot"));
 
-        // Platform-specific sections should appear
         assert!(
             output.contains("### Platform Memory Items"),
             "TwoStage output should contain platform memory section"
@@ -1335,7 +1270,6 @@ mod tests {
             "TwoStage output should contain timeline section"
         );
 
-        // Guard should be in Normal state (platform succeeded)
         assert_eq!(
             guard.degradation_state(),
             crate::domain::degradation::DegradationState::Normal
@@ -1350,24 +1284,19 @@ mod tests {
         let mut guard = DegradationGuard::with_defaults(mode);
         let stage0 = make_test_stage0();
 
-        // Simulate platform failure → record and fall back to Stage0
         guard.record_platform_result(false, Some("assemble unavailable".to_string()));
         let output = stage0.assemble();
 
-        // Verify Stage0 output (fallback)
         assert!(output.contains("## Personality"));
         assert!(output.contains("Creative and bold."));
         assert!(output.contains("## Experience"));
 
-        // No platform-specific sections in fallback
         assert!(
             !output.contains("### Platform Memory Items"),
             "Fallback output should not contain platform memory section"
         );
 
-        // Guard should record the failure
         assert_eq!(guard.failure_count(), 1);
-        // Not yet at threshold (default is 3), so still Normal
         assert_eq!(
             guard.degradation_state(),
             crate::domain::degradation::DegradationState::Normal
@@ -1381,19 +1310,16 @@ mod tests {
         let policy = DegradationPolicy::new(5000, 3, 60, 300, 2);
         let mut guard = DegradationGuard::new(policy, mode);
 
-        // Record failures up to threshold
         for i in 0..3 {
             guard.record_platform_result(false, Some(format!("failure {i}")));
         }
 
-        // Should have degraded to level 1
         assert_eq!(
             guard.degradation_state(),
             crate::domain::degradation::DegradationState::DegradedLevel1
         );
-        assert_eq!(guard.failure_count(), 0); // reset after degradation
+        assert_eq!(guard.failure_count(), 0);
 
-        // Current mode should be downgraded
         assert_eq!(
             *guard.current_mode(),
             DomainRuntimeMode::new(RuntimeMode::LocalFirst)
@@ -1406,7 +1332,6 @@ mod tests {
         let mode = DomainRuntimeMode::new(RuntimeMode::LocalFirst);
         let mut guard = DegradationGuard::with_defaults(mode);
 
-        // Simulate platform failure
         guard.record_platform_result(false, Some("connection refused".to_string()));
 
         assert_eq!(guard.failure_count(), 1);
@@ -1441,7 +1366,6 @@ mod tests {
     fn create_guard_restores_from_snapshot() {
         use crate::domain::degradation::DegradationState;
 
-        // Non-Normal state: should restore directly without replaying failures
         let mut config = CliConfig::default();
         config.runtime_mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
         config.degradation_snapshot = Some(crate::domain::DegradationSnapshot {
@@ -1453,16 +1377,13 @@ mod tests {
 
         let guard = create_degradation_guard(&config);
 
-        // State should be restored directly
         assert_eq!(guard.degradation_state(), DegradationState::DegradedLevel1);
         assert_eq!(guard.failure_count(), 2);
-        // Mode should be downgraded one level from CloudEnhanced
         assert_eq!(
             *guard.current_mode(),
             DomainRuntimeMode::new(RuntimeMode::LocalFirst)
         );
 
-        // Normal state with failures: should replay to restore failure_count
         let mut config2 = CliConfig::default();
         config2.runtime_mode = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
         config2.degradation_snapshot = Some(crate::domain::DegradationSnapshot {
@@ -1477,8 +1398,6 @@ mod tests {
         assert_eq!(guard2.failure_count(), 1);
     }
 
-    // ── R2: Workspace slug resolution in try_platform_assemble ─────────
-
     #[test]
     fn workspace_slug_for_creator_returns_configured_slug() {
         use crate::config::DEFAULT_WORKSPACE_SLUG;
@@ -1492,7 +1411,6 @@ mod tests {
         let slug = config.workspace_slug_for_creator("ctr_alice");
         assert_eq!(slug, "wrk_novel");
 
-        // Unknown creator falls back to default
         let slug = config.workspace_slug_for_creator("ctr_unknown");
         assert_eq!(slug, DEFAULT_WORKSPACE_SLUG);
     }
@@ -1505,8 +1423,6 @@ mod tests {
         let slug = config.workspace_slug_for_creator("ctr_anyone");
         assert_eq!(slug, DEFAULT_WORKSPACE_SLUG);
     }
-
-    // ── V1.150 P1: inspector packet never carries the Moment Directive (AC-I3)
 
     /// AC-I3 (V1.150 P1, extended V1.151 P0): the inspector packet
     /// (`modules.placement` + `modules.activation_trace` + the enriched
@@ -1550,7 +1466,6 @@ mod tests {
             moment_directive: Some("DIRECTIVE_SECRET_MARKER keep the prose terse".to_string()),
             moment_directive_depth: DirectiveDepth::Head,
             activation_trace: Some(trace),
-            // V1.151 P0: populate the enriched surface — the directive meta
             // carries status/metadata only (never the body).
             slot_map: Some(vec![nexus_moment_context_assembly::slots::SlotMapEntry {
                 entry_id: "kb_hero".to_string(),
@@ -1584,7 +1499,6 @@ mod tests {
         );
         assert!(json.contains("kb_hero"), "trace entries still present");
         assert!(json.contains("modules"), "packet shape preserved");
-        // Enriched product-local sections present (V1.151 P0, spec §2).
         assert!(
             json.contains("slot_map"),
             "enriched slot_map section present"
@@ -1594,7 +1508,6 @@ mod tests {
             json.contains("moment_directive"),
             "enriched moment_directive section present"
         );
-        // The moment_directive section is metadata-only: scope metadata
         // present, no `body` key anywhere in the packet.
         assert!(
             json.contains("\"scope\":\"work\""),
@@ -1605,14 +1518,6 @@ mod tests {
             "AC-I3: no body key anywhere in the enriched packet"
         );
     }
-
-    // ── V1.145 P2: assemble_moment behavior equivalence (T4) ────────────
-    //
-    // Proves the MCA wiring switch from `SqliteKbStore` to
-    // `SpokeBackedKbStore` produces byte-identical `assemble_moment` output:
-    // the `world_kb` section (the only KB-dependent slice) is rendered from
-    // `canonical_name` / `block_type` / `body.summary`, all of which round-trip
-    // losslessly through the spoke conversion seam.
 
     async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -1652,7 +1557,6 @@ mod tests {
         use nexus_knowledge::world_kb::KbStore;
         use nexus_moment_context_assembly::MomentContext;
 
-        // `KbStore` has async methods (not dyn-compatible), so use a generic
         // helper that runs `assemble_moment` against a concrete store type.
         #[allow(clippy::future_not_send)]
         async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
@@ -1671,7 +1575,6 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_mca_world(&pool).await;
 
-        // Seed entries whose bodies exercise summary + a block_type each.
         let seeder = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         for (idx, (bt, name)) in [
             (BlockType::Character, "Alice"),
@@ -1685,7 +1588,6 @@ mod tests {
             entry.entry_id = format!("kb_t4_{idx}");
             entry.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
-                // An integer attribute that the spoke typed body alone would
                 // round-trip as a float — the lossless carrier must recover it.
                 attributes: Some(serde_json::json!({"order": idx})),
                 ..Default::default()
@@ -1702,7 +1604,6 @@ mod tests {
 
         let sqlite_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         let ctx_sqlite = run(&pool, &sqlite_store).await;
-        // v1.191 P1 T9: the scoped store takes the request-bound selection; the
         // fixture seeds shared rows in one World, so the container-scoped
         // management selection admits them without a holder registry row.
         let spoke_store = nexus_spoke_adapter::SpokeBackedKbStore::new(
@@ -1716,19 +1617,15 @@ mod tests {
         );
         let ctx_spoke = run(&pool, &spoke_store).await;
 
-        // The KB-dependent slice must be byte-identical.
         assert_eq!(
             ctx_sqlite.world_kb, ctx_spoke.world_kb,
             "assemble_moment world_kb must be identical across SqliteKbStore and SpokeBackedKbStore"
         );
-        // Sanity: the section is non-empty and contains the seeded names.
         let kb_text = ctx_spoke.world_kb.as_deref().unwrap_or("");
         assert!(kb_text.contains("Alice"));
         assert!(kb_text.contains("Atlantis"));
         assert!(kb_text.contains("Anvil"));
     }
-
-    // ── V1.146 P4 T3: inspector packet emission ──────────────────────
 
     /// Build a `MomentContext` with a mock activation trace.
     fn mock_ctx_with_trace(trace: Vec<ActivationTraceEntry>) -> MomentContext {
@@ -1774,7 +1671,6 @@ mod tests {
         ];
         let ctx = mock_ctx_with_trace(trace);
 
-        // Write packet to temp file and inspect JSON.
         let dir = tempfile::tempdir().unwrap();
         let packet_path = dir.path().join("packet.json");
         let path_str = packet_path.to_str().unwrap();
@@ -1784,16 +1680,13 @@ mod tests {
         let raw = std::fs::read_to_string(&packet_path).unwrap();
         let packet: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
-        // Top-level key
         let modules = &packet["modules"];
         assert!(modules.is_object(), "packet.modules must be an object");
 
-        // placement
         let placement = &modules["placement"];
         assert!(placement.is_array(), "placement must be an array");
         assert_eq!(placement.as_array().unwrap().len(), 2, "2 accepted entries");
 
-        // First placed: Hero (accepted)
         assert_eq!(placement[0]["entry_id"], "kb_hero");
         assert_eq!(placement[0]["canonical_name"], "Hero");
         assert!(placement[0]["reason"]
@@ -1801,11 +1694,9 @@ mod tests {
             .unwrap()
             .contains("matched keys"));
 
-        // Second placed: Forest (neutral, accepted)
         assert_eq!(placement[1]["entry_id"], "kb_forest");
         assert_eq!(placement[1]["canonical_name"], "Forest");
 
-        // activation_trace
         let activation_trace = &modules["activation_trace"];
         assert!(
             activation_trace.is_array(),
@@ -1817,7 +1708,6 @@ mod tests {
             "all 3 entries traced"
         );
 
-        // Verify each trace entry has required fields
         for (i, entry) in activation_trace.as_array().unwrap().iter().enumerate() {
             assert!(entry["entry_id"].is_string(), "trace[{i}] missing entry_id");
             assert!(
@@ -1831,7 +1721,6 @@ mod tests {
             );
         }
 
-        // Unmatched entry (Castle) appears in trace with accepted=false
         // but does NOT appear in placement.
         assert_eq!(activation_trace[1]["entry_id"], "kb_castle");
         assert_eq!(activation_trace[1]["accepted"], false);
@@ -1897,8 +1786,6 @@ mod tests {
         );
     }
 
-    // ── NEXUS_MCA_LORE_ACTIVATION off-switch (P0 fix wave, QC F-002) ──
-
     #[test]
     fn lore_activation_off_switch_off_values() {
         for value in ["off", "0", "false", " OFF ", "FALSE", "Off"] {
@@ -1921,7 +1808,6 @@ mod tests {
 
     #[test]
     fn lore_activation_off_switch_env_wrapper() {
-        // Unset → on (spec §6 default); `off` → off; `1` → on. Kept in one
         // test so the env writes stay sequential — no other test in this
         // binary touches `NEXUS_MCA_LORE_ACTIVATION`.
         std::env::remove_var("NEXUS_MCA_LORE_ACTIVATION");
@@ -1935,8 +1821,6 @@ mod tests {
         assert!(!lore_activation_env_is_off(), "=1 must keep activation on");
         std::env::remove_var("NEXUS_MCA_LORE_ACTIVATION");
     }
-
-    // ── V1.151 P0 T4: assemble-moment --inspect + enriched --emit-packet ──
 
     /// Build a `MomentContext` carrying the full enriched surface (activation
     /// trace + `slot_map` + budget + directive meta) for the renderer /
@@ -1997,12 +1881,10 @@ mod tests {
         let packet = build_inspector_packet(&enriched_mock_ctx());
         let view = render_inspector_readable(&packet);
 
-        // Four section headers.
         assert!(view.contains("## Activation trace"));
         assert!(view.contains("## Slot map"));
         assert!(view.contains("## Budget"));
         assert!(view.contains("## Moment Directive"));
-        // Fired entry: canonical name + slot id; missed entry + reason.
         assert!(view.contains("Hero"), "fired canonical_name rendered");
         assert!(
             view.contains("world.before"),
@@ -2013,14 +1895,12 @@ mod tests {
             view.contains("matched key [king]"),
             "human-readable reason rendered"
         );
-        // Directive status/metadata only — never the body (AC-I3).
         assert!(view.contains("status: active"));
         assert!(view.contains("wrk_1"));
         assert!(
             !view.contains("DIRECTIVE_SECRET_MARKER"),
             "AC-I3: directive body never rendered"
         );
-        // Budget figures.
         assert!(view.contains("primary tokens est: 4"));
         assert!(view.contains("remaining: 94"));
     }
@@ -2066,7 +1946,6 @@ mod tests {
             packet["moment_directive"].is_object(),
             "enriched moment_directive top-level key present"
         );
-        // Enriched values round-trip through the emission path.
         assert_eq!(packet["slot_map"][0]["slot"], "world.before");
         assert_eq!(packet["budget"]["primary_tokens_est"], 4);
         assert_eq!(packet["moment_directive"]["status"], "active");

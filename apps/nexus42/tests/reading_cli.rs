@@ -62,7 +62,6 @@ async fn fresh_env() -> ReadingEnv {
     .await
     .expect("seed core opens on the isolated home");
     let principal = core.active_principal().await.expect("active principal");
-    // A Work binds to an owned World (V1.40+), so the World comes first.
     let world_id = core
         .create_world(
             &principal,
@@ -95,7 +94,6 @@ async fn fresh_env() -> ReadingEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // The selection above retains the writer admission in THIS process; a CLI
     // child must not be handed a home another writer still holds.
     release_retained_writer_guards(&db_path);
 
@@ -120,8 +118,6 @@ fn write_workspace_meta(home: &Path, creator_id: &str) {
     )
     .expect("write meta.json");
 }
-
-// ── Progress ───────────────────────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn progress_set_get_round_trip() {
@@ -213,7 +209,6 @@ async fn progress_clear_removes_row() {
     assert!(clear.status.success(), "clear failed: {}", stderr(&clear));
     assert!(stdout(&clear).contains("Cleared"), "{}", stdout(&clear));
 
-    // After the clear the core reports the default (0) progress.
     let get = env.cli(&[
         "creator",
         "reading",
@@ -341,9 +336,6 @@ async fn progress_get_unknown_work_surfaces_core_error() {
     );
 }
 
-// ── Annotations ────────────────────────────────────────────────────────────
-
-// The full add→list→patch→list→remove→list journey is one linear scenario;
 // splitting it would hide the cross-verb state transitions it pins.
 #[allow(clippy::too_many_lines)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

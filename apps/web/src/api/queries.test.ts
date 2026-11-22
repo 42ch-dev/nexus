@@ -1,5 +1,4 @@
 /**
- * Unit tests for {@link launchCommandMatches} — the Verify Agent probe matcher
  * (V1.108 FB-UI-008 PR-review fix).
  *
  * The matcher is a pure function; the hook wrapper is exercised through the
@@ -47,15 +46,12 @@ describe('launchCommandMatches', () => {
   });
 
   it('does NOT admit substring false positives', () => {
-    // `code` must not match `codex` even though one contains the other.
     expect(launchCommandMatches('code', 'codex')).toBe(false);
     expect(launchCommandMatches('codex', 'code')).toBe(false);
-    // Different binaries sharing a prefix must not match.
     expect(launchCommandMatches('my-agent-cli', 'my-agent')).toBe(false);
   });
 });
 
-// AD-P0-2c (V1.120 P2 / F3): defensive client filter behind `useSessions`.
 describe('filterVisibleSessions', () => {
   const session = (preset_id: string) => ({ preset_id });
 

@@ -355,7 +355,6 @@ impl UserCapability {
     #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
     #[cfg(feature = "wasm")]
     pub fn to_compute_input(&self, input: Value) -> Result<ComputeInput, CapabilityError> {
-        // The raw input object is the invocation passthrough — a non-object
         // input has no parameter surface to forward.
         let invocation: serde_json::Map<String, Value> =
             input.as_object().cloned().ok_or_else(|| {
@@ -450,7 +449,6 @@ impl Capability for UserCapability {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        // Engine-absent / no-WASM arm (AR-44): still discoverable, not
         // runnable — the ONLY path that returns the existing
         // WorkerUnavailable variant (no new CapabilityError; exhaustive
         // matches keep compiling).
@@ -487,12 +485,8 @@ impl UserCapability {
             return Err(CapabilityError::WorkerUnavailable);
         };
 
-        // AR-37 envelope mapping (T1) — fail-closed on malformed input.
         let compute_input = self.to_compute_input(input)?;
 
-        // Module resolution: read the capability's own manifest + wasm from
-        // its dir (self-contained per-AR-35), compile once through the shared
-        // hash-keyed cache (L211-224), then invoke. A module missing at
         // run()-time (dir edited after admission) is an InputInvalid.
         let manifest_path = self.dir.join("manifest.json");
         let manifest_json = std::fs::read_to_string(&manifest_path).map_err(|e| {
@@ -513,7 +507,6 @@ impl UserCapability {
             ))
         })?;
 
-        // F2 / AR-39 single hash path: every lazy load re-verifies the
         // on-disk module bytes before `get_or_compile`. Admission (gate 3)
         // guaranteed manifest `wasm_sha256` == descriptor `wasmSha256` == the
         // bytes' digest; this closes the TOCTOU gap where a capability dir is
@@ -550,7 +543,6 @@ impl UserCapability {
         let module = cached.module.clone();
         let mut manifest = cached.manifest.clone();
 
-        // F1/AR-38: apply the clamped descriptor sandbox overrides onto the
         // manifest before `compute` — the invocation sandbox is resolved as
         // `min(manifest_override, host_default)` in `WasmEngine::resolve_sandbox`
         // (compute.rs L71-82), so folding each present descriptor bound in
@@ -577,7 +569,6 @@ impl UserCapability {
             }
         }
 
-        // Invoke the sandboxed module and map the 4-part output envelope.
         let output = engine
             .compute(&module, &manifest, &compute_input)
             .map_err(|e| map_compute_error(&e))?;
@@ -834,7 +825,6 @@ mod tests {
         assert_eq!(sandbox.memory_mib, Some(32));
         assert_eq!(sandbox.wall_time_ms, Some(5_000));
 
-        // Round-trip serialization emits the same camelCase field names.
         let round = serde_json::to_value(&descriptor).expect("serializable");
         assert_eq!(round["inputSchema"], "{}");
         assert_eq!(round["outputSchema"], "{}");
@@ -898,12 +888,12 @@ mod tests {
     #[test]
     fn reject_names_not_dot_separated() {
         for name in [
-            "bad/name",  // path separator
-            "BadName",   // uppercase
-            "bad name",  // whitespace
-            "trailing.", // empty trailing segment
-            ".leading",  // empty leading segment
-            "a..b",      // empty middle segment
+            "bad/name",
+            "BadName",
+            "bad name",
+            "trailing.",
+            ".leading",
+            "a..b",
         ] {
             let json = format!(
                 r#"{{ "name": "{name}", "inputSchema": "{{}}", "outputSchema": "{{}}",
@@ -929,7 +919,6 @@ mod tests {
 
     #[test]
     fn accept_underscores_inside_segments() {
-        // Underscores INSIDE segments remain valid — only a `_`-leading FIRST
         // segment is rejected (`my_cap.pull` installs to `my_cap.pull/`, which
         // the scanner reads).
         for name in ["my_cap.pull", "normal.cap", "foo._bar", "a.b_c"] {
@@ -998,11 +987,11 @@ mod tests {
     #[test]
     fn rejects_malformed_wasm_sha256() {
         let bad = [
-            "ABC",                                                               // too short
-            "G0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", // invalid hex char
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeF",  // uppercase hex
-            "",                                                                  // empty
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",   // 63 chars
+            "ABC",
+            "G0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeF",
+            "",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde",
         ];
         for sha in bad {
             let json = format!(
@@ -1106,9 +1095,6 @@ mod tests {
         }
     }
 
-    // ── UserCapability impl (T2 / AR-34 / AR-44) ────────────────────────
-
-    /// Discovery returns the leaked `&'static str` catalog fields.
     #[test]
     fn user_capability_discovery_returns_declared_fields() {
         let descriptor = parse(&minimal_json()).expect("minimal descriptor must parse");
@@ -1134,9 +1120,6 @@ mod tests {
         );
     }
 
-    // ── AR-37 envelope mapping (P1 T1) ───────────────────────────────────
-
-    /// A capability with no dir/engine/cache (envelope-mapping tests only —
     /// mapping is stateless, T2's executor supplies the handles).
     #[cfg(feature = "wasm")]
     fn cap() -> UserCapability {
@@ -1165,7 +1148,6 @@ mod tests {
             .to_compute_input(input.clone())
             .expect("valid input maps");
 
-        // schema_version literal 1 (AR-37, narrative_compute.rs L249-250).
         assert_eq!(compute_input.schema_version.get(), 1);
         assert_eq!(
             compute_input
@@ -1176,7 +1158,6 @@ mod tests {
             Some("wld_w1"),
             "worldId maps to world_ref.world_id"
         );
-        // key_blocks items are opaque JSON objects, preserved in order.
         let expected_blocks = input["keyBlocks"]
             .as_array()
             .expect("keyBlocks is an array");
@@ -1184,7 +1165,6 @@ mod tests {
         for (got, want) in compute_input.key_blocks.iter().zip(expected_blocks) {
             assert_eq!(serde_json::Value::Object(got.clone()), *want);
         }
-        // invocation is the raw input object passthrough — verbatim.
         assert_eq!(
             serde_json::Value::Object(compute_input.invocation),
             input,
@@ -1301,7 +1281,6 @@ mod tests {
             "new_key_blocks": [],
             "battle_report": {"kind": "combat"}
         });
-        // The host deserializes module output into the typed struct; our
         // mapping then re-serializes it — the envelope must round-trip.
         let output: nexus_wasm_host::ComputeOutput = serde_json::from_value(output_json.clone())
             .expect("fixture must deserialize into ComputeOutput");
@@ -1313,9 +1292,6 @@ mod tests {
         );
     }
 
-    // ── Real executor (P1 T2 / AR-37 / AR-44) ────────────────────────────
-    //
-    // Integration tests stage a real capability dir (the AR-35 trio:
     // capability.json + manifest.json + <module-id>.wasm) from the EMBEDDED
     // basic-combat module + the canonical combat-input fixture — zero new
     // wasm fixtures (brief §Fixture). The expected 4-part output mirrors the
@@ -1382,12 +1358,10 @@ mod tests {
         input.remove("schema_version");
         input.remove("world_ref");
         input.remove("narrative_state");
-        // The fixture's world_id lives inside world_ref (wire-valid `wld_…`);
         // re-express it on the capability input surface so the AR-37 mapping
         // carries it into the compute envelope's world_ref (the module emits
         // it on the timeline event, which the wire validates as `^wld_…$`).
         input.insert("worldId".to_string(), raw["world_ref"]["world_id"].clone());
-        // The fixture's invocation carries `attacker_id` / `defender_id`
         // (snake_case) — the keys basic-combat's `select_combatants` reads
         // (manifest `schemas.invocation`). Lifted to the capability input
         // surface so the real selector branch is exercised (S-2: the previous
@@ -1424,10 +1398,8 @@ mod tests {
             .await
             .expect("run() executes the module");
 
-        // 1) battle_report carries the combat discriminator.
         assert_eq!(out["battle_report"]["kind"], "combat");
 
-        // 2) Combat math: delta `-`/`character.current_hp`/15 on `kb_def`
         //    (matches basic_combat.rs L79-86).
         let delta = out["state_delta"]
             .as_array()
@@ -1439,7 +1411,6 @@ mod tests {
         assert_eq!(delta["path"], "character.current_hp");
         assert_eq!(delta["value"], serde_json::json!(15));
 
-        // 3) timeline_events: one state_update event recording the outcome.
         let events = out["timeline_events"].as_array().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["event_type"], "state_update");
@@ -1455,10 +1426,8 @@ mod tests {
             serde_json::json!(["kb_atk", "kb_def"])
         );
 
-        // 4) new_key_blocks empty for basic combat.
         assert_eq!(out["new_key_blocks"], serde_json::json!([]));
 
-        // The full 4-part envelope is present verbatim.
         for key in [
             "state_delta",
             "timeline_events",
@@ -1478,7 +1447,6 @@ mod tests {
     async fn run_module_missing_after_admission_returns_input_invalid() {
         let tmp = tempfile::tempdir().unwrap();
         stage_capability_dir(tmp.path(), "combat.cap", None);
-        // Simulate a post-admission edit: remove the module pair.
         std::fs::remove_file(tmp.path().join("combat.cap/basic-combat.wasm")).unwrap();
         let engine = std::sync::Arc::new(nexus_wasm_host::WasmEngine::new().unwrap());
         let cache = std::sync::Arc::new(nexus_wasm_host::ModuleCache::new());
@@ -1559,7 +1527,6 @@ mod tests {
     async fn run_rejects_module_bytes_changed_after_admission() {
         let tmp = tempfile::tempdir().unwrap();
         stage_capability_dir(tmp.path(), "combat.cap", None);
-        // Post-admission edit: swap the wasm bytes (manifest + descriptor
         // still declare the ORIGINAL admitted hash — the admission-time
         // pairing no longer matches the on-disk pair).
         std::fs::write(
@@ -1630,7 +1597,6 @@ mod tests {
     #[test]
     fn clamp_resolves_exact_bytes_on_non_aligned_cap() {
         const MIB: usize = 1024 * 1024;
-        // A ceiling that is NOT MiB-aligned, built from the owner's other
         // defaults so only the memory cap is the variable under test.
         let defaults = nexus_compute_policy::SandboxConfig::default();
         let base = nexus_compute_policy::SandboxConfig {
@@ -1638,7 +1604,6 @@ mod tests {
             max_memory_bytes: 4 * MIB + 12_345,
             wall_time: defaults.wall_time,
         };
-        // An override ABOVE the cap must keep the cap's exact bytes.
         let resolved = resolve_sandbox_overrides(
             &SandboxOverrides {
                 fuel: None,
@@ -1648,7 +1613,6 @@ mod tests {
             base,
         );
         assert_eq!(resolved.max_memory_bytes, 4 * MIB + 12_345);
-        // ...and an override BELOW the cap must clamp in exact bytes too.
         let lowered = resolve_sandbox_overrides(
             &SandboxOverrides {
                 fuel: None,
@@ -1658,7 +1622,6 @@ mod tests {
             base,
         );
         assert_eq!(lowered.max_memory_bytes, 2 * MIB);
-        // The descriptor projection stays the floored MiB of that byte
         // result, never the byte-cap floor of an independent MiB min.
         let clamped = SandboxOverrides {
             fuel: None,
@@ -1674,7 +1637,6 @@ mod tests {
     /// absent stays absent.
     #[test]
     fn clamp_sandbox_matches_policy_resolve_projection() {
-        // At/above every maximum: clamps to the owner's default exactly.
         let clamped = clamp_sandbox(&SandboxOverrides {
             fuel: Some(99_000_000),
             memory_mib: Some(999),
@@ -1685,7 +1647,6 @@ mod tests {
             clamped.memory_mib,
             Some(nexus_compute_policy::DEFAULT_MEMORY_MIB)
         );
-        // The byte ceiling the projection must round-trip (QC1-01: bytes, not
         // a MiB-recomputed shadow).
         assert_eq!(
             nexus_compute_policy::SandboxConfig::default().max_memory_bytes,
@@ -1695,7 +1656,6 @@ mod tests {
             clamped.wall_time_ms,
             Some(u64::try_from(nexus_compute_policy::DEFAULT_WALL_TIME.as_millis()).unwrap())
         );
-        // Below every maximum: tightening overrides pass through untouched.
         let tighter = clamp_sandbox(&SandboxOverrides {
             fuel: Some(1_000),
             memory_mib: Some(2),
@@ -1709,7 +1669,6 @@ mod tests {
                 wall_time_ms: Some(5_000)
             }
         );
-        // Absent stays absent — admission never invents host defaults.
         assert_eq!(
             clamp_sandbox(&SandboxOverrides::default()),
             SandboxOverrides::default()

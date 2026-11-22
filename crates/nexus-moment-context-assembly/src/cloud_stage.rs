@@ -3,7 +3,7 @@
 //! Stage-1: Call platform `context/assemble` API.
 //! Stage-2: Merge platform response with local SOUL + memories + fragments.
 //!
-//! Spec: `creator-memory-soul-lifecycle.md` §9
+//! Spec: `docs/specs/creator/creator-memory-soul-lifecycle.md` §9
 
 use crate::recall::{memory_body, memory_display_id, memory_kind, memory_updated_at};
 use nexus_contracts::local::domain::RuntimeMode;

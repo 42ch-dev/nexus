@@ -1,5 +1,4 @@
 /**
- * Topnav — identity, not navigation (IA spec §3.1).
  *
  * Left: logo + Creator profile switcher. Right: search (disabled), language,
  * theme toggle, settings entry, agent chip. Identical on both entrances.

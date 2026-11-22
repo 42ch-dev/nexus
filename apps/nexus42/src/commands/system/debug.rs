@@ -51,7 +51,6 @@ fn strip_nulls(value: &serde_json::Value) -> serde_json::Value {
 fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
     let mut state = serde_json::Map::new();
 
-    // --- Config snapshot ---
     let config_snapshot = serde_json::json!({
         "workspace_path": config.workspace_path,
         "active_creator_id": config.active_creator_id,
@@ -61,7 +60,6 @@ fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
     });
     state.insert("config".to_string(), config_snapshot);
 
-    // --- Nexus home ---
     if let Ok(home) = crate::config::nexus_home() {
         state.insert(
             "nexus_home".to_string(),
@@ -69,7 +67,6 @@ fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
         );
     }
 
-    // --- Workspace root ---
     if let Some(root) = crate::config::find_workspace_root() {
         state.insert(
             "workspace_root".to_string(),
@@ -77,7 +74,6 @@ fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
         );
     }
 
-    // --- Database state (best-effort) ---
     match crate::config::resolve_state_db_path(config) {
         Ok(db_path) => {
             let mut db_state = serde_json::Map::new();
@@ -107,11 +103,9 @@ fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
         }
     }
 
-    // --- Output ---
     let output = match format {
         "toml" => {
             let json_val = serde_json::Value::Object(state);
-            // TOML does not support null values; strip them before serialization
             let cleaned = strip_nulls(&json_val);
             toml::to_string_pretty(&cleaned)
                 .map_err(|e| anyhow::anyhow!("Failed to serialize to TOML: {e}"))?

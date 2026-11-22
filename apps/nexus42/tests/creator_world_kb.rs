@@ -90,8 +90,6 @@ candidates:
     log_path
 }
 
-// ── Missing-only lists candidates from advisory log ──────────────────────────
-
 #[tokio::test]
 async fn missing_only_lists_advisory_candidates() {
     let (dir, pool) = fresh_pool_and_dir().await;
@@ -101,13 +99,10 @@ async fn missing_only_lists_advisory_candidates() {
         .await
         .unwrap();
 
-    // JSON variant.
     kb_pending(&pool, OWNER, WORLD, None, true, true, Some(dir.path()))
         .await
         .unwrap();
 }
-
-// ── Missing-only obeys world owner gate ──────────────────────────────────────
 
 #[tokio::test]
 async fn missing_only_cross_author_returns_403() {
@@ -129,8 +124,6 @@ async fn missing_only_cross_author_returns_403() {
     }
 }
 
-// ── Auto-promote adopts high-confidence candidates and skips others ──────────
-
 async fn seed_candidate(pool: &sqlx::SqlitePool, canonical_name: &str, confidence: f64) -> String {
     let payload = serde_json::json!({
         "summary": format!("Auto-promote test entry for {canonical_name}"),
@@ -139,7 +132,6 @@ async fn seed_candidate(pool: &sqlx::SqlitePool, canonical_name: &str, confidenc
     })
     .to_string();
     let quote = format!("...{canonical_name} stepped through the gate...");
-    // v1.191 P1 fix round (mechanical): the DAO seam takes a caller-owned
     // connection (`&mut SqliteConnection`) since the T13 writer-protocol change.
     let mut conn = pool.acquire().await.expect("acquire workspace connection");
     let row = insert_pending_with_llm(
@@ -171,7 +163,6 @@ async fn adopt_auto_promote() {
         .await
         .unwrap();
 
-    // One high-confidence candidate becomes a confirmed KnowledgeEntryRecord.
     let kb_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
         .bind(WORLD)
         .fetch_one(&pool)
@@ -179,7 +170,6 @@ async fn adopt_auto_promote() {
         .unwrap();
     assert_eq!(kb_count, 1);
 
-    // The promoted row is flipped and carries audit columns.
     let promoted: (String, Option<String>, Option<String>) = sqlx::query_as(
         "SELECT promotion_status, auto_promoted_at, auto_promoted_reason \
          FROM kb_extract_jobs WHERE job_id = ?",
@@ -200,7 +190,6 @@ async fn adopt_auto_promote() {
         promoted.2
     );
 
-    // The low-confidence candidate stays pending and untouched.
     let skipped: (String, Option<String>) = sqlx::query_as(
         "SELECT promotion_status, auto_promoted_at \
          FROM kb_extract_jobs WHERE job_id = ?",
@@ -212,7 +201,6 @@ async fn adopt_auto_promote() {
     assert_eq!(skipped.0, "pending");
     assert!(skipped.1.is_none(), "auto_promoted_at should be NULL");
 
-    // Audit log was written under the correct work_ref path.
     let log_dir = dir
         .path()
         .join("Works")
@@ -231,8 +219,6 @@ async fn adopt_auto_promote() {
     assert!(log_text.contains(&promoted_id));
     assert!(log_text.contains("Auto Promote Hero"));
 }
-
-// ── Auto-promote obeys the world owner gate ──────────────────────────────────
 
 #[tokio::test]
 async fn adopt_auto_promote_cross_author_returns_403() {

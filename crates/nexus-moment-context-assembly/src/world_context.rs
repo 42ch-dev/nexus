@@ -17,7 +17,6 @@
 //!
 //! Legacy V1.39 worldless Works (`world_id == None`) receive no block.
 
-// Spec terminology (canonical_name, novel_category, KnowledgeEntryRecord, etc.) triggers doc_markdown.
 #![allow(clippy::doc_markdown)]
 
 use nexus_contracts::BlockType;
@@ -306,19 +305,15 @@ pub fn build_chapter_kb_block(
         .unwrap_or(DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET);
     let max_chars = max_tokens.saturating_mul(CHARS_PER_TOKEN);
 
-    // Resolve characters
     let all_characters: Vec<WorldContextItem> = if params.world_refs.is_empty() {
         WorldKbQueryBuilder::of_block_type(admitted, BlockType::Character)
             .into_iter()
             .map(kb_to_item)
             .collect()
     } else {
-        // Resolve by world_refs: match each ref by canonical_name, keep Character type
         resolve_items_by_refs(admitted, &params.world_refs, BlockType::Character)
     };
 
-    // QC1-W002 fix: heuristic fallback when world_refs is empty but chapter_text is provided.
-    // Scan chapter text for known character canonical_names and prefer those that match.
     let mut characters = if params.world_refs.is_empty() {
         params.chapter_text.as_ref().map_or_else(
             || all_characters.clone(),
@@ -334,10 +329,8 @@ pub fn build_chapter_kb_block(
     } else {
         all_characters
     };
-    // QC3-W4 fix: sort by canonical_name for deterministic prompt output.
     characters.sort_by(|a, b| a.name.cmp(&b.name));
 
-    // Resolve locations
     let all_locations: Vec<WorldContextItem> = if params.world_refs.is_empty() {
         WorldKbQueryBuilder::of_block_type(admitted, BlockType::Scene)
             .into_iter()
@@ -347,7 +340,6 @@ pub fn build_chapter_kb_block(
         resolve_items_by_refs(admitted, &params.world_refs, BlockType::Scene)
     };
 
-    // Heuristic fallback for locations.
     let mut locations = if params.world_refs.is_empty() {
         params.chapter_text.as_ref().map_or_else(
             || all_locations.clone(),
@@ -365,7 +357,6 @@ pub fn build_chapter_kb_block(
     };
     locations.sort_by(|a, b| a.name.cmp(&b.name));
 
-    // Resolve active rules: foundation + rules novel_category items
     let mut active_rules = resolve_active_rules(admitted);
     active_rules.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -379,10 +370,8 @@ pub fn build_chapter_kb_block(
         truncated: false,
     };
 
-    // Apply token budget
     let yaml = block.to_yaml();
     if yaml.chars().count() > max_chars {
-        // Truncate: prefer characters first, then locations, then rules
         apply_token_budget(&mut block, max_chars);
     }
 
@@ -424,42 +413,34 @@ fn resolve_active_rules(admitted: &[KnowledgeEntryRecord]) -> Vec<WorldContextIt
 /// QC3-W3 fix: avoids O(n²) re-rendering by estimating per-item char cost
 /// and popping items until the estimated total is within budget.
 fn apply_token_budget(block: &mut WorldContextBlock, max_chars: usize) {
-    // Estimate the cost of removing one item from a section.
-    // Each item contributes roughly: "  - id: <id>\n    name: <name>\n    descriptor: <desc>\n"
     const fn estimate_item_chars(item: &WorldContextItem) -> usize {
-        // "  - id: " (7) + id.len + "\n    name: " (11) + name.len + "\n    descriptor: " (15) + desc.len + "\n" (1)
         7 + item.id.len() + 11 + item.name.len() + 15 + item.descriptor.len() + 1
     }
 
-    // Compute current total and check if we're already within budget.
     let current_chars = block.to_yaml().chars().count();
     let mut over_by = current_chars.saturating_sub(max_chars);
     if over_by == 0 {
         return;
     }
 
-    // Remove locations from the end until estimated within budget.
     while over_by > 0 && !block.locations_referenced.is_empty() {
         if let Some(item) = block.locations_referenced.pop() {
             over_by = over_by.saturating_sub(estimate_item_chars(&item));
         }
     }
 
-    // Remove characters.
     while over_by > 0 && !block.characters_in_chapter.is_empty() {
         if let Some(item) = block.characters_in_chapter.pop() {
             over_by = over_by.saturating_sub(estimate_item_chars(&item));
         }
     }
 
-    // Remove rules.
     while over_by > 0 && !block.active_rules.is_empty() {
         if let Some(item) = block.active_rules.pop() {
             over_by = over_by.saturating_sub(estimate_item_chars(&item));
         }
     }
 
-    // Final check: if still over budget (header alone exceeds limit), mark truncated.
     let final_chars = block.to_yaml().chars().count();
     if final_chars > max_chars {
         block.truncated = true;
@@ -505,7 +486,6 @@ mod tests {
         }
     }
 
-    // AC1: World-bound Work + populated World KB → block present with required fields.
     #[test]
     fn world_bound_populated_kb_produces_block() {
         let char_kb = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
@@ -534,15 +514,12 @@ mod tests {
             "chapter 3: after the river-market fire"
         );
 
-        // Characters resolved via world_refs
         assert_eq!(block.characters_in_chapter.len(), 1);
         assert_eq!(block.characters_in_chapter[0].name, "char_lin_xia");
 
-        // Locations resolved via world_refs
         assert_eq!(block.locations_referenced.len(), 1);
         assert_eq!(block.locations_referenced[0].name, "loc_neon_city");
 
-        // Active rules: foundation + rules
         assert_eq!(block.active_rules.len(), 2);
         let rule_names: Vec<&str> = block.active_rules.iter().map(|r| r.name.as_str()).collect();
         assert!(rule_names.contains(&"rule_magic_cost"));
@@ -550,7 +527,6 @@ mod tests {
 
         assert!(!block.truncated);
 
-        // Verify YAML output contains required fields (Debug format adds quotes)
         let yaml = block.to_yaml();
         assert!(yaml.contains("world_id: wld_1"));
         assert!(yaml.contains("world_name: \"Neon River\""));
@@ -559,7 +535,6 @@ mod tests {
         assert!(yaml.contains("active_rules:"));
     }
 
-    // AC2: World-bound Work + empty World KB → block present but with empty sections.
     #[test]
     fn world_bound_empty_kb_produces_empty_block() {
         let params = make_params("wld_empty", &[]);
@@ -575,14 +550,12 @@ mod tests {
         assert!(yaml.contains("  []"));
     }
 
-    // AC3: world_refs populated → characters/locations use world_refs.
     #[test]
     fn world_refs_filter_characters_and_locations() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "char_a", "character");
         let char2 = make_novel_block("wld_1", BlockType::Character, "char_b", "character");
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "loc_x", "location");
 
-        // Only reference char_a and loc_x
         let params = ChapterKbBlockParams {
             world_refs: vec!["char_a".to_string(), "loc_x".to_string()],
             ..make_params("wld_1", &[])
@@ -593,16 +566,13 @@ mod tests {
             &params,
         );
 
-        // Should only contain char_a, not char_b
         assert_eq!(block.characters_in_chapter.len(), 1);
         assert_eq!(block.characters_in_chapter[0].name, "char_a");
 
-        // Should only contain loc_x
         assert_eq!(block.locations_referenced.len(), 1);
         assert_eq!(block.locations_referenced[0].name, "loc_x");
     }
 
-    // AC4: world_refs empty → fall back to all characters/locations.
     #[test]
     fn world_refs_empty_falls_back_to_all() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "char_a", "character");
@@ -616,15 +586,11 @@ mod tests {
             &params,
         );
 
-        // All characters
         assert_eq!(block.characters_in_chapter.len(), 2);
-        // All locations (scenes)
         assert_eq!(block.locations_referenced.len(), 1);
-        // No background items in active_rules (only foundation + rules)
         assert!(!block.active_rules.iter().any(|r| r.name == "evt_bg"));
     }
 
-    // QC1-W002 fix: chapter_text heuristic narrows fallback when world_refs is empty.
     #[test]
     fn chapter_text_heuristic_narrows_fallback() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
@@ -632,7 +598,6 @@ mod tests {
         let loc1 = make_novel_block("wld_1", BlockType::Scene, "tavern", "location");
         let loc2 = make_novel_block("wld_1", BlockType::Scene, "forest", "location");
 
-        // chapter_text mentions Alice and the tavern but not Bob or the forest
         let params = ChapterKbBlockParams {
             world_id: "wld_1".to_string(),
             world_name: "Test".to_string(),
@@ -647,7 +612,6 @@ mod tests {
             &params,
         );
 
-        // Heuristic should narrow to only matching names
         let char_names: Vec<&str> = block
             .characters_in_chapter
             .iter()
@@ -677,7 +641,6 @@ mod tests {
         );
     }
 
-    // Without chapter_text, fallback returns all items (no narrowing).
     #[test]
     fn no_chapter_text_returns_all_in_fallback() {
         let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
@@ -693,45 +656,24 @@ mod tests {
             &params,
         );
 
-        // Without chapter_text, all characters are returned
         assert_eq!(block.characters_in_chapter.len(), 2);
     }
 
-    // AC5: Legacy V1.39 worldless Work → block omitted.
-    // (Verified by caller: if world_id is None, don't call build_chapter_kb_block.)
-    // We test that the function requires a world_id.
     #[tokio::test]
-    async fn legacy_worldless_caller_skips_block() {
-        // The caller (engine/daemon) checks world_id before calling.
-        // build_chapter_kb_block always requires a world_id in params.
-        // This test documents the convention: if world_id is None at caller,
-        // the function is not called and no block is produced.
-        // The function signature makes this clear: world_id is String, not Option<String>.
-        // Intentionally unconditional: this test documents a caller-level
-        // convention (world_id is always present when the function is called).
-        // There is nothing to assert at runtime — the contract lives in the
-        // signature (world_id: String, not Option<String>).
-    }
+    async fn legacy_worldless_caller_skips_block() {}
 
-    // AC6 (v1.191 P1 T11 revised contract): the snapshot is the whole input.
-    // The builder performs no World query of its own, so an unknown World is
-    // simply an empty snapshot → empty sections. World scoping belongs to the
-    // caller's admitted `KnowledgeReadScope`, never to this builder.
     #[test]
     fn missing_world_id_returns_empty_block() {
         let params = make_params("wld_ghost", &[]);
         let block = build_chapter_kb_block(&CharacterViewInput::from_entries(Vec::new()), &params);
 
-        // No data for wld_ghost
         assert_eq!(block.characters_in_chapter, Vec::<WorldContextItem>::new());
         assert_eq!(block.locations_referenced, Vec::<WorldContextItem>::new());
         assert_eq!(block.active_rules, Vec::<WorldContextItem>::new());
     }
 
-    // AC7: Token budget exceeded → truncate gracefully with marker.
     #[test]
     fn token_budget_truncates_gracefully() {
-        // Many characters with long summaries.
         let admitted: Vec<_> = (0..20)
             .map(|i| {
                 let mut kb = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
@@ -764,16 +706,13 @@ mod tests {
         let block = build_chapter_kb_block(&CharacterViewInput::from_entries(admitted), &params);
 
         let yaml = block.to_yaml();
-        // Should fit within reasonable bounds (may have truncated some items)
         let yaml_chars = yaml.chars().count();
-        // After truncation, the YAML should be significantly shorter than untruncated
         assert!(
             yaml_chars < 5000,
             "truncated YAML should be short, got {yaml_chars} chars"
         );
     }
 
-    // Unit test: YAML output format matches spec.
     #[test]
     fn yaml_output_matches_spec_shape() {
         let block = WorldContextBlock {
@@ -800,7 +739,6 @@ mod tests {
 
         let yaml = block.to_yaml();
 
-        // Verify exact format per §3.5.1.3 (R-V141HYG-02: Debug format for YAML-safe escaping)
         assert!(yaml.starts_with("world_id: wld_123\n"));
         assert!(yaml.contains("world_name: \"Neon River\""));
         assert!(yaml.contains("current_timeline: \"chapter 3: after the river-market fire\""));
@@ -815,7 +753,6 @@ mod tests {
         assert!(!yaml.contains("truncated"));
     }
 
-    // QC3-W4 fix: output is deterministic regardless of snapshot order.
     #[test]
     fn output_is_deterministic_regardless_of_insertion_order() {
         let char_a = make_novel_block("wld_1", BlockType::Character, "alpha", "character");
@@ -840,7 +777,6 @@ mod tests {
         );
     }
 
-    // Unit test: empty sections render as `[]`.
     #[test]
     fn empty_sections_render_as_empty_list() {
         let block = WorldContextBlock {
@@ -859,7 +795,6 @@ mod tests {
         assert!(yaml.contains("active_rules:\n  []"));
     }
 
-    // Unit test: truncated block includes marker.
     #[test]
     fn truncated_block_includes_marker() {
         let block = WorldContextBlock {
@@ -876,7 +811,6 @@ mod tests {
         assert!(yaml.contains(TRUNCATION_MARKER.trim_start_matches('\n')));
     }
 
-    // v1.191 P1 T11: the snapshot filter helpers replace the retired
     // World-scoped `KbQuery` builders; both directions (present / absent) are
     // pinned because the caller no longer has a store to fall back on.
     #[test]
@@ -893,8 +827,6 @@ mod tests {
             .expect("exact canonical_name + block_type match");
         assert_ne!(located.entry_id, "");
 
-        // A row that is not in the snapshot can never be resolved: absence is
-        // "not admitted", never "query the World for it".
         assert!(
             WorldKbQueryBuilder::by_canonical_name(&admitted, "Ghost", BlockType::Character)
                 .is_none()
@@ -909,8 +841,6 @@ mod tests {
         );
     }
 
-    // v1.191 P1 T11 (durable §4.2): the chapter block reads the admitted
-    // snapshot alone — an empty snapshot yields an empty block, never a
     // World-wide read (`build_chapter_kb_block` has no store to widen with).
     #[test]
     fn v1191_holder_context_chapter_block_reads_admitted_snapshot_only() {
@@ -938,7 +868,6 @@ mod tests {
         assert_eq!(admitted.characters_in_chapter[0].id, shared.entry_id);
     }
 
-    // R-V141HYG-02: to_yaml must produce parseable YAML for strings with metacharacters.
     #[test]
     fn to_yaml_handles_user_strings_with_yaml_metacharacters() {
         let block = WorldContextBlock {
@@ -957,14 +886,8 @@ mod tests {
 
         let yaml = block.to_yaml();
 
-        // Verify the YAML is parseable — at minimum, lines should split correctly.
-        // Using {:?} (Debug) produces escaped strings like:
-        //   world_name: "Neon: River \"Reborn\""
-        // which is valid YAML double-quoted scalar.
-        // With {} (Display), the colons and quotes in the raw string break parsing.
         for line in yaml.lines() {
             if let Some(value) = line.strip_prefix("world_name: ") {
-                // Must be a valid YAML quoted string (starts with ")
                 assert!(
                     value.starts_with('"') && value.ends_with('"'),
                     "world_name value should be YAML-quoted, got: {value}"
@@ -972,8 +895,6 @@ mod tests {
             }
         }
 
-        // Round-trip check: if we can split key-value pairs on ": ", the YAML
-        // is at least structurally valid for our flat format.
         assert!(
             yaml.contains("world_id: wld_test"),
             "world_id should appear correctly"

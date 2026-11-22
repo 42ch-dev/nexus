@@ -71,11 +71,9 @@ pub fn load_or_create_identity_at(path: &Path) -> Result<[u8; 32], IdentityError
         })?;
     }
 
-    // `create_new` eliminates the TOCTOU race between the existence check
     // and the write (same pattern as the connect-host identity helper).
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    // W-1: apply the owner-only mode at creation time (atomic
     // create-with-mode) so the seed is never observable at a permissive
     // mode — even if the process crashes between open and write. umask can
     // only tighten bits, never loosen them. On non-unix the platform
@@ -100,7 +98,6 @@ pub fn load_or_create_identity_at(path: &Path) -> Result<[u8; 32], IdentityError
             Ok(seed)
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            // Reload path: read + validate the persisted seed.
             let bytes = std::fs::read(path).map_err(|e| IdentityError::Io {
                 path: path.display().to_string(),
                 source: e,

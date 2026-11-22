@@ -71,28 +71,22 @@ impl Stage0Assembly {
     /// Follows spec §9.2 ordering exactly.
     pub fn assemble(&self) -> String {
         let mut parts = Vec::new();
-
-        // 1. System/policy prefix
         if !self.system_prefix.is_empty() {
             parts.push(self.system_prefix.clone());
         }
 
-        // 2. ## Personality (wrapped in structured delimiters)
         if !self.personality.is_empty() {
             parts.push(format!(
                 "{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n{}\n\n{STAGE0_PERSONALITY_END}",
                 self.personality
             ));
         }
-
-        // 3. Long-term memories (sorted by kind, then recency)
         let sorted = self.sorted_memories();
         for mem in &sorted {
             let title = format!("### Memory: {}", memory_display_id(mem));
             parts.push(format!("{title}\n\n{}\n", memory_body(mem)));
         }
 
-        // 4. Fragment keywords (deduped, omit if empty)
         let keywords = self.deduped_keywords();
         if !keywords.is_empty() {
             parts.push(format!(
@@ -101,12 +95,10 @@ impl Stage0Assembly {
             ));
         }
 
-        // 5. ## Experience
         if !self.experience.is_empty() {
             parts.push(format!("{EXPERIENCE_HEADING}\n\n{}\n", self.experience));
         }
 
-        // 6. User prompt
         if !self.user_prompt.is_empty() {
             parts.push(self.user_prompt.clone());
         }
@@ -129,15 +121,12 @@ impl Stage0Assembly {
         let sorted = self.sorted_memories();
         let keywords = self.deduped_keywords();
 
-        // Build sections in order: (heading, content, non_truncatable)
         let mut sections: Vec<(String, String, bool)> = Vec::new();
 
-        // 1. System prefix (non-truncatable)
         if !self.system_prefix.is_empty() {
             sections.push((String::new(), self.system_prefix.clone(), true));
         }
 
-        // 2. Personality (non-truncatable — spec §9.3, wrapped in delimiters)
         if !self.personality.is_empty() {
             sections.push((
                 format!("{STAGE0_PERSONALITY_START}\n{PERSONALITY_HEADING}\n\n"),
@@ -146,19 +135,16 @@ impl Stage0Assembly {
             ));
         }
 
-        // 3. Long-term memories (truncatable)
         for mem in &sorted {
             let heading = format!("### Memory: {}\n\n", memory_display_id(mem));
             sections.push((heading, memory_body(mem).to_string(), false));
         }
 
-        // 4. Fragment keywords (truncatable)
         if !keywords.is_empty() {
             let content = keywords.join(", ");
             sections.push((format!("{FRAGMENT_KEYWORDS_HEADING}\n\n"), content, false));
         }
 
-        // 5. Experience (truncatable)
         if !self.experience.is_empty() {
             sections.push((
                 format!("{EXPERIENCE_HEADING}\n\n"),
@@ -167,14 +153,12 @@ impl Stage0Assembly {
             ));
         }
 
-        // 6. User prompt (non-truncatable)
         if !self.user_prompt.is_empty() {
             sections.push((String::new(), self.user_prompt.clone(), true));
         }
 
         let included = truncate_with_budget(&sections, budget);
 
-        // Reassemble
         let parts: Vec<String> = included
             .into_iter()
             .map(|(heading, content)| {
@@ -198,7 +182,6 @@ impl Stage0Assembly {
             if kind_cmp != std::cmp::Ordering::Equal {
                 return kind_cmp;
             }
-            // Most recent first (reverse chronological)
             memory_updated_at(b).cmp(memory_updated_at(a))
         });
         sorted
@@ -242,7 +225,6 @@ pub fn truncate_with_budget(
     let mut result = Vec::new();
     let mut used_tokens: usize = 0;
 
-    // First pass: include all non-truncatable sections
     for (heading, content, non_truncatable) in sections {
         if *non_truncatable {
             let section_text = format!("{heading}{content}");
@@ -252,7 +234,6 @@ pub fn truncate_with_budget(
         }
     }
 
-    // Second pass: greedily add truncatable sections
     for (heading, content, non_truncatable) in sections {
         if *non_truncatable {
             continue;
@@ -265,7 +246,6 @@ pub fn truncate_with_budget(
             result.push((heading.clone(), content.clone()));
             used_tokens += full_tokens;
         } else if remaining > 0 {
-            // Partially truncate: estimate how many chars fit
             let target_chars = remaining * 4;
             let heading_chars = heading.len();
             let content_chars = target_chars.saturating_sub(heading_chars);
@@ -485,8 +465,6 @@ mod tests {
         assert_eq!(truncate_to_char_count("text", 0), "");
     }
 
-    // --- A3.1: Delimiter emit tests ---
-
     #[test]
     fn assemble_emits_personality_delimiters() {
         let asm = Stage0Assembly {
@@ -514,7 +492,6 @@ mod tests {
             start_pos < end_pos,
             "start delimiter must come before end delimiter"
         );
-        // Content between delimiters must include personality body and heading
         let between = &output[start_pos + STAGE0_PERSONALITY_START.len()..end_pos];
         assert!(
             between.contains("Bold and creative."),

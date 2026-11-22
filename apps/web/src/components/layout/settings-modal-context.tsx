@@ -1,5 +1,4 @@
 /**
- * Settings modal controller — V1.131 P2.
  *
  * URL is the open-state SSOT for `/settings/*`. The provider
  * owns last-safe-background, section selection, dirty-source registry, and
@@ -107,7 +106,6 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   const [backgroundLocation, setBackgroundLocation] = useState<Location>(
     defaultBackgroundLocation,
   );
-  // Seed background from the first non-settings location once per session.
   const backgroundSeededRef = useRef(false);
   /** Canonical Settings URL while the modal was last open. */
   const settingsPathWhileOpenRef = useRef<string | null>(null);
@@ -121,7 +119,6 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
   const activeSection = resolved?.section ?? DEFAULT_SETTINGS_SECTION;
   const sectionHash = resolved?.hash ?? '';
 
-  // Normalize aliases and unknown sections to the canonical Settings path.
   // V1.147 P2 T3: `search` is preserved verbatim so deep links into a section
   // (e.g. `/settings/advanced?x=…`) survive the canonicalization instead
   // of having their query params dropped on arrival.
@@ -134,7 +131,6 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
     }
   }, [location.hash, location.pathname, location.search, navigate, resolved]);
 
-  // Track last safe non-settings location (direct Settings loads keep /works).
   useEffect(() => {
     if (isSettingsDrivenPath(location.pathname)) {
       if (!backgroundSeededRef.current) {
@@ -159,7 +155,6 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
     setDirtyEpoch((epoch) => epoch + 1);
   }, []);
 
-  // Remember the Settings URL while open so dirty leave can restore it.
   // V1.147 P2 T3: `search` is preserved so deep-linked sections (`?module=…`)
   // restore with their selection intact after a dirty-leave block.
   useEffect(() => {
@@ -169,7 +164,6 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
     }
   }, [location.search, resolved]);
 
-  // Dirty-aware route leave (BrowserRouter-compatible useBlocker equivalent).
   useLayoutEffect(() => {
     if (resolved) {
       return;
@@ -188,7 +182,6 @@ export function SettingsModalProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Clean leave — modal closes via open=false.
     settingsPathWhileOpenRef.current = null;
     pendingLeaveRef.current = null;
   }, [location, navigate, resolved]);

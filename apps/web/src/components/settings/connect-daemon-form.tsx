@@ -1,5 +1,4 @@
 /**
- * Connect-to-Daemon form — extracted from legacy ConnectDaemonPage (V1.103 P2).
  *
  * Hosted under Settings → Advanced (Connection section; route consolidated to
  * `/settings/advanced#connection` in V1.106 — legacy `/settings/connection`
@@ -53,7 +52,6 @@ export function ConnectDaemonForm() {
   useEffect(() => {
     if (savedConfig) {
       setUrl(savedConfig.endpointUrl);
-      // The desktop store never returns the persisted key (D-18 redacted
       // load) — prefill only what the saved config actually carries.
       setApiKey(savedConfig.apiKey ?? '');
       setLabel(savedConfig.label ?? '');
@@ -64,7 +62,6 @@ export function ConnectDaemonForm() {
 
   const hasSavedConfig = Boolean(savedConfig);
   const savedEndpointMatches = savedConfig?.endpointUrl === normalizedUrl;
-  // Retained-credential reconnect (desktop): the saved endpoint has a stored
   // key the author is not required to re-enter. An endpoint change can never
   // retain the old endpoint's credential (main enforces this on save too).
   const canRetainCredential =
@@ -100,7 +97,6 @@ export function ConnectDaemonForm() {
     }
     const next: ConnectionConfig = {
       endpointUrl: normalizedUrl,
-      // Omitted key means "keep the stored credential" on the desktop store;
       // the browser backend persists the entered key as before.
       apiKey: apiKey || undefined,
       label: label.trim() || endpointLabel(normalizedUrl),
@@ -115,7 +111,6 @@ export function ConnectDaemonForm() {
         title: commonT('toast.connectedToDaemon'),
         description: t('connection.connectedDescription', { url: next.endpointUrl }),
       });
-      // Stay on /settings/advanced#connection — no navigate away (V1.103 lock).
     } catch (err) {
       const description = errorMessage(err) || commonT('error.couldNotSaveConnection');
       toast({
@@ -129,7 +124,6 @@ export function ConnectDaemonForm() {
   async function handleRevertToLocal() {
     try {
       if (savedConfig) {
-        // De-activate without deleting, so the saved entry can be re-activated later.
         await setConfig({ ...savedConfig, active: false });
       }
       toast({
@@ -137,7 +131,6 @@ export function ConnectDaemonForm() {
         title: commonT('toast.usingLocalDaemon'),
         description: commonT('toast.usingLocalDaemonDescription'),
       });
-      // Stay on /settings/advanced#connection — no navigate away (V1.103 lock).
     } catch (err) {
       const description = errorMessage(err) || commonT('error.couldNotSwitchToLocalDaemon');
       toast({
@@ -341,7 +334,6 @@ export function ConnectDaemonForm() {
         </div>
 
         {fpState.status === 'error' && fpState.kind ? (
-          // V1.129 P1: transport-classified failures (kind present) render
           // the promoted <TransportErrorBlock>. CTAs are intentionally
           // omitted — the author is already on the Connection settings page
           // (so "Open Connection Settings" is redundant), and the existing
@@ -356,7 +348,6 @@ export function ConnectDaemonForm() {
             detail={fpState.message}
           />
         ) : fpState.status === 'error' ? (
-          // HTTP errors (no kind) keep the legacy inline region — their
           // recovery is daemon-side (fix the 4xx/5xx), not transport.
           <div
             className="rounded-card border border-error-surface-border bg-error-surface p-4"

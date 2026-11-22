@@ -199,7 +199,6 @@ pub enum CliError {
     Other(String),
 }
 
-// Implement std::error::Error for CliError
 impl std::error::Error for CliError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -216,7 +215,6 @@ impl std::error::Error for CliError {
     }
 }
 
-// Custom Display for enhanced error variants with suggestions
 // V1.51 T-B P1: added VersionConflict arm (+8 lines). The enum has ~20
 // variants with user-facing suggestion text; splitting would scatter the
 // display logic without reducing the variant count.
@@ -224,12 +222,10 @@ impl std::error::Error for CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // Use default #[error] messages for simple variants
             Self::WorkspaceNotInitialized => write!(f, "Workspace not initialized.\n\n  Suggestion: Run `nexus42 creator workspace init workspace` first."),
             Self::AuthenticationRequired => write!(f, "Authentication required.\n\n  Suggestion: Run `nexus42 platform auth login` first."),
             Self::CreatorNotSelected => write!(f, "Creator not selected.\n\n  Suggestion: Run `nexus42 creator use <creator-ref>` first."),
 
-            // Enhanced error variants with suggestions
             Self::ChallengeFailed { reason } => {
                 write!(
                     f,
@@ -338,7 +334,6 @@ impl fmt::Display for CliError {
                 )
             }
 
-            // World KB direct-core conflict: the same structured surface the
             // daemon route emitted (`[world_kb_conflict]` + named fields), so
             // the CLI contract is preserved across the transport change.
             Self::WorldKbConflict {
@@ -359,7 +354,6 @@ impl fmt::Display for CliError {
                 )
             }
 
-            // Use #[error] messages for other variants
             #[cfg(feature = "cli")]
             Self::Network(err) => write!(f, "Network error: {err}"),
             #[cfg(feature = "cli")]
@@ -384,7 +378,6 @@ impl fmt::Display for CliError {
     }
 }
 
-// Helper constructors for enhanced error variants
 impl CliError {
     /// Create an `AgentNotFound` error with agent ID
     #[allow(dead_code)]
@@ -457,7 +450,6 @@ impl From<nexus_creator_memory::errors::MemoryError> for CliError {
 #[cfg(feature = "cli")]
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
-        // v1.193 P2-T13: the reqwest connect/timeout → `DaemonNotRunning`
         // fold retired with the daemon client. Remaining reqwest callers are
         // platform/cloud clients, whose connection failures are ordinary
         // network errors — never daemon-start guidance.

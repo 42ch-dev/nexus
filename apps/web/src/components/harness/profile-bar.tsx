@@ -1,5 +1,4 @@
 /**
- * Harness agent-profile bar (plan v1220 T2, I-000064).
  *
  * Transport-coherent with the shared read seam: on desktop both the read and
  * the save go through the IPC (`get_agent_profile` / `set_agent_profile`); in
@@ -64,7 +63,6 @@ export function ProfileBar() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const profileSettled = saved.isFetched;
 
-  // Converge on the persisted profile whenever it arrives (it wins over the
   // scan-recommended default), as long as the user has not touched the
   // controls. Before the read settles the scan default may show; Save is
   // gated meanwhile, so it is never committed as the persisted choice.
@@ -87,7 +85,6 @@ export function ProfileBar() {
   function handleAgentChange(name: string) {
     setTouched(true);
     setSelected(name);
-    // A switch never inherits the previous custom command: show the new
     // agent's scan default (or nothing) as a non-override origin.
     setCommand(options.find((candidate) => candidate.name === name)?.launchCommand ?? '');
     setCommandOrigin('scan');
@@ -111,13 +108,11 @@ export function ProfileBar() {
     setSavedState(false);
     try {
       if (desktop) {
-        // The IPC store replaces the command wholesale: send it for a stored or
         // edited value (preserve/apply), never for a scan default.
         const ipcCommand =
           commandOrigin === 'scan' || trimmed.length === 0 ? undefined : trimmed;
         await desktop.setAgentProfile(selected, ipcCommand);
       } else {
-        // Service preserves an omitted command; only an explicit edit is an
         // override (a blank edit explicitly clears it).
         await client.saveAgentProfile(
           commandOrigin === 'edited'

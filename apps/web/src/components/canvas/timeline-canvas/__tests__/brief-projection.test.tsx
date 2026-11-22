@@ -1,5 +1,4 @@
 /**
- * TimelineCanvasAdapter — V1.123 P1 T2 (Brief layer projection).
  *
  * Verifies the Brief layer projection contract locked by
  * `iterations/v1.123/specs/three-layer-architecture.md` §2 + §8:
@@ -44,8 +43,6 @@ import {
   type TimelineNodeData,
 } from '../timeline-canvas-adapter';
 
-// ─── Fixture builders ──────────────────────────────────────────────────────
-
 function entity(
   overrides: Partial<WorldKbEntityProjection> &
     Pick<WorldKbEntityProjection, 'key_block_id' | 'block_type' | 'canonical_name'>,
@@ -67,7 +64,6 @@ function eraEntity(
     key_block_id,
     block_type: 'era',
     canonical_name,
-    // Default era body shape per architect §2.3: era markers ride in
     // `body.attributes` (`era_id`, `start_hint`, `end_hint`, `world_summary`).
     body: body ?? {
       attributes: {
@@ -103,7 +99,6 @@ function makeContext(
   };
 }
 
-// ─── Brief layer projection (architect §2 + §8) ─────────────────────────────
 
 describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block_type=era)', () => {
   it("filters entities to block_type='era' for Brief layer", () => {
@@ -133,8 +128,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    // ONLY the era entity renders on the Brief layer.
-    // V1.126 P1: directed-axis spine node is also added.
     expect(nodes).toHaveLength(2);
     const node = nodes[0] as Node<TimelineNodeData>;
     expect(node.id).toBe('entity:kb-era-1');
@@ -166,7 +159,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    // No era entities → Brief layer is empty (Task 5 owns the honest
     // empty-state copy; Task 2 just guarantees no non-era leakage).
     expect(nodes).toEqual([]);
   });
@@ -195,7 +187,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
       },
     });
     const graph: WorldKbGraphResponse = {
-      // intentionally unsorted input — projection owns the chronology
       entities: [later, earlier],
       source_anchors: [],
       relationships: [],
@@ -209,9 +200,7 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
 
     const early = nodes.find((n) => n.id === 'entity:kb-era-early')!;
     const late = nodes.find((n) => n.id === 'entity:kb-era-late')!;
-    // Earlier era MUST land to the left of the later era (LR axis = X).
     expect(early.position.x).toBeLessThan(late.position.x);
-    // Both dated eras sit on the Brief when-axis baseline (Y = 0).
     expect(early.position.y).toBe(0);
     expect(late.position.y).toBe(0);
   });
@@ -248,14 +237,11 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     const datedNode = nodes.find((n) => n.id === 'entity:kb-era-dated')!;
     expect(undatedNode.data.startHint).toBeUndefined();
     expect(datedNode.data.startHint).toBe('1000-01-01T00:00:00Z');
-    // The temporal-unknown cluster sits BELOW the when-axis (Y > 0).
     expect(undatedNode.position.y).toBeGreaterThan(0);
     expect(datedNode.position.y).toBe(0);
   });
 
   it('omits directedAxisSpine when all eras lack start_hint (R1 guard)', () => {
-    // V1.126 P1 QC fix R1: the brief spine should only render when at least
-    // one dated era exists. An all-undated era set should not emit a spine.
     const undatedA = eraEntity({
       key_block_id: 'kb-era-undated-a',
       canonical_name: 'The Forgotten Age',
@@ -278,11 +264,9 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    // Both undated eras appear as era nodes...
     expect(nodes).toHaveLength(2);
     expect(nodes[0].data.startHint).toBeUndefined();
     expect(nodes[1].data.startHint).toBeUndefined();
-    // ...but no directed-axis-spine node is emitted (all eras are undated).
     const spineNode = nodes.find((n) => n.id === 'directed-axis-spine');
     expect(spineNode).toBeUndefined();
   });
@@ -313,8 +297,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     const { nodes } = adapter.projectGraph(graph);
     const node = nodes[0] as Node<TimelineNodeData>;
 
-    // Architect §2.3 + §8: era markers ride in `body.attributes` and surface
-    // on the Brief-era node data for the compact era marker card + the
     // Brief-era inspector (Task 4).
     expect(node.data.eraId).toBe('era-first');
     expect(node.data.startHint).toBe('1000-01-01T00:00:00Z');
@@ -323,9 +305,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
   });
 
   it('does not render relationship edges on the Brief layer (Brief = era sweep, not full graph)', () => {
-    // Architect §8: Brief layer carries era markers only; full relationship
-    // edges belong to the Narrative layer (V1.122 preserved). The Brief
-    // layer is a minimal-density world-shape view per layer-feel-differentiation.md §2.2.
     const era = eraEntity({
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
@@ -357,7 +336,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     );
     const { edges } = adapter.projectGraph(graph);
 
-    // No edges on Brief layer — would clutter the era sweep.
     expect(edges).toEqual([]);
   });
 
@@ -376,7 +354,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
   });
 });
 
-// ─── Narrative layer projection (V1.122 behavior preserved) ─────────────────
 
 describe('TimelineCanvasAdapter.projectGraphForLayer — Narrative projection (V1.122 preserved)', () => {
   it("filters entities to block_type='event' on the when-axis (V1.122 unchanged)", () => {
@@ -398,7 +375,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Narrative projection (V
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    // V1.126 P1: directed-axis spine node is also added.
     expect(nodes).toHaveLength(2);
     const node = nodes[0] as Node<TimelineNodeData>;
     expect(node.type).toBe('timeline-event');
@@ -431,10 +407,8 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Narrative projection (V
   });
 
   it('excludes era entities from the Narrative context clusters (architect §5.2)', () => {
-    // V1.123 architect lock §5.2: Context clusters =
     // `entities.filter(e => !['event','era'].includes(e.block_type))`. An
     // era entity MUST NOT appear as a Context cluster on the Narrative
-    // layer — it is a Brief-layer-only marker.
     const era = eraEntity({
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
@@ -456,19 +430,15 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Narrative projection (V
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    // Only the character renders as a Context cluster; the era is excluded.
     expect(nodes).toHaveLength(1);
     expect(nodes[0].id).toBe('entity:kb-char-1');
     expect(nodes[0].type).toBe('timeline-key-block');
   });
 });
 
-// ─── projectGraph default delegation (V1.122 backward compat) ───────────────
 
 describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () => {
   it("default active layer is 'narrative' when no layer is passed to the factory (V1.122 backward compat)", () => {
-    // V1.122 callers invoked `createTimelineCanvasAdapter(ctxRef)` without a
-    // layer argument. Their existing assertions (event timeline projection,
     // event+context node types, ordering disclaimer) MUST stay green.
     const event = entity({
       key_block_id: 'kb-event-1',
@@ -486,12 +456,9 @@ describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () =
       relationships: [],
     };
 
-    // No layer argument — defaults to 'narrative'.
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const { nodes } = adapter.projectGraph(graph);
 
-    // Narrative projection: the event renders; the era is excluded.
-    // V1.126 P1: directed-axis spine node is also added.
     expect(nodes).toHaveLength(2);
     expect(nodes[0].id).toBe('entity:kb-event-1');
     expect(nodes[0].type).toBe('timeline-event');
@@ -519,15 +486,12 @@ describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () =
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    // Brief projection: only the era renders.
-    // V1.126 P1: directed-axis spine node is also added.
     expect(nodes).toHaveLength(2);
     expect(nodes[0].id).toBe('entity:kb-era-1');
     expect(nodes[0].type).toBe('timeline-brief-era');
   });
 });
 
-// ─── Node-type registry (additive over V1.122) ──────────────────────────────
 
 describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1)', () => {
   it("registers 'timeline-brief-era' alongside V1.122 'timeline-event' + 'timeline-key-block' + V1.126 'directedAxisSpine' + V1.147 'timeline-compute-result' + V1.156 'work-timeline-moment-*'", () => {
@@ -540,7 +504,6 @@ describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1
         'timeline-compute-result',
         'timeline-event',
         'timeline-key-block',
-        // V1.156 P1 T1 — Moment layer reuses the Work Timeline Moment node
         // components (World-Moment feel ≡ Work-Moment feel; no new node
         // component family).
         'work-timeline-moment-beat',
@@ -556,10 +519,6 @@ describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1
   });
 
   it('exposes TimelineLayer type at runtime via the factory signature (smoke test)', () => {
-    // Compile-time assurance: the factory accepts all layer values (brief /
-    // narrative / moment since V1.156 P1 T1). This test exists so a future
-    // rename of `TimelineLayer` that breaks the factory signature surfaces
-    // in the test suite, not in production.
     const layers: TimelineLayer[] = ['brief', 'narrative', 'moment'];
     for (const layer of layers) {
       const adapter = createTimelineCanvasAdapter(

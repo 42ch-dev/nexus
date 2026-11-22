@@ -129,7 +129,6 @@ pub async fn run(cmd: ForkCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // The leaves return their report; nothing reaches stdout until the shared
     // seam released the writer, so a close that did not settle is never
     // reported as a created/listed fork.
     if let Some(text) = finish_direct(&core, outcome).await? {

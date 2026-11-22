@@ -1,5 +1,4 @@
 /**
- * Global Timeline page — route entry for the cross-World Timeline overview
  * (V1.123 P3 Task 1).
  *
  * Renders {@link GlobalTimelineView} — recent Timeline activity composed

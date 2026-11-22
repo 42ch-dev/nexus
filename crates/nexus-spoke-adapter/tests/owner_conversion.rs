@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! v1.184 P1 Task 2 — owner-aware conversion seam proofs.
 //!
 //! Covers the typed Nexus extension projection at the sole SPOKE conversion
@@ -124,7 +125,6 @@ fn binding_owner_emits_binding_id_never_world_id() {
 fn reverse_conversion_without_owner_fails_closed() {
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Orphan");
     let mut spoke = knowledge_record_to_spoke(&rec);
-    // Strip every owner key, simulating a malformed/foreign spoke entry.
     let key = ExtensionKey::try_from("nexus").unwrap();
     if let Some(ns) = spoke.extensions.get_mut(&key) {
         ns.remove("world_id");
@@ -203,7 +203,6 @@ fn spoke_with_nexus(json_map: &serde_json::Value) -> spoke_schemas::KnowledgeEnt
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Wire");
     let mut spoke = knowledge_record_to_spoke(&rec);
     let key = ExtensionKey::try_from("nexus").unwrap();
-    // The `extensions` map holds the namespace as a JSON object (the same
     // shape `nexus_namespace` reads back), not a wrapped `Value`.
     let obj = json_map
         .as_object()

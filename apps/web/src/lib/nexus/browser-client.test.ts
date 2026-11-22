@@ -1,5 +1,4 @@
 /**
- * BrowserClient integration tests via msw — the end-to-end transport path the
  * screens rely on: cursor pagination shape, the W-1 error-envelope unwrapping
  * on a real fetch, and transport-unreachable handling.
  *
@@ -104,7 +103,6 @@ describe('BrowserClient cursor list', () => {
   });
 
   it('surfaces ad-hoc (StatusCode, String) error bodies via the generic fallback', async () => {
-    // Some orchestration handlers still emit non-envelope bodies (R-V164-FE1-ORCH).
     useHandlers(
       http.get('/v1/daemon/orchestration/sessions', () =>
         new HttpResponse('upstream timeout', { status: 502 }),
@@ -547,7 +545,6 @@ describe('BrowserClient compute runs (V1.147 P1)', () => {
   });
 
   it('rejects with the canonical error envelope when the daemon fails a run', async () => {
-    // Live daemon shape (qc2 W-001): `POST /run` never returns 200 with
     // status=failed — on compute failure the daemon persists a Failed row and
     // returns the shared ErrorResponse envelope (422 sandbox / 500 internal).
     // The Failed row is surfaced through the runs list refetch, not as data
@@ -616,7 +613,6 @@ describe('BrowserClient compute runs (V1.147 P1)', () => {
 
     const client = new BrowserClient();
     const res = await client.acceptRun('run_1');
-    // The daemon's axum Json extractor requires a JSON body — the client sends
     // `{}` (accept everything) rather than an empty POST.
     expect(receivedContentType).toContain('application/json');
     expect(receivedBody).toEqual({});
@@ -695,7 +691,6 @@ describe('BrowserClient compute runs (V1.147 P1)', () => {
   });
 });
 
-// ── Transport classification matrix (V1.129 P0 T3) ─────────────────────────
 //
 // The classifier is a pure function of `(baseUrl, cause)` plus the
 // `http_fallback` response detector. Each kind is exercised once with the
@@ -727,7 +722,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
     expect(err).toBeInstanceOf(NexusClientError);
     expect(err.code).toBe('transport_unreachable');
     expect(err.kind).toBe('daemon_down');
-    // Backwards-compat: the legacy multi-cause `message` is still attached so
     // existing toast tests keep passing during the P1 sweep.
     expect(err.message).toContain('nexus42 daemon start');
   });
@@ -764,7 +758,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('classifies `tls` when the cause message carries a TLS signal', async () => {
-    // Browsers do not surface the real cert failure to JS — the classifier
     // matches common signal substrings best-effort.
     const client = clientThrowing(
       new TypeError('ERR_CERT_AUTHORITY_INVALID'),
@@ -775,7 +768,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('falls open to `network` when the throw carries no TLS signal (TLS fail-open)', async () => {
-    // Locked by spec: when in doubt, `network` — do not over-claim cert rejection.
     const client = clientThrowing(
       new TypeError('Failed to fetch'),
       'https://remote.example:8420',
@@ -785,7 +777,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('classifies `http_fallback` when the daemon returns 200 + text/html (release SPA fallback)', async () => {
-    // Release-mode unrouted paths fall through to the static SPA fallback shell,
     // which serves text/html with HTTP 200. The classifier must intercept this
     // BEFORE `response.json()` would throw a raw SyntaxError (legacy V1.128
     // behavior).
@@ -802,7 +793,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('keeps the legacy transport_unreachable code for backwards-compat with toast routing', async () => {
-    // Existing tests across the suite assert on `code === 'transport_unreachable'`.
     // The new `kind` field layers on top — it does not rename the legacy code.
     const client = clientThrowing(new TypeError('Failed to fetch'), 'https://remote.example:8420');
     const err = await client.listWorks().catch((e) => e);
@@ -811,7 +801,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('still routes HTTP errors through fromBody (kind stays undefined for HTTP errors)', async () => {
-    // HTTP error responses are NOT transport-class errors — they have a real
     // status and a parseable body. `kind` must remain undefined so HTTP-error
     // UX (driven by `code`/`details`) does not get mis-routed into the dialog's
     // transport-recovery CTA path.
@@ -831,7 +820,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 });
 
-// ── Workflow observation stream (v1.201 P1 T1) ─────────────────────────────
 //
 // The same-run observation route's frozen client contract
 // (`.agents/knowledge/api-design/sse-fetch-stream-consumer.md`):
@@ -932,7 +920,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
     const prefix =
       'id: e1:1\nevent: host_event\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"step_id":"s1","attempt_id":"a1","host_event":{"ThoughtDelta":{"session_id":"r1","op_id":"op-1","text":"';
     const encoded = encoder.encode(`${prefix}思考の断片"}}}\n\n`);
-    // Split one byte INTO the first 3-byte character — a non-streaming
     // `TextDecoder` would decode it as U+FFFD and corrupt the frame.
     const split = encoder.encode(prefix).length + 1;
 
@@ -1014,7 +1001,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
     await collect(client, 'run/1', { lastEventId: 'e1:7', signal: new AbortController().signal });
     await collect(client, 'run/1', { signal: new AbortController().signal });
 
-    // Zero query parameters (the route refuses them) + the path param encoded.
     expect(seen[0].url).toBe(
       'http://127.0.0.1:8420/v1/daemon/orchestration/sessions/run%2F1/events',
     );
@@ -1033,7 +1019,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
     const pulled = new Promise<void>((resolve) => {
       releasePull = resolve;
     });
-    // `highWaterMark: 0` defers `pull` until the first read request, so the
     // iterator is provably blocked on the open stream when the abort lands.
     const body = new ReadableStream<Uint8Array>(
       {
@@ -1068,7 +1053,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
   });
 
   it('(g) recognizes a mixed `\\n` + `\\r\\n` blank boundary split across chunks', async () => {
-    // §2: a blank-line boundary may mix `\n` and `\r\n`, and either half may
     // straddle a network chunk. Without the `\n\r\n` case the two frames merge
     // into one block (or the first is delayed until EOF), breaking the control
     // frame order the view relies on.
@@ -1089,7 +1073,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
   });
 
   it('(h) stops draining buffered frames once the consumer aborts mid-chunk', async () => {
-    // §3: abort stops iteration without throwing. Two complete frames arrive in
     // ONE chunk, so the resumed generator must re-check the signal between
     // yields instead of draining the rest of the buffer.
     const controller = new AbortController();
@@ -1110,7 +1093,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
   });
 
   it('(i) rejects a data frame with no usable `id:` cursor instead of inventing one', async () => {
-    // §2: the `<epoch>:<sequence>` cursor is never fabricated. A data frame
     // with an absent or empty `id:` is a wire-protocol violation, so it
     // surfaces as a typed refusal rather than an event replayed/persisted
     // under a synthetic empty cursor.
@@ -1265,7 +1247,6 @@ describe('BrowserClient character family (v240 actor web surfaces, I-000126)', (
       image_uri: null,
     });
 
-    // `image_uri: null` clears; `persona`/`display_name` are absent (keep).
     expect(sent).toEqual({ expected_revision: 3, image_uri: null });
     expect(res.character.image_uri).toBeUndefined();
   });
@@ -1480,7 +1461,6 @@ describe('BrowserClient per-character memory family (v240 actor web surfaces, I-
     expect(url.searchParams.get('binding_id')).toBe(bindingId);
     expect(url.searchParams.get('limit')).toBe('10');
     expect(url.searchParams.get('cursor')).toBe('cur-1');
-    // Character scope is the path, never the creator query member.
     expect(url.searchParams.has('creator_id')).toBe(false);
     expect(res.items[0]!.pending_id).toBe(pending.pending_id);
     expect(res.pagination.next_cursor).toBe('cur-2');
@@ -1598,7 +1578,6 @@ describe('BrowserClient per-character memory family (v240 actor web surfaces, I-
       `${characterPath}/memory/fragments/${fragment.fragment_id}:promote`,
     );
     expect(sent).toEqual({ expected_revision: 2 });
-    // Promotion clears binding-local provenance and bumps the revision.
     expect(res.fragment.revision).toBe(3);
     expect(res.fragment.binding_id).toBeUndefined();
   });
@@ -1826,7 +1805,6 @@ describe('BrowserClient actor-knowledge family (v240 actor web surfaces, I-00012
     });
 
     expect(new URL(seenUrl).pathname).toBe('/v1/daemon/actor-knowledge/view');
-    // Scope is the body's admitted actor ref; the path carries no character id.
     expect(sent).toEqual({
       actor_ref: { actor_kind: 'character', character_id: characterId },
       world_id: worldId,
@@ -1856,7 +1834,6 @@ describe('BrowserClient actor-knowledge family (v240 actor web surfaces, I-00012
       audience: { kind: 'author-only' },
     });
 
-    // Creation addresses the principal, never `…/characters/{id}/knowledge`.
     expect(new URL(seenUrl).pathname).toBe('/v1/daemon/actor-knowledge/entries');
     expect(sent).toEqual({
       owner_kind: 'character',
@@ -1897,7 +1874,6 @@ describe('BrowserClient strategy apply (v241 P3.5 T1)', () => {
     });
 
     expect(seenPath).toBe(applyPath);
-    // The approval is named by content hash only: the path owns the strategy.
     expect(sent).toEqual({ approval_content_hash: 'hash-1' });
     expect(res).toEqual(applied);
   });

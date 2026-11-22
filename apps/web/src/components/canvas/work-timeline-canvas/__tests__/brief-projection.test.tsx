@@ -1,5 +1,4 @@
 /**
- * WorkTimelineCanvasAdapter — V1.156 P2 T1 (Work Timeline Brief layer
  * projection).
  *
  * Verifies the Work-Brief projection contract locked by
@@ -64,8 +63,6 @@ import {
   type WorkTimelineNodeData,
 } from '../work-timeline-canvas-adapter';
 
-// ─── Fixture builders ──────────────────────────────────────────────────────
-
 function outline(overrides: Partial<WorkOutline> = {}): WorkOutline {
   return {
     work_id: 'work-1',
@@ -102,7 +99,6 @@ function eraEntity(
     key_block_id,
     block_type: 'era',
     canonical_name,
-    // Default era body shape per architect §2.3: era markers ride in
     // `body.attributes` (`era_id`, `start_hint`, `end_hint`, `world_summary`).
     body: body ?? {
       attributes: {
@@ -124,7 +120,6 @@ function worldGraph(
 }
 
 /**
- * V1.160 P2 T1 — era-nesting relationship fixture (mirrors the World
  * `brief-time-bands.test.tsx` shape): `relation_type: 'custom'` +
  * `custom_label: 'parent_era'` is the sanctioned era-taxonomy carrier,
  * `source_entity_id` = parent (coarser era), `target_entity_id` = child.
@@ -182,22 +177,16 @@ function makeContext(
   };
 }
 
-// ─── Layer union (architect §7.1 + V1.156 §3.3.3) ──────────────────────────
-
 describe('WorkTimelineLayer — V1.156 P2 T1 union extension', () => {
   it("includes 'brief' alongside 'narrative' | 'moment' (UI-only union — not a wire DTO)", () => {
-    // Compile-time assertion: 'brief' is assignable to WorkTimelineLayer.
     const layers: WorkTimelineLayer[] = ['brief', 'narrative', 'moment'];
     expect(layers).toContain('brief');
-    // 'brief' is a valid dispatch target with no bound World → honest empty.
     expect(projectWorkTimelineGraph(outline(), 'brief')).toEqual({
       nodes: [],
       edges: [],
     });
   });
 });
-
-// ─── Brief layer projection (architect §3.3.3 V1.156 amendment) ────────────
 
 describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (bound World era entities)', () => {
   it("filters the bound World's entities to block_type='era' for the Brief layer", () => {
@@ -223,7 +212,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
       worldGraph([era, event, character]),
     );
 
-    // ONLY the era entity renders on the Brief layer (plus the V1.126 P1
     // directed-axis spine node).
     expect(nodes).toHaveLength(2);
     const node = nodes[0] as Node<WorkTimelineNodeData>;
@@ -252,13 +240,11 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
       worldGraph([event, character]),
     );
 
-    // No era entities → Brief layer is empty (T2 owns the visible
     // empty-state copy; T1 guarantees no non-era leakage).
     expect(nodes).toEqual([]);
   });
 
   it('emits honest empty-state when no bound World graph is supplied (zero nodes)', () => {
-    // No bound World / graph still loading → the adapter contract is zero
     // nodes; the orchestrator renders the honest empty-state panel (T2).
     expect(projectWorkTimelineGraph(outline(), 'brief')).toEqual({
       nodes: [],
@@ -294,7 +280,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
       },
     });
 
-    // Intentionally unsorted input — the projection owns the chronology.
     const { nodes } = projectWorkTimelineGraph(
       outline(),
       'brief',
@@ -304,9 +289,7 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
 
     const early = nodes.find((n) => n.id === 'entity:kb-era-early')!;
     const late = nodes.find((n) => n.id === 'entity:kb-era-late')!;
-    // Earlier era MUST land to the left of the later era (LR axis = X).
     expect(early.position.x).toBeLessThan(late.position.x);
-    // Both dated eras sit on the Brief when-axis baseline (Y = 0).
     expect(early.position.y).toBe(0);
     expect(late.position.y).toBe(0);
   });
@@ -339,7 +322,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
     const datedNode = nodes.find((n) => n.id === 'entity:kb-era-dated')!;
     expect(undatedNode.data.startHint).toBeUndefined();
     expect(datedNode.data.startHint).toBe('1000-01-01T00:00:00Z');
-    // The temporal-unknown cluster sits BELOW the when-axis (Y > 0).
     expect(undatedNode.position.y).toBeGreaterThan(0);
     expect(datedNode.position.y).toBe(0);
   });
@@ -385,7 +367,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
       body: { attributes: { era_id: 'era-forgotten-b' } },
     });
 
-    // All-undated era set → era nodes only, NO spine (R1 guard).
     const undatedResult = projectWorkTimelineGraph(
       outline(),
       'brief',
@@ -397,7 +378,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
       undatedResult.nodes.find((n) => n.id === 'directed-axis-spine'),
     ).toBeUndefined();
 
-    // At least one dated era → the Brief directed-axis spine is emitted
     // (V1.126 P1 — Work-Brief feel ≡ World-Brief feel).
     const dated = eraEntity({
       key_block_id: 'kb-era-dated',
@@ -433,8 +413,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Brief projection (b
     expect(edges).toEqual([]);
   });
 });
-
-// ─── Adapter factory (architect §7.1 + V1.156 §3.3.3) ──────────────────────
 
 describe('WorkTimelineCanvasAdapter — Brief layer factory wiring', () => {
   it("createWorkTimelineCanvasAdapter(ctxRef, 'brief', worldGraph) delegates projectGraph to the Brief layer", () => {
@@ -507,11 +485,9 @@ describe('WorkTimelineCanvasAdapter — Brief layer factory wiring', () => {
       'narrative',
     );
 
-    // Architect §7.3 UX-risk override — preserved in V1.156 (Brief is one
     // click away, never the Work Timeline default).
     expect(briefAdapter.defaultLayer).toBe('narrative');
     expect(narrativeAdapter.defaultLayer).toBe('narrative');
-    // layer-feel §2.2 — Brief carries the horizontal era-sweep options,
     // identical to the World Timeline Brief layer.
     expect(briefAdapter.layoutOptions?.direction).toBe('LR');
     expect(briefAdapter.layoutOptions?.rankSep).toBe(240);
@@ -520,8 +496,6 @@ describe('WorkTimelineCanvasAdapter — Brief layer factory wiring', () => {
   });
 });
 
-// ─── Time-band slot (V1.160 P2 T1 — renderBriefTimeBands) ──────────────────
-
 describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-band slot', () => {
   it('exposes the renderBriefTimeBands slot on the adapter (mirror of the World Timeline)', () => {
     const adapter = createWorkTimelineCanvasAdapter(
@@ -529,7 +503,6 @@ describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-b
       'brief',
     );
 
-    // The `useCanvasSurface` slot contract reads this duck-typed method;
     // the Work adapter must ship it so the Work Brief layer can render
     // the vertical time-band model.
     expect(typeof adapter.renderBriefTimeBands).toBe('function');
@@ -540,7 +513,6 @@ describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-b
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
     });
-    // The Work outline carries NO era entities (`timeline_events[]`); the
     // bound World's KB graph is the only era data source for Work-Brief.
     const g = outline({
       timeline_events: [{ event_id: 'evt-1', title: 'Inciting Incident' }],
@@ -556,7 +528,6 @@ describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-b
       adapter.renderBriefTimeBands!(g) as React.ReactElement,
     );
 
-    // The vertical time-band panel is present (the V1.159 band model —
     // NOT the V1.156 flat React Flow era sweep).
     const bands = screen.getByTestId('brief-time-bands');
     expect(bands).toBeInTheDocument();
@@ -595,7 +566,6 @@ describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-b
       adapter.renderBriefTimeBands!(outline()) as React.ReactElement,
     );
 
-    // `BriefTimeBands` renders null for an empty forest (defense-in-depth —
     // the canvas gates the panel behind `isBriefEmpty` upstream).
     expect(screen.queryByTestId('brief-time-bands')).toBeNull();
     expect(container).toBeEmptyDOMElement();
@@ -623,7 +593,6 @@ describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-b
 
     const bands = screen.getByTestId('brief-time-bands');
     expect(within(bands).getAllByTestId('brief-time-band')).toHaveLength(2);
-    // Coarser era = root band; finer era = indented child band. The depth
     // marker rides on the band's wrapper (padding-indent carrier), so the
     // assertion walks to `parentElement` — mirroring the World tests.
     expect(bandOf(container, 'kb-kingdom').parentElement).toHaveAttribute(
@@ -636,8 +605,6 @@ describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-b
     );
   });
 });
-
-// ─── Regression (Narrative + Moment unchanged) ─────────────────────────────
 
 describe('WorkTimelineCanvasAdapter — Narrative/Moment regression with the extended signature', () => {
   it('Narrative projection is unchanged when a bound World graph is supplied', () => {
@@ -687,7 +654,6 @@ describe('WorkTimelineCanvasAdapter — Narrative/Moment regression with the ext
 
     expect(nodes.some((n) => n.type === 'work-timeline-moment-scene')).toBe(true);
     expect(nodes.some((n) => n.type === 'work-timeline-moment-beat')).toBe(true);
-    // No era nodes leak into the Moment layer.
     expect(nodes.some((n) => n.type === 'timeline-brief-era')).toBe(false);
   });
 
@@ -704,8 +670,6 @@ describe('WorkTimelineCanvasAdapter — Narrative/Moment regression with the ext
     expect(nodes.some((n) => n.type === 'work-timeline-narrative-event')).toBe(true);
   });
 });
-
-// ─── Canvas wiring (V1.160 P2 T1 — Work Brief time-band panel) ─────────────
 
 describe('WorkTimelineCanvas — Brief layer time-band rendering (V1.160 P2 T1)', () => {
   it('renders the vertical time-band panel when Brief is active and the bound World has era entities', async () => {
@@ -730,7 +694,6 @@ describe('WorkTimelineCanvas — Brief layer time-band rendering (V1.160 P2 T1)'
       initialRouterEntries: ['/?layer=brief'],
     });
 
-    // The band panel appears once the outline + bound-World graph settle
     // (the canvas gates the Brief layer on `worldKbGraphQuery`).
     await waitFor(() => {
       expect(screen.getByTestId('brief-time-bands')).toBeInTheDocument();
@@ -739,7 +702,6 @@ describe('WorkTimelineCanvas — Brief layer time-band rendering (V1.160 P2 T1)'
     const bands = screen.getByTestId('brief-time-bands');
     expect(within(bands).getAllByTestId('brief-time-band')).toHaveLength(1);
     expect(bandOf(container, 'kb-era-1')).toHaveTextContent('The First Age');
-    // The superseded flat React Flow canvas is NOT mounted on the Brief
     // layer (CanvasShell + its timeline badge are absent).
     expect(screen.queryByTestId('canvas-shell-timeline-badge')).toBeNull();
   });
@@ -762,7 +724,6 @@ describe('WorkTimelineCanvas — Brief layer time-band rendering (V1.160 P2 T1)'
       initialRouterEntries: ['/?layer=brief'],
     });
 
-    // No era entities → honest Brief empty-state panel (PD-2 — read-only
     // projection), never a fabricated band surface. Wait for the canvas to
     // settle (outline + bound-World graph resolved) before asserting the
     // absence of the band panel.

@@ -1,5 +1,4 @@
 /**
- * Connection config persistence abstraction (V1.92 P1; v1.192 P0-T8 Electron
  * redacted store).
  *
  * The config shape is a client-side only data model — it is never sent to the
@@ -24,7 +23,6 @@ export interface ConnectionConfig {
   /** Full daemon URL including protocol and port. */
   endpointUrl: string;
   /**
-   * User-entered API key; sent as `X-API-Key` on protected requests. Optional:
    * the desktop store never returns the persisted key (redacted load), so a
    * desktop-saved config carries `hasApiKey` instead and an omitted `apiKey`
    * on save means "keep the stored credential". The browser backend requires
@@ -51,7 +49,6 @@ export interface ConnectionStorage {
 const STORAGE_KEY = 'nexus-connection-config-v1';
 
 /**
- * Web backend: persists the connection config in `localStorage`.
  *
  * Trust-boundary note (daemon-runtime.md §16.5):
  * - `localStorage` is readable by any script on the SPA origin, so an XSS
@@ -91,7 +88,6 @@ class WebConnectionStorage implements ConnectionStorage {
 }
 
 /**
- * Desktop backend: main-owned encrypted store behind the typed bridge (P0-T5).
  *
  * Load returns the **public projection only** — never the persisted API key
  * (D-18); the in-memory config carries `apiKey: ''` plus `hasApiKey`. Save
@@ -128,7 +124,6 @@ class DesktopConnectionStorage implements ConnectionStorage {
 }
 
 /**
- * Validate the raw parsed JSON has the minimal fields the WEB backend
  * requires. The browser localStorage record must carry the actual key —
  * an active keyless remote record would otherwise build an unauthenticated
  * remote BrowserClient. (The desktop redacted shape is constructed from the
@@ -155,7 +150,6 @@ export function createConnectionStorage(): ConnectionStorage {
 export function normalizeEndpointUrl(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return '';
-  // Strip trailing slashes for consistent storage and display.
   return trimmed.replace(/\/+$/, '');
 }
 

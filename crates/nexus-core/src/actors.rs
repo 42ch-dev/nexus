@@ -58,9 +58,6 @@ use sqlx::Row;
 /// `CHARACTER_WIRE_INVALID` internal code from this exact category prefix.
 pub const CHARACTER_WIRE_INVALID_PREFIX: &str = "character_wire_invalid";
 
-// ── Admission types ─────────────────────────────────────────────────────
-
-/// Pair classification for optional Actor/Viewpoint fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorPairMode {
     /// Both fields absent — exact legacy path.
@@ -142,8 +139,6 @@ fn not_found(resource: &str, id: &str) -> CoreError {
 fn invalid_input(message: impl Into<String>) -> CoreError {
     CoreError::ActorInput(message.into())
 }
-
-// ── Wire mapping (record → generated DTO) ───────────────────────────────
 
 pub fn wire_err(err: impl std::fmt::Display) -> CoreError {
     CoreError::Internal {
@@ -245,8 +240,6 @@ pub fn binding_pagination_wire(
     )
 }
 
-// ── Admission + fencing commands ────────────────────────────────────────
-
 impl CoreService {
     /// Admit a stored Actor: validate the closed `actor_ref`/`viewpoint`
     /// against stored ownership (active Creator self-ownership, active owned
@@ -304,13 +297,11 @@ impl CoreService {
             return Err(invalid_input("activity leases fence Character actors only"));
         };
         let pool = &self.inner.pool;
-        // Owner-check before allocating a fence (no fence state leaks existence).
         require_character_row(pool, principal.creator_id(), character_id).await?;
         let parts = self
             .inner
             .character_fences
             .try_acquire_activity(character_id)?;
-        // Re-read under the fence: a transition holds the exclusive write
         // guard, so this status/epoch pair is exact for the lease's lifetime.
         let stored = require_character_row(pool, principal.creator_id(), character_id).await?;
         if stored.status != "active" {
@@ -349,7 +340,6 @@ impl CoreService {
             .inner
             .character_fences
             .try_acquire_transition(&character_id)?;
-        // Re-read under the exclusive fence so the pre-transition epoch is
         // exact for material-vs-no-op session retirement (§11.3.2–§11.3.3).
         let stored = require_character_row(pool, principal.creator_id(), &character_id).await?;
         Ok(crate::actor_fence::CharacterTransitionLease::new(
@@ -400,7 +390,6 @@ impl CoreService {
                 CharacterStatus::Active
             }
         };
-        // §2.2: resolve the identity's holder through the same exported read the
         // admission paths use, before the lifecycle write. The storage layer
         // re-resolves it inside the transaction, so the archive/restore commit
         // still fails closed on a registry that changed under the fence.
@@ -515,7 +504,6 @@ pub async fn require_admitted_ownership(
             require_active_binding(pool, character_id, binding, &viewpoint.world_id).await?;
         }
     }
-    // §2.1: the identity is usable only while its holder registry row exists;
     // admission is a normal read, so missing/corrupt registry state fails
     // closed here instead of provisioning a holder.
     require_actor_holder(pool, caller_creator_id, actor).await?;
@@ -661,8 +649,6 @@ pub async fn require_active_binding(
     }
 }
 
-// ── Character / binding family ──────────────────────────────────────────
-
 impl CoreService {
     /// Create an owned Character with its initial active binding in one
     /// atomic write (display name uniqueness, persona/`WorldSheet` validation
@@ -787,7 +773,6 @@ impl CoreService {
                 },
             )
             .await?;
-        // §2.2: the lifecycle write resolves the identity's holder through the
         // same exported read the admission paths use (the storage layer
         // re-resolves it inside its own transaction).
         require_actor_holder(
@@ -1130,7 +1115,6 @@ impl CoreActorAdmission {
                     .await?;
             }
         }
-        // §2.1/§2.2: the same fail-closed holder resolution as the core
         // admission path — a normal read never provisions a missing holder.
         require_actor_holder(&self.pool, caller_creator_id, &actor).await?;
         let view = self

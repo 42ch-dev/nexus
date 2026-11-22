@@ -168,7 +168,6 @@ fn map_commit_error(err: SessionError) -> CoreError {
         SessionError::NotFound(id) => CoreError::NotFound {
             resource: format!("workspace session {id}"),
         },
-        // Conflicts: stale/expired session, OCC hash mismatch, unsettled
         // recovery intent, foreign workspace root.
         SessionError::AlreadyCommitted(_)
         | SessionError::Expired(_)

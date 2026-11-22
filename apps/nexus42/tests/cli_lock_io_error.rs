@@ -35,7 +35,6 @@ fn lock_io_error_matches_for_exit_code_78() {
     let io_err = std::io::Error::other("disk full");
     let cli_err = CliError::LockIo(io_err);
 
-    // Verify the error pattern for exit-code matching in main.rs.
     assert!(
         matches!(cli_err, CliError::LockIo(_)),
         "LockIo must match CliError::LockIo pattern"
@@ -81,7 +80,6 @@ fn lock_io_source_returns_inner_error() {
 
 #[test]
 fn locked_error_unchanged_after_refactor() {
-    // Regression: ensure the Locked variant display didn't change.
     let err = CliError::Locked {
         holder_pid: 1234,
         holder_name: "cli:cron-set".to_string(),

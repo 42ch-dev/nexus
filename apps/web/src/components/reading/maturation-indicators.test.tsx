@@ -4,7 +4,6 @@ import { render, screen } from '@testing-library/react';
 import { MaturationIndicators } from './maturation-indicators';
 
 /**
- * V1.121 P1 T3 — MaturationIndicators count-badge tokenization (DESIGN.md
  * components.reading-maturation-badge).
  *
  * Pins: KB-density and open-findings count badges consume the projected

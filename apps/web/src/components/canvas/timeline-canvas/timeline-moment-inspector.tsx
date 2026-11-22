@@ -1,5 +1,4 @@
 /**
- * World Timeline Moment inspector — V1.156 P1 fix-wave 1 (F1).
  *
  * Read-only inspector for Moment scene/beat nodes projected onto the World
  * Timeline Moment layer (`projectMomentLayer` — fixture-driven
@@ -36,7 +35,6 @@ import type { Node } from '@xyflow/react';
 
 import type { WorkTimelineNodeData } from '../work-timeline-canvas/work-timeline-canvas-adapter';
 
-// ─── Field row primitive (mirrors work-timeline-inspector.tsx) ─────────────
 
 function FieldRow({
   label,
@@ -86,10 +84,7 @@ function ManuscriptAnchorBlock({
   );
 }
 
-// ─── Shared read-only shell ────────────────────────────────────────────────
-
 /**
- * Read-only inspector shell — title + description + children + a read-only
  * note. Outline accent (amber-700) mirrors the Work Timeline Moment
  * inspectors + the Work-scoped Moment node feel (V1.123 layer-feel §2.4).
  * NO submit wiring, NO Save, NO cross-surface CTA — display-only.
@@ -129,10 +124,7 @@ function TimelineMomentInspectorShell({
   );
 }
 
-// ─── Moment scene inspector ────────────────────────────────────────────────
-
 /**
- * Moment scene inspector — scene card detail. Shows scene id + chapter +
  * status (if any) + the chapter/scene manuscript anchor. Outline accent
  * mirrors the Moment scene node (Work-scoped outline-projection). Read-only:
  * no Save, no `kb.patch_entity` path, no Edit-in-Outline CTA (the World
@@ -189,10 +181,7 @@ export function TimelineMomentSceneInspector({
   );
 }
 
-// ─── Moment beat inspector ─────────────────────────────────────────────────
-
 /**
- * Moment beat inspector — beat pin detail. Shows beat id + parent scene id +
  * status (if any) + the chapter/scene/beat manuscript anchor. Outline accent
  * mirrors the Moment beat node. Read-only: no Save, no `kb.patch_entity`
  * path, no Edit-in-Outline CTA (see module doc).
@@ -248,10 +237,7 @@ export function TimelineMomentBeatInspector({
   );
 }
 
-// ─── Dispatch ──────────────────────────────────────────────────────────────
-
 /**
- * Dispatch the selected node to the right World Timeline Moment inspector by
  * `node.data.nodeKind`. Returns `null` for unknown kinds so the
  * `useCanvasSurface` derived `surface.inspector` slot renders nothing when
  * the selection does not match a Moment node.

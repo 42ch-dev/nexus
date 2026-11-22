@@ -1,5 +1,4 @@
 /**
- * Strategy canvas data hooks — TanStack Query bindings for the Strategy read
  * surface and Idea steering affordance.
  *
  * Write mutations (state, transition, prompt template) live next to the
@@ -71,7 +70,6 @@ function useErrorToast() {
   const { toast } = useToast();
   const { t } = useTranslation('common');
   /**
-   * `descriptionOverride` replaces the error's own message when the mutation
    * knows more than the raw failure (Steer's partial append, W5).
    */
   return (error: unknown, key: string, descriptionOverride?: string) => {
@@ -124,7 +122,6 @@ export interface SteerIdeaArgs {
 }
 
 /**
- * Steer partial failure (W5, `current-host-contracts.md` §3.3): the Idea was
  * committed as a durable core context version, but the follow-up resume signal
  * was refused. The committed version is never rolled back or re-appended, so
  * the caller must report the resume refusal and refresh the visible version.
@@ -142,7 +139,6 @@ class SteerResumeRefusedError extends Error {
 }
 
 /**
- * True if the schedule refused the signal as its own wait/state conflict (409).
  *
  * The core carries those codes in `details.wire_code` — the public `code` stays
  * the generic `invalid_input` (crates/nexus-core-node/src/core_error.rs,
@@ -169,7 +165,6 @@ export function useSteerStrategy() {
   const { toast } = useToast();
   return useMutation({
     mutationFn: async (args: SteerIdeaArgs) => {
-      // Append first: the Idea must be durable before resume counts as success.
       // These are two sequential calls, not one transaction — a refused resume
       // leaves this committed version in place and is never retried.
       const appended = await client.editCoreContext(args.scheduleId, {
@@ -190,7 +185,6 @@ export function useSteerStrategy() {
     },
     onError: (error, args) => {
       if (error instanceof SteerResumeRefusedError) {
-        // The append is durable: refresh the schedule rows so the visible core
         // context version is not stale. The Idea is not re-appended.
         void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
         errorToast(

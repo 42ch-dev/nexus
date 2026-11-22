@@ -122,7 +122,6 @@ async fn run_combined_doctor() -> Result<()> {
 
     let mut issues = 0u32;
 
-    // Check 1: ACP registry reachability
     print!("  [1/2] ACP registry reachability... ");
     match nexus_acp_host::registry::RegistryClient::new() {
         Ok(reg_client) => match reg_client.get_registry().await {
@@ -144,7 +143,6 @@ async fn run_combined_doctor() -> Result<()> {
         }
     }
 
-    // Check 2: Home directory health
     print!("  [2/2] Home directory (~/.nexus42/)... ");
     match crate::config::nexus_home() {
         Ok(home) => {
@@ -171,10 +169,6 @@ async fn run_combined_doctor() -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -182,7 +176,6 @@ mod tests {
 
     #[test]
     fn print_completion_valid_shell_bash() {
-        // Should not error for a valid shell name
         assert!(print_completion("bash").is_ok());
     }
 

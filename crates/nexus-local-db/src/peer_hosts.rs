@@ -106,7 +106,6 @@ pub async fn record_peer_manifest(
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
 pub async fn list_peer_manifests(pool: &SqlitePool) -> Result<Vec<PeerHostRow>, LocalDbError> {
-    // `host_id as "host_id!"` — SQLite describes a TEXT PRIMARY KEY as
     // nullable (sqlx 0.8.6), the non-null coercion matches the `String` field.
     let rows = sqlx::query_as!(
         PeerHostRow,
@@ -172,7 +171,6 @@ mod tests {
 
     const T1: &str = "2026-08-08T10:00:00+00:00";
     const T2: &str = "2026-08-08T11:30:00+00:00";
-    // libp2p-style base58 `PeerId`s (R-V1155P0-001 diagnostics fixtures).
     const PEER_ID_A: &str = "12D3KooWPeerIdA000000000000000000000000000000000000";
     const PEER_ID_B: &str = "12D3KooWPeerIdB000000000000000000000000000000000000";
     const MANIFEST_V1: &str =

@@ -1,5 +1,4 @@
 /**
- * Global Timeline list chrome — presentational extract (V1.124 P2).
  *
  * Props-driven Card + World activity rows. No daemon hooks, no contracts,
  * no router, no `useTranslation`. App `GlobalTimelineView` maps query data →

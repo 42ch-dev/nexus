@@ -196,7 +196,6 @@ async fn transition_races_admitted_activity() {
         character_id: env.character_id.clone(),
     };
 
-    // Active effect holds the shared lease on the first core.
     let activity = core_a
         .acquire_actor_activity(&principal_a, &actor)
         .await
@@ -204,14 +203,12 @@ async fn transition_races_admitted_activity() {
     assert_eq!(activity.character_id(), env.character_id);
     assert_eq!(activity.epoch(), 0);
 
-    // The second core's transition refuses busy — never waits, never cancels.
     let err = core_b
         .acquire_character_transition(&principal_b, env.character_id.clone())
         .await
         .expect_err("transition must refuse while activity is outstanding");
     assert_conflict(err, "character_busy");
 
-    // Release; the transition then commits exactly one epoch.
     drop(activity);
     let (_, pre_revision, pre_epoch) = character_row(&env, &env.character_id).await;
     let response = core_b
@@ -231,7 +228,6 @@ async fn transition_races_admitted_activity() {
     assert_eq!(epoch, pre_epoch + 1);
     assert_eq!(response.character.status.to_string(), "archived");
 
-    // The old admitted token is stale: activity on the pre-transition token
     // now observes the archived row under the fence.
     let err = core_a
         .acquire_actor_activity(&principal_a, &actor)
@@ -264,7 +260,6 @@ async fn activity_admission_is_busy_while_a_transition_lease_is_held() {
         character_id: env.character_id.clone(),
     };
 
-    // core_b holds the exclusive transition lease — acquired, not yet
     // committed, and deliberately still held across the next call.
     let lease = core_b
         .acquire_character_transition(&principal_b, env.character_id.clone())
@@ -280,7 +275,6 @@ async fn activity_admission_is_busy_while_a_transition_lease_is_held() {
     let err = refused.expect_err("activity must be refused while a transition is held");
     assert_conflict(err, "character_busy");
 
-    // Releasing the lease admits the effect on the same core, still at the
     // pre-transition epoch (nothing was committed).
     drop(lease);
     let activity = core_a
@@ -410,7 +404,6 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
     let chr = &env.character_id;
     let bid = env.binding_id.as_str();
 
-    // Happy path: trusted owner, binding and stored Character epoch.
     let ctx = admission
         .admit(
             CREATOR,
@@ -426,7 +419,6 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
     assert_eq!(ctx.binding_id.as_deref(), Some(bid));
     assert_eq!(ctx.character_epoch, Some(0));
 
-    // Foreign creator token and Creator-with-binding shape.
     let err = admission
         .admit(
             CREATOR,
@@ -451,13 +443,11 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         .expect_err("creator with binding");
     assert_invalid_input(&err);
 
-    // Pair classification stays a stable 400 on partial pairs.
     assert!(matches!(
         classify_pair(true, false),
         Err(CoreError::ActorInput(_))
     ));
 
-    // Missing/foreign World → 404; owned archived World → 409 world_inactive.
     let err = admission
         .admit(
             CREATOR,
@@ -492,7 +482,6 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         .await
         .unwrap();
 
-    // Owned archived Character → 409 character_inactive.
     sqlx::query("UPDATE characters SET status = 'archived' WHERE character_id = ?")
         .bind(chr)
         .execute(&pool)
@@ -515,7 +504,6 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         .await
         .unwrap();
 
-    // Inactive binding → 404 (existence hidden).
     sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
         .bind(bid)
         .execute(&pool)
@@ -538,7 +526,6 @@ async fn admission_deny_matrix_world_character_binding_mismatches() {
         .await
         .unwrap();
 
-    // Cross-Character binding and binding targeting a foreign world → 404.
     let err = admission
         .admit(
             CREATOR,
@@ -673,7 +660,6 @@ async fn v1191_holder_lifecycle_actor_holders_are_stable_across_the_lifecycle() 
     let (core, principal) = open_core(&env).await;
     let pool = plain_pool(&env).await;
 
-    // Both Actor kinds resolve the derived holder on a normal read.
     let creator_holder = nexus_core::require_actor_holder(
         &pool,
         CREATOR,
@@ -703,7 +689,6 @@ async fn v1191_holder_lifecycle_actor_holders_are_stable_across_the_lifecycle() 
         1
     );
 
-    // Rename: the projected label moves, the holder does not.
     let renamed = core
         .patch_character(
             &principal,
@@ -724,7 +709,6 @@ async fn v1191_holder_lifecycle_actor_holders_are_stable_across_the_lifecycle() 
     );
     let (_, revision, _) = character_row(&env, &env.character_id).await;
 
-    // Archive keeps the holder and the retained management read answers.
     core.transition_character(
         &principal,
         transition_request(
@@ -746,7 +730,6 @@ async fn v1191_holder_lifecycle_actor_holders_are_stable_across_the_lifecycle() 
         "archived".to_string()
     );
 
-    // Restore reuses the same holder.
     let (_, archived_revision, _) = character_row(&env, &env.character_id).await;
     core.transition_character(
         &principal,
@@ -769,7 +752,6 @@ async fn v1191_holder_lifecycle_actor_holders_are_stable_across_the_lifecycle() 
         1,
         "one Character materialization keeps exactly one holder"
     );
-    // The actor admission path resolves the same holder and still composes.
     let admission = CoreActorAdmission::new(pool.clone());
     admission
         .admit(
@@ -801,7 +783,6 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_closed() {
         0
     );
 
-    // The normal read refuses with the stable code instead of provisioning.
     let err = nexus_core::require_actor_holder(&pool, CREATOR, &character_actor)
         .await
         .expect_err("missing registry must fail the read");
@@ -812,7 +793,6 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_closed() {
         "a read never mints the missing row"
     );
 
-    // Both admission entry points fail closed on the same state.
     let err = CoreActorAdmission::new(pool.clone())
         .admit(
             CREATOR,
@@ -828,7 +808,6 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_closed() {
         .expect_err("composed admission must fail closed");
     assert_conflict(err, "holder_state_invalid");
 
-    // A missing Creator holder is refused as well.
     drop_holder_row(&env, "creator_id", CREATOR).await;
     let err = nexus_core::require_actor_holder(
         &pool,
@@ -841,7 +820,6 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_closed() {
     .expect_err("Creator read must fail closed");
     assert_conflict(err, "holder_state_invalid");
 
-    // A foreign Actor never widens existence through the holder read.
     drop_holder_row(&env, "character_id", &env.foreign_character_id).await;
     let err = nexus_core::require_actor_holder(
         &pool,
@@ -888,7 +866,6 @@ fn selection_admits(scope: &KnowledgeReadScope, row: &KnowledgeEntryRecord) -> b
                 }),
             }
         }
-        // Unknown vocabulary cannot exist as a native row (the storage CHECK in
         // `seed_governance_fixture` proves it) and stays quarantined (§6).
         Some(_) => false,
     }
@@ -995,7 +972,6 @@ async fn seed_governance_fixture(env: &Env) -> GovernanceFixture {
             Some(&first_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
-        // v1.191 P1 T6 additions: the first Character's own container carries a
         // shared row, its own private row, and a storable private row held by
         // somebody else (the shape a hidden read-by-id must not reveal); its
         // binding carries a binding-local private row.
@@ -1026,7 +1002,6 @@ async fn seed_governance_fixture(env: &Env) -> GovernanceFixture {
     ] {
         store.insert_knowledge_entry(row).await.unwrap();
     }
-    // Unknown disclosure vocabulary cannot exist as a native row at all: the
     // cutover keeps it out of `kb_key_blocks` (durable §6 quarantine).
     let unknown = sqlx::query(
         "INSERT INTO kb_key_blocks \
@@ -1072,14 +1047,13 @@ fn container_ids(scope: &KnowledgeReadScope) -> Vec<(String, String)> {
     ids
 }
 
-#[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // one fixture asserted across both policies; the admitted contexts are held across the assertions
+#[allow(clippy::too_many_lines, clippy::significant_drop_tightening)]
 #[tokio::test]
 async fn v1191_knowledge_admission_management_visible_actor_hidden() {
     let env = seed_env().await;
     let fixture = seed_governance_fixture(&env).await;
     let (core, principal) = open_core(&env).await;
 
-    // CreatorManagement: the owned World plus every owned Character/binding
     // container and the known-governance holder set — never an absent viewpoint.
     let management = core
         .admit_creator_management_knowledge(&principal, WORLD.to_string())
@@ -1120,7 +1094,6 @@ async fn v1191_knowledge_admission_management_visible_actor_hidden() {
         "management known-governance holders are the owner Creator plus every owned Character"
     );
 
-    // ActorView: the exact admitted holder plus its authorized containers only.
     let first_actor = AdmittedActor::Character {
         character_id: env.character_id.clone(),
     };
@@ -1150,7 +1123,6 @@ async fn v1191_knowledge_admission_management_visible_actor_hidden() {
         "an ActorView never inherits the management known-governance set"
     );
 
-    // Row-level outcomes under the §4.2 rule: the same stored rows are
     // management-visible and Actor-hidden (and vice versa).
     let pool = plain_pool(&env).await;
     let store = SqliteKbStore::new(pool.clone());
@@ -1173,7 +1145,6 @@ async fn v1191_knowledge_admission_management_visible_actor_hidden() {
         );
     }
 
-    // A second ActorView sees exactly its own private rows, never the first
     // Character's: the exact holder is the only private row it admits.
     let second = core
         .admit_actor_knowledge_view(
@@ -1205,7 +1176,6 @@ async fn v1191_knowledge_admission_management_visible_actor_hidden() {
         "a Character view never inherits another holder's private row"
     );
 
-    // Both fingerprints were read under the leases and differ by policy.
     assert_eq!(
         management.revisions(),
         nexus_core::KnowledgeRevisions {
@@ -1234,7 +1204,6 @@ async fn v1191_knowledge_admission_spoofed_viewpoint_and_actor_are_refused() {
         character_id: env.character_id.clone(),
     };
 
-    // The holder is the stored derivation, never anything the caller supplies.
     let admitted = core
         .admit_actor_knowledge_view(
             &principal,
@@ -1248,7 +1217,6 @@ async fn v1191_knowledge_admission_spoofed_viewpoint_and_actor_are_refused() {
         Some(nexus_local_db::character_holder_entry_id(&env.character_id).as_str())
     );
 
-    // A foreign holder string supplied through the actor never widens the
     // selection: the foreign Actor is simply not found.
     let err = core
         .admit_actor_knowledge_view(
@@ -1262,7 +1230,6 @@ async fn v1191_knowledge_admission_spoofed_viewpoint_and_actor_are_refused() {
         .expect_err("foreign Actor");
     assert_not_found(&err);
 
-    // A viewpoint naming another Character's binding is refused.
     let err = core
         .admit_actor_knowledge_view(
             &principal,
@@ -1273,7 +1240,6 @@ async fn v1191_knowledge_admission_spoofed_viewpoint_and_actor_are_refused() {
         .expect_err("cross-Character binding");
     assert_not_found(&err);
 
-    // A foreign World viewpoint is refused.
     let err = core
         .admit_actor_knowledge_view(
             &principal,
@@ -1284,7 +1250,6 @@ async fn v1191_knowledge_admission_spoofed_viewpoint_and_actor_are_refused() {
         .expect_err("foreign World");
     assert_not_found(&err);
 
-    // A Creator actor carrying a binding is a pair-shape violation.
     let err = core
         .admit_actor_knowledge_view(
             &principal,
@@ -1297,7 +1262,6 @@ async fn v1191_knowledge_admission_spoofed_viewpoint_and_actor_are_refused() {
         .expect_err("Creator with binding");
     assert_invalid_input(&err);
 
-    // A missing registry row fails closed instead of provisioning a holder.
     drop_holder_row(&env, "character_id", &env.character_id).await;
     let err = core
         .admit_actor_knowledge_view(
@@ -1330,7 +1294,6 @@ async fn v1191_knowledge_admission_identity_binds_policy_and_stored_revisions() 
     let baseline_identity = baseline.identity();
     drop(baseline);
 
-    // A cosmetic rename moves the projected label and the content revision,
     // never the knowledge revisions: the reuse fingerprint stays usable.
     let (_, revision, _) = character_row(&env, &env.character_id).await;
     core.patch_character(
@@ -1355,7 +1318,6 @@ async fn v1191_knowledge_admission_identity_binds_policy_and_stored_revisions() 
         "a cosmetic rename leaves the reuse fingerprint untouched"
     );
 
-    // A stored Character governance bump is observed by the next admission
     // (this is what retires a reused session).
     set_knowledge_revision(&pool, "character", &env.character_id, 1).await;
     let after_character = core
@@ -1365,7 +1327,6 @@ async fn v1191_knowledge_admission_identity_binds_policy_and_stored_revisions() 
     assert_eq!(after_character.identity().character_revision(), Some(1));
     assert_ne!(after_character.identity(), after_rename.identity());
 
-    // The World revision participates too.
     set_knowledge_revision(&pool, "world", WORLD, 2).await;
     let after_world = core
         .admit_actor_knowledge_view(&principal, &actor, viewpoint.clone())
@@ -1374,7 +1335,6 @@ async fn v1191_knowledge_admission_identity_binds_policy_and_stored_revisions() 
     assert_eq!(after_world.identity().world_revision(), 2);
     assert_ne!(after_world.identity(), after_character.identity());
 
-    // Same stored revisions, different policy kind: the policy is part of the
     // fingerprint, so management and ActorView can never share a session key.
     let management = core
         .admit_creator_management_knowledge(&principal, WORLD.to_string())
@@ -1400,7 +1360,6 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
         character_id: env.character_id.clone(),
     };
 
-    // Canonical order inside a plan is World ids then Character ids. Holding
     // both the World and the lexically-last Character exclusively must refuse
     // on the World, proving the World is attempted first.
     let mut characters = [
@@ -1433,7 +1392,6 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
     assert_conflict(refused, "world_busy");
     drop(world_lease);
 
-    // Partial acquisition release: with only the last Character contended the
     // plan takes World + first Character, fails on the last, and must release
     // everything it already took.
     let refused = core
@@ -1457,7 +1415,6 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
     drop(world_after);
     drop(first_after);
 
-    // An in-flight activity effect (what a running stream holds) blocks the
     // disclosure edit on its Character.
     let activity = core
         .acquire_actor_activity(&principal, &first_actor)
@@ -1474,7 +1431,6 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
     assert_conflict(refused, "character_busy");
     drop(activity);
 
-    // An admitted ActorView context holds World then Character shared leases
     // through its effect, blocking both governance edits and the retained
     // lifecycle transition; draining it releases every lease.
     let context = core
@@ -1520,7 +1476,6 @@ async fn v1191_knowledge_admission_fence_blocks_and_releases_partial_plan() {
         .expect("draining the effect releases the Character lease");
     drop(drained);
 
-    // Reverse direction: a held governance edit refuses the next admission.
     let world_lease = core
         .acquire_knowledge_governance(&principal, ActorFenceKind::World, WORLD.to_string())
         .await
@@ -1672,7 +1627,6 @@ async fn v1191_holder_visibility_actor_view_pages_skip_hidden_rows() {
             "{hidden} must not be paged into a Character ActorView"
         );
     }
-    // Two independently admitted Characters and the reason the matrix holds:
     // the same stored rows, a different resolved holder.
     let second = core
         .admit_actor_knowledge_view(
@@ -1730,7 +1684,6 @@ async fn v1191_holder_visibility_actor_view_boundary_fraction_pages_every_row() 
     if private < shared {
         std::mem::swap(&mut shared, &mut private);
     }
-    // Both truncate to 10:00:00.000; only the smaller id rounds up a millisecond.
     set_created_at(&pool, &shared, "2026-01-01T10:00:00.000900000Z").await;
     set_created_at(&pool, &private, "2026-01-01T10:00:00.000100000Z").await;
     pool.close().await;
@@ -1824,7 +1777,6 @@ async fn v1191_holder_visibility_detail_hidden_equals_absent() {
         .expect("a shared row stays readable");
     assert_eq!(shared.canonical_name, "FirstCharacterShared");
 
-    // The observable refusal shape with the caller-supplied id normalized away:
     // two refusals must be identical by this measure, so a hidden id cannot be
     // distinguished from an absent one by the caller.
     let absent_id = "kb_never_written";
@@ -1835,7 +1787,6 @@ async fn v1191_holder_visibility_detail_hidden_equals_absent() {
     let absent_shape = refusal_shape(&absent, absent_id);
     assert_not_found(&absent);
 
-    // Hidden by holder, then outside the container (World container, the other
     // Character's container, the other binding's provenance).
     for name in [
         "FirstCharacterForeignPrivate",
@@ -1940,7 +1891,6 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
         "a management snapshot is never returned as an ActorView"
     );
 
-    // Durable §5.1: the Creator knowledge-view surface **is** the management
     // review (the authorized Creator reviews owned private facts). It therefore
     // equals the management set above — never the old holder-filtered Creator
     // ActorView — while still excluding the foreign World's row.
@@ -1985,7 +1935,6 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
         "the foreign World's row never enters the management review"
     );
 
-    // The other direction: a Character `ActorView` stays strictly
     // holder-filtered and never inherits that review. The second Character's
     // view is the smallest case — its own holder plus the shared World row —
     // and excludes both the binding-local private row and every row held by
@@ -2021,7 +1970,6 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
         "a Character ActorView never inherits the management review"
     );
 
-    // The Character view is a **proper subset** of the management review: no
     // rows are gained, so the two policies cannot be confused for one another.
     for name in &second_names {
         assert!(
@@ -2034,7 +1982,6 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
         "an ActorView must not equal the management review"
     );
 
-    // The Character detail listing (no World filter) applies the same
     // selection: its own container, its own holder.
     let listed = core
         .list_character_knowledge(&principal, env.character_id.clone(), 100, None)
@@ -2046,8 +1993,6 @@ async fn v1191_holder_visibility_management_and_actor_view_stay_separate() {
         "the Character-owned listing hides the foreign-holder private row"
     );
 }
-
-// ── v1.191 P1 T7: admitted audience authoring (durable §3/§4.3) ──────────
 
 /// Owner-scoped native governance pair of one stored KE.
 async fn stored_governance(
@@ -2148,7 +2093,6 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
     let character_holder = nexus_local_db::character_holder_entry_id(&env.character_id);
     let foreign_holder = nexus_local_db::character_holder_entry_id(&env.foreign_character_id);
 
-    // World row + author-only → the admitted controlling Creator's holder.
     let author_only_row = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2173,7 +2117,6 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
         )
     );
 
-    // World row + character-private naming a Character actively bound to that
     // World → that Character's holder.
     let world_private = core
         .add_actor_knowledge_entry(
@@ -2199,7 +2142,6 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
         )
     );
 
-    // Omitted audience (and explicit shared) both store no governance.
     let omitted = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2232,7 +2174,6 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
         (None, None, 0)
     );
 
-    // Character-owned row + character-private naming its own owning Character.
     let character_row = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2257,7 +2198,6 @@ async fn v1191_audience_cas_create_resolves_permitted_identities() {
         )
     );
 
-    // Binding-owned row + character-private naming its owning Character.
     let binding_row = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2304,7 +2244,6 @@ async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
     let pool = plain_pool(&env).await;
     let before = knowledge_row_count(&pool).await;
 
-    // Owned + active, but no binding to the target World.
     let err = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2327,7 +2266,6 @@ async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
         "refusal wrote no row"
     );
 
-    // Foreign Character (another Creator's) stays hidden.
     let err = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2346,7 +2284,6 @@ async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
     assert_not_found(&err);
     assert_eq!(knowledge_row_count(&pool).await, before);
 
-    // A Character row may only target its own owning Character.
     let err = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2364,7 +2301,6 @@ async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
         .unwrap_err();
     assert_not_found(&err);
 
-    // A binding row likewise targets only its owning Character.
     let err = core
         .add_actor_knowledge_entry(
             &principal,
@@ -2383,7 +2319,6 @@ async fn v1191_audience_cas_create_refuses_unpermitted_identities() {
     assert_not_found(&err);
     assert_eq!(knowledge_row_count(&pool).await, before);
 
-    // Owned but archiving the Character removes it from the permitted set.
     let characters = plain_pool(&env).await;
     let (_, revision, _) = character_row(&env, &unbound).await;
     nexus_local_db::transition_character(
@@ -2446,7 +2381,6 @@ async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
     let entry_id = created.entry_id.clone();
     assert_eq!(stored_governance(&pool, &entry_id).await, (None, None, 0));
 
-    // Governed patch: the pair and the owning Character's knowledge revision
     // move under the same expected_revision CAS.
     let patched = core
         .patch_actor_knowledge_entry(
@@ -2487,7 +2421,6 @@ async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
     );
     drop(admitted);
 
-    // A content-only patch omits the member: the stored pair is preserved.
     let content_only = core
         .patch_actor_knowledge_entry(
             &principal,
@@ -2512,7 +2445,6 @@ async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
     );
     assert_eq!(stored_character_revision(&pool, &env.character_id).await, 2);
 
-    // Explicit shared clears both columns.
     core.patch_actor_knowledge_entry(
         &principal,
         env.character_id.clone(),
@@ -2527,7 +2459,6 @@ async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
     assert_eq!(stored_governance(&pool, &entry_id).await, (None, None, 3));
     assert_eq!(stored_character_revision(&pool, &env.character_id).await, 3);
 
-    // No-op: identical content and identical audience move neither revision.
     let no_op = core
         .patch_actor_knowledge_entry(
             &principal,
@@ -2543,7 +2474,6 @@ async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
     assert_eq!(no_op.revision, Some(3));
     assert_eq!(stored_character_revision(&pool, &env.character_id).await, 3);
 
-    // Stale CAS writes nothing.
     let err = core
         .patch_actor_knowledge_entry(
             &principal,
@@ -2560,7 +2490,6 @@ async fn v1191_audience_cas_patch_moves_governance_under_the_ke_revision() {
     assert_eq!(stored_governance(&pool, &entry_id).await, (None, None, 3));
     assert_eq!(stored_character_revision(&pool, &env.character_id).await, 3);
 
-    // A foreign Character is never a permitted patch audience, and the
     // refusal leaves the row byte-identical.
     let err = core
         .patch_actor_knowledge_entry(
@@ -2664,7 +2593,6 @@ async fn v1191_audience_cas_restated_content_still_moves_governance() {
         .await
         .expect("shared create admits");
 
-    // shared → author-only while re-stating the (absent) summary is still a
     // material governance write.
     let authored = core
         .patch_actor_knowledge_entry(
@@ -2690,7 +2618,6 @@ async fn v1191_audience_cas_restated_content_still_moves_governance() {
     );
     assert_eq!(stored_character_revision(&pool, &env.character_id).await, 1);
 
-    // …and the same explicit summary with `shared` clears the pair.
     let cleared = core
         .patch_actor_knowledge_entry(
             &principal,
@@ -2710,7 +2637,6 @@ async fn v1191_audience_cas_restated_content_still_moves_governance() {
     );
     assert_eq!(stored_character_revision(&pool, &env.character_id).await, 2);
 
-    // A true no-op (same content, same audience) still moves neither.
     let no_op = core
         .patch_actor_knowledge_entry(
             &principal,
@@ -2768,7 +2694,6 @@ async fn v1191_audience_cas_governed_create_takes_the_exclusive_fence() {
         "refusal wrote no row"
     );
 
-    // The retained shared lane still admits under the same activity lease.
     core.add_actor_knowledge_entry(
         &principal,
         create_request(
@@ -2787,7 +2712,6 @@ async fn v1191_audience_cas_governed_create_takes_the_exclusive_fence() {
     pool.close().await;
 }
 
-// ── P2-T6 — Actor admission and operation observation ─────────────────────
 //
 // Migrated from the retired daemon fixtures `characters_api.rs`,
 // `actor_knowledge_api.rs` and `character_tom_api.rs`. HTTP envelopes, router
@@ -2921,7 +2845,6 @@ async fn retained_character_create_rules_and_owner_scoping() {
     assert_eq!(String::from(created.binding.world_id.clone()), WORLD);
     assert_eq!(created.binding.status.to_string(), "active");
 
-    // A duplicate display name is a stable conflict with zero second row.
     let before = character_count(&env).await;
     let dup = core
         .create_character(&principal, create_character_request("Ava", WORLD_B, None))
@@ -2930,7 +2853,6 @@ async fn retained_character_create_rules_and_owner_scoping() {
     assert_conflict(dup, "duplicate_character_display_name");
     assert_eq!(character_count(&env).await, before);
 
-    // A non-eligible WorldSheet link is refused at create time too.
     let wrong_sheet = seed_sheet(&env, "sheet_wrong_create", WORLD, BlockType::Item).await;
     let sheeted = core
         .create_character(
@@ -2942,7 +2864,6 @@ async fn retained_character_create_rules_and_owner_scoping() {
     assert_conflict(sheeted, "invalid_world_sheet");
     assert_eq!(character_count(&env).await, before);
 
-    // A foreign World is indistinguishable from a missing one, with no write.
     let foreign = core
         .create_character(
             &principal,
@@ -2952,7 +2873,6 @@ async fn retained_character_create_rules_and_owner_scoping() {
         .unwrap_err();
     assert_not_found(&foreign);
 
-    // An owned but inactive World is not an active owner either.
     set_world_status(&env, WORLD, "paused").await;
     let paused = core
         .create_character(&principal, create_character_request("Paused", WORLD, None))
@@ -2962,7 +2882,6 @@ async fn retained_character_create_rules_and_owner_scoping() {
     assert_eq!(character_count(&env).await, before);
     set_world_status(&env, WORLD, "active").await;
 
-    // Show/list stay scoped to the selected creator: the other creator's
     // Character is neither listed nor readable, so nothing leaks.
     let listed = core.list_characters(&principal, 50, 0).await.expect("list");
     let ids: Vec<String> = listed
@@ -3074,7 +2993,6 @@ async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
     );
     assert_eq!(patched.character.persona["role"], "scout");
 
-    // A stale revision is a conflict carrying the retained code.
     let stale = core
         .patch_character(
             &principal,
@@ -3086,7 +3004,6 @@ async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
         .unwrap_err();
     assert_conflict(stale, "character_revision_conflict");
 
-    // Omission keeps the stored member; an explicit clear removes it.
     let omitted = core
         .patch_character(
             &principal,
@@ -3123,7 +3040,6 @@ async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
     assert!(cleared.character.persona.is_empty());
     assert_eq!(cleared.character.revision, revision + 3);
 
-    // A no-op (same values, same revision) leaves the revision untouched.
     let no_op = core
         .patch_character(
             &principal,
@@ -3139,7 +3055,6 @@ async fn retained_character_patch_cas_omit_clear_and_rename_collision() {
         .expect("no-op admits");
     assert_eq!(no_op.character.revision, revision + 3);
 
-    // A rename onto another owned Character's name is refused with zero
     // mutation of the target row.
     let second = core
         .create_character(&principal, create_character_request("Bea", WORLD_B, None))
@@ -3209,7 +3124,6 @@ async fn retained_character_archive_restore_lifecycle_and_guards() {
         "a material transition moves the epoch"
     );
 
-    // The listing still carries archived rows (retained management read).
     let listed = core.list_characters(&principal, 50, 0).await.expect("list");
     assert!(listed
         .items
@@ -3219,7 +3133,6 @@ async fn retained_character_archive_restore_lifecycle_and_guards() {
                 && item.status.to_string() == "archived"
         ));
 
-    // Writing an archived Character is refused, and the same-state archive is
     // a no-op that moves neither the revision nor the lifecycle epoch.
     let denied = core
         .patch_character(
@@ -3265,7 +3178,6 @@ async fn retained_character_archive_restore_lifecycle_and_guards() {
         env.character_id
     );
 
-    // Restore needs a live owned World binding.
     let (_, revision, _) = character_row(&env, &env.character_id).await;
     core.transition_character(
         &principal,
@@ -3293,7 +3205,6 @@ async fn retained_character_archive_restore_lifecycle_and_guards() {
     assert_conflict(no_binding, "character_restore_requires_active_binding");
     set_world_status(&env, WORLD, "active").await;
 
-    // Restore colliding with a live display name is refused.
     let collision = core
         .create_character(&principal, create_character_request("Ada", WORLD_B, None))
         .await
@@ -3355,7 +3266,6 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
         Some(sheet_a.as_str())
     );
 
-    // Relink, clear, then a same-state no-op that keeps the revision.
     let relinked = core
         .patch_binding(
             &principal,
@@ -3391,7 +3301,6 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
         .expect("no-op admits");
     assert_eq!(untouched.binding.revision, 3);
 
-    // A stale revision conflicts.
     let stale = core
         .patch_binding(
             &principal,
@@ -3404,7 +3313,6 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
         .unwrap_err();
     assert_conflict(stale, "binding_revision_conflict");
 
-    // Wrong-type sheet: refused as `invalid_world_sheet` with an explanation,
     // never the bare code as its own message.
     let wrong = core
         .patch_binding(
@@ -3424,7 +3332,6 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
         other => panic!("expected invalid_world_sheet, got {other:?}"),
     }
 
-    // 128 Unicode scalars but 131 bytes: the storage byte bound, not the wire
     // scalar bound, decides.
     let overlength = format!("kb_{}{}", "a".repeat(124), "\u{1f3ad}");
     assert_eq!(overlength.chars().count(), 128);
@@ -3441,7 +3348,6 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
         .unwrap_err();
     assert_conflict(bytes, "invalid_world_sheet");
 
-    // Link a live sheet again, archive the Character, and prove the retained
     // read still answers while every write is refused.
     core.patch_binding(
         &principal,
@@ -3508,8 +3414,6 @@ async fn retained_binding_world_sheet_cas_and_retained_read() {
     );
 }
 
-// ── Actor KnowledgeView / detail family ───────────────────────────────────
-
 fn view_query(world_id: &str, binding_id: Option<&str>, limit: u32) -> ActorKnowledgeViewQuery {
     ActorKnowledgeViewQuery {
         world_id: world_id.to_string(),
@@ -3574,7 +3478,6 @@ async fn retained_knowledge_view_admission_and_binding_requirement() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // A missing/foreign World and a foreign Character are indistinguishable
     // from missing rows on the view.
     let missing_world = core
         .actor_knowledge_view(
@@ -3595,7 +3498,6 @@ async fn retained_knowledge_view_admission_and_binding_requirement() {
         .unwrap_err();
     assert_not_found(&missing_character);
 
-    // A Character actor_ref without its binding never degrades into the
     // Creator management review.
     let unbounded = core
         .actor_knowledge_view(
@@ -3607,7 +3509,6 @@ async fn retained_knowledge_view_admission_and_binding_requirement() {
         .unwrap_err();
     assert_invalid_input(&unbounded);
 
-    // Authoring for a foreign owner is refused and writes nothing.
     let before = {
         let pool = plain_pool(&env).await;
         let rows = knowledge_row_count(&pool).await;
@@ -3631,7 +3532,6 @@ async fn retained_knowledge_view_admission_and_binding_requirement() {
         .unwrap_err();
     assert_not_found(&add_foreign);
 
-    // A binding that targets a foreign World is outside the owned scope.
     let foreign_binding = "awb_cccccccccccccccccccccccccccccccc";
     {
         let pool = plain_pool(&env).await;
@@ -3750,7 +3650,6 @@ async fn retained_binding_removal_blocked_by_owned_knowledge() {
     };
     assert_eq!(after_rows, before_rows, "the owned entry survives");
 
-    // The last-binding conflict wins over the owned-knowledge conflict.
     core.remove_binding(&principal, env.character_id.clone(), second_id)
         .await
         .expect("the non-last binding removes");
@@ -3772,7 +3671,6 @@ async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // A pre-cutover World row carries SQLite `datetime('now')` bytes; the wire
     // projection canonicalizes them and never rewrites the stored value.
     let pool = plain_pool(&env).await;
     insert_legacy_world_row(
@@ -3793,7 +3691,6 @@ async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
         "legacy bytes stay SQLite datetime: {stored}"
     );
 
-    // Two rows sharing one millisecond: the keyset must tie-break
     // deterministically and never skip or duplicate around the tie.
     insert_world_row_at(
         &pool,
@@ -3882,7 +3779,6 @@ async fn retained_knowledge_view_stored_bytes_and_keyset_tie_break() {
         "paging around the tie skips and duplicates nothing"
     );
 
-    // A malformed keyset token is refused before any query runs.
     let bad_cursor = core
         .actor_knowledge_view(
             &principal,
@@ -3924,7 +3820,6 @@ async fn retained_knowledge_inactive_read_write_split_and_detail_scope() {
         .expect("create admits");
     let entry_id = created.entry_id.clone();
 
-    // Detail reads hide a foreign scope and never leak a revision.
     let foreign_character = core
         .actor_knowledge_entry(
             &principal,
@@ -3948,7 +3843,6 @@ async fn retained_knowledge_inactive_read_write_split_and_detail_scope() {
         .unwrap_err();
     assert_not_found(&foreign_entry);
 
-    // An archived Character keeps its retained reads and refuses writes.
     set_character_status(&env, &env.character_id, "archived").await;
     let retained_view = core
         .actor_knowledge_view(
@@ -4001,7 +3895,6 @@ async fn retained_knowledge_inactive_read_write_split_and_detail_scope() {
     assert_conflict(inactive_patch, "character_inactive");
     set_character_status(&env, &env.character_id, "active").await;
 
-    // An archived owned World keeps its retained review and refuses the
     // World-owned write.
     set_world_status(&env, WORLD, "archived").await;
     core.actor_knowledge_view(
@@ -4053,7 +3946,6 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
     create["canonical_name"] = serde_json::json!("unused");
     let entry_id = created.entry_id.clone();
 
-    // An unknown sibling body member survives every summary edit.
     {
         let pool = plain_pool(&env).await;
         sqlx::query("UPDATE kb_key_blocks SET body_json = ? WHERE key_block_id = ?")
@@ -4099,7 +3991,6 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
     );
     assert_eq!(patched.revision, Some(u64::try_from(revision + 1).unwrap()));
 
-    // A rename-only patch preserves the summary.
     let renamed = core
         .patch_actor_knowledge_entry(
             &principal,
@@ -4122,7 +4013,6 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
     );
     assert_eq!(renamed.revision, Some(u64::try_from(revision + 2).unwrap()));
 
-    // A null summary clears it; an empty patch is refused; a stale revision
     // conflicts.
     let cleared = core
         .patch_actor_knowledge_entry(
@@ -4171,7 +4061,6 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
         "an unknown body member is never dropped: {body_json}"
     );
 
-    // An anchored entry cannot be deleted; a stale revision conflicts.
     {
         let pool = plain_pool(&env).await;
         sqlx::query(
@@ -4194,7 +4083,6 @@ async fn retained_knowledge_detail_summary_lifecycle_and_cas_guards() {
         .unwrap_err();
     assert_conflict(in_use, "knowledge_entry_in_use");
 
-    // An unrepresentable revision is refused by the CAS domain, never
     // truncated into a different row revision.
     let overflow = core
         .delete_actor_knowledge_entry(
@@ -4260,7 +4148,6 @@ async fn retained_knowledge_authoring_shape_guards() {
         .unwrap_err();
     assert_invalid_input(&world_summary);
 
-    // 65536 bytes of summary is the bound; one byte more is refused.
     let at_limit = format!("{}a", "字".repeat(21845));
     assert_eq!(at_limit.len(), 65536);
     let over = format!("{at_limit}b");
@@ -4286,8 +4173,6 @@ async fn retained_knowledge_authoring_shape_guards() {
         }
     }
 }
-
-// ── Character ToM (theory of mind) record/list family ─────────────────────
 
 fn tom_request(
     world_id: &str,
@@ -4523,7 +4408,6 @@ async fn retained_tom_l1_l2_order_and_subject_rules() {
         .expect("list");
     assert_eq!(orders(&page), vec![1, 2]);
 
-    // An L1 belief must be the viewer's own.
     let l1_foreign = core
         .record_character_tom(
             &principal,
@@ -4534,7 +4418,6 @@ async fn retained_tom_l1_l2_order_and_subject_rules() {
         .unwrap_err();
     assert_invalid_input(&l1_foreign);
 
-    // An L2 belief must name a different Character than the viewer.
     let l2_self = core
         .record_character_tom(
             &principal,
@@ -4553,7 +4436,6 @@ async fn retained_tom_l1_l2_order_and_subject_rules() {
         .unwrap_err();
     assert_invalid_input(&l2_self);
 
-    // An L2 subject outside the owned active scope is a not-found.
     let l2_unbound = core
         .record_character_tom(
             &principal,
@@ -4604,7 +4486,6 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
     };
 
     let before = mind_state_count(&env).await;
-    // A World-owned entry can never be a Character ToM carrier.
     let world_owned = core
         .record_character_tom(
             &principal,
@@ -4628,7 +4509,6 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
         "no derivative is written"
     );
 
-    // A carrier owned by another Character is a not-found.
     let foreign_carrier = seed_carrier(
         &env,
         &env.foreign_character_id,
@@ -4654,7 +4534,6 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
         .unwrap_err();
     assert_not_found(&foreign);
 
-    // A stale revision conflicts and leaves the CAS where it was.
     core.record_character_tom(
         &principal,
         env.character_id.clone(),
@@ -4689,7 +4568,6 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
     assert_actor_conflict(&stale);
     assert_eq!(mind_state_count(&env).await, before + 1);
 
-    // An archived viewer refuses the write but keeps the retained list read.
     set_character_status(&env, &env.character_id, "archived").await;
     let archived_viewer = core
         .record_character_tom(
@@ -4719,7 +4597,6 @@ async fn retained_tom_carrier_and_liveness_fail_closed() {
     assert_eq!(orders(&retained), vec![1]);
     set_character_status(&env, &env.character_id, "active").await;
 
-    // A paused World refuses the write.
     set_world_status(&env, WORLD, "paused").await;
     let paused = core
         .record_character_tom(
@@ -4752,7 +4629,6 @@ async fn retained_tom_module_shape_and_absent_belief() {
     let env = seed_env().await;
     let (core, principal) = open_core(&env).await;
 
-    // Order outside the closed space is refused (labels are enum-typed on the
     // wire and covered by the nexus-knowledge validation unit cases).
     let order3 = seed_carrier(
         &env,
@@ -4782,7 +4658,6 @@ async fn retained_tom_module_shape_and_absent_belief() {
     assert_eq!(mind_state_count(&env).await, before);
     assert_eq!(carrier_revision(&env, &order3).await, 0);
 
-    // A non-object `modules` and a non-array `belief` reject without rewrite.
     let array_modules = seed_carrier(
         &env,
         &env.character_id,
@@ -4843,7 +4718,6 @@ async fn retained_tom_module_shape_and_absent_belief() {
         "a non-array belief member is never replaced with an empty array"
     );
 
-    // Invalid persisted JSON is a distinguishable refusal that never
     // overwrites the bytes, on both record and list.
     let invalid = seed_carrier(
         &env,
@@ -4891,7 +4765,6 @@ async fn retained_tom_module_shape_and_absent_belief() {
         assert_eq!(text, "{\"belief\": [", "invalid bytes are preserved");
     }
 
-    // An absent `belief` member is zero rows, and unknown sibling module keys
     // round-trip verbatim through the CAS.
     let absent = seed_carrier(&env, &env.character_id, "NoBelief", serde_json::json!({})).await;
     core.record_character_tom(
@@ -5013,7 +4886,6 @@ async fn retained_tom_physical_ordinal_and_corpus_caps() {
     assert_eq!(carrier_ids(&page2), vec![carrier.clone()]);
     assert!(!page2.pagination.has_more);
 
-    // Corpus cap: more carriers than the fixed per-scope bound.
     let store = {
         let pool = plain_pool(&env).await;
         (SqliteKbStore::new(pool.clone()), pool)
@@ -5038,7 +4910,6 @@ async fn retained_tom_physical_ordinal_and_corpus_caps() {
         .unwrap_err();
     assert_conflict(capped, "view_incomplete");
 
-    // Per-carrier row cap: a carrier already at the cap refuses the next
     // belief with zero mutation and stays listable.
     let env2 = seed_env().await;
     let (core2, principal2) = open_core(&env2).await;
@@ -5142,11 +5013,9 @@ async fn retained_tom_derivative_history_and_binding_scoped_timestamps() {
     .await
     .expect("record");
 
-    // Several derivative rows: only the latest `occurred_at` surfaces.
     insert_derivative(&env, "ms_old", &alive, "2099-01-01T00:00:00Z").await;
     insert_derivative(&env, "ms_latest", &alive, "2099-01-03T00:00:00Z").await;
 
-    // A deleted carrier's large history never surfaces.
     let deleted = seed_carrier(
         &env,
         &env.character_id,
@@ -5165,7 +5034,6 @@ async fn retained_tom_derivative_history_and_binding_scoped_timestamps() {
     }
     set_carrier_status(&env, &deleted, "deleted").await;
 
-    // A second, unselected binding of the same Character carries its own
     // history and must stay outside the selected snapshot.
     let second = core
         .add_binding(
@@ -5240,7 +5108,6 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
         pool.close().await;
     }
 
-    // The u64 revision domain is refused, never truncated; i64::MAX is
     // refused by the CAS increment guard; i64::MAX - 1 cas-misses normally.
     for extreme in [u64::MAX, i64::MAX as u64] {
         let refused = core
@@ -5281,7 +5148,6 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
     assert_eq!(mind_state_count(&env).await, 0);
     assert_eq!(carrier_revision(&env, &carrier).await, 0);
 
-    // A storage failure is an internal error, never a not-found.
     {
         let pool = plain_pool(&env).await;
         sqlx::query("DROP TABLE kb_key_blocks")
@@ -5311,7 +5177,6 @@ async fn retained_tom_revision_domain_storage_error_and_summary_interaction() {
         "a storage failure must not masquerade as not-found, got {storage:?}"
     );
 
-    // A summary edit never clobbers the ToM modules, and the ToM CAS bump
     // blocks a stale summary patch.
     let env2 = seed_env().await;
     let (core2, principal2) = open_core(&env2).await;

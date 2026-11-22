@@ -1,5 +1,4 @@
 /**
- * SoulPanel integration tests (V1.79 P1 — Track B §D).
  *
  * Renders the full MemoryPage against msw handlers that vary the fragments list
  * to exercise the three density states (empty / low-data / rich) and the
@@ -49,7 +48,6 @@ function jsonFragments(
     fragment_id: `f${i}`,
     summary: `fragment ${i}`,
     keywords,
-    // Spread fragments across `spreadDays` distinct days for temporal bucketing.
     created_at: `2026-06-${String(1 + (i % spreadDays)).padStart(2, '0')}T00:00:00Z`,
   }));
 }
@@ -62,7 +60,6 @@ describe('MemoryPage SOUL section — density states + click-to-filter', () => {
 
     expect(await screen.findByTestId('soul-empty-state')).toBeInTheDocument();
     expect(screen.getByText(/your soul is just beginning/i)).toBeInTheDocument();
-    // No chart must render in the empty state.
     expect(screen.queryByTestId('soul-keyword-frequency')).not.toBeInTheDocument();
   });
 
@@ -77,7 +74,6 @@ describe('MemoryPage SOUL section — density states + click-to-filter', () => {
 
     expect(await screen.findByTestId('soul-low-data')).toBeInTheDocument();
     expect(screen.getByText(/3 fragments captured so far/i)).toBeInTheDocument();
-    // Frequency rows render the keyword + count.
     expect(await screen.findByTestId('soul-keyword-frequency')).toBeInTheDocument();
     expect(screen.getByText('moral ambiguity')).toBeInTheDocument();
   });
@@ -92,7 +88,6 @@ describe('MemoryPage SOUL section — density states + click-to-filter', () => {
     renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
     expect(await screen.findByTestId('soul-rich')).toBeInTheDocument();
-    // The temporal drift timeline renders with >=2 buckets and a cumulative total.
     expect(screen.getByTestId('soul-temporal-drift')).toBeInTheDocument();
     expect(screen.getByText(/22 fragments captured over time/i)).toBeInTheDocument();
   });
@@ -106,11 +101,9 @@ describe('MemoryPage SOUL section — density states + click-to-filter', () => {
 
     renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
-    // Wait for the SOUL frequency row to render, then click it.
     const row = await screen.findByText('political intrigue');
     fireEvent.click(row);
 
-    // The lifted fragment-keyword state drives the fragments browser input.
     await waitFor(() =>
       expect(screen.getByLabelText(/filter by keyword/i)).toHaveValue('political intrigue'),
     );

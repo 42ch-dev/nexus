@@ -1,5 +1,4 @@
 /**
- * Content family HTTP surface (P5-T1): Work chapter/manuscript content and
  * outline/timeline structure patches (P1-T2 authority). Path arguments stay
  * explicit route parameters, `ChapterContentQuery` stays a query (never a
  * body), per-Work locks, published/finalized rules, hash/CAS and path/symlink
@@ -169,7 +168,6 @@ export function patchTimelineEvent(
 export const CONTENT_ROUTES: readonly DomainRoute[] = [
   {
     method: 'GET',
-    // Canonical wire form: the Rust daemon serves (and the browser delegation
     // has always sent) the list WITHOUT a trailing slash.
     pattern: /^\/v1\/daemon\/works\/([^/]+)\/chapters$/,
     tier: 'tier2',

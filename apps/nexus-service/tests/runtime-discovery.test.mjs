@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * P0-T4 / D17 — guarded `GET /v1/daemon/runtime/discovery`.
  *
  * The route is the attach identity anchor (`rust-core-service-boundary.md`
  * §8.1): the closed v1 discovery record of the running instance under the same
@@ -154,7 +153,6 @@ test('a stale published record cannot make the response name another instance', 
   const home = tempHome();
   const server = await startServer(home, { workspaceInitialized: true, creatorId: 'ctr_a', workspaceSlug: 'default', engineEpoch: 1 });
   const { createDiscoveryRecord, publishDiscovery } = await import(join(serviceRoot, 'dist/discovery.js'));
-  // A replacement (or a crash survivor) owns the file: the response must still
   // describe the process answering the request.
   const stale = createDiscoveryRecord({
     instanceId: 'inst-replaced',
@@ -198,7 +196,6 @@ test('the discovery route requires the same admission as the guarded stop path',
     assert.equal(admitted.status, 200, admitted.text);
     assert.equal(admitted.payload.instance_id, server.service.instanceId);
 
-    // The unguarded liveness route stays reachable without a key.
     const health = await request(`${server.url}/v1/daemon/runtime/health`);
     assert.equal(health.status, 200, health.text);
 

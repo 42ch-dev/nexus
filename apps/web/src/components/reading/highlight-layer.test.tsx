@@ -1,5 +1,4 @@
 /**
- * HighlightLayer tests — V1.89 Deeper Manuscript Reading.
  *
  * Covers drift-notice rendering when an annotation's offsets exceed the current
  * body length and the presence of highlight marks after applying in-bounds

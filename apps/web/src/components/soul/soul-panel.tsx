@@ -88,7 +88,6 @@ export function SoulPanel({
     );
   }
 
-  // rich
   const buckets = bucketByTime(fragments);
   return (
     <div data-testid="soul-rich" className="flex flex-col gap-6">
@@ -96,7 +95,6 @@ export function SoulPanel({
       {buckets.length >= 2 ? (
         <TemporalDrift buckets={buckets} />
       ) : (
-        // Many fragments but a single time moment: render the frequency list
         // rather than a single-point timeline that would look broken.
         <KeywordFrequency
           counts={aggregateKeywordFrequency(fragments)}

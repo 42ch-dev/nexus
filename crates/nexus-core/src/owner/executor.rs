@@ -190,7 +190,6 @@ fn map_session_error(err: SessionError) -> CapabilityError {
         SessionError::ActiveWorkspaceMismatch { .. } => {
             CapabilityError::InputInvalid("session workspace root mismatch".into())
         }
-        // A held workspace authority is a conflict, not a capability fault; it
         // cannot arise from an executor call (the bundle takes the lease before
         // the executor exists), so this arm is only here for exhaustiveness.
         SessionError::AuthorityBusy => {
@@ -285,14 +284,12 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        // The refusal precedes the root checks, as it did when the only
         // selection was a home.
         if matches!(self.work_artifact, WorkArtifactBinding::Unbound) {
             return Err(CapabilityError::InputInvalid(
                 "work artifact commit not wired".into(),
             ));
         }
-        // A builtin's default `works_root` is the workspace-relative `Works`,
         // so its owning root arrives empty. Resolve any relative/empty input
         // against the ONE canonical root this executor was built for, then
         // require the result to BE that root: a caller-supplied directory
@@ -322,7 +319,6 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.workspace_root
             )));
         }
-        // `rel_child` addresses a path BELOW `Works/<work_ref>/`: an absolute
         // path replaces the base entirely, and a `..` walks out of the Work
         // subtree. The port re-checks the same shape for every caller; this
         // copy refuses on the capability surface before the root canonicalize
@@ -339,7 +335,6 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.rel_child
             )));
         }
-        // One selection at construction covers this commit: a simulated
         // executor records the write, a production one commits it over the
         // shared pool. No second writer and no new public surface.
         self.commit_into_selected_port(WorkArtifactWrite {
@@ -519,7 +514,6 @@ mod tests {
         let unrelated = tempfile::tempdir().expect("unrelated directory");
         let (_pool, executor) = seam(home.path(), workspace.path()).await;
 
-        // A sibling Work's tree: with `Works/<work_ref>` absent the port's
         // boundary probe would otherwise stop at the `Works` first-write
         // ancestor and approve this target.
         let err = executor
@@ -540,7 +534,6 @@ mod tests {
             "no directory may be created for a refused child"
         );
 
-        // An absolute child replaces the base path entirely.
         let err = executor
             .commit_work_artifact(WorkArtifactCommitInput {
                 workspace_root: workspace.path().to_string_lossy().into_owned(),

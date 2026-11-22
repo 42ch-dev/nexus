@@ -6,7 +6,6 @@ import '@testing-library/jest-dom/vitest';
 import { Dialog, DialogClose, DialogContent, DialogTrigger } from './dialog';
 
 /**
- * V1.148 P1 — promoted Dialog presentational primitive (DESIGN.md components.dialog).
  *
  * Pins: caller-owned copy (title/description/closeLabel), the v0.4 modal token
  * recipe (scrim overlay, shadow-elevation-4, dialog sizing tokens), and

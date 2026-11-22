@@ -135,7 +135,6 @@ function InlineWorldForm({
       await onSubmit?.(trimmed);
       setTitle('');
     } catch {
-      // Parent handles errors; keep form state for retry.
     }
   }
 
@@ -201,7 +200,6 @@ function InlineWorkForm({
   const worldIdField = `${uid}-sidebar-create-work-world`;
   const profileId = `${uid}-sidebar-create-work-profile`;
 
-  // Single-world preselect (F-01 W1): when the workspace has exactly one
   // World, the create is unambiguous — select it automatically so the author
   // is not forced through a one-option selector.
   useEffect(() => {
@@ -235,7 +233,6 @@ function InlineWorkForm({
       setWorkProfileTouched(false);
       setWorldId('');
     } catch {
-      // Parent handles errors; keep form state for retry.
     }
   }
 
@@ -375,7 +372,6 @@ export type CreatorShellContentProps =
     };
 
 /**
- * Inline create zone — tab bar + world/work forms. Owns tab state so hooks stay
  * outside the mode-switching parent.
  */
 function CreatorShellInlineCreate({

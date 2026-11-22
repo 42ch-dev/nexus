@@ -33,7 +33,6 @@ async fn main() -> anyhow::Result<()> {
     let pool = Schema::init(&db_path)
         .await
         .context("initialize workspace DB")?;
-    // v1.191 P1 T4: the one Creator materialization helper also commits the
     // stable holder registry row with the workspace subject (§2.1).
     nexus_local_db::ensure_creator_row(&pool, CREATOR_ID, "Trpg Probe")
         .await

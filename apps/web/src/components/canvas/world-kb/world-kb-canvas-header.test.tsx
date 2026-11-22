@@ -1,5 +1,4 @@
 /**
- * WorldKbHeader empty-state honesty tests — V1.108 FB-UI-010.
  *
  * The empty World KB helper copy was dishonest — it referenced a "command
  * palette (kb adopt/snapshot)" that does not exist in the product UI. The

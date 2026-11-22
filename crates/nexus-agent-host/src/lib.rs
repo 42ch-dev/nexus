@@ -1,4 +1,4 @@
-//! nexus-agent-host — Hybrid managed-only host core for local agent execution.
+//! nexus-agent-host — Hybrid managed-only host core for local agent execution. See docs/specs/agents/agent-host.md.
 //!
 //! This crate provides the orchestration/facade layer above `nexus-acp-host` and
 //! native CLI process adapters. It normalizes ACP providers and native CLI providers
@@ -28,7 +28,6 @@
 //! - **Narrow facade**: daemon runtime depends only on `HostFacade` trait.
 
 #![deny(clippy::unwrap_used)]
-// Test modules use ergonomic `.unwrap()`/`.expect()`; production keeps the strict deny.
 #![cfg_attr(
     test,
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
@@ -46,11 +45,9 @@ pub mod telemetry;
 
 use async_trait::async_trait;
 
-// Re-export primary types at crate root for convenience.
 pub use error::{HostError, HostResult};
 pub use ids::{HostOperationId, HostSessionId, ProviderId};
 
-// Re-export key public types from submodules.
 pub use core::{HostManager, HostSession, SessionRegistry, SessionState, TransitionResult};
 pub use discovery::ProviderCatalog;
 pub use policy::{AdmissionPolicy, HostPermissionResolver, PermissionOutcome};
@@ -247,6 +244,8 @@ pub enum LaunchStrategy {
 pub(crate) mod test_support {
     //! Shared serialization for tests that touch the process-global
     //! environment (see [`PROCESS_ENV_LOCK`]).
+    //!
+    //! See docs/specs/agents/agent-host.md
 
     /// Serializes tests that mutate the process-global environment with
     /// tests that spawn fixture children.
@@ -275,7 +274,7 @@ pub(crate) mod test_support {
     ///
     /// shortcut: the directory survives the process until the next run's sweep,
     /// and two test processes sharing one temp dir would sweep each other's
-    /// shims — upgrade if that ever runs on one machine.
+    /// shims — upgrade: if that ever runs on one machine.
     #[cfg(windows)]
     static SHIM_DIR: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
         let dir = std::env::temp_dir().join("nexus-agent-host-fixture-shims");

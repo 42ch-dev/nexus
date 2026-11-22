@@ -91,7 +91,6 @@ describe('SelectionSubmenu', () => {
     }
   });
 
-  // V1.127 P0 T4 (AC-V1127-4) — dismiss on layout change. The popover is
   // position:fixed and its coordinates are derived once from the anchor rect,
   // so resize/scroll moves the anchor under the popover. Dismiss (not
   // reposition) is the chosen UX — submenu is cheap to reopen.
@@ -120,7 +119,6 @@ describe('SelectionSubmenu', () => {
     });
 
     it('dismisses on scroll of an ancestor scroll container via onClose (capture listener)', () => {
-      // Mirrors the sidebar chrome's `overflow-auto` <ul>: the submenu anchor
       // lives inside a scroll container that is NOT `window`. `scroll` does
       // not bubble, so the listener captures on `window` — the capture phase
       // descends root → target, so a scroll on any descendant reaches it.

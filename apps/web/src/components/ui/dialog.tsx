@@ -1,5 +1,4 @@
 /**
- * Dialog — DESIGN.md §Component Primitives/Dialog.
  *
  * Re-exported from @42ch/nexus-ui (V1.148 P1 promotion).
  * The package owns the presentational implementation; this file is a thin

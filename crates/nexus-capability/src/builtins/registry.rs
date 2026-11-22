@@ -27,7 +27,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-// ─── Metrics (V1.58 P0 T16 — R-V156P1-L007) ────────────────────────────────
 //
 // Process-wide counters for registry.refresh observability. Read via the
 // monitoring surface or tracing spans. No external metrics pipeline (pre-1.0
@@ -59,7 +58,6 @@ pub fn refresh_cache_hit_total() -> u64 {
     REFRESH_CACHE_HIT_TOTAL.load(Ordering::Relaxed)
 }
 
-// ─── Shared HTTP client (V1.58 P0 T9 — R-V156P1-M005) ──────────────────────
 //
 // A single reqwest::Client with connection pooling + keep-alive is reused
 // across all registry.refresh CDN fetches instead of constructing a new
@@ -95,8 +93,6 @@ pub const fn registry_refresh_help_text() -> &'static str {
      response body is capped (default 8 MiB)."
 }
 
-// ─── Retry jitter (V1.58 P0 T13 — R-V156P1-L004; DR-01 v1.179) ──────────────
-
 /// Backoff base for the first retry attempt, in milliseconds.
 const RETRY_BASE_MS: u64 = 500;
 /// Upper bound on any retry sleep, in milliseconds. 500·2^5 = 16 s exceeds
@@ -131,9 +127,6 @@ fn retry_jitter_ms_with(attempt: u32, entropy: &mut dyn FnMut() -> u64) -> u64 {
     entropy() % bound
 }
 
-// ─── CDN Error Type ────────────────────────────────────────────────────────
-
-/// Domain error for CDN fetch and URL validation.
 #[derive(Debug, Clone)]
 pub enum CdnError {
     /// URL scheme is not HTTPS.
@@ -197,27 +190,22 @@ pub const DEFAULT_MAX_CDN_BODY_SIZE: usize = 8 * 1024 * 1024;
 /// to parse, has a non-HTTPS scheme, or contains a literal
 /// private/loopback/link-local IP address.
 pub fn validate_cdn_url_static(url_str: &str) -> Result<(), CdnError> {
-    // H-002: reject empty / whitespace-only
     if url_str.trim().is_empty() {
         return Err(CdnError::EmptyUrl);
     }
 
-    // H-002: reject non-HTTPS scheme
     if !url_str.starts_with("https://") {
         return Err(CdnError::InsecureScheme);
     }
 
-    // Extract host portion for literal-IP check.
     let after_scheme = &url_str["https://".len()..];
     let host_part = after_scheme.split('/').next().unwrap_or(after_scheme);
-    // Strip port if present
     let host = host_part.split(':').next().unwrap_or(host_part);
 
     if host.is_empty() {
         return Err(CdnError::UrlParse);
     }
 
-    // If the host is a literal IP, reject private/loopback/link-local ranges.
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_blocked_ip(&ip) {
             return Err(CdnError::BlockedHost);
@@ -235,7 +223,6 @@ fn is_blocked_ip(ip: &IpAddr) -> bool {
             v4.is_private()
                 || v4.is_loopback()
                 || v4.is_link_local()
-                // Explicit metadata endpoint range (169.254.0.0/16) —
                 // `is_link_local()` already covers this on most platforms,
                 // but we double-check for clarity.
                 || v4.octets()[0] == 169 && v4.octets()[1] == 254
@@ -250,7 +237,6 @@ fn is_blocked_ip(ip: &IpAddr) -> bool {
 /// IPv4 address falls in a blocked range.
 fn is_ipv6_mapped_ipv4_private(v6: &Ipv6Addr) -> bool {
     let octets = v6.octets();
-    // ::ffff:0:0/96 prefix
     if octets[..10] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] && octets[10] == 0xff && octets[11] == 0xff {
         let v4 = Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]);
         return v4.is_private()
@@ -264,13 +250,9 @@ fn is_ipv6_mapped_ipv4_private(v6: &Ipv6Addr) -> bool {
 /// Check if an IPv6 address falls in a private/unique-local range (`fc00::/7`).
 const fn is_ipv6_private_range(v6: &Ipv6Addr) -> bool {
     let octets = v6.octets();
-    // fc00::/7 → first octet 0xfc or 0xfd
     octets[0] & 0xfe == 0xfc
 }
 
-// ─── Embedded Snapshot ─────────────────────────────────────────────────────
-
-/// Version string for the embedded registry snapshot.
 /// Bumped every release when the snapshot list is updated.
 const REGISTRY_SNAPSHOT_VERSION: &str = "2026-11-11.v1";
 
@@ -278,50 +260,39 @@ const REGISTRY_SNAPSHOT_VERSION: &str = "2026-11-11.v1";
 ///
 /// This is a minimal list (capability IDs only) — not the full registry
 /// metadata. Updated per release to match the logical catalog in
-/// `acp-capability-set.md`.
+/// `docs/specs/agents/acp-capability-set.md`.
 const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
-    // §4.1 Context
     "nexus.context.whoami",
     "nexus.workspace.info",
     "nexus.workspace.paths",
     "nexus.context.assemble",
-    // §4.2 World read
     "nexus.world.snapshot.get",
     "nexus.world.state.query",
     "nexus.timeline.recent.get",
     "nexus.kb_snapshot.read",
-    // §4.3 World mutation
     "nexus.world.delta.propose",
     "nexus.world.delta.apply",
     "nexus.timeline.event.append",
     "nexus.fork.create",
-    // §4.3A World CLI write
     "nexus.kb_snapshot.write",
     "nexus.world.configure",
-    // §4.4 Sync
     "nexus.sync.prepare_push",
     "nexus.sync.push",
     "nexus.sync.pull",
     "nexus.sync.status",
-    // §4.5 Manuscript
     "nexus.manuscript.list",
     "nexus.manuscript.read_range",
     "nexus.manuscript.write",
     "nexus.manuscript.phase.get",
     "nexus.manuscript.phase.set",
     "nexus.manuscript.chapter.update",
-    // §4.7 Observability
     "nexus.trace.correlation",
     "nexus.runtime.health",
-    // §4.8 Work & orchestration
     "nexus.work.schedule.set",
     "nexus.finding.resolve",
     "nexus.pool.entry.manage",
-    // ── registry.refresh itself ──
     "nexus.registry.refresh",
 ];
-
-// ─── CDN configuration (constructor-injected; V1.57 P1) ────────────────────
 
 /// CDN fetch configuration.
 #[derive(Debug, Clone)]
@@ -351,9 +322,6 @@ impl CdnConfig {
     }
 }
 
-// ─── Capability ────────────────────────────────────────────────────────────
-
-/// Refresh the ACP registry cache.
 ///
 /// Uses embedded snapshot by default; fetches from CDN if configured.
 /// `CdnConfig` is constructor-injected (V1.57 P1) — no global state.
@@ -398,10 +366,8 @@ impl Capability for RegistryRefresh {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        // V1.58 P0 T16 (R-V156P1-L007): increment the refresh counter on entry.
         REFRESH_TOTAL.fetch_add(1, Ordering::Relaxed);
 
-        // V1.58 P0 T7 (R-V156P1-M003) / QC2 M-1 fix: the `force` input
         // parameter was removed from the contract — it was a documented
         // no-op (the synthetic path is always fresh; the CDN path always
         // fetches) but the help text advertised it as bypassing cache
@@ -411,12 +377,10 @@ impl Capability for RegistryRefresh {
         let _parsed: RegistryRefreshInput = serde_json::from_value(input)
             .map_err(|e| CapabilityError::InputInvalid(format!("registry.refresh input: {e}")))?;
 
-        // V1.58 P0 T15 (R-V156P1-L006): generated_at is captured ONCE per
         // invocation (not per retry) so the field is deterministic across the
         // retry lifecycle of a single refresh call.
         let now = Utc::now().to_rfc3339();
 
-        // V1.58 P0 T8 (R-V156P1-M004): structured tracing spanning admission →
         // fetch → response phases.
         let span = tracing::info_span!(
             "registry_refresh",
@@ -427,9 +391,7 @@ impl Capability for RegistryRefresh {
 
         tracing::info!("registry.refresh admitted");
 
-        // Check if CDN URL is configured (constructor-injected, V1.57 P1)
         if let Some(ref cdn) = self.cdn_config {
-            // Network mode: fetch from CDN with timeout + retry
             tracing::debug!(cdn_url = %cdn.url, timeout_ms = cdn.timeout_ms, "fetching registry from CDN");
             match fetch_from_cdn(cdn).await {
                 Ok((capability_count, retry_count)) => {
@@ -454,8 +416,6 @@ impl Capability for RegistryRefresh {
                         .map_err(|e| CapabilityError::Internal(format!("serialize output: {e}")));
                 }
                 Err(err) => {
-                    // Network failed — fall back to synthetic.
-                    // H-001: fallback_reason carries a typed CdnError variant stringified.
                     tracing::warn!(error = %err, "CDN fetch failed — falling back to synthetic");
                     let fallback_reason = err.to_string();
                     let output = RegistryRefreshOutput {
@@ -469,7 +429,6 @@ impl Capability for RegistryRefresh {
                         retry_count: cdn.max_retries,
                         fallback_reason,
                     };
-                    // Fallback still serves a usable snapshot — count as success
                     // (the capability returned valid data) but the failure counter
                     // captures the CDN miss.
                     REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
@@ -480,8 +439,6 @@ impl Capability for RegistryRefresh {
             }
         }
 
-        // Default / air-gap: synthetic output only — zero network calls.
-        // V1.58 P0 T16: synthetic mode serves the embedded snapshot, which is
         // effectively a cache hit (no network round-trip).
         tracing::debug!("serving embedded synthetic snapshot");
         REFRESH_CACHE_HIT_TOTAL.fetch_add(1, Ordering::Relaxed);
@@ -502,9 +459,6 @@ impl Capability for RegistryRefresh {
     }
 }
 
-// ─── Network fetch helpers ─────────────────────────────────────────────────
-
-/// Helper: convert a `usize` len to `u32`, clamping at `u32::MAX`.
 fn len_u32(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
@@ -520,12 +474,10 @@ fn len_u32(len: usize) -> u32 {
 /// Returns `(capability_count, retry_count)` on success, or a typed
 /// `CdnError` on failure.
 async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
-    // ── C-001 #1: scheme guard ──────────────────────────────────────────
     if !cdn.url.starts_with("https://") {
         return Err(CdnError::InsecureScheme);
     }
 
-    // ── C-001 #3: extract host + perform DNS resolution + block private IPs ─
     let after_scheme = &cdn.url["https://".len()..];
     let host_part = after_scheme.split('/').next().unwrap_or(after_scheme);
     let host = host_part.split(':').next().unwrap_or(host_part);
@@ -534,8 +486,6 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
         return Err(CdnError::UrlParse);
     }
 
-    // Resolve the hostname to IP addresses.
-    // Use port 443 (default HTTPS port) for resolution.
     let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, 443_u16))
         .await
         .map_err(|_e| CdnError::BlockedHost)?
@@ -551,8 +501,6 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
         }
     }
 
-    // ── C-001 #2: redirect policy — handled by the shared client (T9) ──
-    // V1.58 P0 T9 (R-V156P1-M005): reuse the shared LazyLock client for
     // connection pooling + keep-alive. Per-request timeout is applied below.
     let timeout = Duration::from_millis(cdn.timeout_ms);
     let client = SHARED_CDN_CLIENT.clone();
@@ -561,7 +509,6 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
 
     for attempt in 0..=cdn.max_retries {
         if attempt > 0 {
-            // Full-jitter backoff (DR-01): the sample itself is the sleep,
             // uniform in [0, min(8 s, 500 ms · 2^attempt)). No additive base
             // and no second cap — the helper is the single authority.
             let backoff_ms = retry_jitter_ms(attempt);
@@ -570,16 +517,13 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
 
         match client.get(&cdn.url).timeout(timeout).send().await {
             Ok(resp) => {
-                // C-001 #2: 3xx responses are blocked by the redirect policy.
                 // policy=limited(0) means reqwest returns the 3xx response
                 // as-is without following it.
                 if resp.status().is_redirection() {
                     last_err = CdnError::TooManyRedirects;
-                    // No retry for redirects — the endpoint is misconfigured.
                     break;
                 }
                 if resp.status().is_success() {
-                    // C-001 #4: body size limit — configurable (V1.58 P0 T11).
                     match read_body_with_limit(resp, cdn.max_body_bytes).await {
                         Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
                             Ok(json) => {
@@ -588,12 +532,10 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
                             }
                             Err(_e) => {
                                 last_err = CdnError::Parse;
-                                // continue to next retry
                             }
                         },
                         Err(e) => {
                             last_err = e;
-                            // Do not retry on BodyTooLarge — the endpoint is
                             // serving a too-large payload, retrying won't help.
                             if matches!(last_err, CdnError::BodyTooLarge) {
                                 break;
@@ -602,7 +544,6 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
                     }
                 } else {
                     last_err = CdnError::ServerStatus(resp.status().as_u16());
-                    // Retry on 5xx, break on 4xx (client error).
                     if resp.status().is_client_error() {
                         break;
                     }
@@ -678,15 +619,9 @@ fn count_capabilities(json: &Value) -> u32 {
                 .and_then(|v| v.as_array())
                 .map(|items| len_u32(items.len()))
         })
-        .unwrap_or_else(|| {
-            // Count top-level keys as approximate capability count
-            json.as_object().map_or(0, |obj| len_u32(obj.len()))
-        })
+        .unwrap_or_else(|| json.as_object().map_or(0, |obj| len_u32(obj.len())))
 }
 
-// ─── Public API for capability registration ────────────────────────────────
-
-/// Export the embedded snapshot for golden-snapshot tests.
 #[must_use]
 pub const fn embedded_snapshot_version() -> &'static str {
     REGISTRY_SNAPSHOT_VERSION
@@ -698,13 +633,9 @@ pub const fn embedded_snapshot_capabilities() -> &'static [&'static str] {
     REGISTRY_SNAPSHOT_CAPABILITIES
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Synthetic mode tests (air-gap / default) ───────────────────────────
 
     #[tokio::test]
     #[serial_test::serial]
@@ -728,7 +659,6 @@ mod tests {
     async fn registry_refresh_synthetic_deterministic() {
         let cap = RegistryRefresh::new();
 
-        // Two back-to-back calls with the same input should yield the same
         // capability_count, source, and snapshot_version. generated_at will
         // differ (timestamp), but the rest must be identical.
         let out1 = cap.run(serde_json::json!({"force": false})).await.unwrap();
@@ -744,7 +674,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_synthetic_zero_network_calls() {
-        // Default mode (no CDN URL) must produce output without any network I/O.
         // This is verified by the output having source="synthetic" and
         // fetch_timeout_ms=0. The test also ensures no reqwest client is
         // created when no CDN config is set.
@@ -754,12 +683,9 @@ mod tests {
         assert_eq!(out["fetchTimeoutMs"], 0);
     }
 
-    // ── Golden snapshot test ───────────────────────────────────────────────
-
     #[tokio::test]
     #[serial_test::serial]
     async fn golden_snapshot_version_stability() {
-        // The snapshot version must never change without a code change.
         // If this test fails because REGISTRY_SNAPSHOT_VERSION was
         // intentionally bumped, update the expected value.
         assert_eq!(REGISTRY_SNAPSHOT_VERSION, "2026-11-11.v1");
@@ -767,13 +693,10 @@ mod tests {
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();
 
-        // Verify every known capability ID is embedded
         let count = usize::try_from(out["capabilityCount"].as_u64().unwrap()).unwrap_or(usize::MAX);
         assert_eq!(count, REGISTRY_SNAPSHOT_CAPABILITIES.len());
         assert!(count >= 30, "expected at least 30 capabilities in snapshot");
     }
-
-    // ── Embedded snapshot integrity tests ──────────────────────────────────
 
     #[test]
     fn embedded_snapshot_all_nexus_prefix() {
@@ -793,12 +716,9 @@ mod tests {
         }
     }
 
-    // ── Network mode tests ─────────────────────────────────────────────────
-
     #[tokio::test]
     #[serial_test::serial]
     async fn network_mode_requires_cdn_config() {
-        // No CDN config set → synthetic output.
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();
         assert_eq!(out["source"], "synthetic");
@@ -807,7 +727,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn network_mode_falls_back_on_bad_url() {
-        // Set a CDN URL with a blocked private IP — should be rejected
         // by the scheme guard or IP block, and fall back to synthetic.
         let config = CdnConfig {
             url: "https://127.0.0.1/nonexistent".to_string(),
@@ -822,12 +741,9 @@ mod tests {
         assert_ne!(out["fallbackReason"].as_str().unwrap_or(""), "");
     }
 
-    // ── Constructor injection test (V1.57 P1) ────────────────────────────
-
     #[tokio::test]
     #[serial_test::serial]
     async fn cdn_config_constructor_injection() {
-        // Prove that CdnConfig is constructor-injected (no global state).
         // Two separate capability instances with different CDN configs
         // should produce different source values.
         let cap_no_cdn = RegistryRefresh::new();
@@ -849,15 +765,12 @@ mod tests {
             .unwrap();
         assert_eq!(out2["source"], "synthetic_fallback");
 
-        // The first instance should still be synthetic (no cross-contamination)
         let out3 = cap_no_cdn
             .run(serde_json::json!({"force": false}))
             .await
             .unwrap();
         assert_eq!(out3["source"], "synthetic");
     }
-
-    // ── Capability metadata tests ──────────────────────────────────────────
 
     #[test]
     fn capability_name_is_registry_refresh() {
@@ -873,8 +786,6 @@ mod tests {
         assert_eq!(schema["type"], "object");
     }
 
-    // ── V1.58 P0 T11 (R-V156P1-L002): body-size cap configurable ───────────
-
     #[test]
     fn cdn_config_new_defaults_to_8mib() {
         let cfg = CdnConfig::new("https://example.com/r.json", 5_000, 2);
@@ -889,8 +800,6 @@ mod tests {
         assert_eq!(cfg.max_body_bytes, 1024);
     }
 
-    // ── DR-01 (v1.179): attempt-aware full-jitter retry band ────────────────
-
     /// Test-local copy of the locked bound formula:
     /// `min(RETRY_CAP_MS, RETRY_BASE_MS · 2^attempt)` (saturating).
     fn expected_jitter_bound(attempt: u32) -> u64 {
@@ -899,10 +808,8 @@ mod tests {
 
     #[test]
     fn retry_jitter_samples_stay_within_attempt_band() {
-        // Injected entropy extremes pin the band edges exactly.
         assert_eq!(retry_jitter_ms_with(1, &mut || 0), 0);
         assert_eq!(retry_jitter_ms_with(3, &mut || 0), 0);
-        // u64::MAX maps exactly through the modulo (2^64−1 is only ≡ bound−1
         // for power-of-two bounds, so pin the true residue).
         assert_eq!(
             retry_jitter_ms_with(1, &mut || u64::MAX),
@@ -912,7 +819,6 @@ mod tests {
             retry_jitter_ms_with(3, &mut || u64::MAX),
             u64::MAX % expected_jitter_bound(3)
         );
-        // Stepped entropy sweeps the band 1000× per attempt without
         // escaping it.
         let mut s = 0u64;
         let mut stepped = || {
@@ -930,7 +836,6 @@ mod tests {
 
     #[test]
     fn retry_jitter_production_entropy_stays_in_band() {
-        // n=1000 smoke through the real SystemTime-nanos entropy path.
         for attempt in 1..=3u32 {
             let bound = expected_jitter_bound(attempt);
             for _ in 0..1000 {
@@ -938,7 +843,6 @@ mod tests {
                 assert!(j < bound, "jitter {j} ms escapes band [0, {bound})");
             }
         }
-        // S-6 (v1.179 QC fix): a dead entropy source (constant clock) passes
         // every containment assert — the samples must vary. Checked at
         // attempt 5 (bound 8000): on hosts with coarse clock granularity
         // (µs-scale ticks quantize subsec_nanos to multiples of 1000, which
@@ -959,7 +863,6 @@ mod tests {
 
     #[test]
     fn retry_jitter_cap_binds_from_attempt_five() {
-        // 500·2^5 = 16 s exceeds the 8 s cap, so attempt ≥ 5 tops out just
         // under RETRY_CAP_MS regardless of entropy.
         // Max entropy lands at the top of the capped band (exact residue).
         assert_eq!(
@@ -975,12 +878,9 @@ mod tests {
         }
     }
 
-    // ── V1.58 P0 T15 (R-V156P1-L006): generated_at determinism ─────────────
-
     #[tokio::test]
     #[serial_test::serial]
     async fn generated_at_is_set_once_per_invocation() {
-        // generated_at is captured once at the top of run() (not per retry),
         // so a single invocation yields exactly one timestamp value. We
         // verify the field is present and well-formed; retry-path determinism
         // is structurally guaranteed because `now` is bound before the
@@ -988,11 +888,8 @@ mod tests {
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();
         let ts = out["generatedAt"].as_str().expect("generatedAt present");
-        // RFC 3339 timestamps contain 'T' and end with a timezone offset or 'Z'.
         assert!(ts.contains('T'), "generatedAt should be RFC 3339: {ts}");
     }
-
-    // ── V1.58 P0 T16 (R-V156P1-L007): structured metrics ───────────────────
 
     #[tokio::test]
     #[serial_test::serial]
@@ -1020,18 +917,14 @@ mod tests {
 
     #[test]
     fn metrics_counters_are_readable() {
-        // Smoke: all four counters are readable and non-decreasing.
         let _ = refresh_total();
         let _ = refresh_success_total();
         let _ = refresh_failure_total();
         let _ = refresh_cache_hit_total();
     }
 
-    // ── V1.58 P0 T10 (R-V156P1-L001): help text HTTPS + public ─────────────
-
     #[test]
     fn help_text_documents_https_and_public_requirement() {
-        // V1.58 P0 fix-wave (QC2 M-1): the `force` parameter mention was
         // removed from the help text (it was a documented no-op).
         let help = registry_refresh_help_text();
         assert!(help.contains("https://"), "help must mention HTTPS scheme");
@@ -1045,15 +938,12 @@ mod tests {
         );
     }
 
-    // ── V1.58 P0 T20 (R-V157P0-L002): per-ID failure-path test vectors ─────
-
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_rejects_invalid_input_type() {
-        // Pass a non-object input — must surface CapabilityError::InputInvalid.
         let cap = RegistryRefresh::new();
         let err = cap
-            .run(serde_json::json!(42)) // not an object
+            .run(serde_json::json!(42))
             .await
             .expect_err("non-object input must error");
         assert!(
@@ -1065,7 +955,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_rejects_unknown_field_silently() {
-        // V1.58 P0 fix-wave (QC2 M-1): with `force` removed from the input
         // schema, an unknown field like `unknownField` is silently ignored
         // (serde default). The capability still runs and serves synthetic.
         // This documents the current contract: extra fields are ignored,
@@ -1082,7 +971,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_tolerates_historical_force_field() {
-        // V1.58 P0 fix-wave (QC2 M-1): historical callers that still send
         // `{"force": true}` (the removed parameter) must not break — serde
         // ignores unknown fields by default. This is the backward-compat
         // guarantee after the force parameter was removed from the contract.

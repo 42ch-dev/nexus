@@ -551,7 +551,6 @@ impl CoreService {
         op: ComposeOp,
     ) -> CoreResult<ComposeOutcome> {
         self.verify_principal(principal)?;
-        // The conflict class multiplies under contention, so a stale base is refused from the row
         // alone: never after scanning the whole pattern registry for pins it will not use.
         let current = self.read_strategy_candidate(principal, strategy_id).await?;
         if current.revision != base_revision {
@@ -630,7 +629,6 @@ fn verify_pins(
         ComposeOp::Unnest(payload) => &payload.nest_id,
         ComposeOp::BindSlot(payload) => &payload.nest_id,
     };
-    // An unknown nest or an unresolved child is the operation's own refusal, not this check's.
     let Some(nest) = document.nests.iter().find(|nest| nest.id == *nest_id) else {
         return Ok(());
     };
@@ -730,7 +728,6 @@ fn nest_pattern(
         });
     }
 
-    // The connecting edge must reach one node that already exists and is not the slot this nest
     // inserts: `settle` filters only `GraphCycle`, so a self-loop or an unknown target would
     // commit bytes that every later operation refuses.
     let attach_to = op.attach_to.as_deref();
@@ -762,7 +759,6 @@ fn nest_pattern(
         parent_node: op.parent_node.clone(),
         pin_policy: WorkflowNestBindingPinPolicy::Exact,
     });
-    // The walk only reaches a node an edge reaches, so the slot stays unreachable unless the
     // commit wires it. The target was proven to name an existing node above.
     if let Some(attach_to) = attach_to {
         let mut taken: HashSet<String> =
@@ -822,7 +818,6 @@ fn unnest_slot(
             format!("package `{pin}` has no fragment body to move"),
         ));
     };
-    // The body's own pins become this candidate's graph, so they are checked before it moves.
     verify_body_pins(body, packages, &mut HashSet::new())?;
     if let Some(lost) = lost_declarations(document, body, &parent_node) {
         return Err(unflattenable(&op.nest_id, lost));
@@ -1021,7 +1016,6 @@ pub fn verify_recorded_pins(
     packages: &[PatternPackage],
 ) -> Result<(), PinVerificationFailure> {
     if recorded.is_empty() {
-        // No registry read: the shortcut is reserved for a document that names no pattern package
         // at all. A carrier with no recorded hash is refused here rather than cleared, because the
         // fragment it loads can pin packages the empty snapshot never recorded — deciding it pins
         // nothing would mean reading the registry the shortcut exists to avoid.
@@ -1256,7 +1250,6 @@ fn move_body(
         if let Some(id) = node_ids.get(&node.id) {
             moved.id.clone_from(id);
         }
-        // A reference that names no fragment node cannot survive the move: repointing it would
         // wire a stranger's id, so it is dropped.
         moved.depends_on = node
             .depends_on
@@ -1420,7 +1413,6 @@ fn replace_subtree(
     };
     let parent_node = nest.parent_node.clone();
 
-    // One manifest-binding rule for explicit binding and for what a replacement retains.
     if let Some(node) = document.nodes.iter().find(|node| node.id == parent_node) {
         for (slot, value) in &node.bind {
             check_binding(
@@ -1439,7 +1431,6 @@ fn replace_subtree(
         nest.expansion = op.expansion;
     }
 
-    // The region keeps its nest id and every other authored edit: only the pin changes, in place.
     if let Some(node) = document
         .nodes
         .iter_mut()
@@ -1617,7 +1608,6 @@ impl<'a> PackageIndex<'a> {
             let Some(manifest) = package.manifest() else {
                 continue;
             };
-            // Two directories can declare the same pin. An available one wins regardless of scan
             // order, so a broken duplicate cannot make a readable package unresolvable; only when
             // none is available does the first scanned directory keep the pin, and its own reason
             // is the one a refusal names. The listing still reports every directory.
@@ -1670,7 +1660,6 @@ impl<'a> PackageIndex<'a> {
             let Some(pin) = pinned_pattern(&nest.child) else {
                 continue;
             };
-            // The recorded hash is checked before this walk de-dupes the pin and before a package
             // that failed to load is skipped, so a carrier whose bytes changed or whose package is
             // gone is always reported.
             self.report_unusable_pin(nest, &pin, diagnostics);
@@ -1882,7 +1871,6 @@ mod tests {
             pinned_pattern(&child(Some("research-loop"), Some("1.0.0"))),
             Some(pin)
         );
-        // A pin missing or emptying either half names no package, so the resolved test compares
         // the version too instead of falling through on a non-empty id.
         assert_eq!(pinned_pattern(&child(Some("research-loop"), None)), None);
         assert_eq!(

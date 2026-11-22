@@ -1,4 +1,4 @@
-//! Session registry and state machine.
+//! Session registry and state machine. See docs/specs/agents/agent-host.md.
 //!
 //! Manages host-level session lifecycle with explicit op substates per the compass
 //! §Session state machine. Enforces one active op per session in Wave 1.
@@ -231,7 +231,6 @@ impl SessionRegistry {
             SessionState::Busy(ref current_op_id) if current_op_id == op_id => {
                 session.state = SessionState::Ready;
                 session.active_op_id = None;
-                // Caller emits the actual terminal event
                 Ok(TransitionResult::Ok)
             }
             _ => Err(HostError::internal(format!(
@@ -283,7 +282,6 @@ impl SessionRegistry {
             SessionState::Cancelling(ref current_op_id) if current_op_id == op_id => {
                 session.state = SessionState::Ready;
                 session.active_op_id = None;
-                // The caller emits OpFinished or OpFailed terminal event
                 Ok(TransitionResult::Ok)
             }
             _ => Err(HostError::internal(format!(
@@ -592,7 +590,6 @@ mod tests {
         let op1 = HostOperationId::new();
         registry.transition_to_busy(&id, op1).unwrap();
 
-        // Trying to start another op while busy should fail
         let op2 = HostOperationId::new();
         assert!(registry.transition_to_busy(&id, op2).is_err());
     }
@@ -648,7 +645,6 @@ mod tests {
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_error_recoverable(&id).unwrap();
 
-        // Restart from error recoverable
         registry.transition_to_starting(&id).unwrap();
         assert_eq!(registry.get(&id).unwrap().state, SessionState::Starting);
     }
@@ -663,7 +659,6 @@ mod tests {
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_ready(&id).unwrap();
 
-        // First cleanup attempt entered Stopping, then retained ownership as
         // ErrorRecoverable when process cleanup could not be confirmed.
         registry.transition_to_stopping(&id).unwrap();
         registry.transition_to_error_recoverable(&id).unwrap();
@@ -672,7 +667,6 @@ mod tests {
             SessionState::ErrorRecoverable
         );
 
-        // Later ownership-safe retry completes: ErrorRecoverable → Stopping.
         registry
             .transition_to_stopping(&id)
             .expect("retry to Stopping");
@@ -682,7 +676,6 @@ mod tests {
         assert!(matches!(event, HostEvent::SessionStopped(_)));
         assert!(registry.get(&id).unwrap().state.is_terminal());
 
-        // Registry and mapping removal happens after the successful retry.
         registry.remove_stopped(&id).expect("remove after retry");
         assert!(registry.get(&id).is_none());
     }
@@ -692,16 +685,13 @@ mod tests {
         let mut registry = SessionRegistry::new();
         let id = register_session(&mut registry);
 
-        // Created → Starting → Ready
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_ready(&id).unwrap();
 
-        // Ready → Busy → Ready
         let op_id = HostOperationId::new();
         registry.transition_to_busy(&id, op_id.clone()).unwrap();
         registry.transition_busy_to_ready(&id, &op_id).unwrap();
 
-        // Ready → Stopping → Stopped
         registry.transition_to_stopping(&id).unwrap();
         let event = registry
             .transition_to_stopped(&id, SessionStopReason::GracefulShutdown)

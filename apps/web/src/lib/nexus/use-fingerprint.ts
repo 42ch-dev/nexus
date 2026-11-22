@@ -14,7 +14,6 @@ export type FingerprintState =
       message: string;
       code?: string;
       /**
-       * Transport-failure sub-classification (V1.129 P1). Present when the
        * throw was a `NexusClientError` produced by the browser-client
        * classifier (status=0 transport failures); absent for HTTP errors
        * (4xx/5xx — recovery is daemon-side, not transport). Drives the

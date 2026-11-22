@@ -94,7 +94,6 @@ pub async fn aggregate_experience(
 
     let (experience_markdown, used_acp) = generate_experience_markdown(&entries, synthesizer).await;
 
-    // Update SOUL.md
     let mut soul = crate::soul_io::load(home, bearer)?;
     soul.set_experience(experience_markdown.clone());
     crate::soul_io::save(home, bearer, &soul)?;
@@ -108,13 +107,6 @@ pub async fn aggregate_experience(
 ///
 /// # Errors
 /// Returns `Err(MemoryError::...)` if validation fails.
-///
-/// # Errors
-/// Returns `Err(MemoryError::...)` if validation fails.
-/// Aggregate experience without updating SOUL.md.
-///
-/// Returns the generated markdown and metadata, but does NOT write to disk.
-/// Useful for preview or dry-run scenarios.
 pub async fn aggregate_experience_preview(
     home: &Path,
     bearer: MemoryBearerRef<'_>,
@@ -168,7 +160,6 @@ fn collect_experience_entries(
         }
     }
 
-    // Sort by recency (most recent first)
     experience_entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
     Ok(experience_entries)
@@ -190,7 +181,6 @@ async fn generate_experience_markdown(
             match synth.synthesize(entries).await {
                 Ok(text) => return (text, true),
                 Err(_) => {
-                    // ACP failed — fall back to deterministic
                     return (deterministic_concat(entries), false);
                 }
             }
@@ -239,9 +229,7 @@ fn truncate_body(body: &str, max_chars: usize) -> String {
     if body.chars().count() <= max_chars {
         return body.to_string();
     }
-    // Take first max_chars characters (char-safe, not byte-safe)
     let end: String = body.chars().take(max_chars).collect();
-    // Break at last space before limit
     end.rfind(' ')
         .map_or_else(|| format!("{end}..."), |pos| format!("{}...", &end[..pos]))
 }
@@ -295,7 +283,6 @@ mod tests {
             ),
         ];
         let result = deterministic_concat(&entries);
-        // Most recent first
         let alice_pos = result.find("alice").expect("should contain alice");
         let setting_pos = result.find("setting").expect("should contain setting");
         assert!(
@@ -316,9 +303,7 @@ mod tests {
             "2026-04-14T00:00:00Z",
         )];
         let result = deterministic_concat(&entries);
-        // Should be truncated with "..."
         assert!(result.ends_with("..."));
-        // Should not include the full body
         assert!(result.len() < long_body.len() + 50);
     }
 
@@ -399,7 +384,6 @@ mod tests {
         let home = std::path::PathBuf::from("/tmp/test_agg_exp_empty");
         let _ = std::fs::remove_dir_all(&home);
 
-        // Create soul first
         crate::soul_io::create(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
 
         let result = aggregate_experience(&home, MemoryBearerRef::Creator("ctr_test"), None)
@@ -409,7 +393,6 @@ mod tests {
         assert!(!result.used_acp);
         assert_eq!(result.experience_markdown, "");
 
-        // Verify soul still has empty experience
         let soul = crate::soul_io::load(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         assert_eq!(soul.experience.as_deref().unwrap_or(""), "");
 
@@ -421,10 +404,8 @@ mod tests {
         let home = std::path::PathBuf::from("/tmp/test_agg_exp_determ");
         let _ = std::fs::remove_dir_all(&home);
 
-        // Create soul
         crate::soul_io::create(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
 
-        // Create experience memories
         let mut mem1 = LongTermMemory::new("story_summary");
         mem1.set_body("A grand adventure story about heroes saving the world from darkness.");
         memory_io::save_memory(
@@ -447,7 +428,6 @@ mod tests {
         )
         .unwrap();
 
-        // Create a non-experience memory (should be ignored)
         let mut mem3 = LongTermMemory::new("research_material");
         mem3.set_body("Research on medieval castles.");
         memory_io::save_memory(
@@ -468,7 +448,6 @@ mod tests {
         assert!(result.experience_markdown.contains("Character Note"));
         assert!(!result.experience_markdown.contains("research"));
 
-        // Verify SOUL.md was updated
         let soul = crate::soul_io::load(&home, MemoryBearerRef::Creator("ctr_test")).unwrap();
         let exp = soul.experience.as_deref().unwrap_or("");
         assert!(exp.contains("adventure-story"));
@@ -567,7 +546,6 @@ mod tests {
 
         assert!(!result.used_acp);
         assert_eq!(result.memories_processed, 1);
-        // Should have deterministic fallback output
         assert!(result.experience_markdown.contains("Story Summary"));
 
         let _ = std::fs::remove_dir_all(&home);
@@ -585,12 +563,10 @@ mod tests {
 
         let creator_id = "ctr_aggsoul";
 
-        // Create SOUL with empty experience
         let soul = crate::soul_io::create(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         let exp_before = soul.experience.as_deref().unwrap_or("");
         assert_eq!(exp_before, "");
 
-        // Create experience memories
         let mut mem1 = LongTermMemory::new("theme_analysis");
         mem1.set_body("Themes of isolation and connection in modern fiction.");
         memory_io::save_memory(
@@ -601,14 +577,12 @@ mod tests {
         )
         .unwrap();
 
-        // Aggregate
         let result = aggregate_experience(&home, MemoryBearerRef::Creator(creator_id), None)
             .await
             .unwrap();
         assert_eq!(result.memories_processed, 1);
         assert!(result.experience_markdown.contains("isolation-theme"));
 
-        // Verify SOUL.md was updated on disk
         let reloaded = crate::soul_io::load(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         let exp_after = reloaded.experience.as_deref().unwrap_or("");
         assert_ne!(exp_after, "");
@@ -625,12 +599,10 @@ mod tests {
 
         let creator_id = "ctr_pushtest";
 
-        // Create SOUL with personality
         let mut soul = crate::soul_io::create(&home, MemoryBearerRef::Creator(creator_id)).unwrap();
         soul.set_personality("A minimalist prose style with sharp dialogue.".to_string());
         crate::soul_io::save(&home, MemoryBearerRef::Creator(creator_id), &soul).unwrap();
 
-        // Push personality to memory
         let memory = crate::personality_sync::push_personality_to_memory(
             &home,
             MemoryBearerRef::Creator(creator_id),
@@ -638,7 +610,6 @@ mod tests {
         )
         .unwrap();
 
-        // Verify file exists and is valid
         let loaded = memory_io::load_memory(
             &home,
             MemoryBearerRef::Creator(creator_id),
@@ -649,7 +620,6 @@ mod tests {
         assert!(loaded.body.contains("minimalist prose style"));
         assert!(loaded.validate().is_ok());
 
-        // Re-push should preserve memory_id
         let memory2 = crate::personality_sync::push_personality_to_memory(
             &home,
             MemoryBearerRef::Creator(creator_id),

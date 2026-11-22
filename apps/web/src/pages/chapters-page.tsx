@@ -1,5 +1,4 @@
 /**
- * ChaptersPage — V1.65 Content-Authoring structure table (T1 + T3).
  *
  * Per-Work chapter structure: chapter # / title (display-only) / slug /
  * planned word count / volume / status badge / actual word count. Inline edit
@@ -71,7 +70,6 @@ export function ChaptersPage() {
       planned_word_count: edits.planned_word_count,
       volume: edits.volume,
     };
-    // Only `finalized` is confirm-editable. `published` is server hard-blocked
     // (`CHAPTER_STRUCTURE_EDIT_BLOCKED`) with no `confirm_structural_edit`
     // override, so it must never reach an actionable confirm dialog — showing
     // one would always end in an error toast after the user confirms.
@@ -172,7 +170,6 @@ export function ChaptersPage() {
                     return (
                       <TableRow
                         key={`${row.volume}:${row.chapter}`}
-                        // V1.121 v0.4: protected-row tint converges onto the
                         // registered data-table-row-protected token (DESIGN.md
                         // components.data-table.row-protected — purple-700
                         // low-alpha wash). Was a raw color-mix arbitrary class,
@@ -282,7 +279,6 @@ export function ChaptersPage() {
                                 </Button>
                               </>
                             ) : row.status === 'published' ? (
-                              // `published` chapters are server hard-blocked from
                               // structural edits (CHAPTER_STRUCTURE_EDIT_BLOCKED,
                               // no override). Render a disabled, informational
                               // affordance instead of an actionable Edit button.

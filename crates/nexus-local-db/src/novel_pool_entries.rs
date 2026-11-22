@@ -182,7 +182,6 @@ pub async fn promote_to_active(
     // SAFETY: dynamic SQL for upsert — compile-time macro not applicable.
     let entry_id = format!("npe_{}", uuid::Uuid::new_v4());
 
-    // Get the title from the works table for the work_id if available
     let work_title: Option<String> =
         sqlx::query_scalar("SELECT title FROM works WHERE work_id = ? AND creator_id = ?")
             .bind(work_id)
@@ -211,7 +210,6 @@ pub async fn promote_to_active(
 
     tx.commit().await?;
 
-    // Fetch the upserted entry
     get_pool_entry_by_work(pool, creator_id, work_id)
         .await?
         .ok_or_else(|| LocalDbError::MissingVersionKey {
@@ -426,7 +424,6 @@ mod tests {
         seed_work(&pool, "wrk_002", "ctr_test").await.unwrap();
 
         let now = chrono::Utc::now().to_rfc3339();
-        // Insert entries directly
         for (eid, wid, status) in [
             ("npe_1", "wrk_001", "active"),
             ("npe_2", "wrk_002", "queued"),
@@ -450,7 +447,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(entries.len(), 2);
-        // Active comes first
         assert_eq!(entries[0].status, "active");
         assert_eq!(entries[1].status, "queued");
     }
@@ -461,13 +457,11 @@ mod tests {
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
         seed_work(&pool, "wrk_002", "ctr_test").await.unwrap();
 
-        // Promote first work
         let entry1 = promote_to_active(&pool, "ctr_test", "wrk_001")
             .await
             .unwrap();
         assert_eq!(entry1.status, "active");
 
-        // Promote second work — should demote first
         let entry2 = promote_to_active(&pool, "ctr_test", "wrk_002")
             .await
             .unwrap();
@@ -514,7 +508,6 @@ mod tests {
         assert_eq!(entry.status, "completed");
     }
 
-    // V1.46 P4 (R-V141P1-15): verify pool mutation emits structured tracing.
     #[tokio::test]
     async fn test_promote_to_active_emits_trace() {
         let (layer, captured) = crate::test_tracing::capture_layer();
@@ -539,10 +532,6 @@ mod tests {
             ],
         );
     }
-
-    // ── R-V146P4-QC1-S1: trace coverage for the remaining 3 pool mutation
-    //    paths (archive / mark_completed / mark_completed_for_work). Previously
-    //    only `promote_to_active` had a capture test (1 of 4 paths).
 
     #[tokio::test]
     async fn test_archive_pool_entry_emits_trace() {

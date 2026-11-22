@@ -1,3 +1,4 @@
+// contract — docs/specs/architecture/spoke-adapter-architecture.md.
 //! Build script for `nexus-spoke-adapter`.
 //!
 //! Probes whether the `wasm32-unknown-unknown` target is installed so
@@ -11,7 +12,6 @@
 //! `computable_port.rs` are gated behind `#[cfg(not(...))]` accordingly.
 
 fn main() {
-    // Declare the custom cfg flag early so rustc does not warn about
     // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_spoke_adapter_no_wasm_target)");
 

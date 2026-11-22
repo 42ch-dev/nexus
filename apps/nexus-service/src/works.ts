@@ -1,5 +1,4 @@
 /**
- * Work family HTTP surface (P5-T1): Work lifecycle, authoring pool and
  * inspiration, durable selection, completion-lock release and chapter
  * reconcile (P1-T1 authority). Every operation is a thin translation over the
  * native family surface — the stored Principal is minted natively, ownership,

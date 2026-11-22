@@ -3,7 +3,6 @@ import { type ReactNode } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * FormSection — DESIGN.md §Component Primitives/FormSection.
  *
  * V1.149 P1 — L2 pattern component: the field-group layout behind form
  * dialogs and settings surfaces. Native fieldset/legend group semantics;

@@ -1,5 +1,4 @@
 /**
- * Brief empty state (plan v1219-world-module T2) — the guided entry into the
  * first Brief: final prompt + example copy (product-owned) and the
  * `+ 写 Brief` action that mounts the inline {@link BriefEditor}.
  */

@@ -149,12 +149,10 @@ impl CompletedSet {
 ///    constraint is enforced at the `AcpPromptTask` dispatch site.
 #[must_use]
 pub fn admit(candidate: &Schedule, running: &RunningSet, completed: &CompletedSet) -> bool {
-    // 1. Concurrency gate
     if !check_concurrency(candidate, running) {
         return false;
     }
 
-    // 2. Dependency gate
     for dep in &candidate.depends_on {
         if !completed.contains(dep) {
             return false;
@@ -168,7 +166,6 @@ fn check_concurrency(candidate: &Schedule, running: &RunningSet) -> bool {
     match &candidate.concurrency {
         ScheduleConcurrency::Serial => running.is_empty_for_creator(&candidate.creator_id),
         ScheduleConcurrency::ParallelWith(whitelist) => {
-            // Every running schedule for this creator must be in the whitelist.
             // Schedules from other creators are irrelevant.
             let creator_ids = running.ids_for_creator(&candidate.creator_id);
             creator_ids
@@ -221,7 +218,6 @@ mod tests {
 
     #[test]
     fn serial_allows_different_creator_running() {
-        // Creator A serial schedule should not be blocked by creator B's serial schedule
         let p = sched("A", "creator-a", ScheduleConcurrency::Serial, vec![]);
         let r = RunningSet::from(vec![sched(
             "B",
@@ -254,7 +250,6 @@ mod tests {
 
     #[test]
     fn parallel_with_ignores_other_creator_running() {
-        // Creator A's ParallelWith should not consider creator B's running schedules
         let p = sched(
             "A",
             "creator-a",
@@ -263,7 +258,6 @@ mod tests {
             }),
             vec![],
         );
-        // Creator B has a running schedule "Z" not in the whitelist
         let r = RunningSet::from(vec![sched(
             "Z",
             "creator-b",
@@ -275,7 +269,6 @@ mod tests {
 
     #[test]
     fn cross_creator_dependency_still_works() {
-        // Creator B's schedule can depend on creator A's completed schedule
         let p = sched("B", "creator-b", ScheduleConcurrency::Serial, vec!["A"]);
         let completed = CompletedSet::from(vec![ScheduleId("A".to_string())]);
         assert!(admit(&p, &RunningSet::empty(), &completed));

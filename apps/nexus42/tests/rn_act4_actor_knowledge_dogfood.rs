@@ -166,7 +166,6 @@ async fn seed(actor: &DirectActor) -> RnAct4Graph {
     );
 
     let world_w3 = actor.create_world("RN-ACT-4 World Three Later").await;
-    // The later binding is created last: a Character-owned entry is shared
     // across the Character's active bindings, so W3 must see it without a copy.
     let bind_a_w3 = actor.add_binding(&character_a, &world_w3).await;
 
@@ -288,7 +287,6 @@ fn named_item<'a>(index: &'a BTreeMap<String, Value>, canonical_name: &str) -> &
     matches[0]
 }
 
-// ── stored-row reads (the released workspace DB) ────────────────────────────
 //
 // Every seed writer is released and each CLI child exits before these run, so
 // the assertions read the same durable rows the CLI just wrote.
@@ -464,7 +462,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     let a_w1 = view_character_cli(&actor, &g.character_a, &g.world_w1, &g.bind_a_w1);
     let a_w2 = view_character_cli(&actor, &g.character_a, &g.world_w2, &g.bind_a_w2);
     let b_w1 = view_character_cli(&actor, &g.character_b, &g.world_w1, &g.bind_b_w1);
-    // The later World is reached through a binding created last: a
     // Character-owned row is shared across the Character's bindings, never
     // copied into the new World's container.
     let later = view_character_cli(&actor, &g.character_a, &g.world_w3, &g.bind_a_w3);
@@ -511,7 +508,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         named_item(&creator_i, NAME_W1_SECRET)["entry_id"],
         g.ke_w1_secret
     );
-    // v1.191 P1 T9 (durable §7): the projection carries the native governance
     // pair. `W1Secret` is authored `author-only`, i.e. the Creator's own holder
     // with an owner-private disclosure; the retired boolean is gone.
     assert_eq!(
@@ -564,7 +560,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         named_item(&creator_i, NAME_B_SHARE)["entry_id"],
         g.ke_b_share
     );
-    // The same durable row is addressed by both Character viewpoint and
     // management review: the revision and status the CLI projects are one row's.
     assert_eq!(
         named_item(&a_w1_i, NAME_A_SHARE)["revision"],
@@ -596,7 +591,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     assert_eq!(stored, 6, "captured entry_ids must each exist once");
     pool.close().await;
 
-    // ── v1.191 P1 T9: authored audience round trip (durable §3) ─────────────
     //
     // Every arm below drives the shipped CLI verbs, so the journey covers the
     // public authoring path end to end: `add --audience character-private`,
@@ -608,7 +602,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     let view_a = || view_character_ids(&actor, &g.character_a, &g.world_w1, &g.bind_a_w1);
     let view_b = || view_character_ids(&actor, &g.character_b, &g.world_w1, &g.bind_b_w1);
 
-    // Character-private, authored through the CLI: visible to the owning
     // Character and to the Creator's management review, hidden from every other
     // Character.
     let private_entry = add_character_private(&actor, &g.character_a, NAME_A_PRIVATE);
@@ -633,7 +626,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         "the Creator's management review keeps an owned private row"
     );
 
-    // The CLI `edit --audience shared` clears the pair under the expected
     // revision CAS. The row is Character-owned, so clearing its disclosure is
     // not a container move: it stays in its owner's container only.
     let shared = edit_audience(&actor, &g.character_a, &private_entry, 0, "shared", None);
@@ -655,7 +647,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         "clearing a disclosure must not leak an owner-scoped row to another Character"
     );
 
-    // World KB `entity patch --audience` on a World-owned row: author-only →
     // character-private → shared, each move under the graph-read CAS preimage,
     // with the Actor KnowledgeView following every one of them.
     let author_only = patch_entity_audience(
@@ -674,7 +665,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         author_only["entity"]["disclosure"],
         DISCLOSURE_OWNER_PRIVATE
     );
-    // The Creator's holder is not a Character's holder: both bound Characters
     // lose the row, and the management review keeps it.
     assert!(!view_a().contains(&g.ke_w1_public));
     assert!(!view_b().contains(&g.ke_w1_public));

@@ -51,7 +51,6 @@ use crate::moment::MomentContext;
 pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
     let trace = ctx.activation_trace.as_deref().unwrap_or(&[]);
 
-    // modules.placement: entries that passed activation (accepted == true).
     let placement: Vec<serde_json::Value> = trace
         .iter()
         .filter(|t| t.accepted)
@@ -64,7 +63,6 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         })
         .collect();
 
-    // modules.activation_trace: full per-entry fire/miss trace.
     let trace_json: Vec<serde_json::Value> = trace
         .iter()
         .map(|t| {
@@ -77,8 +75,6 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         })
         .collect();
 
-    // slot_map: entry_id → slot id (spec §2 H2) — captured post stage-gate
-    // at assembly time, so it reflects what actually rendered.
     let slot_map: Vec<serde_json::Value> = ctx
         .slot_map
         .as_deref()
@@ -92,7 +88,6 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         })
         .collect();
 
-    // budget: chars/4 token accounting (spec §2 H3). `None` budget (no
     // activation ran) renders zeros with null cap/remaining.
     let budget = serde_json::json!({
         "primary_tokens_est": ctx.activation_budget.as_ref().map_or(0, |b| b.primary_tokens_est),
@@ -100,8 +95,6 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         "cap": ctx.activation_budget.as_ref().and_then(|b| b.cap),
         "remaining": ctx.activation_budget.as_ref().and_then(|b| b.remaining),
     });
-    // moment_directive: status/metadata only (spec §2 H6). Reads ONLY
-    // `ctx.moment_directive_meta` — the directive body is excluded **by
     // construction** (AC-I3). `"none"` + nulls when no directive injected.
     let moment_directive = match ctx.moment_directive_meta.as_ref() {
         Some(meta) => serde_json::json!({
@@ -124,8 +117,6 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         }),
     };
 
-    // hygiene: per-entry transform trace (DF-79) — always present, empty
-    // array when no hygiene pass ran or no carrier-bearing entries.
     let hygiene: Vec<serde_json::Value> = ctx
         .hygiene_trace
         .as_deref()
@@ -232,7 +223,6 @@ mod tests {
 
         let packet = build_inspector_packet(&ctx);
 
-        // slot_map section: entry_id → slot, exact captured values.
         assert_eq!(
             packet["slot_map"],
             serde_json::json!([
@@ -243,7 +233,6 @@ mod tests {
             "slot_map must carry the captured post-gate slot assignments"
         );
 
-        // budget section: chars/4 accounting.
         assert_eq!(
             packet["budget"],
             serde_json::json!({
@@ -255,7 +244,6 @@ mod tests {
             "budget must carry the captured token accounting"
         );
 
-        // moment_directive section: status/metadata only.
         assert_eq!(
             packet["moment_directive"],
             serde_json::json!({
@@ -269,7 +257,6 @@ mod tests {
             }),
             "moment_directive must carry status/metadata only"
         );
-        // hygiene section: per-entry transform trace (DF-79).
         assert_eq!(
             packet["hygiene"],
             serde_json::json!([
@@ -278,7 +265,6 @@ mod tests {
             "hygiene must carry the per-entry transform trace"
         );
 
-        // modules.* unchanged: derived solely from the activation trace.
         assert_eq!(
             packet["modules"]["placement"],
             serde_json::json!([

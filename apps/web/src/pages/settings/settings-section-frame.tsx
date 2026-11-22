@@ -1,5 +1,4 @@
 /**
- * Settings section frame — modal-primary chrome (V1.131 P2).
  *
  * Presentational section nav + outlet region driven by
  * {@link SETTINGS_SECTION_DESCRIPTORS}. Host supplies active section and
@@ -22,7 +21,6 @@ export interface SettingsSectionFrameProps {
   /** Optional helper under the title row — modal host usually omits (title is Dialog). */
   showPageChrome?: boolean;
   /**
-   * Sections hidden from the rail on this entrance (AR-15 Create hide-table).
    * The host supplies them from the entrance registry — the frame stays
    * presentational (plan QC W-2: `hiddenSettingsSections` must be consumed).
    */

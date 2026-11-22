@@ -1,4 +1,4 @@
-//! PATH-based discovery for native CLI and curated ACP providers.
+//! PATH-based discovery for native CLI and curated ACP providers. See docs/specs/agents/agent-host.md.
 //!
 //! Scans the `PATH` environment variable for the known commands in
 //! [`KNOWN_COMMANDS`] (`claude`, `codex`, `dsh` — the ordinary upstream
@@ -62,10 +62,8 @@ const KNOWN_COMMANDS: &[(&str, &str, &[&str])] = &[
     ("claude", "claude-native", &[]),
     ("codex", "codex-native", &[]),
     ("dsh", "dsh-native", &[]),
-    // Curated native ACP servers (launch args verified against docs).
     ("omp", "omp", &["acp"]),
     ("hermes", "hermes", &["acp"]),
-    // open-design detection targets (nexu-io/open-design runtimes/defs).
     ("vela", "amr", &[]),
     ("devin", "devin", &[]),
     ("opencode", "opencode", &[]),
@@ -151,7 +149,6 @@ pub fn scan_path_in(
 ) -> HostResult<Vec<ProviderCatalogEntry>> {
     let suppressed: HashSet<&ProviderId> = suppressed_ids.iter().collect();
 
-    // Collect configured provider_ids for dedup
     let configured: HashSet<ProviderId> = config
         .providers
         .iter()
@@ -164,12 +161,10 @@ pub fn scan_path_in(
     for &(cmd, provider_id_str, acp_args) in KNOWN_COMMANDS {
         let pid = ProviderId::new(provider_id_str);
 
-        // Skip if already configured or suppressed
         if configured.contains(&pid) || suppressed.contains(&pid) {
             continue;
         }
 
-        // Health messages are diagnostics only: the scan handler in
         // `nexus-core` derives `installed` from the resolved executable, never
         // from this message text.
         let acp = !acp_args.is_empty();
@@ -220,14 +215,12 @@ pub fn scan_path_in(
             message: Some(message),
         };
 
-        // Search the provided dirs (and process PATH as a which fallback).
         if let Some(found_path) = find_command(path_dirs, cmd) {
             push_row(
                 found_path.to_string_lossy().into_owned(),
                 candidate("path candidate; bounded probe required"),
             );
         } else if cmd == "dsh" {
-            // Env route (PD-4): a non-empty `DSH_RUNTIME_BIN` counts as
             // present even when `dsh` is not on PATH — same catalog row,
             // same fields. The override is VALIDATED through the same
             // Nexus-owned resolution chain as launch/boot (fix wave): an
@@ -251,7 +244,6 @@ pub fn scan_path_in(
                 }
             }
             if !routed {
-                // Env route not taken: keep the not-found roster row so the
                 // dsh entry still shows up (disabled) in the UI.
                 push_row(
                     cmd.to_string(),
@@ -259,7 +251,6 @@ pub fn scan_path_in(
                 );
             }
         } else {
-            // Full-roster contract: a detection target that is not installed
             // still gets a row so the UI renders it disabled. The launch
             // command stays the bare name; the daemon's executable check
             // resolves it as not installed, so it is never spawned.
@@ -324,7 +315,6 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
         return Some(path);
     }
 
-    // Fallback: manual scan of the provided dirs, then the process PATH,
     // for environments where `which` may not find a command that exists.
     let search_dirs: Vec<PathBuf> = if path_dirs.is_empty() {
         std::env::var_os("PATH").map_or_default(|p| std::env::split_paths(&p).collect())
@@ -334,13 +324,11 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
 
     for dir in search_dirs {
         let candidate = dir.join(command);
-        // A non-executable file is not a command: `which` already enforces
         // this, so the manual fallback must too.
         if is_executable_file(&candidate) {
             return Some(candidate);
         }
 
-        // Windows: try appending PATHEXT extensions.
         #[cfg(target_os = "windows")]
         {
             if let Some(ext_var) = std::env::var_os("PATHEXT") {
@@ -386,7 +374,6 @@ pub fn scan_custom_path(
             message: Some(message),
         };
 
-        // Same capability honesty as the production scan: the dsh row
         // carries the AR-6 narrower descriptor. The `DSH_RUNTIME_BIN`
         // env route is intentionally absent here — this helper is the
         // custom-PATH test seam and stays deterministic against the
@@ -428,12 +415,10 @@ pub fn scan_custom_path(
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
                 capabilities,
-                // Same truthful-candidate contract as the production scan: an
                 // executable on a scanned dir is a candidate, not readiness.
                 health: candidate("path candidate; bounded probe required"),
             });
         } else {
-            // Same full-roster contract as the production scan (the dsh env
             // route stays intentionally absent here): a missing target is an
             // unavailable row whose message never carries the "path
             // candidate" installed marker.
@@ -492,7 +477,6 @@ mod tests {
     #[test]
     fn scan_custom_path_finds_claude() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        // Create a fake claude executable
         let claude_path = temp_dir.path().join("claude");
         std::fs::write(&claude_path, "#!/bin/sh\necho hello\n").expect("Failed to write fixture");
 
@@ -504,7 +488,6 @@ mod tests {
         assert_eq!(claude.protocol_kind, ProtocolKind::NativeCli);
         assert_eq!(claude.source, DiscoverySource::PathScan);
         assert_eq!(claude.trust, TrustLevel::LocalPath);
-        // Full roster: every other target is an unavailable not-found row.
         assert!(
             entries
                 .iter()
@@ -517,7 +500,6 @@ mod tests {
     #[test]
     fn scan_custom_path_finds_codex() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        // Create a fake codex executable
         let codex_path = temp_dir.path().join("codex");
         std::fs::write(&codex_path, "#!/bin/sh\necho hello\n").expect("Failed to write fixture");
 
@@ -535,7 +517,6 @@ mod tests {
     fn scan_custom_path_empty_dir() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let entries = scan_custom_path(&[temp_dir.path().to_path_buf()], &[]);
-        // Full roster: an empty dir yields all-unavailable rows, never candidates.
         assert_eq!(entries.len(), KNOWN_COMMANDS.len());
         assert!(
             entries.iter().all(|e| !e.health.available),
@@ -559,7 +540,6 @@ mod tests {
         );
     }
 
-    // PATH / DSH_RUNTIME_BIN mutations below use the crate-wide
     // `PROCESS_ENV_LOCK` (lib.rs `test_support`), which ALSO serializes
     // against the python-fixture spawn tests in claude/codex/dsh: the
     // fixtures' `#!/usr/bin/env python3` shebang resolves python3 through
@@ -696,11 +676,9 @@ mod tests {
         set_executable(&omp_path);
         set_executable(&hermes_path);
 
-        // Isolate PATH so the test depends on the stubs, not on any real
         // codex/claude/dsh that might be installed on the host
         // (qc1 W-002).
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        // A set `DSH_RUNTIME_BIN` must not duplicate the PATH-found dsh
         // row (the PATH route wins; the env route only fires on a miss).
         let _env_guard = DshEnvGuard::set("/opt/dsh/dsh");
 
@@ -708,7 +686,6 @@ mod tests {
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
-        // Full-roster contract: EVERY detection target gets a row, installed
         // or not — the UI renders the whole priority list and disables the
         // not-installed entries.
         assert_eq!(
@@ -734,7 +711,6 @@ mod tests {
             assert_eq!(entry.protocol_kind, ProtocolKind::NativeCli);
             assert_eq!(entry.source, DiscoverySource::PathScan);
             assert_eq!(entry.trust, TrustLevel::LocalPath);
-            // Truthful catalog: an executable on PATH is a CANDIDATE. It is not
             // available until a bounded probe proves it, so discovery must not
             // claim readiness.
             assert!(
@@ -751,7 +727,6 @@ mod tests {
             );
         }
 
-        // Curated ACP rows: omp and hermes are doc-verified native ACP
         // servers — the stubbed row must carry the ACP launch strategy.
         for (id, cmd) in [("omp", "omp"), ("hermes", "hermes")] {
             let entry = by_id(id);
@@ -783,7 +758,6 @@ mod tests {
             );
         }
 
-        // Not-installed targets stay in the roster, marked unavailable with a
         // message that NEVER carries the "path candidate" installed marker.
         let not_installed: Vec<&str> = entries
             .iter()
@@ -812,7 +786,6 @@ mod tests {
             );
         }
 
-        // B-2: the dsh row advertises the AR-6 narrower descriptor —
         // message-level streaming (proven on actual dsh in v1.188 P1 T3)
         // but no cancellation; claude/codex keep the broader native CLI
         // descriptor.
@@ -858,7 +831,6 @@ mod tests {
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
-        // Full roster: the non-dsh targets appear as not-found rows.
         let dsh = entries
             .iter()
             .find(|e| e.provider_id.0.as_str() == "dsh-native")
@@ -912,7 +884,6 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        // A missing ABSOLUTE path: a `/`-rooted value is not absolute on
         // Windows, where it would be rejected as a relative path before ever
         // reaching the executability check this test targets.
         #[cfg(windows)]
@@ -925,7 +896,6 @@ mod tests {
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
-        // Full roster: the non-dsh targets appear as not-found rows.
         let dsh = entries
             .iter()
             .find(|e| e.provider_id.0.as_str() == "dsh-native")
@@ -972,7 +942,6 @@ mod tests {
             "absent dsh must be a not-found roster row: {:?}",
             dsh.health.message
         );
-        // And nothing anywhere on the roster claims to be a PATH candidate.
         assert!(
             entries.iter().all(|e| !e
                 .health
@@ -1026,13 +995,10 @@ mod tests {
     }
 
     #[cfg(not(unix))]
-    fn set_executable(_path: &std::path::Path) {
-        // Windows: `which` resolves via PATHEXT; no executable bit needed.
-    }
+    fn set_executable(_path: &std::path::Path) {}
 
     #[test]
     fn known_commands_mapping() {
-        // Verify the mapping by SEMANTICS (command → provider id + acp args),
         // never by table position: the roster is append-ordered by feature.
         let by_command = |cmd: &str| {
             KNOWN_COMMANDS
@@ -1065,14 +1031,11 @@ mod tests {
         assert_eq!(ids.len(), deduped, "provider ids must be unique: {ids:?}");
     }
 
-    // ── DF-26: Cross-platform probe tests (AH5.1) ─────────────────────
-
     /// Verify that `find_command` uses `which::which()` for cross-platform
     /// resolution. This test verifies the function exists and returns
     /// `None` for commands not on PATH (not hanging, not panicking).
     #[test]
     fn find_command_returns_none_for_missing_command() {
-        // A command that definitely does not exist on any system
         let result = find_command(&[], "nexus42_nonexistent_command_99999");
         assert!(
             result.is_none(),
@@ -1085,11 +1048,9 @@ mod tests {
     /// platforms, so at least one should resolve.
     #[test]
     fn find_command_finds_real_system_command() {
-        // Try common commands that exist on any platform
         let found = find_command(&[], "sh")
             .or_else(|| find_command(&[], "cmd"))
             .or_else(|| find_command(&[], "ls"));
-        // On CI there should be at least one of these
         // But we don't hard-assert because unusual containers may lack all of them
         if let Some(path) = &found {
             assert!(
@@ -1098,7 +1059,6 @@ mod tests {
                 path.display()
             );
         }
-        // If none found, that's fine too (unusual environment) — the important
         // thing is that the function didn't panic or hang.
     }
 
@@ -1137,7 +1097,6 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
-        // Route 1 fixture: both extension forms in one directory: `.EXE`
         // precedes `.CMD` in the canonical PATHEXT order, so the priority
         // assertion is deterministic.
         let both_dir = temp_dir.path().join("both-bin");
@@ -1147,7 +1106,6 @@ mod tests {
         std::fs::write(&exe_stub, "MZ stub payload").expect("write claude.exe stub");
         std::fs::write(&cmd_stub, "@echo off\r\necho stub\r\n").expect("write claude.cmd stub");
 
-        // Route 2 fixture: a valid directory holding ONLY `claude.cmd`, paired
         // with a synthetic entry that carries a double quote. `find_command`
         // reaches `which::which_in` only when `join_paths` accepts the list;
         // on Windows `join_paths` rejects any entry containing `"` (the
@@ -1167,7 +1125,6 @@ mod tests {
             "the quote-bearing entry must stay synthetic: {}",
             quoted_entry.display()
         );
-        // Guard route 2's premise: this exact list must be rejected, otherwise
         // `find_command` would take the `which_in` branch and the test would
         // pass without ever executing the manual PATHEXT loop it targets.
         assert!(
@@ -1177,7 +1134,6 @@ mod tests {
         );
 
         let _pathext_guard = PathextGuard::set(".COM;.EXE;.BAT;.CMD");
-        // Isolate PATH to an empty directory so neither `which` call can find a
         // real `claude` installed on the runner (same rationale as qc1 W-002);
         // every resolution below therefore comes from the scanned `path_dirs`.
         let empty_dir = temp_dir.path().join("empty-path");
@@ -1197,7 +1153,6 @@ mod tests {
             "resolution must come from the scanned stub dir: {}",
             resolved_exe.display()
         );
-        // Windows paths are case-insensitive, so compare the name and the
         // extension case-insensitively: the `.EXE` stub must outrank `.CMD`.
         assert_eq!(
             resolved_exe
@@ -1218,7 +1173,6 @@ mod tests {
             resolved_exe.display()
         );
 
-        // Route 2: the manual fallback's PATHEXT loop. `join_paths` rejects
         // `search_dirs`, so `which_in` is skipped; the isolated PATH makes the
         // second `which()` call miss; the loop resolves `claude.cmd` from the
         // valid entry.
@@ -1247,7 +1201,6 @@ mod tests {
     fn scan_path_does_not_panic_without_claude() {
         let config = default_config();
         let result = scan_path(&config, &[]);
-        // Should succeed (not panic), even if claude is not found
         assert!(result.is_ok());
     }
 }

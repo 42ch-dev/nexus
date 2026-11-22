@@ -1,5 +1,4 @@
 /**
- * Pure presentational Nexus wordmark — renders a consumer-resolved SVG asset.
  *
  * The component is intentionally bundler-agnostic: it does NOT import `.svg`
  * files in its source. Consumers resolve the asset through their own bundler
@@ -33,7 +32,6 @@ export interface NexusLogoProps {
   label?: string;
   className?: string;
   /**
-   * Rendered height in px. Defaults to 32. Width is left auto so wide-aspect
    * marks and the wordmark preserve their intrinsic ratios.
    */
   size?: number;
@@ -49,8 +47,6 @@ export function NexusLogo({
   size = 32,
   draggable,
 }: NexusLogoProps) {
-  // `variant` is part of the public contract (documents which asset `src` resolves)
-  // and is intentionally unused at render time — the consumer supplies `src`.
   void variant;
 
   return (

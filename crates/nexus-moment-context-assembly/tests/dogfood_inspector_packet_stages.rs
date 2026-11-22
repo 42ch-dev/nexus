@@ -169,13 +169,11 @@ async fn seed_kb(kb: &InMemoryKbStore) {
             serde_json::json!({"constant": true, "priority": 50,
                 "position_hint": "outlet", "outlet": "style.post_history"}),
         ),
-        // Keyword-fired (non-constant) — sorts after the constant band.
         (
             "Court Scribe",
             "kb_mid",
             serde_json::json!({"keys": ["king"], "priority": 30}),
         ),
-        // Keyed but non-firing — only reachable via the relation hop.
         (
             "Hidden Cove",
             "kb_hidden",
@@ -187,7 +185,6 @@ async fn seed_kb(kb: &InMemoryKbStore) {
             .await
             .expect("insert kb entry");
     }
-    // Neutral — no activation module → default slot, "no activation module".
     kb.insert_knowledge_entry(neutral_entry("Neutral", "kb_neutral"))
         .await
         .expect("insert neutral kb entry");
@@ -225,8 +222,6 @@ impl StubDirectiveStore {
     }
 }
 
-// `unused_async_trait_impl` (new in clippy 1.98): the stub performs no async
-// I/O; `async` is by `DirectiveStore` trait contract — toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
 impl DirectiveStore for StubDirectiveStore {
     async fn load_active(
@@ -304,7 +299,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     let (ctx, store) = assemble(GenerationStage::Produce).await;
     let packet = build_inspector_packet(&ctx);
 
-    // ── modules.*: fired entries with reasons (unchanged spoke recipe) ──
     let placement = packet["modules"]["placement"]
         .as_array()
         .expect("placement array");
@@ -356,9 +350,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     let trace = packet["modules"]["activation_trace"]
         .as_array()
         .expect("trace array");
-    // 8 primary rows + 1 extra hop-accepted row for kb_hidden (its primary
-    // row is rejected — keys absent from the scan — the hop row carries the
-    // pull). Same engine semantics V1.149's dogfood asserts on the ctx trace.
     assert_eq!(trace.len(), 9, "8 primary rows + 1 hop row");
     assert!(
         trace
@@ -384,8 +375,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         "kb_hidden hop row accepted"
     );
 
-    // Hop fields live on `ctx.activation_trace` (the packet's
-    // `modules.activation_trace` is the unchanged spoke 4-field shape).
     let hidden = ctx
         .activation_trace
         .as_deref()
@@ -405,7 +394,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     );
     assert_eq!(hidden.source_relation_id.as_deref(), Some("rel_hero_cove"));
 
-    // ── slot_map: every fired entry routed to its expected slot ──
     let slots = slot_map(&packet);
     assert_eq!(slots.len(), 9, "8 lore entries + 1 synthetic directive row");
     assert_eq!(slots["kb_bf"], "world.before");
@@ -421,7 +409,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
     );
     assert_eq!(slots["dir_dogfood"], "moment.directive");
 
-    // The rendered World-KB matches the slot map (post-gate reality).
     let kb_text = ctx.world_kb.as_deref().expect("world_kb present");
     for heading in [
         "### World (Before)",
@@ -432,7 +419,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         assert!(kb_text.contains(heading), "missing {heading}");
     }
 
-    // ── budget: primary + hop estimates with caller cap / remaining ──
     assert!(
         packet["budget"]["primary_tokens_est"]
             .as_u64()
@@ -457,7 +443,6 @@ async fn dogfood_produce_packet_carries_slots_directive_and_hops() {
         "remaining must be present when a cap was set"
     );
 
-    // ── moment_directive: status/metadata only, body never present ──
     assert_eq!(
         packet["moment_directive"],
         serde_json::json!({

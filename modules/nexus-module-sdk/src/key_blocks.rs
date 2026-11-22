@@ -34,7 +34,6 @@ pub fn read_attr_int(kb: &Value, trait_name: &str) -> Option<i64> {
     if let Some(v) = read_int(kb, &["body", "attributes", trait_name]) {
         return Some(v);
     }
-    // Flat-object form carrying spoke round-tripped float values (`20.0`):
     // `as_i64` misses f64-backed numbers, so fall back to the float read.
     if let Some(v) = read_int_f64(kb, &["body", "attributes", trait_name]) {
         return Some(v);

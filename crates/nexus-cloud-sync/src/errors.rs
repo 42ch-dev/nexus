@@ -19,8 +19,6 @@ use thiserror::Error;
 /// Sync error type covering all sync-layer operations.
 #[derive(Debug, Error)]
 pub enum SyncError {
-    // ── Outbox errors ──────────────────────────────────────────────
-    /// Failed to open or initialize the `SQLite` outbox database.
     #[error("outbox database error: {0}")]
     OutboxDatabase(String),
 
@@ -36,14 +34,10 @@ pub enum SyncError {
     #[error("outbox max retries exceeded: {id} (retried {retries} times)")]
     OutboxMaxRetriesExceeded { id: String, retries: u64 },
 
-    // ── Input errors ───────────────────────────────────────────────
-    /// Caller-supplied input is invalid or an external value exceeds the
     /// representable domain; fail-closed boundary rejection.
     #[error("invalid input: {0}")]
     InvalidInput(String),
 
-    // ── Bundle builder errors ──────────────────────────────────────
-    /// Bundle validation failed.
     #[error("bundle validation failed: {0}")]
     BundleValidation(String),
 
@@ -59,8 +53,6 @@ pub enum SyncError {
     #[error("bundle must contain at least one delta")]
     BundleEmptyDeltas,
 
-    // ── Sync client errors ────────────────────────────────────────
-    /// HTTP request to the platform failed.
     #[error("sync HTTP error: {0}")]
     HttpError(#[from] reqwest::Error),
 
@@ -93,8 +85,6 @@ pub enum SyncError {
     #[error("HTTP body size exceeded: {actual} bytes (limit: {limit} bytes)")]
     HttpBodySizeExceeded { actual: usize, limit: usize },
 
-    // ── Conflict resolution errors ────────────────────────────────
-    /// Conflict cannot be automatically resolved.
     #[error("unresolvable conflict: {0}")]
     UnresolvableConflict(String),
 
@@ -102,8 +92,6 @@ pub enum SyncError {
     #[error("manual review required: {0}")]
     ManualReviewRequired(String),
 
-    // ── Partial apply errors ──────────────────────────────────────
-    /// Partial apply state is corrupted.
     #[error("partial apply state corrupted: {0}")]
     PartialApplyStateError(String),
 
@@ -114,8 +102,6 @@ pub enum SyncError {
         total_count: usize,
     },
 
-    // ── Precheck errors ───────────────────────────────────────────
-    /// Local precheck failed before upload.
     #[error("precheck failed: {0}")]
     PrecheckFailed(String),
 
@@ -131,8 +117,6 @@ pub enum SyncError {
     #[error("precheck schema violation: {0}")]
     PrecheckSchemaViolation(String),
 
-    // ── Serialization errors ──────────────────────────────────────
-    /// JSON serialization/deserialization failed.
     #[error("serialization error: {0}")]
     Serialization(String),
 }
@@ -145,20 +129,17 @@ impl SyncError {
     #[must_use]
     pub const fn error_code(&self) -> &str {
         match self {
-            // Outbox errors
             Self::OutboxDatabase(_) => "OUTBOX_DATABASE_ERROR",
             Self::OutboxEntryNotFound { .. } => "OUTBOX_ENTRY_NOT_FOUND",
             Self::OutboxInvalidState { .. } => "OUTBOX_INVALID_STATE",
             Self::OutboxMaxRetriesExceeded { .. } => "OUTBOX_MAX_RETRIES_EXCEEDED",
 
-            // Bundle errors
             Self::InvalidInput(_) => "INVALID_INPUT",
             Self::BundleValidation(_) => "BUNDLE_VALIDATION_ERROR",
             Self::BundleMissingField { .. } => "BUNDLE_MISSING_FIELD",
             Self::BundleSequenceNotMonotonic { .. } => "BUNDLE_SEQUENCE_NOT_MONOTONIC",
             Self::BundleEmptyDeltas => "BUNDLE_EMPTY_DELTAS",
 
-            // Sync client errors
             Self::HttpError(_) => "HTTP_ERROR",
             Self::PlatformError { .. } => "PLATFORM_ERROR",
             Self::SyncConflict { .. } => "SYNC_CONFLICT",
@@ -167,21 +148,17 @@ impl SyncError {
             Self::SyncTimeout { .. } => "SYNC_TIMEOUT",
             Self::HttpBodySizeExceeded { .. } => "HTTP_BODY_SIZE_EXCEEDED",
 
-            // Conflict resolution errors
             Self::UnresolvableConflict(_) => "UNRESOLVABLE_CONFLICT",
             Self::ManualReviewRequired(_) => "MANUAL_REVIEW_REQUIRED",
 
-            // Partial apply errors
             Self::PartialApplyStateError(_) => "PARTIAL_APPLY_STATE_ERROR",
             Self::AllDeltasFailed { .. } => "ALL_DELTAS_FAILED",
 
-            // Precheck errors
             Self::PrecheckFailed(_) => "PRECHECK_FAILED",
             Self::PrecheckVersionMismatch { .. } => "PRECHECK_VERSION_MISMATCH",
             Self::PrecheckCommandInconsistency(_) => "PRECHECK_COMMAND_INCONSISTENCY",
             Self::PrecheckSchemaViolation(_) => "PRECHECK_SCHEMA_VIOLATION",
 
-            // Serialization errors
             Self::Serialization(_) => "SERIALIZATION_ERROR",
         }
     }

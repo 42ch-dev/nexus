@@ -9,7 +9,6 @@ import { after, before, describe, test } from 'node:test';
 import { isNativeCoreErrorCode, openCore, parseNativeCoreError } from '../dist/index.js';
 
 /**
- * P0-T5 bounded native target: the six contract §2 Actor Host methods over the
  * real native core, the real attached Host authority, and the real service
  * composition underneath.
  *
@@ -202,7 +201,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       assert.equal(typeof core[name], 'function', `${name} must be exported through native`);
     }
 
-    // A real owned Character + binding is created through the surface itself.
     const created = await core.createCharacter(principal, {
       world_id: WORLD,
       display_name: 'Native Actor Host',
@@ -216,7 +214,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     const viewpoint = { world_id: WORLD, binding_id: bindingId };
     const session = await core.hostCreateSession(principal, {
       provider_id: MAIN_PROVIDER,
-      // The session cwd must be inside the engine-owner Host's pinned workspace
       // boundary, which is the registered creative root (not the nexus root the
       // wire omits to).
       cwd: creativeRoot,
@@ -245,7 +242,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     assert.equal(outcome.finish_reason, 'end_turn');
     assert.deepEqual(outcome.capture, { status: 'disabled', pending_id: null, code: null });
 
-    // The events are the local ACP peer's own transformation of the prompt and
     // its own end_turn — a fabricated projection cannot carry them.
     const batch = await core.nextHostEvents(principal, mainSessionId, mainOperationId, 16, 65_536);
     assert.equal(batch.operation_id, mainOperationId);
@@ -259,7 +255,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       JSON.stringify(batch.events),
     );
 
-    // Owner-bound reads: another operation/session pair and an unknown id are
     // the same bounded not_found, never a cross-session leak.
     await assert.rejects(
       () => core.nextHostEvents(principal, mainSessionId, randomUUID(), 16, 65_536),
@@ -269,7 +264,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       () => core.hostCharacterOperation(principal, randomUUID()),
       (error) => isNativeCoreErrorCode(error, 'not_found'),
     );
-    // The principal handle is resolved and verified on every effect/read, so a
     // handle this open did not mint is refused before anything else runs.
     await assert.rejects(
       () => core.hostCharacterOperation(`p:9:${CREATOR}:default`, mainOperationId),
@@ -302,7 +296,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     assert.equal(outcome.finish_reason, 'cancelled');
     assert.deepEqual(outcome.capture, { status: 'disabled', pending_id: null, code: null });
 
-    // The settled operation refuses a second cancel with its own coded
     // conflict, never a fabricated second success.
     await assert.rejects(
       () => core.hostCancelOperation(principal, started.operation_id),
@@ -331,11 +324,9 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     assert.equal(shutdown.session_id, session.session_id);
     assert.equal(shutdown.status, 'shutdown');
 
-    // The shutdown's accepted cancel settles the run it retired.
     const outcome = await waitForOutcome(core, principal, started.operation_id);
     assert.equal(outcome.run_status, 'cancelled');
 
-    // The retired id is a tombstone: even the raw provider lane refuses it, so
     // a released Actor session can never be resurrected as provider-only.
     await assert.rejects(
       () =>
@@ -385,7 +376,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       'a refused Actor id must not reach the provider lane at all',
     );
 
-    // An id the core never indexed keeps its provider-only semantics end to
     // end: the arbitrary id launches, prompts and terminates on the same peer.
     const rawSessionId = randomUUID();
     const launched = await core.providerCall({
@@ -430,7 +420,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       payload: {},
     });
 
-    // An adapter-shaped id is opaque, not a UUID: the gate must not claim an id
     // the core never indexed, and the lane's own refusal is what answers an
     // unknown operation id.
     const adapterSessionId = 'legacy-adapter-session';
@@ -462,7 +451,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     core = await openCore({ ...OPEN_OPTIONS, user_home: home }, providers.callbacks);
     const reopenedPrincipal = await core.activePrincipal();
 
-    // Process-lifetime detailed outcomes: the pre-close operation is MISSING
     // after the reopen, never inferred as a success from provider-only state.
     await assert.rejects(
       () => core.hostCharacterOperation(reopenedPrincipal, mainOperationId),
@@ -475,7 +463,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
   });
 
   /**
-   * The producer contract behind the TS absence classification: the SAME
    * refusal must be typed (`details.category`), so no consumer has to match the
    * human message. Exercised in the binding the service itself opens
    * (`direct_writer` + `allow_uninitialized`), and the authority's presence is
@@ -492,7 +479,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     try {
       const domainPrincipal = await domain.activePrincipal();
 
-      // The authority IS attached here: an ordinary miss keeps its own
       // code/status and carries NO absence category, so the discriminator is
       // categorical instead of a blanket `invalid_input`/400 marker.
       await assert.rejects(
@@ -505,7 +491,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
           return true;
         },
       );
-      // A live authority answers an unknown operation with its own not_found —
       // also not absence.
       await assert.rejects(
         () => domain.hostCharacterOperation(domainPrincipal, randomUUID()),
@@ -516,7 +501,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       assert.equal(report.cleanup_confirmed, true, JSON.stringify(report));
     }
 
-    // The authority is gone. The public code/status stay the designed
     // `invalid_input`/400 (degraded readiness is not a client fault) and the
     // typed category is what names the absence.
     await assert.rejects(
@@ -531,7 +515,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       },
     );
 
-    // Restore the suite's core so `after` closes the instance it opened.
     core = await openCore({ ...OPEN_OPTIONS, user_home: home }, providers.callbacks);
   });
 });

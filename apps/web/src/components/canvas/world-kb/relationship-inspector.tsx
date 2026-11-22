@@ -1,5 +1,4 @@
 /**
- * World KB relationship inspector — create/edit/remove typed relationships
  * via `world_kb.patch_relationship` (V1.74 A6).
  *
  * Supports core taxonomy + custom_label escape hatch, symmetric toggle,
@@ -116,7 +115,6 @@ export function RelationshipInspector({
     patchRelationship.mutate(buildRelationshipRemoveRequest(relationship), {
       onSuccess: () => onSaved?.(),
       onError: (error) => {
-        // A 409 on delete = the relationship changed concurrently (or was
         // already removed). The hook's global onError refetches the graph to
         // canonical state; here we dismiss the inspector since the stale row is
         // no longer editable.

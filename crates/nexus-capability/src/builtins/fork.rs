@@ -105,7 +105,6 @@ impl Capability for ForkCreate {
             "fork.create admitted"
         );
 
-        // Admission gate: creator must own the world.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
         // Validate the fork point event exists and belongs to the parent branch.
@@ -127,10 +126,8 @@ impl Capability for ForkCreate {
             )));
         }
 
-        // Allocate the new branch id.
         let new_branch_id = generate_fork_branch_id();
 
-        // Materialize the fork by appending a `fork_created` marker event on the
         // new branch at sequence_no 0. This establishes the branch in storage
         // (lazy forks are otherwise invisible until the first real event).
         let label = parsed.label.clone().unwrap_or_else(|| "fork".to_string());
@@ -138,7 +135,6 @@ impl Capability for ForkCreate {
             "forked from {}/{} ({label})",
             parsed.parent_branch_id, parsed.forked_from_event_id
         );
-        // Carrier B (plan 2026-08-12-v1.162-p1-fork-backend-foundation): the
         // marker is written `status=canon` with structured lineage in
         // `extensions_nexus_json` (`fork_lineage`). Canon status reflects that
         // a fork creation is a committed structural fact and makes the marker
@@ -180,8 +176,6 @@ impl Capability for ForkCreate {
         }))
     }
 }
-
-// ─── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -371,7 +365,6 @@ mod tests {
             .unwrap();
         let new_branch = out["branch_id"].as_str().unwrap();
 
-        // The marker must be findable in a canon-filtered read — exactly the
         // SQL the timeline-events route runs (`status` defaults to `canon`,
         // `event_type` exact-match; see `list_timeline_events_page`). This
         // verifies the Narrative-layer read does not choke on the
@@ -401,7 +394,6 @@ mod tests {
             extensions["fork_lineage"]["forked_from_event_id"],
             fork_point
         );
-        // Default-label contract: the caller omitted `label`, so the marker
         // must carry the canonical `"fork"` default.
         assert_eq!(extensions["fork_lineage"]["label"], "fork");
     }

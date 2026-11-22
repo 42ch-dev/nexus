@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
  * @nexus/design-tokens — generate the three derived outputs from the DESIGN pair.
- *
  * Reads repo-root DESIGN.md / DESIGN.dark.md, compiles via project-tokens.mjs,
  * and writes (only) these three deterministic outputs:
  *   - tooling/design-tokens/src/tokens.css
@@ -37,7 +36,6 @@ try {
     : REPO_ROOT;
   const pair = await loadDesignPair(repoRoot);
   const out = projectDesign(pair);
-  // Write each artifact to a temp file in its target directory first; only
   // after ALL writes succeed, replace the targets (atomic as a set), so a
   // failure mid-loop cannot leave mixed-generation output.
   const staged = [];
@@ -54,7 +52,6 @@ try {
       console.log(`wrote ${rel} (${out[field].length} bytes)`);
     }
   } finally {
-    // Best-effort cleanup of any temp file that was not renamed.
     await Promise.all(staged.map(({ tmp }) => rm(tmp, { force: true })));
   }
 } catch (err) {

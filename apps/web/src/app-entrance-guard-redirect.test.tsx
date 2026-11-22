@@ -1,5 +1,4 @@
 /**
- * Entrance guard redirects + entrance-aware index redirect (V1.170 P1 — AR-18/AR-19).
  *
  * Mirrors the `app-capabilities-redirect.test.tsx` precedent: a focused route
  * tree with the REAL `EntranceGuard` / `EntranceIndexRedirect` and marker
@@ -145,7 +144,6 @@ describe('EntranceGuard redirects (AR-19)', () => {
   });
 
   it('bounces Create on /schedule (V1.171 P2 — schedule CRUD stays develop-only; no creator chrome)', async () => {
-    // P2 PL-15/PL-8: the schedule operator surface stays hidden on the Create
     // entrance even though the page now carries create/edit/delete chrome —
     // the existing develop-only rule must keep bouncing it (AR-28).
     let resolvedPath = '';
@@ -188,7 +186,6 @@ describe('EntranceGuard redirects (AR-19)', () => {
   });
 
   it('passes Create through the strategy profile deep link (no bounce, no toast, no new guard)', async () => {
-    // V1.171 P1 (PL-13/AR-28): `/strategies/:presetId/profile` longest-prefix
     // matches the canvas rule (`/strategies/:presetId` develop-only +
     // allowDeepLink) — the profile view is not a new bounce surface.
     let resolvedPathname = '';

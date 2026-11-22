@@ -62,7 +62,6 @@ async fn forward_migration_adds_promotion_columns() {
 async fn promotion_status_defaults_to_pending_with_check_constraint() {
     let (pool, _dir) = fresh_pool().await;
 
-    // Insert a legacy-style row (V1.29 enqueue) and verify promotion_status
     // defaults to 'pending'.
     let job = nexus_local_db::enqueue_extract_job(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
         .await
@@ -78,7 +77,6 @@ async fn promotion_status_defaults_to_pending_with_check_constraint() {
             .unwrap();
     assert_eq!(promo, "pending");
 
-    // CHECK constraint rejects invalid values.
     let bad = sqlx::query("UPDATE kb_extract_jobs SET promotion_status = 'bogus' WHERE job_id = ?")
         .bind(&job.job_id)
         .execute(&pool)
@@ -123,7 +121,6 @@ async fn insert_pending_then_list_round_trip() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].job_id, row.job_id);
 
-    // Other world sees nothing.
     let other = list_pending_for_world(&pool, "wld_other", None)
         .await
         .unwrap();
@@ -136,7 +133,6 @@ async fn idempotency_guard_blocks_duplicate_pending() {
 
     let (pool, _dir) = fresh_pool().await;
 
-    // Before insert: not idempotent.
     assert!(!is_idempotent(&pool, "wrk_1", "Aria Stormblade")
         .await
         .unwrap());
@@ -155,12 +151,10 @@ async fn idempotency_guard_blocks_duplicate_pending() {
     .await
     .unwrap();
 
-    // After insert: idempotent (pending row exists).
     assert!(is_idempotent(&pool, "wrk_1", "Aria Stormblade")
         .await
         .unwrap());
 
-    // Different name: not idempotent.
     assert!(!is_idempotent(&pool, "wrk_1", "Other Name").await.unwrap());
 }
 
@@ -183,16 +177,13 @@ async fn idempotency_survives_confirm_but_not_reject() {
     .await
     .unwrap();
 
-    // Confirm.
     let flipped = mark_confirmed(&pool, &row.job_id).await.unwrap();
     assert!(flipped);
 
-    // Still idempotent (confirmed rows block re-extraction).
     assert!(is_idempotent(&pool, "wrk_1", "Confirmed Hero")
         .await
         .unwrap());
 
-    // Confirming again is a no-op (already confirmed).
     let reflip = mark_confirmed(&pool, &row.job_id).await.unwrap();
     assert!(!reflip);
 }
@@ -219,7 +210,6 @@ async fn reject_allows_re_extraction() {
     let flipped = mark_rejected(&pool, &row.job_id).await.unwrap();
     assert!(flipped);
 
-    // Rejected rows do NOT block re-extraction (author may change their mind).
     assert!(!is_idempotent(&pool, "wrk_1", "Rejected Name")
         .await
         .unwrap());
@@ -231,7 +221,6 @@ async fn pending_index_supports_filtered_list() {
 
     let (pool, _dir) = fresh_pool().await;
 
-    // Insert 3 pending for wld_1, 1 for wld_2.
     for name in ["Alpha Hero", "Beta Villain", "Gamma Sage"] {
         insert_pending(
             &pool,
@@ -264,7 +253,6 @@ async fn pending_index_supports_filtered_list() {
     let w1 = list_pending_for_world(&pool, "wld_1", None).await.unwrap();
     assert_eq!(w1.len(), 3);
 
-    // Limit bounds the result.
     let limited = list_pending_for_world(&pool, "wld_1", Some(2))
         .await
         .unwrap();
@@ -286,7 +274,6 @@ async fn pending_list_uses_world_id_covering_index() {
     use nexus_local_db::kb_extract_job::insert_pending;
     let (pool, _dir) = fresh_pool().await;
 
-    // Seed one pending row so the planner has stats (not strictly required for
     // EXPLAIN QUERY PLAN, but mirrors a realistic state).
     insert_pending(
         &pool,
@@ -333,11 +320,6 @@ async fn pending_list_uses_world_id_covering_index() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// V1.51 T-A P0 — LLM payload extension (migration 202606180004)
-// Plan: 2026-06-18-v1.51-llm-extraction; Spec: llm-extract.md §3.2
-// ═══════════════════════════════════════════════════════════════════════════
-
 /// Forward migration adds `llm_confidence` + `llm_source_quote` columns.
 #[tokio::test]
 async fn v151_forward_migration_adds_llm_columns() {
@@ -365,7 +347,6 @@ async fn v151_legacy_rows_default_llm_columns_to_null() {
     use nexus_local_db::kb_extract_job::insert_pending;
     let (pool, _dir) = fresh_pool().await;
 
-    // Insert a V1.50-style heuristic pending row via the legacy entry point.
     let row = insert_pending(
         &pool,
         "ctr_v151",
@@ -443,7 +424,6 @@ async fn v151_insert_pending_with_llm_round_trips_metadata() {
         Some("...the eastern gate groaned open...")
     );
 
-    // get_promotion surfaces the same metadata.
     let fetched = get_promotion(&pool, &row.job_id).await.unwrap().unwrap();
     assert_eq!(fetched.llm_confidence, Some(0.92));
     assert_eq!(
@@ -451,7 +431,6 @@ async fn v151_insert_pending_with_llm_round_trips_metadata() {
         Some("...the eastern gate groaned open...")
     );
 
-    // list_pending_for_world surfaces the same metadata.
     let pending = list_pending_for_world(&pool, "wld_v151b", None)
         .await
         .unwrap();

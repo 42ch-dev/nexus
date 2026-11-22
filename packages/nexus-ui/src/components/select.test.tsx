@@ -5,8 +5,6 @@ import '@testing-library/jest-dom/vitest';
 import { Select } from './select';
 
 describe('Select', () => {
-  // --- base rendering ---
-
   it('renders a select element', () => {
     render(
       <Select data-testid="test-select">
@@ -29,12 +27,7 @@ describe('Select', () => {
     expect(screen.getByRole('option', { name: 'Option B' })).toBeInTheDocument();
   });
 
-  // --- chevron inset (asymmetric horizontal padding) ---
 
-
-
-
-  // --- custom chevron overlay ---
 
   it('renders a custom chevron overlay', () => {
     render(
@@ -63,7 +56,6 @@ describe('Select', () => {
     expect(screen.getByTestId('select-chevron')).toBeInTheDocument();
   });
 
-  // --- className merge (cn integration) ---
 
   it('merges custom className with base classes', () => {
     render(
@@ -75,7 +67,6 @@ describe('Select', () => {
     expect(select).toHaveClass('custom-class');
   });
 
-  // --- invalid prop → aria-invalid + visual state ---
 
   it('sets aria-invalid="true" when invalid is true', () => {
     render(
@@ -106,7 +97,6 @@ describe('Select', () => {
 
 
 
-  // --- ref-as-prop ---
 
   it('passes the ref to the underlying select element', () => {
     let ref: HTMLSelectElement | null = null;
@@ -123,7 +113,6 @@ describe('Select', () => {
     expect(ref).toBe(screen.getByTestId('test-select'));
   });
 
-  // --- accessibility-relevant attributes ---
 
   it('passes through standard aria-describedby', () => {
     render(
@@ -174,7 +163,6 @@ describe('Select', () => {
     expect(container.querySelectorAll('[role="alert"]').length).toBe(0);
   });
 
-  // --- disabled state ---
 
   it('exposes the native disabled state', () => {
     render(

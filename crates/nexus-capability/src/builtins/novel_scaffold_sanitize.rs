@@ -43,7 +43,6 @@ fn validate_slug_inner(s: &str, label: &str) -> Result<String, CapabilityError> 
             s.len()
         )));
     }
-    // Explicit path-traversal / separator rejection (defense-in-depth on top
     // of the character class check below).
     if s.contains("..") || s.contains('/') || s.contains('\\') || s.contains('\0') {
         return Err(CapabilityError::InputInvalid(format!(
@@ -92,7 +91,6 @@ pub fn validate_total_chapters(n: i32) -> Result<u32, CapabilityError> {
             "total_planned_chapters must be {MIN_CHAPTERS}..={MAX_CHAPTERS} (got {n})"
         )));
     }
-    // i32 -> u32 is safe given the bounds above.
     Ok(u32::try_from(n).expect("bounded 1..=100"))
 }
 

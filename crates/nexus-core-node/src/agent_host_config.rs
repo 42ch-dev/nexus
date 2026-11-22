@@ -34,9 +34,6 @@ fn validate(config: &AgentHostConfig) -> Result<()> {
         ));
     }
     for provider in &config.providers {
-        // The launcher's own admission check is the single source of truth:
-        // id non-empty; enabled entries need a supported protocol AND a
-        // non-empty command. A save can never accept what the launcher rejects.
         validate_provider_config(provider).map_err(|error| invalid_input(error.to_string()))?;
     }
     Ok(())
@@ -133,8 +130,6 @@ mod tests {
 
     #[test]
     fn accepts_disabled_provider_without_command() {
-        // A stale entry disabled by replacement semantics keeps no command but
-        // must not block the save: the launcher never selects it.
         validate(&config_with(provider(None, false))).expect("disabled entry is accepted");
     }
 }

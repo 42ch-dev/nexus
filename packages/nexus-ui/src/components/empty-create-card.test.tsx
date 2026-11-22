@@ -6,7 +6,6 @@ import '@testing-library/jest-dom/vitest';
 import { EmptyCreateCard } from './empty-create-card';
 
 /**
- * V1.148 P1 — promoted EmptyCreateCard primitive.
  *
  * Pins: caller-owned copy and icon, the dashed-card create affordance recipe
  * (V1.125 P2 AC-V1125-5), disabled gating (non-interactive + optional native

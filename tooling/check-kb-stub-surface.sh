@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
 # check-kb-stub-surface.sh — knowledge-entry seam structural guard (I-000590).
 #
 # The in-memory `KnowledgeEntryPort` stub is only meaningful while the conversion
@@ -71,7 +70,6 @@
 # Exit codes:
 #   0 — surface matches: one owner per mapper, no parallel port
 #   1 — mismatch, missing source tree, or self-test failure
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"

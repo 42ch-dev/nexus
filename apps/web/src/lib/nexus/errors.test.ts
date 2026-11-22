@@ -1,5 +1,4 @@
 /**
- * Tests for NexusClientError — the W-1 error-envelope parsing contract.
  *
  * The daemon wraps the canonical ErrorResponse under `{ success: false, error:
  * { code, message, details? } }` (ApiErrorResponse). `fromBody` must unwrap the
@@ -37,7 +36,6 @@ describe('NexusClientError.fromBody', () => {
   });
 
   it('falls back to top-level code/message when no envelope is present', () => {
-    // Some orchestration handlers still emit ad-hoc bodies (R-V164-FE1-ORCH).
     const body = { code: 'not_found', message: 'Work not found.' };
     const error = NexusClientError.fromBody(404, body);
     expect(error.code).toBe('not_found');
@@ -63,7 +61,6 @@ describe('NexusClientError.fromBody', () => {
   });
 
   it('prefers inner envelope fields over stray top-level fields', () => {
-    // Defensive: if both an envelope and top-level fields exist, the envelope wins.
     const body = {
       code: 'stale_top_level',
       message: 'ignored',

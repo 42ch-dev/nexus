@@ -113,7 +113,6 @@ describe('WebConnectionStorage', () => {
   });
 
   it('clears an active remote entry with a missing API key (never loads keyless remote mode)', async () => {
-    // Regression: the desktop redacted shape makes apiKey optional, but the
     // web backend must never load an active remote record without the actual
     // key — that would build an unauthenticated BrowserClient.
     window.localStorage.setItem(

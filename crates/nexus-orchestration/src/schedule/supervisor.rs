@@ -267,7 +267,6 @@ impl ScheduleSupervisor {
     /// # Errors
     /// Returns [`SupervisorError`] if schedule admission or database operations fail.
     pub async fn tick(&self) -> Result<(), SupervisorError> {
-        // H4: Re-entrancy guard — if a tick is already in progress, skip.
         if self
             .tick_in_progress
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -276,11 +275,9 @@ impl ScheduleSupervisor {
             return Ok(());
         }
 
-        // Use system clock for on-demand tick
         let now = chrono::Utc::now().timestamp();
         let result = self.tick_inner(now, None).await;
 
-        // Always release the guard, even on error.
         self.tick_in_progress.store(false, Ordering::Release);
 
         result
@@ -303,7 +300,6 @@ impl ScheduleSupervisor {
     /// # Errors
     /// Returns [`SupervisorError`] if schedule admission or database operations fail.
     pub async fn tick_clocked(&self, clock_now: i64) -> Result<(), SupervisorError> {
-        // H4: Re-entrancy guard — shared with tick()
         if self
             .tick_in_progress
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -312,10 +308,8 @@ impl ScheduleSupervisor {
             return Ok(());
         }
 
-        // Filter by scheduled_at <= clock_now OR scheduled_at IS NULL
         let result = self.tick_inner(clock_now, Some(clock_now)).await;
 
-        // Always release the guard, even on error.
         self.tick_in_progress.store(false, Ordering::Release);
 
         result
@@ -366,7 +360,6 @@ impl ScheduleSupervisor {
 
         let completed_ids: Vec<ScheduleId> = completed_rows.into_iter().map(ScheduleId).collect();
 
-        // Classify active rows into running (by creator) and pending.
         //
         // A3 (admission cutover): only `driven_v1` rows participate in
         // admission/execution capacity. Legacy (`legacy_inert`) and
@@ -381,7 +374,6 @@ impl ScheduleSupervisor {
 
         for row in &active_rows {
             let schedule = row.to_schedule();
-            // A3: non-driven rows never enter the running set (excluded from
             // execution capacity) nor become admission candidates.
             if row.execution_policy != EXECUTION_POLICY_DRIVEN_V1 {
                 continue;
@@ -394,13 +386,11 @@ impl ScheduleSupervisor {
                         .insert(schedule.id);
                 }
                 ScheduleStatus::Pending => {
-                    // V1.5 WS-D: filter by scheduled_at for clock-triggered tick
                     // scheduled_at_cutoff filters by scheduled_at <= cutoff OR scheduled_at IS NULL
                     let due = match (scheduled_at_cutoff, &schedule.scheduled_at) {
                         (None, _) => true,             // on-demand tick: admit all pending
                         (Some(_cutoff), None) => true, // no scheduled_at: on-demand schedule
                         (Some(cutoff), Some(scheduled_str)) => {
-                            // Parse scheduled_at string (Unix timestamp as string)
                             scheduled_str.parse::<i64>().is_ok_and(|t| t <= cutoff)
                         }
                     };
@@ -414,7 +404,6 @@ impl ScheduleSupervisor {
 
         let completed_set = CompletedSet::from(completed_ids);
 
-        // Load depends_on for each pending schedule from schedule_dependencies
         let pool_ref = &*self.pool;
         let mut pending_with_deps: Vec<(Schedule, String)> = Vec::with_capacity(pending.len());
         for (schedule, policy) in pending {
@@ -431,10 +420,8 @@ impl ScheduleSupervisor {
             pending_with_deps.push((schedule, policy));
         }
 
-        // Sort pending by created_at for FIFO ordering
         pending_with_deps.sort_by(|a, b| a.0.created_at.cmp(&b.0.created_at));
 
-        // Evaluate admission one at a time, updating the running set after
         // each admission so that Serial schedules don't all get admitted
         // in the same tick. Concurrency checks are scoped per-creator (H1).
         //
@@ -473,7 +460,6 @@ impl ScheduleSupervisor {
                         started.push((creator_id.clone(), sid.clone()));
                     }
                     Err(e) => {
-                        // A failed admission never marks the row Running
                         // (no session was created); it stays pending for a
                         // later tick / explicit start.
                         tracing::warn!(
@@ -485,14 +471,12 @@ impl ScheduleSupervisor {
                     }
                 }
             } else {
-                // No daemon starter (tests / standalone supervisor): keep
                 // the historical status-only flip so admission-gate tests
                 // remain meaningful. Production always injects a starter.
                 started.push((creator_id.clone(), sid.clone()));
                 status_flip.push((creator_id, sid));
             }
 
-            // Immediately update the running set so subsequent candidates
             // see this one as running (important for Serial).
             running_by_creator_so_far
                 .entry(candidate.creator_id.clone())
@@ -500,7 +484,6 @@ impl ScheduleSupervisor {
                 .insert(candidate.id.clone());
         }
 
-        // Status-only flip for rows admitted without a daemon starter.
         for (_creator_id, sid) in &status_flip {
             let sid_owned = sid.to_owned();
             sqlx::query!(
@@ -513,7 +496,6 @@ impl ScheduleSupervisor {
             .await?;
         }
 
-        // Update inner cache
         for (creator_id, sid) in &started {
             self.inner
                 .lock()
@@ -565,11 +547,6 @@ impl ScheduleSupervisor {
             ));
         }
 
-        // Fetch creator_id + preset_id + owned session for the schedule.
-        // V1.47 P0 fix (qc3 W-1): preset_id is inspected here so the
-        // review-findings hook can be short-circuited for non-review
-        // presets without an extra round-trip inside
-        // persist_review_findings_for_schedule.
         let schedule_row = sqlx::query_as::<_, TerminalScheduleRow>(
             "SELECT creator_id, preset_id, current_session_id
              FROM creator_schedules WHERE schedule_id = ?",
@@ -578,7 +555,6 @@ impl ScheduleSupervisor {
         .fetch_optional(&*self.pool)
         .await?;
 
-        // T3 (A3): a driven schedule (owned session) settles through the
         // atomic path — source settlement + auto-chain child commit in ONE
         // transaction keyed by source_run_id. Non-driven rows (tests,
         // legacy) keep the sequential path below.
@@ -618,13 +594,11 @@ impl ScheduleSupervisor {
         .execute(&*self.pool)
         .await?;
 
-        // Remove from running cache
         if let Some(row) = &schedule_row {
             self.remove_from_running_cache(schedule_id, &row.creator_id)
                 .await;
         }
 
-        // V1.42 P0 (T3): Release runtime lock held by this schedule.
         // The holder format is `daemon:schedule:<schedule_id>`.
         // Look up the Work that was driven by this schedule and release its lock.
         if let Some(row) = &schedule_row {
@@ -632,7 +606,6 @@ impl ScheduleSupervisor {
                 .await;
         }
 
-        // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
         // Only on success — failed/cancelled schedules do not trigger auto-chain.
         if terminal_status == ScheduleStatus::Completed {
             if let Some(row) = &schedule_row {
@@ -642,7 +615,6 @@ impl ScheduleSupervisor {
             }
         }
 
-        // Trigger tick to admit next eligible schedule
         self.tick().await?;
 
         Ok(())
@@ -689,7 +661,6 @@ impl ScheduleSupervisor {
         let executor: Option<&Arc<dyn nexus_capability::WorkspaceExecutor>> =
             (*self.workspace_executor).as_ref();
 
-        // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
         // when a `novel-chapter-review` schedule completes. This is the
         // **single code path** covering both the auto-chain driver and
         // on-demand `creator run novel-chapter-review <work_id>` runs.
@@ -707,7 +678,6 @@ impl ScheduleSupervisor {
                 );
             }
         }
-        // V1.49 P1 (narrative-indexes overlay §4): promote inline F###
         // declarations from chapter outlines into
         // `Works/<work_ref>/Outlines/foreshadowing.md` after a
         // `novel-writing` produce run completes.
@@ -727,7 +697,6 @@ impl ScheduleSupervisor {
                 );
             }
 
-            // V1.51 T-A P2: finalize-time missing-KB detection. Scan the
             // finalized chapter prose, diff against confirmed World KB rows,
             // and write an advisory log under
             // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
@@ -749,7 +718,6 @@ impl ScheduleSupervisor {
                 );
             }
         }
-        // V1.50 T-B P1 (entity-scope-model.md §5.5 / cron-staggering.md
         // §4.4): review-time KB candidate extraction. When a
         // `novel-review-master` schedule completes, scan the current
         // chapter prose for capitalized noun phrases and insert
@@ -807,7 +775,6 @@ impl ScheduleSupervisor {
             _ => unreachable!(),
         };
 
-        // Evaluate auto-chain BEFORE the transaction (read-only).
         let chain = if terminal_status == ScheduleStatus::Completed {
             self.evaluate_auto_chain(schedule_id, creator_id).await
         } else {
@@ -823,7 +790,6 @@ impl ScheduleSupervisor {
                 })
             })?;
 
-        // 1. Source settlement — only the schedule whose current_session_id
         //    equals the run is updated. Any non-terminal status settles
         //    (running, paused, pending): a paused-after-reconcile-error row
         //    (P1-1) must still reach its durable terminal, and the live
@@ -844,7 +810,6 @@ impl ScheduleSupervisor {
         .await?;
         let source_transitioned = source_result.rows_affected() > 0;
 
-        // 2. Child enqueue in the SAME transaction (auto-chain only).
         let mut child_id: Option<String> = None;
         let mut conflict = false;
         if let Some((action, work)) = &chain {
@@ -863,7 +828,6 @@ impl ScheduleSupervisor {
                     Some(*next_volume),
                     work_id.as_str(),
                 )),
-                // WorkComplete / NoAction do not create a child; handled
                 // after commit.
                 _ => None,
             };
@@ -900,14 +864,12 @@ impl ScheduleSupervisor {
             }
         }
 
-        // Whether THIS call performed the terminal transition. A duplicate
         // callback (source_run_id conflict) must not re-run completion hooks,
         // mark Work complete, or re-hand the child to the starter (Greptile P2).
         // Ownership is keyed on the source UPDATE row count — not merely
         // whether the child INSERT conflicted.
         let mut transitioned = source_transitioned;
         if conflict {
-            // Duplicate terminal callback: the child INSERT failed on the
             // source_run_id unique index. Roll back (the source settlement
             // flips back with it) and load the already-created child.
             drop(tx);
@@ -917,7 +879,6 @@ impl ScheduleSupervisor {
             .bind(source_run_id)
             .fetch_optional(&*self.pool)
             .await?;
-            // Settle the source idempotently — a no-op when the winner's
             // transaction already settled it.
             let settled = sqlx::query(
                 "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
@@ -943,7 +904,6 @@ impl ScheduleSupervisor {
             tx.commit().await?;
         }
 
-        // Post-commit: running cache, runtime lock, hooks, starter handoff,
         // WorkComplete, tick.
         self.remove_from_running_cache(schedule_id, creator_id)
             .await;
@@ -982,7 +942,6 @@ impl ScheduleSupervisor {
             }
         }
 
-        // Trigger tick to admit next eligible schedule
         self.tick().await?;
 
         Ok(())
@@ -1005,7 +964,6 @@ impl ScheduleSupervisor {
     )> {
         use crate::auto_chain::{self, ChainAction};
 
-        // Find the Work that was driven by this schedule
         let work = match auto_chain::find_work_for_driver(&self.pool, schedule_id).await {
             Ok(Some(w)) => w,
             Ok(None) => return None, // Not an auto-chain driver
@@ -1023,7 +981,6 @@ impl ScheduleSupervisor {
             return None;
         }
 
-        // DF-60 §6: skip auto-chain on completion-locked Works
         if work.completion_locked_at.is_some() {
             tracing::debug!(
                 work_id = %work.work_id,
@@ -1032,7 +989,6 @@ impl ScheduleSupervisor {
             return None;
         }
 
-        // Read latest WorkRecord from DB (SSOT, not cached state)
         let work =
             match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await {
                 Ok(Some(w)) => w,
@@ -1047,7 +1003,6 @@ impl ScheduleSupervisor {
                 }
             };
 
-        // V1.42 F-001: When the persist stage just completed, use the
         // volume-aware evaluator to correctly handle cross-volume auto-chain
         // (Plan Goal 4 / AC2). For all other stages, the flat evaluator suffices.
         let action = if work.current_stage == "persist" && work.stage_status == "complete" {
@@ -1099,7 +1054,6 @@ impl ScheduleSupervisor {
                 Some,
             )
         } else {
-            // No configured provider: only presets WITHOUT prompt roles
             // may be enqueued (empty map passes the completeness gate).
             let caps = nexus_capability::CapabilityRegistry::with_builtins();
             if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
@@ -1141,7 +1095,6 @@ impl ScheduleSupervisor {
     async fn process_auto_chain_after_terminal(&self, schedule_id: &str, creator_id: &str) {
         use crate::auto_chain::{self, ChainAction};
 
-        // Find the Work that was driven by this schedule
         let work = match auto_chain::find_work_for_driver(&self.pool, schedule_id).await {
             Ok(Some(w)) => w,
             Ok(None) => return, // Not an auto-chain driver
@@ -1159,7 +1112,6 @@ impl ScheduleSupervisor {
             return;
         }
 
-        // DF-60 §6: skip auto-chain on completion-locked Works
         if work.completion_locked_at.is_some() {
             tracing::debug!(
                 work_id = %work.work_id,
@@ -1168,7 +1120,6 @@ impl ScheduleSupervisor {
             return;
         }
 
-        // Read latest WorkRecord from DB (SSOT, not cached state)
         let work =
             match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await {
                 Ok(Some(w)) => w,
@@ -1183,7 +1134,6 @@ impl ScheduleSupervisor {
                 }
             };
 
-        // V1.42 F-001: When the persist stage just completed, use the
         // volume-aware evaluator to correctly handle cross-volume auto-chain
         // (Plan Goal 4 / AC2). For all other stages, the flat evaluator suffices.
         let action = if work.current_stage == "persist" && work.stage_status == "complete" {
@@ -1224,7 +1174,6 @@ impl ScheduleSupervisor {
                 ref next_chapter,
                 next_volume,
             } => {
-                // V1.42: log cross-volume transitions for observability.
                 let is_cross_volume =
                     next_volume > 1 || (next_volume == 1 && work.current_chapter > 0);
                 if is_cross_volume {
@@ -1235,7 +1184,6 @@ impl ScheduleSupervisor {
                         "auto-chain: next chapter (volume-aware)"
                     );
                 }
-                // V1.44 P2 (F-004): pass volume through to enqueue so the
                 // `novel-writing` preset input includes `volume` template var.
                 // Next chapter starts at produce stage
                 if let Err(e) = self
@@ -1331,7 +1279,6 @@ impl ScheduleSupervisor {
     ) -> Result<(), SupervisorError> {
         use crate::auto_chain::{self, AutoChainError};
 
-        // N-9: derive the complete binding map for the stage's preset from
         // the configured default provider. A preset with prompt roles and
         // no provider refuses the enqueue (never a drive-enabled row with an
         // empty binding map); a preset with no prompt roles accepts an empty
@@ -1355,7 +1302,6 @@ impl ScheduleSupervisor {
                 return Ok(());
             }
         } else {
-            // No configured provider: only presets WITHOUT prompt roles
             // may be enqueued (empty map passes the completeness gate).
             let caps = nexus_capability::CapabilityRegistry::with_builtins();
             if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
@@ -1400,7 +1346,6 @@ impl ScheduleSupervisor {
                 Ok(())
             }
             Err(AutoChainError::InvalidState(msg)) => {
-                // No schedule mapping for this stage — not a DB error.
                 tracing::warn!(
                     work_id = %work_id,
                     stage = %stage,
@@ -1408,13 +1353,10 @@ impl ScheduleSupervisor {
                 );
                 Ok(())
             }
-            Err(AutoChainError::Database(e)) => Err(SupervisorError::Database(
-                // Extract the underlying sqlx error from LocalDbError.
-                match e {
-                    nexus_local_db::LocalDbError::Sqlx(s) => s,
-                    other => sqlx::Error::Protocol(other.to_string()),
-                },
-            )),
+            Err(AutoChainError::Database(e)) => Err(SupervisorError::Database(match e {
+                nexus_local_db::LocalDbError::Sqlx(s) => s,
+                other => sqlx::Error::Protocol(other.to_string()),
+            })),
             Err(other) => Err(SupervisorError::Database(sqlx::Error::Protocol(
                 other.to_string(),
             ))),
@@ -1485,7 +1427,6 @@ impl ScheduleSupervisor {
     ) -> Result<(), SupervisorError> {
         let now = chrono::Utc::now().timestamp();
 
-        // R2: Check for duplicate (creator_id + preset_id + label)
         let dup_creator_id = schedule.creator_id.clone();
         let dup_preset_id = schedule.preset_id.clone();
         let dup_label = schedule.label.clone().unwrap_or_default();
@@ -1508,7 +1449,6 @@ impl ScheduleSupervisor {
             });
         }
 
-        // Parse timestamps: if the schedule has string timestamps, try to parse them.
         // For test convenience, empty strings default to `now`.
         let created_at: i64 = if schedule.created_at.is_empty() {
             now
@@ -1530,7 +1470,6 @@ impl ScheduleSupervisor {
             ScheduleConcurrency::ParallelAny => ("parallel_any".to_string(), None),
         };
 
-        // Pre-own all bind params (borrow lifetime rules for sqlx macros).
         let schedule_id = schedule.id.0;
         let creator_id = schedule.creator_id;
         let preset_id = schedule.preset_id;
@@ -1539,7 +1478,6 @@ impl ScheduleSupervisor {
         let scheduled_at = schedule.scheduled_at;
         let label = schedule.label;
 
-        // A3 admission cutover: every NEW row created through the supervisor
         // is drive-enabled (`driven_v1`); `_system.*` internal presets are
         // explicitly `system_inert`. The migration default (`legacy_inert`)
         // is reserved for pre-cutover rows that must stay inert until an
@@ -1550,14 +1488,12 @@ impl ScheduleSupervisor {
             EXECUTION_POLICY_DRIVEN_V1
         };
 
-        // C-2: the schedule row, its dependency rows, and the frozen
         // execution descriptor commit in ONE transaction so a concurrent
         // tick can never observe a partially seeded `driven_v1` row.
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| SupervisorError::Database(sqlx::Error::Protocol(e.to_string())))?;
 
-        // N-14: the frozen descriptor carries the schedule's work_id; the
         // `Schedule` DTO has no work_id field, so the row's `work_id`
         // column is derived from the descriptor here (work-linked adds
         // must freeze work_id into the schedule row, not only the
@@ -1601,7 +1537,6 @@ impl ScheduleSupervisor {
         .execute(&mut *tx)
         .await?;
 
-        // Insert dependencies
         for dep in &schedule.depends_on {
             let dep_id = dep.0.clone();
             sqlx::query!(
@@ -1614,7 +1549,6 @@ impl ScheduleSupervisor {
             .await?;
         }
 
-        // N-3: when a seed is supplied, persist the durable version-0
         // core-context record in the SAME transaction — a `driven_v1` row
         // is never observable before its seed/version is durable, and a
         // seed failure rolls the whole row back (no orphaned drive-enabled
@@ -1702,10 +1636,6 @@ impl ScheduleSupervisor {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Boot/Shutdown helpers (WS7 T9)
-// ---------------------------------------------------------------------------
-
 impl ScheduleSupervisor {
     /// Resume any Running schedules as Paused (daemon restart recovery).
     ///
@@ -1745,7 +1675,6 @@ impl ScheduleSupervisor {
         }
 
         if count > 0 {
-            // R1/R4: Clear the running cache for all paused schedules.
             // After boot recovery, no schedules should be in the running set.
             self.inner.lock().await.running_by_creator.clear();
             tracing::info!("paused {} running schedule(s) (reason: {})", count, reason);
@@ -1810,7 +1739,6 @@ impl ScheduleSupervisor {
                 nexus_session_storage::SessionStatus::Completed => ScheduleStatus::Completed,
                 nexus_session_storage::SessionStatus::Failed => ScheduleStatus::Failed,
                 nexus_session_storage::SessionStatus::Cancelled => ScheduleStatus::Cancelled,
-                // Unconfirmed cancel/cleanup is NOT a successful cancel
                 // (A5): the schedule row is deliberately left non-terminal
                 // so public inspect projects the run's
                 // `execution.recovery_class: "interrupted"` from the durable
@@ -1847,11 +1775,6 @@ impl ScheduleSupervisor {
         Ok(reconciled)
     }
 
-    // -----------------------------------------------------------------------
-    // R1+R4 — pause_schedule(): atomically update DB + running cache
-    // -----------------------------------------------------------------------
-
-    /// Pause a running (or pending) schedule.
     ///
     /// **R1+R4 — Consistent pause**: Updates the DB status to `paused` AND
     /// removes the schedule from the in-memory running set cache. This
@@ -1881,7 +1804,6 @@ impl ScheduleSupervisor {
         let current_status = row.status.as_str();
         let creator_id = row.creator_id;
 
-        // Only running or pending can be paused.
         if !matches!(current_status, "running" | "pending") {
             return Ok(false);
         }
@@ -1897,7 +1819,6 @@ impl ScheduleSupervisor {
         .execute(&*self.pool)
         .await?;
 
-        // R1: Remove from running cache so concurrent tick() won't see stale state.
         if current_status == "running" {
             let mut inner = self.inner.lock().await;
             if let Some(ids) = inner.running_by_creator.get_mut(&creator_id) {
@@ -1953,14 +1874,12 @@ impl ScheduleSupervisor {
         .execute(&*self.pool)
         .await?;
         if cancelled.rows_affected() == 1 {
-            // A cancelled row owns no run, so it can never be in the running
             // set; drop any stale cache entry all the same.
             self.remove_from_running_cache(schedule_id, creator_id)
                 .await;
             return Ok(ScheduleCancelDisposition::Cancelled);
         }
 
-        // The fence was not won: the row moved on (or never existed for this
         // creator). The DURABLE row is the winner — read it once and report
         // exactly what it says.
         let row: Option<(String, Option<String>)> = sqlx::query_as(
@@ -1978,11 +1897,6 @@ impl ScheduleSupervisor {
         })
     }
 
-    // -----------------------------------------------------------------------
-    // R3+R7 — resume_running(): smart paused→running if admitted
-    // -----------------------------------------------------------------------
-
-    /// Resume a paused schedule.
     ///
     /// **R3+R7 — Smart resume**: If the schedule would be admitted (all deps
     /// satisfied, concurrency rules pass), transitions directly to `Running`
@@ -2018,7 +1932,6 @@ impl ScheduleSupervisor {
             return Err(SupervisorError::InvalidTransition(
                 schedule_id.to_string(),
                 ScheduleStatus::Paused,
-                // Parse the actual status for the error message
                 match row.status.as_str() {
                     "running" => ScheduleStatus::Running,
                     "completed" => ScheduleStatus::Completed,
@@ -2029,7 +1942,6 @@ impl ScheduleSupervisor {
             ));
         }
 
-        // I-7: policy-aware — legacy/system-inert rows cannot be resumed
         // into a driven run; only an explicit public `schedule start` opts
         // them in (C-3).
         let policy: String = sqlx::query_scalar(
@@ -2048,7 +1960,6 @@ impl ScheduleSupervisor {
 
         let creator_id = row.creator_id;
 
-        // Check admission rules to decide: direct to Running or fall back to Pending.
         let mut should_run = false;
 
         // Build the current running set and completed set from DB.
@@ -2082,7 +1993,6 @@ impl ScheduleSupervisor {
 
         for r in &active_rows {
             let s = r.to_schedule();
-            // N-16: only `driven_v1` rows count toward execution capacity —
             // legacy/system-inert `Running` rows (historical admission-only
             // rows with no owned session) are inert and must not block an
             // eligible driven schedule's resume. Same invariant as
@@ -2099,7 +2009,6 @@ impl ScheduleSupervisor {
             }
         }
 
-        // Load dependencies for the candidate
         if let Some(mut candidate) = candidate_schedule {
             let sid = schedule_id.to_owned();
             let dep_rows = sqlx::query_scalar!(
@@ -2116,7 +2025,6 @@ impl ScheduleSupervisor {
         }
 
         if should_run {
-            // I-7: a driven row with an owned session is routed to the
             // coordinator (the caller drives it); a driven row without an
             // owned session goes through the normal admission path. Never
             // produce `running` without an owned session.
@@ -2166,7 +2074,6 @@ impl ScheduleSupervisor {
             .await?;
 
             if result.rows_affected() == 0 {
-                // TOCTOU race: another concurrent resume/cancel already changed
                 // the status. Return current DB status without touching cache.
                 let current = self.status_of(schedule_id).await?;
                 return Ok(match current {
@@ -2179,7 +2086,6 @@ impl ScheduleSupervisor {
                 });
             }
 
-            // Add to running cache
             self.inner
                 .lock()
                 .await
@@ -2203,7 +2109,6 @@ impl ScheduleSupervisor {
             .await?;
 
             if result.rows_affected() == 0 {
-                // TOCTOU race: return current status without touching cache.
                 let current = self.status_of(schedule_id).await?;
                 return Ok(match current {
                     ScheduleStatus::Running => "running".to_string(),
@@ -2215,7 +2120,6 @@ impl ScheduleSupervisor {
                 });
             }
 
-            // Trigger tick to attempt admission
             self.tick().await?;
 
             Ok("pending".to_string())
@@ -2300,7 +2204,6 @@ impl ScheduleRow {
                 u32::try_from(self.current_core_context_version).unwrap_or_default(),
             ),
             current_session_id: self.current_session_id.clone(),
-            // scheduled_at is stored as i64 (Unix timestamp) in SQLite but exposed
             // as Option<String> in the domain type. Conversion via .to_string() is safe.
             scheduled_at: self.scheduled_at.map(|t| t.to_string()),
             label: self.label.clone(),
@@ -2393,23 +2296,18 @@ mod tests_t9 {
     async fn daemon_restart_preserves_running_schedule_as_paused() {
         let sup = test_supervisor_with_db().await;
 
-        // Insert a running schedule (simulating a pre-crash state).
         insert_schedule(&sup, "S01", "running").await;
 
-        // Verify it's running.
         assert_eq!(sup.status_of("S01").await.unwrap(), ScheduleStatus::Running);
 
-        // Simulate daemon boot: resume running as paused.
         let count = sup
             .resume_running_as_paused("daemon_restart")
             .await
             .unwrap();
         assert_eq!(count, 1);
 
-        // Verify it's now paused.
         assert_eq!(sup.status_of("S01").await.unwrap(), ScheduleStatus::Paused);
 
-        // Calling again should be a no-op (no running schedules left).
         let count2 = sup
             .resume_running_as_paused("daemon_restart")
             .await
@@ -2426,9 +2324,7 @@ mod tests_t9 {
 
         let _ = sup.resume_running_as_paused("daemon_restart").await;
 
-        // Pending should still be pending.
         assert_eq!(sup.status_of("S01").await.unwrap(), ScheduleStatus::Pending);
-        // Running should be paused.
         assert_eq!(sup.status_of("S02").await.unwrap(), ScheduleStatus::Paused);
     }
 
@@ -2437,9 +2333,7 @@ mod tests_t9 {
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
-        // Insert schedule A (pending)
         insert_schedule(&sup, "DEP-A", "pending").await;
-        // Insert schedule B (pending) with dependency on A
         insert_schedule(&sup, "DEP-B", "pending").await;
 
         // Insert dependency: B depends on A
@@ -2451,7 +2345,6 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Tick: A should start (no deps), B should remain pending (depends on A)
         sup.tick().await.unwrap();
         assert_eq!(
             sup.status_of("DEP-A").await.unwrap(),
@@ -2464,12 +2357,10 @@ mod tests_t9 {
             "B should not start — A is not completed"
         );
 
-        // Complete A
         sup.on_schedule_terminal("DEP-A", ScheduleStatus::Completed)
             .await
             .unwrap();
 
-        // After A completes, tick should auto-start B
         assert_eq!(
             sup.status_of("DEP-B").await.unwrap(),
             ScheduleStatus::Running,
@@ -2482,7 +2373,6 @@ mod tests_t9 {
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
-        // Insert A (already failed) and B (pending, depends on A)
         insert_schedule(&sup, "DEP-A-FAIL", "failed").await;
         insert_schedule(&sup, "DEP-B-FAIL", "pending").await;
 
@@ -2494,7 +2384,6 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Tick: B should remain pending — failed dep does not satisfy
         sup.tick().await.unwrap();
         assert_eq!(
             sup.status_of("DEP-B-FAIL").await.unwrap(),
@@ -2511,9 +2400,7 @@ mod tests_t9 {
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
-        // Insert A as already completed (simulates historical schedule)
         insert_schedule(&sup, "QC1-A", "completed").await;
-        // Insert B (pending) with dependency on A
         insert_schedule(&sup, "QC1-B", "pending").await;
 
         // SAFETY: test-only — DML helper for dependency setup.
@@ -2524,7 +2411,6 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Tick: B should start immediately — A is already completed
         sup.tick().await.unwrap();
         assert_eq!(
             sup.status_of("QC1-B").await.unwrap(),
@@ -2588,19 +2474,15 @@ mod tests_t9 {
         );
     }
 
-    // ---------- H1: Per-creator scoping ----------
-
     #[tokio::test]
     async fn different_creators_serial_schedules_run_concurrently() {
         let sup = test_supervisor_with_db().await;
 
-        // Insert serial schedules for two different creators
         insert_schedule_with_creator(&sup, "H1-A1", "creator-alpha", "pending").await;
         insert_schedule_with_creator(&sup, "H1-A2", "creator-alpha", "pending").await;
         insert_schedule_with_creator(&sup, "H1-B1", "creator-beta", "pending").await;
         insert_schedule_with_creator(&sup, "H1-B2", "creator-beta", "pending").await;
 
-        // Tick: both A1 and B1 should start (different creators)
         sup.tick().await.unwrap();
         assert_eq!(
             sup.status_of("H1-A1").await.unwrap(),
@@ -2612,7 +2494,6 @@ mod tests_t9 {
             ScheduleStatus::Running,
             "B1 should start (first serial for creator-beta)"
         );
-        // Second serial for each creator should remain pending
         assert_eq!(
             sup.status_of("H1-A2").await.unwrap(),
             ScheduleStatus::Pending,
@@ -2624,7 +2505,6 @@ mod tests_t9 {
             "B2 should be blocked by B1 (same creator)"
         );
 
-        // Complete A1 → A2 should start, B2 still blocked
         sup.on_schedule_terminal("H1-A1", ScheduleStatus::Completed)
             .await
             .unwrap();
@@ -2640,22 +2520,18 @@ mod tests_t9 {
         );
     }
 
-    // ---------- H4: Tick idempotency ----------
-
     #[tokio::test]
     async fn double_tick_does_not_duplicate_admission() {
         let sup = test_supervisor_with_db().await;
 
         insert_schedule(&sup, "DT-A", "pending").await;
 
-        // First tick starts DT-A
         sup.tick().await.unwrap();
         assert_eq!(
             sup.status_of("DT-A").await.unwrap(),
             ScheduleStatus::Running
         );
 
-        // Second tick should be a no-op — DT-A is already running
         sup.tick().await.unwrap();
         assert_eq!(
             sup.status_of("DT-A").await.unwrap(),
@@ -2664,17 +2540,10 @@ mod tests_t9 {
         );
     }
 
-    // ===================================================================
-    // WS-A Residuals: R1, R2, R3, R4, R7
-    // ===================================================================
-
-    // ---------- R1+R4: pause_schedule updates DB + running cache ----------
-
     #[tokio::test]
     async fn r1_pause_running_schedule_updates_cache() {
         let sup = test_supervisor_with_db().await;
 
-        // Insert and start a schedule
         insert_schedule(&sup, "R1-S1", "pending").await;
         sup.tick().await.unwrap();
         assert_eq!(
@@ -2682,7 +2551,6 @@ mod tests_t9 {
             ScheduleStatus::Running
         );
 
-        // Pause via supervisor method
         let paused = sup.pause_schedule("R1-S1").await.unwrap();
         assert!(paused, "pause should succeed for running schedule");
         assert_eq!(
@@ -2691,7 +2559,6 @@ mod tests_t9 {
             "schedule should be paused after pause_schedule"
         );
 
-        // Tick should NOT re-admit the paused schedule
         sup.tick().await.unwrap();
         assert_eq!(
             sup.status_of("R1-S1").await.unwrap(),
@@ -2706,7 +2573,6 @@ mod tests_t9 {
 
         insert_schedule(&sup, "R4-S1", "pending").await;
 
-        // Pause a pending schedule (allowed per spec)
         let paused = sup.pause_schedule("R4-S1").await.unwrap();
         assert!(paused, "pause should succeed for pending schedule");
         assert_eq!(
@@ -2722,12 +2588,9 @@ mod tests_t9 {
         insert_schedule(&sup, "R4-S2", "completed").await;
         insert_schedule(&sup, "R4-S3", "cancelled").await;
 
-        // Cannot pause completed/cancelled
         assert!(!sup.pause_schedule("R4-S2").await.unwrap());
         assert!(!sup.pause_schedule("R4-S3").await.unwrap());
     }
-
-    // ---------- R2: Duplicate schedule detection ----------
 
     #[tokio::test]
     async fn r2_duplicate_schedule_rejected() {
@@ -2750,10 +2613,8 @@ mod tests_t9 {
             terminated_at: None,
         };
 
-        // First insert succeeds
         sup.insert_pending(schedule.clone()).await.unwrap();
 
-        // Second insert with same creator+preset+label fails
         let dup = Schedule {
             id: ScheduleId("R2-S2".to_string()),
             ..schedule.clone()
@@ -2804,18 +2665,14 @@ mod tests_t9 {
             terminated_at: None,
         };
 
-        // Both should succeed — different labels
         sup.insert_pending(schedule_a).await.unwrap();
         sup.insert_pending(schedule_b).await.unwrap();
     }
-
-    // ---------- R3+R7: Smart resume (paused→running if admitted) ----------
 
     #[tokio::test]
     async fn r3_resume_paused_goes_directly_to_running_when_admitted() {
         let sup = test_supervisor_with_db().await;
 
-        // Insert and start a schedule, then complete it
         insert_schedule(&sup, "R3-A", "pending").await;
         sup.tick().await.unwrap();
         assert_eq!(
@@ -2826,7 +2683,6 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Insert another schedule for same creator, start it, then pause it
         insert_schedule(&sup, "R3-B", "pending").await;
         sup.tick().await.unwrap();
         assert_eq!(
@@ -2837,7 +2693,6 @@ mod tests_t9 {
         sup.pause_schedule("R3-B").await.unwrap();
         assert_eq!(sup.status_of("R3-B").await.unwrap(), ScheduleStatus::Paused);
 
-        // R3: Resume — no running schedules for this creator, so B should go directly to Running
         let new_status = sup.resume_schedule("R3-B").await.unwrap();
         assert_eq!(
             new_status, "running",
@@ -2853,7 +2708,6 @@ mod tests_t9 {
     async fn r3_resume_paused_falls_back_to_pending_when_not_admitted() {
         let sup = test_supervisor_with_db().await;
 
-        // Insert and start schedule A (serial)
         insert_schedule(&sup, "R3-C1", "pending").await;
         sup.tick().await.unwrap();
         assert_eq!(
@@ -2861,29 +2715,19 @@ mod tests_t9 {
             ScheduleStatus::Running
         );
 
-        // Insert and start schedule B (same creator, serial — can't run concurrently)
-        // Actually B can't start because A is running and serial. Let's pause A first.
-        // Simpler: start A, then insert B and try to start it — B stays pending.
-        // Then pause A, resume B — B goes to running.
-        // Let's test the fallback: pause B (which is pending), resume B while A is running.
-
-        // Insert B while A is running
         insert_schedule(&sup, "R3-C2", "pending").await;
         sup.tick().await.unwrap();
-        // B stays pending (A is running, serial)
         assert_eq!(
             sup.status_of("R3-C2").await.unwrap(),
             ScheduleStatus::Pending
         );
 
-        // Pause B (pending→paused)
         sup.pause_schedule("R3-C2").await.unwrap();
         assert_eq!(
             sup.status_of("R3-C2").await.unwrap(),
             ScheduleStatus::Paused
         );
 
-        // R3: Resume B while A is still running — should fall back to Pending
         let new_status = sup.resume_schedule("R3-C2").await.unwrap();
         assert_eq!(
             new_status, "pending",
@@ -2897,22 +2741,18 @@ mod tests_t9 {
 
     #[tokio::test]
     async fn r7_resume_single_step_user_experience() {
-        // R7 is the UX simplification. The backend R3 change makes resume smart.
         // This test verifies that a single resume call handles the full transition.
         let sup = test_supervisor_with_db().await;
 
-        // Start and pause a schedule
         insert_schedule(&sup, "R7-S1", "pending").await;
         sup.tick().await.unwrap();
         sup.pause_schedule("R7-S1").await.unwrap();
 
-        // Verify paused
         assert_eq!(
             sup.status_of("R7-S1").await.unwrap(),
             ScheduleStatus::Paused
         );
 
-        // Single resume call — should go to Running (no deps, no running siblings)
         let new_status = sup.resume_schedule("R7-S1").await.unwrap();
         assert_eq!(new_status, "running");
         assert_eq!(
@@ -2921,17 +2761,13 @@ mod tests_t9 {
         );
     }
 
-    // ---------- R5: Delete cascade for schedules ----------
-
     #[tokio::test]
     async fn r5_delete_schedule_cancels_active_session() {
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
-        // Insert a schedule and an associated session
         insert_schedule(&sup, "R5-S1", "running").await;
 
-        // Insert an orchestration_session for this schedule
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper for session setup.
         sqlx::query(
@@ -2957,7 +2793,6 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Verify the session is linked
         let sid: Option<String> = sqlx::query_scalar(
             "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
         )
@@ -2967,7 +2802,6 @@ mod tests_t9 {
         .unwrap();
         assert_eq!(sid, Some("R5-SESSION-1".to_string()));
 
-        // Cancel session first (simulating delete logic)
         let cancel_now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper.
         sqlx::query(
@@ -3009,7 +2843,6 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Verify schedule is deleted
         let result = sqlx::query_scalar::<_, Option<String>>(
             "SELECT schedule_id FROM creator_schedules WHERE schedule_id = ?",
         )
@@ -3019,14 +2852,12 @@ mod tests_t9 {
         .unwrap();
         assert!(result.is_none(), "schedule should be deleted");
 
-        // Verify session was cancelled
         let session_status: Option<String> =
             sqlx::query_scalar("SELECT status FROM orchestration_sessions WHERE session_id = ?")
                 .bind("R5-SESSION-1")
                 .fetch_optional(&*pool)
                 .await
                 .unwrap();
-        // Session may remain (FK is one-way), but its status should be cancelled
         assert_eq!(session_status, Some("cancelled".to_string()));
     }
 
@@ -3035,10 +2866,8 @@ mod tests_t9 {
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
-        // Insert a completed schedule with no dependents
         insert_schedule(&sup, "R5-S2", "completed").await;
 
-        // Insert another unrelated pending schedule
         insert_schedule(&sup, "R5-S3", "pending").await;
 
         // Delete R5-S2 (terminal, no dependencies pointing at it)
@@ -3049,11 +2878,9 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Verify deleted
         let result = sup.status_of("R5-S2").await;
         assert!(result.is_err(), "completed schedule should be deleted");
 
-        // R5-S3 should still exist
         assert!(
             sup.status_of("R5-S3").await.is_ok(),
             "R5-S3 should still exist after deleting R5-S2"
@@ -3065,7 +2892,6 @@ mod tests_t9 {
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
-        // Insert A (completed) and B (pending, depends on A)
         insert_schedule(&sup, "R5-DEP-A", "completed").await;
         insert_schedule(&sup, "R5-DEP-B", "pending").await;
 
@@ -3077,8 +2903,6 @@ mod tests_t9 {
             .await
             .unwrap();
 
-        // Attempting to delete A should fail due to FK constraint
-        // (depends_on FK does NOT have CASCADE)
         let result = sqlx::query("DELETE FROM creator_schedules WHERE schedule_id = ?")
             .bind("R5-DEP-A")
             .execute(&*pool)
@@ -3090,39 +2914,25 @@ mod tests_t9 {
         );
     }
 
-    // ===================================================================
-    // WS-A V1.6 Residual fixes: R1 (cancel-pause warn), R2 (TOCTOU)
-    // ===================================================================
-
-    // ---------- R1: Cancel-path pause logs error, does not block cancel ----------
-
     #[tokio::test]
     async fn r1_cancel_pause_failure_does_not_block_cancel() {
-        // This test verifies the R1 fix at the supervisor level: pause_schedule()
         // returns false for non-pausable states (already paused), and the cancel
         // operation should still succeed. The HTTP handler in schedules.rs
         // translates pause errors to warn! logs and continues with cancel.
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
-        // Insert a pending schedule (pauseable)
         insert_schedule(&sup, "R1-CANCEL-S1", "pending").await;
 
-        // Pause it (should succeed)
         let paused = sup.pause_schedule("R1-CANCEL-S1").await.unwrap();
         assert!(paused, "pending schedule should be pausable");
 
-        // Try to pause again while already paused — returns Ok(false), not error.
-        // This verifies the pause_schedule method handles non-pausable states
-        // gracefully (returning false), which the cancel handler can safely ignore.
         let paused_again = sup.pause_schedule("R1-CANCEL-S1").await.unwrap();
         assert!(
             !paused_again,
             "already-paused schedule should return false from pause"
         );
 
-        // Cancel the paused schedule via direct SQL (simulating the HTTP handler
-        // cancel path which updates status to 'cancelled' directly).
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper for schedule cancellation.
         sqlx::query(
@@ -3145,7 +2955,6 @@ mod tests_t9 {
 
     #[tokio::test]
     async fn r1_running_schedule_pause_then_cancel_succeeds() {
-        // Verify: running schedule → pause → cancel succeeds.
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
@@ -3156,7 +2965,6 @@ mod tests_t9 {
             ScheduleStatus::Running
         );
 
-        // Pause the running schedule
         let paused = sup.pause_schedule("R1-CANCEL-S2").await.unwrap();
         assert!(paused, "running schedule should be pausable");
         assert_eq!(
@@ -3164,7 +2972,6 @@ mod tests_t9 {
             ScheduleStatus::Paused
         );
 
-        // Cancel via direct SQL (simulating HTTP cancel handler path)
         let now = chrono::Utc::now().timestamp();
         // SAFETY: test-only — DML helper for schedule cancellation.
         sqlx::query(
@@ -3185,13 +2992,10 @@ mod tests_t9 {
         );
     }
 
-    // ---------- R2: TOCTOU race on concurrent resume_schedule ----------
-
     #[tokio::test]
     async fn r2_resume_toctou_race_returns_current_status() {
         let sup = test_supervisor_with_db().await;
 
-        // Insert and start a schedule
         insert_schedule(&sup, "R2-TOCTOU-S1", "pending").await;
         sup.tick().await.unwrap();
         assert_eq!(
@@ -3199,23 +3003,16 @@ mod tests_t9 {
             ScheduleStatus::Running
         );
 
-        // Pause the schedule
         sup.pause_schedule("R2-TOCTOU-S1").await.unwrap();
         assert_eq!(
             sup.status_of("R2-TOCTOU-S1").await.unwrap(),
             ScheduleStatus::Paused
         );
 
-        // First resume: should succeed (paused → running, no blocking schedules)
         let status1 = sup.resume_schedule("R2-TOCTOU-S1").await.unwrap();
         assert_eq!(status1, "running");
 
-        // Second resume: the schedule is now "running", so the UPDATE's
-        // WHERE clause (status = 'paused') matches 0 rows.
-        // R2 fix: resume_schedule returns current status instead of error.
         let status2 = sup.resume_schedule("R2-TOCTOU-S1").await;
-        // Should return an error (InvalidTransition: running → running is invalid),
-        // because the status check happens before the TOCTOU-vulnerable UPDATE.
         assert!(
             status2.is_err(),
             "second resume should fail — schedule is already running, not paused"
@@ -3224,14 +3021,12 @@ mod tests_t9 {
 
     #[tokio::test]
     async fn r2_concurrent_resume_toctou_exercises_rows_affected_zero() {
-        // Exercise the `rows_affected() == 0` branch by calling resume_schedule()
         // concurrently on a Paused schedule. A barrier ensures both spawned tasks
         // pass the initial "status == paused" check before either issues its
         // UPDATE. Only one UPDATE can match `WHERE status = 'paused'`; the
         // loser hits `rows_affected() == 0` and returns the current DB status.
         let sup = test_supervisor_with_db().await;
 
-        // Insert and start a schedule, then pause it
         insert_schedule(&sup, "R2-CONC-S1", "pending").await;
         sup.tick().await.unwrap();
         assert_eq!(
@@ -3244,7 +3039,6 @@ mod tests_t9 {
             ScheduleStatus::Paused
         );
 
-        // Barrier with 3 participants: two worker tasks + the main test task.
         // Both workers wait at the barrier after reading "paused" (verified by
         // the early check) but before the UPDATE. Once all arrive, they race
         // to UPDATE, and exactly one hits rows_affected() == 0.
@@ -3257,7 +3051,6 @@ mod tests_t9 {
 
         let handle_a = tokio::spawn(async move {
             let sid = "R2-CONC-S1";
-            // Step 1: Read status (should be "paused")
             let row = sqlx::query_as::<_, StatusCreatorRow>(
                 "SELECT status, creator_id FROM creator_schedules WHERE schedule_id = ?",
             )
@@ -3266,9 +3059,7 @@ mod tests_t9 {
             .await
             .unwrap();
             assert_eq!(row.status, "paused", "task A should see paused");
-            // Step 2: Wait at barrier — both tasks see "paused"
             barrier_a.wait().await;
-            // Step 3: Issue the same UPDATE as resume_schedule()
             let now = chrono::Utc::now().timestamp();
             // SAFETY: test-only — replicating production UPDATE pattern for TOCTOU test.
             let result = sqlx::query(
@@ -3285,7 +3076,6 @@ mod tests_t9 {
 
         let handle_b = tokio::spawn(async move {
             let sid = "R2-CONC-S1";
-            // Step 1: Read status (should be "paused")
             let row = sqlx::query_as::<_, StatusCreatorRow>(
                 "SELECT status, creator_id FROM creator_schedules WHERE schedule_id = ?",
             )
@@ -3294,9 +3084,7 @@ mod tests_t9 {
             .await
             .unwrap();
             assert_eq!(row.status, "paused", "task B should see paused");
-            // Step 2: Wait at barrier — both tasks see "paused"
             barrier_b.wait().await;
-            // Step 3: Issue the same UPDATE as resume_schedule()
             let now = chrono::Utc::now().timestamp();
             // SAFETY: test-only — replicating production UPDATE pattern for TOCTOU test.
             let result = sqlx::query(
@@ -3311,15 +3099,12 @@ mod tests_t9 {
             result.rows_affected()
         });
 
-        // Main task also waits at barrier (3rd participant)
         barrier.wait().await;
 
         let (ra, rb) = tokio::join!(handle_a, handle_b);
         let rows_a = ra.expect("task A should not panic");
         let rows_b = rb.expect("task B should not panic");
 
-        // Exactly one UPDATE should have affected 1 row (the winner),
-        // the other should have affected 0 rows (the loser — TOCTOU).
         assert_eq!(
             rows_a + rows_b,
             1,
@@ -3329,13 +3114,11 @@ mod tests_t9 {
             rows_a + rows_b
         );
 
-        // Verify the loser indeed got 0 rows affected
         assert!(
             rows_a == 0 || rows_b == 0,
             "one task must have rows_affected() == 0 (TOCTOU race exercised)"
         );
 
-        // Final state must be Running
         assert_eq!(
             sup.status_of("R2-CONC-S1").await.unwrap(),
             ScheduleStatus::Running,
@@ -3345,7 +3128,6 @@ mod tests_t9 {
 
     #[tokio::test]
     async fn r2_resume_paused_schedule_succeeds_normally() {
-        // Verify normal resume still works after R2 fix (no regression).
         let sup = test_supervisor_with_db().await;
 
         insert_schedule(&sup, "R2-NORMAL-S1", "pending").await;
@@ -3356,7 +3138,6 @@ mod tests_t9 {
             ScheduleStatus::Paused
         );
 
-        // Resume should succeed
         let status = sup.resume_schedule("R2-NORMAL-S1").await.unwrap();
         assert_eq!(status, "running");
         assert_eq!(
@@ -3379,7 +3160,6 @@ mod tests_t9 {
         let sup = test_supervisor_with_db().await;
         let now = chrono::Utc::now().timestamp();
 
-        // Durable v1 session: terminal `completed` with a CORRUPT run-state
         // blob — the previous recovery pass hit a transient storage error
         // while loading it.
         let descriptor = serde_json::to_vec(&nexus_session_storage::run_state::RunDescriptorV1 {
@@ -3415,7 +3195,6 @@ mod tests_t9 {
         .await
         .expect("insert durable terminal run");
 
-        // driven_v1 schedule owning that session, PAUSED — the boot pause
         // after the earlier (failed) settlement pass (P1-1 shape).
         sqlx::query(
             "INSERT INTO creator_schedules
@@ -3431,7 +3210,6 @@ mod tests_t9 {
         .await
         .expect("insert paused driven schedule");
 
-        // Pass 1 — the durable run cannot be loaded: reconcile skips the
         // row. The row must NOT be excluded: still paused, still
         // non-terminal, still inside the scan.
         let count = sup
@@ -3445,7 +3223,6 @@ mod tests_t9 {
             "a reconcile error must never flip the row terminal"
         );
 
-        // The storage glitch clears (next boot): the SAME paused row is
         // retried and settles from the durable terminal — paused rows are
         // inside the reconcile scan and errors never permanently exclude.
         let good_state =
@@ -3476,7 +3253,6 @@ mod tests_t9 {
         .expect("owned session");
         assert_eq!(owned.as_deref(), Some("SES-P1-1"));
 
-        // Terminal rows leave the scan: a third pass is a no-op.
         let count = sup
             .reconcile_terminal_schedules()
             .await

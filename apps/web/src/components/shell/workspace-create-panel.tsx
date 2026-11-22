@@ -1,5 +1,4 @@
 /**
- * Workspace create panel (plan v1220 P3-T3; prototype screen 3; partial-success
  * handling added by plan v1220 QC fix wave 2).
  *
  * Opened from the chip row's trailing 「＋新建工作区」 chip on creator-entrance
@@ -50,7 +49,6 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
   const [pending, setPending] = useState(false);
 
   /**
-   * Failure copy per phase. `创建失败：{reason}` only describes a create that did
    * not commit; once the workspace exists, activation failures must never reuse
    * the create fallback (that would contradict the created state), so they use
    * the created-state copy.
@@ -118,7 +116,6 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
       return;
     }
 
-    // Creation committed: the chip row must surface it even if activation fails.
     setCreated({ slug: response.workspace_slug, creatorId: response.creator_id });
     void qc.invalidateQueries({
       queryKey: queryKeys.workspaces.list({ creator_id: creatorId }),

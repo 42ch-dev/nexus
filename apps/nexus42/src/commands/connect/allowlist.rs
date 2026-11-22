@@ -235,7 +235,6 @@ impl PeerGrant {
         pool: &sqlx::SqlitePool,
         admission: GrantAdmission,
     ) -> Result<nexus_knowledge::world_kb::KnowledgeReadScope> {
-        // Live admission (durable §2.2/§9): a write/compute invoke requires
         // the granted subject and binding to be ACTIVE, resolved from storage
         // on this invoke. The guards are the core's own liveness authority —
         // the retained-read resolution below is reused for the containers and
@@ -276,7 +275,6 @@ impl PeerGrant {
             nexus_core::require_active_owned_character(pool, &self.creator_id, id)
                 .await
                 .map_err(|e| self.unresolvable(&e.to_string()))?;
-            // `validate` guarantees a binding for a Character grant.
             let binding = self.binding_id.as_deref().unwrap_or_default();
             nexus_core::ActorKnowledgeViewService::new(pool.clone())
                 .require_active_binding(id, binding, &self.world_id)
@@ -467,9 +465,7 @@ pub fn load(home: &Path, cli_peers: &[String]) -> Result<PeerScope> {
                 scope.insert_entry(entry)?;
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Missing file ⇒ empty allowlist ⇒ fail-closed.
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(CliError::Io(e)),
     }
     for peer in cli_peers {
@@ -546,7 +542,6 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = nexus_home_layout::connect_allowlist_path(temp.path());
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
-        // `peerIds` is a common typo for `peer_ids`; accepting it would
         // silently produce an empty (fail-closed) allowlist.
         std::fs::write(&path, r#"{ "peer_ids": [], "peerIds": ["12D3KooWxxxx"] }"#).expect("write");
 
@@ -562,9 +557,6 @@ mod tests {
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
     }
 
-    // ---- N-C1 world/op scoping (locked schema, fail-closed) ----
-
-    /// The T1 gate contract (brief Step 1): a scoped peer is allowed on a
     /// listed world and denied on every other world; ops outside its
     /// `op_scope` are denied too.
     #[test]
@@ -657,9 +649,6 @@ mod tests {
         );
     }
 
-    // ---- N-C2 (P2) module scoping (architect lock, spec §6.1) ----
-
-    /// The P2 module gate contract: a scoped peer is allowed to invoke a
     /// listed module and denied every other module.
     #[test]
     fn scoped_peer_allowed_on_listed_module_denied_on_other_modules() {
@@ -817,9 +806,6 @@ mod tests {
         );
     }
 
-    // ---- v1.191 P1 T14: operator-stored Actor grants (durable §9) ----
-
-    /// A well-formed grant round-trips: it is stored, bound to its own peer,
     /// and exposes the granted World viewpoint.
     #[test]
     fn v1191_holder_connect_grant_is_peer_bound() {
@@ -925,7 +911,6 @@ mod tests {
         let err = load(temp.path(), &[]).expect_err("binding-less Character grant rejected");
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
 
-        // With the binding it loads.
         write_allowlist(
             temp.path(),
             &serde_json::json!([{

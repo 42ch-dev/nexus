@@ -88,7 +88,6 @@ async fn a_first_write_at_base_zero_inserts_revision_one_and_mirrors_it() {
         .await
         .unwrap();
 
-    // `apply` returned the document still at revision 0; the store is the only
     // writer of the embedded revision.
     assert_eq!(committed.revision, 1);
     assert_eq!(committed.document.revision, 1);
@@ -163,12 +162,10 @@ async fn two_sequential_writes_bump_the_revision_once_each() {
 #[tokio::test]
 async fn a_second_writer_at_the_pre_bump_revision_is_refused_not_merged() {
     let (_tmp, core, principal) = setup().await;
-    // Writer A read the candidate at revision 0.
     let read = core
         .read_strategy_candidate(&principal, "novel-writing")
         .await
         .unwrap();
-    // Writer B commits first from the same observed base.
     core.commit_strategy_candidate(&principal, "novel-writing", read.revision, |document| {
         let mut next = document.clone();
         next.meta.description = "writer b".to_string();
@@ -177,7 +174,6 @@ async fn a_second_writer_at_the_pre_bump_revision_is_refused_not_merged() {
     .await
     .unwrap();
 
-    // Writer A retries with its pre-bump revision: refused, never merged.
     let mut stale = read.document.clone();
     stale.meta.description = "writer a".to_string();
     let conflict = conflict_of(
@@ -199,7 +195,6 @@ async fn a_second_writer_at_the_pre_bump_revision_is_refused_not_merged() {
     core.close().await.unwrap();
 }
 
-// ---------------------------------------------------------------------------
 // Import: an external partner bundle becomes a revision-1 candidate
 // ---------------------------------------------------------------------------
 
@@ -354,7 +349,6 @@ async fn importing_a_partner_bundle_stores_revision_one_and_approves_with_its_tr
     assert_eq!(stored.revision, 1);
     assert_eq!(stored.id.as_str(), PARTNER);
 
-    // The trajectory is the caller's Approve evidence, unchanged.
     let content_hash = imported.candidate.content_hash.clone();
     let snapshot = core
         .approve_strategy(&principal, PARTNER, 1, Some(imported.trajectory))
@@ -385,7 +379,6 @@ async fn a_second_import_of_the_same_strategy_is_the_typed_conflict_and_changes_
         .unwrap();
     let stored_before = stored_row(core.pool(), PARTNER).await.unwrap();
 
-    // Different bundle bytes, same strategy: the stored row decides, not the source.
     let before = write_bundle(&bundle, &partner_bundle("different bytes"));
     let conflict = conflict_of(
         core.import_strategy_candidate(&principal, &bundle)
@@ -479,7 +472,6 @@ async fn a_document_the_walk_cannot_simulate_is_refused_with_its_reason() {
 #[tokio::test]
 async fn a_bundle_declaring_an_embedded_preset_id_is_refused_by_name() {
     let (tmp, core, principal) = setup().await;
-    // The candidate read prefers a stored row over the preset resolution, so an import under an
     // embedded id would shadow that preset for compose and approve. The id the host ships is not
     // a partner's to claim, so the import refuses instead of writing the row.
     let bundle = tmp.path().join(EMBEDDED);

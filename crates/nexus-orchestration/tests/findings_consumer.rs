@@ -101,13 +101,11 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
     let raw = read_embedded_template("novel-writing", "prompts/outline-chapter.md")
         .expect("novel-writing outline-chapter.md must be embedded");
 
-    // Strip the YAML frontmatter; render only the Markdown body.
     let body = raw.strip_prefix("---\n").map_or(&raw[..], |rest| {
         rest.find("\n---\n")
             .map_or(rest, |end| &rest[end + "\n---\n".len()..])
     });
 
-    // The prompt uses `{{world_kb_block}}` and `{{open_findings_block}}`
     // as top-level vars; the preset wires `preset.input.X` → prompt var
     // `X`. For this test we pass a flat context with both fields at the
     // top level (matching how the capability inject_prompt wires vars).
@@ -117,7 +115,6 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
             ctx.insert(k.clone(), v.clone());
         }
     }
-    // Ensure all referenced top-level vars are present (strict mode).
     for k in [
         "work_ref",
         "work_id",
@@ -138,8 +135,6 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
         .unwrap_or_else(|e| panic!("outline-chapter.md render failed: {e}"))
 }
 
-// ── T3 integration tests (per plan T4 names) ───────────────────────────────
-
 /// Plan T4 — `novel_writing_outline_includes_open_findings_block_when_seeded`.
 ///
 /// Seed the DAO with 3 open findings for the active chapter. Run the
@@ -151,7 +146,6 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
 ///    block, contains the `## Open Findings to Address` section and the
 ///    finding titles.
 #[tokio::test]
-// Long integration test; splitting would obscure the end-to-end scenario
 #[allow(clippy::too_many_lines)]
 async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     const WORK: &str = "wrk_fc_1";
@@ -161,7 +155,6 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Seed 3 open findings: 2 chapter-scoped, 1 work-level.
     findings::create_finding(
         &pool,
         &finding(
@@ -205,7 +198,6 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     .await
     .unwrap();
 
-    // Run the auto-chain produce enqueue path (server-side).
     let schedule_id = auto_chain::enqueue_auto_chain_schedule(
         &pool,
         CREATOR,
@@ -220,7 +212,6 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     .await
     .expect("enqueue_auto_chain_schedule should succeed for produce stage");
 
-    // The schedule row should now exist with `preset_input` containing
     // `open_findings_block`. The handler-level tests assert the full
     // request shape; here we re-derive the block from the DAO + builder
     // and assert the rendered outline prompt contains it.
@@ -232,7 +223,6 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
             .unwrap();
     assert_eq!(stored, Some("novel-writing".to_string()));
 
-    // Re-render the block via the same path the enqueue used.
     let open_findings = findings::list_open_findings_for_chapter(&pool, CREATOR, WORK, 1)
         .await
         .unwrap();
@@ -263,7 +253,6 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
 
     let rendered = render_outline_prompt(&preset_input);
 
-    // The outline prompt should contain the section header and all three titles.
     assert!(
         rendered.contains("## Open Findings to Address"),
         "expected '## Open Findings to Address' section in rendered outline; got:\n{rendered}"
@@ -278,7 +267,6 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
             "expected finding title '{title}' in rendered outline; got:\n{rendered}"
         );
     }
-    // Severity ordering: blocker (work-level) should appear before major/minor.
     let blocker_pos = rendered.find("World rule break").unwrap();
     let major_pos = rendered.find("Plot thread dropped").unwrap();
     assert!(
@@ -301,9 +289,6 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
     let work = novel_work(WORK, WORK_REF);
     works::create_work(&pool, &work).await.unwrap();
 
-    // No findings seeded.
-
-    // Auto-chain enqueue should still succeed; the block will be None.
     let schedule_id = auto_chain::enqueue_auto_chain_schedule(
         &pool,
         CREATOR,
@@ -320,7 +305,6 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
 
     let _ = schedule_id;
 
-    // No findings → builder returns empty string → preset.input gets "" →
     // template guard omits the section.
     let open_findings = findings::list_open_findings_for_chapter(&pool, CREATOR, WORK, 1)
         .await
@@ -353,7 +337,6 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
     );
 }
 
-// ── W-1 (qc1) regression guard — direct wiring assertion ───────────────────
 //
 // The two integration tests above exercise `enqueue_auto_chain_schedule` but
 // then independently re-derive the findings block via DAO + builder and feed
@@ -379,7 +362,6 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
 fn novel_writing_persists_open_findings_block_to_preset_input() {
     let work = novel_work("wrk_fc_w1_some", "fc-w1-novel-some");
 
-    // A known, non-empty block (mirrors what `build_open_findings_block`
     // emits for a chapter with open findings).
     let known_block = "## Open findings (chapter 01)\n\n- [blocker] World rule break\n";
 
@@ -403,7 +385,6 @@ fn novel_writing_persists_open_findings_block_to_preset_input() {
         .as_ref()
         .expect("AddScheduleRequest.input must be set for produce stage");
 
-    // Direct wiring assertion: the block threaded in as `Some(...)` must
     // appear unchanged in the preset input JSON. Catches regressions where
     // `build_auto_chain_schedule` drops the param, or `build_preset_input`
     // removes/empties/replaces the key.
@@ -447,7 +428,6 @@ fn novel_writing_preset_input_coerces_none_open_findings_block_to_empty() {
     );
 }
 
-// ── V1.49 F6: actionable-set filter (findings-lifecycle.md §2.2) ───────────
 //
 // The V1.49 spec expands the actionable set from `{ open }` to
 // `{ open, triaged }`. `in_review` and the terminal statuses remain
@@ -509,7 +489,6 @@ async fn actionable_set_includes_triaged_and_excludes_in_review() {
         "V1.49 F6 actionable set must be open + triaged; got {returned:?}"
     );
 
-    // The builder must render both rows (it does not re-filter; the DAO
     // is the SSOT for the actionable set). `in_review` must NOT appear.
     let block = build_open_findings_block(&got, "01");
     assert!(

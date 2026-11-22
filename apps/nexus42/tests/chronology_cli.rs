@@ -16,10 +16,6 @@
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chronology::{advance_manual, outline_path, AdvanceOutcome};
 
-// =============================================================================
-// DAO round-trip layer (AC §8: set/show/advance)
-// =============================================================================
-
 /// AC §8: `chronology set my-work --auto true` round-trips through the DAO.
 #[tokio::test]
 async fn chronology_set_true_persists() {
@@ -65,7 +61,6 @@ async fn chronology_show_defaults_false() {
 async fn chronology_advance_round_trip() {
     let (_dir, pool) = fresh_seeded_pool().await;
     let ws = tempfile::tempdir().unwrap();
-    // The Work is NOT opted in; manual advance must still work (spec §2.2).
     assert!(
         !works::get_auto_chronology(&pool, "wrk_seed").await.unwrap(),
         "advance target is not opted in"
@@ -88,14 +83,12 @@ async fn chronology_advance_round_trip() {
         }
     }
 
-    // Outline created at the spec path layout.
     let outline = outline_path(ws.path(), "seed-ref", 2);
     assert!(outline.exists(), "advance must create the outline");
     assert!(std::fs::read_to_string(&outline)
         .unwrap()
         .contains("Volume 2 Outline"));
 
-    // Chapters seeded in the DB.
     let vol2_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM work_chapters WHERE work_id = 'wrk_seed' AND volume = 2",
     )
@@ -125,10 +118,6 @@ async fn chronology_advance_idempotent_on_repeat() {
         }
     ));
 }
-
-// =============================================================================
-// CLI binary surface (help text — AC §8: subcommand registered)
-// =============================================================================
 
 /// `creator works chronology` is registered as a subcommand of `creator works`.
 #[test]
@@ -230,10 +219,6 @@ fn chronology_advance_help_documents_force_flag() {
         "chronology advance --help must document --force: {help}"
     );
 }
-
-// =============================================================================
-// Test helpers
-// =============================================================================
 
 /// Open a fresh temp DB, run migrations, and seed one Work (`wrk_seed` /
 /// `seed-ref`) under `ctr_test` / `default`.

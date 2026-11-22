@@ -15,7 +15,6 @@ use std::path::Path;
 use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 
 // ---------------------------------------------------------------------------
-// Helpers
 // ---------------------------------------------------------------------------
 
 /// Test executor: commits Work bytes at the target the production port builds
@@ -125,7 +124,6 @@ fn scaffold_input(
 }
 
 // ---------------------------------------------------------------------------
-// T7a: scaffold tree + template content
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -135,7 +133,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    // V1.40: world_id is mandatory — seed a World row for FK validation.
     let world_id = "wld_t7a_world";
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
@@ -153,7 +150,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
     let scaffold = out["scaffold_root"].as_str().expect("scaffold_root");
     let root = Path::new(scaffold);
 
-    // ── Directories ────────────────────────────────────────────────
     assert!(root.join("Outlines").is_dir(), "Outlines/ must exist");
     assert!(
         root.join("Outlines/chapters").is_dir(),
@@ -162,7 +158,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
     assert!(root.join("Stories").is_dir(), "Stories/ must exist");
     assert!(root.join("Logs").is_dir(), "Logs/ must exist");
 
-    // ── Files ──────────────────────────────────────────────────────
     assert!(root.join("README.md").is_file(), "README.md must exist");
     assert!(
         root.join("Outlines/foreshadowing.md").is_file(),
@@ -177,7 +172,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
         "Outlines/volume-outline.md must exist"
     );
 
-    // ── Content regex checks ───────────────────────────────────────
     let readme = std::fs::read_to_string(root.join("README.md")).expect("read README");
     assert!(
         readme.contains("my-novel"),
@@ -187,7 +181,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
         readme.contains("My Test Novel"),
         "README must contain title: {readme}"
     );
-    // V1.40: README must contain the bound world_id
     assert!(
         readme.contains(world_id),
         "README must contain bound world_id '{world_id}': {readme}"
@@ -214,7 +207,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
         "volume-outline should contain work_ref: {vol_outline}"
     );
 
-    // ── Verify no Stories/<story_ref> or work-status.md ────────────
     assert!(
         !root.join("work-status.md").exists(),
         "work-status.md must NOT be created (replaced by work_chapters)"
@@ -222,7 +214,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
 }
 
 // ---------------------------------------------------------------------------
-// T7b: idempotent re-init preserves existing files
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -240,7 +231,6 @@ async fn t7b_idempotent_reinit_preserves_existing_files() {
         2,
     );
 
-    // V1.40: seed World for FK check
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_idem_world",
@@ -252,19 +242,15 @@ async fn t7b_idempotent_reinit_preserves_existing_files() {
     )
     .await;
 
-    // First run
     let _out1 = cap.run(input.clone()).await.expect("first run");
     let scaffold_root = works_root.join("idem-novel");
     let readme_path = scaffold_root.join("README.md");
 
-    // Overwrite README with custom content
     let custom = "CUSTOM CONTENT THAT MUST SURVIVE RE-INIT";
     std::fs::write(&readme_path, custom).expect("write custom README");
 
-    // Second run (re-init)
     let _out2 = cap.run(input).await.expect("second run");
 
-    // Custom content preserved
     let content = std::fs::read_to_string(&readme_path).expect("read README after re-init");
     assert_eq!(
         content, custom,
@@ -273,7 +259,6 @@ async fn t7b_idempotent_reinit_preserves_existing_files() {
 }
 
 // ---------------------------------------------------------------------------
-// T7c: work_chapters rows seeded correctly
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -293,7 +278,6 @@ async fn t7c_work_chapters_rows_seeded_correctly() {
         total,
     );
 
-    // V1.40: seed World for FK check
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_t7c_world",
@@ -308,7 +292,6 @@ async fn t7c_work_chapters_rows_seeded_correctly() {
     let out = cap.run(input).await.expect("scaffold should succeed");
     assert_eq!(out["chapters_seeded"], total, "chapters_seeded must match");
 
-    // Verify DB rows
     let chapters = nexus_local_db::work_chapters::list_chapters(&pool, "wrk_t7c")
         .await
         .expect("list chapters");
@@ -332,7 +315,6 @@ async fn t7c_work_chapters_rows_seeded_correctly() {
             "body_path must be set for ch{ch_num}"
         );
 
-        // Verify path format per spec §5.4.3
         let outline = ch.outline_path.as_deref().unwrap();
         assert!(
             outline.starts_with("Works/chapter-test/Outlines/chapters/ch"),
@@ -358,7 +340,6 @@ async fn t7c_work_chapters_rows_seeded_correctly() {
 }
 
 // ---------------------------------------------------------------------------
-// T7d: works table PATCHed with correct world_id (3 branches)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -370,7 +351,6 @@ async fn t7d_works_patch_world_id_existing() {
     let cap = make_cap(pool.clone(), &works_root);
 
     let world_id = "wld_existing_123";
-    // F5: world_id FK is enforced — seed the row first.
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         world_id,
@@ -405,7 +385,6 @@ async fn t7d_works_patch_world_id_existing() {
 
 #[tokio::test]
 async fn t7d_works_patch_world_id_none_worldless_rejected() {
-    // V1.40: creating a worldless Work (world_id == None, create_world == false)
     // must fail-closed with a remediation message.
     let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7d_none").await;
@@ -432,7 +411,6 @@ async fn t7d_works_patch_world_id_none_worldless_rejected() {
 
 #[tokio::test]
 async fn t7d_works_patch_world_id_new_placeholder() {
-    // V1.36 limitation: "create new World" is a placeholder. The test
     // verifies that a world_id string (simulating what a future
     // `creator world create` command would return) is correctly set on
     // the works table.
@@ -443,7 +421,6 @@ async fn t7d_works_patch_world_id_new_placeholder() {
     let cap = make_cap(pool.clone(), &works_root);
 
     let new_world_id = "wld_newly_created_456";
-    // F5: world_id FK is enforced — simulate the row a future
     // `creator world create` would persist before binding the Work.
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
@@ -479,12 +456,10 @@ async fn t7d_works_patch_world_id_new_placeholder() {
 }
 
 // ---------------------------------------------------------------------------
-// T7d-bis: F5 — world_id FK enforced before any side effect (C-3)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
-    // Spec §3.5: binding a Work to a non-existent world is a config error.
     // Verify (1) the scaffold returns InputInvalid, (2) no FS directory was
     // created, (3) the works row is NOT patched with the bogus world_id.
     let (dir, pool) = test_pool().await;
@@ -511,13 +486,11 @@ async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
         "F5 error message must mention world_id+not found, got: {msg}"
     );
 
-    // No FS scaffold should have been written for this work_ref.
     assert!(
         !works_root.join("world-bis").exists(),
         "F5: no Works/<ref>/ should be created when FK check fails"
     );
 
-    // works row world_id must still be NULL.
     let work = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_t7d_bis")
         .await
         .expect("get work")
@@ -529,7 +502,6 @@ async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
 }
 
 // ---------------------------------------------------------------------------
-// T7e: gate-pass verification (init enables downstream novel-writing gate)
 // ---------------------------------------------------------------------------
 //
 // The novel-writing gate (§5.3.2) requires:
@@ -568,7 +540,6 @@ async fn t7e_gate_pass_init_enables_novel_writing_filesystem_gates() {
         2,
     );
 
-    // V1.40: seed World for FK check
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_t7e_world",
@@ -582,28 +553,22 @@ async fn t7e_gate_pass_init_enables_novel_writing_filesystem_gates() {
 
     cap.run(input).await.expect("scaffold");
 
-    // Verify §5.3.2 gate conditions that init IS responsible for:
-
-    // (1) filesystem: Works/<work_ref>/ must exist
     let scaffold_root = works_root.join("gate-test");
     assert!(
         scaffold_root.is_dir(),
         "§5.3.2 gate: Works/gate-test/ must exist"
     );
 
-    // (2) filesystem: Works/<work_ref>/Outlines/ must exist
     assert!(
         scaffold_root.join("Outlines").is_dir(),
         "§5.3.2 gate: Outlines/ must exist"
     );
 
-    // (3) filesystem: Works/<work_ref>/Stories/ must exist
     assert!(
         scaffold_root.join("Stories").is_dir(),
         "§5.3.2 gate: Stories/ must exist"
     );
 
-    // (4) work_profile == novel
     let work = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_t7e")
         .await
         .expect("get work")
@@ -614,14 +579,11 @@ async fn t7e_gate_pass_init_enables_novel_writing_filesystem_gates() {
         "§5.3.2 gate: work_profile must be 'novel'"
     );
 
-    // (5) work_ref non-null
     assert!(
         work.work_ref.as_deref().is_some_and(|s| !s.is_empty()),
         "§5.3.2 gate: work_ref must be set"
     );
 
-    // (6) intake_status is NOT changed by init (remains "pending")
-    //     This verifies that init does NOT falsely claim intake completion.
     assert_eq!(
         work.intake_status, "pending",
         "§5.3.2 gate: init must not change intake_status — creative-brief-intake owns that"
@@ -636,12 +598,10 @@ async fn t7e_gate_pass_init_enables_novel_writing_filesystem_gates() {
 }
 
 // ---------------------------------------------------------------------------
-// T7e stub: stage gate advance passes after init + intake
 // ---------------------------------------------------------------------------
 
 #[test]
 fn t7e_stage_advance_produce_passes_when_intake_complete() {
-    // Verify the FL-E stage advance gate for produce (novel-writing)
     // passes when the Work is at intake complete with intake_status complete.
     // This is a synchronous gate check (stage_gates.rs) — not the full
     // preset gate evaluator.
@@ -659,7 +619,6 @@ fn t7e_stage_advance_produce_passes_when_intake_complete() {
         "stage advance intake→research should pass when intake complete"
     );
 
-    // From research→produce (novel-writing) also passes
     let at_research = WorkStageState {
         current_stage: "research".to_string(),
         stage_status: "complete".to_string(),
@@ -671,7 +630,6 @@ fn t7e_stage_advance_produce_passes_when_intake_complete() {
         "stage advance research→produce should pass when research complete"
     );
 
-    // Verify produce resolves to novel-writing
     let preset = nexus_orchestration::stage_gates::preset_for_stage("produce");
     assert_eq!(
         preset,
@@ -681,7 +639,6 @@ fn t7e_stage_advance_produce_passes_when_intake_complete() {
 }
 
 // ---------------------------------------------------------------------------
-// T7a-bis: Input sanitization (F1 — fixes C-1, C-4, W-2)
 // ---------------------------------------------------------------------------
 //
 // Verifies that the scaffold capability rejects untrusted grill-me values
@@ -763,12 +720,10 @@ async fn t7a_bis_chapters_over_max_rejected() {
 
 #[tokio::test]
 async fn t7a_bis_chapters_bounds_accepted() {
-    // boundary check: 1 and 100 must be accepted
     for n in [1, 100] {
         let (dir, pool) = test_pool().await;
         let wid = format!("wrk_bnd_{n}");
         insert_test_work(&pool, &wid).await;
-        // V1.40: seed World for FK check
         nexus_local_db::narrative_gateway::seed::world(
             &pool,
             "wld_bnd",
@@ -789,19 +744,16 @@ async fn t7a_bis_chapters_bounds_accepted() {
 }
 
 // ---------------------------------------------------------------------------
-// T7f: PATCH only updates fields the user explicitly changed (F4 — fixes W-2-qc2)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn t7f_partial_reinit_only_updates_listed_fields() {
-    // Spec §5.4.4: re-init with only `world_id` changed must not overwrite
     // `work_ref` or `total_planned_chapters`.
     let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7f").await;
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    // Initial bootstrap: all fields PATCHed.
     // V1.40: world_id is mandatory — seed World rows.
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
@@ -830,9 +782,7 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
     assert_eq!(after_initial.total_planned_chapters, Some(5));
     assert_eq!(after_initial.world_id.as_deref(), Some("wld_t7f_initial"));
 
-    // Partial re-init: only world_id changed. Use a DIFFERENT work_ref and
     // chapter count in the input to verify they are NOT applied to the DB.
-    // F5: world_id FK is enforced — seed the row first.
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_new_xyz",
@@ -876,17 +826,14 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
 }
 
 // ---------------------------------------------------------------------------
-// T7g: F2 — scaffold is atomic; mid-flight failure rolls back FS state
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
-    // Force scaffold failure by referencing a work_id that does not exist
     // in `works` AND a world_id that does not exist in `narrative_worlds`.
     // V1.40: the world_id FK check fires before seed_chapters, so we get
     // a world_id-not-found error. Either way, the FS scaffold must be rolled back.
     let (dir, pool) = test_pool().await;
-    // intentionally do NOT call insert_test_work — no Work row exists.
 
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
@@ -912,20 +859,17 @@ async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
         "F2: expected FK/world_id error, got: {msg}"
     );
 
-    // ScaffoldTransaction Drop must have removed the partial scaffold.
     let scaffold_root = works_root.join("atomic-test");
     assert!(
         !scaffold_root.exists(),
         "F2: ScaffoldTransaction must have removed the partial scaffold at {}",
         scaffold_root.display()
     );
-    // Parent Works/ root may persist if it was created by the test
     // harness or pre-existing — only the work_ref subtree is owned by
     // this invocation.
 }
 
 // ---------------------------------------------------------------------------
-// T6: V1.42 multi-volume tests (AC1–AC3)
 // ---------------------------------------------------------------------------
 
 /// AC1: Single-volume regression — existing Works get volume=1 without user action.
@@ -936,10 +880,8 @@ async fn t6_ac1_single_volume_regression_volume_defaults_to_1() {
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    // Insert a World for FK validation
     let _world_id = insert_test_world(&pool, "wld_t6_ac1").await;
 
-    // Single-volume (default total_volumes=1) — no explicit volume in input
     let input = scaffold_input(
         "wrk_t6_ac1",
         "ac1-regression",
@@ -949,7 +891,6 @@ async fn t6_ac1_single_volume_regression_volume_defaults_to_1() {
     );
     let out = cap.run(input).await.expect("scaffold should succeed");
 
-    // All chapters must have volume=1
     let chapters = nexus_local_db::work_chapters::list_chapters(&pool, "wrk_t6_ac1")
         .await
         .expect("list chapters");
@@ -963,7 +904,6 @@ async fn t6_ac1_single_volume_regression_volume_defaults_to_1() {
         );
     }
 
-    // next_chapter_volume_aware returns (1, 1) for fresh Work
     let next = nexus_local_db::work_chapters::next_chapter_volume_aware(&pool, "wrk_t6_ac1")
         .await
         .expect("next chapter volume aware");
@@ -986,7 +926,6 @@ async fn t6_ac2_two_volume_happy_path() {
 
     let _world_id = insert_test_world(&pool, "wld_t6_ac2").await;
 
-    // Two-volume, 6 chapters each = 12 total
     let mut input = scaffold_input(
         "wrk_t6_ac2",
         "ac2-twovol",
@@ -998,7 +937,6 @@ async fn t6_ac2_two_volume_happy_path() {
 
     let _out = cap.run(input).await.expect("scaffold should succeed");
 
-    // Verify chapters are seeded across both volumes
     let chapters = nexus_local_db::work_chapters::list_chapters(&pool, "wrk_t6_ac2")
         .await
         .expect("list chapters");
@@ -1013,7 +951,6 @@ async fn t6_ac2_two_volume_happy_path() {
     assert_eq!(vol1_count, 6, "volume 1 should have 6 chapters");
     assert_eq!(vol2_count, 6, "volume 2 should have 6 chapters");
 
-    // next_chapter_volume_aware returns (1, 1) — first non-finalized
     let next = nexus_local_db::work_chapters::next_chapter_volume_aware(&pool, "wrk_t6_ac2")
         .await
         .expect("next chapter volume aware");
@@ -1023,7 +960,6 @@ async fn t6_ac2_two_volume_happy_path() {
         "initial next should be vol 1, ch 1, got {next:?}",
     );
 
-    // Finalize volume 1 chapters 1-6
     let now = "2026-06-11T12:00:00Z";
     for ch in 1..=6 {
         nexus_local_db::work_chapters::update_status(
@@ -1039,7 +975,6 @@ async fn t6_ac2_two_volume_happy_path() {
         .expect("update_status");
     }
 
-    // After finalizing all vol 1, next should be vol 2, ch 1
     let next_after_vol1 =
         nexus_local_db::work_chapters::next_chapter_volume_aware(&pool, "wrk_t6_ac2")
             .await
@@ -1050,7 +985,6 @@ async fn t6_ac2_two_volume_happy_path() {
         "after vol 1 finalized, next should be vol 2, ch 1, got {next_after_vol1:?}",
     );
 
-    // Verify volume-outline.md exists with multi-volume structure
     let vol_outline =
         std::fs::read_to_string(works_root.join("ac2-twovol/Outlines/volume-outline.md"))
             .expect("volume-outline.md should exist");
@@ -1074,7 +1008,6 @@ async fn t6_ac3_status_api_volume_aware_rows() {
     let (_dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t6_ac3").await;
 
-    // Seed multi-volume chapters directly
     nexus_local_db::work_chapters::seed_chapters_multi_volume(
         &pool,
         "wrk_t6_ac3",
@@ -1090,7 +1023,6 @@ async fn t6_ac3_status_api_volume_aware_rows() {
         .await
         .expect("list chapters");
 
-    // Every chapter row must have volume populated
     for ch in &chapters {
         assert!(
             ch.volume.is_some(),
@@ -1099,13 +1031,11 @@ async fn t6_ac3_status_api_volume_aware_rows() {
         );
     }
 
-    // Verify correct volume distribution: vol 1 = ch 1-3, vol 2 = ch 1-3
     let vol1_count = chapters.iter().filter(|c| c.volume == Some(1)).count();
     let vol2_count = chapters.iter().filter(|c| c.volume == Some(2)).count();
     assert_eq!(vol1_count, 3, "volume 1 should have 3 chapters");
     assert_eq!(vol2_count, 3, "volume 2 should have 3 chapters");
 
-    // Verify ordering: volume ascending, then chapter ascending
     for (i, ch) in chapters.iter().enumerate() {
         if i > 0 {
             let prev = &chapters[i - 1];

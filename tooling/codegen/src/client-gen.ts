@@ -1,5 +1,4 @@
 /**
- * Emit CoreSliceClient method declarations from core-service-operations metadata.
  */
 import fs from 'fs';
 import path from 'path';
@@ -29,7 +28,6 @@ interface OperationsDoc {
 }
 
 const IMPORT_TYPES = [
-  // World KB canvas (V1.73/V1.74) + core slice (P4-T3)
   'WorldKbGraphResponse',
   'WorldKbPatchEntityRequest',
   'WorldKbPatchEntityResponse',
@@ -52,7 +50,6 @@ const IMPORT_TYPES = [
   'CoreServiceStopRequest',
   'RuntimeApi',
   'ProviderHostEvent',
-  // Narrative worlds (P5-T1 worlds family)
   'NarrativeWorldsListResponse',
   'NarrativeWorldResponse',
   'CreateWorldRequest',
@@ -71,7 +68,6 @@ const IMPORT_TYPES = [
   'TimelineOverviewResponse',
   'CoreTimelineEventsQuery',
   'ListTimelineEventsResponse',
-  // Works family (P5-T1 works/pool/inspiration)
   'ListWorksQuery',
   'ListWorksResponse',
   'CreateWorkRequest',
@@ -96,7 +92,6 @@ const IMPORT_TYPES = [
   'AppendInspirationResponse',
   'ReleaseCompletionLockRequest',
   'WorkReconcileReport',
-  // Content family (P5-T1 chapters/outline/timeline)
   'ListChaptersQuery',
   'ListChaptersResponse',
   'ChapterContentQuery',
@@ -109,7 +104,6 @@ const IMPORT_TYPES = [
   'OutlinePatchResponse',
   'OutlinePatchChapterRequest',
   'TimelinePatchEventRequest',
-  // Knowledge family (P5-T1 findings/reading)
   'ListFindingsQuery',
   'ListFindingsResponse',
   'CreateFindingRequest',
@@ -183,7 +177,6 @@ export function generateCoreSliceClient(outDir?: string): void {
   fs.writeFileSync(outPath, lines.join('\n'));
   logger.success(`Generated CoreSliceClient → ${outPath}`);
 
-  // `CoreSliceClient` is a hand-declared interface (not a schema-derived type),
   // so the ts-gen subdir barrel cannot emit it. Append the re-export here,
   // after the barrel exists and idempotently, so `@42ch/nexus-contracts` can
   // satisfy the locked `NexusClient extends CoreSliceClient` contract.

@@ -58,7 +58,6 @@ pub fn get_module(id: &str) -> Result<Option<ModuleDetail>, serde_json::Error> {
 }
 
 fn manifest_to_summary(manifest: &ModuleManifest) -> ModuleSummary {
-    // Keep field mapping aligned with `manifest_to_detail` in manifest.rs.
     ModuleSummary {
         module_id: manifest.module_id.clone(),
         name: manifest.name.clone(),

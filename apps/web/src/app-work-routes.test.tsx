@@ -1,5 +1,4 @@
 /**
- * Work-route nesting under WorkShellLayout — V1.118 P2 T2/T3.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -147,7 +146,6 @@ describe('work route nesting (T2)', () => {
     expect(screen.queryByTestId('work-shell-layout')).not.toBeInTheDocument();
   });
 
-  // v1.223 W2 — a static `works/<segment>` route outranks `works/:workId`, so a
   // Work whose id is one of these literals loses WorkShellLayout. The source is
   // the independent truth: adding a static sibling reds until the reservation
   // is re-decided.

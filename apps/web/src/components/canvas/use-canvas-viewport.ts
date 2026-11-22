@@ -1,5 +1,4 @@
 /**
- * Viewport preservation hook — caches React Flow pan/zoom across re-mounts
  * (FB-GS-000, V1.109 P2 T1; residual R-V1108P0QC3-S002).
  *
  * The graph↔list alt-view toggle unmounts `CanvasShell` (and therefore the
@@ -22,18 +21,16 @@ import { useCallback, useState } from 'react';
 import type { Viewport } from '@xyflow/react';
 
 // simplify: single module-level Map, no eviction. Acceptable for a local-first
-// SPA with a handful of concurrent surfaces; add LRU if surface count grows.
+// SPA with a handful of concurrent surfaces. upgrade: add LRU when surface count grows.
 const viewportCache = new Map<string, Viewport>();
 
 export interface UseCanvasViewportResult {
   /**
-   * The viewport cached for this surface, read once on mount. `null` when no
    * viewport has been cached yet (first mount) or when `surfaceKey` is not
    * provided (opt-out). Pass to RF `defaultViewport` and use to gate `fitView`.
    */
   readonly cachedViewport: Viewport | null;
   /**
-   * Stable callback to attach to React Flow `onMove`. Updates the cache as the
    * user pans/zooms. No-op when `surfaceKey` is undefined.
    */
   onViewportChange: (viewport: Viewport) => void;
@@ -47,7 +44,6 @@ export interface UseCanvasViewportResult {
  *   default for surfaces that have not opted in yet).
  */
 export function useCanvasViewport(surfaceKey?: string): UseCanvasViewportResult {
-  // Read once on mount via the useState initializer so the cached value is
   // stable across re-renders within the same mount lifecycle.
   const [cachedViewport] = useState<Viewport | null>(
     () => (surfaceKey ? (viewportCache.get(surfaceKey) ?? null) : null),

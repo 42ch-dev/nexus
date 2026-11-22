@@ -84,7 +84,6 @@ impl DomainRuntimeMode {
     /// Calculate degradation depth from a target mode.
     /// 0 = same mode, 1 = one level down, 2 = two levels down.
     #[must_use]
-    // Or-patterns group the mode-pairs that share a depth value; the grouped
     // arms are the only way to express the depth table without duplicate
     // match-arm bodies, and no further nesting is possible for these tuples.
     #[allow(clippy::unnested_or_patterns)]
@@ -193,7 +192,6 @@ mod tests {
         let local_only = local_first.downgrade().unwrap();
         assert_eq!(local_only, DomainRuntimeMode::new(RuntimeMode::LocalOnly));
 
-        // Cannot downgrade from local_only
         assert!(local_only.downgrade().is_none());
     }
 
@@ -206,7 +204,6 @@ mod tests {
         let cloud = local_first.upgrade().unwrap();
         assert_eq!(cloud, DomainRuntimeMode::new(RuntimeMode::CloudEnhanced));
 
-        // Cannot upgrade from cloud_enhanced
         assert!(cloud.upgrade().is_none());
     }
 
@@ -256,11 +253,8 @@ mod tests {
     fn degradation_depth_upgrade_returns_zero() {
         let local_only = DomainRuntimeMode::new(RuntimeMode::LocalOnly);
         let cloud = DomainRuntimeMode::new(RuntimeMode::CloudEnhanced);
-        // Upgrading (reverse direction) should return 0
         assert_eq!(local_only.degradation_depth_to(&cloud), 0);
     }
-
-    // ── T6.9: Mode Switch Test Cases ─────────────────────────────────────
 
     #[test]
     fn mode_switch_chain_cloud_to_local_only() {
@@ -269,7 +263,7 @@ mod tests {
         assert_eq!(local_first.to_string(), "local_first");
         let local_only = local_first.downgrade().unwrap();
         assert_eq!(local_only.to_string(), "local_only");
-        assert!(local_only.downgrade().is_none()); // floor
+        assert!(local_only.downgrade().is_none());
     }
 
     #[test]
@@ -279,7 +273,7 @@ mod tests {
         assert_eq!(local_first.to_string(), "local_first");
         let cloud = local_first.upgrade().unwrap();
         assert_eq!(cloud.to_string(), "cloud_enhanced");
-        assert!(cloud.upgrade().is_none()); // ceiling
+        assert!(cloud.upgrade().is_none());
     }
 
     #[test]
@@ -296,17 +290,14 @@ mod tests {
 
     #[test]
     fn mode_switch_preserves_constraints() {
-        // Cloud enhanced: allows platform + allows LLM
         let cloud = DomainRuntimeMode::parse("cloud_enhanced").unwrap();
         assert!(cloud.allows_platform());
         assert!(cloud.allows_platform_llm());
 
-        // Local first: allows platform, denies LLM
         let degraded = cloud.downgrade().unwrap();
         assert!(degraded.allows_platform());
         assert!(!degraded.allows_platform_llm());
 
-        // Local only: denies both
         let floor = degraded.downgrade().unwrap();
         assert!(!floor.allows_platform());
         assert!(!floor.allows_platform_llm());

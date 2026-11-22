@@ -182,7 +182,6 @@ async fn required_profile_missing_fails_closed_with_profile_incomplete() {
         "a missing authored profile is not a missing capability (MEM-R005)"
     );
 
-    // Only the optional `preferences` kind is authored: the required one is
     // still missing, so the gate still fails closed.
     let authored = author(
         &provider,
@@ -211,7 +210,6 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
     let provider = open_provider(&env).await;
     ensure(&provider).await;
 
-    // markdown: a whitespace-only body authors nothing.
     let authored = author_document(
         &provider,
         SOUL_PROFILE_KIND,
@@ -230,7 +228,6 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         "the empty required kind is named in details.missing"
     );
 
-    // json: a structurally empty body authors nothing either.
     let authored = author_document(
         &provider,
         SOUL_PROFILE_KIND,
@@ -256,7 +253,6 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         SpokeRejectCode::ProfileIncomplete
     );
 
-    // An empty *optional* kind neither substitutes for the required one nor
     // becomes a failure of its own.
     let authored = author_document(
         &provider,
@@ -273,7 +269,6 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         SpokeRejectCode::ProfileIncomplete
     );
 
-    // Control: real content is admitted, and the empty optional kind stays
     // honest-empty rather than being listed as authored content.
     let authored = author_document(
         &provider,
@@ -303,7 +298,6 @@ async fn optional_kind_absent_is_honest_empty_success() {
     let provider = open_provider(&env).await;
     ensure(&provider).await;
 
-    // D-12: the Creator SOUL document is the authored `personality` profile.
     let authored = author(
         &provider,
         SOUL_PROFILE_KIND,
@@ -403,7 +397,6 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
     );
     assert_eq!(error_code(&transfer), "CAPABILITY_PORT_MISSING");
 
-    // The deliberately-unadvertised matrix keeps the selection refusal for the
     // reflection family: the same capability-absence verdict as transfer.
     let unadvertised =
         LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
@@ -429,7 +422,6 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
         "an unserved family is a selection failure, not an admission verdict: {gated}"
     );
 
-    // Non-collapse, both directions.
     assert_ne!(
         error_code(&reflection),
         "PROFILE_INCOMPLETE",

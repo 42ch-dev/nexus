@@ -1,4 +1,4 @@
-//! Tool risk classification.
+//! Tool risk classification. See docs/specs/agents/agent-host.md.
 //!
 //! Wave 1: static declaration only with extension point for future
 //! auto-classification (R-006).
@@ -63,7 +63,6 @@ impl ToolRiskClassifier for StaticToolRiskClassifier {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Compiled regex patterns for auto-classification
 // ---------------------------------------------------------------------------
 
@@ -125,12 +124,10 @@ impl AutoToolRiskClassifier {
 
 impl ToolRiskClassifier for AutoToolRiskClassifier {
     fn classify(&self, tool_name: &str) -> Option<ToolRisk> {
-        // 1. Check static overrides first
         if let Some(risk) = self.overrides.classify(tool_name) {
             return Some(risk);
         }
 
-        // 2. Match against compiled patterns (destructive first, then write, then read)
         if DESTRUCTIVE_RE.is_match(tool_name) {
             return Some(ToolRisk::Destructive);
         }
@@ -141,7 +138,6 @@ impl ToolRiskClassifier for AutoToolRiskClassifier {
             return Some(ToolRisk::Read);
         }
 
-        // 3. Default: Write (not Read)
         Some(ToolRisk::Write)
     }
 }
@@ -179,12 +175,9 @@ mod tests {
         assert_eq!(json, "\"destructive\"");
     }
 
-    // --- AutoToolRiskClassifier tests ---
-
     #[test]
     fn auto_classifier_destructive_patterns() {
         let classifier = AutoToolRiskClassifier::new();
-        // Exact keywords
         assert_eq!(
             classifier.classify("drop_table"),
             Some(ToolRisk::Destructive)
@@ -260,7 +253,6 @@ mod tests {
     #[test]
     fn auto_classifier_default_is_write() {
         let classifier = AutoToolRiskClassifier::new();
-        // Names that don't match any pattern should default to Write
         assert_eq!(classifier.classify("calc"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("transform"), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("process"), Some(ToolRisk::Write));
@@ -270,7 +262,6 @@ mod tests {
     #[test]
     fn auto_classifier_destructive_takes_precedence_over_write() {
         let classifier = AutoToolRiskClassifier::new();
-        // "delete" matches both destructive and write keywords — destructive wins
         // because destructive is checked first
         // "force" is destructive; "update" is write
         assert_eq!(
@@ -287,27 +278,22 @@ mod tests {
 
         let classifier = AutoToolRiskClassifier::with_overrides(overrides);
 
-        // Override beats pattern
         assert_eq!(classifier.classify("drop_table"), Some(ToolRisk::Read));
-        // Custom tool not matching any pattern but registered
         assert_eq!(
             classifier.classify("custom_tool"),
             Some(ToolRisk::Destructive)
         );
-        // Non-override still falls through to pattern matching
         assert_eq!(classifier.classify("get_user"), Some(ToolRisk::Read));
     }
 
     #[test]
     fn auto_classifier_register_override_method() {
         let mut classifier = AutoToolRiskClassifier::new();
-        // Before override: "purge" matches destructive
         assert_eq!(
             classifier.classify("purge_all"),
             Some(ToolRisk::Destructive)
         );
 
-        // Override to Read
         classifier.register_override("purge_all", ToolRisk::Read);
         assert_eq!(classifier.classify("purge_all"), Some(ToolRisk::Read));
     }
@@ -326,7 +312,6 @@ mod tests {
     #[test]
     fn auto_classifier_always_returns_some() {
         let classifier = AutoToolRiskClassifier::new();
-        // Auto classifier never returns None — always falls back to Write
         assert_eq!(classifier.classify(""), Some(ToolRisk::Write));
         assert_eq!(classifier.classify("xyz_no_match"), Some(ToolRisk::Write));
     }

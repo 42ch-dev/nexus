@@ -51,7 +51,6 @@ impl From<ContentFault> for CoreError {
                 field: code,
                 reason: message,
             },
-            // The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR,
             // FILE_READ_ERROR, …) rides verbatim as `<CODE>: <message>`; the
             // daemon content adapter re-emits the code instead of collapsing it
             // to the shared `CORE_ERROR` shape.
@@ -75,8 +74,6 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
             category: format!("CONTRACT_ERROR: {error}"),
         })
 }
-
-// ─── Guarded filesystem primitives (shared by content + outline) ───────────
 
 /// # Errors
 ///
@@ -137,7 +134,6 @@ pub fn resolve_guarded_path(
             field: "chapter_path_unresolvable".to_string(),
             reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
         })?;
-        // Component-wise comparison (Path::starts_with). A plain string prefix
         // match would let `/home/user-data/evil.md` slip past a `/home/user`
         // root because the string starts with "/home/user".
         if !canonical_target.starts_with(&canonical_root) {
@@ -145,14 +141,12 @@ pub fn resolve_guarded_path(
         }
         Ok(canonical_target)
     } else {
-        // For creatable targets, normalize the joined path and verify it stays
         // within the workspace root. We walk up to the nearest existing parent
         // so that missing intermediate directories are still allowed as long
         // as they would be created inside the root.
         let mut probe = joined.as_path();
         loop {
             if let Ok(canonical) = probe.canonicalize() {
-                // Component-wise comparison (Path::starts_with) — see read branch.
                 if !canonical.starts_with(&canonical_root) {
                     return Err(forbidden(rel_path));
                 }
@@ -235,7 +229,6 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
         Err(join) => Err(std::io::Error::other(join)),
     };
 
-    // Commit only runs when the caller is still live: a dropped future
     // never reaches the second blocking task, so the target keeps its
     // previous content. It goes through `spawn_blocking` because the
     // rename + fsyncs must not stall a Tokio worker.
@@ -344,9 +337,6 @@ impl WorkLock {
     }
 }
 
-// ─── Chapter content domain helpers ────────────────────────────────────────
-
-/// Parse a chapter number path parameter.
 fn parse_chapter(n: &str) -> Result<i32, ContentFault> {
     n.parse::<i32>()
         .map_err(|_| ContentFault::BadRequest {
@@ -763,7 +753,6 @@ async fn list_chapters(
     let pool = &service.inner.pool;
 
     let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
-    // Clamp to [1, 100]: the generated `NonZeroU64` limit type enforces the
     // schema `minimum: 1` at deserialization (`?limit=0` rejects as 400
     // instead of reaching `chapter_page_meta`), so only the upper bound is
     // clamped here. Default 50 when absent.
@@ -942,7 +931,6 @@ async fn patch_chapter(
 
     let record = load_chapter(service, work_id, chapter, volume).await?;
 
-    // Reject display-only title writes in V1.65. This is field validation, not
     // a preset gate, so use BadRequest (HTTP 400, code `bad_request`) rather
     // than PresetGatesFailed (HTTP 422, `preset_gates_failed`) — the previous
     // observable contract and the semantic meaning of both error categories.
@@ -954,13 +942,11 @@ async fn patch_chapter(
         });
     }
 
-    // Validate status transition before acquiring lock.
     if let Some(target_status) = &req.status {
         let target = target_status.as_str();
         validate_status_transition(&record.status, target)?;
     }
 
-    // Structural edit protection for finalized/published chapters.
     let has_structural_edit = req.slug.is_some()
         || req.planned_word_count.is_some()
         || req.volume.is_some()
@@ -984,7 +970,6 @@ async fn patch_chapter(
             _ => {}
         }
     }
-    // Acquire runtime lock before mutating DB metadata.
     let lock = WorkLock::acquire(pool, creator_id, work_id, holder).await?;
 
     let updated: Result<WorkChapterRecord, ContentFault> = async {
@@ -1007,7 +992,6 @@ async fn patch_chapter(
             .then_some(())
             .ok_or_else(|| ContentFault::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-        // Re-fetch using the POST-patch volume. If `req.volume` changed it, the
         // row now lives at the new volume; re-fetching with the original query
         // `volume` would miss it and return 404 on a fully-committed write.
         let fetch_volume = patch.volume.unwrap_or(volume);
@@ -1088,7 +1072,6 @@ mod tests {
                 outcome.is_err(),
                 "prepare must still be queued when the write is cancelled"
             );
-            // Release the parked slot. The cancelled task's prepare now
             // runs and exits; the sentinel submitted behind it resolves
             // only once the pool is free again — FIFO on a single slot.
             let _ = release_tx.send(());

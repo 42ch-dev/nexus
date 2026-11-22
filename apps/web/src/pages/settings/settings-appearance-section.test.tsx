@@ -1,5 +1,4 @@
 /**
- * Settings Appearance section — language control renders, switches instantly,
  * and persists the preference.
  */
 import { beforeEach, describe, expect, it } from 'vitest';

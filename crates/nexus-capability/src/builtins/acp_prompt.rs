@@ -110,7 +110,6 @@ impl Capability for AcpPrompt {
                 |s| std::str::FromStr::from_str(s).map_err(CapabilityError::InputInvalid),
             )?;
 
-        // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
         // to prevent cross-creator routing (IDOR).
         //
@@ -133,7 +132,6 @@ impl Capability for AcpPrompt {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // A1: resolve the coordinator cancellation token for this run from
         // the shared per-run map. FAIL-CLOSED: a run with no registered
         // token refuses with `CancellationUnavailable` — a fresh token would
         // be uncancellable by any coordinator (never mint one here). The run
@@ -169,8 +167,6 @@ mod tests {
         assert_eq!(cap.name(), "acp.prompt");
     }
 
-    // ── Standalone mode (no executor) ─────────────────────────────────
-
     #[tokio::test]
     async fn acp_prompt_standalone_returns_unavailable() {
         let cap = AcpPrompt::new();
@@ -198,8 +194,6 @@ mod tests {
         assert!(err.contains("missing 'prompt'"), "error: {err}");
     }
 
-    // ── With mock prompt executor ─────────────────────────────────────
-
     struct MockAcpExecutor {
         captured: std::sync::Mutex<Option<PromptRequest>>,
     }
@@ -224,7 +218,6 @@ mod tests {
         let executor = Arc::new(MockAcpExecutor {
             captured: std::sync::Mutex::new(None),
         });
-        // Seed the run's coordinator token (fail-closed contract: unregistered
         // runs refuse CancellationUnavailable; production registers at admission).
         let cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         cancels

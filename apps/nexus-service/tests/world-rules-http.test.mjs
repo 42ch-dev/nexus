@@ -1,5 +1,4 @@
 /**
- * World structured-rule HTTP inclusion + lifecycle (V1.198 P0-T3).
  *
  * Drives the real service over the real native binding: the fixture home is
  * seeded through `native-wire-fixture-seed`, the service is built and started
@@ -129,7 +128,6 @@ describe('world-rules-http (V1.198 P0-T3)', () => {
         await service.close();
       }
     } finally {
-      // Remove the seeded home even when the service close fails; `home` is
       // unset when the `before` hook failed before seeding it.
       if (home) rmSync(home, { recursive: true, force: true });
     }
@@ -213,11 +211,9 @@ describe('world-rules-http (V1.198 P0-T3)', () => {
       { body: { status: 'deprecated' }, field: 'status' },
       { body: { status: 'archived', canonical_name: 'Resurrected' }, field: 'canonical_name' },
       { body: { canonical_name: 'Resurrected' }, field: 'canonical_name' },
-      // An explicit null is a SUPPLIED member, not an absent one: the native
       // presence capture must survive the typed decode, so this names `status`
       // rather than degrading into the empty-PATCH refusal.
       { body: { status: null }, field: 'status' },
-      // A raw empty object supplies nothing and still names `patch`.
       { body: {}, field: 'patch' },
     ];
     for (const { body, field } of cases) {

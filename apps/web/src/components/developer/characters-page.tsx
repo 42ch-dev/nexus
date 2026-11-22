@@ -1,5 +1,4 @@
 /**
- * Character management surface (plan v240-actor-web-surfaces T6) — list,
  * create and World-bind Creator-owned characters behind the single
  * `Characters` rail entry (compass D7/D8: lives in the developer rail, reads
  * as a creator-facing surface).
@@ -340,7 +339,6 @@ function BindingsPanel({
 }
 
 /**
- * Per-character authoring surfaces (plan v240 T7, I-000127): pending review,
  * memory review drain, fragments, SOUL narrative and ToM beliefs. One section
  * per artifact kind; every section is scoped to the character opened from the
  * list. The ToM section reads bindings through the same query key the
@@ -659,7 +657,6 @@ function SoulSection({ characterId }: { characterId: string }) {
   const client = useNexusClient();
   const qc = useQueryClient();
 
-  // Reflect with force_regenerate=false is the read path (cache hit or gate
   // report); synthesis only runs from the explicit regenerate mutation.
   const soul = useQuery({
     queryKey: queryKeys.characters.soul.narrative(characterId),
@@ -728,7 +725,6 @@ function SoulSection({ characterId }: { characterId: string }) {
 }
 
 /**
- * ToM beliefs. The list call is only issued once a binding is selected — the
  * query is `enabled`-gated on the selection and the wire requires both
  * `binding_id` and `world_id`, which come from the selected binding row, so
  * there is no code path that lists beliefs without one.
@@ -739,7 +735,6 @@ function TomSection({ character }: { character: CharacterDetail['character'] }) 
   const qc = useQueryClient();
   const characterId = character.character_id;
 
-  // Same query key the BindingsPanel uses: one cache entry per character.
   const bindings = useQuery({
     queryKey: queryKeys.characters.bindings.list(characterId),
     queryFn: () => client.listCharacterBindings(characterId),
@@ -751,7 +746,6 @@ function TomSection({ character }: { character: CharacterDetail['character'] }) 
   const tom = useQuery({
     queryKey: queryKeys.characters.tom.list(characterId, scope ?? {}),
     queryFn: () => client.listCharacterTom(characterId, scope!),
-    // No binding selected → no list call (wire requires binding_id + world_id).
     enabled: scope !== null,
   });
   const record = useMutation({
@@ -936,7 +930,6 @@ function TomSection({ character }: { character: CharacterDetail['character'] }) 
 }
 
 /**
- * Knowledge entries (plan v240 T8, I-000128). The address split is the wire
  * contract's, not a UI choice: list/get/patch/delete are character-scoped,
  * while creation exists only on the admitted-principal route and carries
  * `owner_kind` + `character_id` in the body. Every `expected_revision` comes
@@ -957,7 +950,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
   const detail = useQuery({
     queryKey: queryKeys.characters.knowledge.detail(characterId, editingId ?? ''),
     queryFn: () => client.getCharacterKnowledge(characterId, editingId!),
-    // No row selected → no read (same gating pattern as the ToM list).
     enabled: editingId !== null,
   });
 
@@ -965,7 +957,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
     mutationFn: (request: UpdateKnowledgeEntryRequest) =>
       client.patchCharacterKnowledge(characterId, editingId!, request),
     onSuccess: () => {
-      // Drop the cached detail (stale text) alongside the list, so a reopen
       // refetches instead of replaying pre-edit values.
       void qc.invalidateQueries({
         queryKey: queryKeys.characters.knowledge.detail(characterId, editingId ?? ''),
@@ -1014,7 +1005,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
       {
         owner_kind: 'character',
         character_id: characterId,
-        // This surface authors character blocks; other block types are
         // created from their own surfaces.
         block_type: 'character',
         canonical_name,
@@ -1045,11 +1035,9 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
     const summary = readField('summary').trim();
     const audienceValue = readField('audience');
     patch.mutate({
-      // CAS against the revision the list returned for this row.
       expected_revision: data.item.revision,
       canonical_name,
       summary: summary === '' ? null : summary,
-      // An untouched select omits audience: the wire preserves the stored
       // governance pair, and only an explicit "shared" clears it.
       ...(audienceValue ? { audience: audienceFor(audienceValue) } : {}),
     });
@@ -1122,7 +1110,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
           ) : !detail.data ? (
             <LoadingState label={t('knowledge.editLoading')} />
           ) : (
-            // Uncontrolled inputs keep DOM state; a revision bump after a
             // successful patch must remount the form to drop stale text.
             <form
               key={`${detail.data.item.entry_id}:${detail.data.item.revision}`}

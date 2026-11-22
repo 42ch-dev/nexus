@@ -1,5 +1,4 @@
 /**
- * World KB entity authoring vocabulary + pure `modules.mental` / `modules.belief`
  * serialization (v1.203 P2 module carriers, extracted per QC1-S001 /
  * `R-V1203P2QC1-S001`).
  *
@@ -18,12 +17,10 @@ export interface EntityEditForm {
   aliasesText: string; // comma-separated in the UI; converted to string[] on submit
   block_type: BlockType;
   /**
-   * `modules.mental` as JSON text per locked nine-field key ('' = absent).
    * Whole-first-level-value upsert: the parsed object is written back complete.
    */
   mental: Record<(typeof MENTAL_FIELD_ORDER)[number], string>;
   /**
-   * Raw-JSON fallback mode: non-null when the stored `modules.mental` member
    * is nonrepresentable for the structured nine-field editor (a stored
    * non-object value — array, string, number, …). Holds the JSON text of the
    * COMPLETE stored value so an untouched seed stays byte-identical (not
@@ -36,7 +33,6 @@ export interface EntityEditForm {
    */
   mentalRawText?: string | null;
   /**
-   * STOP-condition fallback rows: stored mental keys outside the locked
    * vocabulary, edited as raw JSON so unknown inner keys round-trip verbatim.
    * A blanked row clears that inner key on save (container-level semantics).
    */
@@ -44,7 +40,6 @@ export interface EntityEditForm {
   /** `modules.belief` rows; '' on a field means "absent" on that row. */
   beliefs: BeliefRowForm[];
   /**
-   * Raw-JSON fallback mode (QC1-F001/QC3-001): non-null when the stored
    * `modules.belief` member is nonrepresentable for the structured row
    * editor (non-array value, or an array containing a non-object row).
    * Holds the JSON text of the COMPLETE stored value so an untouched seed
@@ -149,7 +144,6 @@ export function buildMentalValue(
   form: EntityEditForm,
   jsonError: (field: string) => string,
 ): { value: Record<string, unknown>; errors: Record<string, string> } {
-  // `!= null` (not `!== null`): hand-rolled form literals may leave the
   // field undefined — only a STRING enables raw mode.
   if (form.mentalRawText != null) {
     const rawText = form.mentalRawText.trim();
@@ -252,7 +246,6 @@ export function buildBeliefValue(
       }
     }
     if (untouched) {
-      // Seeded row with no author edit: emit the stored content exactly —
       // including a stored `{}`, which must survive at its original index.
       value.push({ ...row.original! });
       wireToForm.push(index);
@@ -276,7 +269,6 @@ export function buildBeliefValue(
         const n = Number(text.trim());
         if (!Number.isInteger(n)) {
           errors[`belief.${index}.order`] = orderError(field);
-          // Keep the invalid raw text in the built value so the exact dirty
           // check still sees the edit — otherwise the row would compare equal
           // to the stored one and the submit (which surfaces this error)
           // could never fire. The error blocks the write, so the raw string

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /**
- * Desktop config tests (v1.192 P0-T2).
  *
  * Defends the frozen config contract without launching Electron: workspace-root
  * precedence (per-creator map → legacy mirror → `<documents>/nexus/default`),
@@ -33,7 +32,6 @@ import { createDesktopConfig } from '../dist/desktop-config.js';
 const configPath = (home) => join(home, '.nexus42', 'config.toml');
 const agentPath = (home) => join(home, '.nexus42', 'agent-host', 'config.toml');
 const readText = (path) => readFileSync(path, 'utf8');
-// smol-toml 1.9 returns null-prototype tables (prototype-pollution hardening);
 // re-establish the plain-object shape these assertions pin, mirroring the
 // normalization at the product's own parse seam in src/desktop-config.ts.
 const toPlainToml = (value) =>
@@ -46,7 +44,6 @@ const parseToml = (path) =>
   toPlainToml(parse(readText(path), { integersAsBigInt: 'asNeeded' }));
 
 /**
- * A group this process may assign that differs from its effective gid, or null
  * when it belongs to no other group. Without one a staged-and-renamed file
  * always inherits the process egid, so a captured-group assertion cannot fail.
  */
@@ -72,9 +69,6 @@ function expectCode(promise, code) {
   return assert.rejects(promise, (err) => err.code === code);
 }
 
-// ---------------------------------------------------------------------------
-// Trusted inputs
-// ---------------------------------------------------------------------------
 
 test('trusted home and documents path are required', () => {
   assert.throws(() => createDesktopConfig('', '/tmp/Documents'), (err) => err.code === 'invalid_input');
@@ -96,27 +90,20 @@ test('factory exposes the P0-T2 handler map plus resolveWorkspaceRoot', async (t
     'set_workspace_path',
     'switch_active_creator',
   ]);
-  // `resolveWorkspaceRoot` is the same authority the display read uses (P0-T3).
   assert.equal(await config.resolveWorkspaceRoot(), await config.get_workspace_root());
 });
 
-// ---------------------------------------------------------------------------
-// Workspace root resolution
-// ---------------------------------------------------------------------------
 
 test('workspace root precedence: per-creator map, legacy mirror, default slug', async (t) => {
   const { home, documents, config } = setup(t);
   const fallback = join(documents, 'nexus', 'default');
 
-  // No config at all — default slug, and the read creates no file.
   assert.equal(await config.get_workspace_root(), fallback);
   assert.equal(existsSync(configPath(home)), false);
 
-  // Legacy mirror only.
   writeTomlFile(configPath(home), 'active_creator_id = "ctr_a"\nworkspace_path = "/legacy/ws"\n');
   assert.equal(await config.get_workspace_root(), '/legacy/ws');
 
-  // Per-creator entry wins over the mirror.
   writeTomlFile(
     configPath(home),
     [
@@ -131,7 +118,6 @@ test('workspace root precedence: per-creator map, legacy mirror, default slug', 
   );
   assert.equal(await config.get_workspace_root(), '/map/ws');
 
-  // Map present but without an entry for the active creator — mirror, not
   // another creator's path.
   writeTomlFile(
     configPath(home),
@@ -146,16 +132,12 @@ test('workspace root precedence: per-creator map, legacy mirror, default slug', 
   );
   assert.equal(await config.get_workspace_root(), '/legacy/ws');
 
-  // No active creator — mirror, then the default slug.
   writeTomlFile(configPath(home), 'workspace_path = "/legacy/ws"\n');
   assert.equal(await config.get_workspace_root(), '/legacy/ws');
   writeTomlFile(configPath(home), 'active_creator_id = "ctr_a"\n');
   assert.equal(await config.get_workspace_root(), fallback);
 });
 
-// ---------------------------------------------------------------------------
-// Setup bootstrap
-// ---------------------------------------------------------------------------
 
 test('bootstrap is idempotent, generates ctr_local + 12 hex, and never replaces an existing creator', async (t) => {
   const { home, config } = setup(t);
@@ -167,7 +149,6 @@ test('bootstrap is idempotent, generates ctr_local + 12 hex, and never replaces 
   assert.equal(doc.active_creator_id, first.creator_id);
   assert.equal(doc.active_workspace_slug_by_creator[first.creator_id], 'default');
 
-  // A hand-added comment survives the second call: an existing creator is
   // reported without rewriting the document.
   writeTomlFile(configPath(home), `${readText(configPath(home))}\n# keep me\n`);
   assert.deepEqual(await config.ensure_setup_bootstrap(), {
@@ -190,9 +171,6 @@ test('concurrent bootstrap calls create exactly one creator', async (t) => {
   assert.match([...ids][0], /^ctr_local[0-9a-f]{12}$/);
 });
 
-// ---------------------------------------------------------------------------
-// Workspace path write and creator switch
-// ---------------------------------------------------------------------------
 
 test('set_workspace_path requires an active creator, then updates map and mirror', async (t) => {
   const { home, config } = setup(t);
@@ -223,7 +201,6 @@ test('creator switch updates map, mirror and default slug, preserving other crea
   assert.equal(doc.active_workspace_slug_by_creator.ctr_second, 'default');
   assert.equal(await config.get_workspace_root(), fallback);
 
-  // A creator that already owns a path keeps it across a round trip.
   await config.set_workspace_path({ path: '/second/ws' });
   await config.switch_active_creator({ creatorId: first });
   assert.equal(await config.switch_active_creator({ creatorId: 'ctr_second' }), '/second/ws');
@@ -253,9 +230,6 @@ test('serialized mutations keep both creators in the per-creator map', async (t)
   assert.equal(doc.workspace_path_by_creator.ctr_two, fallback);
 });
 
-// ---------------------------------------------------------------------------
-// Entrance and setup_completed
-// ---------------------------------------------------------------------------
 
 test('entrance: missing default, enum round-trip, invalid stored value, no mutation on read', async (t) => {
   const { home, config } = setup(t);
@@ -270,14 +244,12 @@ test('entrance: missing default, enum round-trip, invalid stored value, no mutat
   writeTomlFile(configPath(home), 'entrance = "banana"\n');
   await expectCode(config.get_entrance(), 'invalid_input');
 
-  // An unreadable document keeps the documented default (retired fail-soft read).
   writeTomlFile(configPath(home), 'not toml {{{\n');
   assert.equal(await config.get_entrance(), 'content-creator');
 });
 
 test('set_entrance rejects a non-enum value at the handler boundary, byte-preserving', async (t) => {
   const { home, config } = setup(t);
-  // Nothing to mutate yet: a rejected write must not create the document.
   await expectCode(config.set_entrance({ value: 'banana' }), 'invalid_input');
   assert.equal(existsSync(configPath(home)), false);
 
@@ -289,7 +261,6 @@ test('set_entrance rejects a non-enum value at the handler boundary, byte-preser
   assert.equal(readText(configPath(home)), stored);
   assert.equal(await config.get_entrance(), 'developer');
 
-  // Both enum values still write.
   assert.equal(await config.set_entrance({ value: 'content-creator' }), null);
   assert.equal(await config.get_entrance(), 'content-creator');
   assert.deepEqual(readdirSync(join(home, '.nexus42')), ['config.toml']);
@@ -309,9 +280,6 @@ test('setup_completed: absent is false, writes round-trip, unreadable reads fals
   assert.equal(await config.get_setup_completed(), false);
 });
 
-// ---------------------------------------------------------------------------
-// Corrupt documents and unrelated-key retention
-// ---------------------------------------------------------------------------
 
 test('corrupt config is never replaced with an empty document and leaves no temp litter', async (t) => {
   const { home, config } = setup(t);
@@ -328,23 +296,18 @@ test('corrupt config is never replaced with an empty document and leaves no temp
   for (const write of writes) {
     await expectCode(write(), 'config_corrupt');
   }
-  // The authoritative root read fails closed rather than fabricating a root.
   await expectCode(config.get_workspace_root(), 'config_corrupt');
 
   assert.equal(readText(configPath(home)), corrupt);
   assert.deepEqual(readdirSync(join(home, '.nexus42')), ['config.toml']);
 });
 
-// ---------------------------------------------------------------------------
-// Owner-only writes
-// ---------------------------------------------------------------------------
 
 test('written documents are owner-only (0600)', async (t) => {
   const { home, config } = setup(t);
   await config.ensure_setup_bootstrap();
   await config.set_agent_profile({ name: 'claude', launchCommand: 'claude' });
 
-  // The atomic replace creates a 0600 temp file and renames it into place, so
   // neither the materialized copy nor the document is readable by other users.
   assert.equal(statSync(configPath(home)).mode & 0o777, 0o600);
   assert.equal(statSync(agentPath(home)).mode & 0o777, 0o600);
@@ -387,9 +350,6 @@ test('mutations preserve unrelated keys and their value types', async (t) => {
   assert.deepEqual(readdirSync(join(home, '.nexus42')), ['config.toml']);
 });
 
-// ---------------------------------------------------------------------------
-// Agent profile (`~/.nexus42/agent-host/config.toml`)
-// ---------------------------------------------------------------------------
 
 test('agent profile: null when absent, native_cli upsert, other providers and keys preserved', async (t) => {
   const { home, config } = setup(t);
@@ -483,7 +443,6 @@ test('agent profile write fails closed on non-table provider rows, byte-preservi
   }
   assert.deepEqual(readdirSync(join(home, '.nexus42', 'agent-host')), ['config.toml']);
 
-  // A well-formed array-of-tables still upserts.
   writeTomlFile(
     agentPath(home),
     '[[providers]]\nid = "other"\nprotocol = "http"\n',
@@ -514,7 +473,6 @@ test('a saved launch command is never executed here', async (t) => {
  */
 test('a release never unlinks a lock that only ends with our token', async (t) => {
   const source = readFileSync(new URL('../dist/desktop-config.js', import.meta.url), 'utf8');
-  // Fault injection: stall the holder inside its read-modify-write (after the
   // lock is taken) so the lock can be rewritten underneath it.
   const marker = 'await writeDocument(path, doc);';
   assert.ok(source.includes(marker), 'the write marker must exist in dist/desktop-config.js');
@@ -539,7 +497,6 @@ test('a release never unlinks a lock that only ends with our token', async (t) =
     const lockPath = `${configPath(home)}.lock`;
 
     const pending = config.set_workspace_path({ path: '/ws' });
-    // Capture the held token line, then prepend a foreign marker: the result
     // still ends with our token, so a suffix compare would unlink it.
     const lockDeadline = Date.now() + 2000;
     let held = '';
@@ -554,19 +511,14 @@ test('a release never unlinks a lock that only ends with our token', async (t) =
     await pending;
     assert.equal(existsSync(lockPath), true, 'a foreign lock must never be unlinked');
     assert.equal(readFileSync(lockPath, 'utf8'), rewritten);
-    // The mutation itself completed; only the foreign lock survived release.
     assert.equal(parseToml(configPath(home)).workspace_path, '/ws');
   } finally {
     rmSync(copyUrl, { force: true });
   }
 });
 
-// ---------------------------------------------------------------------------
-// Native publication: refusal and policy preservation
-// ---------------------------------------------------------------------------
 
 /**
- * The desktop writer publishes through the native publisher, so a document the
  * process may not write is refused instead of replaced by a rename that the
  * directory — not the file — authorized.
  */
@@ -588,13 +540,11 @@ test('a write-denied document is refused and keeps its bytes', async (t) => {
 
   assert.equal(readText(configPath(home)), daemon);
   assert.equal(readText(agentPath(home)), agent);
-  // The refused publication leaves no staging file behind.
   assert.deepEqual(readdirSync(join(home, '.nexus42')).sort(), ['agent-host', 'config.toml']);
   assert.deepEqual(readdirSync(join(home, '.nexus42', 'agent-host')), ['config.toml']);
 });
 
 /**
- * A `0640` document keeps its mode and group: the publisher captures the target
  * policy and reapplies it before the rename, so publication never silently
  * tightens or widens access.
  */

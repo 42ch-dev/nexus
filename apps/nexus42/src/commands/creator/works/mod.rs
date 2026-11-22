@@ -13,17 +13,13 @@ use crate::errors::Result;
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-// v1.193 P0-T7: every retained Work arm — selection, pool, inspiration,
 // governance and findings — runs on the typed core seam ([`crate::core`]).
 use crate::core::{finish_direct, map_core_error, open_direct_core};
-// V1.42 P-last (R-V141P0-06): completion-lock file path check
 use nexus_home_layout;
-// Schema-owned wire shape for the stale enrichment of `works status --json`
 // (the core report is not a wire type).
 use nexus_contracts::daemon_api::findings::{
     StaleFindingEntry as StaleFindingWire, StaleFindingsResponse as StaleFindingsWire,
 };
-// Schema-owned wire shapes for the `--json` output of the pool reads; the core
 // carriers are not wire types (they still hold the stored `creator_id`).
 use nexus_contracts::{
     AppendInspirationRequest, ListWorksQuery, ReleaseCompletionLockRequest,
@@ -86,7 +82,6 @@ pub enum WorksCommand {
         action: PoolAction,
     },
 
-    // ── V1.45 P2: atomic Work operations migrated from `creator run` ──
     /// Append inspiration / direction to an existing Work (V1.45 P2).
     ///
     /// Pure side-input lane: POSTs an inspiration note to the Work's
@@ -154,7 +149,6 @@ pub enum WorksCommand {
         json: bool,
     },
 
-    // ── V1.48 P2: findings + rules (Layer 2 AGENTS.md) ──────────────
     /// Finding-level operations (accept rule suggestions, future prune / …).
     ///
     /// V1.48 P2 introduces the `accept` subcommand which appends a finding's
@@ -173,7 +167,6 @@ pub enum WorksCommand {
         command: RulesCommand,
     },
 
-    // ── V1.50 T-A P0: per-Work cron configuration ──────────────────────
     /// Manage per-Work cron configuration for novel-writing staggering
     /// (V1.50 §3). Foundation: set/show/list the `schedule_json` column.
     Cron {
@@ -181,7 +174,6 @@ pub enum WorksCommand {
         command: cron::CronCommand,
     },
 
-    // ── V1.50 T-A P3: per-Work auto-chronology ─────────────────────────
     /// Manage per-Work auto-chronology (volume auto-advance on finish)
     /// (V1.50 §2.2). `set` toggles the opt-in flag; `show` renders state;
     /// `advance` manually overrides to a target volume.
@@ -189,7 +181,6 @@ pub enum WorksCommand {
         #[command(subcommand)]
         command: chronology::ChronologyCommand,
     },
-    // ── V1.175 P1 Task 3: outline/chapter/timeline patch leaves (group 2) ──
     /// Show / patch the work outline (V1.72 canvas read + structure patch).
     ///
     /// Thin daemon-HTTP leaves over the existing canvas routes (AR-84 group
@@ -278,7 +269,6 @@ pub enum FindingsCommand {
         json: bool,
     },
 
-    // ── V1.175 P1 Task 4: findings triage leaves (group 8, AR-87) ──────
     /// List findings for a Work (`GET /v1/daemon/works/:work_id/findings`).
     ///
     /// Optional `--status` / `--severity` filters. `--json` emits the
@@ -650,7 +640,6 @@ pub(crate) async fn active_work_id_core(
         })
 }
 
-// Migrated from run.rs — preserved status display logic with DF-60 extensions.
 //
 // v1.193 P0-T7: the Work *and* its findings/stale enrichment come from the
 // typed core (`get_work` plus the findings family, with the active-Work
@@ -681,7 +670,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
     .await;
     let (work, open_findings, stale) = finish_direct(&core, outcome).await?;
 
-    // `WorkDetails` derives `Serialize` as the retained tool/Work wire shape
     // (it replaced the daemon's field-for-field copy), and every reader below
     // treats an absent nullable key and an explicit `null` identically.
     let resolved_id = work.work_id.clone();
@@ -699,7 +687,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
         };
         let mut output = enrich_status_json(resp, findings, stale.as_ref());
 
-        // V1.51 T-B P0: add lock_holder field (best-effort, reads from filesystem).
         if let Some(lock_holder) = read_lock_holder_json(&output) {
             if let Some(obj) = output.as_object_mut() {
                 obj.insert("lock_holder".to_string(), lock_holder);
@@ -708,7 +695,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
 
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
         //
         // R-V146P0-QC3-S3: rendered from the enrichment read taken inside the
@@ -757,7 +743,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
             .unwrap_or(0);
         let chapters = resp.get("chapters").and_then(|v| v.as_array());
 
-        // V1.38 P0 (T8): per-chapter status UX per spec §8.1.
         // For novel profile works, show chapter-centric output.
         if let (Some("novel"), Some(ch_list)) = (work_profile, chapters) {
             let finalized_count = ch_list
@@ -768,27 +753,22 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
 
             let profile_tag = " (novel)".to_string();
 
-            // V1.43 P2 (T2): the open-findings summary for spec §4 row 3 comes
             // from the enrichment read taken inside the admitted writer.
             if work_status == "completed" {
                 let updated_at = resp
                     .get("updated_at")
                     .and_then(|v| v.as_str())
                     .unwrap_or("(unknown)");
-                // V1.43 (P1 §3 remediation — work completed): cite quickstart §6.
                 println!("═══════════════════════════════════════════════════════");
                 println!("  \"{title}\" — Work {resolved_id}{profile_tag}");
                 println!("  COMPLETED at {updated_at}");
                 println!("  {total}/{total} chapters finalized.");
                 println!("  No further novel-writing schedules will be enqueued.");
                 println!();
-                // V1.43 P2: findings summary in completed view (spec §4 row 3).
                 print_findings_summary(&open_findings);
-                // V1.47 P1: normalize user-facing copy — spec name, not repo path.
                 println!("  This Work is complete; see novel-author-experience §3");
                 println!("═══════════════════════════════════════════════════════");
             } else {
-                // Header
                 println!("Work: {resolved_id} — {title}{profile_tag}");
                 println!("work_ref: {work_ref}");
                 println!("intake: {intake_status}");
@@ -796,7 +776,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 println!("current_chapter: {current_chapter}");
                 println!("total_planned_chapters: {total_planned}");
 
-                // V1.39 T7: auto-chain checkpoint fields
                 let auto_chain = resp
                     .get("auto_chain_enabled")
                     .and_then(serde_json::Value::as_bool)
@@ -813,13 +792,11 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 println!("auto_chain_enabled: {auto_chain}");
                 println!("driver_schedule_id: {driver}");
                 if interrupted {
-                    // v1.193 P2-T1: the `creator works resume-chain` entrance was
                     // removed with the incomplete Creator runner; the flag stays
                     // reported, but no CLI remediation command is advertised.
                     println!("auto_chain_interrupted: true");
                 }
 
-                // V1.41: completion lock fields (DF-60 §6.2H)
                 if let Some(completion_status) =
                     resp.get("novel_completion_status").and_then(|v| v.as_str())
                 {
@@ -827,7 +804,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 }
                 if let Some(locked_at) = resp.get("completion_locked_at").and_then(|v| v.as_str()) {
                     println!("completion_locked_at: {locked_at}");
-                    // V1.42 P-last (R-V141P0-06): missing-file hint.
                     print_completion_lock_hint(work_ref, &resolved_id);
                 }
                 if let Some(lock_holder) = resp.get("runtime_lock_holder").and_then(|v| v.as_str())
@@ -835,7 +811,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                     println!("runtime_lock_holder: {lock_holder}");
                 }
 
-                // V1.43 P2: findings summary (spec §4 row 3).
                 print_findings_summary(&open_findings);
 
                 // Per-chapter table
@@ -844,13 +819,11 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 print_chapter_table(ch_list, &resolved_id);
             }
         } else {
-            // Non-novel or generic work display
             println!("Work: {resolved_id} — {title}");
             println!("status: {work_status}");
             println!("work_ref: {work_ref}");
             println!("intake: {intake_status}");
 
-            // Show all remaining key-value pairs
             let skip_keys = [
                 "work_id",
                 "title",
@@ -915,8 +888,6 @@ async fn handle_use(config: &CliConfig, work_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ── V1.45 P2: atomic Work operations ──────────────────────────────────
-
 /// Handle `creator works inspire` — append an inspiration note to the Work's
 /// own `inspiration_log` (V1.45 P2).
 ///
@@ -948,7 +919,6 @@ async fn handle_inspire(
             .append_work_inspiration(
                 &principal,
                 resolved_id.clone(),
-                // `cli:<kind>:<uuid>` runtime-lock holder; the daemon adapter
                 // passed `http` for its own surface.
                 "inspire",
                 AppendInspirationRequest {
@@ -999,7 +969,6 @@ async fn handle_reopen(
     reason: &str,
     json: bool,
 ) -> Result<()> {
-    // W-5: Cap and sanitize reason
     if reason.len() > 512 {
         return Err(crate::errors::CliError::Config(format!(
             "--reason exceeds maximum length (512 chars); got {} chars",
@@ -1082,7 +1051,6 @@ async fn handle_reconcile_chapters(
             None => active_work_id_core(&core, &principal).await?,
         };
 
-        // `--dry-run`: preview only, never write, never prompt. The core
         // computes the report without the runtime lock and without any
         // filesystem/DB write (overlay §8.2).
         if dry_run {
@@ -1090,10 +1058,8 @@ async fn handle_reconcile_chapters(
             return Ok((resolved_id, ReconcileOutcome::Reconciled(report, true)));
         }
 
-        // Mutating path: confirm unless `--yes` (mirror `works rules reset`).
         if !yes {
             if json {
-                // Machine-readable mode cannot host an interactive prompt;
                 // report that confirmation is required and write nothing.
                 return Ok((
                     resolved_id.clone(),
@@ -1301,8 +1267,6 @@ async fn handle_completion_lock(config: &CliConfig, cmd: CompletionLockCommand) 
     Ok(())
 }
 
-// ── Selection pool handlers (DF-61) ────────────────────────────────────
-
 /// Handle `creator works pool` — the selection pool and the pool-level
 /// inspiration store, each on its own typed core producer.
 ///
@@ -1341,7 +1305,6 @@ async fn handle_pool(config: &CliConfig, action: PoolAction) -> Result<()> {
         }
     }
     .await;
-    // The leaves return their report; nothing reaches stdout until the shared
     // seam released the writer, so a promoted/archived entry is never reported
     // ahead of a close that did not settle.
     if let Some(text) = finish_direct(&core, outcome).await? {
@@ -1427,7 +1390,6 @@ async fn handle_pool_promote(
     )];
 
     if set_default {
-        // `works use` semantics: the pool `active` row is the CLI default. The
         // retired adapter issued this selection as a second control request;
         // the core promotes to `active` on both paths.
         core.select_work(principal, work_id.to_string())
@@ -1456,8 +1418,6 @@ async fn handle_pool_archive(
 
     Ok(Some(format!("Entry {entry_id} → {}", entry.status)))
 }
-
-// ── Inspiration pool handlers (DF-61 §4) ───────────────────────────────
 
 async fn handle_inspiration(
     core: &CoreService,
@@ -1593,7 +1553,6 @@ async fn handle_inspiration_promote(
     )];
 
     if set_default {
-        // The atomic promotion already wrote the new Work as the pool `active`
         // row; this is the retained `works use` selection on its own request.
         core.select_work(principal, promoted.work_id.clone())
             .await
@@ -1657,8 +1616,6 @@ fn inspiration_item_wire(item: nexus_core::WorkInspirationItem) -> InspirationLi
         promoted_at: item.promoted_at,
     }
 }
-
-// ── Shared display helpers (V1.42 P-last R-V141P0-02 dedup) ───────────
 
 /// Hard cap on the number of open findings the status enrichment reads.
 ///
@@ -1725,7 +1682,6 @@ async fn fetch_open_findings(
             if let Ok(serde_json::Value::Array(items)) = serde_json::to_value(&resp.items) {
                 FindingsResult::Fetched(items)
             } else {
-                // A serialization failure is the same class as a failed read: the
                 // status command degrades instead of reporting a findings list it
                 // cannot render.
                 tracing::warn!(
@@ -1759,7 +1715,6 @@ async fn fetch_stale_findings(
         .list_stale_findings(principal, STALE_FINDINGS_THRESHOLD_SECS)
         .await
         .map_err(|error| {
-            // R-V146P0-QC3-S2: observe the silent swallow — a failed stale
             // read must not vanish into `None` without a trace.
             tracing::warn!(
                 error = %error,
@@ -1834,7 +1789,6 @@ fn format_stale_banner(stale_count: u64, threshold_seconds: i64) -> Option<Strin
         return None;
     }
     let threshold_hours = threshold_seconds / 3600;
-    // V1.47 P1: normalize user-facing copy — spec name, not repo path.
     // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
     Some(format!(
         "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
@@ -1879,7 +1833,6 @@ fn enrich_status_json(
             "findings".to_string(),
             serde_json::Value::Array(arr.to_vec()),
         );
-        // qc3 F-003: surface the 50-item fetch cap so JSON consumers can
         // distinguish "exactly 50 open findings" from "50+ open findings".
         // Omitted when not at the cap (consumers treat absence as not-truncated).
         if is_truncated {
@@ -1932,7 +1885,6 @@ impl FindingsSummary {
 
         let open_count = findings.len();
 
-        // Severity priority order (highest first).
         let severity_order = ["blocker", "major", "minor", "info"];
         let mut severity_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -1946,7 +1898,6 @@ impl FindingsSummary {
                 .to_string();
             *severity_counts.entry(sev.clone()).or_insert(0) += 1;
 
-            // Track highest severity.
             let current_rank = severity_order.iter().position(|s| *s == sev);
             let highest_rank = highest_severity
                 .as_ref()
@@ -1956,7 +1907,6 @@ impl FindingsSummary {
             }
         }
 
-        // Sort severity counts by priority order.
         let mut severity_vec: Vec<(String, usize)> = severity_counts.into_iter().collect();
         severity_vec.sort_by(|a, b| {
             let ra = severity_order.iter().position(|s| *s == a.0);
@@ -1964,7 +1914,6 @@ impl FindingsSummary {
             ra.cmp(&rb)
         });
 
-        // Top 5 findings with (title, severity, routing_hint).
         let top_findings = findings
             .iter()
             .take(5)
@@ -2008,7 +1957,6 @@ impl FindingsSummary {
 ///   the removed runner — no CLI preset dispatch entrance is claimed)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult) {
-    // R-V146P0-QC1-S2: formatting lives in the pure `format_findings_summary_lines`
     // helper so the test helper `capture_findings_output` cannot drift from
     // production. This wrapper only prints each rendered line.
     for line in format_findings_summary_lines(result) {
@@ -2043,7 +1991,6 @@ fn format_findings_summary_lines(result: &FindingsResult) -> Vec<String> {
         return vec!["findings: none open".to_string()];
     }
 
-    // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
     // Truncated: "findings: 50+ open (...)"
     let count_display = if summary.is_truncated {
         format!("{}+", summary.open_count)
@@ -2065,7 +2012,6 @@ fn format_findings_summary_lines(result: &FindingsResult) -> Vec<String> {
         "findings: {count_display} open ({sev_summary}){highest_tag}"
     )];
 
-    // Top findings with routing hints (sanitized).
     for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
         let safe_title = sanitize_for_terminal(title);
         let safe_hint = sanitize_for_terminal(hint);
@@ -2100,7 +2046,6 @@ const CHAPTER_PATH_HINT_CAP: usize = 50;
 /// `CHAPTER_PATH_HINT_CAP` to prevent tail latency on large works; a
 /// summary line covers chapters beyond the cap.
 fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
-    // Resolve the operational workspace dir once (best-effort). When this
     // cannot be resolved (no active creator, no home dir, etc.), on-disk
     // hints are silently skipped — the table still renders normally.
     let ws_dir = operational_workspace_dir_from_config();
@@ -2120,7 +2065,6 @@ fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
     let total_chapters = chapters.len();
     let hint_cap = total_chapters.min(CHAPTER_PATH_HINT_CAP);
 
-    // tracing span records chapter count + effective cap; the >100ms
     // threshold log below surfaces slow loops without spamming fast SSDs.
     let hint_loop_elapsed_ms = {
         let span = tracing::info_span!("chapter_path_hints", total_chapters, capped = hint_cap,);
@@ -2167,7 +2111,6 @@ fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
         );
     }
 
-    // V1.46 P2 QC fix W-001: summary line for chapters beyond the cap.
     // Emitted only when the workspace was resolved (otherwise the entire
     // hint feature was silently skipped and a summary would mislead the
     // user into thinking paths were checked).
@@ -2277,7 +2220,6 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
     if work_ref.starts_with('(') {
         return;
     }
-    // R-V146P2-QC1-S2: route through the shared `operational_workspace_dir_from_config`
     // helper instead of re-implementing the config → creator_id → workspace_slug →
     // home → operational_workspace_dir lookup inline. The helper has identical
     // best-effort semantics (None on any resolution failure); the prior ad-hoc
@@ -2291,7 +2233,6 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
         .join(".completion-lock.json");
     if !lock_path.exists() {
         println!("⚠ completion-lock file missing (DB says locked but file not found)");
-        // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
         println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
     }
 }
@@ -2312,14 +2253,10 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
 /// - ASCII control chars 0x00–0x1F (except `\n` 0x0A and `\t` 0x09) and 0x7F (DEL)
 /// - ANSI CSI sequences (`ESC [ ... letter`)
 fn sanitize_for_terminal(s: &str) -> String {
-    // Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
-    let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap_or_else(|e| {
-        // The pattern is a compile-time constant; panic is unreachable.
-        unreachable!("invalid ANSI regex pattern: {e}")
-    });
+    let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]")
+        .unwrap_or_else(|e| unreachable!("invalid ANSI regex pattern: {e}"));
     let stripped = ansi_re.replace_all(s, "");
 
-    // Phase 2: remove remaining ASCII control chars (keep \n, \t, and printable).
     stripped
         .chars()
         .filter(|&c| {
@@ -2327,14 +2264,11 @@ fn sanitize_for_terminal(s: &str) -> String {
                 return true;
             }
             let code = c as u32;
-            // Allow printable chars: space (0x20) and above, excluding DEL (0x7F).
             // Below 0x20 are control chars — filter them out.
             code >= 0x20 && code != 0x7F
         })
         .collect()
 }
-
-// ── Tests (V1.43 P2 T4) ───────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -2372,8 +2306,6 @@ mod tests {
             "updated_at": 1_718_000_123,
         })
     }
-
-    // ── FindingsSummary parsing tests ────────────────────────────────────
 
     #[test]
     fn findings_summary_empty() {
@@ -2418,7 +2350,6 @@ mod tests {
         let summary = FindingsSummary::from_findings_json(&findings, false);
         assert_eq!(summary.open_count, 4);
         assert_eq!(summary.highest_severity.as_deref(), Some("blocker"));
-        // Sorted by severity priority (blocker first).
         assert_eq!(summary.severity_counts[0].0, "blocker");
         assert_eq!(summary.severity_counts[0].1, 1);
         assert_eq!(summary.severity_counts[1].0, "major");
@@ -2445,10 +2376,7 @@ mod tests {
         assert!(summary.is_truncated);
     }
 
-    // ── print_findings_summary display tests ─────────────────────────────
-
     fn capture_findings_output(findings: &[serde_json::Value]) -> String {
-        // R-V146P0-QC1-S2: delegate to the shared production formatter so the
         // test helper cannot drift from `print_findings_summary`. The slice is
         // wrapped into `FindingsResult::Fetched`; the `Unavailable` branch is
         // covered directly by `format_findings_summary_lines` unit tests.
@@ -2460,18 +2388,12 @@ mod tests {
     fn display_no_open_findings() {
         let output = capture_findings_output(&[]);
         assert!(output.contains("findings: none open"));
-        // v1.193 P2-T1: the removed `creator run` runner is not advertised.
         assert!(!output.contains("creator run"));
         assert!(!output.contains("highest"));
     }
 
-    // -----------------------------------------------------------------------
-    // R-V146P0-QC1-S2: shared formatter covers the Unavailable branch + parity
-    // -----------------------------------------------------------------------
-
     #[test]
     fn format_findings_summary_lines_unavailable_branch() {
-        // R-V146P0-QC1-S2: the shared `format_findings_summary_lines` owns the
         // Unavailable branch (previously only reachable via the production
         // `print_findings_summary`, never via the test helper). Pins the
         // one-line degradation output.
@@ -2482,7 +2404,6 @@ mod tests {
 
     #[test]
     fn format_findings_summary_lines_parity_with_capture_helper() {
-        // R-V146P0-QC1-S2: the test helper `capture_findings_output` now
         // delegates to the shared formatter, so its output must equal
         // `format_findings_summary_lines(...).join("\n")` byte-for-byte.
         // A representative populated case proves no formatting drifted.
@@ -2498,7 +2419,6 @@ mod tests {
             via_helper, via_shared,
             "helper must delegate to shared formatter"
         );
-        // Sanity: the populated summary surfaces the count + a top finding.
         assert!(via_shared.contains("findings: 3 open"));
         assert!(via_shared.contains("1 blocker"));
         assert!(via_shared.contains("Continuity error"));
@@ -2530,7 +2450,6 @@ mod tests {
 
     #[test]
     fn display_findings_completed_work_shows_summary() {
-        // Verify that the findings summary format works for the completed
         // path too — same formatting, just inserted before the "complete" message.
         let findings = vec![finding_json("info", "Nice-to-have", "→ none")];
         let output = capture_findings_output(&findings);
@@ -2552,7 +2471,6 @@ mod tests {
             finding_json("minor", "Typo", "→ copyedit"),
         ];
         let output = capture_findings_output(&findings);
-        // Each per-finding hint appears verbatim in the output.
         assert!(
             output.contains("→ write"),
             "per-finding routing_hint '→ write' must appear: {output}"
@@ -2572,17 +2490,12 @@ mod tests {
         );
     }
 
-    // ── Completion display tests ─────────────────────────────────────────
-
     #[test]
     fn completion_shows_zero_open_findings() {
-        // When no findings exist, the summary line should say "none open".
         let output = capture_findings_output(&[]);
         assert!(output.contains("findings: none open"));
         assert!(!output.contains("creator run"));
     }
-
-    // ── Truncation tests ─────────────────────────────────────────────────
 
     #[test]
     fn truncate_with_ellipsis_short() {
@@ -2594,8 +2507,6 @@ mod tests {
         assert_eq!(truncate_with_ellipsis("hello world", 5), "hello…");
     }
 
-    // ── Truncated findings (50+) display test ────────────────────────────
-
     #[test]
     fn display_truncated_findings_shows_plus_indicator() {
         let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
@@ -2606,14 +2517,11 @@ mod tests {
             output.contains(&format!("findings: {FINDINGS_FETCH_LIMIT}+ open")),
             "expected '50+ open' indicator in output: {output}"
         );
-        // Should NOT show bare "50 open" (without +).
         assert!(
             !output.contains(&format!("findings: {FINDINGS_FETCH_LIMIT} open")),
             "should not show exact count without '+' when truncated"
         );
     }
-
-    // ── V1.46 P0 enrich_status_json tests (novel-only gate + JSON contract) ──
 
     fn novel_work_resp() -> serde_json::Value {
         serde_json::json!({
@@ -2646,7 +2554,6 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("findings[] present for novel work");
         assert_eq!(arr.len(), 2);
-        // Same element shape as list API (verbatim).
         assert_eq!(
             arr[0].get("severity").and_then(|v| v.as_str()),
             Some("major")
@@ -2655,7 +2562,6 @@ mod tests {
             arr[0].get("routing_hint").and_then(|v| v.as_str()),
             Some("→ write")
         );
-        // Daemon work fields preserved.
         assert_eq!(
             out.get("title").and_then(|v| v.as_str()),
             Some("Test Novel")
@@ -2669,7 +2575,6 @@ mod tests {
 
     #[test]
     fn enrich_novel_preserves_full_finding_element_shape_verbatim() {
-        // R-V146P0-QC2-S1: the existing enrich tests used the minimal
         // `finding_json` helper and only spot-checked `severity` /
         // `routing_hint`. Assert full element-shape fidelity: a finding
         // carrying every list-API field must survive `enrich_status_json`
@@ -2684,12 +2589,10 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("findings[] present");
         assert_eq!(arr.len(), 1, "exactly the one full-shape finding");
-        // Verbatim equality: the enriched element equals the input element.
         assert_eq!(
             arr[0], full,
             "enrich must preserve the full finding element verbatim (no field drop/rename/coerce)"
         );
-        // Pin a handful of the previously-unasserted fields explicitly so a
         // regression message points at the right field.
         assert_eq!(
             arr[0].get("chapter").and_then(serde_json::Value::as_i64),
@@ -2725,14 +2628,12 @@ mod tests {
 
     #[test]
     fn enrich_novel_unavailable_findings_omits_key() {
-        // When the findings endpoint is unreachable (None), omit findings[]
         // rather than fabricating an empty array (graceful degradation).
         let out = enrich_status_json(novel_work_resp(), None, None);
         assert!(
             out.get("findings").is_none(),
             "findings key omitted when unavailable"
         );
-        // qc3 F-003: truncation marker must also be absent when findings
         // were not fetched at all.
         assert!(
             out.get("findings_truncated").is_none(),
@@ -2740,11 +2641,8 @@ mod tests {
         );
     }
 
-    // ── qc3 F-003: findings_truncated marker tests ───────────────────────
-
     #[test]
     fn enrich_findings_truncated_marker_set_when_at_limit() {
-        // When the daemon returns exactly FINDINGS_FETCH_LIMIT (50) rows,
         // there may be more open findings beyond the fetched page. Surface
         // a `findings_truncated: true` flag so JSON consumers can detect
         // the cap (qc3 F-003).
@@ -2762,7 +2660,6 @@ mod tests {
 
     #[test]
     fn enrich_findings_truncated_omitted_when_below_limit() {
-        // Below the cap, the marker is omitted (not false) so consumers can
         // distinguish "truncation known to be false" from "not applicable".
         let findings = vec![
             finding_json("major", "Plot hole", "→ write"),
@@ -2777,7 +2674,6 @@ mod tests {
 
     #[test]
     fn enrich_findings_truncated_omitted_when_empty() {
-        // Empty findings (fetched successfully, none open) — not truncated.
         let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
         assert!(
             out.get("findings_truncated").is_none(),
@@ -2799,7 +2695,6 @@ mod tests {
 
     #[test]
     fn enrich_missing_work_profile_omits_findings() {
-        // A work with no work_profile field is treated as non-novel.
         let resp = serde_json::json!({ "work_id": "wrk_x", "title": "Mystery" });
         let findings = vec![finding_json("info", "x", "→ none")];
         let out = enrich_status_json(resp, Some(findings.as_slice()), None);
@@ -2833,7 +2728,6 @@ mod tests {
 
     #[test]
     fn enrich_preserves_daemon_work_fields() {
-        // Daemon GET work payload fields must be unchanged (spec §4.1).
         let resp = serde_json::json!({
             "work_id": "wrk_full",
             "title": "Full",
@@ -2853,11 +2747,8 @@ mod tests {
         assert!(out.get("chapters").and_then(|v| v.as_array()).is_some());
     }
 
-    // ── R-V146P0-QC3-S3: human-path stale banner rendering ──────────────
-
     #[test]
     fn format_stale_banner_none_when_zero() {
-        // R-V146P0-QC3-S3: zero stale findings must NOT emit a banner
         // (no empty sentinel noise). The human status path now routes through
         // `format_stale_banner`, so the zero-suppression is unit-testable.
         assert_eq!(format_stale_banner(0, 96 * 60 * 60), None);
@@ -2865,7 +2756,6 @@ mod tests {
 
     #[test]
     fn format_stale_banner_some_when_stale_count_positive() {
-        // R-V146P0-QC3-S3: a positive stale count renders the banner with the
         // computed whole-hour threshold and the spec citation.
         let banner = format_stale_banner(7, 96 * 60 * 60).expect("banner for stale_count>0");
         assert!(
@@ -2884,13 +2774,10 @@ mod tests {
 
     #[test]
     fn format_stale_banner_computes_hours_from_seconds() {
-        // R-V146P0-QC3-S3: threshold_seconds is converted to whole hours
         // (integer division). 345600s = 96h; 7200s = 2h.
         assert!(format_stale_banner(1, 345_600).unwrap().contains(">96h"));
         assert!(format_stale_banner(1, 7_200).unwrap().contains(">2h"));
     }
-
-    // ── sanitize_for_terminal tests ──────────────────────────────────────
 
     #[test]
     fn sanitize_for_terminal_strips_escape_codes() {
@@ -2915,7 +2802,6 @@ mod tests {
 
     #[test]
     fn sanitize_for_terminal_strips_del() {
-        // DEL (0x7F) should be removed
         let input = "before\x7Fafter";
         let sanitized = sanitize_for_terminal(input);
         assert_eq!(sanitized, "beforeafter");
@@ -2930,17 +2816,13 @@ mod tests {
 
     #[test]
     fn sanitize_for_terminal_strips_clear_screen() {
-        // \x1b[2J is "clear screen"
         let input = "good\x1b[2Jbad";
         let sanitized = sanitize_for_terminal(input);
         assert_eq!(sanitized, "goodbad");
     }
 
-    // ── R-V146P2-QC1-S2: workspace-dir resolution dedup ─────────────────
-
     #[test]
     fn print_completion_lock_hint_no_ops_when_work_ref_is_placeholder() {
-        // R-V146P2-QC1-S2: a placeholder work_ref (starting with "(") must
         // short-circuit before any workspace-dir resolution. Asserts the
         // early-return branch is preserved after routing through the shared
         // `operational_workspace_dir_from_config` helper.
@@ -2950,18 +2832,14 @@ mod tests {
 
     #[test]
     fn print_completion_lock_hint_no_ops_when_workspace_unresolvable() {
-        // R-V146P2-QC1-S2: with a real-looking work_ref but no resolvable
         // active creator/workspace (the default test-env state), the shared
         // helper returns None and the hint is skipped without panicking.
         // Pins that the deduplicated resolution path degrades gracefully.
         print_completion_lock_hint("MYNOVEL", "wrk_test");
     }
 
-    // ── FindingsResult unavailable display test ──────────────────────────
-
     #[test]
     fn display_unavailable_findings() {
-        // When findings are unavailable, the output should say "unavailable"
         // not "none open". This tests the logic that print_findings_summary uses.
         let result = FindingsResult::Unavailable;
         let output = match result {
@@ -2979,8 +2857,6 @@ mod tests {
         assert!(output.contains("unavailable"));
         assert!(!output.contains("none open"));
     }
-
-    // ── V1.45 P2: CLI parsing tests for migrated works subcommands ──────
 
     use clap::Parser;
 
@@ -3062,7 +2938,6 @@ mod tests {
 
     #[test]
     fn works_reopen_rejects_removed_extend_chapters_flag() {
-        // The flag rode the retired daemon patch body; no retained request
         // carries `total_planned_chapters`, so the parser must refuse it
         // instead of silently dropping it.
         let result = WorksCli::try_parse_from([
@@ -3182,7 +3057,6 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_body_missing_on_disk() {
-        // body_path configured but file does not exist → hint should fire
         // and mention body_path.
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(Some("Works/my-novel/Stories/ch01-intro.md"), None);
@@ -3197,7 +3071,6 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_outline_missing_on_disk() {
-        // outline_path configured but file does not exist → hint fires.
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(
             None,
@@ -3213,9 +3086,7 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_both_present_no_hint() {
-        // Both paths configured AND present on disk → no hint (None).
         let dir = tempfile::tempdir().expect("tempdir");
-        // Create the files so exists() returns true.
         let body_rel = "Works/my-novel/Stories/ch01.md";
         let outline_rel = "Works/my-novel/Outlines/chapters/ch01-outline.md";
         std::fs::create_dir_all(dir.path().join("Works/my-novel/Stories"))
@@ -3235,7 +3106,6 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_no_paths_configured_no_hint() {
-        // Neither body_path nor outline_path in the JSON → None (nothing to
         // check; daemon has not assigned file paths yet).
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(None, None);
@@ -3248,7 +3118,6 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_both_missing_mentions_both() {
-        // Both configured, neither exists → hint mentions both fields.
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(
             Some("Works/x/Stories/ch01.md"),
@@ -3268,7 +3137,6 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_exists_failure_is_silent() {
-        // Best-effort contract: `Path::exists()` returns false (rather than
         // panicking) for unreadable / permission-denied paths. The hint
         // surfaces "missing on disk" for such cases too — reconcile is the
         // correct remediation regardless. This test pins the "swallow"
@@ -3277,10 +3145,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let dir_path = dir.path().to_path_buf();
         let ch = chapter_with_paths(Some("nonexistent/ch01.md"), None);
-        // Drop the tempdir handle but keep the path; the files never existed.
         drop(dir);
         let hint = chapter_path_missing_hint(&ch, &dir_path);
-        // After drop the tempdir may still exist on disk (cleanup is
         // best-effort), but the inner file definitely does not → Some.
         assert!(
             hint.is_some(),
@@ -3288,11 +3154,8 @@ mod tests {
         );
     }
 
-    // ── V1.46 P2 QC fix W-001: chapter hint cap + summary tests ──────────
-
     #[test]
     fn chapter_path_hint_skipped_summary_format() {
-        // Format contract for the "+ N more (paths not checked)" line.
         assert_eq!(
             chapter_path_hint_skipped_summary(1).as_deref(),
             Some("+ 1 more (paths not checked)"),
@@ -3301,7 +3164,6 @@ mod tests {
             chapter_path_hint_skipped_summary(10).as_deref(),
             Some("+ 10 more (paths not checked)"),
         );
-        // Zero skipped → no summary line (caller must not render one).
         assert!(
             chapter_path_hint_skipped_summary(0).is_none(),
             "no summary when skipped == 0"
@@ -3310,7 +3172,6 @@ mod tests {
 
     #[test]
     fn chapter_path_hint_cap_only_first_50_chapters_get_hints() {
-        // 60-chapter work, all with missing body_path. Without the cap,
         // every chapter would emit a ⚠ hint (and incur a synchronous
         // `exists()` syscall). The cap bounds the inspected set at
         // `CHAPTER_PATH_HINT_CAP` and summarizes the remainder.
@@ -3320,14 +3181,12 @@ mod tests {
             .collect();
         assert_eq!(chapters.len(), 60);
 
-        // Mirror print_chapter_table's cap math.
         let hint_cap = chapters.len().min(CHAPTER_PATH_HINT_CAP);
         assert_eq!(
             hint_cap, CHAPTER_PATH_HINT_CAP,
             "60-chapter work hits the cap"
         );
 
-        // Only the first `hint_cap` chapters are inspected for path hints.
         let capped_hint_count = chapters[..hint_cap]
             .iter()
             .filter_map(|ch| chapter_path_missing_hint(ch, dir.path()))
@@ -3337,7 +3196,6 @@ mod tests {
             "all 50 capped chapters have missing body_path → 50 hints"
         );
 
-        // Prove the cap is actually bounding something real: the skipped
         // chapters WOULD have generated hints if the cap weren't in place.
         let would_have_hinted = chapters[hint_cap..]
             .iter()
@@ -3348,7 +3206,6 @@ mod tests {
             "skipped chapters would have hinted without the cap"
         );
 
-        // Summary line covers exactly the skipped count.
         let skipped = chapters.len().saturating_sub(hint_cap);
         assert_eq!(skipped, 10);
         let summary =
@@ -3358,7 +3215,6 @@ mod tests {
 
     #[test]
     fn chapter_path_hint_cap_not_triggered_under_50() {
-        // A 10-chapter work is well under the cap: no chapter is skipped,
         // no summary line is rendered, and the existing per-chapter
         // behavior is fully preserved.
         let chapters: Vec<serde_json::Value> = (1..=10)
@@ -3374,8 +3230,6 @@ mod tests {
             "no summary when skipped == 0"
         );
     }
-
-    // ── V1.48 P2: CLI parsing for findings + rules subcommands ────────
 
     #[test]
     fn works_findings_accept_parses_with_finding_id() {
@@ -3410,8 +3264,6 @@ mod tests {
             _ => panic!("expected Findings::Accept variant"),
         }
     }
-
-    // ── V1.48 P2 T4: rules reset CLI parsing ──────────────────────────
 
     #[test]
     fn works_rules_reset_parses_without_work_id() {
@@ -3457,8 +3309,6 @@ mod tests {
             _ => panic!("expected Rules::Reset variant"),
         }
     }
-
-    // ── V1.48 P2-fix1: --dry-run / --yes flag parsing ─────────────────
 
     #[test]
     fn works_rules_reset_supports_dry_run_flag() {

@@ -444,7 +444,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Known ids returned in any order; the missing id is omitted.
         let refs = [
             "rule_a".to_string(),
             "rule_missing".to_string(),
@@ -456,7 +455,6 @@ mod tests {
         ids.sort_unstable();
         assert_eq!(ids, vec!["rule_a", "rule_b"]);
 
-        // Column values round-trip.
         let row = rows.iter().find(|r| r.rule_id == "rule_a").unwrap();
         assert_eq!(row.world_id, "wld_1");
         assert_eq!(row.schema_version, 1);

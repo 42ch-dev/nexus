@@ -63,21 +63,15 @@ impl WasmEngine {
     /// Returns [`ComputeError::Wasmtime`] on engine init failure.
     pub fn with_config(default_sandbox: SandboxConfig) -> Result<Self> {
         let mut config = Config::new();
-        // Fuel: per-instruction budget, set per-invocation via Store::set_fuel.
         config.consume_fuel(true);
-        // Epoch interruption: enables the wall-time watchdog to trap runaway
-        // modules via Engine::increment_epoch().
         config.epoch_interruption(true);
-        // Debug-info off for release-grade modules; speed over introspection.
         config.debug_info(false);
-        // Wasmtime 47+ enables the GC, function-references and exceptions
         // proposals by default. Preserve the v46 module-admission set: the
         // Nexus module ABI is core Wasm, and accepting these proposals would
         // silently widen what the sandbox admits.
         config.wasm_gc(false);
         config.wasm_function_references(false);
         config.wasm_exceptions(false);
-        // Wasmtime 49 additionally enables the wide-arithmetic proposal by
         // default (it is part of the `WASM3` default feature set). Keep the v48
         // admission set here too: `i64.add128` / `i64.mul_wide_*` are not part
         // of the Nexus module ABI, so modules using them must stay rejected at
@@ -124,7 +118,6 @@ mod tests {
     #[test]
     fn loads_valid_module() {
         let engine = WasmEngine::new().unwrap();
-        // A minimal valid wasm module (empty, no exports).
         let empty = wat::parse_str("(module)").unwrap_or_default();
         engine.load_module(&empty).expect("empty module loads");
     }

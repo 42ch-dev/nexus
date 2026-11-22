@@ -77,7 +77,6 @@ impl CoreService {
             category: format!("fork marker append: {e}"),
         })?;
 
-        // The generated response owns the timestamp format validation.
         serde_json::from_value(json!({
             "branch_id": branch_id,
             "parent_branch_id": request.parent_branch_id,
