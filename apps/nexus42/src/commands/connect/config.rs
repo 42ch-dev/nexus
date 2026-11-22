@@ -25,21 +25,21 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectTokenConfig {
-    /// Peer ids whose signed capability tokens this node accepts (parallel
+    /// note: peer ids whose signed capability tokens this node accepts (parallel
     /// to `peer_allowlist`). **Empty ⇒ the capability-token method is
     /// disabled** (challenges are not offered; any presented proof is
     /// rejected — fail closed).
     #[serde(default)]
     pub trusted_issuers: Vec<String>,
 
-    /// Whether every session must complete the capability-token challenge
+    /// note: whether every session must complete the capability-token challenge
     /// before invokes are accepted. Effective only with a non-empty
     /// `trusted_issuers`; default `false` keeps the `noise-peerid`-only
     /// behavior.
     #[serde(default)]
     pub require_capability_token: bool,
 
-    /// Outbound proof surface: when `enabled`, this node mints tokens from
+    /// note: outbound proof surface — when `enabled`, this node mints tokens from
     /// its issuer key to answer challenges when it **dials** peers that
     /// require tokens (the inbound side is governed by `trusted_issuers` +
     /// `require_capability_token`).
@@ -47,7 +47,7 @@ pub struct ConnectTokenConfig {
     pub capability_token_provider: Option<ProviderConfig>,
 }
 
-/// The `capability_token_provider` block.
+/// note: the `capability_token_provider` block.
 ///
 /// `issuer_key_path` overrides the default `~/.nexus42/connect/issuer.key`:
 /// absolute paths are used as-is; relative paths resolve against
@@ -55,9 +55,9 @@ pub struct ConnectTokenConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
-    /// Whether this node presents capability-token proofs on dial.
+    /// note: whether this node presents capability-token proofs on dial.
     pub enabled: bool,
-    /// Issuer key path override (optional — defaults to
+    /// note: issuer key path override (optional — defaults to
     /// `~/.nexus42/connect/issuer.key`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issuer_key_path: Option<String>,
@@ -116,7 +116,7 @@ pub fn load(home: &Path) -> Result<ConnectTokenConfig> {
     }
 }
 
-/// Resolve the provider issuer key path.
+/// note: resolve the provider issuer key path.
 ///
 /// The configured `issuer_key_path` (absolute → as-is; relative → against
 /// `~/.nexus42/connect/`) is used when present; otherwise the default
@@ -184,7 +184,7 @@ mod tests {
             Some("/abs/path/issuer.key")
         );
 
-        // Serialize → reparse: the on-disk shape round-trips exactly.
+        // note: serialize then reparse to prove the on-disk shape round-trips exactly.
         let serialized = serde_json::to_string(&config).expect("serialize");
         let reparsed: ConnectTokenConfig = serde_json::from_str(&serialized).expect("reparse");
         assert_eq!(reparsed, config);
@@ -260,17 +260,14 @@ mod tests {
         let default = resolve_issuer_key_path(home, None);
         assert_eq!(default, nexus_home_layout::connect_issuer_key_path(home));
 
-        // Absolute path used as-is.
         assert_eq!(
             resolve_issuer_key_path(home, Some("/etc/issuer.key")),
             PathBuf::from("/etc/issuer.key")
         );
-        // Relative path resolves against ~/.nexus42/connect/.
         assert_eq!(
             resolve_issuer_key_path(home, Some("keys/issuer.key")),
             PathBuf::from("/fake/home/.nexus42/connect/keys/issuer.key")
         );
-        // Empty / whitespace-only values fall back to the default.
         assert_eq!(resolve_issuer_key_path(home, Some("")), default);
         assert_eq!(resolve_issuer_key_path(home, Some("   ")), default);
     }

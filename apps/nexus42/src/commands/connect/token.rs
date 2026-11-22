@@ -22,28 +22,28 @@ use spoke_connect::CapabilityTokenProvider;
 use std::path::Path;
 use std::sync::Arc;
 
-/// `connect token` subcommands.
+/// note: `connect token` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum TokenCommand {
-    /// Issue a signed capability token with the persisted issuer key.
+    /// note: issue a signed capability token with the persisted issuer key.
     ///
     /// Prints the wire proof `{v, claims, sig}` (JCS claims, base64url
     /// signature) as JSON on stdout.
     Issue {
-        /// Subject peer id — who may present the token.
+        /// note: subject peer id — who may present the token.
         #[arg(long, value_name = "PEER_ID")]
         sub: String,
-        /// Audience peer id — the verifying node.
+        /// note: audience peer id — the verifying node.
         #[arg(long, value_name = "PEER_ID")]
         aud: String,
-        /// Comma-separated capability names granted to `sub` (non-empty).
+        /// note: comma-separated capability names granted to `sub` (non-empty).
         #[arg(long, value_name = "C1,C2")]
         capabilities: String,
-        /// Expiry as Unix time seconds (UTC); must be beyond
+        /// note: expiry as Unix time seconds (UTC); must be beyond
         /// now + 60s clock skew.
         #[arg(long, value_name = "UNIX_SECONDS")]
         exp: u64,
-        /// Issuer peer id override (defaults to the issuer key's derived
+        /// note: issuer peer id override (defaults to the issuer key's derived
         /// peer id — MUST equal it, spoke normative rule).
         #[arg(long, value_name = "PEER_ID")]
         iss: Option<String>,
@@ -75,22 +75,22 @@ pub fn load_or_create_issuer_key(home: &Path) -> Result<Keypair> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Serialize before touching the filesystem so a serialization failure
+    // why: serialize before touching the filesystem so a serialization failure
     // can never leave a partial key file behind.
     let keypair = Keypair::generate_ed25519();
     let encoded = keypair
         .to_protobuf_encoding()
         .map_err(|e| CliError::Config(format!("issuer key serialization failed: {e}")))?;
 
-    // `create_new` eliminates the TOCTOU race between the existence check
+    // why: `create_new` eliminates the TOCTOU race between the existence check
     // and the write (same pattern as the identity key): create-once, never
     // overwrite — a second issue reuses the persisted key.
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    // W-1: apply the owner-only mode at creation time (atomic create-with-
-    // mode) so the key is never observable at a permissive mode — not even
-    // if the process crashes between open and write. umask can only tighten
-    // the bits, never loosen them. On non-unix, the platform default
+    // safety: W-1 applies the owner-only mode at creation time (atomic
+    // create-with-mode), so the key is never observable at a permissive mode —
+    // not even if the process crashes between open and write. umask can only
+    // tighten the bits, never loosen them. On non-unix, the platform default
     // applies (best available).
     #[cfg(unix)]
     {
@@ -100,8 +100,8 @@ pub fn load_or_create_issuer_key(home: &Path) -> Result<Keypair> {
     match options.open(&path) {
         Ok(mut file) => {
             if let Err(e) = file.write_all(&encoded) {
-                // S-1: never leave a partial key file behind — a corrupt key
-                // would block every later issue (the reload path rejects it).
+                // safety: S-1 never leaves a partial key file behind — a corrupt
+                // key would block every later issue (the reload path rejects it).
                 let _ = std::fs::remove_file(&path);
                 return Err(CliError::Io(e));
             }
@@ -112,7 +112,7 @@ pub fn load_or_create_issuer_key(home: &Path) -> Result<Keypair> {
     }
 }
 
-/// Ensure the issuer key file is owner-only (0600) on the reload path.
+/// note: ensure the issuer key file is owner-only (0600) on the reload path.
 ///
 /// Same hardening rationale as the identity key: files created before the
 /// atomic `mode(0o600)` fix may sit at a permissive mode; self-heal instead
@@ -128,7 +128,7 @@ fn harden_issuer_key_permissions(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Derive the issuer `peer_id` for a keypair (spoke normative mapping:
+/// note: derive the issuer `peer_id` for a keypair (spoke normative mapping:
 /// identity multihash over the Ed25519 protobuf public key).
 ///
 /// # Errors
@@ -141,7 +141,10 @@ pub fn issuer_peer_id(keypair: &Keypair) -> Result<String> {
     Ok(derive_peer_id_from_ed25519_pubkey(&public.to_bytes()))
 }
 
-/// Extract the raw 32-byte Ed25519 seed the spoke issue API signs with.
+/// note: extract the raw 32-byte Ed25519 seed the spoke issue API signs with.
+///
+/// why: the seed is copied out because the spoke issue API takes raw bytes, not
+/// a keypair — the keypair itself stays owned by the caller.
 ///
 /// # Errors
 /// [`CliError::Config`] when the keypair is not Ed25519 or the secret is
@@ -183,7 +186,7 @@ pub(crate) fn load_issuer_key_at(path: &Path) -> Result<Keypair> {
     })
 }
 
-/// TTL for provider-minted proofs (seconds, V1.155 P1): proofs are minted
+/// note: TTL for provider-minted proofs (seconds, V1.155 P1) — proofs are minted
 /// on demand at challenge time; 5 minutes covers handshake exchanges
 /// without keeping long-lived tokens around.
 ///
@@ -239,7 +242,7 @@ pub(crate) fn build_provider(
     Ok(Arc::new(provider))
 }
 
-/// Issue a signed capability token with the persisted issuer key.
+/// note: issue a signed capability token with the persisted issuer key.
 ///
 /// `iss` defaults to the issuer-derived peer id and MUST equal it (spoke
 /// normative rule: "the issuer key MUST derive claims.iss"); spoke
@@ -263,7 +266,7 @@ pub fn issue_token(
     iss: Option<&str>,
     now: u64,
 ) -> Result<CapabilityTokenProof> {
-    // Validated BEFORE the issuer-key load so a usage error has no
+    // why: validated BEFORE the issuer-key load so a usage error has no
     // filesystem side effect (the key file is created only on a valid
     // issue, not on flag misuse).
     if sub.trim().is_empty() {
@@ -299,7 +302,7 @@ pub fn issue_token(
         .map_err(|e| CliError::Config(format!("token issuance rejected: {e}")))
 }
 
-/// Parse the `--capabilities` flag (`c1,c2`): non-empty list, no empty
+/// note: parse the `--capabilities` flag (`c1,c2`) — non-empty list, no empty
 /// entries (an empty entry is ambiguous — usage error).
 ///
 /// # Errors
@@ -327,7 +330,7 @@ fn parse_capabilities(raw: &str) -> Result<Vec<String>> {
     Ok(capabilities)
 }
 
-/// Current time in Unix seconds (the unit spoke `issue_capability_token`
+/// note: current time in Unix seconds (the unit spoke `issue_capability_token`
 /// and `verify_capability_token` operate on).
 ///
 /// # Errors
@@ -343,7 +346,7 @@ fn now_unix_seconds() -> std::result::Result<u64, String> {
         .map_err(|e| format!("system clock is before the Unix epoch; refusing to mint: {e}"))
 }
 
-/// Run a `connect token` command.
+/// note: run a `connect token` command.
 ///
 /// # Errors
 /// [`CliError::Config`] on flag-validation failures (empty/blank
@@ -382,7 +385,7 @@ mod tests {
     use super::*;
     use spoke_connect::core::{verify_capability_token, CapabilityTokenProof};
 
-    /// Fixed "now" (Unix seconds) for deterministic issuance tests.
+    /// note: fixed "now" (Unix seconds) for deterministic issuance tests.
     const NOW: u64 = 1_750_000_000;
 
     fn temp_home() -> tempfile::TempDir {
@@ -421,14 +424,12 @@ mod tests {
         );
         assert!(!proof.sig.is_empty(), "signature must be present");
 
-        // Default iss = the issuer key's derived peer id.
         let issuer = issuer_of(home.path());
         assert_eq!(
             proof.claims.iss, issuer,
             "default iss = issuer-derived peer id"
         );
 
-        // Issue → verify green with the correct trusted_issuers.
         let granted = verify_capability_token(&proof, &[issuer], aud, sub, NOW + 10)
             .expect("token verifies green");
         assert_eq!(granted, vec!["spoke-baseline".to_string()]);
@@ -493,7 +494,6 @@ mod tests {
         let sub = "subject-peer";
         let aud = "audience-peer";
         let mut proof = issue_ok(home.path(), sub, aud, &["spoke-baseline"], NOW + 3600);
-        // Tamper after signing: grant a second capability.
         proof.claims.capabilities.push("l2-computable".to_string());
 
         let err = verify_capability_token(&proof, &[issuer_of(home.path())], aud, sub, NOW + 10)
@@ -527,8 +527,8 @@ mod tests {
         let home = temp_home();
         let sub = "subject-peer";
         let aud = "audience-peer";
-        // exp = NOW + 61: valid at issuance (> NOW + 60s skew), expired
-        // once the verifier's now reaches it (reject when now >= exp).
+        // why: exp = NOW + 61 is valid at issuance (> NOW + 60s skew) yet
+        // expired once the verifier's now reaches it (reject when now >= exp).
         let proof = issue_ok(home.path(), sub, aud, &["spoke-baseline"], NOW + 61);
 
         let err = verify_capability_token(&proof, &[issuer_of(home.path())], aud, sub, NOW + 61)
@@ -546,7 +546,6 @@ mod tests {
         let aud = "audience-peer";
         let proof = issue_ok(home.path(), sub, aud, &["spoke-baseline"], NOW + 3600);
 
-        // A different trusted issuer: a fresh keypair's peer id.
         let other = libp2p::identity::Keypair::generate_ed25519();
         let other_iss = other.public().to_peer_id().to_string();
         let err = verify_capability_token(&proof, &[other_iss], aud, sub, NOW + 10)
@@ -559,7 +558,7 @@ mod tests {
 
     #[test]
     fn exp_within_clock_skew_rejected_at_issue() {
-        // Spoke fail-fast parity: exp must be beyond now + 60s, else the
+        // why: spoke fail-fast parity — exp must be beyond now + 60s, else the
         // verifier would deterministically reject.
         let home = temp_home();
         let caps = vec!["spoke-baseline".to_string()];
@@ -589,7 +588,6 @@ mod tests {
             "issuer key must persist across calls"
         );
 
-        // create-once: reload must never overwrite the file bytes.
         let path = nexus_home_layout::connect_issuer_key_path(home.path());
         let bytes1 = std::fs::read(&path).expect("read key");
         let _ = load_or_create_issuer_key(home.path()).expect("reload again");
@@ -662,7 +660,7 @@ mod tests {
 
     #[test]
     fn empty_sub_rejected() {
-        // QC2 F-001: clap enforces presence only — an empty `--sub ""`
+        // note: QC2 F-001 — clap enforces presence only, so an empty `--sub ""`
         // must be a usage error, not an inert token.
         let home = temp_home();
         let caps = vec!["spoke-baseline".to_string()];
@@ -682,7 +680,6 @@ mod tests {
                 "empty sub is a usage error: {err:?}"
             );
         }
-        // A usage error must not create the issuer key file (no side effect).
         let path = nexus_home_layout::connect_issuer_key_path(home.path());
         assert!(
             !path.exists(),
@@ -692,7 +689,7 @@ mod tests {
 
     #[test]
     fn empty_aud_rejected() {
-        // QC2 F-001: same for `--aud`.
+        // note: QC2 F-001 — same empty-value rule applies to `--aud`.
         let home = temp_home();
         let caps = vec!["spoke-baseline".to_string()];
         for bad in ["", "   "] {
@@ -720,7 +717,7 @@ mod tests {
 
     #[test]
     fn token_from_untrusted_issuer_rejected_through_verify_path() {
-        // QC2 F-003: a token minted by an issuer NOT in `trusted_issuers`
+        // note: QC2 F-003 — a token minted by an issuer NOT in `trusted_issuers`
         // must be rejected through the verify path. Mint with a second
         // (untrusted) issuer key and verify against the trusted issuer's
         // whitelist — a regressed issuer-whitelist wiring would fail this.

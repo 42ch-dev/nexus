@@ -215,7 +215,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-/// The ops this host serves (N-C1 writes → N-C2 read half → P2 compute →
+/// note: the ops this host serves (N-C1 writes → N-C2 read half → P2 compute →
 /// V1.173 tools).
 ///
 /// This const is load-bearing, not declaration-only: [`dispatch`] gates on
@@ -247,7 +247,7 @@ pub const SERVED_OPS: [&str; 6 + LOCAL_TOOL_OPS.len()] = {
     ops
 };
 
-/// Architect-locked bounded-bridge limits (spec §5.4).
+/// note: architect-locked bounded-bridge limits (spec §5.4).
 ///
 /// Defaults are the locked numbers — **8** concurrent invokes per process,
 /// a **30,000 ms** per-invoke deadline, **500** logical collection entries
@@ -259,20 +259,20 @@ pub const SERVED_OPS: [&str; 6 + LOCAL_TOOL_OPS.len()] = {
 /// saturation, deadline, and cap paths deterministically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeLimits {
-    /// Max concurrent in-flight invokes per process (semaphore permits) —
+    /// note: max concurrent in-flight invokes per process (semaphore permits),
     /// bounds BLOCKING-pool orchestrator work, not wire processing (the
     /// event loop parks per invoke).
     pub max_concurrent_invokes: usize,
-    /// Per-invoke deadline — ONE shared budget for the permit acquire AND
+    /// note: per-invoke deadline — ONE shared budget for the permit acquire AND
     /// the result wait (a saturated-lane wait consumes the same budget, so
     /// `invoke_busy` fires only after the full deadline).
     pub invoke_deadline: std::time::Duration,
-    /// Max logical collection entries per payload (the operation's batch
+    /// note: max logical collection entries per payload (the operation's batch
     /// arrays).
     pub max_collection_entries: usize,
-    /// Max serialized request bytes per payload.
+    /// note: max serialized request bytes per payload.
     pub max_payload_bytes: usize,
-    /// Max serialized response bytes per invoke — measured after the
+    /// note: max serialized response bytes per invoke — measured after the
     /// orchestrator returns, before the invoke result is returned (P1 QC
     /// fix wave FW-2; mirrors the request-side 2 MiB).
     pub max_response_bytes: usize,
@@ -290,7 +290,7 @@ impl Default for BridgeLimits {
     }
 }
 
-/// The server-side port composition of one Connect host process (v1.191 P1
+/// note: the server-side port composition of one Connect host process (v1.191 P1
 /// T14, durable §9).
 ///
 /// Two adapter shapes serve this host, and they are deliberately distinct:
@@ -313,12 +313,12 @@ pub struct ConnectPorts {
     pool: sqlx::SqlitePool,
     modules_dir: Option<PathBuf>,
     host: Arc<NexusAdapter<'static>>,
-    /// The operation ids this host process is executing right now (§B.3
+    /// note: the operation ids this host process is executing right now (§B.3
     /// live-owner signal). See [`InFlightWrites`].
     in_flight: Arc<InFlightWrites>,
 }
 
-/// The operation ids this host process is currently executing a Connect write
+/// note: the operation ids this host process is currently executing a Connect write
 /// for (v1.207 P3, §B.3 live-owner signal).
 ///
 /// §B.3 distinguishes a `running` receipt whose owner is LIVE (typed Busy /
@@ -334,27 +334,27 @@ pub struct ConnectPorts {
 pub struct InFlightWrites(std::sync::Mutex<std::collections::HashSet<String>>);
 
 impl InFlightWrites {
-    /// A registry for one host process (one [`ConnectPorts`]).
+    /// note: a registry for one host process (one [`ConnectPorts`]).
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Mark an acquired operation as running in this process.
+    /// note: mark an acquired operation as running in this process.
     pub fn register(&self, operation_id: &str) {
         if let Ok(mut in_flight) = self.0.lock() {
             in_flight.insert(operation_id.to_string());
         }
     }
 
-    /// Clear the registration once the effect settled (or the lane ended).
+    /// note: clear the registration once the effect settled (or the lane ended).
     pub fn release(&self, operation_id: &str) {
         if let Ok(mut in_flight) = self.0.lock() {
             in_flight.remove(operation_id);
         }
     }
 
-    /// True when this process is running the effect for `operation_id` now.
+    /// note: true when this process is running the effect for `operation_id` now.
     ///
     /// A poisoned lock reports `false`, which degrades to the `uncertain`
     /// refusal — never to a claim of live ownership.
@@ -367,7 +367,7 @@ impl InFlightWrites {
 }
 
 impl ConnectPorts {
-    /// Compose the host's port set over one workspace pool.
+    /// note: compose the host's port set over one workspace pool.
     ///
     /// `modules_dir` is the host-local compute module store
     /// (`~/.nexus42/modules/`) when the host serves compute; `None` keeps the
@@ -386,26 +386,26 @@ impl ConnectPorts {
         }
     }
 
-    /// The process-wide in-flight write registry (§B.3 live-owner signal).
+    /// note: the process-wide in-flight write registry (§B.3 live-owner signal).
     #[must_use]
     pub fn in_flight_writes(&self) -> Arc<InFlightWrites> {
         Arc::clone(&self.in_flight)
     }
 
-    /// The host metadata/tools adapter — the two exact `tools.nexus.*` reads
+    /// note: the host metadata/tools adapter — the two exact `tools.nexus.*` reads
     /// and the observed-peer store. Every KE port on it fails closed.
     #[must_use]
     pub fn host_adapter(&self) -> Arc<NexusAdapter<'static>> {
         Arc::clone(&self.host)
     }
 
-    /// The workspace pool the per-invoke adapters bind to.
+    /// note: the workspace pool the per-invoke adapters bind to.
     #[must_use]
     pub const fn pool(&self) -> &sqlx::SqlitePool {
         &self.pool
     }
 
-    /// Build the per-invoke KE adapter bound to one admitted selection.
+    /// note: build the per-invoke KE adapter bound to one admitted selection.
     ///
     /// The selection comes from the caller's stored grant resolution — never
     /// from a payload — and is moved into the adapter, so the six served
@@ -422,7 +422,7 @@ impl ConnectPorts {
     }
 }
 
-/// Build the N-C2 E2 `InvokeHandlerV2` on the architect-locked bridge
+/// note: build the N-C2 E2 `InvokeHandlerV2` on the architect-locked bridge
 /// limits.
 ///
 /// The dispatch pipeline (spec §5.4 — [`BridgeLimits::default`]) is a
@@ -446,7 +446,7 @@ pub fn build_handler(scope: PeerScope, ports: ConnectPorts) -> Arc<InvokeHandler
     build_handler_with_limits(scope, ports, BridgeLimits::default()).0
 }
 
-/// Like [`build_handler`] with injectable bridge limits.
+/// note: like [`build_handler`] with injectable bridge limits.
 ///
 /// **Test seam only** (P1 QC fix wave FW-10): `pub(crate)` because every
 /// caller lives in this crate — production wiring goes through
@@ -466,7 +466,7 @@ pub(crate) fn build_handler_with_limits(
 ) -> (Arc<InvokeHandlerV2>, Arc<Semaphore>, Arc<Semaphore>) {
     let lane = Arc::new(Semaphore::new(limits.max_concurrent_invokes));
     let lane_for_handler = Arc::clone(&lane);
-    // P2 compute serializer (spec §2.4): one WASM invocation at a time —
+    // note: P2 compute serializer (spec §2.4) — one WASM invocation at a time,
     // the wasmtime epoch watchdog is engine-global, so concurrent compute
     // calls would trap each other at the shortest budget (the daemon's
     // compute_runs.rs W-2 permit is the same shape).
@@ -474,7 +474,7 @@ pub(crate) fn build_handler_with_limits(
     let serializer_for_handler = Arc::clone(&compute_serializer);
     let ports_for_handler = Arc::new(ports);
     #[expect(clippy::result_large_err)]
-    // closure returns Result<_, ErrorEnvelope> — the locked wire error type, payload-heavy by design
+    // note: closure returns Result<_, ErrorEnvelope> — the locked wire error type, payload-heavy by design
     let handler = Arc::new(move |peer: &PeerId, op: &str, payload: Value| {
         dispatch(
             &scope,
@@ -490,7 +490,7 @@ pub(crate) fn build_handler_with_limits(
     (handler, lane, compute_serializer)
 }
 
-/// One served op.
+/// note: one served op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Route {
     Upsert,
@@ -499,13 +499,13 @@ enum Route {
     Check,
     Assemble,
     Compute,
-    /// Host-level `tools.nexus.*` route (V1.173, DF-84 — the user-locked
+    /// note: host-level `tools.nexus.*` route (V1.173, DF-84 — the user-locked
     /// set `S` from the adapter manifest's [`LOCAL_TOOL_OPS`]). Tools are
     /// host-local adapter reads, never core ops (AR-56).
     Tool,
 }
 
-/// The grant admission a route runs under (v1.191 P1 T14 fix round, durable
+/// note: the grant admission a route runs under (v1.191 P1 T14 fix round, durable
 /// §2.2/§9): writes and compute need **live** subject/binding admission,
 /// while the read half (`check` / `assemble`) keeps the retained-read
 /// texture of owned containers. Host-level tools carry no grant at all.
@@ -518,15 +518,15 @@ const fn grant_admission(route: Route) -> GrantAdmission {
     }
 }
 
-/// The full dispatch pipeline. Every gate is fail-closed and runs before
+/// note: the full dispatch pipeline. Every gate is fail-closed and runs before
 /// any orchestrator call, so denials have zero side effects.
 ///
 /// The argument list is the architect-locked pipeline context (scope,
 /// ports, lane, compute serializer, limits, caller, op, payload);
 /// bundling it would obscure the explicit fail-closed ordering.
-#[expect(clippy::too_many_arguments)] // bundling it would obscure the explicit fail-closed ordering.
-#[expect(clippy::too_many_lines)] // the numbered fail-closed pipeline reads as one sequence.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::too_many_arguments)] // note: bundling it would obscure the explicit fail-closed ordering.
+#[expect(clippy::too_many_lines)] // note: the numbered fail-closed pipeline reads as one sequence.
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn dispatch(
     scope: &PeerScope,
     ports: &Arc<ConnectPorts>,
@@ -537,7 +537,7 @@ fn dispatch(
     op: &str,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
-    // 1. Served-op gate (N-C1 → N-C2 E2): `SERVED_OPS` is the load-bearing
+    // note: 1. served-op gate (N-C1 → N-C2 E2) — `SERVED_OPS` is the load-bearing
     //    serving gate — the manifest-honesty machine check
     //    (`n_c1_manifest_served_ops_match_dispatch_both_directions`)
     //    verifies the manifest against this const, so dispatch MUST read it
@@ -554,7 +554,7 @@ fn dispatch(
         ));
     }
 
-    // 2. Map the gate-passed op to its route. The arms cover exactly the
+    // note: 2. map the gate-passed op to its route. The arms cover exactly the
     //    `SERVED_OPS` set; the `_` tail below is unreachable for served ops
     //    (the gate refused everything else) and stays as a defensive
     //    fallthrough.
@@ -565,7 +565,7 @@ fn dispatch(
         "check" => Route::Check,
         "assemble" => Route::Assemble,
         "compute" => Route::Compute,
-        // V1.173 (DF-84, T2): the user-locked tool set `S`. Only the exact
+        // note: V1.173 (DF-84, T2) — the user-locked tool set `S`. Only the exact
         // `tools.nexus.*` ids in `LOCAL_TOOL_OPS` reach this arm — the
         // step-1 gate refused every other `tools.*` string.
         "tools.nexus.list_observed_peers" | "tools.nexus.list_modules" => Route::Tool,
@@ -578,7 +578,7 @@ fn dispatch(
         }
     };
 
-    // 3. Caller identity = the noise-authenticated **session peer** (the
+    // note: 3. caller identity = the noise-authenticated **session peer** (the
     //    `peer` argument; spoke-connect 0.9.2 `InvokeHandlerV2` — see
     //    module docs). Spec §5.1 lock: the payload's
     //    `extensions.nexus.peer_id` is informational only — present ⇒ it
@@ -588,7 +588,7 @@ fn dispatch(
     //    effects); absent ⇒ fine. The legacy payload-carried identity path
     //    is removed (clean cutover, no dual registration).
     if let Some(claim) = payload.pointer("/extensions/nexus/peer_id") {
-        // Parse cap: reject claims longer than 128 chars before any decode
+        // note: parse cap — reject claims longer than 128 chars before any decode
         // work, mirroring the spoke session-core 128-char decode input cap
         // (libp2p-identity's `FromStr` bs58-decodes without a length bound).
         // Oversized claims share the identity-deny path below.
@@ -605,13 +605,13 @@ fn dispatch(
         }
     }
 
-    // 4. Op-scope gate (T1 PeerScope, fail-closed) — identity = session
+    // note: 4. op-scope gate (T1 PeerScope, fail-closed), identity = session
     //    peer.
     if !scope.allows_op(peer, op) {
         return Err(denied(&format!("op {op} is not in this peer's op_scope")));
     }
 
-    // 4b. Stored Actor grant (v1.191 P1 T14, durable §9): every KE route
+    // note: 4b. stored Actor grant (v1.191 P1 T14, durable §9) — every KE route
     //     needs the caller's operator-stored grant, resolved by the
     //     authenticated session peer. The lookup reads the allowlist row of
     //     THIS peer — a payload can neither carry nor select a grant, and a
@@ -629,7 +629,7 @@ fn dispatch(
         })?)
     };
 
-    // 5. World-scope gate (T1 PeerScope, fail-closed; spec §5.5 — reads
+    // note: 5. world-scope gate (T1 PeerScope, fail-closed; spec §5.5 — reads
     //    scoped exactly like writes): every target world in the payload
     //    must be in the peer's `world_scope`. Strictness (fix loop,
     //    Important): EVERY entry/relation must carry a parseable
@@ -663,7 +663,7 @@ fn dispatch(
                 "world {world} is not in this peer's world_scope"
             )));
         }
-        // 5b. Grant viewpoint (durable §9): the payload world may only
+        // note: 5b. grant viewpoint (durable §9) — the payload world may only
         //     narrow/match the granted World/binding viewpoint — a raw
         //     selector can never re-point the invoke at another Actor's
         //     world. The granted world is the stored allowlist value, so
@@ -682,7 +682,7 @@ fn dispatch(
         }
     }
 
-    // 6. Payload/batch cap (spec §5.4 — architect-locked): 500 logical
+    // note: 6. payload/batch cap (spec §5.4, architect-locked) — 500 logical
     //    collection entries OR 2 MiB serialized request bytes, whichever
     //    is reached first. Checked before the bridge so an over-cap
     //    request never consumes a lane permit or reaches the orchestrator.
@@ -703,7 +703,7 @@ fn dispatch(
         )));
     }
 
-    // 7. Bounded async bridge (R2 closure — spec §5.3/§5.4): the
+    // note: 7. bounded async bridge (R2 closure, spec §5.3/§5.4) — the
     //    orchestrators are native async fn but this closure is sync on the
     //    node's event loop, so the call moves to the per-process
     //    `spawn_blocking` lane capped by [`BridgeLimits`]. The handler runs
@@ -743,7 +743,7 @@ fn dispatch(
     )
 }
 
-/// Step 7-8 of [`dispatch`] — the bounded async bridge (R2 closure, spec
+/// note: step 7-8 of [`dispatch`] — the bounded async bridge (R2 closure, spec
 /// §5.3/§5.4): orchestrator calls move to a per-process `spawn_blocking`
 /// lane capped by [`BridgeLimits`].
 ///
@@ -769,12 +769,12 @@ fn dispatch(
 /// A grant that no longer resolves denies the invoke before any gate or
 /// orchestrator call — zero side effects.
 #[expect(clippy::too_many_arguments)]
-// ^ Ten args mirror dispatch's architect-locked pipeline context (route,
+// note: ten args mirror dispatch's architect-locked pipeline context (route,
 // scope, ports, serializer, caller, op, grant, payload, permit, deadline,
 // limits); bundling them would obscure the explicit fail-closed ordering.
 #[expect(clippy::result_large_err)]
-// Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
-#[expect(clippy::too_many_lines)] // the numbered fail-closed pipeline (adapter selection, receipt metadata, authorization gates, receipt read, execution prerequisites, acquire, effect, settle) reads as one sequence
+// note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::too_many_lines)] // note: the numbered fail-closed pipeline (adapter selection, receipt metadata, authorization gates, receipt read, execution prerequisites, acquire, effect, settle) reads as one sequence
 fn run_in_lane(
     route: Route,
     scope: &PeerScope,
@@ -799,7 +799,7 @@ fn run_in_lane(
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let result = tokio::runtime::Handle::current().block_on(async {
-            // Step 8a. Adapter selection (durable §9): the KE routes run
+            // note: step 8a. adapter selection (durable §9) — the KE routes run
             // through the selection the caller's stored grant resolves to
             // *now*; the two host-level tools run through the host adapter
             // (their exact op-scope allowlist is their whole gate, and every
@@ -814,7 +814,7 @@ fn run_in_lane(
                     Err(e) => return Err(denied(&e.to_string())),
                 },
             };
-            // Step 8b. §B.1 receipt metadata (v1.207 P3), for the
+            // note: step 8b. §B.1 receipt metadata (v1.207 P3), for the
             // non-idempotent writes only: the caller-supplied `operation_id`
             // is envelope metadata of the durable receipt contract, NOT part
             // of the route request (`operation_id` + `request_fingerprint`),
@@ -832,7 +832,7 @@ fn run_in_lane(
                 None
             };
 
-            // Step 8c. Route AUTHORIZATION gates (fail-closed, unchanged lock
+            // note: step 8c. route AUTHORIZATION gates (fail-closed, unchanged lock
             // set): upsert holder narrowing, the compute gate set (stored
             // world + grant viewpoint + module identity + module scope +
             // module-id pin), or the stored-world gate for the other writes.
@@ -863,7 +863,7 @@ fn run_in_lane(
                 None
             };
 
-            // Step 8d. §B.3 step 2 — ask the receipt store FIRST (§B.1
+            // note: step 8d. §B.3 step 2 — ask the receipt store FIRST (§B.1
             // conflict precedence included). An already-answered operation is
             // answered from its receipt HERE, before any execution-only
             // prerequisite is required: an authorized terminal replay must
@@ -885,7 +885,7 @@ fn run_in_lane(
                 }
             }
 
-            // Step 8e. Execution-only prerequisites. No receipt has been
+            // note: step 8e. execution-only prerequisites. No receipt has been
             // written yet, so a refusal here leaves no `running` receipt
             // behind: a module that is not installed is refused exactly as
             // before, and the durable answer of an ALREADY finished operation
@@ -894,7 +894,7 @@ fn run_in_lane(
                 verify_compute_module_installed(&adapter_for_lane, module_id)?;
             }
 
-            // Step 8f. §B.3 step 3 — write the `running` receipt FIRST, then
+            // note: step 8f. §B.3 step 3 — write the `running` receipt FIRST, then
             // run the effect (this call is the acquirer). A racing replay is
             // answered from the stored receipt instead.
             let mut acquired_receipt = None;
@@ -905,7 +905,7 @@ fn run_in_lane(
                 {
                     return Ok(answer);
                 }
-                // This process now owns the effect: register it so a re-drive
+                // note: this process now owns the effect — register it so a re-drive
                 // arriving while it runs gets the §B.3 Busy answer.
                 in_flight.register(&metadata.operation_id);
                 commit_watermark = write_commit_watermark(ports_for_lane.pool()).await;
@@ -923,7 +923,7 @@ fn run_in_lane(
             .await;
 
             if let Some(metadata) = &acquired_receipt {
-                // F4: `Result::Err` never means "no effect" — the pinned
+                // note: F4 — `Result::Err` never means "no effect"; the pinned
                 // upsert orchestrator commits each entry over an unbound
                 // per-invoke port, so a later entry's rejection can follow
                 // an earlier entry's commit. Observe the durable outbox
@@ -935,7 +935,7 @@ fn run_in_lane(
                 let settled =
                     settle_write_receipt(ports_for_lane.pool(), result, effect_committed, metadata)
                         .await;
-                // The effect is settled: this process no longer owns it, so a
+                // note: the effect is settled — this process no longer owns it, so a
                 // later re-drive classifies the receipt by its stored status
                 // (terminal ⇒ answered; `running` ⇒ unknown owner ⇒
                 // `uncertain`) instead of claiming live ownership.
@@ -948,7 +948,7 @@ fn run_in_lane(
         let _ = tx.send(result);
     });
     match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
-        // Response-cap gate (spec §5.4 — P1 QC fix wave FW-2): the
+        // note: response-cap gate (spec §5.4 — P1 QC fix wave FW-2) — the
         // orchestrator result is serialized and measured AFTER the lane
         // returns and BEFORE the invoke result is handed back to the
         // peer. An over-cap response maps to the locked
@@ -963,7 +963,7 @@ fn run_in_lane(
     }
 }
 
-/// Durable §9 upsert narrowing: a KE write may only carry the granted
+/// note: durable §9 upsert narrowing — a KE write may only carry the granted
 /// Actor's own holder.
 ///
 /// The container half of the rule is the adapter's (a create outside the
@@ -979,13 +979,13 @@ fn run_in_lane(
 /// # Errors
 /// Returns the `invalid_input` envelope (client-input family — the peer can
 /// fix the payload) naming the offending entry.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of dispatch
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of dispatch
 fn verify_upsert_holder_narrowing(
     payload: &Value,
     holder: Option<&str>,
 ) -> Result<(), ErrorEnvelope> {
     let Some(entries) = payload.get("knowledge_entries").and_then(Value::as_array) else {
-        // No collection ⇒ the typed parse rejects the payload later; there
+        // note: no collection ⇒ the typed parse rejects the payload later, so there
         // is nothing to narrow here.
         return Ok(());
     };
@@ -994,15 +994,15 @@ fn verify_upsert_holder_narrowing(
             .get("entry_id")
             .and_then(Value::as_str)
             .unwrap_or("<unnamed>");
-        // A JSON `null` owner is the absent holder (the wire `owner` is an
+        // note: a JSON `null` owner is the absent holder (the wire `owner` is an
         // optional nonempty string), so both are handled by the `None` arm.
         match entry.get("owner").filter(|value| !value.is_null()) {
-            // A named holder must be the granted Actor's own resolved holder.
+            // note: a named holder must be the granted Actor's own resolved holder.
             Some(Value::String(owner)) if Some(owner.as_str()) == holder => {}
-            // Any other present owner — another holder's id, or a non-string
+            // note: any other present owner — another holder's id, or a non-string
             // value the wire type cannot carry — is a refused assignment.
             Some(_) => return Err(holder_assignment_denied(entry_id, "owner")),
-            // No holder: legal for a shared row (`disclosure` absent), but
+            // note: no holder is legal for a shared row (`disclosure` absent), but
             // `owner-private` without an owner is refused (wire contract +
             // §9: a private row belongs to a holder).
             None => {
@@ -1016,7 +1016,7 @@ fn verify_upsert_holder_narrowing(
     Ok(())
 }
 
-/// Upsert holder-narrowing denial (durable §9): the payload tried to name a
+/// note: upsert holder-narrowing denial (durable §9) — the payload tried to name a
 /// holder other than the granted Actor's resolved holder, or claimed
 /// `owner-private` without one. `invalid_input` — a client-input error the
 /// peer can fix; zero side effects (the orchestrator never runs).
@@ -1036,14 +1036,14 @@ fn holder_assignment_denied(entry_id: &str, field: &str) -> ErrorEnvelope {
     }
 }
 
-/// True for the non-idempotent write routes the §B.3 receipt guard covers —
+/// note: true for the non-idempotent write routes the §B.3 receipt guard covers —
 /// exactly the `LiveWrite` admission class (`upsert` / `promote` / `relate` /
 /// `compute`).
 const fn is_live_write(route: Route) -> bool {
     matches!(grant_admission(route), GrantAdmission::LiveWrite)
 }
 
-/// Strip the caller-supplied `operation_id` from the invoke payload.
+/// note: strip the caller-supplied `operation_id` from the invoke payload.
 ///
 /// `args.operation_id` is an envelope-level argument of the §B.1 id contract,
 /// not a field of the route's typed request: it is consumed by
@@ -1055,7 +1055,7 @@ fn strip_caller_operation_id(payload: &mut Value) {
     }
 }
 
-/// The §B.3 typed Busy / in-progress refusal envelope (spec §B.3 step 3).
+/// note: the §B.3 typed Busy / in-progress refusal envelope (spec §B.3 step 3).
 ///
 /// §B.3 requires the distinction: a `running` receipt whose owner is KNOWN to
 /// be live is "typed Busy / in-progress", while `uncertain` is for genuinely
@@ -1087,10 +1087,10 @@ fn operation_in_progress_envelope(operation_id: &str, subject_id: &str) -> Error
     }
 }
 
-/// The §B.3 typed Busy / in-progress wire code.
+/// note: the §B.3 typed Busy / in-progress wire code.
 const OPERATION_IN_PROGRESS_CODE: &str = "operation_in_progress";
 
-/// The typed `uncertain` refusal envelope (spec §B.3 item 4 / §C): the
+/// note: the typed `uncertain` refusal envelope (spec §B.3 item 4 / §C) — the
 /// operation has no terminal receipt, so it is never retried blindly.
 fn uncertain_envelope(operation_id: &str, subject_id: &str) -> ErrorEnvelope {
     let mut details = Map::new();
@@ -1113,7 +1113,7 @@ fn uncertain_envelope(operation_id: &str, subject_id: &str) -> ErrorEnvelope {
     }
 }
 
-/// The typed first-writer-wins refusal (spec §B.1 / §C).
+/// note: the typed first-writer-wins refusal (spec §B.1 / §C).
 fn operation_id_conflict_envelope(operation_id: &str) -> ErrorEnvelope {
     let mut details = Map::new();
     details.insert(
@@ -1131,7 +1131,7 @@ fn operation_id_conflict_envelope(operation_id: &str) -> ErrorEnvelope {
     }
 }
 
-/// A receipt-store fault: an `internal` envelope that never fabricates a
+/// note: a receipt-store fault — an `internal` envelope that never fabricates a
 /// success and never licenses a re-apply.
 fn receipt_store_fault(err: &nexus_local_db::LocalDbError) -> ErrorEnvelope {
     ErrorEnvelope {
@@ -1142,7 +1142,7 @@ fn receipt_store_fault(err: &nexus_local_db::LocalDbError) -> ErrorEnvelope {
     }
 }
 
-/// The effect-committed refusal (spec §B.3 item 4): the write's effect landed
+/// note: the effect-committed refusal (spec §B.3 item 4) — the write's effect landed
 /// but its required durable receipt did not. Not a rollback, not retryable.
 fn effect_committed_envelope(
     operation_id: &str,
@@ -1171,7 +1171,7 @@ fn effect_committed_envelope(
     }
 }
 
-/// Answer a replay from its stored receipt (spec §B.3 step 3) — never a
+/// note: answer a replay from its stored receipt (spec §B.3 step 3) — never a
 /// second effect run.
 ///
 /// A settled success replays the stored result verbatim. Every other terminal
@@ -1182,7 +1182,7 @@ fn effect_committed_envelope(
 /// typed `uncertain` refusal verbatim in `details.stored_payload`, and a
 /// missing payload is the plain `uncertain` refusal. Success is never
 /// fabricated, and no stored answer is silently discarded.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 fn answer_from_receipt(
     receipt: &nexus_local_db::OperationReceipt,
     subject_id: &str,
@@ -1194,7 +1194,7 @@ fn answer_from_receipt(
             |json| serde_json::from_str::<Value>(json).map_err(|_| ambiguous()),
         );
     }
-    // Every other terminal status replays its stored reason as the answer.
+    // note: every other terminal status replays its stored reason as the answer.
     receipt.error_json.as_deref().map_or_else(
         || Err(ambiguous()),
         |json| {
@@ -1212,7 +1212,7 @@ fn answer_from_receipt(
     )
 }
 
-/// The typed `uncertain` refusal for a terminal receipt whose stored answer
+/// note: the typed `uncertain` refusal for a terminal receipt whose stored answer
 /// this surface cannot decode: the stored payload travels verbatim in
 /// `details.stored_payload`, so a replay never silently loses it and never
 /// fabricates a success.
@@ -1246,7 +1246,7 @@ fn undecodable_stored_answer(
     }
 }
 
-/// The stored receipt a recovery decision was classified from, when the
+/// note: the stored receipt a recovery decision was classified from, when the
 /// decision has one (`ApplyOnce` means no receipt exists).
 const fn decision_receipt(
     decision: &RecoveryDecision,
@@ -1259,7 +1259,7 @@ const fn decision_receipt(
     }
 }
 
-/// The resolved §B.1/§B.2 receipt metadata of one non-idempotent Connect
+/// note: the resolved §B.1/§B.2 receipt metadata of one non-idempotent Connect
 /// write: the durable operation id (caller-supplied or derived), the subject
 /// the receipt is keyed on, and the complete-request fingerprint the store
 /// compares first-writer-wins.
@@ -1270,7 +1270,7 @@ struct WriteReceiptMetadata {
     fingerprint: String,
 }
 
-/// Consume and strip the caller's `operation_id` metadata (§B.1) and resolve
+/// note: consume and strip the caller's `operation_id` metadata (§B.1) and resolve
 /// this write's durable receipt identity.
 ///
 /// MUST run before any typed route preflight: the generated route requests are
@@ -1281,7 +1281,7 @@ struct WriteReceiptMetadata {
 /// # Errors
 /// The `invalid_input` envelope for a malformed caller-supplied id (the same
 /// refusal the core's `OperationIdError` maps to).
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 fn prepare_write_receipt(
     peer: &PeerId,
     grant: Option<&PeerGrant>,
@@ -1289,7 +1289,7 @@ fn prepare_write_receipt(
     payload: &mut Value,
 ) -> Result<WriteReceiptMetadata, ErrorEnvelope> {
     let session = peer.to_string();
-    // The caller's `operation_id` is envelope metadata of the receipt contract,
+    // note: the caller's `operation_id` is envelope metadata of the receipt contract,
     // not part of the request: extract and shape-validate it, then strip it so
     // neither the canonical document nor the strict typed route request sees it.
     let caller_id = match payload.get(operation_id::OPERATION_ID_FIELD) {
@@ -1302,7 +1302,7 @@ fn prepare_write_receipt(
         Some(_) => return Err(invalid_operation_id("args.operation_id must be a string")),
     };
     strip_caller_operation_id(payload);
-    // §B.2: the fingerprint binds the COMPLETE logical request — actor,
+    // note: §B.2 — the fingerprint binds the COMPLETE logical request (actor,
     // session, action and args — so a caller-supplied id used verbatim in a
     // workspace-global primary key can never let a different caller/session
     // (or a changed grant actor) with identical arguments replay another
@@ -1323,7 +1323,7 @@ fn prepare_write_receipt(
     })
 }
 
-/// The `invalid_input` envelope for a malformed caller-supplied operation id
+/// note: the `invalid_input` envelope for a malformed caller-supplied operation id
 /// (the same refusal the core's `OperationIdError` maps to).
 fn invalid_operation_id(reason: &str) -> ErrorEnvelope {
     let mut details = Map::new();
@@ -1339,7 +1339,7 @@ fn invalid_operation_id(reason: &str) -> ErrorEnvelope {
     }
 }
 
-/// The §B.3 read half (steps 1–3): ask the receipt store FIRST and decide.
+/// note: the §B.3 read half (steps 1–3) — ask the receipt store FIRST and decide.
 ///
 /// `Ok(Some(answer))` = the operation was already answered (a terminal replay
 /// served **from the receipt**); `Ok(None)` = this call may proceed.
@@ -1354,13 +1354,13 @@ fn invalid_operation_id(reason: &str) -> ErrorEnvelope {
 /// `operation_id_conflict` (the id is owned by a different logical request),
 /// `operation_in_progress` (a live owner is running it), `uncertain` (no
 /// terminal receipt, ownership unknown) and `internal` (receipt-store fault).
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 async fn read_write_receipt(
     pool: &sqlx::SqlitePool,
     metadata: &WriteReceiptMetadata,
     owner_is_live: bool,
 ) -> Result<Option<Value>, ErrorEnvelope> {
-    // `owner_is_live` is the §B.3 liveness signal — `true` only when this
+    // note: `owner_is_live` is the §B.3 liveness signal — `true` only when this
     // process is running the effect right now (see [`InFlightWrites`]). It is
     // never assumed: a `running` receipt left by a previous process must stay
     // `uncertain`, not claim a live owner the host cannot see.
@@ -1369,7 +1369,7 @@ async fn read_write_receipt(
         Err(err) => return Err(receipt_store_fault(&err)),
     };
 
-    // §B.1 conflict precedence: a receipt first written for a DIFFERENT
+    // note: §B.1 conflict precedence — a receipt first written for a DIFFERENT
     // canonical request is not a replay of this call — the id is owned by
     // another logical operation, and §B.1 refuses that typed rather than
     // silently deduping it. This is decided before §B.3's status-based answer
@@ -1385,7 +1385,7 @@ async fn read_write_receipt(
         RecoveryDecision::AnswerFromReceipt(receipt) => {
             Ok(Some(answer_from_receipt(&receipt, &metadata.subject_id)?))
         }
-        // §B.3's two under-way answers stay distinct: Busy names a KNOWN live
+        // note: §B.3's two under-way answers stay distinct — Busy names a KNOWN live
         // owner, `uncertain` an unknown one.
         RecoveryDecision::InProgress(receipt) => Err(operation_in_progress_envelope(
             &receipt.operation_id,
@@ -1398,7 +1398,7 @@ async fn read_write_receipt(
     }
 }
 
-/// The §B.3 acquire half (step 3): write the `running` receipt FIRST and
+/// note: the §B.3 acquire half (step 3) — write the `running` receipt FIRST and
 /// report whether THIS call acquired the effect.
 ///
 /// `Ok(None)` = acquired (run the effect, then settle it). `Ok(Some(answer))` =
@@ -1409,7 +1409,7 @@ async fn read_write_receipt(
 /// # Errors
 /// `operation_id_conflict` (first-writer-wins), `operation_in_progress`,
 /// `uncertain` and `internal` (receipt-store fault).
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 async fn acquire_write_receipt(
     pool: &sqlx::SqlitePool,
     metadata: &WriteReceiptMetadata,
@@ -1425,7 +1425,7 @@ async fn acquire_write_receipt(
     .await
     {
         Ok(BeginOutcome::Acquired(_)) => Ok(None),
-        // A racing replay: answer from the stored receipt, never re-apply.
+        // note: a racing replay — answer from the stored receipt, never re-apply.
         Ok(BeginOutcome::Existing(stored)) => {
             if nexus_local_db::is_terminal_status(&stored.status) {
                 return Ok(Some(answer_from_receipt(&stored, &metadata.subject_id)?));
@@ -1448,7 +1448,7 @@ async fn acquire_write_receipt(
     }
 }
 
-/// The durable outbox commit counter (F5).
+/// note: the durable outbox commit counter (F5).
 ///
 /// `core_changes.sequence` is an AUTOINCREMENT primary key, so
 /// `sqlite_sequence.seq` is the monotonic high-water mark of every insert ever
@@ -1473,7 +1473,7 @@ async fn outbox_commit_counter(pool: &sqlx::SqlitePool) -> Result<i64, sqlx::Err
     }
 }
 
-/// The `core_changes` commit watermark for this call's effect observation.
+/// note: the `core_changes` commit watermark for this call's effect observation.
 ///
 /// Taken AFTER the receipt was acquired (so the receipt's own outbox rows are
 /// already counted) and BEFORE the route runs; see [`write_effect_committed`].
@@ -1493,7 +1493,7 @@ async fn write_commit_watermark(pool: &sqlx::SqlitePool) -> Option<i64> {
     }
 }
 
-/// Did this call commit a durable effect? (F4 + F5)
+/// note: did this call commit a durable effect? (F4 + F5)
 ///
 /// A write route's `Result::Err` never means "no effect": the pinned upsert
 /// orchestrator commits each entry over an unbound per-invoke port, so a later
@@ -1524,7 +1524,7 @@ async fn write_effect_committed(pool: &sqlx::SqlitePool, watermark: Option<i64>)
     }
 }
 
-/// Settle the receipt of an acquired Connect write with the invoke's outcome
+/// note: settle the receipt of an acquired Connect write with the invoke's outcome
 /// (spec §B.3 step 3 + item 4).
 ///
 /// A committed success whose settlement fails is the effect-committed refusal:
@@ -1543,7 +1543,7 @@ async fn write_effect_committed(pool: &sqlx::SqlitePool, watermark: Option<i64>)
 /// # Errors
 /// The effect-committed refusal when a write whose effect committed cannot be
 /// settled; the original outcome is returned unchanged otherwise.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 async fn settle_write_receipt(
     pool: &sqlx::SqlitePool,
     result: Result<Value, ErrorEnvelope>,
@@ -1587,7 +1587,7 @@ async fn settle_write_receipt(
     result
 }
 
-/// The durable payload a rejected write settles with (F4).
+/// note: the durable payload a rejected write settles with (F4).
 ///
 /// A rejection that followed a committed partial effect (a batch whose earlier
 /// entries landed before a later one was refused) is marked
@@ -1609,7 +1609,7 @@ fn reject_settlement_payload(envelope: &ErrorEnvelope, effect_committed: bool) -
     serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Run one served op through its orchestrator and map the outcome to the
+/// note: run one served op through its orchestrator and map the outcome to the
 /// handler's return type. Rejects map through the locked
 /// `SpokeRejectCode → ErrorEnvelope` table (P1 spec § OCC + error mapping).
 ///
@@ -1623,7 +1623,7 @@ fn reject_settlement_payload(envelope: &ErrorEnvelope, effect_committed: bool) -
 /// fails fast with `invoke_deadline_exceeded` instead of holding its lane
 /// permit on an unbounded serializer backlog (Greptile P1).
 #[expect(clippy::result_large_err)]
-// Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+// note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 // Only the `connect-host` build unifies the `spoke-operations` assemble surface
 // whose `current_view_policy: Option<&dyn CurrentViewPolicy>` parameter
 // (spoke-operations-0.16.0/src/assemble.rs:181,247) is not `Sync`; nexus always
@@ -1675,7 +1675,7 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
-        // N-C2 read half (spec §5.1 lock): the Connect payload deserializes
+        // note: N-C2 read half (spec §5.1 lock) — the Connect payload deserializes
         // DIRECTLY into the spoke wire types; the request scope is the
         // schema's `scope` object (world-scoped by the step-5 gate).
         // `run_checker` is the production baseline no-op evaluator — the
@@ -1705,13 +1705,13 @@ async fn route_orchestrator(
                 Ok(request) => request,
                 Err(error) => return Err(map_reject(&invalid_payload("assemble", &error))),
             };
-            // Cognition family stays UNCONSUMED (baseline rule): no view policy.
+            // note: the cognition family stays UNCONSUMED (baseline rule) — no view policy.
             match orchestrate_assemble(adapter, request, None).await {
                 SpokeResult::Ok(response) => serialize_response::<AssembleResponse>(&response),
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
-        // N-C2 E2 (P2, spec §2): the envelope is locked to the spoke
+        // note: N-C2 E2 (P2, spec §2) — the envelope is locked to the spoke
         // `ComputeRequest` / `ComputeResponse` (no third wrapper; the
         // V1.147 generated `RunRequest` / `RunResponse` HTTP pair is the
         // reference mapping only). The read-only lock, world gate, module
@@ -1725,7 +1725,7 @@ async fn route_orchestrator(
                 Ok(request) => request,
                 Err(error) => return Err(map_reject(&invalid_payload("compute", &error))),
             };
-            // Serializer wait bounded by the REMAINING per-invoke budget
+            // note: serializer wait bounded by the REMAINING per-invoke budget
             // (Greptile P1): the lane permit and the serializer permit
             // share ONE deadline, so a compute queued on the serializer
             // past its budget fails fast with invoke_deadline_exceeded and
@@ -1748,7 +1748,7 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
-        // V1.173 (DF-84, AR-49): the user-locked `tools.nexus.*` set `S`
+        // note: V1.173 (DF-84, AR-49) — the user-locked `tools.nexus.*` set `S`
         // (host-level, world-gate-skipped). The payload shape is the spoke
         // tool-invoke convention: `{ "arguments": <object> }` → success
         // `{ "result": <object> }`. A missing / non-object `arguments`
@@ -1758,7 +1758,7 @@ async fn route_orchestrator(
         Route::Tool => route_tool(adapter, op, payload).await,
     }
 }
-/// V1.173 (DF-84, AR-49) — dispatch one served host-level tool.
+/// note: V1.173 (DF-84, AR-49) — dispatch one served host-level tool.
 ///
 /// The `op` string is a `tools.nexus.*` id from the user-locked set `S`
 /// ([`LOCAL_TOOL_OPS`]); the step-1 gate refused every other `tools.*`
@@ -1773,7 +1773,7 @@ async fn route_orchestrator(
 /// input schemas for both locked tools are `{ "type": "object",
 /// "additionalProperties": false }`, so the only legal argument is an
 /// object.
-#[expect(clippy::result_large_err)] // ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type; matches the rest of dispatch
+#[expect(clippy::result_large_err)] // note: ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type; matches the rest of dispatch
 async fn route_tool(
     adapter: &NexusAdapter<'static>,
     op: &str,
@@ -1791,7 +1791,7 @@ async fn route_tool(
             "\"arguments\" must be an object matching the tool descriptor input",
         ));
     }
-    // Both locked tool descriptors advertise `{ "type": "object",
+    // note: both locked tool descriptors advertise `{ "type": "object",
     // "additionalProperties": false }` (spec §2.1 C-1/C-2) — the only
     // legal argument is an EMPTY object, so a non-empty object is a
     // schema violation and fails `invalid_input` before any adapter read
@@ -1810,7 +1810,7 @@ async fn route_tool(
     match op {
         "tools.nexus.list_observed_peers" => tool_list_observed_peers(adapter).await,
         "tools.nexus.list_modules" => tool_list_modules(adapter).await,
-        // A `bridge_fault` here means `S` drifted from the match arms
+        // note: a `bridge_fault` here means `S` drifted from the match arms
         // (and from `Route::Tool` above) — the routing sweep
         // `n_c1_every_served_op_advertised_by_the_const_actually_routes`
         // is the loud guard that catches it.
@@ -1820,7 +1820,7 @@ async fn route_tool(
     }
 }
 
-/// V1.173 Tool denial — `invalid_input` for a malformed tool payload
+/// note: V1.173 tool denial — `invalid_input` for a malformed tool payload
 /// (spec §2, AR-49: missing / non-object `arguments` fails before adapter
 /// I/O, retry-safe for peers that fix their payload).
 fn tool_invalid_input(op: &str, reason: &str) -> ErrorEnvelope {
@@ -1832,7 +1832,7 @@ fn tool_invalid_input(op: &str, reason: &str) -> ErrorEnvelope {
     }
 }
 
-/// V1.173 `tools.nexus.list_observed_peers` handler (spec §2.1 C-1): list
+/// note: V1.173 `tools.nexus.list_observed_peers` handler (spec §2.1 C-1) — list
 /// the Connect peers this host has observed (outbound `connect()`
 /// recordings, newest `last_seen` first — the storage ordering contract).
 /// Each entry carries `hostId` / `lastSeen` / `roles` / `capabilities`
@@ -1840,7 +1840,7 @@ fn tool_invalid_input(op: &str, reason: &str) -> ErrorEnvelope {
 /// spoof/collision diagnostic is not an integrator contract, spec §2.1
 /// C-1 risks). An empty store → `{ "peers": [] }` (never fabricated).
 /// Adapter read only.
-#[expect(clippy::result_large_err)] // ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type
+#[expect(clippy::result_large_err)] // note: ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type
 async fn tool_list_observed_peers(adapter: &NexusAdapter<'static>) -> Result<Value, ErrorEnvelope> {
     match adapter.list_observed_peer_hosts().await {
         SpokeResult::Ok(observed) => {
@@ -1861,7 +1861,7 @@ async fn tool_list_observed_peers(adapter: &NexusAdapter<'static>) -> Result<Val
     }
 }
 
-/// V1.173 `tools.nexus.list_modules` handler (C-2): list the compute
+/// note: V1.173 `tools.nexus.list_modules` handler (C-2) — list the compute
 /// module ids installed in the host-local store (`~/.nexus42/modules/`)
 /// using the same id-safety + file-pair logic as [`module_installed`] — a
 /// module counts only when `<id>/<id>.wasm` AND `<id>/manifest.json`
@@ -1869,7 +1869,7 @@ async fn tool_list_observed_peers(adapter: &NexusAdapter<'static>) -> Result<Val
 /// returns bytes, absolute paths, or file contents (spec §2.1 C-2 risks).
 /// A missing store dir → `{ "modules": [] }`. Does NOT list V1.172
 /// `~/.nexus42/capabilities/`.
-#[expect(clippy::unused_async, clippy::result_large_err)] // awaited through route_tool; ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type
+#[expect(clippy::unused_async, clippy::result_large_err)] // note: awaited through route_tool; ErrorEnvelope (String code + JSON Map details + HashMap extensions) is the locked wire error type
 async fn tool_list_modules(adapter: &NexusAdapter<'static>) -> Result<Value, ErrorEnvelope> {
     let Some(modules_dir) = adapter.user_modules_dir() else {
         return Ok(serde_json::json!({ "result": { "modules": [] } }));
@@ -1883,7 +1883,7 @@ async fn tool_list_modules(adapter: &NexusAdapter<'static>) -> Result<Value, Err
         let Some(id) = id.to_str() else {
             continue;
         };
-        // Skip `_` / `.`-prefixed entries and unsafe ids (the shared
+        // note: skip `_` / `.`-prefixed entries and unsafe ids (the shared
         // `is_safe_module_id` guard — same single source as the compute
         // store gate and the adapter loader).
         if id.starts_with('_') || id.starts_with('.') || !is_safe_module_id(id) {
@@ -1896,7 +1896,7 @@ async fn tool_list_modules(adapter: &NexusAdapter<'static>) -> Result<Value, Err
     Ok(serde_json::json!({ "result": { "modules": modules } }))
 }
 
-/// Read the canonical world-id carrier from a wire object
+/// note: read the canonical world-id carrier from a wire object
 /// (`extensions.nexus.world_id` — the field the conversion seam writes).
 fn world_id_of(value: &Value) -> Option<&str> {
     value
@@ -1904,7 +1904,7 @@ fn world_id_of(value: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-/// Target world ids inside an ops payload, in wire order — raw JSON reads so
+/// note: target world ids inside an ops payload, in wire order — raw JSON reads so
 /// the scope gate runs before any typed parse (fail-closed, zero side
 /// effects). Writes carry `extensions.nexus.world_id` (the canonical carrier
 /// the conversion seam writes on entries/relations); reads (`check` /
@@ -1938,7 +1938,7 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
             let scope_id = payload.pointer("/scope/scope_id")?.as_str()?;
             Some(vec![scope_id.to_string()])
         }
-        // Compute carries no world on the wire (P2, spec §2.2): the world is
+        // note: compute carries no world on the wire (P2, spec §2.2) — the world is
         // the stored entry's `extensions.nexus.world_id`, resolved inside
         // the lane by verify_compute_authorization. Dispatch skips the raw world
         // gate for this route; this arm is unreachable and exists only for
@@ -1950,7 +1950,7 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
     }
 }
 
-/// Logical collection-entry count for the payload cap (spec §5.4): the
+/// note: logical collection-entry count for the payload cap (spec §5.4) — the
 /// operation's collection fields. `upsert` counts `knowledge_entries`;
 /// `promote` / `relate` carry a single candidate / relation (1 when
 /// present); `check` counts its batch arrays (`rule_refs` + `rules` +
@@ -1968,7 +1968,7 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
 /// `list_timeline_events`), so a payload could otherwise carry far more
 /// than 500 logical collection entries under the byte cap.
 fn payload_collection_entries(route: Route, payload: &Value) -> usize {
-    // Length of one scope-object batch array — raw JSON reads so the cap
+    // note: length of one scope-object batch array — raw JSON reads so the cap
     // gate runs before any typed parse.
     let scope_array_len = |field: &str| {
         payload
@@ -2006,7 +2006,7 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
                 + scope_array_len("entry_types")
                 + scope_array_len("timeline_event_ids")
         }
-        // Compute (P2): the dynamic `computable` map is the request's batch
+        // note: compute (P2) — the dynamic `computable` map is the request's batch
         // surface (the session state is staged out-of-band); its key count
         // bounds the payload's logical entry amplification. The response
         // cap additionally bounds the merged-state output.
@@ -2014,7 +2014,7 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
             .get("computable")
             .and_then(Value::as_object)
             .map_or(0, Map::len),
-        // Host-level tools (V1.173): the request carries a single
+        // note: host-level tools (V1.173) — the request carries a single
         // `arguments` object (payload shape `{ "arguments": <object> }`),
         // so the logical batch surface is one — the byte cap still bounds
         // oversized argument objects.
@@ -2022,7 +2022,7 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
     }
 }
 
-/// Verify the stored-world invariant before any orchestrator CAS (fix loop,
+/// note: verify the stored-world invariant before any orchestrator CAS (fix loop,
 /// Critical — defense-in-depth): for every payload entry/relation that
 /// already exists in storage, the stored row's `world_id` must equal the
 /// payload-claimed `world_id`. Since V1.154 P2 (R3 closure, spec §3) the
@@ -2041,7 +2041,7 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
 /// F-001 / QC2 W-2) — `from_id` / `to_id` are resolved and their stored
 /// worlds must equal the claimed world; mismatch or missing endpoint denies
 /// the whole payload with zero insert.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn verify_stored_worlds(
     adapter: &NexusAdapter<'static>,
     route: Route,
@@ -2052,12 +2052,12 @@ async fn verify_stored_worlds(
             if let Some(entries) = payload.get("knowledge_entries").and_then(Value::as_array) {
                 for entry in entries {
                     let Some(entry_id) = entry.get("entry_id").and_then(Value::as_str) else {
-                        // No id ⇒ no stored row can be targeted; the typed
+                        // note: no id ⇒ no stored row can be targeted, so the typed
                         // parse rejects the payload later.
                         continue;
                     };
                     let Some(claimed) = world_id_of(entry) else {
-                        // Unreachable: the world gate (step 4) already
+                        // note: unreachable — the world gate (step 4) already
                         // denied any payload with an entry lacking the id.
                         // Fail closed rather than skip the check.
                         return Err(denied(
@@ -2102,7 +2102,7 @@ async fn verify_stored_worlds(
                         SpokeResult::Reject(reject)
                             if reject.code == SpokeRejectCode::RelationNotFound =>
                         {
-                            // Create path (plan QC, QC1 F-001 / QC2 W-2):
+                            // note: create path (plan QC, QC1 F-001 / QC2 W-2) —
                             // no relation row exists yet, so the stored-row
                             // check above is a no-op — but the INSERT's FKs
                             // are single-column on `key_block_id` (world-
@@ -2132,7 +2132,7 @@ async fn verify_stored_worlds(
                 }
             }
         }
-        // Reads (N-C2) and compute (P2): no stored row is targeted by id —
+        // note: reads (N-C2) and compute (P2) target no stored row by id —
         // `check` / `assemble` reach storage only through the
         // orchestrators' own world-scoped `ScopeQueryPort` reads (world
         // gate verified `scope.scope_id` at step 5), and `compute` runs its
@@ -2145,7 +2145,7 @@ async fn verify_stored_worlds(
     Ok(())
 }
 
-/// The P2 compute gate set (spec §2.1–§2.3, architect locks). Every gate
+/// note: the P2 compute gate set (spec §2.1–§2.3, architect locks). Every gate
 /// runs inside the bounded lane BEFORE any WASM execution, fail-closed, zero
 /// side effects:
 ///
@@ -2209,7 +2209,7 @@ async fn verify_stored_worlds(
 /// replay depend on the module still being installed (F3). Every existing
 /// security lock is preserved; this split moves nothing out of the fail-closed
 /// path except the host-local store check.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn verify_compute_authorization(
     scope: &PeerScope,
     adapter: &NexusAdapter<'static>,
@@ -2222,12 +2222,12 @@ async fn verify_compute_authorization(
         Err(error) => return Err(map_reject(&invalid_payload("compute", &error))),
     };
 
-    // 1. Read-only compute lock — the cheapest gate, checked first.
+    // note: 1. read-only compute lock — the cheapest gate, checked first.
     if request.settle == Some(true) {
         return Err(settle_not_enabled());
     }
 
-    // 2. Stored-entry gate: the compute world is the stored entry's
+    // note: 2. stored-entry gate — the compute world is the stored entry's
     //    `extensions.nexus.world_id` (spec §2.2 — no wire carrier). A
     //    MISSING entry is a client-input error — the request names its
     //    `entry_id` on the wire — mapped to the defined `invalid_input`
@@ -2253,7 +2253,7 @@ async fn verify_compute_authorization(
             "world {world} is not in this peer's world_scope"
         )));
     }
-    // 2b. Grant viewpoint (durable §9): the stored entry's world must be the
+    // note: 2b. grant viewpoint (durable §9) — the stored entry's world must be the
     //     granted World/binding viewpoint — compute has no wire world, so
     //     this is the only place the grant intersection can be enforced. A
     //     peer cannot compute an entry outside its granted Actor.
@@ -2268,7 +2268,7 @@ async fn verify_compute_authorization(
         }
     }
 
-    // 3. Module identity — the locked resolution precedence (session state
+    // note: 3. module identity — the locked resolution precedence (session state
     //    → entry body.computable). The adapter marks the missing-module-name
     //    reject with the `module_identity_missing` details marker
     //    (P2 QC fix wave FW-5 — classified by marker, never by message
@@ -2286,17 +2286,17 @@ async fn verify_compute_authorization(
         SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
     };
 
-    // 4. Module-scope gate (architect lock, spec §6.1): missing/empty
+    // note: 4. module-scope gate (architect lock, spec §6.1) — missing/empty
     //    `module_scope` denies ALL compute; a resolved module outside the
     //    list is denied before any WASM execution.
     if !scope.allows_module(peer, &module_id) {
         return Err(module_not_scoped(Some(&module_id)));
     }
 
-    // (Stage 5, the host-local store gate, is an EXECUTION-only prerequisite
+    // note: stage 5, the host-local store gate, is an EXECUTION-only prerequisite
     // and lives in `verify_compute_module_installed` — see the doc above.)
 
-    // 5. Module-id pin, KEY-PRESENCE form (L2 review C-1, hardened P2 QC
+    // note: 5. module-id pin, KEY-PRESENCE form (L2 review C-1, hardened P2 QC
     //    fix wave FW-1): the adapter's `ComputablePort` merges
     //    request.computable over the session state before re-resolving the
     //    module id, so a request-carried `computable.module_id` that
@@ -2320,7 +2320,7 @@ async fn verify_compute_authorization(
     Ok(module_id)
 }
 
-/// The compute route's **execution-only** prerequisite (spec §2.1): the gated
+/// note: the compute route's **execution-only** prerequisite (spec §2.1) — the gated
 /// module must be installed under the configured host-local module store.
 /// Bytes are never peer-supplied, and a host without a configured store serves
 /// no compute module.
@@ -2333,7 +2333,7 @@ async fn verify_compute_authorization(
 /// # Errors
 /// The retained `module_not_found` envelope when the store is unconfigured or
 /// the module is not installed.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope; matches the rest of the dispatch
 fn verify_compute_module_installed(
     adapter: &NexusAdapter<'static>,
     module_id: &str,
@@ -2356,7 +2356,7 @@ fn verify_compute_module_installed(
     Ok(())
 }
 
-/// Fail-closed host-local module store check (spec §2.1): the peer can name
+/// note: fail-closed host-local module store check (spec §2.1) — the peer can name
 /// only a module already installed under `~/.nexus42/modules/` as
 /// `<id>/<id>.wasm` + `<id>/manifest.json`. The id-safety check is the
 /// shared [`is_safe_module_id`] (P2 QC fix wave FW-4 — same single source
@@ -2373,7 +2373,7 @@ fn module_installed(modules_dir: &Path, module_id: &str) -> bool {
         && modules_dir.join(module_id).join("manifest.json").is_file()
 }
 
-/// Compute denial — the N-C2 compute surface is read-only (spec §5 / §6.5):
+/// note: compute denial — the N-C2 compute surface is read-only (spec §5 / §6.5) —
 /// `settle: true` is rejected because the compute settlement helper is NOT
 /// enabled over Connect. Retry-safe for peers that re-issue with
 /// `settle: false`.
@@ -2388,7 +2388,7 @@ fn settle_not_enabled() -> ErrorEnvelope {
     }
 }
 
-/// Compute denial — the resolved module is not in the peer's `module_scope`
+/// note: compute denial — the resolved module is not in the peer's `module_scope`
 /// (architect lock, spec §6.1): a missing/empty scope denies ALL compute;
 /// a resolved module outside the list is denied before any WASM execution.
 /// Also the module-id pin denial (L2 review C-1, hardened P2 QC fix wave
@@ -2427,7 +2427,7 @@ fn module_not_scoped(module_id: Option<&str>) -> ErrorEnvelope {
     }
 }
 
-/// Compute denial — no module identity is available (missing module name,
+/// note: compute denial — no module identity is available (missing module name,
 /// spec §2.2 resolution precedence) or the resolved module is not installed
 /// in the host-local store (spec §2.1 — module bytes are never
 /// peer-supplied). Retry-safe for peers that fix their session/entry
@@ -2445,7 +2445,7 @@ fn module_not_found(module_id: Option<&str>, reason: &str) -> ErrorEnvelope {
     }
 }
 
-/// Compute denial — the target entry does not exist (P2 QC fix wave FW-3).
+/// note: compute denial — the target entry does not exist (P2 QC fix wave FW-3).
 /// A compute request names its `entry_id` on the wire, so a missing entry
 /// is a client-input error mapped through the `invalid_input` family — the
 /// same code the check/assemble paths use for client-input rejects — never
@@ -2462,11 +2462,11 @@ fn compute_entry_not_found(entry_id: &str) -> ErrorEnvelope {
     }
 }
 
-/// Assert an existing entry's stored `world_id` equals the payload-claimed
+/// note: assert an existing entry's stored `world_id` equals the payload-claimed
 /// `world_id` (fix loop, Critical). A missing stored entry (create path) needs
 /// no check; any other read reject fails closed through the locked reject
 /// mapping (a storage fault must not read as a scope denial).
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn assert_stored_entry_world_matches(
     adapter: &NexusAdapter<'static>,
     entry_id: &str,
@@ -2485,7 +2485,7 @@ async fn assert_stored_entry_world_matches(
     Ok(())
 }
 
-/// Assert a relate create-path endpoint exists in storage AND its stored
+/// note: assert a relate create-path endpoint exists in storage AND its stored
 /// `world_id` equals the relation's claimed world (plan QC, QC1 F-001 /
 /// QC2 W-2). Unlike [`assert_stored_entry_world_matches`] (whose create
 /// paths legitimately reference not-yet-stored rows), a relate endpoint
@@ -2494,7 +2494,7 @@ async fn assert_stored_entry_world_matches(
 /// surface as an FK `internal_error` — an id-existence oracle via insert
 /// success vs FK-failure differential. Denied like the stored-world gate:
 /// `op_unsupported` family, zero insert.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 async fn assert_relate_endpoint_world_matches(
     adapter: &NexusAdapter<'static>,
     endpoint_id: &str,
@@ -2522,7 +2522,7 @@ async fn assert_relate_endpoint_world_matches(
     Ok(())
 }
 
-/// Read `extensions.nexus.world_id` from a stored spoke `Relation` (the
+/// note: read `extensions.nexus.world_id` from a stored spoke `Relation` (the
 /// typed map lookup — `ExtensionKey` does not implement
 /// `Borrow<str>`, mirroring the adapter's own extension-key pattern).
 fn relation_world_id_of(relation: &Relation) -> Option<&str> {
@@ -2534,7 +2534,7 @@ fn relation_world_id_of(relation: &Relation) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
-/// Cross-world stored-mismatch denial: same `op_unsupported` refusal family
+/// note: cross-world stored-mismatch denial — same `op_unsupported` refusal family
 /// as the world-scope gate (the plan's locked code for wrong-world), with a
 /// human-readable reason naming the row and both worlds. No information
 /// about OTHER peers' scopes leaks; the stored world of a row the caller
@@ -2552,7 +2552,7 @@ fn cross_world_denied(
     ))
 }
 
-/// A [`std::task::Wake`] impl that unparks the owning thread — the waker
+/// note: a [`std::task::Wake`] impl that unparks the owning thread — the waker
 /// tokio's semaphore uses to wake the acquiring thread when a permit is
 /// released.
 struct ThreadWaker(Arc<std::thread::Thread>);
@@ -2563,7 +2563,7 @@ impl std::task::Wake for ThreadWaker {
     }
 }
 
-/// Synchronously acquire a lane permit, bounded by `deadline`.
+/// note: synchronously acquire a lane permit, bounded by `deadline`.
 ///
 /// The handler runs inside an entered tokio context (the node's event-loop
 /// task), where `Handle::block_on` panics and the R2 contract bans the old
@@ -2572,7 +2572,7 @@ impl std::task::Wake for ThreadWaker {
 /// keeps the wait bounded even when no wake arrives; the semaphore unparks
 /// the thread via [`ThreadWaker`] as soon as a permit is released, so a
 /// briefly saturated lane does not wait out the deadline.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn acquire_permit(
     lane: &Arc<Semaphore>,
     deadline: std::time::Instant,
@@ -2596,7 +2596,7 @@ fn acquire_permit(
     }
 }
 
-/// Saturated-lane denial (spec §5.3): every permit is held by in-flight
+/// note: saturated-lane denial (spec §5.3) — every permit is held by in-flight
 /// invokes and none freed within the per-invoke deadline. Retry-safe — a
 /// later invoke may be served.
 fn busy_lane() -> ErrorEnvelope {
@@ -2609,7 +2609,7 @@ fn busy_lane() -> ErrorEnvelope {
     }
 }
 
-/// Deadline denial (spec §5.4): the invoke did not complete within the
+/// note: deadline denial (spec §5.4) — the invoke did not complete within the
 /// per-invoke budget. Retry-safe.
 fn deadline_exceeded() -> ErrorEnvelope {
     ErrorEnvelope {
@@ -2620,7 +2620,7 @@ fn deadline_exceeded() -> ErrorEnvelope {
     }
 }
 
-/// Payload-cap denial (spec §5.4): the request is above the locked batch
+/// note: payload-cap denial (spec §5.4) — the request is above the locked batch
 /// caps. Retry-safe for peers that can shrink their payload.
 fn payload_too_large(reason: &str) -> ErrorEnvelope {
     ErrorEnvelope {
@@ -2631,7 +2631,7 @@ fn payload_too_large(reason: &str) -> ErrorEnvelope {
     }
 }
 
-/// Response-cap denial (spec §5.4 — P1 QC fix wave FW-2): the orchestrator
+/// note: response-cap denial (spec §5.4 — P1 QC fix wave FW-2) — the orchestrator
 /// produced a result above the locked response byte cap. Retry-safe for
 /// peers that can narrow their request (e.g. fewer `max_entries`).
 fn response_too_large(reason: &str) -> ErrorEnvelope {
@@ -2643,14 +2643,14 @@ fn response_too_large(reason: &str) -> ErrorEnvelope {
     }
 }
 
-/// Response-cap gate (spec §5.4 — P1 QC fix wave FW-2): serialize the
+/// note: response-cap gate (spec §5.4 — P1 QC fix wave FW-2) — serialize the
 /// orchestrator success value and measure it; over the locked cap, return
 /// the `response_too_large` envelope instead of the value. Applied at the
 /// bridge boundary — after the orchestrator returns, before the invoke
 /// returns the `Value` — so an amplified response fails as a graceful
 /// envelope, never as a hard peer codec failure. Rejects pass through
 /// untouched.
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn enforce_response_cap(
     result: Result<Value, ErrorEnvelope>,
     max_response_bytes: usize,
@@ -2667,7 +2667,7 @@ fn enforce_response_cap(
     Ok(value)
 }
 
-/// Bridge fault: the lane could not run the invoke at all (closed
+/// note: bridge fault — the lane could not run the invoke at all (closed
 /// semaphore, lane worker terminated). Server fault — not retry-safe,
 /// mapped through the locked `internal_error` default.
 fn bridge_fault(reason: &str) -> ErrorEnvelope {
@@ -2679,7 +2679,7 @@ fn bridge_fault(reason: &str) -> ErrorEnvelope {
     }
 }
 
-/// Locked `SpokeRejectCode → ErrorEnvelope` mapping (P1 spec § OCC + error
+/// note: locked `SpokeRejectCode → ErrorEnvelope` mapping (P1 spec § OCC + error
 /// mapping — verbatim; extended for the N-C2 read half per the V1.148
 /// daemon-route precedent, where the check handler maps spoke client-input
 /// rejects to the 400 class):
@@ -2711,7 +2711,7 @@ fn bridge_fault(reason: &str) -> ErrorEnvelope {
 /// marker ([`is_module_identity_missing_reject`]) — the marked reject maps
 /// to `module_not_found`, never through this table.
 fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
-    // V1.154 P2 (R3 closure, spec §3.2 LOCKED): a zero-row CAS caused by a
+    // note: V1.154 P2 (R3 closure, spec §3.2 LOCKED) — a zero-row CAS caused by a
     // world mismatch must surface as `world_conflict` — never collapsed into
     // `revision_conflict` / `stored_revision_stale`. The adapter carries the
     // classification on the `InternalError` carrier with a `world_conflict:
@@ -2729,17 +2729,17 @@ fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
         SpokeRejectCode::KnowledgeEntryAlreadyExists => "knowledge_entry_already_exists",
         SpokeRejectCode::StoredRevisionStale => "stored_revision_stale",
         SpokeRejectCode::RevisionConflict => "revision_conflict",
-        // Client-input family (V1.148 daemon check mapping precedent —
+        // note: client-input family (V1.148 daemon check mapping precedent,
         // spoke InvalidInput → 400 class; the Connect envelope equivalent).
         SpokeRejectCode::InvalidInput | SpokeRejectCode::InvalidPacketInput => "invalid_input",
-        // Locked safe default for every other reject (incl. InternalError).
+        // note: locked safe default for every other reject (incl. InternalError).
         _ => "internal_error",
     };
     let mut details = Map::new();
     if let Some(extra) = &reject.details {
         details.extend(extra.clone());
     }
-    // The safe-default branch preserves the original reject identity so a
+    // note: the safe-default branch preserves the original reject identity so a
     // client can distinguish a validation reject from a server fault.
     if code == "internal_error" && reject.code != SpokeRejectCode::InternalError {
         details.insert(
@@ -2759,7 +2759,7 @@ fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
     }
 }
 
-/// A synthetic `InvalidInput` reject for a payload the handler cannot
+/// note: a synthetic `InvalidInput` reject for a payload the handler cannot
 /// deserialize into the typed ops envelope. Mapped through the same locked
 /// table as orchestrator rejects (a malformed envelope would have produced
 /// the identical `InvalidInput` from the orchestrator's own `wire_convert`).
@@ -2771,11 +2771,11 @@ fn invalid_payload(op: &str, error: &serde_json::Error) -> SpokeReject {
     }
 }
 
-/// Serialize an orchestrator success response into the opaque ops response
+/// note: serialize an orchestrator success response into the opaque ops response
 /// success body the wire carries. Serialization cannot fail for a typed
 /// spoke response; a failure would be a wire-shape drift, mapped to
 /// `internal_error` (server fault).
-#[expect(clippy::result_large_err)] // Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
+#[expect(clippy::result_large_err)] // note: Err payload = ErrorEnvelope, the locked wire error envelope (String code + JSON Map details + HashMap extensions); boxing would churn every locked constructor and the wire-facing return types (AR-101)
 fn serialize_response<T: serde::Serialize>(response: &T) -> Result<Value, ErrorEnvelope> {
     serde_json::to_value(response).map_err(|error| ErrorEnvelope {
         code: "internal_error".to_string(),
@@ -2785,7 +2785,7 @@ fn serialize_response<T: serde::Serialize>(response: &T) -> Result<Value, ErrorE
     })
 }
 
-/// Non-served op refusal (N-C0 contract): `op_unsupported`, zero side
+/// note: non-served op refusal (N-C0 contract) — `op_unsupported`, zero side
 /// effects.
 fn unsupported(op: &str, reason: &str) -> ErrorEnvelope {
     ErrorEnvelope {
@@ -2796,7 +2796,7 @@ fn unsupported(op: &str, reason: &str) -> ErrorEnvelope {
     }
 }
 
-/// Scope-gate denial: same `op_unsupported` refusal family as N-C0 (P1 spec
+/// note: scope-gate denial — same `op_unsupported` refusal family as N-C0 (P1 spec
 /// § World scoping — "the spoke `op_unsupported` family"), with a
 /// human-readable reason. No information about other peers' scopes leaks.
 fn denied(reason: &str) -> ErrorEnvelope {
@@ -2816,35 +2816,35 @@ mod tests {
     use std::time::Duration;
 
     const WORLD_A: &str = "wld_bridge_a";
-    /// A second world for the scope-vs-grant intersection cases (no stored
+    /// note: a second world for the scope-vs-grant intersection cases (no stored
     /// row is needed: the denial happens before any read).
     const WORLD_B: &str = "wld_bridge_b";
     const CREATOR: &str = "ctr_bridge";
-    /// A second stored Creator that owns no world here (the cross-Creator
+    /// note: a second stored Creator that owns no world here (the cross-Creator
     /// ownership revalidation case).
     const OTHER_CREATOR: &str = "ctr_other";
-    /// Two Characters owned by `CREATOR`, each bound into `WORLD_A`.
+    /// note: two Characters owned by `CREATOR`, each bound into `WORLD_A`.
     const CHARACTER: &str = "chr_0123456789abcdef0123456789abcdef";
     const SIBLING_CHARACTER: &str = "chr_fedcba9876543210fedcba9876543210";
     const BINDING: &str = "awb_0123456789abcdef0123456789abcdef";
     const SIBLING_BINDING: &str = "awb_fedcba9876543210fedcba9876543210";
 
-    /// The seeded Creator's stable holder id (derived, never hand-written).
+    /// note: the seeded Creator's stable holder id (derived, never hand-written).
     fn creator_holder() -> String {
         nexus_local_db::creator_holder_entry_id(CREATOR)
     }
 
-    /// The seeded Character's stable holder id (derived, never hand-written).
+    /// note: the seeded Character's stable holder id (derived, never hand-written).
     fn character_holder(character_id: &str) -> String {
         nexus_local_db::character_holder_entry_id(character_id)
     }
 
-    /// A deterministic Ed25519 keypair (the interop golden-test shape).
+    /// note: a deterministic Ed25519 keypair (the interop golden-test shape).
     fn fixed_keypair(seed: u8) -> Keypair {
         Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
     }
 
-    /// A wire-shape upsert entry carrying the `extensions.nexus.world_id`
+    /// note: a wire-shape upsert entry carrying the `extensions.nexus.world_id`
     /// carrier the dispatch gates read.
     fn entry_fixture(entry_id: &str, world_id: &str) -> Value {
         serde_json::json!({
@@ -2859,7 +2859,7 @@ mod tests {
         })
     }
 
-    /// A hermetic workspace DB (the N-C1 golden-test shape): FK rows for
+    /// note: a hermetic workspace DB (the N-C1 golden-test shape) — FK rows for
     /// `WORLD_A` so the production adapter's put paths can persist.
     /// `_temp` keeps the DB directory alive for the test's duration.
     async fn test_pool() -> (tempfile::TempDir, sqlx::SqlitePool) {
@@ -2887,7 +2887,7 @@ mod tests {
         .execute(&pool)
         .await
         .expect("world seed");
-        // Actor rows for the stored grants (v1.191 P1 T14): two Characters
+        // note: actor rows for the stored grants (v1.191 P1 T14) — two Characters
         // owned by `CREATOR`, each with its own binding into `WORLD_A`, plus
         // the holder registry rows the admission resolves. Two Characters are
         // what makes cross-actor narrowing observable (a Character grant may
@@ -2921,7 +2921,7 @@ mod tests {
             .await
             .expect("binding seed");
         }
-        // The holder registry rows (`nexus_local_db` derives the ids from the
+        // note: the holder registry rows (`nexus_local_db` derives the ids from the
         // subjects — never hand-written registry state).
         sqlx::query(
             "INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)",
@@ -2945,13 +2945,13 @@ mod tests {
         (temp, pool)
     }
 
-    /// A hermetic workspace DB + the host port set over it (no module store).
+    /// note: a hermetic workspace DB + the host port set over it (no module store).
     async fn test_ports() -> (tempfile::TempDir, ConnectPorts) {
         let (temp, pool) = test_pool().await;
         (temp, ConnectPorts::new(pool, None))
     }
 
-    /// The seeded workspace DB reopened under the **engine** admission for the
+    /// note: the seeded workspace DB reopened under the **engine** admission for the
     /// compute fixtures.
     ///
     /// `compute_sessions` is engine-owned under the core writer protocol
@@ -2978,7 +2978,7 @@ mod tests {
         (temp, guarded.clone_pool())
     }
 
-    /// The operator allowlist JSON for `peer` — scopes plus the optional
+    /// note: the operator allowlist JSON for `peer` — scopes plus the optional
     /// stored Actor grant (v1.191 P1 T14, durable §9), written through the
     /// on-disk allowlist shape (like the CLI boot). Every entry allowlists
     /// the `basic-combat` module (P2 architect lock — an absent/empty
@@ -2987,7 +2987,7 @@ mod tests {
         allowlist_with_worlds(peer, &[WORLD_A], ops, grant)
     }
 
-    /// As [`allowlist_for`] with an explicit `world_scope` (the
+    /// note: as [`allowlist_for`] with an explicit `world_scope` (the
     /// scope-vs-grant intersection cases need a world the grant does not
     /// cover).
     fn allowlist_with_worlds(
@@ -3016,7 +3016,7 @@ mod tests {
         crate::commands::connect::allowlist::load(temp.path(), &[]).expect("scoped allowlist loads")
     }
 
-    /// The stored Creator grant fixture: `CREATOR` acting as itself,
+    /// note: the stored Creator grant fixture — `CREATOR` acting as itself,
     /// viewpoint `WORLD_A` (the seeded world it owns).
     fn creator_grant() -> Value {
         serde_json::json!({
@@ -3026,7 +3026,7 @@ mod tests {
         })
     }
 
-    /// The stored Character grant fixture for one seeded Character/binding.
+    /// note: the stored Character grant fixture for one seeded Character/binding.
     fn character_grant(character_id: &str, binding_id: &str) -> Value {
         serde_json::json!({
             "creator_id": CREATOR,
@@ -3036,7 +3036,7 @@ mod tests {
         })
     }
 
-    /// A grant whose controlling Creator owns no world of the seeded
+    /// note: a grant whose controlling Creator owns no world of the seeded
     /// workspace (the stored ownership revalidation case).
     fn foreign_creator_grant() -> Value {
         serde_json::json!({
@@ -3046,24 +3046,24 @@ mod tests {
         })
     }
 
-    /// A `PeerScope` allowlisting `peer` for `WORLD_A` with the given ops and
+    /// note: a `PeerScope` allowlisting `peer` for `WORLD_A` with the given ops and
     /// the stored Creator grant.
     fn scoped_scope_for(peer: PeerId, ops: &[&str]) -> PeerScope {
         allowlist_for(peer, ops, Some(creator_grant()))
     }
 
-    /// A `PeerScope` allowlisting `peer` for `WORLD_A` with the upsert op.
+    /// note: a `PeerScope` allowlisting `peer` for `WORLD_A` with the upsert op.
     fn scoped_scope(peer: PeerId) -> PeerScope {
         scoped_scope_for(peer, &["upsert"])
     }
 
-    /// A `PeerScope` with the same scopes but **no** stored grant — durable
+    /// note: a `PeerScope` with the same scopes but **no** stored grant (durable
     /// §9: no grant ⇒ no KE operation.
     fn grantless_scope(peer: PeerId, ops: &[&str]) -> PeerScope {
         allowlist_for(peer, ops, None)
     }
 
-    /// The admitted selection `peer`'s stored grant resolves to (the real
+    /// note: the admitted selection `peer`'s stored grant resolves to (the real
     /// resolution path, used to stage fixtures through a scoped adapter).
     async fn granted_selection(
         scope: &PeerScope,
@@ -3078,7 +3078,7 @@ mod tests {
             .expect("fixture grant resolves against the seeded rows")
     }
 
-    /// A scoped peer + handler + lane + compute serializer over a hermetic
+    /// note: a scoped peer + handler + lane + compute serializer over a hermetic
     /// port set. `_temp` keeps the DB directory alive for the test's
     /// duration.
     async fn test_handler(
@@ -3097,7 +3097,7 @@ mod tests {
         (handler, lane, serializer, peer, temp)
     }
 
-    /// A compute-capable variant of [`test_handler`]: the port set carries a
+    /// note: a compute-capable variant of [`test_handler`] — the port set carries a
     /// host-local module store holding a `basic-combat` module pair, the
     /// peer is allowlisted for `compute` + `upsert` with `module_scope`
     /// (the P2 architect lock — missing/empty module scope denies ALL
@@ -3123,7 +3123,7 @@ mod tests {
         let peer = fixed_keypair(17).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["compute", "upsert"]);
         let (temp, pool) = test_engine_pool().await;
-        // Host-local module store (spec §2.1): `<id>/<id>.wasm` +
+        // note: host-local module store (spec §2.1) — `<id>/<id>.wasm` +
         // `<id>/manifest.json` under a hermetic `~/.nexus42/modules/`.
         let modules_dir = tempfile::tempdir().expect("modules tempdir");
         let basic_combat_dir = modules_dir.path().join("basic-combat");
@@ -3139,7 +3139,7 @@ mod tests {
         )
         .expect("write module manifest");
         let ports = ConnectPorts::new(pool.clone(), Some(modules_dir.path().to_path_buf()));
-        // Stage the compute target entry + session so the P2 gates pass
+        // note: stage the compute target entry + session so the P2 gates pass
         // (the serializer wait is the only thing the test exercises). The
         // entry is written through the granted Actor's scoped adapter — the
         // production write path (v1.191 P1 T14, durable §9).
@@ -3164,7 +3164,7 @@ mod tests {
         (handler, lane, serializer, peer, temp, modules_dir, pool)
     }
 
-    /// (a) Saturated lane: with the only permit held by a concurrent
+    /// note: (a) saturated lane — with the only permit held by a concurrent
     /// invoke, the next invoke fails fast with the locked `invoke_busy`
     /// envelope (spec §5.3) instead of queuing; once the permit frees, the
     /// lane serves again.
@@ -3172,7 +3172,7 @@ mod tests {
     async fn saturated_lane_returns_invoke_busy_then_recovers() {
         let (handler, lane, _serializer, peer, _temp) = test_handler(BridgeLimits {
             max_concurrent_invokes: 1,
-            // CI-robust per-invoke budget (R-FLAKE-CONNECT-SATURATED). The
+            // note: CI-robust per-invoke budget (R-FLAKE-CONNECT-SATURATED). The
             // asserted semantics do not depend on this value: `invoke_busy`
             // still fires only once the *held* permit outlives the budget
             // (the acquire wait consumes the same budget), and the
@@ -3201,7 +3201,7 @@ mod tests {
         assert_eq!(served["knowledge_entries"][0]["entry_id"], "kb_b1");
     }
 
-    /// (b) Slow invoke: a zero-budget deadline override simulates any op
+    /// note: (b) slow invoke — a zero-budget deadline override simulates any op
     /// exceeding the budget — the acquire completes synchronously on a
     /// free permit, so the result wait deterministically exceeds the
     /// remaining budget and returns the locked `invoke_deadline_exceeded`
@@ -3223,7 +3223,7 @@ mod tests {
         }
     }
 
-    /// A waiter whose permit frees mid-wait is served (the acquire wakes
+    /// note: a waiter whose permit frees mid-wait is served (the acquire wakes
     /// on release instead of waiting out the deadline): one permit, a long
     /// deadline, the test holds the permit and releases it after the
     /// invoke is queued.
@@ -3249,7 +3249,7 @@ mod tests {
                 }),
             )
         });
-        // Give the invoke time to park in the acquire wait, then free the
+        // note: give the invoke time to park in the acquire wait, then free the
         // permit; the waiter must be woken and served.
         tokio::time::sleep(Duration::from_millis(100)).await;
         drop(held);
@@ -3258,7 +3258,7 @@ mod tests {
         assert_eq!(served["knowledge_entries"][0]["entry_id"], "kb_b3");
     }
 
-    /// Greptile P1 (compute serializer backlog): the serializer wait is
+    /// note: Greptile P1 (compute serializer backlog) — the serializer wait is
     /// bounded by the REMAINING per-invoke budget — the lane permit and
     /// the serializer permit share ONE deadline. A compute that acquires
     /// the lane but queues on a held serializer past its budget fails fast
@@ -3276,7 +3276,7 @@ mod tests {
                 ..BridgeLimits::default()
             })
             .await;
-        // Simulate an in-flight WASM invocation: hold the serializer
+        // note: simulate an in-flight WASM invocation — hold the serializer
         // permit so a queued compute cannot proceed.
         let _serializer_held = serializer
             .try_acquire_owned()
@@ -3292,7 +3292,7 @@ mod tests {
             "computable": {},
         });
         let invoke = tokio::spawn(async move { handler_for_task(&peer, "compute", payload) });
-        // Let the compute park on the lane, then free the lane permit: it
+        // note: let the compute park on the lane, then free the lane permit — it
         // acquires the lane, passes the P2 compute gates, and queues on
         // the held serializer until its per-invoke budget expires.
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -3308,7 +3308,7 @@ mod tests {
             Ok(_) => panic!("a serializer-queued compute past its budget must fail fast"),
         }
 
-        // The timed-out compute must NOT hold the lane: an unrelated op is
+        // note: the timed-out compute must NOT hold the lane, so an unrelated op is
         // served immediately after it. Pre-fix, the still-queued compute
         // held the only lane permit and this upsert would have returned
         // invoke_busy after its own budget.
@@ -3326,7 +3326,7 @@ mod tests {
         );
     }
 
-    /// (c) Entry cap: 501 logical collection entries (> 500) are rejected
+    /// note: (c) entry cap — 501 logical collection entries (> 500) are rejected
     /// with the locked `payload_too_large` envelope before the bridge
     /// (spec §5.4).
     #[tokio::test(flavor = "multi_thread")]
@@ -3343,7 +3343,7 @@ mod tests {
         }
     }
 
-    /// (c) Byte cap: a payload serializing above 2 MiB is rejected with
+    /// note: (c) byte cap — a payload serializing above 2 MiB is rejected with
     /// the locked `payload_too_large` envelope before the bridge (spec
     /// §5.4).
     #[tokio::test(flavor = "multi_thread")]
@@ -3359,7 +3359,7 @@ mod tests {
         }
     }
 
-    /// N-C2 (T1 Minor follow-up, spec §5.4): the entry cap extends to the
+    /// note: N-C2 (T1 Minor follow-up, spec §5.4) — the entry cap extends to the
     /// check op's collection fields — `rule_refs` + `rules` +
     /// `checker_kinds` all count as logical collection entries. 501
     /// `rule_refs` (> 500) are rejected with `payload_too_large` before the
@@ -3384,7 +3384,7 @@ mod tests {
         }
     }
 
-    /// N-C2 (T1 Minor follow-up, spec §5.4): the entry cap extends to the
+    /// note: N-C2 (T1 Minor follow-up, spec §5.4) — the entry cap extends to the
     /// assemble op's collection field — `max_entries` counts as the
     /// logical entries the peer asks the packet to carry. 501 (> 500) is
     /// rejected with `payload_too_large` before the bridge (prevents
@@ -3409,7 +3409,7 @@ mod tests {
         }
     }
 
-    /// P1 QC fix wave (FW-1, spec §5.4): the check entry cap extends to the
+    /// note: P1 QC fix wave (FW-1, spec §5.4) — the check entry cap extends to the
     /// scope-object batch arrays — `scope.entry_ids` / `scope.entry_types`
     /// / `scope.timeline_event_ids` all count as logical collection
     /// entries (the spoke Scope schema places no `maxItems` on them and
@@ -3438,7 +3438,7 @@ mod tests {
         }
     }
 
-    /// P1 QC fix wave (FW-1, spec §5.4): the assemble entry cap counts the
+    /// note: P1 QC fix wave (FW-1, spec §5.4) — the assemble entry cap counts the
     /// scope-object batch arrays the same way — 501 `scope.timeline_event_ids`
     /// (> 500) are rejected with `payload_too_large` before the bridge.
     #[tokio::test(flavor = "multi_thread")]
@@ -3463,7 +3463,7 @@ mod tests {
         }
     }
 
-    /// P1 QC fix wave (FW-2, spec §5.4): the orchestrator result is
+    /// note: P1 QC fix wave (FW-2, spec §5.4) — the orchestrator result is
     /// serialized and measured at the bridge boundary — a response above
     /// the locked byte cap maps to the `response_too_large` envelope, not
     /// a hard peer codec failure. The tiny-cap override stands in for a
@@ -3492,7 +3492,7 @@ mod tests {
         }
     }
 
-    /// N-C2 mapping extension (V1.148 daemon precedent — spoke client-input
+    /// note: N-C2 mapping extension (V1.148 daemon precedent — spoke client-input
     /// rejects are the 400 class, not server faults): a payload that passes
     /// the world gate but fails the typed orchestrator parse maps through
     /// the synthetic `InvalidInput` reject to the `invalid_input` envelope
@@ -3504,7 +3504,7 @@ mod tests {
         let (_temp, ports) = test_ports().await;
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
-        // The entry carries the world_id carrier (world gate passes) but
+        // note: the entry carries the world_id carrier (world gate passes) but
         // misses the typed wire's required fields (parse rejects).
         let payload = serde_json::json!({
             "knowledge_entries": [{
@@ -3520,7 +3520,7 @@ mod tests {
         }
     }
 
-    /// V1.166 AR-1 (PD-3, fail closed): the N-C2 `check` read half crosses
+    /// note: V1.166 AR-1 (PD-3, fail closed) — the N-C2 `check` read half crosses
     /// the same world-scoped wrapper as the daemon route — a foreign-world
     /// `rule_ref` rejects with the locked `invalid_input` envelope (the
     /// `map_reject` row) naming the offending id, `details.foreign_rule_ids`
@@ -3530,7 +3530,7 @@ mod tests {
         let peer = fixed_keypair(14).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["check"]);
         let (_temp, pool) = test_pool().await;
-        // A rule whose owner world differs from the check's scope world
+        // note: a rule whose owner world differs from the check's scope world
         // (`WORLD_A`) — `spoke_rules.world_id` has no FK, so a bare foreign
         // world id is a valid seed.
         let foreign_row = nexus_local_db::spoke_rules::SpokeRuleRow {
@@ -3588,7 +3588,7 @@ mod tests {
         }
     }
 
-    /// R3 wire spelling (spec §3.2 LOCKED): a zero-row CAS caused by a world
+    /// note: R3 wire spelling (spec §3.2 LOCKED) — a zero-row CAS caused by a world
     /// mismatch must surface as the `world_conflict` `ErrorEnvelope` code —
     /// never collapsed into `revision_conflict` / `stored_revision_stale` —
     /// and a same-world stale revision keeps its existing code.
@@ -3634,7 +3634,7 @@ mod tests {
             "actualWorld rides through to the envelope details"
         );
 
-        // Same-world stale/conflict rejects keep the existing codes — the
+        // note: same-world stale/conflict rejects keep the existing codes — the
         // world-conflict branch must not widen their mapping.
         let rev_reject = SpokeReject {
             code: SpokeRejectCode::RevisionConflict,
@@ -3650,7 +3650,7 @@ mod tests {
         assert_eq!(map_reject(&stale_reject).code, "stored_revision_stale");
     }
 
-    /// V1.169 P0 (locks AR-4 layer 2): a `tools.*` op that somehow reaches
+    /// note: V1.169 P0 (locks AR-4 layer 2) — a `tools.*` op that somehow reaches
     /// the nexus invoke handler is refused by the `SERVED_OPS` pre-routing
     /// gate with the `op_unsupported` envelope — code + the locked message
     /// prefix (`op <op> is not supported: …`, NOT the scope-denial
@@ -3691,7 +3691,7 @@ mod tests {
             }
         }
         drop(held);
-        // Zero side effects: the refusals consumed nothing — a served op
+        // note: zero side effects — the refusals consumed nothing, so a served op
         // round-trips normally afterwards.
         let served = handler(
             &peer,
@@ -3707,7 +3707,7 @@ mod tests {
         );
     }
 
-    /// V1.173 QC fix wave F-001 (AR-49 payload-shape pin): a served tool
+    /// note: V1.173 QC fix wave F-001 (AR-49 payload-shape pin) — a served tool
     /// invoked with a malformed payload — missing `arguments`
     /// (`{ "extensions": {} }`), a non-object `arguments`
     /// (`{ "arguments": "string" }`), or a non-empty object
@@ -3727,7 +3727,7 @@ mod tests {
         let ports = ConnectPorts::new(pool.clone(), None);
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
-        // Close the store: any code path that reaches the adapter would
+        // note: close the store — any code path that reaches the adapter would
         // fail as `internal_error` (closed-pool query) — the
         // `invalid_input` assertions below pin the error to the argument
         // gate and prove zero adapter I/O.
@@ -3765,9 +3765,7 @@ mod tests {
         drop(temp);
     }
 
-    // ---- v1.191 P1 T14: stored Actor grants over the Connect face (§9) ----
-
-    /// Durable §9 upsert: the granted Creator's private row lands on the
+    /// note: durable §9 upsert — the granted Creator's private row lands on the
     /// granted holder (the write path resolves the holder server-side; the
     /// payload only names it).
     #[tokio::test(flavor = "multi_thread")]
@@ -3810,7 +3808,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9: the wire `owner`/`disclosure` pair only narrows — a
+    /// note: durable §9 — the wire `owner`/`disclosure` pair only narrows, so a
     /// foreign holder, or `owner-private` without a holder, is refused with
     /// `invalid_input` and zero writes.
     #[tokio::test(flavor = "multi_thread")]
@@ -3823,13 +3821,13 @@ mod tests {
             build_handler_with_limits(scope, ports, BridgeLimits::default());
 
         for (entry_id, owner, disclosure) in [
-            // Another Actor's holder (the sibling Character's).
+            // note: another Actor's holder (the sibling Character's).
             (
                 "kb_spoof_owner",
                 Some(character_holder(SIBLING_CHARACTER)),
                 Some(DISCLOSURE_OWNER_PRIVATE),
             ),
-            // `owner-private` with no holder at all.
+            // note: `owner-private` with no holder at all.
             ("kb_bare_private", None, Some(DISCLOSURE_OWNER_PRIVATE)),
         ] {
             let mut entry = entry_fixture(entry_id, WORLD_A);
@@ -3864,7 +3862,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9: a peer with scopes but **no stored grant** performs no KE
+    /// note: durable §9 — a peer with scopes but **no stored grant** performs no KE
     /// operation (all six families), while the two exact host-level tools
     /// stay served (they are not KE operations) and `extract` is refused.
     #[tokio::test(flavor = "multi_thread")]
@@ -3901,13 +3899,13 @@ mod tests {
             }
         }
 
-        // `extract` is never served (durable §9 — no remote extraction).
+        // note: `extract` is never served (durable §9 — no remote extraction).
         match handler(&peer, "extract", serde_json::json!({})) {
             Err(envelope) => assert_eq!(envelope.code, "op_unsupported"),
             Ok(served) => panic!("extract must never be served, got {served}"),
         }
 
-        // The two exact tools are host-level reads, not KE operations: they
+        // note: the two exact tools are host-level reads, not KE operations — they
         // run on the host adapter, which serves them without any grant.
         for op in LOCAL_TOOL_OPS {
             let served = handler(&peer, op, serde_json::json!({ "arguments": {} }))
@@ -3920,7 +3918,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9: a raw world selector may only narrow/match the granted
+    /// note: durable §9 — a raw world selector may only narrow/match the granted
     /// viewpoint — a payload world inside `world_scope` but outside the
     /// grant is denied before any read or write.
     #[tokio::test(flavor = "multi_thread")]
@@ -3969,7 +3967,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9: the wire `scope.viewpoint` must equal the resolved holder
+    /// note: durable §9 — the wire `scope.viewpoint` must equal the resolved holder
     /// — matching it is a legal narrowing, naming another Actor is refused
     /// by the scoped adapter (`invalid_input`), and the foreign id is never
     /// echoed.
@@ -3982,7 +3980,7 @@ mod tests {
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
 
-        // Matching the resolved holder is a narrowing selection the granted
+        // note: matching the resolved holder is a narrowing selection the granted
         // Actor is allowed to send.
         let served = handler(
             &peer,
@@ -4023,7 +4021,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9: the grant is re-resolved on every invoke — once the
+    /// note: durable §9 — the grant is re-resolved on every invoke; once the
     /// stored state it points at is gone (here: the holder registry row),
     /// the next invoke is denied with zero side effects.
     #[tokio::test(flavor = "multi_thread")]
@@ -4042,7 +4040,7 @@ mod tests {
         )
         .expect("the grant resolves while its holder row exists");
 
-        // Revoke the stored state the grant points at (the registry row the
+        // note: revoke the stored state the grant points at (the registry row the
         // admission resolves) — the grant now resolves to nothing.
         sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ?")
             .bind(creator_holder())
@@ -4075,7 +4073,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9 / §4.2: a private row never leaks across Actors over the
+    /// note: durable §9 / §4.2 — a private row never leaks across Actors over the
     /// Connect face, and the granted Actor cannot widen into another
     /// Actor's viewpoint: the owning Creator's `assemble` carries it with
     /// its own viewpoint (the positive control), the Character `ActorView` is
@@ -4098,7 +4096,7 @@ mod tests {
         let (sibling_handler, _lane2, _serializer2) =
             build_handler_with_limits(sibling_scope, ports, BridgeLimits::default());
 
-        // A private row in the shared World container: both ActorViews are
+        // note: a private row in the shared World container — both ActorViews are
         // authorized for the container, so only the governance axes can keep
         // it from a foreign Actor.
         let mut entry = entry_fixture("kb_owner_private", WORLD_A);
@@ -4117,7 +4115,7 @@ mod tests {
                 .contains("kb_owner_private")
         };
 
-        // Positive control: the owning ActorView, asking with its own
+        // note: positive control — the owning ActorView, asking with its own
         // resolved holder as viewpoint, is served the private row.
         let owner_view = owner_handler(
             &owner_peer,
@@ -4133,7 +4131,7 @@ mod tests {
             "the positive control: the owning ActorView carries the private row: {owner_view}"
         );
 
-        // The Character ActorView cannot name the Creator's viewpoint at all.
+        // note: the Character ActorView cannot name the Creator's viewpoint at all.
         match sibling_handler(
             &sibling_peer,
             "assemble",
@@ -4151,7 +4149,7 @@ mod tests {
             }
         }
 
-        // Its own viewpoint is a legal narrowing — and carries no Creator
+        // note: its own viewpoint is a legal narrowing, and carries no Creator
         // private row (the character-private axis cannot see it).
         for scope in [
             serde_json::json!({ "scope_id": WORLD_A, "viewpoint": character_holder(CHARACTER) }),
@@ -4171,7 +4169,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9: the grant is re-resolved against **current stored
+    /// note: durable §9 — the grant is re-resolved against **current stored
     /// ownership** on every invoke — a peer granted as a Creator who does not
     /// own the granted World reaches nothing, and wants no stored grant
     /// (the caller's own) to be reachable for another Creator's world.
@@ -4180,7 +4178,7 @@ mod tests {
         let peer = fixed_keypair(39).public().to_peer_id();
         let scope = allowlist_for(peer, &["upsert", "assemble"], Some(foreign_creator_grant()));
         let (temp, pool) = test_pool().await;
-        // A second Creator with a holder row that owns NO world of this
+        // note: a second Creator with a holder row that owns NO world of this
         // workspace: its grant points at WORLD_A, which it does not own.
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -4238,7 +4236,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §2.2/§9 (fix round): writes and compute need **live**
+    /// note: durable §2.2/§9 (fix round) — writes and compute need **live**
     /// admission — once the granted binding is paused, `upsert` is denied
     /// with zero writes while the read half (`check`) keeps serving the
     /// retained read of the same grant.
@@ -4264,7 +4262,7 @@ mod tests {
         handler(&peer, "upsert", payload()).expect("an active binding admits the write");
         handler(&peer, "check", check()).expect("the read half is served");
 
-        // Pause the binding: the stored tuple still resolves for a retained
+        // note: pause the binding — the stored tuple still resolves for a retained
         // read, but it is no longer a live write admission.
         sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
             .bind(BINDING)
@@ -4298,7 +4296,7 @@ mod tests {
         handler(&peer, "check", check())
             .expect("the retained read stays served while the binding is paused");
 
-        // Resume: live admission holds again.
+        // note: resume — live admission holds again.
         sqlx::query("UPDATE actor_world_bindings SET status = 'active' WHERE binding_id = ?")
             .bind(BINDING)
             .execute(&pool)
@@ -4315,7 +4313,7 @@ mod tests {
         drop(temp);
     }
 
-    /// Durable §9: an entry naming only a Character container carries no
+    /// note: durable §9 — an entry naming only a Character container carries no
     /// World carrier, so the whole payload is denied (fail-closed) — a
     /// container selector can never choose a container outside the granted
     /// selection, and no partial write happens.
@@ -4348,9 +4346,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // v1.207 P3 — the §B.3 durable-operation handshake on the Connect writes
-    // -----------------------------------------------------------------------
-
-    /// The host's own DIRECT-admission pool plus a handler over it, so the
+    /// note: the host's own DIRECT-admission pool plus a handler over it, so the
     /// receipt rows are observable next to the invoke.
     async fn receipt_handler(
         peer: PeerId,
@@ -4369,7 +4365,7 @@ mod tests {
         (handler, pool, in_flight, temp)
     }
 
-    /// One connected invoke's receipt row, as `(operation_id, status)`.
+    /// note: one connected invoke's receipt row, as `(operation_id, status)`.
     async fn connect_receipt_rows(
         pool: &sqlx::SqlitePool,
         subject_id: &str,
@@ -4384,12 +4380,12 @@ mod tests {
         .expect("connect receipt rows")
     }
 
-    /// A caller-supplied valid operation id for the conflict/ambiguity cases.
+    /// note: a caller-supplied valid operation id for the conflict/ambiguity cases.
     fn caller_operation_id(suffix: &str) -> String {
         format!("op_{suffix:0>32}")
     }
 
-    /// The §B.2 fingerprint of one Connect logical request, computed exactly as
+    /// note: the §B.2 fingerprint of one Connect logical request, computed exactly as
     /// `open_write_receipt` computes it: the complete scope (grant Actor + peer
     /// session + op + args), with the caller's id argument excluded.
     fn connect_fingerprint(peer: &PeerId, op: &str, payload: &Value) -> String {
@@ -4406,7 +4402,7 @@ mod tests {
         })
     }
 
-    /// §B.3 on the Connect write surface: a re-driven `LiveWrite` invoke is
+    /// note: §B.3 on the Connect write surface — a re-driven `LiveWrite` invoke is
     /// answered from its stored receipt, so the effect is never applied twice.
     ///
     /// The host's existing DIRECT-admission pool is the writer (§B.2 third
@@ -4423,7 +4419,7 @@ mod tests {
         let applied = handler(&peer, "upsert", payload.clone()).expect("the first write applies");
         assert_eq!(applied["knowledge_entries"][0]["entry_id"], "kb_redrive");
 
-        // The governed write left a terminal receipt on the host's own pool.
+        // note: the governed write left a terminal receipt on the host's own pool.
         let rows = connect_receipt_rows(&pool, &subject_id).await;
         assert_eq!(rows.len(), 1, "one logical call owns exactly one receipt");
         assert_eq!(rows[0].1, "finished");
@@ -4437,7 +4433,7 @@ mod tests {
                 .expect("count blocks");
         assert_eq!(stored_blocks, 1, "the first invoke applied the effect");
 
-        // The effect's durable traces, captured before the re-drive.
+        // note: the effect's durable traces, captured before the re-drive.
         let changes_before: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM core_changes WHERE resource_id = ?")
                 .bind("kb_redrive")
@@ -4445,7 +4441,7 @@ mod tests {
                 .await
                 .expect("count changes");
 
-        // The SAME logical call re-driven (same peer, same op, same args).
+        // note: the SAME logical call re-driven (same peer, same op, same args).
         let replayed = handler(&peer, "upsert", payload).expect("the re-drive is answered");
         assert_eq!(
             replayed, applied,
@@ -4467,7 +4463,7 @@ mod tests {
         assert_eq!(rows[0].1, "finished");
     }
 
-    /// §B.3 item 4 on the Connect surface: a non-idempotent write whose
+    /// note: §B.3 item 4 on the Connect surface — a non-idempotent write whose
     /// receipt is still `running` (the cancel/timeout ambiguity) is refused
     /// with the frozen `uncertain` code — never a blind retry, and no
     /// terminal is fabricated for the orphan.
@@ -4481,7 +4477,7 @@ mod tests {
             "operation_id": &operation_id,
             "knowledge_entries": [entry_fixture("kb_ambiguous", WORLD_A)],
         });
-        // The timed-out attempt's receipt: `running`, its owner possibly alive.
+        // note: the timed-out attempt's receipt is `running`, its owner possibly alive.
         // Its fingerprint is the SAME logical call's (the id argument is an
         // envelope argument and is not part of the fingerprinted request), so
         // this is a replay of an unterminated operation — not a conflict.
@@ -4508,7 +4504,7 @@ mod tests {
             Ok(served) => panic!("an ambiguous re-drive must be refused, got {served}"),
         }
 
-        // Zero side effects, and the orphaned receipt is untouched.
+        // note: zero side effects, and the orphaned receipt is untouched.
         let applied: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind("kb_ambiguous")
@@ -4524,7 +4520,7 @@ mod tests {
         );
     }
 
-    /// §B.1 first-writer-wins on the Connect surface: a caller-supplied id
+    /// note: §B.1 first-writer-wins on the Connect surface — a caller-supplied id
     /// already owned by a receipt with a DIFFERENT request fingerprint is the
     /// typed `operation_id_conflict`, never a silent dedupe or a second apply.
     #[tokio::test(flavor = "multi_thread")]
@@ -4561,12 +4557,12 @@ mod tests {
                 .await
                 .expect("count blocks");
         assert_eq!(applied, 0, "a conflicting id applies nothing");
-        // The first writer's row is untouched.
+        // note: the first writer's row is untouched.
         let rows = connect_receipt_rows(&pool, &subject_id).await;
         assert_eq!(rows, vec![(operation_id, "running".to_string())]);
     }
 
-    /// §B.1 first-writer-wins across SCOPES (Critical 1): a caller-supplied id
+    /// note: §B.1 first-writer-wins across SCOPES (Critical 1) — a caller-supplied id
     /// is used verbatim in a workspace-global primary key, so its fingerprint
     /// must bind the COMPLETE logical request. Two admitted peers sharing one
     /// supplied id and byte-identical arguments are NOT the same logical call —
@@ -4581,7 +4577,7 @@ mod tests {
         let peer_b = fixed_keypair(45).public().to_peer_id();
         let operation_id = caller_operation_id("ab");
 
-        // ONE workspace (the shared world), two admitted peers over it.
+        // note: ONE workspace (the shared world), two admitted peers over it.
         let (_temp, ports_a) = test_ports().await;
         let pool = ports_a.pool().clone();
         let (handler_a, _lane_a, _ser_a) =
@@ -4603,7 +4599,7 @@ mod tests {
         let rows_a = connect_receipt_rows(&pool, &subject_a).await;
         assert_eq!(rows_a.len(), 1, "peer A owns the receipt");
 
-        // The effect's durable trace, captured before peer B's call.
+        // note: the effect's durable trace, captured before peer B's call.
         let before: (i64, String) =
             sqlx::query_as("SELECT revision, updated_at FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind("kb_scope")
@@ -4611,7 +4607,7 @@ mod tests {
                 .await
                 .expect("entry row");
 
-        // Peer B: the SAME supplied id and identical arguments, a different
+        // note: peer B — the SAME supplied id and identical arguments, a different
         // authenticated session — a different logical call.
         match handler_b(&peer_b, "upsert", payload.clone()) {
             Err(envelope) => assert_eq!(
@@ -4621,7 +4617,7 @@ mod tests {
             Ok(served) => panic!("a scope-different caller must be refused, got {served}"),
         }
 
-        // No second effect, no second receipt, and peer A's row is untouched.
+        // note: no second effect, no second receipt, and peer A's row is untouched.
         let after: (i64, String) =
             sqlx::query_as("SELECT revision, updated_at FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind("kb_scope")
@@ -4637,7 +4633,7 @@ mod tests {
             "the refused call created no receipt for peer B"
         );
 
-        // The racing-begin path (the store's own first-writer-wins insert)
+        // note: the racing-begin path (the store's own first-writer-wins insert)
         // refuses the same scope difference with the same typed error.
         let err = nexus_local_db::operation_receipts::begin_operation(
             &pool,
@@ -4660,9 +4656,7 @@ mod tests {
     // -----------------------------------------------------------------------
     // F3 — compute receipt metadata precedes the typed preflight, and an
     // authorized terminal replay needs no execution environment
-    // -----------------------------------------------------------------------
-
-    /// F3(a): a `compute` invoke carrying a valid caller-supplied
+    /// note: F3(a) — a `compute` invoke carrying a valid caller-supplied
     /// `operation_id` is not a malformed payload — the §B.1 metadata is
     /// consumed and stripped BEFORE the strict typed compute preflight, and the
     /// id is used verbatim for the receipt.
@@ -4678,7 +4672,7 @@ mod tests {
             "computable": {},
         });
 
-        // The dummy module cannot execute, so the call may succeed or fail —
+        // note: the dummy module cannot execute, so the call may succeed or fail;
         // but it must NEVER be read as a malformed payload, and it must have
         // taken the supplied id into the receipt contract.
         if let Err(envelope) = handler(&peer, "compute", payload) {
@@ -4697,7 +4691,7 @@ mod tests {
         assert_eq!(receipt.subject_id, format!("{peer}/compute"));
     }
 
-    /// F3(b): an AUTHORIZED terminal replay is answered from its receipt before
+    /// note: F3(b) — an AUTHORIZED terminal replay is answered from its receipt before
     /// any execution-only prerequisite — a module removed from the host store
     /// must not turn a durable answer into `module_not_found`, and nothing is
     /// re-applied.
@@ -4713,7 +4707,7 @@ mod tests {
             "computable": {},
         });
 
-        // The completed attempt's durable answer (the receipt is what a replay
+        // note: the completed attempt's durable answer (the receipt is what a replay
         // must be served from).
         nexus_local_db::operation_receipts::begin_operation(
             &pool,
@@ -4733,7 +4727,7 @@ mod tests {
         .await
         .expect("settle the receipt terminally");
 
-        // The execution environment is GONE: the module is removed from the
+        // note: the execution environment is GONE — the module is removed from the
         // host-local store.
         std::fs::remove_dir_all(modules_dir.path().join("basic-combat"))
             .expect("remove the module from the store");
@@ -4742,7 +4736,7 @@ mod tests {
             "the execution prerequisite is really unavailable"
         );
 
-        // The authorized replay is answered from the receipt.
+        // note: the authorized replay is answered from the receipt.
         let served = handler(&peer, "compute", payload).expect(
             "an authorized terminal replay must be answered from its receipt, not refused \
              for a missing execution environment",
@@ -4753,7 +4747,7 @@ mod tests {
             "the stored terminal answer is returned verbatim: {served}"
         );
 
-        // Nothing re-applied: still exactly one receipt, still terminal.
+        // note: nothing re-applied — still exactly one receipt, still terminal.
         assert_eq!(
             connect_receipt_rows(&pool, &format!("{peer}/compute")).await,
             vec![(operation_id, "finished".to_string())]
@@ -4762,9 +4756,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // F4 — a rejected write is never assumed effect-free
-    // -----------------------------------------------------------------------
-
-    /// F4: `Result::Err` from a write route never means "no effect". The pinned
+    /// note: F4 — `Result::Err` from a write route never means "no effect". The pinned
     /// upsert orchestrator commits each entry over an unbound per-invoke port,
     /// so a batch whose first entry lands and whose second is refused leaves a
     /// durable partial effect. This pins (1) that the durable-outbox
@@ -4776,7 +4768,7 @@ mod tests {
         let peer = fixed_keypair(46).public().to_peer_id();
         let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
 
-        // Entry A is unique; entry B repeats A's (entry_type, canonical_name),
+        // note: entry A is unique; entry B repeats A's (entry_type, canonical_name),
         // which the orchestrator refuses AFTER A has already committed.
         let mut first = entry_fixture("kb_partial_a", WORLD_A);
         first["canonical_name"] = Value::String("Uniqueness Probe".to_string());
@@ -4787,7 +4779,7 @@ mod tests {
         let watermark = write_commit_watermark(&pool).await;
         let refused = handler(&peer, "upsert", payload).expect_err("the second entry is refused");
 
-        // (1) The partial effect is durable and the observer sees it.
+        // note: (1) the partial effect is durable and the observer sees it.
         let applied: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind("kb_partial_a")
@@ -4803,7 +4795,7 @@ mod tests {
             "the durable-outbox observation must see the committed partial effect"
         );
 
-        // (2) The settled receipt preserves the refusal AND marks the commit.
+        // note: (2) the settled receipt preserves the refusal AND marks the commit.
         let subject_id = format!("{peer}/upsert");
         let rows = connect_receipt_rows(&pool, &subject_id).await;
         assert_eq!(rows.len(), 1, "one logical call owns one receipt");
@@ -4826,7 +4818,7 @@ mod tests {
             "a partially applied batch is marked so a replay can never read it as untouched"
         );
 
-        // (3) A settlement fault after a committed effect is NOT retryable.
+        // note: (3) a settlement fault after a committed effect is NOT retryable,
         let metadata = WriteReceiptMetadata {
             operation_id: caller_operation_id("f0"),
             subject_id: subject_id.clone(),
@@ -4854,7 +4846,7 @@ mod tests {
             not_retryable.message
         );
 
-        // ...while a settlement fault with NO committed effect keeps the
+        // note: while a settlement fault with NO committed effect keeps the
         // original refusal verbatim (`metadata`'s id owns no receipt row, so
         // the settlement itself fails).
         let original = uncertain_envelope("op_00000000000000000000000000000000", &subject_id);
@@ -4868,7 +4860,7 @@ mod tests {
         );
     }
 
-    /// F5: the commit observation must survive outbox retention. The counter is
+    /// note: F5 — the commit observation must survive outbox retention. The counter is
     /// the AUTOINCREMENT high-water mark, which row deletion never lowers, so
     /// pruning every post-watermark row (another admitted writer running the
     /// bounded retention) cannot erase a committed effect — and an unverifiable
@@ -4878,7 +4870,7 @@ mod tests {
         let peer = fixed_keypair(47).public().to_peer_id();
         let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
 
-        // Baseline accuracy: the same watermark against an unchanged outbox
+        // note: baseline accuracy — the same watermark against an unchanged outbox
         // reports NO committed effect.
         let watermark = write_commit_watermark(&pool)
             .await
@@ -4888,7 +4880,7 @@ mod tests {
             "nothing was written since the watermark"
         );
 
-        // A committed effect.
+        // note: a committed effect.
         let payload = serde_json::json!({
             "knowledge_entries": [entry_fixture("kb_retention", WORLD_A)],
         });
@@ -4898,7 +4890,7 @@ mod tests {
             "the committed mutation is observed"
         );
 
-        // Another admitted writer prunes every row above the watermark — exactly
+        // note: another admitted writer prunes every row above the watermark, exactly
         // what the outbox's bounded retention does.
         let pruned = sqlx::query("DELETE FROM core_changes WHERE sequence > ?")
             .bind(watermark)
@@ -4918,14 +4910,14 @@ mod tests {
                 .expect("count");
         assert_eq!(remaining, 0, "the row evidence is gone");
 
-        // The observation must stay conservative: the committed effect is still
+        // note: the observation must stay conservative — the committed effect is still
         // reported, so the settlement-fault path keeps the typed
         // not-retryable guarantee.
         assert!(
             write_effect_committed(&pool, Some(watermark)).await,
             "pruned row evidence must never read as 'no effect committed'"
         );
-        // An UNVERIFIABLE watermark is conservative too.
+        // note: an UNVERIFIABLE watermark is conservative too.
         assert!(
             write_effect_committed(&pool, None).await,
             "an unverifiable observation must resolve to effect-may-have-committed"
@@ -4934,9 +4926,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // QC1-W001 — §B.3's Busy/in-progress answer vs the uncertain one
-    // -----------------------------------------------------------------------
-
-    /// §B.3's two under-way answers stay distinct: a `running` receipt whose
+    /// note: §B.3's two under-way answers stay distinct — a `running` receipt whose
     /// owner is KNOWN to be live (this process is running it) is the typed Busy
     /// answer, while a `running` receipt with no live owner known — what a
     /// restart or a previous process leaves behind — stays `uncertain`. Neither
@@ -4961,7 +4951,7 @@ mod tests {
         .await
         .expect("seed the in-flight receipt");
 
-        // A KNOWN live owner: this process is running the effect.
+        // note: a KNOWN live owner — this process is running the effect.
         in_flight.register(&operation_id);
         match handler(&peer, "upsert", payload.clone()) {
             Err(envelope) => {
@@ -4977,7 +4967,7 @@ mod tests {
             Ok(served) => panic!("a live owner must answer Busy, got {served}"),
         }
 
-        // The owner is no longer known (the registration is gone, as after a
+        // note: the owner is no longer known (the registration is gone, as after a
         // restart): `uncertain`, never Busy and never a re-apply.
         in_flight.release(&operation_id);
         match handler(&peer, "upsert", payload) {
@@ -4988,7 +4978,7 @@ mod tests {
             Ok(served) => panic!("an unknown owner must answer uncertain, got {served}"),
         }
 
-        // Nothing was applied either time, and the receipt is untouched.
+        // note: nothing was applied either time, and the receipt is untouched.
         let applied: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
                 .bind("kb_busy")
@@ -5002,7 +4992,7 @@ mod tests {
         );
     }
 
-    /// QC1-W001, the racing-begin half: the caller that loses the
+    /// note: QC1-W001, the racing-begin half — the caller that loses the
     /// first-writer-wins insert reads the winner's `running` receipt, and the
     /// same liveness rule decides — Busy when the winner is registered as a
     /// live in-process owner, `uncertain` when the registration is gone.
@@ -5016,7 +5006,7 @@ mod tests {
             subject_id: subject_id.clone(),
             fingerprint: "fp-racing-winner".to_string(),
         };
-        // The winner's row, written by an in-process sibling that is running the
+        // note: the winner's row, written by an in-process sibling that is running the
         // effect right now.
         nexus_local_db::operation_receipts::begin_operation(
             &pool,

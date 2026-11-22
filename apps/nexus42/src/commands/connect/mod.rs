@@ -44,16 +44,17 @@
 //!   per-Work `nexus-local-db` `runtime_lock` is daemon-internal and the
 //!   Connect invoke path never acquires it (P1 spec § Process model,
 //!   corrected). Same-entry write correctness is the orchestrators' OCC CAS.
+// note: the whole module is gated on the `connect-host` feature; a default build compiles nothing here.
 
 pub mod allowlist;
-// V1.155 P1 T2: operator config — `~/.nexus42/connect/config.json`
+// note: V1.155 P1 T2 operator config — `~/.nexus42/connect/config.json`
 // (trusted_issuers / require_capability_token / capability_token_provider).
 pub mod config;
 pub mod identity;
-// V1.153 P1 N-C1 → V1.154 P0 T2: the session-peer `InvokeHandlerV2`
+// note: V1.153 P1 N-C1 → V1.154 P0 T2 session-peer `InvokeHandlerV2`
 // closure (architect-locked home; identity = the authenticated session peer).
 pub mod invoke;
-// V1.155 P1: capability-token production issuance — `connect token issue`.
+// note: V1.155 P1 capability-token production issuance — `connect token issue`.
 pub mod token;
 
 use crate::errors::{CliError, Result};
@@ -67,33 +68,33 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Default listen multiaddr when `--listen` is not given (loopback only —
+/// note: default listen multiaddr when `--listen` is not given (loopback only —
 /// binding a routable interface is an explicit operator choice, N-C0 §5.3).
 const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 
-/// Connect Host subcommands.
+/// note: Connect Host subcommands.
 #[derive(Debug, Subcommand)]
 pub enum ConnectCommand {
-    /// Start the Connect Host node (handshake + manifest + the served
+    /// note: start the Connect Host node (handshake + manifest + the served
     /// invoke surface: world-scoped upsert/promote/relate/check/assemble,
     /// World/module/Actor-gated compute, and the host-level
     /// `tools.nexus.list_observed_peers` / `tools.nexus.list_modules` reads;
     /// project/unknown ops refused)
     Start {
-        /// Peer IDs to allowlist for this run (repeatable; unioned with
+        /// note: peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`).
         #[arg(long = "allow-peer", value_name = "PEER_ID")]
         allow_peer: Vec<String>,
-        /// Listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
+        /// note: listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
         #[arg(long, value_name = "MULTIADDR", default_value = DEFAULT_LISTEN)]
         listen: Vec<String>,
     },
-    /// Inspect observed peer hosts (N-C3 multi-host production).
+    /// note: inspect observed peer hosts (N-C3 multi-host production).
     Peers {
         #[command(subcommand)]
         command: PeersCommand,
     },
-    /// Dial a peer host and record its manifest (N-C3 multi-host
+    /// note: dial a peer host and record its manifest (N-C3 multi-host
     /// production).
     ///
     /// The production outbound dial surface: boots a Connect node, dials
@@ -104,10 +105,10 @@ pub enum ConnectCommand {
     /// dial failure or a recording reject aborts the command (no silent
     /// no-op recording).
     Dial {
-        /// Multiaddr of the peer host to dial (e.g. `/ip4/127.0.0.1/tcp/4321`).
+        /// note: multiaddr of the peer host to dial (e.g. `/ip4/127.0.0.1/tcp/4321`).
         #[arg(value_name = "MULTIADDR")]
         peer: String,
-        /// Peer IDs to allowlist for this run (repeatable; unioned with
+        /// note: peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`). The dialed peer MUST be
         /// allowlisted: the session allowlist is mutual (a connected peer
         /// can invoke this host on the same session), so dialing a
@@ -115,7 +116,7 @@ pub enum ConnectCommand {
         #[arg(long = "allow-peer", value_name = "PEER_ID")]
         allow_peer: Vec<String>,
     },
-    /// Issue signed capability tokens (V1.155 P1 production issuance).
+    /// note: issue signed capability tokens (V1.155 P1 production issuance).
     ///
     /// The operator issuance surface: loads or creates the issuer key
     /// (`~/.nexus42/connect/issuer.key`, create-once 0600) and prints the
@@ -126,7 +127,7 @@ pub enum ConnectCommand {
     },
 }
 
-/// `connect peers` subcommands.
+/// note: `connect peers` subcommands.
 #[derive(Debug, Subcommand)]
 pub enum PeersCommand {
     /// List observed peer hosts — `host_id`, capabilities, `last_seen`.
@@ -140,7 +141,7 @@ pub enum PeersCommand {
     List,
 }
 
-/// Run a Connect Host command.
+/// note: run a Connect Host command.
 ///
 /// # Errors
 /// Returns a [`CliError`] when identity/allowlist I/O, manifest building, or
@@ -154,7 +155,7 @@ pub async fn run(command: ConnectCommand) -> Result<()> {
     }
 }
 
-/// Run a `connect peers` command.
+/// note: run a `connect peers` command.
 ///
 /// # Errors
 /// Returns a [`CliError`] when the workspace DB open or the adapter read
@@ -166,7 +167,7 @@ pub async fn run_peers(command: PeersCommand) -> Result<()> {
     }
 }
 
-/// Run `connect peers list`.
+/// note: run `connect peers list`.
 ///
 /// Opens the active-workspace DB pool (the same WAL pool the adapter runs
 /// against) and reads the observed-peer store through the adapter boundary
@@ -187,7 +188,7 @@ pub async fn run_peers(command: PeersCommand) -> Result<()> {
 /// [`CliError::Other`] when the DB open or the adapter read is rejected.
 async fn peers_list() -> Result<()> {
     let pool = open_workspace_pool(None, None).await?;
-    // The observed-peer store is host metadata, not knowledge: the host
+    // why: the observed-peer store is host metadata, not knowledge — the host
     // adapter (v1.191 P1 T14) serves it and fails closed on every KE port.
     let adapter = NexusAdapter::new_host(pool);
     let peers = match adapter.list_observed_peer_hosts().await {
@@ -206,7 +207,7 @@ async fn peers_list() -> Result<()> {
     Ok(())
 }
 
-/// Render the `connect peers list` output lines (pure, testable).
+/// note: render the `connect peers list` output lines (pure, testable).
 ///
 /// Empty store → the single line `no peers observed`. Otherwise a header
 /// row (`HOST_ID`, `CAPABILITIES`, `PEER_ID`, `LAST_SEEN`) followed by one
@@ -243,7 +244,7 @@ fn render_peer_lines(peers: &[ObservedPeerHost]) -> Vec<String> {
     lines
 }
 
-/// Strip control characters from a peer-controlled string before terminal
+/// note: strip control characters from a peer-controlled string before terminal
 /// render (QC fix wave F-003): ANSI escapes, newlines, and other control
 /// bytes embedded in a remote host's claimed manifest must never reach the
 /// operator's terminal. Printable characters (including ordinary
@@ -252,7 +253,7 @@ fn sanitize_cell(value: &str) -> String {
     value.chars().filter(|c| !c.is_control()).collect()
 }
 
-/// Normalize a stored RFC 3339 UTC timestamp to fixed millisecond precision
+/// note: normalize a stored RFC 3339 UTC timestamp to fixed millisecond precision
 /// for render (QC fix wave S-003).
 ///
 /// `chrono::to_rfc3339()` emits variable precision (no fraction / 3 / 6 / 9
@@ -270,7 +271,7 @@ fn normalize_last_seen(value: &str) -> String {
     )
 }
 
-/// Run the full N-C1 `connect start` boot: the N-C0 assembly
+/// note: run the full N-C1 `connect start` boot — the N-C0 assembly
 /// ([`build_config`]) + the active-workspace DB open + the per-process
 /// `NexusAdapter` + the [`invoke::build_handler`] wiring — exactly the
 /// shared boot shape the P1 spec § Process model locks (shared with
@@ -279,26 +280,26 @@ fn normalize_last_seen(value: &str) -> String {
 /// (`project` / unknown) is answered `op_unsupported` by the handler (N-C0
 /// refusal contract extends).
 async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
-    // Raw home: the home-layout identity/allowlist helpers join `.nexus42`
+    // why: raw home — the home-layout identity/allowlist helpers join `.nexus42`
     // themselves. The device-id resolution mirrors `host_manifest_port`
     // exactly so the Connect host_id is the SAME value HostManifestPort
     // advertises (single builder SSOT).
     let home = crate::config::user_home_dir()?;
-    // N-C3 (V1.155 P0): the boot also returns the per-process adapter (the
-    // peer-recording capability). `connect start` never dials — peers are
+    // note: N-C3 (V1.155 P0) — the boot also returns the per-process adapter
+    // (the peer-recording capability). `connect start` never dials — peers are
     // recorded by the dialing path at `connect()` return
     // ([`record_dialed_peer`]) — so the adapter is kept alive here (same
     // Arc the invoke handler captures) for the process lifetime.
     let (config, host_id, allowlist_len, _adapter) =
         build_host_config(&home, &allow_peer, &listen, None).await?;
 
-    // 7. Start the node; block on the tokio runtime until SIGINT.
     let node = SpokeConnectNode::start(config)
         .await
         .map_err(|e| CliError::Config(format!("connect node start failed: {e}")))?;
     let peer_tools_shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
-    // The static half of the peer admission reserved set: this composition's
-    // own host-tool roster (the protocol crate names no core registry).
+    // note: the static half of the peer admission reserved set — this
+    // composition's own host-tool roster (the protocol crate names no core
+    // registry).
     let builtin_tool_ids: std::collections::HashSet<String> =
         nexus_core::tool_catalog::reserved_host_tool_ids()
             .map(ToOwned::to_owned)
@@ -324,8 +325,8 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     for addr in node.listen_addrs() {
         eprintln!("  listen: {addr}");
     }
-    // v1.210 P3: the event lane's own readiness disclosure — the address it
-    // ACTUALLY bound (never the config echo); absent when the lane
+    // note: v1.210 P3 — the event lane's own readiness disclosure, the address
+    // it ACTUALLY bound (never the config echo); absent when the lane
     // warn-and-skipped (see the `event_lane:` warning above).
     if let Some(lane) = peer_tools_lane.as_ref() {
         eprintln!("  {}", nexus_connect::event_lane_readiness_line(lane.addr));
@@ -355,7 +356,7 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-/// Run `connect dial <multiaddr>` — the production outbound dial surface
+/// note: run `connect dial <multiaddr>`, the production outbound dial surface
 /// (N-C3, QC fix wave F-001).
 ///
 /// Resolves the real user home + the active workspace DB (the daemon
@@ -422,8 +423,8 @@ async fn dial_host(
         .connect(addr.clone())
         .await
         .map_err(|e| CliError::Other(format!("connect dial {addr} failed: {e}")))?;
-    // Fail-closed (F-001): the dial is not complete until the dialed
-    // manifest is recorded — a record reject is a command error, never a
+    // invariant: fail-closed (F-001) — the dial is not complete until the dialed
+    // manifest is recorded; a record reject is a command error, never a
     // silent no-op (the N-C3 honesty contract requires the observation to
     // land in the store).
     record_dialed_peer(&adapter, &session).await?;
@@ -438,8 +439,8 @@ async fn dial_host(
         "  capabilities: {}",
         sanitize_cell(&manifest.capabilities.join(", "))
     );
-    // A successful return above implies the record landed: `dial_host`
-    // aborts on any recording reject (fail-closed), so `recorded: yes` is
+    // note: a successful return above implies the record landed — `dial_host`
+    // aborts on any recording reject (fail-closed) — so `recorded: yes` is
     // not printed as a separate line.
     node.shutdown()
         .await
@@ -447,7 +448,7 @@ async fn dial_host(
     Ok(())
 }
 
-/// Assemble the architect-locked N-C0 `ConnectConfig` from the on-disk
+/// note: assemble the architect-locked N-C0 `ConnectConfig` from the on-disk
 /// state + CLI inputs (steps 1–6 of `start`). The N-C1 pieces (workspace DB
 /// open + adapter + invoke handler) are added by [`build_host_config`], so
 /// this function stays pure (no I/O beyond the identity/allowlist/token-
@@ -477,24 +478,24 @@ fn build_config(
     allow_peer: &[String],
     listen: &[String],
 ) -> Result<(ConnectConfig, String, usize, allowlist::PeerScope)> {
-    // 1. Identity: `~/.nexus42/connect/identity.key` (Ed25519, create-once 0600).
+    // note: 1. identity — `~/.nexus42/connect/identity.key` (Ed25519, create-once 0600).
     let identity = identity::load_or_create_identity(home)?;
 
-    // 2. host_id: installation device-id UUID — resolved exactly like
+    // note: 2. host_id — installation device-id UUID, resolved exactly like
     //    `host_manifest_port::resolve_device_id_from_standard_home`.
     //    `get_or_create_device_id` takes the RAW home and joins `.nexus42`
     //    itself (canonical `~/.nexus42/device-id`; device_id_path contract).
     let host_id = get_or_create_device_id(home)
         .map_err(|e| CliError::Config(format!("device id unavailable: {e}")))?;
 
-    // 3. Allowlist: file ∪ `--allow-peer*`; missing file ⇒ empty ⇒ fail-closed.
+    // note: 3. allowlist — file ∪ `--allow-peer*`; missing file ⇒ empty ⇒ fail-closed.
     //    `load` resolves the N-C1 `PeerScope` (per-peer world/op scope for
     //    the dispatch gate); the flat id set feeds the handshake allowlist.
     let peer_scope = allowlist::load(home, allow_peer)?;
     let peer_allowlist = peer_scope.peer_ids();
     let allowlist_len = peer_allowlist.len();
 
-    // 4. Listen multiaddrs from `--listen` (default loopback ephemeral port).
+    // note: 4. listen multiaddrs from `--listen` (default loopback ephemeral port).
     let listen_addrs = listen
         .iter()
         .map(|addr| {
@@ -503,7 +504,7 @@ fn build_config(
         })
         .collect::<Result<Vec<Multiaddr>>>()?;
 
-    // 5. Manifest: shared builder → connect_hello wire type (JSON round-trip).
+    // note: 5. manifest — shared builder → connect_hello wire type (JSON round-trip).
     let local_manifest = match build_connect_hello_manifest(&host_id) {
         SpokeResult::Ok(manifest) => manifest,
         SpokeResult::Reject(reject) => {
@@ -539,7 +540,7 @@ fn build_config(
         _ => None,
     };
 
-    // 6. Architect-locked ConnectConfig (the invoke handler is installed by
+    // note: 6. architect-locked ConnectConfig (the invoke handler is installed by
     //    build_host_config once the workspace adapter exists).
     let config = ConnectConfig {
         identity,
@@ -557,7 +558,7 @@ fn build_config(
     Ok((config, host_id, allowlist_len, peer_scope))
 }
 
-/// Full N-C1 host boot: [`build_config`] + workspace DB open + per-process
+/// note: full N-C1 host boot — [`build_config`] + workspace DB open + per-process
 /// `NexusAdapter` + [`invoke::build_handler`] — the `connect start` shape.
 ///
 /// DF-73: the `nexus-runtime` bin shares this boot; `run_daemon` is never
@@ -584,7 +585,7 @@ pub async fn build_host_config(
 ) -> Result<(ConnectConfig, String, usize, Arc<NexusAdapter<'static>>)> {
     let (mut config, host_id, allowlist_len, peer_scope) = build_config(home, allow_peer, listen)?;
 
-    // N-C1: workspace DB open (WAL pool via the shared Schema initializer —
+    // note: N-C1 — workspace DB open (WAL pool via the shared Schema initializer,
     // coexistence with a co-running daemon is WAL-governed, not
     // runtime_lock-governed; P1 spec § Process model) + the per-process
     // adapter singleton + the session-peer invoke dispatch handler
@@ -592,10 +593,10 @@ pub async fn build_host_config(
     // authenticated session peer; the legacy `invoke_handler` is not
     // selected, clean cutover per spec §5.2).
     let pool = open_workspace_pool(Some(home), workspace_db).await?;
-    // P2: the adapter's ComputablePort resolves compute modules host-locally
-    // from `~/.nexus42/modules/` (spec §2.1 — never peer-supplied bytes).
+    // note: P2 — the adapter's ComputablePort resolves compute modules host-locally
+    // from `~/.nexus42/modules/` (spec §2.1, never peer-supplied bytes).
     let modules_dir = nexus_home_layout::user_modules_dir(home);
-    // v1.191 P1 T14 (durable §9): the port set carries ONE process-wide
+    // note: v1.191 P1 T14 (durable §9) — the port set carries ONE process-wide
     // compiled-module cache and one host adapter; every KE invoke builds a
     // scoped adapter from the caller's stored Actor grant and shares the
     // cache (T8 hand-off — request binding never recompiles a module).
@@ -645,8 +646,8 @@ pub async fn record_dialed_peer(
                 )));
             }
         };
-    // V1.158 P2 (R-V1155P0-001): record the dialed peer's actual libp2p
-    // `PeerId` alongside the claimed `host_id` — the spoof/collision signal
+    // note: V1.158 P2 (R-V1155P0-001) — record the dialed peer's actual libp2p
+    // `PeerId` alongside the claimed `host_id`, the spoof/collision signal
     // (operator-visibility diagnostics only; no auth/allowlist input).
     let peer_id = session.remote_peer_id().to_string();
     match adapter
@@ -661,7 +662,7 @@ pub async fn record_dialed_peer(
     }
 }
 
-/// Open the active-workspace `SQLite` pool (WAL mode, migrations applied) —
+/// note: open the active-workspace `SQLite` pool (WAL mode, migrations applied) —
 /// the `DbPool` the per-process `NexusAdapter` runs against.
 ///
 /// `home` selects an explicit user home for embedded runtimes. `None` keeps
@@ -711,8 +712,8 @@ mod tests {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("manifest build is Ok: {r:?}"),
         };
-        // Capabilities are locked constants in the shared builder; override
-        // them to exercise the render path with the peer's actual list.
+        // why: capabilities are locked constants in the shared builder, so they
+        // are overridden here to exercise the render path with the peer's actual list.
         let manifest = {
             let mut m = manifest;
             m.capabilities = capabilities.iter().map(|c| (*c).to_string()).collect();
@@ -776,8 +777,8 @@ mod tests {
 
     #[test]
     fn render_peer_lines_strips_control_chars_from_peer_controlled_cells() {
-        // F-003: host_id / capabilities / last_peer_id originate from the
-        // remote peer — ANSI escapes and newlines must never reach the
+        // note: F-003 — host_id / capabilities / last_peer_id originate from the
+        // remote peer, so ANSI escapes and newlines must never reach the
         // operator's terminal.
         let peers = vec![observed_peer(
             "peer-\u{1b}[31mred\u{1b}[0m-uuid\n0003",
@@ -818,12 +819,10 @@ mod tests {
             normalize_last_seen("2026-08-08T10:00:00+00:00"),
             "2026-08-08T10:00:00.000Z"
         );
-        // Storage corruption is rejected earlier (InternalError) — the
-        // fallback keeps the render total.
+        // why: storage corruption is rejected earlier (InternalError), so the
+        // fallback only keeps the render total.
         assert_eq!(normalize_last_seen("not-a-timestamp"), "not-a-timestamp");
     }
-
-    // ── V1.155 P1 T2: token operator config wiring ───────────────────────
 
     fn temp_home() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
@@ -835,7 +834,7 @@ mod tests {
         std::fs::write(dir.join("config.json"), body).expect("write config.json");
     }
 
-    /// `build_config` with a loopback ephemeral listener and no CLI peers —
+    /// note: `build_config` with a loopback ephemeral listener and no CLI peers,
     /// the token-config surface under test.
     fn build_config_for(
         home: &Path,
@@ -926,7 +925,7 @@ mod tests {
         use spoke_connect::core::{verify_capability_token, CapabilityTokenProof};
 
         let home = temp_home();
-        // The issuer key must exist at boot (the CLI is the creation path).
+        // why: the issuer key must exist at boot; the CLI is the creation path.
         let issuer = token::load_or_create_issuer_key(home.path()).expect("issuer key created");
         let issuer_id = token::issuer_peer_id(&issuer).expect("issuer peer id");
         write_config(
@@ -945,7 +944,7 @@ mod tests {
             .as_ref()
             .expect("provider is Some when enabled");
 
-        // Mint a proof for a challenger audience and validate it end-to-end:
+        // note: mint a proof for a challenger audience and validate it end-to-end —
         // iss = issuer-derived id, sub = this node's peer id, aud = the
         // challenger, capabilities = the host manifest capabilities.
         let challenger = "12D3KooWChallengerPeer";

@@ -31,6 +31,7 @@
 //! granted peer, so the authenticated session peer can only ever reach its
 //! own grant; `world_scope`/`op_scope`/`module_scope` remain independent
 //! gates that must *also* pass (grant ∩ scopes ∩ capability token).
+// note: absent or empty scopes deny by default — only explicit entries grant access.
 //!
 
 use crate::errors::{CliError, Result};
@@ -39,7 +40,7 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// On-disk allowlist shape (`allowlist.json`).
+/// note: on-disk allowlist shape (`allowlist.json`).
 ///
 /// `deny_unknown_fields` turns typos like `peerIds` / `peer-id` into a hard
 /// config error instead of silently producing an empty (fail-closed)
@@ -51,7 +52,7 @@ struct AllowlistFile {
     peer_ids: Vec<PeerEntry>,
 }
 
-/// One `peer_ids` entry: a bare peer id (N-C0 shape — no op access) or a
+/// note: one `peer_ids` entry — a bare peer id (N-C0 shape, no op access) or a
 /// scoped object (N-C1 → N-C2).
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
@@ -60,7 +61,7 @@ enum PeerEntry {
     Scoped(PeerEntryScoped),
 }
 
-/// Scoped entry form — locked schema (P1 spec § World scoping; P2 spec
+/// note: scoped entry form, locked schema (P1 spec § World scoping; P2 spec
 /// §6.1 adds `module_scope`).
 ///
 /// `world_scope` / `op_scope` / `module_scope` are optional; absent fields
@@ -74,17 +75,17 @@ struct PeerEntryScoped {
     world_scope: Vec<String>,
     #[serde(default)]
     op_scope: Vec<String>,
-    /// Host-local compute module ids this peer may invoke (P2 — architect
+    /// note: host-local compute module ids this peer may invoke (P2 — architect
     /// lock, spec §6.1: absent/empty denies ALL compute).
     #[serde(default)]
     module_scope: Vec<String>,
-    /// Operator-stored Actor grant (v1.191 P1 T14, durable §9). Absent ⇒ the
+    /// note: operator-stored Actor grant (v1.191 P1 T14, durable §9). Absent ⇒ the
     /// peer is handshake/scope-allowlisted but performs no KE operation.
     #[serde(default)]
     grant: Option<PeerGrant>,
 }
 
-/// Operator-stored Actor grant for one allowlisted peer (v1.191 P1 T14 —
+/// note: operator-stored Actor grant for one allowlisted peer (v1.191 P1 T14,
 /// durable `holder-governance.md` §9).
 ///
 /// The grant names the **stored** Actor the peer acts as — a controlling
@@ -99,38 +100,38 @@ struct PeerEntryScoped {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PeerGrant {
-    /// Controlling Creator of the granted Actor: the stored owner whose
+    /// note: controlling Creator of the granted Actor — the stored owner whose
     /// ownership rows authorize the containers (`actor_view_scope` resolves
     /// them server-side, never from the request).
     pub creator_id: String,
-    /// The granted `ActorRef` — the peer acts as this stored identity only.
+    /// note: the granted `ActorRef` — the peer acts as this stored identity only.
     pub actor: GrantActor,
-    /// Granted World (world UUID string, never a path).
+    /// note: granted World (world UUID string, never a path).
     pub world_id: String,
-    /// Granted Actor-World binding; REQUIRED for a Character grant (the
+    /// note: granted Actor-World binding; REQUIRED for a Character grant (the
     /// Character viewpoint is World + Character + binding).
     #[serde(default)]
     pub binding_id: Option<String>,
 }
 
-/// The `ActorRef` half of a [`PeerGrant`] — mirrors `nexus_core::AdmittedActor`
+/// note: the `ActorRef` half of a [`PeerGrant`] — mirrors `nexus_core::AdmittedActor`
 /// without importing it into the on-disk schema.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GrantActor {
-    /// The controlling Creator itself.
+    /// note: the controlling Creator itself.
     Creator {
-        /// Creator id (must equal [`PeerGrant::creator_id`]).
+        /// note: Creator id (must equal [`PeerGrant::creator_id`]).
         id: String,
     },
-    /// One Character owned by the controlling Creator.
+    /// note: one Character owned by the controlling Creator.
     Character {
-        /// Character id.
+        /// note: Character id.
         id: String,
     },
 }
 
-/// How a granted Actor is admitted for one invoke (v1.191 P1 T14 fix round,
+/// note: how a granted Actor is admitted for one invoke (v1.191 P1 T14 fix round,
 /// durable §2.2/§9).
 ///
 /// The grant is resolved the same way in both modes — the containers and the
@@ -146,20 +147,20 @@ pub enum GrantActor {
 ///   run compute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrantAdmission {
-    /// `check` / `assemble` — retained read of owned containers.
+    /// note: `check` / `assemble` — retained read of owned containers.
     RetainedRead,
-    /// `upsert` / `promote` / `relate` / `compute` — live subject + binding.
+    /// note: `upsert` / `promote` / `relate` / `compute` — live subject + binding.
     LiveWrite,
 }
 
 impl PeerGrant {
-    /// The granted World viewpoint.
+    /// note: the granted World viewpoint.
     #[must_use]
     pub fn world_id(&self) -> &str {
         &self.world_id
     }
 
-    /// The granted `ActorRef` id (Creator or Character id).
+    /// note: the granted `ActorRef` id (Creator or Character id).
     #[must_use]
     pub fn actor_id(&self) -> &str {
         match &self.actor {
@@ -167,7 +168,7 @@ impl PeerGrant {
         }
     }
 
-    /// Fail-closed validation of one operator-authored grant.
+    /// note: fail-closed validation of one operator-authored grant.
     ///
     /// A grant is a pointer at stored state, so a malformed one must be a
     /// hard config error rather than a row that denies every invoke later:
@@ -210,7 +211,7 @@ impl PeerGrant {
         }
     }
 
-    /// Resolve this grant against **current stored ownership/lifecycle** into
+    /// note: resolve this grant against **current stored ownership/lifecycle** into
     /// the admitted read selection it authorizes (v1.191 P1 T14, durable §4.1
     /// / §9).
     ///
@@ -235,7 +236,7 @@ impl PeerGrant {
         pool: &sqlx::SqlitePool,
         admission: GrantAdmission,
     ) -> Result<nexus_knowledge::world_kb::KnowledgeReadScope> {
-        // Live admission (durable §2.2/§9): a write/compute invoke requires
+        // why: live admission (durable §2.2/§9) — a write/compute invoke requires
         // the granted subject and binding to be ACTIVE, resolved from storage
         // on this invoke. The guards are the core's own liveness authority —
         // the retained-read resolution below is reused for the containers and
@@ -263,7 +264,7 @@ impl PeerGrant {
             .map_err(|e| self.unresolvable(&e.to_string()))
     }
 
-    /// The live-admission guards for `upsert` / `promote` / `relate` /
+    /// note: the live-admission guards for `upsert` / `promote` / `relate` /
     /// `compute` (v1.191 P1 T14 fix round, durable §2.2/§9): the granted
     /// World must be active, and a Character grant additionally requires an
     /// active Character and an **active** binding whose stored tuple matches
@@ -276,7 +277,7 @@ impl PeerGrant {
             nexus_core::require_active_owned_character(pool, &self.creator_id, id)
                 .await
                 .map_err(|e| self.unresolvable(&e.to_string()))?;
-            // `validate` guarantees a binding for a Character grant.
+            // invariant: `validate` guarantees a binding for a Character grant.
             let binding = self.binding_id.as_deref().unwrap_or_default();
             nexus_core::ActorKnowledgeViewService::new(pool.clone())
                 .require_active_binding(id, binding, &self.world_id)
@@ -286,7 +287,7 @@ impl PeerGrant {
         Ok(())
     }
 
-    /// The stable, non-leaking denial message for an unresolvable grant.
+    /// note: the stable, non-leaking denial message for an unresolvable grant.
     fn unresolvable(&self, reason: &str) -> CliError {
         CliError::Other(format!(
             "stored Actor grant (creator {}, actor {}, world {}) does not resolve: {reason}",
@@ -297,7 +298,7 @@ impl PeerGrant {
     }
 }
 
-/// Resolved allowlist scoping: peer → allowed world ids / allowed ops.
+/// note: resolved allowlist scoping — peer → allowed world ids / allowed ops.
 ///
 /// Consumed by (a) the N-C1 dispatch gate via [`PeerScope::allows_world`] /
 /// [`PeerScope::allows_op`] and (b) `ConnectConfig.peer_allowlist` via
@@ -307,15 +308,15 @@ pub struct PeerScope {
     entries: BTreeMap<PeerId, PeerAccess>,
 }
 
-/// Per-peer scoping. Empty sets ⇒ fail-closed: the peer is handshake-
+/// note: per-peer scoping. Empty sets ⇒ fail-closed: the peer is handshake-
 /// allowlisted but has no world/op/module access.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerAccess {
-    /// World ids (world UUID strings, not paths) this peer may target —
+    /// note: world ids (world UUID strings, not paths) this peer may target —
     /// writes AND the world-scoped read ops (`check` / `assemble`) and the
     /// P2 compute op share the same gate.
     pub world_scope: BTreeSet<String>,
-    /// Ops this peer may invoke (N-C2 E2 served ops: `upsert` / `promote` /
+    /// note: ops this peer may invoke (N-C2 E2 served ops: `upsert` / `promote` /
     /// `relate` / `check` / `assemble` / `compute`). V1.173 (DF-84, AR-49):
     /// may also list `tools.nexus.*` strings (e.g.
     /// `tools.nexus.list_observed_peers`) — they flow through the same
@@ -323,32 +324,32 @@ pub struct PeerAccess {
     /// an operator must add each served tool id the peer may call, or the
     /// invoke is denied after the `SERVED_OPS` gate.
     pub op_scope: BTreeSet<String>,
-    /// Host-local compute module ids this peer may invoke (P2 — architect
+    /// note: host-local compute module ids this peer may invoke (P2 — architect
     /// lock, spec §6.1: missing/empty denies ALL compute, fail-closed).
     /// Module ids are operator-allowlisted names; the module bytes are
     /// never peer-supplied (resolved host-locally under
     /// `~/.nexus42/modules/` only).
     pub module_scope: BTreeSet<String>,
-    /// Operator-stored Actor grant (v1.191 P1 T14, durable §9). `None` ⇒ no
+    /// note: operator-stored Actor grant (v1.191 P1 T14, durable §9). `None` ⇒ no
     /// KE operation is served to this peer, whatever its scopes say.
     pub grant: Option<PeerGrant>,
 }
 
 impl PeerScope {
-    /// All allowlisted peer ids (sorted) — the `ConnectConfig.peer_allowlist`
+    /// note: all allowlisted peer ids (sorted) — the `ConnectConfig.peer_allowlist`
     /// handshake set.
     #[must_use]
     pub fn peer_ids(&self) -> Vec<PeerId> {
         self.entries.keys().copied().collect()
     }
 
-    /// Per-peer access; `None` when the peer is not allowlisted.
+    /// note: per-peer access; `None` when the peer is not allowlisted.
     #[must_use]
     pub fn access_for(&self, peer: &PeerId) -> Option<&PeerAccess> {
         self.entries.get(peer)
     }
 
-    /// The stored Actor grant of one peer (v1.191 P1 T14, durable §9).
+    /// note: the stored Actor grant of one peer (v1.191 P1 T14, durable §9).
     ///
     /// Keyed by the **authenticated session peer**: the lookup is the
     /// grant's peer binding, so a peer can only ever reach its own grant —
@@ -360,7 +361,7 @@ impl PeerScope {
             .and_then(|access| access.grant.as_ref())
     }
 
-    /// Fail-closed world gate: true only when the peer is allowlisted AND its
+    /// note: fail-closed world gate — true only when the peer is allowlisted AND its
     /// `world_scope` contains `world_id`.
     #[must_use]
     pub fn allows_world(&self, peer: &PeerId, world_id: &str) -> bool {
@@ -368,7 +369,7 @@ impl PeerScope {
             .is_some_and(|access| access.world_scope.contains(world_id))
     }
 
-    /// Fail-closed op gate: true only when the peer is allowlisted AND its
+    /// note: fail-closed op gate — true only when the peer is allowlisted AND its
     /// `op_scope` contains `op`.
     #[must_use]
     pub fn allows_op(&self, peer: &PeerId, op: &str) -> bool {
@@ -376,7 +377,7 @@ impl PeerScope {
             .is_some_and(|access| access.op_scope.contains(op))
     }
 
-    /// Fail-closed compute-module gate (P2 architect lock, spec §6.1): true
+    /// note: fail-closed compute-module gate (P2 architect lock, spec §6.1) — true
     /// only when the peer is allowlisted AND its `module_scope` contains
     /// `module_id`. An absent/empty `module_scope` denies ALL compute.
     #[must_use]
@@ -385,13 +386,13 @@ impl PeerScope {
             .is_some_and(|access| access.module_scope.contains(module_id))
     }
 
-    /// True when no peer is allowlisted at all (missing/empty file).
+    /// note: true when no peer is allowlisted at all (missing/empty file).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// File entries: last occurrence wins (a later hand-authored duplicate
+    /// note: file entries — last occurrence wins (a later hand-authored duplicate
     /// overrides an earlier one, matching JSON duplicate-key conventions).
     fn insert_entry(&mut self, entry: PeerEntry) -> Result<()> {
         match entry {
@@ -418,7 +419,7 @@ impl PeerScope {
         Ok(())
     }
 
-    /// CLI overlay: fills gaps only — a `--allow-peer` entry (which carries
+    /// note: CLI overlay fills gaps only — a `--allow-peer` entry (which carries
     /// no scope) must never strip a hand-authored file scope for the same
     /// peer. CLI peers have no write access by design (fail-closed).
     fn insert_cli_peer(&mut self, id: &str) -> Result<()> {
@@ -433,7 +434,7 @@ fn parse_peer_id(raw: &str) -> Result<PeerId> {
         .map_err(|e| CliError::Config(format!("invalid peer id {raw:?} in allowlist: {e}")))
 }
 
-/// Load the effective allowlist: file entries ∪ `--allow-peer` CLI entries.
+/// note: load the effective allowlist — file entries ∪ `--allow-peer` CLI entries.
 ///
 /// A missing file is not an error — it contributes nothing (fail-closed).
 /// An unreadable/malformed file or an unparseable peer id is a hard error so
@@ -468,7 +469,7 @@ pub fn load(home: &Path, cli_peers: &[String]) -> Result<PeerScope> {
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Missing file ⇒ empty allowlist ⇒ fail-closed.
+            // note: missing file ⇒ empty allowlist ⇒ fail-closed.
         }
         Err(e) => return Err(CliError::Io(e)),
     }
@@ -546,7 +547,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = nexus_home_layout::connect_allowlist_path(temp.path());
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
-        // `peerIds` is a common typo for `peer_ids`; accepting it would
+        // note: `peerIds` is a common typo for `peer_ids`; accepting it would
         // silently produce an empty (fail-closed) allowlist.
         std::fs::write(&path, r#"{ "peer_ids": [], "peerIds": ["12D3KooWxxxx"] }"#).expect("write");
 
@@ -562,9 +563,7 @@ mod tests {
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
     }
 
-    // ---- N-C1 world/op scoping (locked schema, fail-closed) ----
-
-    /// The T1 gate contract (brief Step 1): a scoped peer is allowed on a
+    /// note: the T1 gate contract (brief Step 1) — a scoped peer is allowed on a
     /// listed world and denied on every other world; ops outside its
     /// `op_scope` are denied too.
     #[test]
@@ -599,7 +598,7 @@ mod tests {
         assert!(!scope.allows_op(&peer, "relate"), "unlisted op denied");
     }
 
-    /// N-C0 backward compat: a bare string entry stays handshake-allowlisted
+    /// note: N-C0 backward compat — a bare string entry stays handshake-allowlisted
     /// but carries no scope ⇒ never any world-write access (fail-closed).
     #[test]
     fn bare_string_entries_are_allowlisted_but_never_write() {
@@ -623,7 +622,7 @@ mod tests {
         );
     }
 
-    /// Absent `world_scope` ⇒ no world writes, even with an op scope present.
+    /// note: absent `world_scope` ⇒ no world writes, even with an op scope present.
     #[test]
     fn object_entry_without_world_scope_is_fail_closed() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -640,7 +639,7 @@ mod tests {
         );
     }
 
-    /// Absent `op_scope` ⇒ no ops, even with a world scope present.
+    /// note: absent `op_scope` ⇒ no ops, even with a world scope present.
     #[test]
     fn object_entry_without_op_scope_is_fail_closed() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -657,9 +656,7 @@ mod tests {
         );
     }
 
-    // ---- N-C2 (P2) module scoping (architect lock, spec §6.1) ----
-
-    /// The P2 module gate contract: a scoped peer is allowed to invoke a
+    /// note: the P2 module gate contract — a scoped peer is allowed to invoke a
     /// listed module and denied every other module.
     #[test]
     fn scoped_peer_allowed_on_listed_module_denied_on_other_modules() {
@@ -686,7 +683,7 @@ mod tests {
         );
     }
 
-    /// Absent `module_scope` ⇒ no compute, even with world/op scopes
+    /// note: absent `module_scope` ⇒ no compute, even with world/op scopes
     /// present (the architect lock: missing or empty scope denies ALL
     /// compute — fail-closed). Also the backward-compat pin: a V1.153 →
     /// V1.154 allowlist file WITHOUT the new field still loads (optional
@@ -711,7 +708,7 @@ mod tests {
         );
     }
 
-    /// An explicit empty `module_scope` list denies compute exactly like an
+    /// note: an explicit empty `module_scope` list denies compute exactly like an
     /// absent field.
     #[test]
     fn empty_module_scope_is_fail_closed() {
@@ -734,7 +731,7 @@ mod tests {
         );
     }
 
-    /// `deny_unknown_fields` is retained on the scoped object form: a typo
+    /// note: `deny_unknown_fields` is retained on the scoped object form — a typo
     /// like `op_scop` stays a hard config error.
     #[test]
     fn unknown_fields_inside_scoped_entry_are_rejected() {
@@ -764,7 +761,7 @@ mod tests {
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
     }
 
-    /// The `--allow-peer` overlay carries no scope by design; it must fill
+    /// note: the `--allow-peer` overlay carries no scope by design; it must fill
     /// gaps only and never strip a hand-authored file scope.
     #[test]
     fn cli_overlay_never_strips_file_scope() {
@@ -787,7 +784,7 @@ mod tests {
         );
     }
 
-    /// A peer that is not allowlisted at all has no access (gate is
+    /// note: a peer that is not allowlisted at all has no access (gate is
     /// fail-closed on unknown peers too).
     #[test]
     fn non_allowlisted_peer_has_no_access() {
@@ -817,9 +814,7 @@ mod tests {
         );
     }
 
-    // ---- v1.191 P1 T14: operator-stored Actor grants (durable §9) ----
-
-    /// A well-formed grant round-trips: it is stored, bound to its own peer,
+    /// note: a well-formed grant round-trips — it is stored, bound to its own peer,
     /// and exposes the granted World viewpoint.
     #[test]
     fn v1191_holder_connect_grant_is_peer_bound() {
@@ -851,7 +846,7 @@ mod tests {
         );
     }
 
-    /// Absent grant ⇒ the peer keeps its scopes but no KE authority: the
+    /// note: absent grant ⇒ the peer keeps its scopes but no KE authority — the
     /// model never fabricates one from the peer id or the scopes.
     #[test]
     fn v1191_holder_connect_absent_grant_is_denied() {
@@ -877,7 +872,7 @@ mod tests {
         );
     }
 
-    /// A grant never widens the independent scopes; empty scopes deny even
+    /// note: a grant never widens the independent scopes; empty scopes deny even
     /// with a stored grant (fail-closed intersection).
     #[test]
     fn v1191_holder_connect_grant_does_not_widen_scopes() {
@@ -904,7 +899,7 @@ mod tests {
         );
     }
 
-    /// A Character grant requires its binding (the Character viewpoint is
+    /// note: a Character grant requires its binding (the Character viewpoint is
     /// World + Character + binding) — an operator typo is a hard config
     /// error, never a grant that silently denies every invoke.
     #[test]
@@ -925,7 +920,6 @@ mod tests {
         let err = load(temp.path(), &[]).expect_err("binding-less Character grant rejected");
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
 
-        // With the binding it loads.
         write_allowlist(
             temp.path(),
             &serde_json::json!([{
@@ -944,7 +938,7 @@ mod tests {
         assert_eq!(grant.binding_id.as_deref(), Some("bnd_hero"));
     }
 
-    /// A Creator grant's `ActorRef` is its controlling Creator — two different
+    /// note: a Creator grant's `ActorRef` is its controlling Creator — two different
     /// subjects are refused at load (never a silently dead grant).
     #[test]
     fn v1191_holder_connect_creator_grant_must_name_its_controlling_creator() {
@@ -965,7 +959,7 @@ mod tests {
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
     }
 
-    /// Empty grant fields are refused at load (fail-closed, named error).
+    /// note: empty grant fields are refused at load (fail-closed, named error).
     #[test]
     fn v1191_holder_connect_empty_grant_fields_are_rejected() {
         for grant in [
@@ -996,7 +990,7 @@ mod tests {
         }
     }
 
-    /// Unknown grant fields / an unknown actor kind stay hard config errors
+    /// note: unknown grant fields / an unknown actor kind stay hard config errors
     /// (`deny_unknown_fields` inside the grant, like the entry itself).
     #[test]
     fn v1191_holder_connect_unknown_grant_fields_are_rejected() {
@@ -1023,7 +1017,7 @@ mod tests {
         }
     }
 
-    /// The `--allow-peer` overlay can never mint or strip a grant (it has no
+    /// note: the `--allow-peer` overlay can never mint or strip a grant (it has no
     /// scope fields by design — the trust root stays hand-authored).
     #[test]
     fn v1191_holder_connect_cli_overlay_never_mints_a_grant() {
@@ -1036,7 +1030,7 @@ mod tests {
         );
     }
 
-    /// The granted World viewpoint is independent from `world_scope`: a
+    /// note: the granted World viewpoint is independent from `world_scope` — a
     /// grant on world-a never authorizes world-b, and a scope entry for
     /// world-b never re-points the grant.
     #[test]

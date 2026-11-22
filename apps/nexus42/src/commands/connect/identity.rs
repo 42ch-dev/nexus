@@ -4,12 +4,13 @@
 //! created once with owner-only permissions, reused across restarts so the
 //! derived `PeerId` (the network identity and hello signer) is stable for
 //! the installation.
+// note: losing this key changes the PeerId, so it is never regenerated over an existing file.
 
 use crate::errors::{CliError, Result};
 use libp2p::identity::Keypair;
 use std::path::Path;
 
-/// Load the persisted Connect identity key, or generate + persist a fresh
+/// note: load the persisted Connect identity key, or generate + persist a fresh
 /// Ed25519 keypair on first use (create-once, 0600 on Unix).
 ///
 /// The file stores the libp2p protobuf key encoding (`Keypair::to_bytes`),
@@ -32,22 +33,22 @@ pub fn load_or_create_identity(home: &Path) -> Result<Keypair> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Serialize before touching the filesystem so a serialization failure can
-    // never leave a partial identity file behind.
+    // why: serialize before touching the filesystem so a serialization failure
+    // can never leave a partial identity file behind.
     let keypair = Keypair::generate_ed25519();
     let encoded = keypair
         .to_protobuf_encoding()
         .map_err(|e| CliError::Config(format!("identity key serialization failed: {e}")))?;
 
-    // `create_new` eliminates the TOCTOU race between the existence check and
-    // the write (same pattern as the device-id file in `nexus-home-layout`).
+    // why: `create_new` eliminates the TOCTOU race between the existence check
+    // and the write (same pattern as the device-id file in `nexus-home-layout`).
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    // W-1: apply the owner-only mode at creation time (atomic create-with-mode)
-    // so the key is never observable at a permissive mode — not even if the
-    // process crashes between open and write (the old open-then-chmod window).
-    // umask can only tighten the bits, never loosen them. On non-unix, the
-    // platform default applies (best available).
+    // safety: W-1 applies the owner-only mode at creation time (atomic
+    // create-with-mode), so the key is never observable at a permissive mode —
+    // not even if the process crashes between open and write (the old
+    // open-then-chmod window). umask can only tighten the bits, never loosen
+    // them. On non-unix, the platform default applies (best available).
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -56,8 +57,8 @@ pub fn load_or_create_identity(home: &Path) -> Result<Keypair> {
     match options.open(&path) {
         Ok(mut file) => {
             if let Err(e) = file.write_all(&encoded) {
-                // S-1: never leave a partial key file behind — a corrupt key
-                // would block every later start (the reload path rejects it).
+                // safety: S-1 never leaves a partial key file behind — a corrupt
+                // key would block every later start (the reload path rejects it).
                 let _ = std::fs::remove_file(&path);
                 return Err(CliError::Io(e));
             }
@@ -78,7 +79,7 @@ pub fn load_or_create_identity(home: &Path) -> Result<Keypair> {
     }
 }
 
-/// Ensure the identity key file is owner-only (0600) on the reload path.
+/// note: ensure the identity key file is owner-only (0600) on the reload path.
 ///
 /// Files created before the atomic `mode(0o600)` fix (open-then-chmod) may
 /// still sit at a permissive mode if a previous process crashed between the
@@ -107,7 +108,6 @@ mod tests {
         let created = load_or_create_identity(home).expect("create");
         let created_peer = created.public().to_peer_id();
 
-        // Second call must reload the same keypair (stable PeerId).
         let reloaded = load_or_create_identity(home).expect("reload");
         assert_eq!(
             reloaded.public().to_peer_id(),
@@ -115,7 +115,7 @@ mod tests {
             "identity must persist across calls"
         );
 
-        // The persisted file is the protobuf encoding (reloadable directly).
+        // note: the persisted file is the protobuf encoding, reloadable directly.
         let path = nexus_home_layout::connect_identity_key_path(home);
         let bytes = std::fs::read(&path).expect("identity file exists");
         let from_file = Keypair::from_protobuf_encoding(&bytes).expect("protobuf key parses");
@@ -149,8 +149,8 @@ mod tests {
         let home = temp.path();
         let path = nexus_home_layout::connect_identity_key_path(home);
 
-        // Simulate a key left behind by the old open-then-chmod path (crash
-        // between open and chmod ⇒ file stuck at 0644).
+        // note: simulate a key left behind by the old open-then-chmod path
+        // (crash between open and chmod ⇒ file stuck at 0644).
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         let keypair = Keypair::generate_ed25519();
         std::fs::write(&path, keypair.to_protobuf_encoding().expect("encode")).expect("write key");
