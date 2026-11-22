@@ -389,12 +389,12 @@ mod tests {
             "",
             "op_",
             "op_123",
-            "op_0000000000000000000000000000000",   // note: 31 hex
+            "op_0000000000000000000000000000000", // note: 31 hex
             "op_000000000000000000000000000000000", // note: 33 hex
-            "op_0000000000000000000000000000000G",  // note: non-hex char
-            "op_0000000000000000000000000000000A",  // note: uppercase hex
-            "OP_00000000000000000000000000000000",  // note: uppercase prefix
-            "00000000000000000000000000000000",     // note: missing prefix
+            "op_0000000000000000000000000000000G", // note: non-hex char
+            "op_0000000000000000000000000000000A", // note: uppercase hex
+            "OP_00000000000000000000000000000000", // note: uppercase prefix
+            "00000000000000000000000000000000",   // note: missing prefix
         ] {
             let args = json!({"operation_id": bad});
             let err =

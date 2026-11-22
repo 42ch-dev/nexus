@@ -88,7 +88,7 @@ fn chapter_locator(chapter: Option<i32>) -> Result<ArtifactLocator, KnowledgeFau
 }
 
 impl CoreService {
-// note: work-entry extract queue (`creator world kb queue-extract` / `extract-status`).
+    // note: work-entry extract queue (`creator world kb queue-extract` / `extract-status`).
 
     /// note: Enqueue a work-scope entry for extraction into a target world.
     ///
