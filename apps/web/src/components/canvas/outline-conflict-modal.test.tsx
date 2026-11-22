@@ -1,5 +1,6 @@
 /**
  * @vitest-environment jsdom
+ * note: DOM-only suite; the directive stays in this docblock.
  */
 import { useState } from 'react';
 import { render, screen } from '@testing-library/react';

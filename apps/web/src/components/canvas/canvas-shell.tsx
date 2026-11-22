@@ -1,5 +1,5 @@
 /**
- * Canvas Shell — shared React Flow chrome for infinite-canvas surfaces
+ * note: Canvas Shell — shared React Flow chrome for infinite-canvas surfaces
  * (canvas-strategy-surface.md Draft §3.3).
  *
  * Provides the ReactFlowProvider, pan/zoom controls, minimap, dot-grid
@@ -78,25 +78,25 @@ export interface CanvasShellProps {
   onEdgesChange?: OnEdgesChange;
   onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void;
   onConnect?: OnConnect;
-  /** Edge reconnect handler — when set, edges become draggable to a new end (RF `edgesReconnectable` defaults to true). */
+  /** note: Edge reconnect handler — when set, edges become draggable to a new end (RF `edgesReconnectable` defaults to true). */
   onReconnect?: OnReconnect<Edge>;
-  /** Graph-level summary spoken to assistive tech (A8). */
+  /** note: Graph-level summary spoken to assistive tech (A8). */
   summaryText: string;
-  /** Accessible label for the canvas region. */
+  /** note: Accessible label for the canvas region. */
   ariaLabel: string;
-  /** Overlay children rendered above the graph (idea input, inspector, etc.). */
+  /** note: Overlay children rendered above the graph (idea input, inspector, etc.). */
   children?: ReactNode;
   /**
-   * Stable key for viewport caching across graph↔list toggles (FB-GS-000).
+   * note: Stable key for viewport caching across graph↔list toggles (FB-GS-000).
    * When provided, the pan/zoom viewport is cached on user interaction and
    * restored on re-mount instead of re-fitting. Omit to opt out (surfaces
    * that have not opted in keep the previous re-fit behaviour).
    */
   surfaceKey?: string;
-  /** Optional re-layout action rendered inside the canvas when provided. */
+  /** note: Optional re-layout action rendered inside the canvas when provided. */
   relayout?: () => void;
   /**
-   * V1.123 P3 T2 — surface identity driving visual prominence treatment.
+   * note: V1.123 P3 T2 — surface identity driving visual prominence treatment.
    * When set to `'timeline'` or `'work-timeline'`, the shell renders a
    * {@link CanvasShellTimelineBadge} overlay so the Timeline surface reads
    * as the central instrument (per `three-layer-product-spec.md`).
@@ -109,14 +109,14 @@ export interface CanvasShellProps {
    */
   surfaceKind?: CanvasSurfaceKind;
   /**
-   * V1.126 P1 — optional fitView options override. When provided, these
+   * note: V1.126 P1 — optional fitView options override. When provided, these
    * options are merged into the default `{ padding: '8%' }`. Surfaces that
    * need to exclude certain nodes from fit-bounds calculations (e.g. the
    * directed-axis-spine decoration node) can pass a `nodes` filter here.
    */
   fitViewOptions?: FitViewOptions;
   /**
-   * v1.183 P0 (R-V1121P3QC1-S002) — surface-aware MiniMap node swatch color.
+   * note: v1.183 P0 (R-V1121P3QC1-S002) — surface-aware MiniMap node swatch color.
    * Defaults to the strategy accent (the shell's original hardcoded color);
    * surfaces with their own accent token pass their
    * `var(--color-canvas-*-accent)` so the minimap reads as part of the active
@@ -128,7 +128,7 @@ export interface CanvasShellProps {
 }
 
 /**
- * Inner shell rendered inside a `ReactFlowProvider`. Owns the controlled
+ * note: Inner shell rendered inside a `ReactFlowProvider`. Owns the controlled
  * node/edge state plumbing and the interactive chrome.
  */
 function CanvasShellInner({
@@ -147,20 +147,20 @@ function CanvasShellInner({
   relayout,
   surfaceKind,
   fitViewOptions,
-  // Strategy accent is the original hardcoded swatch; surfaces with their
+  // note: strategy accent is the original hardcoded swatch; surfaces with their
   // own accent token opt in via the minimapAccent prop (R-V1121P3QC1-S002).
   minimapAccent = 'var(--color-canvas-strategy-accent)',
 }: CanvasShellProps) {
   const { t } = useTranslation('canvas');
-  // FB-GS-000 — cache pan/zoom so a graph↔list toggle does not drop the
+  // note: FB-GS-000 — cache pan/zoom so a graph↔list toggle does not drop the
   // viewport. When a cached viewport exists, restore it instead of fitting.
   const { cachedViewport, onViewportChange } = useCanvasViewport(surfaceKey);
   const hasCachedViewport = cachedViewport !== null;
-  // V1.121 v0.4 — ambient dot-grid metrics consumed from DESIGN.md §canvas
+  // note: V1.121 v0.4 — ambient dot-grid metrics consumed from DESIGN.md §canvas
   // tokens (per-theme tunable; dark canvas is ink, not neutral flip).
   const gridMetrics = useCanvasGridMetrics();
 
-  // V1.123 P3 T2 — Timeline visual prominence. The shell renders a small
+  // note: V1.123 P3 T2 — Timeline visual prominence. The shell renders a small
   // accent badge overlay when the active surface is the World Timeline or
   // Work Timeline so the central instrument reads as visually distinct from
   // Strategy / Outline / World KB canvases. Other surfaces render no badge.
@@ -178,7 +178,7 @@ function CanvasShellInner({
         {summaryText}
       </div>
 
-      {/* V1.123 P3 T2 — Timeline prominence badge overlay. Rendered ABOVE
+      {/* note: V1.123 P3 T2 — Timeline prominence badge overlay. Rendered ABOVE
           the React Flow pane (z-10) so the accent treatment stays visible
           across viewport pans / zooms. Sibling to the SR summary so the
           i18n namespace resolves once for both. */}
@@ -201,7 +201,7 @@ function CanvasShellInner({
         nodesFocusable
         edgesFocusable
         fitView={!hasCachedViewport}
-        // RF 13 padding is px or a % string; legacy 0.2 ≈ 8% on the new scale.
+        // note: RF 13 padding is px or a % string; legacy 0.2 ≈ 8% on the new scale.
         fitViewOptions={{ padding: '8%', ...fitViewOptions }}
         defaultViewport={hasCachedViewport ? cachedViewport : undefined}
         onMove={(_, viewport) => onViewportChange(viewport)}

@@ -1,5 +1,5 @@
 /**
- * Canvas surface commands — palette registrations mounted inside each canvas
+ * note: Canvas surface commands — palette registrations mounted inside each canvas
  * surface (V1.111 P0 T4).
  *
  * Unlike {@link CanvasNavCommands} (which lives in `RootLayout`), the
@@ -27,7 +27,7 @@ import { EntranceProvider } from '@/lib/entrance-context';
 import { noopClient } from '@/test/test-providers';
 
 // ---------------------------------------------------------------------------
-// Shared mocks — CanvasShell (React Flow) as a no-op so jsdom stays cheap.
+// note: Shared mocks — CanvasShell (React Flow) as a no-op so jsdom stays cheap.
 // ---------------------------------------------------------------------------
 
 vi.mock('@/components/canvas/canvas-shell', () => ({
@@ -36,7 +36,7 @@ vi.mock('@/components/canvas/canvas-shell', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// OUTLINE mocks
+// note: Outline mocks.
 // ---------------------------------------------------------------------------
 
 const outlineMocks = vi.hoisted(() => ({
@@ -46,7 +46,7 @@ const outlineMocks = vi.hoisted(() => ({
       outline_revision: 1,
       volumes: [],
       timeline_events: [],
-      // Required `WorkOutline` carrier fields (V1.200 DR-26 Task 1 made
+      // note: required `WorkOutline` carrier fields (V1.200 DR-26 Task 1 made
       // `scenes` / `beats` required on the wire; this stale mock omitted them).
       foreshadows: [],
       scenes: [],
@@ -100,7 +100,7 @@ vi.mock('@/lib/canvas/use-outline-data', async (orig) => {
 vi.mock('@/lib/nexus/query-keys', () => ({
   queryKeys: {
     chapters: { outlines: () => ['ch', 'out'] },
-    // The Strategy canvas mounts the live-apply and approval-list reads, so this
+    // note: the Strategy canvas mounts the live-apply and approval-list reads, so this
     // suite's partial key mock has to carry both families it evaluates on mount.
     strategies: {
       applied: (id: string) => ['strategies', 'applied', id],
@@ -117,7 +117,7 @@ vi.mock('@/components/canvas/outline-canvas/rf-projection', () => ({
   selectedBeatIdFromNodes: () => null,
 }));
 
-// Outline heavy children → no-ops (keep canvas-layout real for the toggle).
+// note: Outline heavy children → no-ops (keep canvas-layout real for the toggle).
 vi.mock('@/components/canvas/outline-canvas/inspectors/chapter-inspector', () => ({
   ChapterInspector: () => null,
 }));
@@ -144,7 +144,7 @@ vi.mock('@/components/canvas/outline-canvas/outline-nodes', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// STRATEGY mocks
+// note: Strategy mocks.
 // ---------------------------------------------------------------------------
 
 const strategyMocks = vi.hoisted(() => ({
@@ -202,7 +202,7 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
   return { useStrategyCanvas: () => strategyState };
 });
 
-// Strategy heavy children → no-ops (keep canvas-layout real).
+// note: Strategy heavy children → no-ops (keep canvas-layout real).
 vi.mock('@/components/canvas/strategy-canvas/inspectors/state-inspector', () => ({
   StateInspector: () => null,
 }));
@@ -226,7 +226,7 @@ vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
 vi.mock('@/components/canvas/strategy-alt-view', () => ({
   StrategyAltView: () => null,
 }));
-// The simulation hook needs a client provider; this suite is about palette
+// why: the simulation hook needs a client provider; this suite is about palette
 // commands, so it stays inert.
 vi.mock('@/lib/canvas/use-simulation-trajectory', () => ({
   useSimulationTrajectory: () => ({
@@ -245,7 +245,7 @@ vi.mock('@/components/canvas/idea-input', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// WORLD KB mocks
+// note: World KB mocks.
 // ---------------------------------------------------------------------------
 
 const worldKbMocks = vi.hoisted(() => ({
@@ -332,7 +332,7 @@ vi.mock('@/components/canvas/world-kb/world-kb-canvas-utils', () => ({
 vi.mock('@/components/canvas/world-kb/types', () => ({}));
 
 // ---------------------------------------------------------------------------
-// Helpers
+// note: Helpers.
 // ---------------------------------------------------------------------------
 
 function findById(id: string): Command | undefined {
@@ -343,7 +343,7 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
 
-/** Wrap an element in the QueryClientProvider the canvas hooks require. */
+/** note: Wrap an element in the QueryClientProvider the canvas hooks require. */
 function withProviders(element: ReactElement): ReactElement {
   return (
     <QueryClientProvider client={queryClient}>
@@ -366,7 +366,7 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Strategy — toggle view. View switching is the only palette command this
+// note: Strategy — toggle view. View switching is the only palette command this
 // surface registers; structural creation is a Compose operation.
 // ---------------------------------------------------------------------------
 
@@ -391,7 +391,7 @@ describe('StrategyCanvas — palette commands', () => {
   });
 
   it('toggle handler flips aria-pressed across repeated invocations', async () => {
-    // useRegisterCommand captures the command once on mount. The toggle handler
+    // why: useRegisterCommand captures the command once on mount. The toggle handler
     // uses setShowAlt(v => !v) so it never closes over a stale boolean — two
     // invocations must flip true then false, not true then true.
     const { StrategyCanvas } = await import('@/components/canvas/strategy-canvas');
@@ -406,7 +406,7 @@ describe('StrategyCanvas — palette commands', () => {
     });
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
 
-    // Second invocation via the SAME captured handler must flip back.
+    // note: second invocation via the SAME captured handler must flip back.
     act(() => {
       findById('strategy.toggle-view')?.handler();
     });
@@ -415,7 +415,7 @@ describe('StrategyCanvas — palette commands', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Outline — toggle view only. No node-create: the outline canvas exposes no
+// note: Outline — toggle view only. No node-create: the outline canvas exposes no
 // chapter-creation entrypoint (structure panel is select/move only).
 // ---------------------------------------------------------------------------
 
@@ -460,7 +460,7 @@ describe('OutlineCanvas — palette commands', () => {
 });
 
 // ---------------------------------------------------------------------------
-// World KB — toggle view only. No node-create: the World KB canvas exposes no
+// note: World KB — toggle view only. No node-create: the World KB canvas exposes no
 // clean canvas-level creation button (relationships are created via graph
 // edge-drag or alt-view row action, both of which require entity context).
 // ---------------------------------------------------------------------------
@@ -484,7 +484,7 @@ describe('WorldKbCanvas — palette commands', () => {
 
     const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
     expect(toggle).not.toBeNull();
-    // useReducedMotionPreference is mocked false → showList starts false.
+    // note: useReducedMotionPreference is mocked false → showList starts false.
     const initial = toggle.getAttribute('aria-pressed');
     expect(initial).toBe('false');
 

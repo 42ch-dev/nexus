@@ -1,5 +1,5 @@
 /**
- * `CanvasNavCommands` — registers canvas navigation commands into the shared
+ * note: `CanvasNavCommands` — registers canvas navigation commands into the shared
  * command palette (V1.111 P0 T4).
  *
  * Coverage per task brief: command registration + handler invocation with the
@@ -26,7 +26,7 @@ import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { clearCommands, getCommands, type Command } from '@/lib/canvas/command-registry';
 
 /**
- * Records the current pathname via a closure so a test can assert where
+ * note: Records the current pathname via a closure so a test can assert where
  * `useNavigate` landed after a command handler fires. Rendered as a sibling of
  * `<CanvasNavCommands />` in the layout route.
  */
@@ -45,7 +45,7 @@ function makeLocationProbe() {
 }
 
 /**
- * Renders a button that calls `navigate(target)` so a test can drive an
+ * note: Renders a button that calls `navigate(target)` so a test can drive an
  * in-router navigation (same `MemoryRouter`, layout stays mounted) without
  * depending on `<Link>` anchor internals.
  */
@@ -62,7 +62,7 @@ function makeNavigateButton() {
 }
 
 /**
- * Render `CanvasNavCommands` inside a layout route mirroring `RootLayout`, with
+ * note: Render `CanvasNavCommands` inside a layout route mirroring `RootLayout`, with
  * child routes declared so `useParams` extracts `workId` / `worldId` on the
  * matching child. `initialPath` selects the active child route.
  *
@@ -124,7 +124,7 @@ afterEach(() => {
 });
 
 describe('CanvasNavCommands — registration', () => {
-  // V1.123 P2 Task 5 — `go.work-timeline` registered alongside the V1.111
+  // note: V1.123 P2 Task 5 — `go.work-timeline` registered alongside the V1.111
   // trio (`go.outline`, `go.strategy`, `go.world-kb`). Surgical relaxation of
   // the V1.111 "exactly three" assertion: same Navigate group, same labelKey
   // shape, additive only.
@@ -207,7 +207,7 @@ describe('CanvasNavCommands — Go to Outline (workId-gated)', () => {
   });
 
   it('encodes the workId so a space-bearing id stays one path segment', () => {
-    // MemoryRouter decodes %20 → space in the param; the handler must
+    // why: MemoryRouter decodes %20 → space in the param; the handler must
     // re-encode via encodeURIComponent so the navigate target stays valid.
     const { probe } = renderInLayout('/works/w%204');
     act(() => {
@@ -235,7 +235,7 @@ describe('CanvasNavCommands — Go to World KB (worldId-gated)', () => {
 });
 
 describe('CanvasNavCommands — Go to World Findings (worldId-gated, V1.166 P2 T1)', () => {
-  // PD-2 locked placement: `/worlds/:worldId/findings` is a peer surface of
+  // note: PD-2 locked placement: `/worlds/:worldId/findings` is a peer surface of
   // World KB; the command mirrors `go.world-kb`'s worldId-gating so it
   // surfaces only on World-scoped routes.
   it('is hidden when no worldId is in the URL', () => {
@@ -260,7 +260,7 @@ describe('CanvasNavCommands — Go to World Findings (worldId-gated, V1.166 P2 T
 });
 
 describe('CanvasNavCommands — Go to Work Timeline (workId-gated, V1.123 P2)', () => {
-  // Plan AC-V1123-11: Work Timeline reachable as a peer surface from Work
+  // note: Plan AC-V1123-11: Work Timeline reachable as a peer surface from Work
   // Canvas shell. The command is workId-gated (mirrors `go.outline`); the
   // handler encodes the workId so space-bearing ids stay one path segment.
   it('is hidden when no workId is in the URL', () => {
@@ -279,7 +279,7 @@ describe('CanvasNavCommands — Go to Work Timeline (workId-gated, V1.123 P2)', 
   });
 
   it('is available on the Outline route (workId still present — peer reachable)', () => {
-    // Work Timeline is a peer of Outline from the Work Canvas shell; the
+    // why: Work Timeline is a peer of Outline from the Work Canvas shell; the
     // command MUST stay available while the user is on `/works/:workId/outline`
     // so they can pivot Outline → Work Timeline without going through the list.
     renderInLayout('/works/w-1/outline');
@@ -296,7 +296,7 @@ describe('CanvasNavCommands — Go to Work Timeline (workId-gated, V1.123 P2)', 
 });
 
 describe('CanvasNavCommands — Go to Assembly Inspector (workId-gated, V1.151 P1 T3)', () => {
-  // Plan Q1: the inspector is a moment-level debug surface in the creator
+  // note: Plan Q1: the inspector is a moment-level debug surface in the creator
   // area — reachable from ⌘K on Work routes like `go.work-timeline`.
   it('is hidden when no workId is in the URL', () => {
     renderInLayout('/sessions');
@@ -321,25 +321,24 @@ describe('CanvasNavCommands — Go to Assembly Inspector (workId-gated, V1.151 P
 
 describe('CanvasNavCommands — live handler reads current id (no remount)', () => {
   it('targets the latest workId after a same-layout route change', () => {
-    // useRegisterCommand captures the command once on mount. The handler must
+    // why: useRegisterCommand captures the command once on mount. The handler must
     // read the current workId via the internal ref, so an in-router navigation
     // /works/A → /works/B (re-render of the layout, NOT a remount of
     // CanvasNavCommands) must retarget the handler to B. The layout route stays
     // mounted because only the child changes.
     const { probe } = renderInLayout('/works/A', '/works/B');
 
-    // Initial: handler targets A.
     act(() => {
       findById('go.outline')?.handler();
     });
     expect(probe.read()).toBe('/works/A/outline');
 
-    // Drive an in-router navigation to /works/B (same MemoryRouter, layout
+    // why: drive an in-router navigation to /works/B (same MemoryRouter, layout
     // route and CanvasNavCommands stay mounted).
     const navButton = screen.getByRole('button', { name: 'go-/works/B' });
     fireEvent.click(navButton);
 
-    // availability still true on B; handler now targets B (proves the ref, not
+    // why: availability still true on B; handler now targets B (proves the ref, not
     // a mount-time closure, is read).
     expect(findById('go.outline')?.available?.()).toBe(true);
     act(() => {
@@ -358,11 +357,8 @@ describe('CanvasNavCommands — live handler reads current id (no remount)', () 
   });
 });
 
-// (No trailing guard — all imports are used.)
-
-
 describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
-  // Search-aware probe: the compute commands navigate to `/modules` URLs that
+  // note: search-aware probe: the compute commands navigate to `/modules` URLs that
   // carry query params (`/modules?world=…`), so the plain pathname probe is
   // not enough here.
   function makeFullProbe() {
@@ -391,7 +387,7 @@ describe('CanvasNavCommands — Compute jumps (V1.147 P2 T3)', () => {
           >
             <Route path="worlds/:worldId/timeline" element={<div />} />
             <Route path="sessions" element={<div />} />
-            {/* Catch-all so Modules deep-link navigations keep the layout
+            {/* note: catch-all so Modules deep-link navigations keep the layout
                 (and its command registrations + probe) mounted. */}
             <Route path="*" element={<div />} />
           </Route>

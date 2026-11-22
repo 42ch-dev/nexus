@@ -45,7 +45,7 @@ export function useInboundEventFocus<TNodeData extends Record<string, unknown>>(
     if (!targetNodeId) return;
     if (appliedRef.current === targetNodeId) return;
     if (selectedNodeId === targetNodeId) {
-      // Selection already applied (e.g. it survived a projection rebuild) —
+      // why: selection already applied (e.g. it survived a projection rebuild) —
       // mark it applied so we never fight a later user selection.
       appliedRef.current = targetNodeId;
       return;
@@ -53,7 +53,7 @@ export function useInboundEventFocus<TNodeData extends Record<string, unknown>>(
     const exists = nodes.some(
       (n) => n.id === targetNodeId && (isFocusTarget?.(n) ?? true),
     );
-    if (!exists) return; // unknown / non-target id — no fabricated selection
+    if (!exists) return; // why: unknown / non-target id — no fabricated selection
     onNodesChange(
       new NodeChangeset(
         nodes.map((n) => ({

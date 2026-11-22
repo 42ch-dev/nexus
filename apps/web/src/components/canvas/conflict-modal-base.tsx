@@ -1,5 +1,5 @@
 /**
- * Conflict-modal base — App i18n adapter over presentational chrome.
+ * note: Conflict-modal base — App i18n adapter over presentational chrome.
  *
  * Domain wrappers (Strategy / Outline / World KB) keep importing this module
  * for translated defaults. The visual shell lives in

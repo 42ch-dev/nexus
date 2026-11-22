@@ -17,11 +17,11 @@ import { innerGraphIdOf, stateKind } from '@/lib/canvas/preset-yaml';
 
 export interface StrategyAltViewProps {
   parsed: ParsedPreset;
-  /** Optional overlay status by state id (from the live session). */
+  /** note: Optional overlay status by state id (from the live session). */
   statusByState?: Record<string, string>;
 }
 
-/** BFS execution order from the initial state (falls back to declared order). */
+/** note: BFS execution order from the initial state (falls back to declared order). */
 function executionOrder(parsed: ParsedPreset): string[] {
   const { manifest } = parsed;
   const byId = new Map(manifest.states.map((s) => [s.id, s]));
@@ -51,7 +51,7 @@ function executionOrder(parsed: ParsedPreset): string[] {
       }
     }
   }
-  // Append any unreachable states so nothing is silently dropped.
+  // why: append unreachable states so nothing is silently dropped.
   for (const s of manifest.states) if (!seen.has(s.id)) order.push(s.id);
   return order;
 }

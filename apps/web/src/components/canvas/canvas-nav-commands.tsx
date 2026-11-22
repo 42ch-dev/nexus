@@ -1,5 +1,5 @@
 /**
- * Canvas navigation commands — registers the "Go to <surface>" palette actions
+ * note: Canvas navigation commands — registers the "Go to <surface>" palette actions
  * (V1.111 P0 T4 + V1.123 P2 T5).
  *
  * Mounted once in {@link RootLayout} so the canvas-surface entry routes
@@ -39,16 +39,16 @@ import { useRegisterCommand } from '@/lib/canvas/command-registry';
 
 export function CanvasNavCommands(): null {
   const navigate = useNavigate();
-  // `useParams` in a layout-level component returns the leaf route's params,
+  // note: `useParams` in a layout-level component returns the leaf route's params,
   // so `workId`/`worldId` are populated on Work- and World-scoped routes and
   // `undefined` elsewhere.
   const { workId, worldId } = useParams<{ workId?: string; worldId?: string }>();
 
-  // Ref so handlers/predicates (captured once on mount) read current values.
+  // why: a ref so handlers/predicates (captured once on mount) read current values.
   const idsRef = useRef({ workId, worldId });
   idsRef.current = { workId, worldId };
 
-  // V1.123 P3 Task 2 — global Timeline entry in the command palette.
+  // note: V1.123 P3 Task 2 — global Timeline entry in the command palette.
   // Registered FIRST so authors discover the central instrument from any
   // route (one-click reachability per AC-V1123-16). Always available —
   // `/timeline` is a primary-nav route with no path params.
@@ -116,7 +116,7 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.worldId),
   });
 
-  // V1.166 P2 (DR-64 surfacing half) — World Findings peer surface. Mirrors
+  // note: V1.166 P2 (DR-64 surfacing half) — World Findings peer surface. Mirrors
   // `go.world-kb`'s worldId-gating: the command surfaces only on World-scoped
   // routes and jumps to the read-only check-findings panel at
   // `/worlds/:worldId/findings` (PD-2 locked placement, sibling of World KB).
@@ -138,7 +138,7 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.worldId),
   });
 
-  // V1.123 P2 T5 — Work Timeline peer surface. Mirrors `go.outline`'s
+  // note: V1.123 P2 T5 — Work Timeline peer surface. Mirrors `go.outline`'s
   // workId-gating so the command surfaces only on Work-scoped routes. Work
   // entry stays Outline (V1.118 regression) — the command does NOT flip the
   // `/works/:workId` index redirect; it exposes Work Timeline as a peer at
@@ -161,7 +161,7 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.workId),
   });
 
-  // V1.151 P1 (DF-76) — Assembly Inspector debug surface. Mirrors
+  // note: V1.151 P1 (DF-76) — Assembly Inspector debug surface. Mirrors
   // `go.work-timeline`'s workId-gating; exposes the read-only moment-level
   // inspector at `/works/:workId/inspector` from ⌘K.
   useRegisterCommand({
@@ -182,7 +182,7 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.workId),
   });
 
-  // ── V1.147 P2 T3 — Compute jump commands (behavior spec §1 P3) ───────────
+  // note: ── V1.147 P2 T3 — Compute jump commands (behavior spec §1 P3) ──────
   //
   // Jump-only per plan ⌘K scope ("navigation jumps into the Timeline Run
   // Module entry only; no palette form"):

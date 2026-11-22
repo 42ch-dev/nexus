@@ -29,7 +29,7 @@ export interface UseCanvasSurfaceResult<TNodeData extends Record<string, unknown
   setShowAlt: (value: boolean) => void;
   altView: ReactNode;
   /**
-   * V1.159 P1 T2 — Brief-layer time-band panel (adapter slot). Rendered by
+   * note: V1.159 P1 T2 — Brief-layer time-band panel (adapter slot). Rendered by
    * the surface when the Brief layer is active; `null` when the adapter
    * does not implement `renderBriefTimeBands` (non-Timeline surfaces).
    */
@@ -57,7 +57,7 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
   adapter: CanvasSurfaceAdapter<TGraph, TNodeData, TEdgeData>,
   queryResult: CanvasSurfaceQueryResult<TGraph>,
 ): UseCanvasSurfaceResult<TNodeData, TEdgeData> {
-  // Viewport key is the surface kind per product direction; per-instance overrides
+  // note: viewport key is the surface kind per product direction; per-instance overrides
   // should call useCanvasViewport directly.
   const surfaceKey = adapter.surfaceKind;
   const { cachedViewport, onViewportChange } = useCanvasViewport(surfaceKey);
@@ -74,7 +74,7 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
 
   const [nodes, setNodes] = useState<Node<TNodeData>[]>(projected.nodes);
 
-  // Sync the projected graph into local RF state, preserving manual positions and
+  // why: sync the projected graph into local RF state, preserving manual positions and
   // selection for nodes that persist across the rebuild (same as outline-canvas-graph).
   useEffect(() => {
     setNodes((prev) => {
@@ -97,7 +97,7 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
 
   const layout = useAutoLayout(nodes, projected.edges, adapter.layoutOptions);
 
-  // Reconcile laid-out positions back into the source node state that React Flow
+  // why: reconcile laid-out positions back into the source node state that React Flow
   // owns. Without this, measurement-only changes from React Flow compare the
   // original (pre-layout) positions against the saved layout positions and are
   // misclassified as manual drags, which suppresses auto-layout.
@@ -124,7 +124,7 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
   }, [graph, adapter]);
 
   const altView = useMemo(() => adapter.renderAltView?.() ?? null, [adapter]);
-  // V1.159 P1 T2 — Brief time-band panel. The Timeline adapter exposes the
+  // note: V1.159 P1 T2 — Brief time-band panel. The Timeline adapter exposes the
   // slot on its local intersection type (not the shared `CanvasSurfaceAdapter`
   // base — `timeline-canvas-adapter.tsx`); non-Timeline adapters never define
   // it, so the optional duck-typed read yields null for them. Re-computed on
@@ -141,7 +141,7 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
     return adapter.renderInspector?.(selectedNode) ?? null;
   }, [selectedNode, adapter]);
 
-  // Auto-populate conflict state from query errors.
+  // note: auto-populate conflict state from query errors.
   useEffect(() => {
     if (queryResult.isError && adapter.adaptConflict) {
       setConflict(adapter.adaptConflict(queryResult.error));

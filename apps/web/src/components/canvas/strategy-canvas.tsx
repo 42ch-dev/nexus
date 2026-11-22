@@ -1,5 +1,5 @@
 /**
- * Strategy canvas — public orchestrator facade.
+ * note: Strategy canvas — public orchestrator facade.
  *
  * B2: split into focused sibling modules ≤200 lines (R-V171P0-QC1-006).
  * V1.114 P0 T2: migrated to the shared `CanvasSurfaceAdapter` abstraction via
@@ -55,26 +55,26 @@ import type { IdeaArtifact } from '@/components/canvas/idea-input';
 export interface StrategyCanvasProps {
   presetId: string;
   /**
-   * The open candidate IR. Approve disclosure and the canvas overlay exist
+   * note: The open candidate IR. Approve disclosure and the canvas overlay exist
    * only for a candidate: the static walk answers questions about that
    * document, not about the stored preset.
    */
   candidate?: WorkflowDocument;
-  /** Approval write path for a fresh trajectory. */
+  /** note: Approval write path for a fresh trajectory. */
   onApproveCandidate?: () => void;
 }
 
 export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: StrategyCanvasProps) {
   const { t } = useTranslation('canvas');
-  // v239-p3-canvas-compose-ui: per-surface flag (compass D14/D18). Off → the
+  // note: v239-p3-canvas-compose-ui: per-surface flag (compass D14/D18). Off → the
   // Canvas renders the applied preset with no composition surface.
   const composeFlag = useStrategyCanvasComposeFlag();
-  // D16(a): Compose is the never-applied state's one action, so it must be
+  // why: D16(a) — Compose is the never-applied state's one action, so it must be
   // reachable for a creator whose entrance defaults the flag off — and from the
   // read-only applied view, which otherwise renders a strategy nobody can edit.
   const [composeByUser, setComposeByUser] = useState(false);
   const composeEnabled = composeFlag || composeByUser;
-  // D18: one status read carries the identity, the frozen applied document and
+  // note: D18 — one status read carries the identity, the frozen applied document and
   // the refusal that separates "nothing applied" from "unreadable". It is the
   // Canvas's document source — the Canvas parses no YAML (P6 condition 2).
   const applied = useStrategyApplied(presetId, true);
@@ -82,21 +82,21 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const currentApply = applied.data?.current_apply ?? null;
   const refusal = applied.data?.applied_document_refusal ?? null;
   const compose = useStrategyCompose(presetId, composeEnabled);
-  // The document being rendered: the candidate while composing, else the
+  // note: the document being rendered: the candidate while composing, else the
   // applied preset. Both are IR.
   const document = composeEnabled
     ? (compose.workingDocument ?? appliedDocument)
     : appliedDocument;
-  // The document being rendered is the applied (running) strategy: it is what
+  // why: the document being rendered is the applied (running) strategy: it is what
   // apply/approve produced, so this view is read-only and editing goes through
   // Compose (P6 condition 2, D18).
   const appliedView = document === appliedDocument;
   const strategyState = useStrategyCanvas(presetId, document);
   const approval = useApproveStrategy(presetId);
   const application = useApplyStrategy(presetId);
-  // T4: every approval, so Apply can be aimed at a superseded one (rollback).
+  // note: T4 — every approval, so Apply can be aimed at a superseded one (rollback).
   const approvals = useStrategyApprovals(presetId, composeEnabled);
-  // The compose path simulates the working candidate it holds in hand; the
+  // why: the compose path simulates the working candidate it holds in hand; the
   // flag-off path keeps the shipped preset/candidate behaviour.
   const simulationCandidate = composeEnabled
     ? (compose.workingDocument ?? undefined)
@@ -107,7 +107,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const [isEditing, setIsEditing] = useState(false);
   const [patternPickerOpen, setPatternPickerOpen] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
-  // Which listed approval Apply is aimed at; null means the newest (T4).
+  // note: which listed approval Apply is aimed at; null means the newest (T4).
   const [applyTargetId, setApplyTargetId] = useState<string | null>(null);
 
   const ctxRef = useRef<StrategyCanvasAdapterContext>({
@@ -123,7 +123,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
 
   const adapter = useMemo(() => createStrategyCanvasAdapter(ctxRef), []);
 
-  // `useCanvasSurface` only calls this from an error state, but its identity is
+  // why: `useCanvasSurface` only calls this from an error state, but its identity is
   // part of the payload: a value that changed per render would re-project the
   // graph every render (the surface syncs the projection into its node state).
   const refetchApplied = useRef<() => void>(() => {});
@@ -140,7 +140,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         refetch: refetchSurface,
       };
     }
-    // The payload carries the document only: the adapter projects it from IR.
+    // note: the payload carries the document only: the adapter projects it from IR.
     return {
       data: {
         revision: document.revision,
@@ -179,7 +179,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     return selectedState ? templateRefOf(selectedState) : undefined;
   }, [selectedState]);
 
-  // V1.115 T2: revisionStatus was previously owned by useStrategyCanvas.
+  // note: V1.115 T2: revisionStatus was previously owned by useStrategyCanvas.
   // It moved here because it depends on selectedState (now resolved from
   // surface.selectedNode by the orchestrator, not from hook-owned node state).
   const original = useMemo(() => originalFormOf(selectedState), [selectedState]);
@@ -197,7 +197,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     strategyState.setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  // One Simulate action for the open strategy: a supplied candidate is walked
+  // note: one Simulate action for the open strategy: a supplied candidate is walked
   // as-is; otherwise the installed preset's IR is re-read and walked only when
   // it no longer matches the trajectory in hand. On the compose path the
   // working candidate (committed document + authored connecting edges) is the
@@ -209,20 +209,20 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       void simulation.runStrategy(presetId);
       return;
     }
-    // A candidate that still matches its trajectory is reopened, never re-walked.
+    // why: a candidate that still matches its trajectory is reopened, never re-walked.
     if (simulation.status !== 'ready') void simulation.run(simulationCandidate);
   }
 
   /**
-   * T6 — the real approve route, compose path only. A current successful
+   * note: T6 — the real approve route, compose path only. A current successful
    * trajectory is required (the disclosure disables Approve otherwise) and an
    * unbound required slot gates the button with its named reason. The daemon's
    * refusal renders verbatim with its recovery copy; nothing auto-retries.
    */
   function handleApprove() {
-    // A newer approval supersedes the previous apply block; never render both.
+    // why: a newer approval supersedes the previous apply block; never render both.
     application.dismissApplication();
-    // The fresh approval is the newest, so Apply goes back to the default target.
+    // note: the fresh approval is the newest, so Apply goes back to the default target.
     setApplyTargetId(null);
     void approval
       .approve({
@@ -230,24 +230,24 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         trajectory: simulation.trajectory,
       })
       .catch(() => {
-        // The refusal renders from `approval.approval`; no toast duplication.
+        // why: the refusal renders from `approval.approval`; no toast duplication.
       });
   }
 
   /**
-   * v241 P3.5 T2/T4 — apply the approval the control is aimed at, listed or
+   * note: v241 P3.5 T2/T4 — apply the approval the control is aimed at, listed or
    * freshly approved. The request names the approval by content hash only, so a
    * rollback is this same call; the applied identity comes back from the
    * response, so the surface never reloads to show it.
    */
   function handleApply(target: StrategyApprovals['items'][number]) {
     void application.apply(target).catch(() => {
-      // The refusal renders from `application.application`; no toast duplication.
+      // why: the refusal renders from `application.application`; no toast duplication.
     });
   }
 
   /**
-   * Approve stays disabled while a required slot is unbound (named per pattern).
+   * note: Approve stays disabled while a required slot is unbound (named per pattern).
    * Only a listing with no data at all gates (a pending or failed first load),
    * because that is when `unboundSlots` cannot see the slots. A failed
    * background refetch keeps the last read's items, so it stays ungated.
@@ -273,12 +273,12 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
             .join(' ')
         : null;
 
-  /** Nest attaches at the selected node, else the candidate entry. */
+  /** note: Nest attaches at the selected node, else the candidate entry. */
   const nestAttachNodeId =
     (surface.selectedNode?.data as StrategyNodeData | undefined)?.stateId ??
     compose.workingDocument?.entry;
 
-  // Update the mutable adapter context every render. The adapter object is
+  // note: update the mutable adapter context every render. The adapter object is
   // stable, so useCanvasSurface's projection memo survives state changes.
   // danglingTargets is written BY the adapter during projection and read below
   // for the ValidationPanel.
@@ -308,7 +308,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
   const showAltRef = useRef(surface.showAlt);
   showAltRef.current = surface.showAlt;
 
-  // V1.111 P0 T4 — register Strategy-surface palette commands. The handlers
+  // note: V1.111 P0 T4 — register Strategy-surface palette commands. The handlers
   // read the current showAlt value through a ref so the command captured on
   // mount never closes over a stale boolean.
   useRegisterCommand({
@@ -332,7 +332,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     strategyState.setForm(originalFormOf(selectedState));
   }, [isEditing, selectedState?.id, strategyState.setForm]);
 
-  // D16(c): an apply is recorded but its document no longer verifies. This is
+  // why: D16(c) — an apply is recorded but its document no longer verifies. This is
   // not an empty state — presenting it as "not yet applied" would invite an
   // apply that overwrites a live ledger — so it wins over every other view and
   // carries no import or apply action.
@@ -345,7 +345,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       />
     );
   }
-  // Compose path: the working candidate seeds from the one IR read the wire
+  // note: compose path — the working candidate seeds from the one IR read the wire
   // serves; until it lands there is nothing to project.
   if (!document && composeEnabled && compose.seedQuery.isError) {
     return (
@@ -378,7 +378,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
       />
     );
   }
-  // D16(b): an approved candidate with no live version — apply leads, Compose
+  // why: D16(b) — an approved candidate with no live version: apply leads, Compose
   // does not. D16(a): neither — Compose is the only action.
   if (!document) {
     const newest = applied.data?.newest_approval ?? null;
@@ -398,7 +398,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
 
   const parsed = strategyState.parsed;
   const problems = parsed?.problems ?? [];
-  // V1.115 T2: danglingTargets is a projection byproduct written by the
+  // note: V1.115 T2: danglingTargets is a projection byproduct written by the
   // adapter's projectGraph into ctxRef.current.danglingTargets.
   const dangling = ctxRef.current.danglingTargets ?? [];
 
@@ -413,7 +413,7 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
         onSimulate={handleSimulate}
         staging={composeEnabled}
         onAddPattern={composeEnabled ? () => setPatternPickerOpen(true) : undefined}
-        // D16(a) read from a state that has content: the flag-off applied view
+        // note: D16(a) read from a state that has content: the flag-off applied view
         // is read-only, so this is the one way to author — Compose, seeded from
         // the strategy's candidate (the hint in the header says so).
         onEditApplied={appliedView && !composeEnabled ? () => setComposeByUser(true) : undefined}

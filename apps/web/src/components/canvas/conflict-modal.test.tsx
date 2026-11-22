@@ -1,5 +1,6 @@
 /**
  * @vitest-environment jsdom
+ * note: DOM-only suite; the directive stays in this docblock.
  */
 import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
@@ -120,7 +121,7 @@ describe('ConflictModal', () => {
   it('traps focus so Tab wraps from the last button to the first', async () => {
     const user = userEvent.setup();
     render(<ConflictModal {...baseProps} />);
-    // Move focus to the last button (Use current), then Tab should wrap to the first (Keep editing).
+    // why: focus starts on the last button so Tab proves the wrap to the first.
     const useCurrent = screen.getByRole('button', { name: /Use current/i });
     useCurrent.focus();
     await user.tab();

@@ -26,7 +26,7 @@ import {
   type NodeStatus,
 } from './presentational/node-chrome-shell';
 
-// Re-export the shared status type + chrome extract so historical import
+// why: re-export the shared status type + chrome extract so historical import
 // sites (`NodeStatus` from this barrel) keep resolving. The canonical home is
 // now the presentational extract.
 export type { NodeStatus };
@@ -43,7 +43,7 @@ function statusFromSession(status: string | undefined): NodeStatus | undefined {
 }
 
 /**
- * Resolve a node's effective status for the live overlay.
+ * note: Resolve a node's effective status for the live overlay.
  *
  * The canvas patches `data.status` onto the current execution node with the
  * sentinel `'__current__'` (or one of the raw session status strings when the
@@ -58,7 +58,7 @@ function effectiveStatus(rawStatus: string | undefined): NodeStatus | undefined 
 }
 
 /**
- * i18n keys for the strategy status overlay label. The status ring + dot
+ * note: i18n keys for the strategy status overlay label. The status ring + dot
  * classes live in the shared `NodeChromeShell` extract
  * (`NODE_STATUS_RING` / `NODE_STATUS_DOT`); only the human-readable label is
  * App-owned (resolved via `t()` at render time).

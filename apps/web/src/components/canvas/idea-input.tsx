@@ -1,5 +1,5 @@
 /**
- * Idea-input affordance — the persistent canvas steering control
+ * note: Idea-input affordance — the persistent canvas steering control
  * (canvas-strategy-surface.md Draft §4.1 / §3.7).
  *
  * The author gives direction; Nexus executes and owns prose. Verbs prefer
@@ -34,9 +34,9 @@ export interface IdeaArtifact {
 export interface IdeaInputProps {
   presetId: string;
   creatorId?: string;
-  /** Active schedule id for Steer/Resume (derived from the live overlay). */
+  /** note: Active schedule id for Steer/Resume (derived from the live overlay). */
   scheduleId?: string;
-  /** Called when an Idea is submitted so the canvas can show the artifact. */
+  /** note: Called when an Idea is submitted so the canvas can show the artifact. */
   onArtifact: (artifact: IdeaArtifact) => void;
 }
 
@@ -56,7 +56,7 @@ export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaI
 
   const pending = run.isPending || steer.isPending || resume.isPending;
 
-  // Default verb follows availability: steer when a schedule is active, else run.
+  // why: default verb follows availability — steer when a schedule is active.
   const effectiveVerb: IdeaVerb = scheduleId && verb === 'run' ? 'steer' : verb;
 
   const canSubmit =

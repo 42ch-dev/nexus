@@ -1,5 +1,5 @@
 /**
- * Conflict resolution modal for the Outline+Timeline canvas write boundary.
+ * note: Conflict resolution modal for the Outline+Timeline canvas write boundary.
  *
  * Reuses the generic {@link ConflictModalBase} shell so the Strategy and Outline
  * surfaces share focus trapping, live-region announcements, and the reapply/
