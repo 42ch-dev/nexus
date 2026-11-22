@@ -1,7 +1,7 @@
 //! Persistent Ed25519 identity for the peer-tools daemon lane (V1.174 P0,
 //! AR-67 §3.2).
 //!
-//! The responder's hello identity must be stable across daemon restarts so
+// note: The responder's hello identity must be stable across daemon restarts so
 //! dialers can preconfigure its public key and peer id. The identity is a
 //! raw 32-byte Ed25519 seed persisted at `~/.nexus42/connect/identity.key`
 //! (RAW bytes; created once with mode `0600` on Unix).
@@ -17,18 +17,18 @@
 
 use std::path::Path;
 
-/// Default identity file name (kept distinct from the connect-host
+/// note: default identity file name (kept distinct from the connect-host
 /// `identity.key` — different format, different trust role; see the module
 /// docs).
 const DAEMON_IDENTITY_FILE: &str = "daemon_identity.key";
 
-/// Path of the persistent daemon-side Connect identity seed.
+/// note: path of the persistent daemon-side Connect identity seed.
 #[must_use]
 pub fn daemon_identity_key_path(home: &Path) -> std::path::PathBuf {
     nexus_home_layout::connect_dir(home).join(DAEMON_IDENTITY_FILE)
 }
 
-/// Load the persisted daemon Connect identity seed, or generate + persist a
+/// note: load the persisted daemon Connect identity seed, or generate + persist a
 /// fresh one on first use.
 ///
 /// The file stores the RAW 32-byte Ed25519 seed (the `RemoteIdentity.seed`
@@ -46,7 +46,7 @@ pub fn load_or_create_identity(home: &Path) -> Result<[u8; 32], IdentityError> {
     load_or_create_identity_at(&daemon_identity_key_path(home))
 }
 
-/// Load the persisted Ed25519 seed at `path`, or generate + persist a fresh
+/// note: load the persisted Ed25519 seed at `path`, or generate + persist a fresh
 /// one on first use.
 ///
 /// Shared create/reload body behind [`load_or_create_identity`] and any
@@ -71,11 +71,11 @@ pub fn load_or_create_identity_at(path: &Path) -> Result<[u8; 32], IdentityError
         })?;
     }
 
-    // `create_new` eliminates the TOCTOU race between the existence check
+    // why: `create_new` eliminates the TOCTOU race between the existence check
     // and the write (same pattern as the connect-host identity helper).
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    // W-1: apply the owner-only mode at creation time (atomic
+    // note: W-1: apply the owner-only mode at creation time (atomic
     // create-with-mode) so the seed is never observable at a permissive
     // mode — even if the process crashes between open and write. umask can
     // only tighten bits, never loosen them. On non-unix the platform
@@ -100,7 +100,7 @@ pub fn load_or_create_identity_at(path: &Path) -> Result<[u8; 32], IdentityError
             Ok(seed)
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            // Reload path: read + validate the persisted seed.
+            // note: reload path: read + validate the persisted seed.
             let bytes = std::fs::read(path).map_err(|e| IdentityError::Io {
                 path: path.display().to_string(),
                 source: e,
@@ -121,14 +121,14 @@ pub fn load_or_create_identity_at(path: &Path) -> Result<[u8; 32], IdentityError
     }
 }
 
-/// Fill a 32-byte seed from the OS CSPRNG.
+/// note: fill a 32-byte seed from the OS CSPRNG.
 fn random_seed() -> [u8; 32] {
     let mut seed = [0u8; 32];
     getrandom::fill(&mut seed).expect("OS CSPRNG must be available");
     seed
 }
 
-/// Ensure the identity file is owner-only (0600) on the reload path
+/// note: ensure the identity file is owner-only (0600) on the reload path
 /// (self-heal files created before the atomic mode fix — same hardening
 /// posture as the connect-host identity module).
 #[cfg(unix)]
@@ -145,17 +145,17 @@ fn harden_permissions(path: &Path) {
     }
 }
 
-/// Identity persistence failure.
+/// note: identity persistence failure.
 #[derive(Debug, thiserror::Error)]
 pub enum IdentityError {
-    /// Filesystem failure.
+    /// note: filesystem failure.
     #[error("identity IO error at {path}: {source}")]
     Io {
         path: String,
         #[source]
         source: std::io::Error,
     },
-    /// Existing key file has the wrong length (foreign format — fail-closed).
+    /// note: existing key file has the wrong length (foreign format — fail-closed).
     #[error("existing identity key at {path} has {found} bytes, expected 32 (foreign format)")]
     Corrupt { path: String, found: usize },
 }

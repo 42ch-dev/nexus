@@ -1,6 +1,6 @@
 //! Peer tool table — daemon-side adapter over the core registry.
 //!
-//! v1.190 P3-T3: the table BODY (admission chain, collision policy, eviction,
+// note: v1.190 P3-T3: the table BODY (admission chain, collision policy, eviction,
 //! the process-global singleton) moved to
 //! [`crate::peer_tools`]. What remains is the daemon's own
 //! translation:
@@ -28,14 +28,14 @@ pub use crate::peer_tools::{
     PeerToolsConfig, ToolRefusal,
 };
 
-/// The core registry type, under the daemon's historical name.
+/// note: the core registry type, under the daemon's historical name.
 ///
 /// Kept as an alias so the Connect lane's type positions (`Arc<PeerToolTable>`
 /// in the config watcher) need no rename while there is still exactly one
 /// registry.
 pub type PeerToolTable = crate::peer_tools::PeerToolRegistry;
 
-/// MCP catalog admission: the peer descriptor's input must be a root object.
+/// note: MCP catalog admission: the peer descriptor's input must be a root object.
 /// # Errors
 ///
 /// Returns `CoreError` when the manifest is malformed or the peer is not
@@ -50,36 +50,36 @@ pub fn mcp_catalog_admission(
     }
 }
 
-/// Whether the peer descriptor's output schema may be carried on an MCP
+/// note: whether the peer descriptor's output schema may be carried on an MCP
 /// surface.
 #[must_use]
 pub fn mcp_catalog_output_root_object(descriptor: &nexus_spoke_adapter::ToolDescriptor) -> bool {
     crate::peer_tools::catalog_output_root_object(descriptor)
 }
 
-/// MCP catalog refusal for a peer descriptor.
+/// note: MCP catalog refusal for a peer descriptor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpCatalogRefusal {
-    /// `descriptor.input` does not declare a root `type: "object"`.
+    /// note: `descriptor.input` does not declare a root `type: "object"`.
     InputSchemaNotRootObject,
 }
 
-/// Adapter presenting a `spoke_connect` responder as the core's neutral port.
+/// note: adapter presenting a `spoke_connect` responder as the core's neutral port.
 pub struct ConnectResponderAdapter {
-    /// The underlying wire responder.
+    /// note: the underlying wire responder.
     inner: Arc<ConnectResponder>,
-    /// The authenticated peer id this responder serves.
+    /// note: the authenticated peer id this responder serves.
     peer_id: String,
 }
 
 impl ConnectResponderAdapter {
-    /// Wrap a wire responder, binding it to `peer_id`.
+    /// note: wrap a wire responder, binding it to `peer_id`.
     #[must_use]
     pub const fn new(inner: Arc<ConnectResponder>, peer_id: String) -> Self {
         Self { inner, peer_id }
     }
 
-    /// The wrapped wire responder.
+    /// note: the wrapped wire responder.
     #[must_use]
     pub const fn inner(&self) -> &Arc<ConnectResponder> {
         &self.inner
@@ -117,7 +117,7 @@ impl PeerResponder for ConnectResponderAdapter {
                         _ => {}
                     }
                 }
-                // A peer-side deny keeps the peer's own lowercase code
+                // why: A peer-side deny keeps the peer's own lowercase code
                 // verbatim; it is never re-parsed from the message text.
                 let wire_code = reject
                     .details
@@ -138,7 +138,7 @@ impl PeerResponder for ConnectResponderAdapter {
     }
 }
 
-/// The peer admission decision, consistent with the capability reservation
+/// note: the peer admission decision, consistent with the capability reservation
 /// AT THE MOMENT IT IS MADE (C3 fix round 2).
 ///
 /// When a holder is supplied, its reservation is held exclusively (via
@@ -159,7 +159,7 @@ impl PeerResponder for ConnectResponderAdapter {
 /// Without a holder there is no live reservation to serialize against; the
 /// builtin roster alone is the reserved set (the caller-side snapshot helper
 /// [`live_reserved_tool_ids`] covers exactly that case).
-#[allow(clippy::too_many_arguments)] // one decision, the eight admission inputs
+#[allow(clippy::too_many_arguments)] // why: one decision, the eight admission inputs
 pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
     table: &PeerToolTable,
     capability_registry: Option<&CapabilityRegistryHolder>,
@@ -170,7 +170,7 @@ pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
     daemon_capabilities: &HashSet<String, S>,
     tool_allowlist: &HashSet<String, S>,
 ) -> AdmissionOutcome {
-    /// One dispatch through [`PeerToolRegistry::admit_and_register`], over
+    /// note: one dispatch through [`PeerToolRegistry::admit_and_register`], over
     /// the caller's borrowed sets and the ONE merged reserved set. No
     /// normalization copy exists: the caller's sets are borrowed as-is.
     fn dispatch_admission<S: std::hash::BuildHasher>(
@@ -183,7 +183,7 @@ pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
         builtin_tool_ids: &HashSet<String, S>,
         live_reservation: Option<&std::collections::HashSet<&'static str>>,
     ) -> AdmissionOutcome {
-        // The ONE allocation per decision (pre-existing in every shape of
+        // why: the ONE allocation per decision (pre-existing in every shape of
         // this seam): the merged reserved set — builtin ∪ live — must be
         // materialized because `admit_and_register` takes it by reference.
         let mut reserved: HashSet<String> = builtin_tool_ids.iter().cloned().collect();
@@ -230,7 +230,7 @@ pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
     )
 }
 
-/// The caller-side reserved-tool-id SNAPSHOT: the injected builtin ids plus
+/// note: the caller-side reserved-tool-id SNAPSHOT: the injected builtin ids plus
 /// the holder's reservation, read once.
 ///
 /// With a holder present, the live admission path is
@@ -256,7 +256,7 @@ pub fn live_reserved_tool_ids(
     reserved
 }
 
-/// The process-global registry (kept as the daemon's historical accessor name).
+/// note: the process-global registry (kept as the daemon's historical accessor name).
 #[must_use]
 pub fn peer_tool_table() -> &'static Arc<PeerToolRegistry> {
     peer_tool_registry()

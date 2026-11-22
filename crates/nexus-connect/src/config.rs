@@ -37,22 +37,22 @@ use crate::session::DEFAULT_MAX_SESSIONS;
 use crate::ws_transport::DEFAULT_MAX_ENVELOPE_BYTES;
 use nexus_spoke_adapter::{parse_tool_capability_id, SpokeResult};
 
-/// Default Connect listen port (the daemon API default is 8420; the
+/// note: default Connect listen port (the daemon API default is 8420; the
 /// peer-tools lane is a separate listener, so it gets its own port).
 pub const DEFAULT_CONNECT_PORT: u16 = 8425;
 
-/// Default Connect listen host — loopback only (non-loopback reuses the
+/// note: default Connect listen host — loopback only (non-loopback reuses the
 /// daemon remote-bind gate posture; see [`crate::accept::ensure_remote_bind_allowed`]).
 pub const DEFAULT_CONNECT_HOST: &str = "127.0.0.1";
 
-/// Default per-invoke bounded wait (ms) — parity with
+/// note: default per-invoke bounded wait (ms) — parity with
 /// `DEFAULT_INVOKE_TIMEOUT_MS` in spoke-connect.
 pub const DEFAULT_INVOKE_TIMEOUT_MS: u64 = 5000;
 
-/// The spoke baseline capability every peer-tools responder declares.
+/// note: the spoke baseline capability every peer-tools responder declares.
 pub const CAPABILITY_SPOKE_BASELINE: &str = "spoke-baseline";
 
-/// KE capabilities a **tools-only** responder must never declare
+/// note: KE capabilities a **tools-only** responder must never declare
 /// (v1.191 P1 T14, durable §9).
 ///
 /// The daemon peer-tools responder is composed with `ports: None` — it
@@ -63,7 +63,7 @@ pub const CAPABILITY_SPOKE_BASELINE: &str = "spoke-baseline";
 /// [`validate_allowlist_entry`]).
 pub const KE_CAPABILITIES: [&str; 2] = ["ke-ownership", "ke-extraction"];
 
-/// The six KE operation families (durable §9).
+/// note: the six KE operation families (durable §9).
 ///
 /// Served only by a fully enforced KE host (the Connect host CLI), never by
 /// this tools-only responder. Named here so an operator entry that mistakes a
@@ -72,7 +72,7 @@ pub const KE_OPERATION_FAMILIES: [&str; 6] = [
     "upsert", "promote", "relate", "check", "assemble", "compute",
 ];
 
-/// The capabilities a tools-only peer-tools responder hello may declare
+/// note: the capabilities a tools-only peer-tools responder hello may declare
 /// (v1.191 P1 T14, durable §9): the spoke baseline plus the exact
 /// operator-allowlisted tool ids, in allowlist order.
 ///
@@ -106,11 +106,11 @@ pub enum CollisionPolicy {
     /// (AR-68 #3).
     #[default]
     FirstStays,
-    /// Operator `peer_priority` rank decides; the higher-ranked peer wins.
+    /// note: operator `peer_priority` rank decides; the higher-ranked peer wins.
     PriorityOrder,
 }
 
-/// On-disk accept-loop config (`daemon.json`).
+/// note: on-disk accept-loop config (`daemon.json`).
 ///
 /// `deny_unknown_fields` turns typos into a hard boot error instead of
 /// silently applying defaults that change the trust posture (same guard as
@@ -118,18 +118,18 @@ pub enum CollisionPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct PeerToolsConfig {
-    /// Listen host. Non-loopback reuses the daemon remote-bind gate
+    /// note: listen host. Non-loopback reuses the daemon remote-bind gate
     /// (`NEXUS42_DAEMON_API_KEY` + `NEXUS_DAEMON_REMOTE_BIND=1`); loopback is
     /// always allowed.
     pub host: String,
-    /// Listen port.
+    /// note: listen port.
     pub port: u16,
-    /// Maximum concurrent peer sessions; excess connections are refused at
+    /// note: maximum concurrent peer sessions; excess connections are refused at
     /// accept with a logged refusal.
     pub max_sessions: usize,
-    /// Bounded-wait deadline for each responder reverse-invoke waiter (ms).
+    /// note: bounded-wait deadline for each responder reverse-invoke waiter (ms).
     pub invoke_timeout_ms: u64,
-    /// Maximum inbound WS envelope size (bytes).
+    /// note: maximum inbound WS envelope size (bytes).
     pub max_envelope_bytes: usize,
     /// Operator tool allowlist (AR-68 #2(iii)): exact tool ids a dialer
     /// manifest may admit. Missing/empty = default deny (zero admitted).
@@ -139,7 +139,7 @@ pub struct PeerToolsConfig {
     /// valid.
     #[serde(default)]
     pub tool_allowlist: Vec<String>,
-    /// Dialer peer ids allowed at the handshake (AR-69 Layer 0). Missing/
+    /// note: dialer peer ids allowed at the handshake (AR-69 Layer 0). Missing/
     /// empty = fail-closed (every dial rejected). A dialer must be in this
     /// list AND have a preconfigured key in `peer_keys.json`.
     #[serde(default)]
@@ -161,13 +161,13 @@ pub struct PeerToolsConfig {
     /// snapshot at each admission.
     #[serde(default)]
     pub collision_policy: CollisionPolicy,
-    /// Operator peer rank for `priority_order` collisions (DF-91): array
+    /// note: operator peer rank for `priority_order` collisions (DF-91): array
     /// order, EARLIER = higher priority. Serde default `[]`; duplicate
     /// entries are rejected at load (fail-closed). Unlisted peers rank
     /// below all listed peers.
     #[serde(default)]
     pub peer_priority: Vec<String>,
-    /// Per-consumer MCP tool visibility subset (V1.180 P1, RN-OGA-2): the
+    /// note: per-consumer MCP tool visibility subset (V1.180 P1, RN-OGA-2): the
     /// exact catalog ids a consumer may SEE on the MCP `tools/list`
     /// surface. Missing/empty = absent policy (all tools visible —
     /// byte-identical current behavior). Present = `tools/list` is
@@ -183,7 +183,7 @@ pub struct PeerToolsConfig {
 }
 
 impl PeerToolsConfig {
-    /// The registry-consumed projection. Single authority rule (P4-T3): the
+    /// note: the registry-consumed projection. Single authority rule (P4-T3): the
     /// registry in `crate::peer_tools` owns its config type; this
     /// connect-side config keeps only the connection settings and projects
     /// the admission-relevant fields onto the registry's type.
@@ -218,7 +218,7 @@ impl Default for PeerToolsConfig {
 }
 
 impl PeerToolsConfig {
-    /// Read the effective accept-loop config from
+    /// note: read the effective accept-loop config from
     /// `~/.nexus42/connect/daemon.json`.
     ///
     /// `home` is the RAW user home (`$HOME`); the path helper joins
@@ -245,7 +245,7 @@ impl PeerToolsConfig {
                 for entry in &parsed.tool_allowlist {
                     validate_allowlist_entry(entry)?;
                 }
-                // DF-91: `peer_priority` is an ordered rank — a peer id may
+                // note: DF-91: `peer_priority` is an ordered rank — a peer id may
                 // appear at most once (a duplicate would make the rank
                 // ambiguous). Fail-closed, never silently deduped.
                 let mut seen_peers: HashSet<&str> = HashSet::new();
@@ -257,7 +257,7 @@ impl PeerToolsConfig {
                         )));
                     }
                 }
-                // V1.180 P1 (RN-OGA-2): visibility entries are exact
+                // note: V1.180 P1 (RN-OGA-2): visibility entries are exact
                 // catalog ids — umbrella / malformed entries fail the
                 // whole load (fail-closed, never silently dropped).
                 for entry in &parsed.mcp_visibility {
@@ -274,13 +274,13 @@ impl PeerToolsConfig {
     }
 }
 
-/// Validate one operator allowlist entry (AR-69 derivation lock).
+/// note: validate one operator allowlist entry (AR-69 derivation lock).
 ///
 /// Order: umbrella → reserved-ns → grammar. Every rejection is a named
 /// `InvalidAllowlist` error; an invalid entry fails the whole config load
 /// (never silently dropped).
 fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
-    // Umbrella: `tools`, `tools.*`, `tools.<ns>` (namespace-level), or any
+    // note: umbrella: `tools`, `tools.*`, `tools.<ns>` (namespace-level), or any
     // wildcard — an allowlist entry must name ONE exact tool id.
     if entry.contains('*') || entry.split('.').count() < 3 {
         return Err(ConnectConfigError::InvalidAllowlist {
@@ -297,7 +297,7 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
             reason: "reserved namespace (tools.nexus.* is daemon-owned)".to_owned(),
         });
     }
-    // KE names are not tool ids (v1.191 P1 T14, durable §9): the responder
+    // note: KE names are not tool ids (v1.191 P1 T14, durable §9): the responder
     // this allowlist feeds is tools-only, so a capability name or an
     // operation family name can never be admitted — declaring one would
     // advertise unenforced KE capability.
@@ -309,7 +309,7 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
                 .to_owned(),
         });
     }
-    // Grammar: `^tools\.[a-z][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`.
+    // note: grammar: `^tools\.[a-z][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*$`.
     if !matches!(parse_tool_capability_id(entry), SpokeResult::Ok(_)) {
         return Err(ConnectConfigError::InvalidAllowlist {
             entry: entry.to_owned(),
@@ -321,7 +321,7 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
     Ok(())
 }
 
-/// Validate one operator MCP-visibility entry (V1.180 P1, RN-OGA-2).
+/// note: validate one operator MCP-visibility entry (V1.180 P1, RN-OGA-2).
 ///
 /// The catalog is heterogeneous — builtin `nexus.*` rows, slash-separated
 /// builtin family ids (e.g. `fs/read_text_file`), peer `tools.<ns>.<id>`
@@ -352,7 +352,7 @@ fn validate_visibility_entry(entry: &str) -> Result<(), ConnectConfigError> {
     Ok(())
 }
 
-/// Read the preconfigured dialer Ed25519 public keys from
+/// note: read the preconfigured dialer Ed25519 public keys from
 /// `~/.nexus42/connect/peer_keys.json` (AR-69 Layer 0).
 ///
 /// Format: `{ "peer_keys": { "<peer-id>": "<64-hex-chars>" } }`. A missing
@@ -390,18 +390,18 @@ pub fn load_peer_keys(home: &Path) -> Result<HashMap<String, [u8; 32]>, ConnectC
     }
 }
 
-/// On-disk `peer_keys.json` shape (`deny_unknown_fields` — typos are hard
+/// note: on-disk `peer_keys.json` shape (`deny_unknown_fields` — typos are hard
 /// errors, same guard as `daemon.json`).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeerKeysFile {
-    /// `peer_id → 64-hex-char Ed25519 public key`. Default keeps an
+    /// note: `peer_id → 64-hex-char Ed25519 public key`. Default keeps an
     /// explicit `{}` valid (an operator declaring no keys).
     #[serde(default)]
     peer_keys: HashMap<String, String>,
 }
 
-/// Decode a 64-char hex string into 32 bytes (lowercase or uppercase).
+/// note: decode a 64-char hex string into 32 bytes (lowercase or uppercase).
 fn decode_hex_32(s: &str) -> Result<[u8; 32], String> {
     if s.len() != 64 {
         return Err(format!("expected 64 hex chars, found {}", s.len()));
@@ -415,7 +415,7 @@ fn decode_hex_32(s: &str) -> Result<[u8; 32], String> {
     Ok(out)
 }
 
-/// One hex nibble.
+/// note: one hex nibble.
 fn hex_val(b: u8) -> Result<u8, String> {
     match b {
         b'0'..=b'9' => Ok(b - b'0'),
@@ -425,29 +425,29 @@ fn hex_val(b: u8) -> Result<u8, String> {
     }
 }
 
-/// Config load failure (fail-closed on any existing-but-invalid file).
+/// note: config load failure (fail-closed on any existing-but-invalid file).
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectConfigError {
-    /// The file exists but cannot be read.
+    /// note: the file exists but cannot be read.
     #[error("{0}")]
     Io(String),
-    /// The file is malformed / has unknown fields.
+    /// note: the file is malformed / has unknown fields.
     #[error("{0}")]
     Malformed(String),
-    /// Valid JSON but semantically invalid.
+    /// note: valid JSON but semantically invalid.
     #[error("{0}")]
     Invalid(String),
-    /// An operator allowlist entry failed the AR-69 derivation-lock
+    /// note: an operator allowlist entry failed the AR-69 derivation-lock
     /// validation (umbrella / reserved-ns / malformed). The whole config
     /// load fails — invalid entries are never silently dropped.
     #[error("invalid tool_allowlist entry {entry:?}: {reason}")]
     InvalidAllowlist { entry: String, reason: String },
-    /// An operator MCP-visibility entry failed validation (umbrella /
+    /// note: an operator MCP-visibility entry failed validation (umbrella /
     /// malformed — V1.180 P1, RN-OGA-2). The whole config load fails —
     /// invalid entries are never silently dropped.
     #[error("invalid mcp_visibility entry {entry:?}: {reason}")]
     InvalidVisibility { entry: String, reason: String },
-    /// `peer_keys.json` exists but is malformed / has unknown fields / a
+    /// note: `peer_keys.json` exists but is malformed / has unknown fields / a
     /// key is not 64 hex chars.
     #[error("invalid peer_keys.json: {0}")]
     InvalidPeerKeys(String),
@@ -494,7 +494,6 @@ mod tests {
         );
     }
 
-    // ── DF-91: collision policy + peer priority grammar ──────────────────
 
     #[test]
     fn absent_policy_keys_default_to_first_stays_empty_rank() {
@@ -534,7 +533,7 @@ mod tests {
 
     #[test]
     fn unknown_collision_policy_value_fails_load() {
-        // DF-91: an unknown policy value is a HARD config-load error
+        // note: DF-91: an unknown policy value is a HARD config-load error
         // (fail-closed) — never a silent fallback to first_stays.
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
@@ -551,7 +550,7 @@ mod tests {
 
     #[test]
     fn duplicate_peer_priority_entries_fail_load() {
-        // DF-91: `peer_priority` is an ordered rank — a duplicate entry
+        // note: DF-91: `peer_priority` is an ordered rank — a duplicate entry
         // makes the rank ambiguous and fails load (fail-closed, never
         // silently deduped).
         let home = isolated_home();
@@ -616,7 +615,6 @@ mod tests {
         ));
     }
 
-    // ── AR-69 derivation lock: allowlist negatives ────────────────────────
 
     #[test]
     fn authz_hello_allowlist_umbrella_rejected() {
@@ -703,7 +701,6 @@ mod tests {
         assert_eq!(config.peer_ids, vec!["peer-1".to_owned()]);
     }
 
-    // ── AR-69 Layer 0: peer_keys.json reader ─────────────────────────────
 
     #[test]
     fn authz_hello_peer_keys_missing_file_is_empty() {
@@ -774,11 +771,10 @@ mod tests {
         ));
     }
 
-    // ── V1.180 P1 (RN-OGA-2): MCP visibility subset ─────────────────────
 
     #[test]
     fn absent_mcp_visibility_defaults_to_empty() {
-        // The additive default: a `daemon.json` without the new key parses
+        // note: the additive default: a `daemon.json` without the new key parses
         // as an empty subset ⇒ absent policy (all tools visible —
         // byte-identical current behavior).
         let home = isolated_home();
@@ -791,7 +787,7 @@ mod tests {
 
     #[test]
     fn mcp_visibility_parses_exact_ids() {
-        // Heterogeneous catalog ids all load: builtin `nexus.*`, peer
+        // note: heterogeneous catalog ids all load: builtin `nexus.*`, peer
         // `tools.*`, and user-capability ids.
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
@@ -812,7 +808,7 @@ mod tests {
     }
     #[test]
     fn mcp_visibility_parses_slash_separated_ids() {
-        // QC W-001: slash-separated builtin family ids (`fs/*`) are exact
+        // note: QC W-001: slash-separated builtin family ids (`fs/*`) are exact
         // catalog ids — the operator config surface must express them
         // (the `fs/*` family is part of the real spine catalog).
         let home = isolated_home();
@@ -834,7 +830,7 @@ mod tests {
 
     #[test]
     fn mcp_visibility_umbrella_rejected() {
-        // Wildcards can never match a catalog id — fail-closed, never
+        // why: wildcards can never match a catalog id — fail-closed, never
         // silently dropped. (Single-segment ids like `tools` are accepted:
         // they can never match a catalog row, so they simply hide nothing.)
         for entry in ["tools.*", "tools.t4.*", "*"] {
@@ -864,7 +860,7 @@ mod tests {
 
     #[test]
     fn mcp_visibility_malformed_rejected() {
-        // Whitespace can never match a catalog id — the entry passes JSON
+        // why: whitespace can never match a catalog id — the entry passes JSON
         // parsing (so the named validator catches it) and fails the whole
         // load with `InvalidVisibility`.
         let home = isolated_home();
@@ -885,7 +881,7 @@ mod tests {
 
     #[test]
     fn mcp_visibility_json_hostile_entries_fail_closed() {
-        // Control characters are rejected by the JSON parser itself
+        // why: control characters are rejected by the JSON parser itself
         // (serde) — still a hard load failure, just at the parse layer.
         // Both layers fail closed; the named validator only sees entries
         // that survive JSON parsing.
@@ -906,7 +902,7 @@ mod tests {
 
     #[test]
     fn mcp_visibility_allows_reserved_namespace() {
-        // Unlike `tool_allowlist`, the reserved `tools.nexus.*` namespace
+        // why: unlike `tool_allowlist`, the reserved `tools.nexus.*` namespace
         // IS a valid visibility entry: hiding a daemon-owned tool from a
         // consumer is legitimate (visibility never grants execute).
         let home = isolated_home();

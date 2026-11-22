@@ -1,6 +1,6 @@
 //! Protocol-neutral peer tool registry (v1.190 P3-T3).
 //!
-//! The reverse-invoke spine: an admitted peer's tools become dispatchable by
+// note: The reverse-invoke spine: an admitted peer's tools become dispatchable by
 //! id, exactly like a builtin. Moved out of the daemon's
 //! `connect/table.rs` so a non-Connect host (the TS service, an independent
 //! product) owns the SAME registry instead of a second one.
@@ -45,138 +45,138 @@ use nexus_spoke_adapter::{
     ToolDescriptor,
 };
 
-/// One tool invocation's outcome, in protocol-neutral terms.
+/// note: one tool invocation's outcome, in protocol-neutral terms.
 pub type PeerInvokeResult = Result<serde_json::Value, PeerInvokeError>;
 
-/// A protocol-neutral invocation failure.
+/// note: A protocol-neutral invocation failure.
 ///
 /// The registry maps these onto its own refusals; the transport that produced
 /// them keeps its wire detail (the daemon preserves `details.kind` for the
 /// timeout/disconnect classes).
 #[derive(Debug, Clone)]
 pub enum PeerInvokeError {
-    /// The peer refused the call (a policy deny, not a transport fault).
+    /// note: the peer refused the call (a policy deny, not a transport fault).
     Denied {
-        /// The peer's own wire code, when it supplies one — preserved
+        /// note: the peer's own wire code, when it supplies one — preserved
         /// verbatim so a consumer can distinguish the peer's precise reason
         /// from the spine's generic `not_supported`.
         wire_code: Option<String>,
-        /// Human-readable refusal.
+        /// note: human-readable refusal.
         message: String,
     },
-    /// The invoke timed out.
+    /// note: the invoke timed out.
     Timeout {
-        /// Human-readable detail.
+        /// note: human-readable detail.
         message: String,
     },
-    /// The peer's session was torn down mid-invoke.
+    /// note: the peer's session was torn down mid-invoke.
     Disconnected {
-        /// Human-readable detail.
+        /// note: human-readable detail.
         message: String,
     },
-    /// Any other peer-side failure.
+    /// note: any other peer-side failure.
     Internal {
-        /// Human-readable detail.
+        /// note: human-readable detail.
         message: String,
     },
 }
 
-/// The reverse-invoke port a peer transport implements.
+/// note: the reverse-invoke port a peer transport implements.
 ///
 /// Deliberately two methods: the registry needs to invoke a tool and to
 /// identify the owning session. Anything else (framing, reconnection,
 /// negotiation) belongs to the transport, not here.
 #[async_trait::async_trait]
 pub trait PeerResponder: Send + Sync {
-    /// Invoke `tool_id` with `arguments` on this peer's session.
+    /// note: invoke `tool_id` with `arguments` on this peer's session.
     async fn invoke_tool(&self, tool_id: &str, arguments: serde_json::Value) -> PeerInvokeResult;
 
-    /// The authenticated peer id this responder serves.
+    /// note: the authenticated peer id this responder serves.
     fn peer_id(&self) -> &str;
 }
 
-/// One admitted peer tool row.
+/// note: one admitted peer tool row.
 #[derive(Clone)]
 pub struct PeerToolEntry {
-    /// The authenticated peer that owns this tool.
+    /// note: the authenticated peer that owns this tool.
     pub peer_id: String,
-    /// The manifest's tool descriptor (input/output schemas + description
+    /// note: the manifest's tool descriptor (input/output schemas + description
     /// carried verbatim).
     pub descriptor: ToolDescriptor,
-    /// The reverse-invoke face for the owning session.
+    /// note: the reverse-invoke face for the owning session.
     pub responder: Arc<dyn PeerResponder>,
 }
 
-/// Per-peer session record inside the registry.
+/// note: per-peer session record inside the registry.
 #[derive(Clone)]
 pub struct PeerSessionTools {
-    /// The responder handle for this peer's live session.
+    /// note: the responder handle for this peer's live session.
     pub responder: Arc<dyn PeerResponder>,
-    /// Tool ids admitted for this peer.
+    /// note: tool ids admitted for this peer.
     pub tool_ids: Vec<String>,
 }
 
-/// Interior state of the process-global registry.
+/// note: interior state of the process-global registry.
 struct TableInner {
-    /// `tool_id → entry` (the dispatchable peer surface).
+    /// note: `tool_id → entry` (the dispatchable peer surface).
     tools: HashMap<String, PeerToolEntry>,
-    /// `peer_id → session tools` (eviction + reconnect bookkeeping).
+    /// note: `peer_id → session tools` (eviction + reconnect bookkeeping).
     sessions: HashMap<String, PeerSessionTools>,
 }
 
-/// Collision policy when two peers offer the same tool id.
+/// note: collision policy when two peers offer the same tool id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CollisionPolicy {
-    /// The first registrant keeps the id (the default).
+    /// note: the first registrant keeps the id (the default).
     #[default]
     FirstStays,
-    /// The peer ranked earlier in the priority list wins.
+    /// note: the peer ranked earlier in the priority list wins.
     PriorityOrder,
 }
 
-/// Live config the registry reads at each admission.
+/// note: live config the registry reads at each admission.
 #[derive(Debug, Clone, Default)]
 pub struct PeerToolsConfig {
-    /// Duplicate-id collision policy.
+    /// note: duplicate-id collision policy.
     pub collision_policy: CollisionPolicy,
-    /// Peer rank: earlier = higher priority.
+    /// note: peer rank: earlier = higher priority.
     pub peer_priority: Vec<String>,
 }
 
-/// The outcome of one manifest admission.
+/// note: the outcome of one manifest admission.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdmissionOutcome {
-    /// The manifest was admitted; the listed ids are now dispatchable.
+    /// note: the manifest was admitted; the listed ids are now dispatchable.
     Admitted {
-        /// The ids that were admitted.
+        /// note: the ids that were admitted.
         tool_ids: Vec<String>,
     },
-    /// The whole manifest was refused — zero ingestion, session stays up.
+    /// note: the whole manifest was refused — zero ingestion, session stays up.
     ManifestInvalid {
-        /// Why it was refused.
+        /// note: why it was refused.
         message: String,
     },
 }
 
-/// Why a single tool id was refused at admission.
+/// note: why a single tool id was refused at admission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolRefusal {
-    /// The id does not match the `tools.<ns>.<tool_id>` grammar.
+    /// note: the id does not match the `tools.<ns>.<tool_id>` grammar.
     Grammar,
-    /// The id is reserved (a builtin or user capability).
+    /// note: the id is reserved (a builtin or user capability).
     ReservedNamespace,
-    /// The daemon hello did not negotiate this exact id.
+    /// note: the daemon hello did not negotiate this exact id.
     NotNegotiated,
-    /// The operator allowlist does not include the id.
+    /// note: the operator allowlist does not include the id.
     NotAllowlisted,
-    /// Another peer already owns the id.
+    /// note: another peer already owns the id.
     DuplicatePeer,
 }
 
-/// The peer tool registry.
+/// note: the peer tool registry.
 pub struct PeerToolRegistry {
     inner: Mutex<TableInner>,
-    /// Live config snapshot. The registry reads the collision policy from the
+    /// note: live config snapshot. The registry reads the collision policy from the
     /// CURRENT config at each admission, so a reload takes effect for new
     /// registrations without further mutation.
     ///
@@ -189,7 +189,7 @@ pub struct PeerToolRegistry {
 }
 
 impl PeerToolRegistry {
-    /// An empty registry.
+    /// note: an empty registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -201,12 +201,12 @@ impl PeerToolRegistry {
         }
     }
 
-    /// Wire the live config snapshot.
+    /// note: wire the live config snapshot.
     pub fn set_config(&self, config: Option<Arc<PeerToolsConfig>>) {
         *self.config.lock().unwrap_or_else(PoisonError::into_inner) = config;
     }
 
-    /// Whether a config snapshot is wired.
+    /// note: whether a config snapshot is wired.
     #[must_use]
     pub fn has_config(&self) -> bool {
         self.config
@@ -215,7 +215,7 @@ impl PeerToolRegistry {
             .is_some()
     }
 
-    /// Admit one authenticated manifest.
+    /// note: admit one authenticated manifest.
     ///
     /// The whole-manifest validation runs FIRST: a failure ingests nothing and
     /// leaves the session up. Then each tool id passes the named filter chain
@@ -248,7 +248,7 @@ impl PeerToolRegistry {
 
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
 
-        // A same-peer reconnect evicts the peer's prior rows first
+        // why: A same-peer reconnect evicts the peer's prior rows first
         // (deterministic last-wins).
         if let Some(prior) = inner.sessions.remove(peer_id) {
             for id in &prior.tool_ids {
@@ -258,7 +258,7 @@ impl PeerToolRegistry {
             }
         }
 
-        // The config guard is scoped to this block and dropped once the rank
+        // why: the config guard is scoped to this block and dropped once the rank
         // vector is cloned; `inner` stays held for the whole admission.
         let (policy, peer_priority) = {
             let config_guard = self.config.lock().unwrap_or_else(PoisonError::into_inner);
@@ -281,7 +281,7 @@ impl PeerToolRegistry {
             match collision_decision(&id, peer_id, &inner.tools, policy, &peer_priority) {
                 CollisionDecision::Admit => {}
                 CollisionDecision::Preempt => {
-                    // The preempted peer's session record is untouched: its
+                    // why: the preempted peer's session record is untouched: its
                     // other rows keep dispatching. An in-flight invoke on the
                     // evicted row resolves as an honest per-call failure — the
                     // spine reads the registry at invoke time, so a rebound row
@@ -323,8 +323,8 @@ impl PeerToolRegistry {
         AdmissionOutcome::Admitted { tool_ids: admitted }
     }
 
-    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
-    /// Evict every row owned by `peer_id`.
+    #[allow(clippy::significant_drop_tightening)] // why: the guard deliberately spans the whole operation
+    /// note: evict every row owned by `peer_id`.
     ///
     /// `expected` guards against a stale monitor evicting a REPLACEMENT
     /// session's rows (pointer identity). Returns `false` when nothing was
@@ -349,7 +349,7 @@ impl PeerToolRegistry {
         evicted
     }
 
-    /// Look up a dispatchable peer entry by tool id.
+    /// note: look up a dispatchable peer entry by tool id.
     #[must_use]
     pub fn get(&self, tool_id: &str) -> Option<PeerToolEntry> {
         self.inner
@@ -360,7 +360,7 @@ impl PeerToolRegistry {
             .cloned()
     }
 
-    /// Every dispatchable peer tool id.
+    /// note: every dispatchable peer tool id.
     #[must_use]
     pub fn ids(&self) -> Vec<String> {
         self.inner
@@ -372,7 +372,7 @@ impl PeerToolRegistry {
             .collect()
     }
 
-    /// Every dispatchable peer entry.
+    /// note: every dispatchable peer entry.
     #[must_use]
     pub fn entries(&self) -> Vec<PeerToolEntry> {
         self.inner
@@ -384,7 +384,7 @@ impl PeerToolRegistry {
             .collect()
     }
 
-    /// The tool ids admitted for one peer.
+    /// note: the tool ids admitted for one peer.
     #[must_use]
     pub fn peer_tool_ids(&self, peer_id: &str) -> Vec<String> {
         self.inner
@@ -395,7 +395,7 @@ impl PeerToolRegistry {
             .map_or_default(|s| s.tool_ids.clone())
     }
 
-    /// Number of dispatchable peer tools.
+    /// note: number of dispatchable peer tools.
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner
@@ -405,7 +405,7 @@ impl PeerToolRegistry {
             .len()
     }
 
-    /// Whether no peer tool is dispatchable.
+    /// note: whether no peer tool is dispatchable.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -418,7 +418,7 @@ impl Default for PeerToolRegistry {
     }
 }
 
-/// The process-global peer tool registry.
+/// note: the process-global peer tool registry.
 #[must_use]
 pub fn peer_tool_registry() -> &'static Arc<PeerToolRegistry> {
     static TABLE: LazyLock<Arc<PeerToolRegistry>> =
@@ -426,7 +426,7 @@ pub fn peer_tool_registry() -> &'static Arc<PeerToolRegistry> {
     &TABLE
 }
 
-/// Invoke an admitted peer tool, validating its arguments first.
+/// note: invoke an admitted peer tool, validating its arguments first.
 ///
 /// The structural argument gate runs before any transport I/O: a malformed
 /// call is refused locally and never reaches the peer.
@@ -450,7 +450,7 @@ pub async fn invoke_peer_tool(
         .await
 }
 
-/// Whether a peer descriptor's input schema may be carried on an MCP surface.
+/// note: whether a peer descriptor's input schema may be carried on an MCP surface.
 ///
 /// The surface only carries root-object tools; a non-object input is omitted
 /// from the CATALOG while its registration lane is untouched — the tool stays
@@ -464,7 +464,7 @@ pub fn catalog_input_root_object(descriptor: &ToolDescriptor) -> bool {
         == Some("object")
 }
 
-/// Whether a peer descriptor's output schema may be carried on an MCP surface
+/// note: whether a peer descriptor's output schema may be carried on an MCP surface
 /// (present AND root-object; a non-object output is omitted, never wrapped).
 #[must_use]
 pub fn catalog_output_root_object(descriptor: &ToolDescriptor) -> bool {
@@ -475,11 +475,7 @@ pub fn catalog_output_root_object(descriptor: &ToolDescriptor) -> bool {
         == Some("object")
 }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
-
-/// The per-tool named refusal chain.
+/// note: the per-tool named refusal chain.
 ///
 /// Order: grammar → reserved-ns → negotiated → allowlist. The duplicate-peer
 /// collision is deliberately NOT here: it is policy-aware and decided by
@@ -505,7 +501,7 @@ fn refuse_tool<S: std::hash::BuildHasher>(
     None
 }
 
-/// Policy-aware duplicate-id collision decision.
+/// note: policy-aware duplicate-id collision decision.
 ///
 /// `first_stays`: the existing row stays, the new peer is refused.
 /// `priority_order`: a later-registering higher-priority peer preempts; equal
@@ -534,7 +530,7 @@ fn collision_decision(
     CollisionDecision::Refuse
 }
 
-/// Array-order rank: earlier in `peer_priority` = higher priority (smaller
+/// note: array-order rank: earlier in `peer_priority` = higher priority (smaller
 /// rank). Unlisted peers rank below every listed peer.
 fn peer_rank(peer_id: &str, peer_priority: &[String]) -> usize {
     peer_priority
@@ -543,14 +539,14 @@ fn peer_rank(peer_id: &str, peer_priority: &[String]) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-/// Policy-aware collision outcome for one tool id.
+/// note: policy-aware collision outcome for one tool id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CollisionDecision {
-    /// No existing row — admit.
+    /// note: no existing row — admit.
     Admit,
-    /// The new peer outranks the existing owner; the caller removes the old
+    /// note: the new peer outranks the existing owner; the caller removes the old
     /// row and rebinds it.
     Preempt,
-    /// The existing row stays — the new peer is refused.
+    /// note: the existing row stays — the new peer is refused.
     Refuse,
 }

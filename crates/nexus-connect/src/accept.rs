@@ -59,10 +59,10 @@ use nexus_capability::CapabilityRegistryHolder;
 const SUBSCRIBE_TOOL: &str = "tools.nexus.subscribe";
 const DELIVER_TOOL: &str = "tools.nexus.deliver_events";
 
-/// Poll interval for the close-observation fallback (`responder.state()`).
+/// note: poll interval for the close-observation fallback (`responder.state()`).
 const CLOSE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Handshake state poll interval while waiting for establishment.
+/// note: handshake state poll interval while waiting for establishment.
 const HANDSHAKE_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// The nexus-owned transport wrapper (AR-67 #4).
@@ -77,7 +77,7 @@ pub struct ObservedTransport {
     closed_notify: Notify,
     pending_subscribe: Mutex<HashMap<String, String>>,
     session: Mutex<Option<String>>,
-    /// Outbound envelopes dropped without activating a delivery
+    /// note: outbound envelopes dropped without activating a delivery
     /// (`R-V1207-P2-S3A`): the payload-blind `observe_outbound` returns.
     outbound_drops: AtomicU64,
 }
@@ -152,7 +152,7 @@ impl ObservedTransport {
         }
     }
 
-    /// Record an outbound envelope dropped without activating a delivery
+    /// note: record an outbound envelope dropped without activating a delivery
     /// (`R-V1207-P2-S3A`). The drop stays non-fatal — the subscription is
     /// simply never enabled — so the signal is a counter + warn line, never
     /// a `send` error.
@@ -169,7 +169,7 @@ impl ObservedTransport {
         self.closed.load(Ordering::SeqCst)
     }
 
-    /// How many outbound envelopes were dropped without activating a
+    /// note: how many outbound envelopes were dropped without activating a
     /// delivery (`R-V1207-P2-S3A`) — the counter the in-crate test asserts the
     /// payload-blind `observe_outbound` returns against. Test-only: the
     /// production signal is the `record_outbound_drop` warning, so this is not
@@ -217,7 +217,7 @@ impl Transport for ObservedTransport {
     }
 }
 
-/// Whether `host` is a loopback bind target (`localhost` or a loopback IP).
+/// note: whether `host` is a loopback bind target (`localhost` or a loopback IP).
 ///
 /// Semantics verbatim from the daemon boot gate (P4-T3 moved into the core
 /// lane so the refusal lives with the lane that enforces it).
@@ -230,7 +230,7 @@ pub fn is_loopback_host(host: &str) -> bool {
         .is_ok_and(|ip| ip.is_loopback())
 }
 
-/// Enforce the opt-in remote-bind gate for a non-loopback peer-tools bind.
+/// note: enforce the opt-in remote-bind gate for a non-loopback peer-tools bind.
 ///
 /// A non-loopback bind is only permitted when both `NEXUS42_DAEMON_API_KEY`
 /// and `NEXUS_DAEMON_REMOTE_BIND=1` are present. Loopback binds are
@@ -256,7 +256,7 @@ pub fn ensure_remote_bind_allowed(host: &str) -> ConnectResult<()> {
     Ok(())
 }
 
-/// WS-lane daemon hello manifest: baseline capabilities, allowlisted tools,
+/// note: WS-lane daemon hello manifest: baseline capabilities, allowlisted tools,
 /// and the fixed subscribe/consumer-delivery capabilities. `host_id` is the
 /// installation device id.
 ///
@@ -295,7 +295,7 @@ pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityMani
     }))
     .expect("static daemon manifest is valid")
 }
-/// Per-lane responder identity (AR-69 trust material minus the frozen
+/// note: per-lane responder identity (AR-69 trust material minus the frozen
 /// generation).
 ///
 /// DF-92: the ADMISSION-affecting material — dialer allowlist, preconfigured
@@ -304,12 +304,12 @@ pub fn daemon_manifest(host_id: &str, tool_ids: &[String]) -> HostCapabilityMani
 /// [`handle_connection`]); only the fields below are lane-static.
 #[derive(Clone)]
 pub struct PeerResponderOptions {
-    /// Daemon Ed25519 seed (persistent identity).
+    /// note: daemon Ed25519 seed (persistent identity).
     pub identity_seed: [u8; 32],
-    /// Installation device id — the hello `host_id`. The hello itself is
+    /// note: installation device id — the hello `host_id`. The hello itself is
     /// derived per connection from the live allowlist.
     pub host_id: String,
-    /// Live peer config holder (DF-92): one read per connection supplies
+    /// note: live peer config holder (DF-92): one read per connection supplies
     /// the handshake allowlist (`peer_ids`), the handshake keys, and the
     /// allowlist the hello + admission derive from.
     pub config: PeerConfigHolder,
@@ -327,7 +327,7 @@ pub struct PeerResponderOptions {
     pub capability_registry: Option<CapabilityRegistryHolder>,
 }
 
-/// The connection's grant-at-establish generation (DF-92): the config
+/// note: the connection's grant-at-establish generation (DF-92): the config
 /// snapshot the handshake validated against + the allowlist-derived hello it
 /// negotiated with. Admission reads THIS generation — never a fresh holder
 /// read — so a session's grant is internally coherent even if a reload lands
@@ -338,7 +338,7 @@ struct ConnectionGeneration {
     manifest: Arc<HostCapabilityManifest>,
 }
 
-/// Spawn the peer-tools accept loop over an already-bound listener.
+/// note: spawn the peer-tools accept loop over an already-bound listener.
 ///
 /// The accept loop is detached: it runs until `shutdown` fires. Each
 /// accepted connection is processed in its own spawned task; the loop never
@@ -388,7 +388,7 @@ pub fn spawn_accept_loop(
     })
 }
 
-/// One accepted connection: WS upgrade → responder → session registration →
+/// note: one accepted connection: WS upgrade → responder → session registration →
 /// close-observation monitor (all in the caller's spawned task).
 async fn handle_connection(
     stream: TcpStream,
@@ -396,7 +396,7 @@ async fn handle_connection(
     sessions: Arc<PeerSessionManager>,
     options: PeerResponderOptions,
 ) {
-    // DF-92: ONE holder read per connection. The handshake (dialer
+    // note: DF-92: ONE holder read per connection. The handshake (dialer
     // allowlist + keys) and the admission (negotiation hello + operator
     // allowlist) validate against THIS generation — grant-at-establish for
     // the session it establishes. A reload landing mid-handshake applies
@@ -422,7 +422,7 @@ async fn handle_connection(
         Ok(ws) => ws,
         Err(e) => {
             tracing::debug!(error = %e, "peer-tools WS upgrade failed");
-            // QC-fix W-A: the accept reservation is released — the
+            // note: QC-fix W-A: the accept reservation is released — the
             // connection never reaches the handshake.
             sessions.release_in_flight();
             return;
@@ -434,7 +434,7 @@ async fn handle_connection(
         identity: RemoteIdentity {
             seed: options.identity_seed,
         },
-        // Handshake admission material from THIS connection's generation
+        // why: handshake admission material from THIS connection's generation
         // (DF-92): a fresh snapshot's peer_ids + keys gate the dialer.
         manifest: (*generation.manifest).clone(),
         allowlist: generation.snapshot.config.peer_ids.clone(),
@@ -460,7 +460,7 @@ async fn monitor_session(
     generation: ConnectionGeneration,
     options: PeerResponderOptions,
 ) {
-    // Phase 1: bounded handshake outcome (a dialer that never sends its
+    // note: phase 1: bounded handshake outcome (a dialer that never sends its
     // hello is closed by us after the bound — the responder's own recv would
     // otherwise park forever).
     let handshake_timeout = Duration::from_millis(config.invoke_timeout_ms.max(1000));
@@ -469,7 +469,7 @@ async fn monitor_session(
         .ok()
         .flatten();
     let Some(peer_id) = established else {
-        // Handshake failed (rejection → responder closed itself) or timed
+        // why: handshake failed (rejection → responder closed itself) or timed
         // out: close the responder so the dialer fails fast. Zero session
         // state — the manager never saw this peer. The accept reservation
         // (QC-fix W-A) is released here.
@@ -488,7 +488,7 @@ async fn monitor_session(
         crate::table::ConnectResponderAdapter::new(Arc::clone(&responder), peer_id.clone()),
     );
 
-    // Phase 2: admit. T3 (AR-68): the authenticated manifest's tool ids run
+    // note: phase 2: admit. T3 (AR-68): the authenticated manifest's tool ids run
     // the full admission chain inside the process-global PeerToolTable
     // (whole-manifest validation → grammar → reserved-ns → negotiated →
     // allowlist → duplicate-peer). The session manager records the
@@ -505,7 +505,7 @@ async fn monitor_session(
                 generation.manifest.capabilities.iter().cloned().collect();
             let allowlist: std::collections::HashSet<String> =
                 generation.snapshot.config.tool_allowlist.iter().cloned().collect();
-            // The decision is consistent with the reservation AT THE MOMENT
+            // why: the decision is consistent with the reservation AT THE MOMENT
             // IT IS MADE (C3 fix round 2): the holder's reservation is held
             // exclusively across set derivation and registration, so a
             // concurrent hot swap serializes with the decision instead of
@@ -539,7 +539,7 @@ async fn monitor_session(
     let replaced = sessions.register(&peer_id, Arc::clone(&responder), &admitted_ids);
     tracing::info!(%peer_id, replaced, "peer session established");
 
-    // Phase 3: close observation (see `wait_for_close`).
+    // note: phase 3: close observation (see `wait_for_close`).
     wait_for_close(&responder, &observed).await;
     crate::events::connect_event_registry().remove_session(&event_session_id);
     let evicted = sessions.evict(&peer_id, Some(&responder));
@@ -554,7 +554,7 @@ async fn monitor_session(
     }
 }
 
-/// Await close observation for one session. Primary path = the wrapper's
+/// note: await close observation for one session. Primary path = the wrapper's
 /// `Notify` (fires the same tick the transport reports an error/close);
 /// fallback = the responder state poll (catches a close the wrapper missed,
 /// e.g. a local `close_session` without a transport error). The flag is
@@ -576,7 +576,7 @@ async fn wait_for_close(responder: &Arc<ConnectResponder>, observed: &ObservedTr
     }
 }
 
-/// Serve `tools.nexus.subscribe` for one session (§A.2a(f)1).
+/// note: serve `tools.nexus.subscribe` for one session (§A.2a(f)1).
 ///
 /// The negotiated subscribe gate is enforced by the responder. The reverse
 /// delivery capability is checked inside the handler before any side effect.
@@ -594,7 +594,7 @@ fn serve_subscribe_tool(
     );
 }
 
-/// Register the async `tools.nexus.subscribe` handler on `responder`.
+/// note: register the async `tools.nexus.subscribe` handler on `responder`.
 ///
 /// The handler performs the ring's atomic subscribe and drives ack-gated
 /// delivery. Its success response carries `{stream, epoch, resumed_from}` and
@@ -605,7 +605,7 @@ fn serve_subscribe_tool(
 /// is stored inside that same responder, so a strong capture would form an
 /// ownership cycle (`close_session` never clears the handler map) and retain
 /// every eligible disconnected session.
-#[allow(clippy::too_many_lines)] // one linear subscribe→ack-gated-delivery handler; splitting would obscure the frozen ordering
+#[allow(clippy::too_many_lines)] // why: one linear subscribe→ack-gated-delivery handler; splitting would obscure the frozen ordering
 fn register_subscribe_handler(
     responder: &Arc<ConnectResponder>,
     session_id: String,
@@ -737,7 +737,7 @@ fn register_subscribe_handler(
     let _ = responder.register_tool_handler(SUBSCRIBE_TOOL, handler);
 }
 
-/// Drive ack-gated delivery for one subscription until it is cancelled or a
+/// note: drive ack-gated delivery for one subscription until it is cancelled or a
 /// reverse invoke fails. `push` performs one reverse invocation of
 /// `tools.nexus.deliver_events`.
 ///
@@ -769,7 +769,7 @@ async fn drive_delivery<P, Fut, F>(
         if frames.is_empty() {
             break;
         }
-        // Send admission: interrupted by cancellation, so a replaced
+        // note: send admission: interrupted by cancellation, so a replaced
         // generation never waits out another stream's send slot.
         let _guard = tokio::select! {
             biased;
@@ -788,7 +788,7 @@ async fn drive_delivery<P, Fut, F>(
     subscription.unregister(&session);
 }
 
-/// A push future that records whether it was ever polled.
+/// note: A push future that records whether it was ever polled.
 ///
 /// The distinction is load-bearing: a cancellation that wins before this
 /// future's first poll means the reverse invoke never ran, so nothing was
@@ -824,7 +824,7 @@ impl<F: std::future::Future> std::future::Future for PollTracker<F> {
     }
 }
 
-/// Race one constructed (never polled) push against cancellation, bounded by
+/// note: race one constructed (never polled) push against cancellation, bounded by
 /// a single deadline from the start of the push.
 ///
 /// Returns `Some(result)` when the push completes, `None` on cancellation or
@@ -855,7 +855,7 @@ where
     })
     .await;
     let Ok(result) = outcome else {
-        // Closing synchronously fences the responder before `invoke` is
+        // why: closing synchronously fences the responder before `invoke` is
         // dropped below; its allocated sequence can never be reused.
         fail_closed();
         return None;
@@ -863,7 +863,7 @@ where
     result
 }
 
-/// Poll the responder state until it leaves `Handshaking`; returns the
+/// note: poll the responder state until it leaves `Handshaking`; returns the
 /// dialer peer id on success, `None` on rejection.
 async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<String> {
     loop {
@@ -877,7 +877,7 @@ async fn wait_until_established(responder: &Arc<ConnectResponder>) -> Option<Str
     }
 }
 
-/// The locked v1.210 P3 event-lane readiness line.
+/// note: the locked v1.210 P3 event-lane readiness line.
 ///
 /// Built from the lane's **actually-bound** address
 /// ([`PeerToolsLaneHandle::addr`]) — never the configured echo, so a spawned
@@ -890,7 +890,7 @@ pub fn event_lane_readiness_line(addr: std::net::SocketAddr) -> String {
     format!("event_lane: ws://{addr}/connect")
 }
 
-/// Actionable warning for a failed event-lane bind (v1.210 P3 locked
+/// note: actionable warning for a failed event-lane bind (v1.210 P3 locked
 /// contract): the configured `host:port`, the failure class, and the
 /// `daemon.json` port remedy. `AddrInUse` is the documented default-port
 /// conflict the lane deliberately warn-and-skips (the node lane is primary
@@ -915,7 +915,7 @@ fn event_lane_bind_warning(
     )
 }
 
-/// Actionable warning for the lane's fail-closed non-loopback refusal
+/// note: actionable warning for the lane's fail-closed non-loopback refusal
 /// (v1.210 P3 locked contract): configured `host:port`, failure class, and
 /// the `daemon.json` remedy.
 #[must_use]
@@ -928,7 +928,7 @@ fn event_lane_non_loopback_warning(host: &str, port: u16, config_path: &Path) ->
     )
 }
 
-/// Actionable warning for a `daemon.json` load failure (v1.210 P3 locked
+/// note: actionable warning for a `daemon.json` load failure (v1.210 P3 locked
 /// contract): failure class + the `daemon.json` remedy. The configured
 /// `host:port` is unknowable here — the file did not parse — so the warning
 /// names the config file instead of a fabricated address.
@@ -945,7 +945,7 @@ fn event_lane_config_warning(config_path: &Path, error: &ConnectConfigError) -> 
     )
 }
 
-/// Refuse an empty injected builtin roster before the lane does any boot work.
+/// note: refuse an empty injected builtin roster before the lane does any boot work.
 ///
 /// The reserved set's builtin half is only as good as this roster, and this
 /// crate has no registry to fall back to: an empty set would let a peer shadow
@@ -1010,12 +1010,12 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
     builtin_tool_ids: HashSet<String, S>,
 ) -> ConnectResult<PeerToolsLaneHandle> {
     ensure_injected_roster(&builtin_tool_ids)?;
-    // DF-92: seed the digest baseline BEFORE the boot load — an edit
+    // note: DF-92: seed the digest baseline BEFORE the boot load — an edit
     // landing anywhere in the boot window diverges from the baseline and
     // the first poll reloads (never absorbed; the capability watcher's
     // W-B rule).
     let boot_digest = peer_config_digest(home);
-    // The effective `daemon.json` path for `home` (`--home` / `NEXUS42_HOME`
+    // why: the effective `daemon.json` path for `home` (`--home` / `NEXUS42_HOME`
     // select it) — the lane-startup warnings must name THIS file, not a
     // hardcoded `~/.nexus42/...`, so the remedy points at the file the
     // operator can actually edit.
@@ -1025,7 +1025,7 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
             category: event_lane_config_warning(&config_path, &e),
         })?,
     );
-    // DF-91: wire the live config snapshot into the process-global table
+    // note: DF-91: wire the live config snapshot into the process-global table
     // so admission reads `collision_policy` + `peer_priority` at
     // admission time (live-derivation precedent: `live_reserved_tool_ids`
     // reads the capability holder the same way — p1's reload swaps the
@@ -1083,13 +1083,13 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
         identity_seed,
         host_id: device_id,
         config: PeerConfigHolder::clone(&config_holder),
-        // The field is lane-static and boot-only: one normalize into the
+        // note: the field is lane-static and boot-only: one normalize into the
         // default hasher keeps `PeerResponderOptions` non-generic (a hasher
         // type parameter there would ripple through every handler).
         builtin_tool_ids: Arc::new(builtin_tool_ids.into_iter().collect()),
         capability_registry,
     };
-    // DF-92: the config watcher runs alongside the accept loop. The
+    // note: DF-92: the config watcher runs alongside the accept loop. The
     // caller's shutdown Notify stays SINGLE-consumer — `notify_one` stores
     // exactly one permit, so a second direct consumer (the watcher) could
     // steal it and leave the accept loop un-woken (a hung lane, observed
@@ -1107,7 +1107,7 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
             watch_shutdown.notify_one();
         }
     });
-    // DF-92 supervision: the supervisor awaits the watcher task; a watcher
+    // note: DF-92 supervision: the supervisor awaits the watcher task; a watcher
     // panic surfaces as a JoinError, logs ONE `peer config reload degraded`
     // warn, and the lane keeps serving the last-good snapshot until a
     // restart restores reload. `handle.watch_task` is the supervisor.
@@ -1155,21 +1155,21 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
     })
 }
 
-/// Running peer-tools lane (accept loop + its session registry).
+/// note: running peer-tools lane (accept loop + its session registry).
 pub struct PeerToolsLaneHandle {
-    /// Bound listen address.
+    /// note: bound listen address.
     pub addr: std::net::SocketAddr,
-    /// Session registry shared by the accept loop (T3's dispatch arm reads
+    /// note: session registry shared by the accept loop (T3's dispatch arm reads
     /// this; the reverse index into the `PeerToolTable` lands with T3).
     pub sessions: Arc<PeerSessionManager>,
-    /// Live peer config holder (DF-92): the watcher swaps validated
+    /// note: live peer config holder (DF-92): the watcher swaps validated
     /// reloads into it; every connection reads ONE generation from it for
     /// the handshake + admission (grant-at-establish — see
     /// [`handle_connection`]).
     pub config: PeerConfigHolder,
-    /// Accept-loop task.
+    /// note: accept-loop task.
     pub task: JoinHandle<()>,
-    /// SUPERVISED config-watcher task (DF-92): the supervisor awaits the
+    /// note: SUPERVISED config-watcher task (DF-92): the supervisor awaits the
     /// inner watcher, so a watcher panic is logged as ONE `peer config
     /// reload degraded` warn while the lane keeps serving the last-good
     /// snapshot (restart restores reload). Exits when the watcher exits on
@@ -1182,7 +1182,7 @@ mod tests {
     use super::*;
     use crate::config::CollisionPolicy;
 
-    /// v1.210 P3 locked contract: the readiness line is the plain
+    /// note: v1.210 P3 locked contract: the readiness line is the plain
     /// `event_lane: ws://<host>:<port>/connect` form, built from the bound
     /// address — a spawned/ephemeral port prints its REAL value, never the
     /// configured default (feature parity across both boot surfaces).
@@ -1200,7 +1200,7 @@ mod tests {
         );
     }
 
-    /// v1.210 P3 locked contract: every enumerated lane-startup failure
+    /// note: v1.210 P3 locked contract: every enumerated lane-startup failure
     /// warning names the configured `host:port` (where knowable), the
     /// failure class, and the EFFECTIVE `daemon.json` path — the file the
     /// `--home` / `NEXUS42_HOME`-selected home actually reads, not a
@@ -1232,7 +1232,7 @@ mod tests {
         assert!(text.contains("non-loopback refusal"), "{text}");
         assert!(text.contains("0.0.0.0:8425"), "{text}");
         assert!(text.contains(&expected), "{text}");
-        // The remedy names the effective file, not the hardcoded default a
+        // why: the remedy names the effective file, not the hardcoded default a
         // non-default home never reads.
         assert!(!text.contains("~/.nexus42/connect/daemon.json"), "{text}");
 
@@ -1262,7 +1262,7 @@ mod tests {
             .build()
             .expect("runtime");
         runtime.block_on(async {
-            // The peer close surfaces as a recv error on the wrapper.
+            // why: the peer close surfaces as a recv error on the wrapper.
             let observed_ref = Arc::clone(&observed);
             let recv = tokio::spawn(async move { observed_ref.recv().await });
             pair.server.close().await.expect("close");
@@ -1323,7 +1323,7 @@ mod tests {
         pair.server.close().await.unwrap();
     }
 
-    /// S1 (`R-V1207-P2-S3A`): the two payload-blind `observe_outbound`
+    /// note: S1 (`R-V1207-P2-S3A`): the two payload-blind `observe_outbound`
     /// branches — an unparseable response envelope, and a response whose
     /// `/payload/result` is absent — dropped the activation silently. Both
     /// drops must now be observable through the per-transport counter.
@@ -1337,17 +1337,17 @@ mod tests {
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
         observed.bind_session(&session);
 
-        // Arm a pending subscribe so a matching response reaches the
+        // why: arm a pending subscribe so a matching response reaches the
         // payload check rather than the earlier lifecycle returns.
         send_subscribe_request(&pair.server, &stream, "subscribe-1").await;
         observed.recv().await.unwrap();
         assert_eq!(observed.outbound_drops(), 0);
 
-        // (a) Unparseable response envelope.
+        // why: (a) Unparseable response envelope.
         observed.send(b"{ not json").await.unwrap();
         assert_eq!(observed.outbound_drops(), 1, "unparseable drop must count");
 
-        // (b) Parseable response with a matching request_id but no
+        // why: (b) Parseable response with a matching request_id but no
         // `/payload/result`.
         observed
             .send(
@@ -1369,7 +1369,7 @@ mod tests {
         pair.server.close().await.unwrap();
     }
 
-    /// C1: an older subscribe response must never activate a replacement
+    /// note: C1: an older subscribe response must never activate a replacement
     /// generation. With interleaved invokes (two requests observed before
     /// either response), the first response enables the generation it was
     /// bound to; the replacement stays dark until its own response write.
@@ -1386,15 +1386,15 @@ mod tests {
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
         observed.bind_session(&session);
 
-        // Request A observed, then its generation registered (awaiting).
+        // why: request A observed, then its generation registered (awaiting).
         send_subscribe_request(&pair.server, &stream, "subscribe-a").await;
         observed.recv().await.unwrap();
         let (_, _, mut first) = registry.subscribe(&session, &stream, None).await.unwrap();
-        // Request B observed while A's response is still outstanding.
+        // why: request B observed while A's response is still outstanding.
         send_subscribe_request(&pair.server, &stream, "subscribe-b").await;
         observed.recv().await.unwrap();
 
-        // A's response write enables A's generation.
+        // why: A's response write enables A's generation.
         send_subscribe_response(observed.as_ref(), &stream, "subscribe-a").await;
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), first.next_batch())
@@ -1403,7 +1403,7 @@ mod tests {
             vec![first_frame]
         );
 
-        // B's generation can now register, but B's response is unwritten.
+        // why: B's generation can now register, but B's response is unwritten.
         let (_, _, mut replacement) = registry.subscribe(&session, &stream, None).await.unwrap();
         assert!(
             tokio::time::timeout(Duration::from_millis(20), replacement.next_batch())
@@ -1411,7 +1411,7 @@ mod tests {
                 .is_err(),
             "no replacement delivery may escape before B's own response"
         );
-        // B's own response write enables it.
+        // why: B's own response write enables it.
         send_subscribe_response(observed.as_ref(), &stream, "subscribe-b").await;
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(1), replacement.next_batch())
@@ -1424,7 +1424,7 @@ mod tests {
         pair.server.close().await.unwrap();
     }
 
-    /// C2/C3: cancellation releases a wait for the session send slot, but an
+    /// note: C2/C3: cancellation releases a wait for the session send slot, but an
     /// in-flight reverse invoke is completed on the wire (never abandoned)
     /// before the slot is handed to another stream — the responder's
     /// allocated outbound sequence must not be skipped.
@@ -1491,7 +1491,7 @@ mod tests {
             },
         ));
 
-        // A holds the session slot inside its reverse invoke; B waits for it.
+        // why: A holds the session slot inside its reverse invoke; B waits for it.
         invoke_started.notified().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
@@ -1499,7 +1499,7 @@ mod tests {
             "the second stream must wait for the session send slot"
         );
 
-        // Replacing A cancels it, but A's in-flight invoke must complete on
+        // why: replacing A cancels it, but A's in-flight invoke must complete on
         // the wire rather than be abandoned (C3): the slot is not yet free.
         let _replacement = registry.subscribe(&session, &stream_a, None).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1508,7 +1508,7 @@ mod tests {
             "an in-flight reverse invoke must complete before the slot is handed over"
         );
 
-        // Complete the wire send: A finishes, stops, and releases the slot.
+        // note: complete the wire send: A finishes, stops, and releases the slot.
         release.notify_one();
         tokio::time::timeout(Duration::from_secs(1), async {
             while !second_pushed.load(Ordering::SeqCst) {
@@ -1527,7 +1527,7 @@ mod tests {
         second_driver.await.unwrap();
     }
 
-    /// A transport decorator that can block one `tools.nexus.deliver_events`
+    /// note: A transport decorator that can block one `tools.nexus.deliver_events`
     /// send after the responder allocated its outbound sequence but before
     /// any byte reaches the inner transport, and records the sequence of
     /// every send that actually reached the wire.
@@ -1561,7 +1561,7 @@ mod tests {
                 })
                 .and_then(|doc| doc.get("sequence").and_then(serde_json::Value::as_i64));
             if sequence.is_some() && self.armed.swap(false, Ordering::SeqCst) {
-                // Park after sequence allocation, before emission.
+                // why: park after sequence allocation, before emission.
                 self.blocked.notify_one();
                 self.release.notified().await;
             }
@@ -1586,7 +1586,7 @@ mod tests {
         }
     }
 
-    /// Establish a real responder/dialer session where the responder's
+    /// note: establish a real responder/dialer session where the responder's
     /// transport can park one delivery send after sequence allocation.
     async fn gated_tool_session() -> (
         Arc<ConnectResponder>,
@@ -1648,7 +1648,7 @@ mod tests {
         (responder, gated, client)
     }
 
-    /// C3: cancelling a subscription whose reverse invoke already holds an
+    /// note: C3: cancelling a subscription whose reverse invoke already holds an
     /// allocated outbound sequence must not abandon that send. Against a REAL
     /// responder with a transport that parks after allocation, the driver
     /// completes the request on the wire; the recorded wire sequences stay
@@ -1668,7 +1668,7 @@ mod tests {
         registry.activate(&session, &stream);
         let cancelled = subscription.cancellation();
 
-        // Arm the gate BEFORE the driver sends so the first delivery push
+        // why: arm the gate BEFORE the driver sends so the first delivery push
         // parks after allocation.
         gated.armed.store(true, Ordering::SeqCst);
         let fail_closed_called = Arc::new(AtomicBool::new(false));
@@ -1700,12 +1700,12 @@ mod tests {
             },
         ));
 
-        // The invoke holds an allocated sequence and is parked before emission.
+        // why: the invoke holds an allocated sequence and is parked before emission.
         gated.blocked.notified().await;
-        // Replace the subscription while that send is outstanding.
+        // why: replace the subscription while that send is outstanding.
         let _replacement = registry.subscribe(&session, &stream, None).await.unwrap();
         tokio::time::sleep(Duration::from_millis(20)).await;
-        // Completion is possible, so the session must not be torn down.
+        // why: completion is possible, so the session must not be torn down.
         assert!(!fail_closed_called.load(Ordering::SeqCst));
         gated.release.notify_one();
         driver.await.unwrap();
@@ -1719,7 +1719,7 @@ mod tests {
             ConnectResponderState::Established,
             "the session must remain usable after a completed in-flight send"
         );
-        // A subsequent reverse invoke must be accepted: the cancelled
+        // note: A subsequent reverse invoke must be accepted: the cancelled
         // generation's allocated sequence reached the wire.
         let follow_up = tokio::time::timeout(
             Duration::from_secs(2),
@@ -1843,7 +1843,7 @@ mod tests {
         ));
         gated.blocked.notified().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
-        // Replacement cancels the subscription while its allocated send is
+        // why: replacement cancels the subscription while its allocated send is
         // still parked. The driver must consume only the original deadline.
         let replacement = registry.subscribe(&session, &stream, None).await;
         assert!(replacement.is_ok());
@@ -1868,7 +1868,7 @@ mod tests {
         );
     }
 
-    /// C4: a cancellation that wins before the push future's first poll must
+    /// note: C4: a cancellation that wins before the push future's first poll must
     /// drop the request untouched — no poll, therefore no allocated sequence.
     #[tokio::test]
     async fn cancellation_before_first_poll_leaves_the_request_unstarted() {
@@ -1898,7 +1898,7 @@ mod tests {
         assert!(!fail_closed_called.load(Ordering::SeqCst));
     }
 
-    /// C4 (end to end): cancelling before the request is polled consumes no
+    /// note: C4 (end to end): cancelling before the request is polled consumes no
     /// outbound sequence, and the session stays usable for the next request.
     #[tokio::test]
     async fn cancellation_before_the_first_poll_consumes_no_wire_sequence() {
@@ -1926,7 +1926,7 @@ mod tests {
             Duration::from_millis(2_000),
             || {},
             move |frames| {
-                // Force the ordering under test: cancel after the retention
+                // note: force the ordering under test: cancel after the retention
                 // check but before the request's first poll.
                 push_registry.remove_session(&push_session);
                 let responder = Arc::clone(&push_responder);
@@ -1951,7 +1951,7 @@ mod tests {
             "a request cancelled before its first poll must not reach the wire"
         );
         assert_eq!(responder.state(), ConnectResponderState::Established);
-        // The first outbound sequence is still available and accepted.
+        // why: the first outbound sequence is still available and accepted.
         let follow_up = tokio::time::timeout(
             Duration::from_secs(2),
             responder.invoke_tool(DELIVER_TOOL, serde_json::json!({})),
@@ -2007,7 +2007,7 @@ mod tests {
             .unwrap();
     }
 
-    /// I1: the registered handler must not form a strong cycle with its
+    /// note: I1: the registered handler must not form a strong cycle with its
     /// responder (it is stored inside that responder and `close_session`
     /// never clears the handler map). Registering the Weak-capturing handler
     /// must not raise the responder's strong count.
@@ -2055,7 +2055,7 @@ mod tests {
 
     #[test]
     fn daemon_manifest_never_carries_collision_policy() {
-        // DF-91 (AR-69 derivation lock): the peer-visible hello derives
+        // note: DF-91 (AR-69 derivation lock): the peer-visible hello derives
         // ONLY from the operator allowlist. The collision policy + peer
         // priority are operator config consumed by the admission table —
         // they must never leak into the hello.
@@ -2092,7 +2092,7 @@ mod tests {
         std::fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         let config = nexus_home_layout::connect_daemon_config_path(home.path());
         std::fs::write(&config, r#"{"host":"0.0.0.0","port":0}"#).expect("write daemon.json");
-        // No peer admission runs in this boot-gate case, so any non-empty
+        // why: no peer admission runs in this boot-gate case, so any non-empty
         // roster satisfies the reserved-set precondition (an empty one is
         // refused at the entry, before the bind gate this test exercises).
         let roster: HashSet<String> = HashSet::from(["nexus-test-builtin".to_owned()]);
@@ -2103,7 +2103,7 @@ mod tests {
         };
         assert!(matches!(err, ConnectError::Internal { .. }), "got {err:?}");
 
-        // Positive control: the same home on the loopback default passes the
+        // note: positive control: the same home on the loopback default passes the
         // plaintext gate and really binds, so the refusal above is the
         // non-loopback rule rather than a general lane-start failure.
         std::fs::write(&config, r#"{"host":"127.0.0.1","port":0}"#)
@@ -2113,7 +2113,7 @@ mod tests {
             .await
             .expect("the loopback plaintext bind starts");
         assert!(lane.addr.ip().is_loopback(), "the lane bound loopback");
-        // Cooperative shutdown: `notify_one` retains a permit even when the
+        // note: cooperative shutdown: `notify_one` retains a permit even when the
         // spawned relay has not registered yet, and both returned handles are
         // awaited so a live accept loop or supervised watcher is observed
         // settling instead of detaching with the test.
@@ -2138,7 +2138,7 @@ mod tests {
         );
     }
 
-    /// v1.191 P1 T14 (durable §9) — the daemon peer-tools responder is
+    /// note: v1.191 P1 T14 (durable §9) — the daemon peer-tools responder is
     /// **tools-only**: its hello declares the spoke baseline plus the exact
     /// operator-allowlisted tool ids, never a KE family, and the operator
     /// allowlist can never name one (a KE capability/family name is refused
@@ -2185,7 +2185,7 @@ mod tests {
             "namespaces derive from allowlisted ids and fixed event capabilities"
         );
 
-        // An operator cannot allowlist a KE name: config load fails with the
+        // note: an operator cannot allowlist a KE name: config load fails with the
         // truthful reason, so the hello above can never grow one.
         for entry in crate::config::KE_CAPABILITIES
             .iter()

@@ -47,24 +47,24 @@ use spoke_connect::remote::ConnectResponder;
 /// Default maximum concurrent peer sessions (AR-67 #4; config-gated).
 pub const DEFAULT_MAX_SESSIONS: usize = 8;
 
-/// One established peer session.
+/// note: one established peer session.
 #[derive(Clone)]
 pub struct SessionRecord {
-    /// The authenticated dialer peer id.
+    /// note: the authenticated dialer peer id.
     pub peer_id: String,
-    /// The responder handle (reverse-invoke face for this session).
+    /// note: the responder handle (reverse-invoke face for this session).
     pub responder: Arc<ConnectResponder>,
-    /// Tool ids admitted by this session (manifest `tools[]` at T2
+    /// note: tool ids admitted by this session (manifest `tools[]` at T2
     /// granularity; the T3 admission chain narrows this).
     pub admitted_ids: Vec<String>,
-    /// Wall-clock establishment time.
+    /// note: wall-clock establishment time.
     pub connected_at: DateTime<Utc>,
 }
 
-/// Process-scoped session registry (one per accept loop).
+/// note: process-scoped session registry (one per accept loop).
 pub struct PeerSessionManager {
     sessions: Mutex<HashMap<String, SessionRecord>>,
-    /// In-handshake / pre-registration connection count (accepted but not
+    /// note: in-handshake / pre-registration connection count (accepted but not
     /// yet registered). Together with the sessions map it bounds the total
     /// accepted connections at the accept gate (QC-fix W-A).
     in_flight: AtomicUsize,
@@ -77,7 +77,7 @@ impl Default for PeerSessionManager {
 }
 
 impl PeerSessionManager {
-    /// Create an empty session manager.
+    /// note: create an empty session manager.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -86,7 +86,7 @@ impl PeerSessionManager {
         }
     }
 
-    /// Number of live sessions.
+    /// note: number of live sessions.
     #[must_use]
     pub fn session_count(&self) -> usize {
         self.sessions
@@ -95,7 +95,7 @@ impl PeerSessionManager {
             .len()
     }
 
-    /// Total connection budget used: registered sessions + in-flight
+    /// note: total connection budget used: registered sessions + in-flight
     /// (in-handshake) connections.
     #[must_use]
     pub fn connection_count(&self) -> usize {
@@ -147,7 +147,7 @@ impl PeerSessionManager {
         }
     }
 
-    /// Release an in-flight reservation (handshake failed / timed out, or
+    /// note: release an in-flight reservation (handshake failed / timed out, or
     /// the connection task ended without registering). Saturating — a
     /// defensive double-release can never underflow the counter.
     pub fn release_in_flight(&self) {
@@ -158,7 +158,7 @@ impl PeerSessionManager {
             });
     }
 
-    /// Read-only clone of one session record.
+    /// note: read-only clone of one session record.
     #[must_use]
     pub fn get(&self, peer_id: &str) -> Option<SessionRecord> {
         self.sessions
@@ -168,7 +168,7 @@ impl PeerSessionManager {
             .cloned()
     }
 
-    /// All live peer ids.
+    /// note: all live peer ids.
     #[must_use]
     pub fn peer_ids(&self) -> Vec<String> {
         self.sessions
@@ -218,7 +218,7 @@ impl PeerSessionManager {
             // counted twice nor missed. A call without a prior reservation
             // (defensive; e.g. direct unit usage) is a saturating no-op.
             self.release_in_flight();
-            // Explicitly drop the guard HERE — after the release — so the
+            // why: explicitly drop the guard HERE — after the release — so the
             // insert + in-flight decrement stay in one lock scope (the
             // F-3 ordering invariant). An implicit drop would let clippy
             // tighten it to right after the insert and reopen the race.
@@ -226,7 +226,7 @@ impl PeerSessionManager {
             replaced
         };
         if let Some(old) = replaced_record {
-            // Deterministic last-wins: the replaced session is closed (the
+            // note: deterministic last-wins: the replaced session is closed (the
             // old responder is torn down outside the lock — `close()` is
             // synchronous and spawns the transport teardown, so no lock is
             // held across a scheduling point).
@@ -238,7 +238,7 @@ impl PeerSessionManager {
         }
     }
 
-    /// Evict a session, optionally guarded by the expected responder.
+    /// note: evict a session, optionally guarded by the expected responder.
     ///
     /// `expected` prevents a stale monitor (whose transport closed while the
     /// session was already replaced) from evicting the replacement session.

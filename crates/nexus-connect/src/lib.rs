@@ -1,6 +1,7 @@
 //! Peer-tools Connect protocol stack, owned by `nexus-connect` (extracted from
 //! `nexus-core`'s `connect` module behind the `connect-host` /
 //! `connect-client` / `embedded-mcp` cohort features).
+// note: this crate owns the peer/MCP session stack; capability dispatch stays in `peer_tools`.
 //!
 //! - WS message-oriented [`ws_transport::Transport`] implementation over
 //!   tokio-tungstenite (AR-66).
@@ -31,11 +32,11 @@ pub mod error;
 
 pub use error::{ConnectError, ConnectResult};
 
-// The protocol-neutral peer tool registry (process-global, one per process).
+// why: the protocol-neutral peer tool registry (process-global, one per process).
 #[cfg(feature = "peer-tools")]
 pub mod peer_tools;
 
-// The message-oriented WS transport is the one surface the remote memory
+// why: the message-oriented WS transport is the one surface the remote memory
 // client shares with the peer-tools stack. Everything below keeps its
 // existing Connect cohort gate.
 #[cfg(feature = "transport")]
@@ -49,7 +50,7 @@ pub mod config;
 pub mod events;
 #[cfg(feature = "connect-host")]
 pub mod identity;
-// The rmcp bridge is the reverse-invoke/operator surface; it compiles only
+// why: the rmcp bridge is the reverse-invoke/operator surface; it compiles only
 // with the rmcp-bearing `connect-client` cohort, never in the Connect-host
 // product cohort.
 #[cfg(feature = "connect-client")]
@@ -83,12 +84,12 @@ pub use watch::{
     peer_config_digest, spawn_peer_config_watch, supervise_peer_config_watch, PeerConfigHolder,
     PeerConfigSnapshot,
 };
-// Shared MCP bridge core re-exports (rmcp-bearing `connect-client` cohort).
+// why: shared MCP bridge core re-exports (rmcp-bearing `connect-client` cohort).
 #[cfg(feature = "connect-client")]
 pub use mcp_bridge::{
     is_unroutable, CatalogResponse, CatalogRow, McpBackend, McpBridgeHandler, ToolCallOutcome,
 };
-// Embedded MCP server shell re-exports (feature-gated).
+// why: embedded MCP server shell re-exports (feature-gated).
 #[cfg(feature = "embedded-mcp")]
 pub use mcp_embedded::{
     start_embedded_mcp_server, EmbeddedMcpError, EmbeddedMcpServer, EmbeddedSession,

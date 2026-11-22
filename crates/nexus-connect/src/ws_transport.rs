@@ -68,7 +68,7 @@ use tokio_tungstenite::WebSocketStream;
 /// Default maximum inbound WS message size (bytes) — AR-57 #3.
 pub const DEFAULT_MAX_ENVELOPE_BYTES: usize = 2 * 1024 * 1024;
 
-/// Bound on the graceful close-frame flush in [`Transport::close`]. The socket
+/// note: bound on the graceful close-frame flush in [`Transport::close`]. The socket
 /// halves are always released, so a peer that stopped reading cannot hold the
 /// teardown open.
 const CLOSE_BOUND: Duration = Duration::from_secs(2);
@@ -76,7 +76,7 @@ const CLOSE_BOUND: Duration = Duration::from_secs(2);
 type SinkHalf<S> = SplitSink<WebSocketStream<S>, Message>;
 type StreamHalf<S> = SplitStream<WebSocketStream<S>>;
 
-/// Build the tungstenite config enforcing the 2 MiB inbound cap.
+/// note: build the tungstenite config enforcing the 2 MiB inbound cap.
 #[must_use]
 pub fn ws_config(max_envelope_bytes: usize) -> WebSocketConfig {
     WebSocketConfig::default()
@@ -98,7 +98,7 @@ fn map_ws_error(error: WsError) -> TransportError {
     }
 }
 
-/// Whether a write failure means the peer connection is already gone.
+/// note: whether a write failure means the peer connection is already gone.
 ///
 /// Only these conditions are "already closed"; every other write failure (TLS,
 /// protocol, capacity, permission or arbitrary I/O) is a real close error that
@@ -113,7 +113,7 @@ const fn is_peer_gone(kind: ErrorKind) -> bool {
     )
 }
 
-/// Classify the outcome of the best-effort close-frame write.
+/// note: classify the outcome of the best-effort close-frame write.
 ///
 /// A connection that is already closed (or whose peer went away mid-write) has
 /// reached the state `close` asks for, so it settles successfully — that is the
@@ -131,32 +131,32 @@ fn close_frame_outcome(error: WsError) -> Result<(), TransportError> {
     }
 }
 
-/// One end of a WebSocket connection implementing the spoke message-oriented
+/// note: one end of a WebSocket connection implementing the spoke message-oriented
 /// [`Transport`] seam.
 pub struct WsTransport<S> {
-    /// The write half. `Arc`ed so the teardown task can own its disposal
+    /// note: the write half. `Arc`ed so the teardown task can own its disposal
     /// without holding the transport (no self-cycle).
     sink: Arc<Mutex<Option<SinkHalf<S>>>>,
-    /// The read half, shared with the teardown task the same way.
+    /// note: the read half, shared with the teardown task the same way.
     stream: Arc<Mutex<Option<StreamHalf<S>>>>,
-    /// Serialises whole `send` calls. It owns no physical half, so a caller
+    /// note: serialises whole `send` calls. It owns no physical half, so a caller
     /// that is polled `Pending` and then retained never keeps the teardown
     /// from taking the socket halves.
     send_slot: Mutex<()>,
-    /// The same for whole `recv` calls.
+    /// note: the same for whole `recv` calls.
     recv_slot: Mutex<()>,
-    /// Idempotent-close guard + fail-fast flag.
+    /// note: idempotent-close guard + fail-fast flag.
     closed: AtomicBool,
-    /// Wakes a parked I/O step for a socket event or a close.
+    /// note: wakes a parked I/O step for a socket event or a close.
     io_wake: Arc<IoWake>,
-    /// Wakes only a close: ordinary socket readiness must never be mistaken
+    /// note: wakes only a close: ordinary socket readiness must never be mistaken
     /// for one.
     closed_signal: Notify,
-    /// The one physical teardown and its settled result.
+    /// note: the one physical teardown and its settled result.
     teardown: Arc<Teardown>,
 }
 
-/// Wakes a parked `send`/`recv` step for a socket event or a close.
+/// note: wakes a parked `send`/`recv` step for a socket event or a close.
 ///
 /// Each I/O step holds its half only for one synchronous poll and then parks on
 /// this notification, so a caller that keeps the future alive without polling
@@ -176,7 +176,7 @@ impl Wake for IoWake {
     }
 }
 
-/// The single physical teardown of one transport.
+/// note: the single physical teardown of one transport.
 ///
 /// The first `close` (or a poisoned receive) signals and starts
 /// [`Self::run`] as its own task, so the disposal is owned independently of the
@@ -184,10 +184,10 @@ impl Wake for IoWake {
 /// caller does not have to continue it. Every caller awaits the one settled
 /// result instead of inferring success from the close having started.
 struct Teardown {
-    /// Settled synchronously: the receiving side may write it from a `Drop`
+    /// note: settled synchronously: the receiving side may write it from a `Drop`
     /// guard, which cannot await.
     state: StdMutex<TeardownState>,
-    /// Wakes every caller waiting for the settled result.
+    /// note: wakes every caller waiting for the settled result.
     settled: Notify,
 }
 
@@ -205,7 +205,7 @@ impl Teardown {
         }
     }
 
-    /// Record the one terminal outcome and wake every waiter.
+    /// note: record the one terminal outcome and wake every waiter.
     fn settle(&self, outcome: Result<(), TransportError>) {
         {
             let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -218,7 +218,7 @@ impl Teardown {
     }
 }
 
-/// Move both socket halves out of their slots, flush a bounded close frame and
+/// note: move both socket halves out of their slots, flush a bounded close frame and
 /// release them. Owned by the teardown task, never by a caller's future.
 async fn dispose<S>(
     sink_half: Arc<Mutex<Option<SinkHalf<S>>>>,
@@ -227,14 +227,14 @@ async fn dispose<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    // The signal already woke any parked I/O, so these waits are bounded by the
+    // why: the signal already woke any parked I/O, so these waits are bounded by the
     // runtime scheduling that woken call: taking first moves the halves into
     // this task, where the flush below and the final drops release them.
     let sink = sink_half.lock().await.take();
     let stream = stream_half.lock().await.take();
     drop(stream);
     let Some(mut sink) = sink else {
-        // Already taken by a previous attempt: nothing left to dispose.
+        // note: already taken by a previous attempt: nothing left to dispose.
         return Ok(());
     };
     let outcome = match tokio::time::timeout(CLOSE_BOUND, sink.close()).await {
@@ -252,7 +252,7 @@ impl<S> WsTransport<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    /// Wrap an established (post-handshake) WebSocket stream into a
+    /// note: wrap an established (post-handshake) WebSocket stream into a
     /// [`Transport`] end.
     #[must_use]
     pub fn new(stream: WebSocketStream<S>) -> Self {
@@ -271,7 +271,7 @@ where
         }
     }
 
-    /// Acquire one whole-operation slot, giving up as soon as the transport
+    /// note: acquire one whole-operation slot, giving up as soon as the transport
     /// closes.
     ///
     /// The slot owns no physical half, but a retained `Pending` holder can keep
@@ -287,7 +287,7 @@ where
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
         }
-        // Subscribe to the close signal ONLY: the I/O notification also fires
+        // note: subscribe to the close signal ONLY: the I/O notification also fires
         // for ordinary socket readiness, which must not evict a queued caller.
         let notified = self.closed_signal.notified();
         tokio::pin!(notified);
@@ -299,7 +299,7 @@ where
             biased;
             () = notified.as_mut() => Err(TransportError::Closed),
             guard = slot.lock() => {
-                // A slot granted at the same moment as the close still loses
+                // why: A slot granted at the same moment as the close still loses
                 // to the close.
                 if self.closed.load(Ordering::SeqCst) {
                     Err(TransportError::Closed)
@@ -317,7 +317,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
-        // Serialise whole sends without owning a physical half, and never wait
+        // why: serialise whole sends without owning a physical half, and never wait
         // on that serialisation past a close.
         let _slot = self.lock_until_closed(&self.send_slot).await?;
         if self.closed.load(Ordering::SeqCst) {
@@ -326,13 +326,13 @@ where
         let mut message = Some(Message::Binary(envelope.to_vec().into()));
         let mut staged = false;
         loop {
-            // Register the wake before the poll so a socket wake that lands in
+            // why: register the wake before the poll so a socket wake that lands in
             // between is never lost.
             let notified = self.io_wake.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
             let outcome = {
-                // The physical half is held only across this one synchronous
+                // why: the physical half is held only across this one synchronous
                 // poll and released before the await below; a retained caller
                 // therefore never keeps it from the teardown.
                 let mut sink_guard = self.sink.lock().await;
@@ -343,7 +343,7 @@ where
                 let waker = Waker::from(Arc::clone(&self.io_wake));
                 let mut context = Context::from_waker(&waker);
                 let mut pinned = Pin::new(sink);
-                // Named positively: the already-staged path below is the
+                // note: named positively: the already-staged path below is the
                 // exceptional one, and the comment reads top-down.
                 let unstaged = !staged;
                 let polled = if unstaged {
@@ -363,7 +363,7 @@ where
                 } else {
                     poll_flush(&mut pinned, &mut context)
                 };
-                // Release the half before the await below, explicitly: the
+                // note: release the half before the await below, explicitly: the
                 // teardown must never wait for a retained caller.
                 drop(sink_guard);
                 polled
@@ -376,7 +376,7 @@ where
     }
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
-        // Serialise whole receives without owning a physical half, and never
+        // why: serialise whole receives without owning a physical half, and never
         // wait on that serialisation past a close.
         let _slot = self.lock_until_closed(&self.recv_slot).await?;
         if self.closed.load(Ordering::SeqCst) {
@@ -387,7 +387,7 @@ where
             tokio::pin!(notified);
             notified.as_mut().enable();
             let polled = {
-                // The read half is held only across this one synchronous poll.
+                // why: the read half is held only across this one synchronous poll.
                 let mut stream_guard = self.stream.lock().await;
                 if self.closed.load(Ordering::SeqCst) {
                     return Err(TransportError::Closed);
@@ -396,7 +396,7 @@ where
                 let waker = Waker::from(Arc::clone(&self.io_wake));
                 let mut context = Context::from_waker(&waker);
                 let polled = Pin::new(stream).poll_next(&mut context);
-                // Release the half before the await below, explicitly.
+                // why: release the half before the await below, explicitly.
                 drop(stream_guard);
                 polled
             };
@@ -410,19 +410,19 @@ where
                         "non-Binary WS message received; session closed (fail-closed)".into(),
                     ));
                 }
-                // Control frames are answered internally by tungstenite
+                // why: control frames are answered internally by tungstenite
                 // (auto-pong); a close frame surfaces as stream end → Closed.
                 Poll::Ready(Some(Ok(
                     Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_),
                 ))) => {}
                 Poll::Ready(Some(Err(error))) => {
-                    // Session poisoned (e.g. inbound envelope over the 2 MiB
+                    // why: session poisoned (e.g. inbound envelope over the 2 MiB
                     // cap ⇒ tungstenite Capacity): fail-closed — no further
                     // traffic may flow on this transport.
                     self.signal();
                     return Err(map_ws_error(error));
                 }
-                // Stream fused: peer disconnected.
+                // note: stream fused: peer disconnected.
                 Poll::Ready(None) => return Err(TransportError::Closed),
                 Poll::Pending => notified.await,
             }
@@ -439,7 +439,7 @@ impl<S> WsTransport<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
-    /// Signal the close and start the one physical teardown, if it has not
+    /// note: signal the close and start the one physical teardown, if it has not
     /// started yet.
     ///
     /// The signal runs before any lock or flush so parked `send`/`recv` calls
@@ -471,7 +471,7 @@ where
                 });
             }
             Err(_) => {
-                // No runtime to own the disposal. Settle truthfully instead of
+                // why: no runtime to own the disposal. Settle truthfully instead of
                 // leaving callers on a teardown that can never run; the halves
                 // are released when the transport drops.
                 teardown.settle(Err(TransportError::Io(
@@ -481,10 +481,10 @@ where
         }
     }
 
-    /// Await the one settled teardown result.
+    /// note: await the one settled teardown result.
     async fn settled_result(&self) -> Result<(), TransportError> {
         loop {
-            // Register before reading the state so a settlement that lands in
+            // why: register before reading the state so a settlement that lands in
             // between cannot be missed.
             let notified = self.teardown.settled.notified();
             tokio::pin!(notified);
@@ -504,7 +504,7 @@ where
     }
 }
 
-/// Poll one flush step of a `SplitSink` and map its error.
+/// note: poll one flush step of a `SplitSink` and map its error.
 fn poll_flush<S>(
     sink: &mut Pin<&mut S>,
     context: &mut Context<'_>,
@@ -519,7 +519,7 @@ where
     }
 }
 
-/// The [`WsTransport`] end type alias used by the accept/dial helpers.
+/// note: the [`WsTransport`] end type alias used by the accept/dial helpers.
 pub type WsTcpTransport = WsTransport<tokio::net::TcpStream>;
 
 #[cfg(test)]
@@ -530,7 +530,7 @@ mod tests {
         WsError::Io(std::io::Error::from(kind))
     }
 
-    /// Only a genuinely closed/peer-gone connection settles the best-effort
+    /// note: only a genuinely closed/peer-gone connection settles the best-effort
     /// close frame as success.
     #[test]
     fn close_frame_outcome_accepts_only_peer_gone_conditions() {
@@ -552,7 +552,7 @@ mod tests {
         }
     }
 
-    /// Every other close-frame failure is a real terminal error and must reach
+    /// note: every other close-frame failure is a real terminal error and must reach
     /// the caller instead of being cached as a clean close.
     #[test]
     fn close_frame_outcome_surfaces_other_failures() {

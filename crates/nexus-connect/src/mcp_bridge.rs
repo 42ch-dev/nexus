@@ -56,7 +56,7 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 
-/// One catalog row from the spine catalog (wire shape mirrors
+/// note: one catalog row from the spine catalog (wire shape mirrors
 /// `catalog-tool.schema.json`).
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct CatalogRow {
@@ -67,7 +67,7 @@ pub struct CatalogRow {
     pub output_schema: Option<String>,
 }
 
-/// `{ "items": [...] }` wrapper of the spine catalog route.
+/// note: `{ "items": [...] }` wrapper of the spine catalog route.
 #[derive(Debug, serde::Deserialize)]
 pub struct CatalogResponse {
     pub items: Vec<CatalogRow>,
@@ -77,21 +77,21 @@ pub struct CatalogResponse {
 /// wire code for the protocol mapping (AR-70 #4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCallOutcome {
-    /// Spine success `{ success: true, result: <value> }`.
+    /// note: spine success `{ success: true, result: <value> }`.
     Success(serde_json::Value),
-    /// Executed-but-failed: spine code preserved (`invalid_input`,
+    /// note: executed-but-failed: spine code preserved (`invalid_input`,
     /// `not_supported` + peer wire code, `service_unavailable`, ...).
     ExecutedError {
         code: String,
         message: String,
         wire_code: Option<String>,
     },
-    /// Unroutable: never-admitted / evicted / allowlist-missing id.
+    /// note: unroutable: never-admitted / evicted / allowlist-missing id.
     Unroutable { code: String, message: String },
     /// The spine refuses the caller itself (auth rejected) — an opaque
     /// `INTERNAL_ERROR` per AR-70 #4, the message never reaches the client.
     DaemonRefused { message: String },
-    /// Visibility refusal (V1.180 P1, RN-OGA-2): the consumer is not
+    /// note: visibility refusal (V1.180 P1, RN-OGA-2): the consumer is not
     /// authorized for this tool — hidden by the per-consumer
     /// `VisibilityPolicy`, refused at the seam BEFORE the backend.
     /// Distinct from `Unroutable` (the spine cannot resolve the id at
@@ -117,7 +117,7 @@ pub enum ToolCallOutcome {
 /// watcher (Model-A-only, AR-79 #5) and must not advertise a capability it
 /// never delivers.
 pub trait McpBackend: Send + Sync + 'static {
-    /// Resolve the live catalog rows (same shape as `GET /v1/daemon/tools`).
+    /// note: resolve the live catalog rows (same shape as `GET /v1/daemon/tools`).
     fn list_tools(&self) -> impl Future<Output = Result<Vec<CatalogRow>, McpError>> + Send;
 
     /// Execute one tool through the spine, mapping the outcome into the
@@ -128,17 +128,17 @@ pub trait McpBackend: Send + Sync + 'static {
         parameters: serde_json::Value,
     ) -> impl Future<Output = Result<ToolCallOutcome, McpError>> + Send;
 
-    /// Whether this backend delivers `notifications/tools/list_changed`
+    /// note: whether this backend delivers `notifications/tools/list_changed`
     /// (AR-79). Default `false` — only the stdio child's watcher overrides.
     fn advertise_tool_list_changed(&self) -> bool {
         false
     }
 }
 
-/// The stateless MCP bridge handler (AR-70), generic over the spine backend.
+/// note: the stateless MCP bridge handler (AR-70), generic over the spine backend.
 pub struct McpBridgeHandler<B> {
     pub backend: B,
-    /// Per-consumer `tools/list` visibility policy (V1.180 P1, RN-OGA-2).
+    /// note: per-consumer `tools/list` visibility policy (V1.180 P1, RN-OGA-2).
     /// Absent ⇒ byte-identical current behavior; present ⇒ `tools/list` is
     /// filtered to the configured subset and a hidden-tool `tools/call`
     /// short-circuits at the seam before the backend.
@@ -164,7 +164,7 @@ impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, McpError> {
         let rows = self.backend.list_tools().await?;
-        // V1.180 P1 (RN-OGA-2): the visibility seam filters the catalog
+        // note: V1.180 P1 (RN-OGA-2): the visibility seam filters the catalog
         // rows BEFORE the row→Tool mapping. Absent policy ⇒ identity
         // (byte-identical current behavior).
         let tools: Vec<Tool> = rows
@@ -235,7 +235,7 @@ fn map_outcome(outcome: ToolCallOutcome) -> std::result::Result<CallToolResult, 
     }
 }
 
-/// Typed unroutable discrimination (T4 review M-1).
+/// note: typed unroutable discrimination (T4 review M-1).
 ///
 /// `not_supported` without `details.wire_code` is unroutable
 /// (never-admitted / evicted / allowlist-missing — the daemon
@@ -247,7 +247,7 @@ pub fn is_unroutable(code: &str, wire_code: Option<&str>) -> bool {
     code == "not_supported" && wire_code.is_none()
 }
 
-/// Map one daemon catalog row to an rmcp `Tool` (AR-70 §3 schema mapping):
+/// note: map one daemon catalog row to an rmcp `Tool` (AR-70 §3 schema mapping):
 /// `input_schema` carried verbatim; `output_schema` carried only when
 /// present (the catalog already omits non-root-object outputs).
 fn row_into_tool(row: CatalogRow) -> Tool {
@@ -261,21 +261,21 @@ fn row_into_tool(row: CatalogRow) -> Tool {
     tool
 }
 
-/// The documented permissive fallback input schema (AR-70 §3 placeholder).
+/// note: the documented permissive fallback input schema (AR-70 §3 placeholder).
 fn default_object_schema() -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::new();
     map.insert("type".into(), serde_json::Value::String("object".into()));
     map
 }
 
-/// Parse a JSON-Schema string into an object, or `None` on failure.
+/// note: parse a JSON-Schema string into an object, or `None` on failure.
 fn parse_schema(raw: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
     serde_json::from_str::<serde_json::Value>(raw)
         .ok()
         .and_then(|v| v.as_object().cloned())
 }
 
-/// Build the success result: `structured_content` when the spine result is
+/// note: build the success result: `structured_content` when the spine result is
 /// a JSON object (matches the advertised output schema), text-only else.
 fn success_result(value: serde_json::Value) -> CallToolResult {
     if value.is_object() {
@@ -361,12 +361,12 @@ mod tests {
 
     #[test]
     fn unroutable_classification_is_typed_not_textual() {
-        // Unroutable: not_supported + NO wire code.
+        // note: unroutable: not_supported + NO wire code.
         assert!(is_unroutable("not_supported", None));
-        // Peer deny: not_supported + typed wire code — executed failure,
+        // note: peer deny: not_supported + typed wire code — executed failure,
         // even when the message text contains the unroutable substring.
         assert!(!is_unroutable("not_supported", Some("op_unsupported")));
-        // Other codes never classify unroutable regardless of wire code.
+        // why: other codes never classify unroutable regardless of wire code.
         assert!(!is_unroutable("invalid_input", None));
         assert!(!is_unroutable("internal", None));
     }
@@ -390,7 +390,7 @@ mod tests {
         assert_eq!(scalar.content.len(), 1);
     }
 
-    /// Stub backend for the `get_info` advertisement pin.
+    /// note: stub backend for the `get_info` advertisement pin.
     struct StubBackend {
         advertise: bool,
     }
@@ -463,7 +463,7 @@ mod tests {
         );
     }
 
-    /// Stub backend with a fixed catalog and call recording for the
+    /// note: stub backend with a fixed catalog and call recording for the
     /// default-equivalence golden (V1.180 P1, RN-OGA-2). Cloneable so the
     /// call log stays inspectable after the backend moves into the server
     /// task.
@@ -507,7 +507,7 @@ mod tests {
         }
     }
 
-    /// Serve the handler over an in-process duplex pair and return the
+    /// note: serve the handler over an in-process duplex pair and return the
     /// client's `RunningService` — the same rmcp service layer the stdio
     /// child and the embedded server use, so the golden exercises the real
     /// wire path (no direct handler calls, no fabricated contexts).
@@ -526,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn absent_policy_list_tools_is_byte_identical_to_unfiltered() {
-        // V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must be
+        // note: V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must be
         // byte-identical to the pre-seam behavior — every catalog row
         // listed, in order, schemas verbatim. The golden JSON pins the
         // exact wire shape (camelCase keys; absent `_meta`/`nextCursor`).
@@ -574,7 +574,7 @@ mod tests {
 
     #[tokio::test]
     async fn absent_policy_call_tool_dispatches_to_backend_unchanged() {
-        // V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must
+        // note: V1.180 P1 (RN-OGA-2): with NO visibility policy the seam must
         // dispatch every call to the backend exactly as before — the
         // backend is invoked with the caller's name + arguments and the
         // outcome maps identically (success → structured content).
@@ -608,7 +608,7 @@ mod tests {
 
     #[tokio::test]
     async fn present_policy_list_tools_filters_to_visible_subset() {
-        // V1.180 P1 (RN-OGA-2): a present policy narrows `tools/list` to
+        // note: V1.180 P1 (RN-OGA-2): a present policy narrows `tools/list` to
         // the operator-configured subset — unlisted rows are dropped
         // BEFORE the row→Tool mapping, listed rows keep their verbatim
         // schemas.
@@ -650,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn present_policy_hidden_tool_call_short_circuits_before_backend() {
-        // V1.180 P1 (RN-OGA-2): a hidden-tool `tools/call` is refused at
+        // note: V1.180 P1 (RN-OGA-2): a hidden-tool `tools/call` is refused at
         // the visibility seam BEFORE the backend — the backend is never
         // invoked, and the refusal is a distinct `tool_not_authorized` protocol
         // error (not success, not a silent no-op, not unroutable).
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn map_outcome_visible_but_denied_is_typed_refusal() {
-        // V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by
+        // note: V1.180 P1 (RN-OGA-2): a tool VISIBLE per policy but denied by
         // the authz spine (admission_pipeline Forbidden / peer deny wire
         // code) maps to an executed-but-failed `CallToolResult::error`
         // naming the spine code — never a silent drop, never a 500.
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(message, "tool_not_authorized: tools.t5.echo");
     }
 
-    /// Backend whose `call_tool` blocks until the fixture hands out a release
+    /// note: backend whose `call_tool` blocks until the fixture hands out a release
     /// permit, so a real `tools/call` can be held in flight when the client
     /// cancels it. Releases are FIFO (the oldest in-flight call first) and each
     /// gated call signals `exited` from inside the handler future right before
@@ -732,11 +732,11 @@ mod tests {
     /// waits on instead of a timer.
     #[derive(Clone)]
     struct GatedBackend {
-        /// Notified once each time a call reaches the backend.
+        /// note: notified once each time a call reaches the backend.
         entered: Arc<tokio::sync::Notify>,
-        /// One permit per call that may finish.
+        /// note: one permit per call that may finish.
         releases: Arc<tokio::sync::Semaphore>,
-        /// Notified once per call that has finished its backend work — i.e. the
+        /// note: notified once per call that has finished its backend work — i.e. the
         /// handler future is about to produce its outcome.
         exited: Arc<tokio::sync::Notify>,
         calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -756,7 +756,7 @@ mod tests {
             self.calls.load(std::sync::atomic::Ordering::SeqCst)
         }
 
-        /// Let exactly one in-flight call finish — the oldest waiter first.
+        /// note: let exactly one in-flight call finish — the oldest waiter first.
         fn release_one(&self) {
             self.releases.add_permits(1);
         }
@@ -779,7 +779,7 @@ mod tests {
             async move {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 entered.notify_one();
-                // Consume the permit (never return it): the fixture hands out
+                // note: consume the permit (never return it): the fixture hands out
                 // exactly one release per in-flight call.
                 releases
                     .acquire()
@@ -794,12 +794,12 @@ mod tests {
         }
     }
 
-    /// The client half of the in-process NDJSON wire these fixtures drive.
+    /// note: the client half of the in-process NDJSON wire these fixtures drive.
     type ProbeLines =
         tokio::io::Lines<tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>>;
     type ProbeWriter = tokio::io::WriteHalf<tokio::io::DuplexStream>;
 
-    /// Write one JSON-RPC line onto the wire.
+    /// note: write one JSON-RPC line onto the wire.
     async fn write_wire_line(write: &mut ProbeWriter, line: &str) {
         use tokio::io::AsyncWriteExt;
         write
@@ -809,7 +809,7 @@ mod tests {
         write.write_all(b"\n").await.expect("write newline");
     }
 
-    /// Read the next JSON-RPC line from the wire.
+    /// note: read the next JSON-RPC line from the wire.
     async fn next_wire_line(lines: &mut ProbeLines) -> String {
         lines
             .next_line()
@@ -818,7 +818,7 @@ mod tests {
             .expect("line present")
     }
 
-    /// Complete the legacy-negotiated handshake (the version that still serves
+    /// note: complete the legacy-negotiated handshake (the version that still serves
     /// `ping`, which the cancellation fixture uses as its wire barrier).
     async fn initialize_probe_session(write: &mut ProbeWriter, lines: &mut ProbeLines) {
         write_wire_line(
@@ -838,7 +838,7 @@ mod tests {
         .await;
     }
 
-    /// Send a `ping` and return its response line — the wire barrier. The serve
+    /// note: send a `ping` and return its response line — the wire barrier. The serve
     /// loop handles messages in arrival order, so a ping answered here proves
     /// everything written before it has already been processed.
     async fn ping_barrier(write: &mut ProbeWriter, lines: &mut ProbeLines, id: i64) -> String {
@@ -861,7 +861,7 @@ mod tests {
         line
     }
 
-    /// v1.191 P0 T4 (Step 5): requalify rmcp's cancellation semantics on the
+    /// note: v1.191 P0 T4 (Step 5): requalify rmcp's cancellation semantics on the
     /// real wire. The sink-proxy drop lives in `service.rs`, which is
     /// byte-identical in 3.2.0 and 3.3.0 — this pins pre-existing rmcp
     /// behaviour under the bumped pin, not an upgrade-introduced change.
@@ -900,7 +900,7 @@ mod tests {
         let mut lines = tokio::io::BufReader::new(read_half).lines();
         initialize_probe_session(&mut write, &mut lines).await;
 
-        // (1) A real call, held in flight by the gate.
+        // why: (1) A real call, held in flight by the gate.
         write_wire_line(
             &mut write,
             r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":1}}}"#,
@@ -913,7 +913,7 @@ mod tests {
             "the first call reached the backend"
         );
 
-        // (2) Cancel it; the barrier ping proves the serve loop applied the
+        // why: (2) Cancel it; the barrier ping proves the serve loop applied the
         // cancellation before anything below is released.
         write_wire_line(
             &mut write,
@@ -922,19 +922,19 @@ mod tests {
         .await;
         ping_barrier(&mut write, &mut lines, 9).await;
 
-        // (3) Release the cancelled call and wait for the handler itself to
+        // why: (3) Release the cancelled call and wait for the handler itself to
         // finish — the backend signals from inside the handler future.
         backend.release_one();
         backend.exited.notified().await;
 
-        // (4) Second barrier: the cancelled response has been enqueued into the
+        // note: (4) Second barrier: the cancelled response has been enqueued into the
         // single FIFO sink before this ping is even written, so reading the
         // ping's answer proves the sink proxy has already handled it. If the
         // cancelled response were delivered instead of dropped, it would be the
         // line read here and the id assertion fails.
         ping_barrier(&mut write, &mut lines, 10).await;
 
-        // (5) The session still serves calls, with exactly one response each.
+        // why: (5) The session still serves calls, with exactly one response each.
         write_wire_line(
             &mut write,
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tools.t5.echo","arguments":{"x":2}}}"#,
@@ -962,7 +962,7 @@ mod tests {
         );
     }
 
-    /// T1 review gap 6: legacy negotiated-version wire proof. A raw
+    /// note: T1 review gap 6: legacy negotiated-version wire proof. A raw
     /// JSON-RPC client negotiates the OLDEST supported protocol version
     /// (2024-11-05) over the real NDJSON transport; the negotiated
     /// initialize result and the `tools/call` result must carry NO
@@ -991,7 +991,7 @@ mod tests {
         let (read_half, mut write_half) = tokio::io::split(client_io);
         let mut lines = tokio::io::BufReader::new(read_half).lines();
 
-        // 1. initialize at the legacy version.
+        // why: 1. initialize at the legacy version.
         write_half
             .write_all(
                 br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"legacy-probe","version":"0"}}}"#,
@@ -1019,7 +1019,7 @@ mod tests {
             "initialize result must not carry resultType: {init_line}"
         );
 
-        // 2. initialized notification, then a tools/call.
+        // why: 2. initialized notification, then a tools/call.
         write_half
             .write_all(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
             .await

@@ -1,6 +1,6 @@
 //! Per-consumer MCP tool visibility policy (V1.180 P1, RN-OGA-2).
 //!
-//! The additive seam that lets an operator grant a consumer a `tools/list`
+// note: The additive seam that lets an operator grant a consumer a `tools/list`
 //! subset while `tools/call` still obeys the V1.174 capability-registry
 //! spine. Evaluated at the shared MCP serving seam
 //! ([`crate::mcp_bridge::McpBridgeHandler`]) BEFORE serving
@@ -24,7 +24,7 @@
 
 use std::collections::HashSet;
 
-/// Per-consumer MCP tool visibility policy.
+/// note: per-consumer MCP tool visibility policy.
 ///
 /// `None` = absent policy (all visible — byte-identical current behavior);
 /// `Some(set)` = the operator-configured visible subset.
@@ -34,14 +34,14 @@ pub struct VisibilityPolicy {
 }
 
 impl VisibilityPolicy {
-    /// Absent policy: every catalog row visible, every call dispatched to
+    /// note: absent policy: every catalog row visible, every call dispatched to
     /// the spine — byte-identical to the pre-seam behavior.
     #[must_use]
     pub const fn absent() -> Self {
         Self { visible: None }
     }
 
-    /// Present policy from the operator-configured visible subset.
+    /// note: present policy from the operator-configured visible subset.
     ///
     /// An empty subset is treated as absent (all visible) — the additive
     /// default keeps existing deployments byte-identical.
@@ -57,7 +57,7 @@ impl VisibilityPolicy {
         }
     }
 
-    /// Whether a tool id is visible to the consumer.
+    /// note: whether a tool id is visible to the consumer.
     #[must_use]
     pub fn is_visible(&self, tool_id: &str) -> bool {
         self.visible
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn empty_visible_subset_is_absent() {
-        // The additive default: an empty operator list must not flip the
+        // note: the additive default: an empty operator list must not flip the
         // surface to deny-all — it stays byte-identical (all visible).
         let policy = VisibilityPolicy::from_visible(Vec::<String>::new());
         assert_eq!(policy, VisibilityPolicy::absent());

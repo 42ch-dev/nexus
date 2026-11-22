@@ -1,6 +1,6 @@
 //! Retained peer-transport and embedded Model B (in-process MCP) contracts.
 //!
-//! v1.193 P2-T10: the domain regressions of the retired daemon-runtime
+// note: v1.193 P2-T10: the domain regressions of the retired daemon-runtime
 //! fixtures (`peer_tool.rs`, `peer_session.rs`, `embedded_mcp_e2e.rs`,
 //! `cross_caller_e2e.rs`, `transport_conformance.rs`, `authz_hello.rs`) whose
 //! behavior had no existing core owner. Every case below is labeled
@@ -27,11 +27,11 @@
 //! stayed in core's `tests/capability_compute.rs`: connect has no core edge.
 
 #![cfg(feature = "connect-client")]
-// Justification (repo convention, cf. tests/peer_control.rs): integration-test
+// note: justification (repo convention, cf. tests/peer_control.rs): integration-test
 // assertions operate on fixed local fixtures where a panic IS the failure
 // signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-// Lock guards in the socket-driven cases are held across an asserted step on
+// why: lock guards in the socket-driven cases are held across an asserted step on
 // purpose; the drop point is not a contention concern in a local test.
 #![allow(clippy::significant_drop_tightening)]
 
@@ -67,9 +67,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-// ── Fixed seeds and tool ids ──────────────────────────────────────────────
 //
-// Distinct from every other fixture in this crate (and from the retired
+// why: distinct from every other fixture in this crate (and from the retired
 // daemon fixtures' `[0x10..0x50]` / `tools.t2..t4.*` ranges) so the
 // process-global peer registry never mixes fixtures.
 
@@ -88,7 +87,7 @@ fn peer_id_of(seed: [u8; 32]) -> String {
     derive_peer_id_from_ed25519_pubkey(&pubkey(seed))
 }
 
-// One tool-id namespace per case: the registry is process-global, so a case
+// note: one tool-id namespace per case: the registry is process-global, so a case
 // that aborts (an assertion failure) must not be able to collide with, or be
 // blocked by, another case's leftover rows.
 const TOOL_RECONNECT_REPLACED: &str = "tools.t10rc.replaced";
@@ -110,14 +109,13 @@ const TOOL_BOOT: &str = "tools.t10bt.echo";
 const TOOL_BOOT_EMPTY: &str = "tools.t10be.echo";
 const TOOL_ROTATED_OLD: &str = "tools.t10rl.echo";
 const TOOL_ROTATED_NEW: &str = "tools.t10rl.rotated";
-// QC2-001: a grammar-valid id the composition injects as reserved, and an
+// note: QC2-001: a grammar-valid id the composition injects as reserved, and an
 // identically negotiated/allowlisted id outside that injected set.
 const TOOL_RESERVED_BUILTIN: &str = "tools.fixture.builtin";
 const TOOL_RESERVED_CONTROL: &str = "tools.fixture.admitted";
 
-// ── Manifests ─────────────────────────────────────────────────────────────
 
-/// A dialer hello manifest advertising `tools` with the given `(input,
+/// note: A dialer hello manifest advertising `tools` with the given `(input,
 /// output)` schemas.
 fn dialer_manifest_with_schemas(
     host_id: &str,
@@ -215,9 +213,8 @@ impl Transport for OrderingTransport {
     }
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────
 
-/// An echo tool handler: answers with the arguments echoed back.
+/// note: an echo tool handler: answers with the arguments echoed back.
 fn echo_handler() -> ToolHandler {
     Arc::new(|args: Value| {
         Box::pin(async move { SpokeResult::Ok(json!({ "echo": args })) })
@@ -225,7 +222,7 @@ fn echo_handler() -> ToolHandler {
     })
 }
 
-/// A parked handler: holds the reverse invoke until `park` is notified.
+/// note: A parked handler: holds the reverse invoke until `park` is notified.
 fn parked_handler(park: Arc<Notify>) -> ToolHandler {
     Arc::new(move |_args: Value| {
         let park = Arc::clone(&park);
@@ -236,7 +233,6 @@ fn parked_handler(park: Arc<Notify>) -> ToolHandler {
     })
 }
 
-// ── Accept-loop harness ───────────────────────────────────────────────────
 
 struct PeerHarness {
     addr: std::net::SocketAddr,
@@ -246,7 +242,7 @@ struct PeerHarness {
 }
 
 impl PeerHarness {
-    /// Stop the accept loop and drop every row the fixture admitted.
+    /// note: stop the accept loop and drop every row the fixture admitted.
     async fn stop(self, peers: &[String]) {
         self.shutdown.notify_one();
         let _ = self.task.await;
@@ -256,7 +252,7 @@ impl PeerHarness {
     }
 }
 
-/// Bind an accept loop on an ephemeral loopback port with the given admission
+/// note: bind an accept loop on an ephemeral loopback port with the given admission
 /// policy (MIGRATED harness from `peer_session.rs`/`peer_tool.rs`, minus the
 /// daemon router/`WorkspaceState` the retired fixtures booted around it).
 async fn start_server(
@@ -279,7 +275,7 @@ async fn start_server(
     let addr = listener.local_addr().unwrap();
     let sessions = Arc::new(PeerSessionManager::new());
     let shutdown = Arc::new(Notify::new());
-    // The hello derives per connection from the live holder — the harness
+    // why: the hello derives per connection from the live holder — the harness
     // seeds it with the boot generation (allowlist + keys).
     let options = PeerResponderOptions {
         identity_seed: seed_host(),
@@ -306,7 +302,7 @@ async fn start_server(
     }
 }
 
-/// The static reserved ids the production composition injects into the lane.
+/// note: the static reserved ids the production composition injects into the lane.
 ///
 /// The composing side owns the real roster (core's canonical
 /// `tool_catalog`); this crate must not reach it, so the fixture stands in for
@@ -322,7 +318,7 @@ fn ws_config_for_tests() -> tokio_tungstenite::tungstenite::protocol::WebSocketC
     ws_config(DEFAULT_MAX_ENVELOPE_BYTES)
 }
 
-/// Dial the harness daemon (fixed `seed_host()` identity) with a spoke adapter
+/// note: dial the harness daemon (fixed `seed_host()` identity) with a spoke adapter
 /// over the [`WsTransport`].
 async fn dial(
     addr: std::net::SocketAddr,
@@ -332,7 +328,7 @@ async fn dial(
     dial_with_manifest(addr, seed, dialer_manifest("dialer", tool_ids)).await
 }
 
-/// Dial the core accept loop with an explicit manifest.
+/// note: dial the core accept loop with an explicit manifest.
 async fn dial_with_manifest(
     addr: std::net::SocketAddr,
     seed: [u8; 32],
@@ -359,7 +355,7 @@ async fn dial_with_manifest(
     .await
 }
 
-/// Await a condition until it holds or the deadline elapses.
+/// note: await a condition until it holds or the deadline elapses.
 async fn wait_until(mut cond: impl FnMut() -> bool, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -371,9 +367,8 @@ async fn wait_until(mut cond: impl FnMut() -> bool, timeout: Duration) -> bool {
     cond()
 }
 
-// ── WS transport conformance ──────────────────────────────────────────────
 
-/// A (client, server) pair of [`WsTransport`]s over a real `TcpListener`
+/// note: A (client, server) pair of [`WsTransport`]s over a real `TcpListener`
 /// on `127.0.0.1:0`.
 async fn ws_pair() -> (Arc<dyn Transport>, Arc<dyn Transport>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -398,7 +393,7 @@ async fn ws_pair() -> (Arc<dyn Transport>, Arc<dyn Transport>) {
     (client, server.await.unwrap())
 }
 
-/// MIGRATED from `transport_conformance.rs::conformance_roundtrip_integrity`
+/// note: MIGRATED from `transport_conformance.rs::conformance_roundtrip_integrity`
 /// and `::conformance_order_preservation`.
 ///
 /// Preserved: one connect envelope == one WS message (payloads carrying
@@ -418,8 +413,8 @@ async fn ws_transport_roundtrips_opaque_envelopes_and_preserves_order() {
         b"plain-ascii".to_vec(),
         b"line1\nline2\r\nline3".to_vec(),
         b"nul\x00inside\x00".to_vec(),
-        vec![0xff, 0xfe, 0x00, 0x01], // invalid UTF-8
-        (0..=255u8).collect(),        // full byte range
+        vec![0xff, 0xfe, 0x00, 0x01], // note: invalid UTF-8
+        (0..=255u8).collect(),        // note: full byte range
     ];
     for payload in &vectors {
         client.send(payload).await.unwrap();
@@ -438,7 +433,7 @@ async fn ws_transport_roundtrips_opaque_envelopes_and_preserves_order() {
         );
     }
 
-    // Order preservation, both directions, interleaved.
+    // why: order preservation, both directions, interleaved.
     let n: u8 = 32;
     for i in 0..n {
         client.send(&[i]).await.unwrap();
@@ -461,7 +456,7 @@ async fn ws_transport_roundtrips_opaque_envelopes_and_preserves_order() {
     server.close().await.unwrap();
 }
 
-/// MIGRATED from `transport_conformance.rs::conformance_close_semantics`.
+/// note: MIGRATED from `transport_conformance.rs::conformance_close_semantics`.
 ///
 /// Preserved: a pending `recv` fails fast with `Closed` once the peer closes,
 /// a `recv` after close fails fast rather than parking, and `close()` is
@@ -474,7 +469,7 @@ async fn ws_transport_close_semantics_fail_fast_and_are_idempotent() {
         let client = Arc::clone(&client);
         async move { client.recv().await }
     });
-    // Let the recv park before the peer closes.
+    // why: let the recv park before the peer closes.
     tokio::task::yield_now().await;
     server.close().await.unwrap();
     let result = tokio::time::timeout(Duration::from_secs(5), recv_task)
@@ -499,7 +494,7 @@ async fn ws_transport_close_semantics_fail_fast_and_are_idempotent() {
     server.close().await.unwrap();
 }
 
-/// MIGRATED from `transport_conformance.rs::conformance_envelope_cap_exceeds_2mib`
+/// note: MIGRATED from `transport_conformance.rs::conformance_envelope_cap_exceeds_2mib`
 /// and `::conformance_non_binary_rejected`.
 ///
 /// Preserved: an inbound message over the 2 MiB envelope cap fails the
@@ -509,7 +504,7 @@ async fn ws_transport_close_semantics_fail_fast_and_are_idempotent() {
 /// envelope contract) and therefore apply to the WS pair only.
 #[tokio::test]
 async fn ws_transport_fails_closed_on_over_cap_and_non_binary_frames() {
-    // Over-cap: the write side is unbounded, so the send may complete or fail
+    // note: over-cap: the write side is unbounded, so the send may complete or fail
     // with a transport error if the receiver's fail-closed teardown resets
     // mid-write. The cap is enforced on the receiver.
     let (client, server) = ws_pair().await;
@@ -537,7 +532,7 @@ async fn ws_transport_fails_closed_on_over_cap_and_non_binary_frames() {
     client.close().await.unwrap();
     server.close().await.unwrap();
 
-    // Non-Binary frame: needs a raw tungstenite sink (the `Transport::send`
+    // note: non-Binary frame: needs a raw tungstenite sink (the `Transport::send`
     // seam only emits Binary).
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -578,7 +573,7 @@ async fn ws_transport_fails_closed_on_over_cap_and_non_binary_frames() {
     server.close().await.unwrap();
 }
 
-/// MIGRATED from `transport_conformance.rs::conformance_golden_path_handshake_and_tool_invoke`.
+/// note: MIGRATED from `transport_conformance.rs::conformance_golden_path_handshake_and_tool_invoke`.
 ///
 /// Preserved: over the [`WsTransport`] a full spoke handshake completes on
 /// BOTH ends (adapter `Established` + the responder's observed peer manifest)
@@ -656,9 +651,8 @@ async fn ws_transport_golden_path_handshake_and_reverse_invoke() {
     responder.close();
 }
 
-// ── Accept-loop session lifecycle ─────────────────────────────────────────
 
-/// MIGRATED from `peer_session.rs::second_session_same_peer_replaces_first`.
+/// note: MIGRATED from `peer_session.rs::second_session_same_peer_replaces_first`.
 ///
 /// Preserved: a second session for the SAME peer id is deterministic
 /// last-wins — exactly one live session remains, the replaced dialer observes
@@ -701,7 +695,7 @@ async fn reconnect_for_a_peer_replaces_the_session_and_its_tool_rows() {
     assert_eq!(harness.sessions.session_count(), 1);
     assert!(peer_tool_table().get(TOOL_RECONNECT_REPLACED).is_some());
 
-    // Same peer id, different manifest: last-wins replace.
+    // note: same peer id, different manifest: last-wins replace.
     let second = dial(harness.addr, seed_peer(0), &[TOOL_RECONNECT_ECHO])
         .await
         .expect("reconnect");
@@ -745,7 +739,7 @@ async fn reconnect_for_a_peer_replaces_the_session_and_its_tool_rows() {
     harness.stop(&[peer_id]).await;
 }
 
-/// MIGRATED from `peer_session.rs::non_allowlisted_peer_is_rejected_at_handshake`
+/// note: MIGRATED from `peer_session.rs::non_allowlisted_peer_is_rejected_at_handshake`
 /// and `::allowlisted_peer_without_key_is_rejected_at_handshake`.
 ///
 /// Preserved: the Layer-0 handshake gate fails CLOSED and FAST — a dialer
@@ -755,7 +749,7 @@ async fn reconnect_for_a_peer_replaces_the_session_and_its_tool_rows() {
 #[tokio::test]
 #[serial]
 async fn handshake_rejections_fail_fast_with_zero_session_state() {
-    // (a) Peer not on the handshake allowlist.
+    // why: (a) Peer not on the handshake allowlist.
     let allowed = peer_id_of(seed_peer(0));
     let harness = start_server(
         8,
@@ -775,7 +769,7 @@ async fn handshake_rejections_fail_fast_with_zero_session_state() {
     assert_eq!(harness.sessions.peer_ids(), [] as [std::string::String; 0]);
     harness.stop(&[allowed]).await;
 
-    // (b) Allowlisted peer with no preconfigured key: fail-closed.
+    // note: (b) Allowlisted peer with no preconfigured key: fail-closed.
     let keyless = peer_id_of(seed_peer(2));
     let harness = start_server(8, vec![keyless.clone()], HashMap::new(), Vec::new()).await;
     let started = Instant::now();
@@ -793,7 +787,7 @@ async fn handshake_rejections_fail_fast_with_zero_session_state() {
     harness.stop(&[keyless]).await;
 }
 
-/// MIGRATED from `peer_session.rs::transport_drop_evicts_session_and_resolves_in_flight_invoke`.
+/// note: MIGRATED from `peer_session.rs::transport_drop_evicts_session_and_resolves_in_flight_invoke`.
 ///
 /// Preserved: dropping the dialer's transport is observed by the session
 /// monitor, which evicts the session AND resolves an in-flight reverse invoke
@@ -821,7 +815,7 @@ async fn transport_drop_evicts_the_session_and_resolves_the_in_flight_invoke() {
         .await
     );
 
-    // A parked dialer handler keeps the reverse invoke in flight.
+    // why: A parked dialer handler keeps the reverse invoke in flight.
     let park = Arc::new(Notify::new());
     adapter.register_tool_handler(TOOL_SLOW, parked_handler(Arc::clone(&park)));
 
@@ -868,7 +862,7 @@ async fn transport_drop_evicts_the_session_and_resolves_the_in_flight_invoke() {
 #[tokio::test]
 #[serial]
 async fn accept_gate_bounds_registered_and_in_flight_connections() {
-    // (a) In-flight flood: no WS upgrade ever completes, yet the cap holds.
+    // note: (a) In-flight flood: no WS upgrade ever completes, yet the cap holds.
     let harness = start_server(2, Vec::new(), HashMap::new(), Vec::new()).await;
     let mut sockets = Vec::new();
     for _ in 0..6 {
@@ -908,7 +902,7 @@ async fn accept_gate_bounds_registered_and_in_flight_connections() {
     );
     harness.stop(&[]).await;
 
-    // (b) Simultaneous dial burst: exactly max_sessions admitted.
+    // note: (b) Simultaneous dial burst: exactly max_sessions admitted.
     let mut allowlist = Vec::new();
     let mut keys = HashMap::new();
     for i in 0..9 {
@@ -945,7 +939,7 @@ async fn accept_gate_bounds_registered_and_in_flight_connections() {
         "no in-flight residue after settlement (slot counted exactly once)"
     );
 
-    // (c) Sequential dial past the cap, then a freed slot.
+    // why: (c) Sequential dial past the cap, then a freed slot.
     let started = Instant::now();
     let ninth = dial(harness.addr, seed_peer(8), &[TOOL_CAP]).await;
     assert!(ninth.is_err(), "the dial past the cap is refused at accept");
@@ -981,9 +975,8 @@ async fn accept_gate_bounds_registered_and_in_flight_connections() {
     harness.stop(&allowlist).await;
 }
 
-// ── Embedded Model B (in-process MCP; needs the nested feature) ───────────
 
-// Embedded-only imports (the cases below are the `embedded-mcp` half of
+// why: embedded-only imports (the cases below are the `embedded-mcp` half of
 // this target; the transport/session/boot cases above need `connect-client`
 // alone).
 #[cfg(feature = "embedded-mcp")]
@@ -999,7 +992,7 @@ use rmcp::model::{CallToolRequestParams, ClientConfig, ErrorCode};
 #[cfg(feature = "embedded-mcp")]
 use rmcp::{serve_client, ServiceError};
 
-/// The in-process Model B consumer: the MCP surface over the
+/// note: the in-process Model B consumer: the MCP surface over the
 /// process-global peer registry, with no HTTP hop, no daemon router and no
 /// child process.
 ///
@@ -1075,7 +1068,7 @@ impl McpBackend for PeerRegistryBackend {
     }
 }
 
-/// Establish one embedded session and complete the initialize handshake.
+/// note: establish one embedded session and complete the initialize handshake.
 #[cfg(feature = "embedded-mcp")]
 async fn establish_session(
     server: &EmbeddedMcpServer<PeerRegistryBackend>,
@@ -1100,7 +1093,7 @@ async fn listed_tools(
         .collect()
 }
 
-/// MIGRATED from `embedded_mcp_e2e.rs::embedded_server_lists_and_calls_builtin_without_child_process`,
+/// note: MIGRATED from `embedded_mcp_e2e.rs::embedded_server_lists_and_calls_builtin_without_child_process`,
 /// `::embedded_unroutable_id_is_method_not_found`,
 /// `::boot_path_cli_flag_enables_and_no_enablement_leaves_no_server` (core
 /// enablement gate), and `peer_tool.rs::disconnect_evicts_rows_table_and_catalog_same_tick`,
@@ -1144,7 +1137,7 @@ async fn disconnect_revokes_embedded_peer_tool() {
         "peer tool admitted"
     );
 
-    // Enablement gate: no enablement ⇒ no embedded surface.
+    // note: enablement gate: no enablement ⇒ no embedded surface.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     assert!(
         start_embedded_mcp_server(
@@ -1165,14 +1158,14 @@ async fn disconnect_revokes_embedded_peer_tool() {
     .expect("enabled server");
     let running = establish_session(&server).await;
 
-    // The listed set mirrors the dispatchable registry (lockstep).
+    // why: the listed set mirrors the dispatchable registry (lockstep).
     let listed = listed_tools(&running).await;
     assert!(
         listed.contains(&TOOL_EMBED_ECHO.to_owned()),
         "the embedded surface lists the admitted peer tool: {listed:?}"
     );
 
-    // A listed id dispatches through the real in-process reverse invoke.
+    // why: A listed id dispatches through the real in-process reverse invoke.
     let call = running
         .call_tool(CallToolRequestParams::new(TOOL_EMBED_ECHO))
         .await
@@ -1184,7 +1177,7 @@ async fn disconnect_revokes_embedded_peer_tool() {
         "the peer's own response reached the embedded consumer"
     );
 
-    // Disconnect: the session monitor evicts the row.
+    // note: disconnect: the session monitor evicts the row.
     adapter.close();
     assert!(
         wait_until(
@@ -1195,7 +1188,7 @@ async fn disconnect_revokes_embedded_peer_tool() {
         "disconnect evicts the peer row"
     );
 
-    // The stale admission is revoked on the MCP surface: not listed, and a
+    // note: the stale admission is revoked on the MCP surface: not listed, and a
     // call is unroutable rather than dispatched.
     let listed_after = listed_tools(&running).await;
     assert!(
@@ -1221,7 +1214,7 @@ async fn disconnect_revokes_embedded_peer_tool() {
     harness.stop(&[peer_id]).await;
 }
 
-/// MIGRATED from `embedded_mcp_e2e.rs::embedded_visibility_policy_filters_list_and_short_circuits_hidden_call`.
+/// note: MIGRATED from `embedded_mcp_e2e.rs::embedded_visibility_policy_filters_list_and_short_circuits_hidden_call`.
 ///
 /// Preserved at the SHELL level (the bridge seam itself is pinned by
 /// `connect/mcp_bridge.rs` unit tests): a present visibility policy filters
@@ -1297,7 +1290,7 @@ async fn embedded_visibility_policy_filters_the_peer_surface() {
     harness.stop(&[peer_id]).await;
 }
 
-/// MIGRATED from `peer_tool.rs::user_cap_non_object_output_omitted_from_catalog`
+/// note: MIGRATED from `peer_tool.rs::user_cap_non_object_output_omitted_from_catalog`
 /// (the AR-70 §3 inclusion rule, applied to the retained peer registry).
 ///
 /// Preserved: a registered peer row whose input schema is NOT a root
@@ -1355,7 +1348,7 @@ async fn embedded_row_with_non_object_input_is_registered_but_unlisted() {
         "a non-root-object input row is omitted from the MCP catalog"
     );
 
-    // Registration is untouched: the row is still dispatchable.
+    // note: registration is untouched: the row is still dispatchable.
     let entry = peer_tool_table()
         .get(TOOL_OPAQUE)
         .expect("registration lane untouched");
@@ -1368,9 +1361,8 @@ async fn embedded_row_with_non_object_input_is_registered_but_unlisted() {
     harness.stop(&[peer_id]).await;
 }
 
-// ── Hello negotiation, boot lane and grant-at-establish ───────────────────
 
-/// MIGRATED from `authz_hello.rs::negotiation_journey_intersection_and_non_advertised_denied`
+/// note: MIGRATED from `authz_hello.rs::negotiation_journey_intersection_and_non_advertised_denied`
 /// and `peer_tool.rs::peer_deny_wire_code_survives_to_http_error_details_verbatim`.
 ///
 /// Preserved through the CORE port (`ConnectResponderAdapter`, the daemon's
@@ -1382,7 +1374,7 @@ async fn embedded_row_with_non_object_input_is_registered_but_unlisted() {
 #[serial]
 async fn non_advertised_peer_id_is_denied_with_the_peers_own_wire_code() {
     let peer_id = peer_id_of(seed_peer(4));
-    // The daemon hello advertises BOTH ids (operator allowlist); the dialer
+    // why: the daemon hello advertises BOTH ids (operator allowlist); the dialer
     // advertises only echo — the negotiated set is the intersection.
     let harness = start_server(
         8,
@@ -1434,7 +1426,7 @@ async fn non_advertised_peer_id_is_denied_with_the_peers_own_wire_code() {
     harness.stop(&[peer_id]).await;
 }
 
-/// Write `daemon.json` + `peer_keys.json` + a fixed daemon identity under
+/// note: write `daemon.json` + `peer_keys.json` + a fixed daemon identity under
 /// `home` (the RAW user home; `.nexus42` is joined internally).
 fn write_boot_config(
     home: &std::path::Path,
@@ -1444,7 +1436,7 @@ fn write_boot_config(
 ) {
     let connect_dir = nexus_home_layout::connect_dir(home);
     std::fs::create_dir_all(&connect_dir).unwrap();
-    // Fixed daemon identity so the dialer can preconfigure the pubkey.
+    // why: fixed daemon identity so the dialer can preconfigure the pubkey.
     std::fs::write(connect_dir.join("daemon_identity.key"), seed_host()).unwrap();
     let allowlist_json = tool_allowlist
         .iter()
@@ -1477,7 +1469,7 @@ fn hex32(bytes: [u8; 32]) -> String {
     out
 }
 
-/// An empty injected roster reserves nothing, so the lane refuses at its entry
+/// note: an empty injected roster reserves nothing, so the lane refuses at its entry
 /// rather than run a reserved-set guard whose builtin half is inert.
 #[tokio::test]
 #[serial]
@@ -1497,7 +1489,7 @@ async fn boot_lane_refuses_an_empty_injected_roster() {
     );
 }
 
-/// MIGRATED from `authz_hello.rs::boot_derives_hello_from_config_allowlist`
+/// note: MIGRATED from `authz_hello.rs::boot_derives_hello_from_config_allowlist`
 /// and `::boot_rejects_peer_not_in_peer_ids`.
 ///
 /// Preserved: the boot lane derives its hello from the on-disk operator
@@ -1527,7 +1519,7 @@ async fn boot_lane_admits_the_config_allowlist_and_rejects_unlisted_peers() {
             .await
             .expect("lane starts");
 
-    // Layer 0 first: the intruder HAS a key but is not on the allowlist.
+    // note: layer 0 first: the intruder HAS a key but is not on the allowlist.
     let refused = dial(handle.addr, seed_peer(6), &[TOOL_BOOT]).await;
     assert!(
         refused.is_err(),
@@ -1538,7 +1530,7 @@ async fn boot_lane_admits_the_config_allowlist_and_rejects_unlisted_peers() {
         "the rejected dialer leaves zero session state"
     );
 
-    // The allowlisted dialer negotiates the config-derived hello.
+    // why: the allowlisted dialer negotiates the config-derived hello.
     let adapter = dial(handle.addr, seed_peer(5), &[TOOL_BOOT])
         .await
         .expect("allowlisted dialer with a key is admitted");
@@ -1559,7 +1551,7 @@ async fn boot_lane_admits_the_config_allowlist_and_rejects_unlisted_peers() {
     peer_tool_table().set_config(None);
 }
 
-/// MIGRATED from `authz_hello.rs::boot_default_deny_empty_allowlist_zero_admitted`.
+/// note: MIGRATED from `authz_hello.rs::boot_default_deny_empty_allowlist_zero_admitted`.
 ///
 /// Preserved: with an empty operator tool allowlist the boot hello advertises
 /// only the spoke baseline, so an allowlisted peer's tools are never
@@ -1600,7 +1592,7 @@ async fn boot_lane_with_an_empty_tool_allowlist_admits_nothing() {
     peer_tool_table().set_config(None);
 }
 
-/// QC2-001 (QC-fix wave): the composing side's injected reserved set is
+/// note: QC2-001 (QC-fix wave): the composing side's injected reserved set is
 /// load-bearing through the real lane, not just the admission table.
 ///
 /// Preserved: one peer advertises BOTH ids in its hello and the operator
@@ -2015,7 +2007,7 @@ async fn consumer_cannot_invoke_reverse_only_delivery_tool_on_host() {
     peer_tool_table().set_config(None);
 }
 
-/// MIGRATED from `authz_hello.rs::reload_rotates_grants_at_session_boundaries_only`.
+/// note: MIGRATED from `authz_hello.rs::reload_rotates_grants_at_session_boundaries_only`.
 ///
 /// Preserved (the SESSION-boundary half): an operator rotation is adopted for
 /// NEW sessions while a LIVE session keeps its grant-at-establish catalog —
@@ -2061,7 +2053,7 @@ async fn reload_adopts_grants_at_session_boundaries_only() {
         "the boot generation admits the tool"
     );
 
-    // Operator rotation: the retired tool leaves the tool allowlist, a new one
+    // note: operator rotation: the retired tool leaves the tool allowlist, a new one
     // arrives, and a boot-scoped field changes (full-byte digest divergence
     // triggers the reload).
     std::fs::write(
@@ -2080,7 +2072,7 @@ async fn reload_adopts_grants_at_session_boundaries_only() {
         "the validated reload is adopted (2s poll budget)"
     );
 
-    // A LIVE session keeps its grant-at-establish catalog.
+    // why: A LIVE session keeps its grant-at-establish catalog.
     assert!(
         peer_tool_table()
             .get(TOOL_ROTATED_OLD)
@@ -2113,7 +2105,7 @@ async fn reload_adopts_grants_at_session_boundaries_only() {
         "boot-scoped max_sessions stays pinned (GC #7)"
     );
 
-    // A reconnect re-evaluates against the FRESH snapshot: the new grant is
+    // note: A reconnect re-evaluates against the FRESH snapshot: the new grant is
     // admitted and the retired row is gone.
     live.close();
     let reconnected = dial(

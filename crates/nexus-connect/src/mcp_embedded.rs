@@ -49,9 +49,9 @@ use rmcp::transport::sink_stream::SinkStreamTransport;
 use crate::mcp_bridge::{McpBackend, McpBridgeHandler};
 use crate::visibility::VisibilityPolicy;
 
-/// Client→server wire messages (the client's sink / the server's stream).
+/// note: client→server wire messages (the client's sink / the server's stream).
 type ClientToServer = JsonRpcMessage<ClientRequest, ClientResult, ClientNotification>;
-/// Server→client wire messages (the server's sink / the client's stream).
+/// note: server→client wire messages (the server's sink / the client's stream).
 type ServerToClient = JsonRpcMessage<ServerRequest, ServerResult, ServerNotification>;
 
 /// Compile-time bound on concurrent embedded MCP sessions (GC #8).
@@ -62,10 +62,10 @@ type ServerToClient = JsonRpcMessage<ServerRequest, ServerResult, ServerNotifica
 /// touches those counters.
 pub const EMBEDDED_MCP_MAX_SESSIONS: usize = 4;
 
-/// Embedded MCP session establish failure (honest discriminator).
+/// note: embedded MCP session establish failure (honest discriminator).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EmbeddedMcpError {
-    /// The (N+1)-th concurrent session was refused: at most
+    /// note: the (N+1)-th concurrent session was refused: at most
     /// [`EMBEDDED_MCP_MAX_SESSIONS`] concurrent embedded sessions may be
     /// live at once.
     #[error(
@@ -73,7 +73,7 @@ pub enum EmbeddedMcpError {
          embedded MCP sessions"
     )]
     SessionLimit,
-    /// The owner has requested shutdown: new sessions are refused because a
+    /// note: the owner has requested shutdown: new sessions are refused because a
     /// shutdown wake reaches only waiters registered at fire time — a
     /// session established afterwards would never end and would leak its
     /// budget slot.
@@ -82,7 +82,7 @@ pub enum EmbeddedMcpError {
 }
 
 impl EmbeddedMcpError {
-    /// The stable lowercase discriminator for this refusal.
+    /// note: the stable lowercase discriminator for this refusal.
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
@@ -92,7 +92,7 @@ impl EmbeddedMcpError {
     }
 }
 
-/// Shutdown signal for the embedded server shell: a `watch` channel whose
+/// note: shutdown signal for the embedded server shell: a `watch` channel whose
 /// boolean is set when the owner requests shutdown (read gate + per-session
 /// select source).
 #[derive(Clone)]
@@ -101,19 +101,19 @@ pub struct EmbeddedShutdown {
 }
 
 impl EmbeddedShutdown {
-    /// Bind the shutdown signal to a watch receiver.
+    /// note: bind the shutdown signal to a watch receiver.
     #[must_use]
     pub const fn new(rx: tokio::sync::watch::Receiver<bool>) -> Self {
         Self { rx }
     }
 
-    /// True once shutdown has been requested.
+    /// note: true once shutdown has been requested.
     #[must_use]
     pub fn requested(&self) -> bool {
         *self.rx.borrow()
     }
 
-    /// Resolves when shutdown is requested (immediately if already set).
+    /// note: resolves when shutdown is requested (immediately if already set).
     async fn notified(&self) {
         let mut rx = self.rx.clone();
         if *rx.borrow() {
@@ -123,20 +123,20 @@ impl EmbeddedShutdown {
     }
 }
 
-/// The embedded MCP server (Model B) over an arbitrary [`McpBackend`].
+/// note: the embedded MCP server (Model B) over an arbitrary [`McpBackend`].
 ///
 /// The session budget is PROCESS-GLOBAL: every handle in the process counts
 /// against the same [`EMBEDDED_MCP_MAX_SESSIONS`] cap.
 pub struct EmbeddedMcpServer<B: McpBackend> {
     backend: B,
-    /// Per-consumer MCP tool visibility policy (V1.180 P1, RN-OGA-2), fixed
+    /// note: per-consumer MCP tool visibility policy (V1.180 P1, RN-OGA-2), fixed
     /// at server construction and injected into every session's
     /// [`McpBridgeHandler`]. Absent ⇒ byte-identical current behavior.
     policy: VisibilityPolicy,
     shutdown: EmbeddedShutdown,
 }
 
-/// One established embedded session: the client-side transport for
+/// note: one established embedded session: the client-side transport for
 /// `serve_client`.
 ///
 /// The consumer completes the handshake with
@@ -146,20 +146,20 @@ pub struct EmbeddedMcpServer<B: McpBackend> {
 /// [`EmbeddedMcpServer::establish`]), so consuming the transport never
 /// releases the budget early.
 pub struct EmbeddedSession {
-    /// Client-side transport: sink = client→server writes, stream =
+    /// note: client-side transport: sink = client→server writes, stream =
     /// server→client reads (the rmcp 3.2 `IntoTransport` blanket covers it
     /// for `serve_client`).
     pub transport:
         SinkStreamTransport<mpsc::Sender<ClientToServer>, mpsc::Receiver<ServerToClient>>,
 }
 
-/// Process-global embedded session registry (shared by every server handle).
+/// note: process-global embedded session registry (shared by every server handle).
 #[derive(Debug)]
 struct SessionRegistry {
     active: AtomicUsize,
 }
 
-/// The ONE process-wide embedded session registry (lazy-initialized, I-1).
+/// note: the ONE process-wide embedded session registry (lazy-initialized, I-1).
 fn process_registry() -> Arc<SessionRegistry> {
     static REGISTRY: std::sync::LazyLock<Arc<SessionRegistry>> = std::sync::LazyLock::new(|| {
         Arc::new(SessionRegistry {
@@ -170,7 +170,7 @@ fn process_registry() -> Arc<SessionRegistry> {
 }
 
 impl SessionRegistry {
-    /// Acquire one session slot, refusing with
+    /// note: acquire one session slot, refusing with
     /// [`EmbeddedMcpError::SessionLimit`] when the budget is exhausted.
     fn try_acquire(self: &Arc<Self>) -> Result<SessionSlot, EmbeddedMcpError> {
         let mut current = self.active.load(Ordering::SeqCst);
@@ -194,7 +194,7 @@ impl SessionRegistry {
         }
     }
 
-    /// Release one session slot (saturating — a defensive double-release
+    /// note: release one session slot (saturating — a defensive double-release
     /// can never underflow).
     fn release(&self) {
         let _ = self
@@ -205,7 +205,7 @@ impl SessionRegistry {
     }
 }
 
-/// RAII session slot: releases the budget on drop.
+/// note: RAII session slot: releases the budget on drop.
 #[derive(Debug)]
 struct SessionSlot {
     registry: Arc<SessionRegistry>,
@@ -218,7 +218,7 @@ impl Drop for SessionSlot {
 }
 
 impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
-    /// Build a server shell over a backend, visibility policy, and shutdown
+    /// note: build a server shell over a backend, visibility policy, and shutdown
     /// signal.
     #[must_use]
     pub const fn new(backend: B, policy: VisibilityPolicy, shutdown: EmbeddedShutdown) -> Self {
@@ -229,7 +229,7 @@ impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
         }
     }
 
-    /// Establish one embedded MCP session: spawns the in-process rmcp
+    /// note: establish one embedded MCP session: spawns the in-process rmcp
     /// server over a fresh sink/stream pair and returns the client-side
     /// transport. The consumer completes the handshake with
     /// `rmcp::serve_client(ClientConfig::default(), session.transport)`.
@@ -244,13 +244,13 @@ impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
     /// Returns [`EmbeddedMcpError::Shutdown`] when shutdown was requested,
     /// and [`EmbeddedMcpError::SessionLimit`] when the budget is exhausted.
     pub fn establish(&self) -> Result<EmbeddedSession, EmbeddedMcpError> {
-        // Check the shutdown gate BEFORE acquiring a slot: a refused
+        // note: check the shutdown gate BEFORE acquiring a slot: a refused
         // establish must not consume budget it can never hold a session in.
         if self.shutdown.requested() {
             return Err(EmbeddedMcpError::Shutdown);
         }
         let slot = process_registry().try_acquire()?;
-        // Channel A: client→server (the client's sink, the server's stream).
+        // note: channel A: client→server (the client's sink, the server's stream).
         // Channel B: server→client (the server's sink, the client's stream).
         // Both carry the concrete JSON-RPC wire message types of their
         // direction.
