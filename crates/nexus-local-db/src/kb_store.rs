@@ -989,8 +989,9 @@ pub enum AuthoredAudience<'a> {
     },
 }
 
-/// note: The container context an authored audience is resolved against (durable
-/// §3): the owning Creator, the owning Character for a Character/binding
+/// note: The container context an authored audience is resolved against.
+///
+/// durable §3: the owning Creator, the owning Character for a Character/binding
 /// container, and the owning World for a World container.
 #[derive(Debug, Clone, Copy)]
 pub struct AudienceContainer<'a> {

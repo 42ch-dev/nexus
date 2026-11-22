@@ -251,7 +251,9 @@ pub struct GuardedPool {
 }
 
 impl GuardedPool {
-    /// note: # Panics
+    /// note: the handle holds its pool until the handle is dropped.
+    ///
+    /// # Panics
     ///
     /// Panics only if the handle's pool was already given up, which the
     /// field's single writer cannot do before the handle is dropped.
