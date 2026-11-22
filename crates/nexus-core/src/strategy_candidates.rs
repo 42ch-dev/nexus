@@ -31,18 +31,18 @@ use crate::{
     CoreError, CoreResult, CoreService, PresetError, Principal, StrategyCandidateConflictError,
 };
 
-/// The canonical candidate document plus the identity derived from it.
+/// note: The canonical candidate document plus the identity derived from it.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyCandidate {
-    /// Row revision; `0` for the unpersisted import projection.
+    /// note: Row revision; `0` for the unpersisted import projection.
     pub revision: u64,
-    /// The complete document; its embedded `revision` mirrors [`Self::revision`].
+    /// note: The complete document; its embedded `revision` mirrors [`Self::revision`].
     pub document: WorkflowDocument,
-    /// Canonical hash recomputed from the document through `nexus-workflow-ir`.
+    /// note: Canonical hash recomputed from the document through `nexus-workflow-ir`.
     pub content_hash: String,
 }
 
-/// The revision-0 projection of an installed strategy, shared with the
+/// note: The revision-0 projection of an installed strategy, shared with the
 /// `workflow-ir` read route so there is one import adapter, not two.
 ///
 /// # Errors
@@ -88,7 +88,7 @@ fn storage_error(error: sqlx::Error) -> CoreError {
     local_db_err(error.into())
 }
 
-/// The typed stale-base refusal of §Q2. Nothing has been written when it returns.
+/// note: The typed stale-base refusal of §Q2. Nothing has been written when it returns.
 pub fn conflict(strategy_id: &str, base_revision: u64, current_revision: u64) -> CoreError {
     CoreError::StrategyCandidateConflict(StrategyCandidateConflictError {
         strategy_id: strategy_id.to_string(),
@@ -120,7 +120,7 @@ pub async fn current_revision(pool: &SqlitePool, strategy_id: &str) -> CoreResul
         .map_err(|_| candidate_internal(format!("stored revision {revision} is negative")))
 }
 
-/// Project one stored row. The schema CHECKs already pin the document's id,
+/// note: Project one stored row. The schema CHECKs already pin the document's id,
 /// state and revision to the row; a mismatch here means the row was tampered
 /// with outside the store, so this fails rather than serving it.
 fn decode_stored(
@@ -149,7 +149,7 @@ fn decode_stored(
     })
 }
 
-/// The CAS write itself: one conditional statement keyed by `(strategy_id, revision)`, inserting
+/// note: The CAS write itself: one conditional statement keyed by `(strategy_id, revision)`, inserting
 /// at base 0 and updating otherwise, with the document's embedded revision already rewritten by
 /// the caller. A zero-row result is the typed conflict, never a repair or a merge.
 ///
@@ -216,7 +216,7 @@ async fn write_candidate(
 }
 
 impl CoreService {
-    /// The canonical candidate: the stored row when present, otherwise the
+    /// note: The canonical candidate: the stored row when present, otherwise the
     /// revision-0 import projection (never persisted).
     ///
     /// # Errors
@@ -235,7 +235,7 @@ impl CoreService {
         }
     }
 
-    /// Apply `apply` to the candidate at `base_revision` and commit it as
+    /// note: Apply `apply` to the candidate at `base_revision` and commit it as
     /// `base_revision + 1`, or refuse with the typed conflict.
     ///
     /// The write is one statement — an insert at `base_revision: 0`, otherwise a
@@ -317,37 +317,35 @@ impl CoreService {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Import: a partner bundle becomes a revision-1 candidate
-// ---------------------------------------------------------------------------
+// note: import turns a partner bundle into a revision-1 candidate.
 
-/// Why a bundle import was refused. Nothing was written when one is returned.
+/// note: Why a bundle import was refused. Nothing was written when one is returned.
 #[cfg(feature = "strategy-authoring")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresetImportRefusal {
-    /// The imported document does not pass the shared structural verdict Approve applies, so the
+    /// note: The imported document does not pass the shared structural verdict Approve applies, so the
     /// candidate would be one no approval could freeze.
     InvalidDocument {
-        /// The shared validator's violations, plus any pin or slot finding that refused it.
+        /// note: The shared validator's violations, plus any pin or slot finding that refused it.
         violations: Vec<String>,
     },
-    /// The document cannot be walked, so no trajectory exists to hand Approve with the candidate.
+    /// note: The document cannot be walked, so no trajectory exists to hand Approve with the candidate.
     SimulationUnavailable {
-        /// The static walk's own refusal.
+        /// note: The static walk's own refusal.
         reason: String,
     },
-    /// The bundle declares an id this host already serves: an embedded preset, or a `_system.` id.
+    /// note: The bundle declares an id this host already serves: an embedded preset, or a `_system.` id.
     /// A stored candidate row is read before the preset resolution (`read_strategy_candidate`), so
     /// a row under one of those ids would shadow a preset no partner owns.
     ReservedId {
-        /// The id the bundle declared.
+        /// note: The id the bundle declared.
         strategy_id: String,
     },
 }
 
 #[cfg(feature = "strategy-authoring")]
 impl PresetImportRefusal {
-    /// The stable lowercase reason a client branches on.
+    /// note: The stable lowercase reason a client branches on.
     #[must_use]
     pub const fn reason(&self) -> &'static str {
         match self {
@@ -357,7 +355,7 @@ impl PresetImportRefusal {
         }
     }
 
-    /// The refusal envelope's `details`, carrying what refused the bundle.
+    /// note: The refusal envelope's `details`, carrying what refused the bundle.
     #[must_use]
     pub fn details(&self) -> serde_json::Value {
         let mut details = serde_json::Map::new();
@@ -390,7 +388,7 @@ impl PresetImportRefusal {
         serde_json::Value::Object(details)
     }
 
-    /// The core error a refused import returns; the adapter renders `details` verbatim.
+    /// note: The core error a refused import returns; the adapter renders `details` verbatim.
     #[must_use]
     pub fn into_error(self) -> CoreError {
         CoreError::InputValidation {
@@ -420,7 +418,7 @@ impl std::fmt::Display for PresetImportRefusal {
     }
 }
 
-/// A committed import: the revision-1 candidate and the simulation evidence Approve needs.
+/// note: A committed import: the revision-1 candidate and the simulation evidence Approve needs.
 ///
 /// The trajectory is the deterministic walk of the SAME bytes that were stored, so a caller can
 /// pass it to [`CoreService::approve_strategy`] unchanged; recomputing it elsewhere is how a
@@ -428,15 +426,15 @@ impl std::fmt::Display for PresetImportRefusal {
 #[cfg(feature = "strategy-authoring")]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StrategyCandidateImport {
-    /// The committed candidate (row revision 1).
+    /// note: The committed candidate (row revision 1).
     pub candidate: StrategyCandidate,
-    /// The deterministic simulation of `candidate.document`.
+    /// note: The deterministic simulation of `candidate.document`.
     pub trajectory: SimulationTrajectory,
 }
 
 #[cfg(feature = "strategy-authoring")]
 impl CoreService {
-    /// Import the external bundle at `bundle_root` as this strategy's revision-1 candidate.
+    /// note: Import the external bundle at `bundle_root` as this strategy's revision-1 candidate.
     ///
     /// The bundle is loaded and converted by the ONE adapters that already own those steps
     /// (`load_preset`, `import_preset_bundle`) — no second YAML reader and no copied directory.
@@ -479,7 +477,7 @@ impl CoreService {
         })?;
         let strategy_id = imported.document.id.as_str().to_owned();
 
-        // The candidate read (`read_strategy_candidate`) prefers a stored row over the preset
+        // why: The candidate read (`read_strategy_candidate`) prefers a stored row over the preset
         // resolution, so a row under an id the host already serves would shadow that preset for
         // compose and approve. Any other id defines a new strategy; see the doc comment.
         if strategy_id.starts_with("_system.")
@@ -488,7 +486,7 @@ impl CoreService {
             return Err(PresetImportRefusal::ReservedId { strategy_id }.into_error());
         }
 
-        // The row this import would write is revision 1, and the trajectory must hash THOSE bytes:
+        // why: The row this import would write is revision 1, and the trajectory must hash THOSE bytes:
         // approve compares the recorded trajectory with a recomputation over the stored document,
         // so validating or simulating the revision-0 projection would store evidence that can
         // never match.
@@ -513,7 +511,7 @@ impl CoreService {
     }
 }
 
-/// The import refusal a shared structural verdict becomes: an explicit invalid-document refusal
+/// note: The import refusal a shared structural verdict becomes: an explicit invalid-document refusal
 /// keeps its violations, and a pin or slot finding (which no YAML bundle can carry today) is
 /// reported in the same list rather than dropped.
 #[cfg(feature = "strategy-authoring")]
@@ -528,7 +526,7 @@ fn import_invalid(refusal: crate::approve::ApproveRefusal) -> PresetImportRefusa
     }
 }
 
-/// A bundle that does not load is a `bundle` input refusal; the loader's own problems are named
+/// note: A bundle that does not load is a `bundle` input refusal; the loader's own problems are named
 /// instead of only their count, so the caller knows which line of `preset.yaml` to fix.
 #[cfg(feature = "strategy-authoring")]
 fn bundle_load_error(error: &nexus_preset::PresetLoadError) -> CoreError {

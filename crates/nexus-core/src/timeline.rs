@@ -8,6 +8,8 @@
 //! SQL authority. Both reads are bounded pulls; HTTP SSE framing and
 //! gap/disconnect handling stay a P5-T4 transport surface. A stream is a
 //! read feed, not a workflow-engine concern.
+// why: both reads are bounded pulls; HTTP SSE framing and gap handling stay a P5-T4
+// transport surface.
 
 use nexus_contracts::daemon_api::timeline::list_timeline_events_response::ListTimelineEventsResponse;
 use nexus_contracts::daemon_api::timeline::timeline_event_info::{
@@ -24,27 +26,27 @@ use crate::service::CoreService;
 use crate::world_kb::guards::{check_world_owner, WorldOwnerGuardFailure};
 use crate::worlds::narrative_internal;
 
-/// Overview worlds per page (unchanged wire contract).
+/// note: Overview worlds per page (unchanged wire contract).
 const OVERVIEW_PAGE_SIZE: usize = 20;
 const OVERVIEW_CURSOR_PREFIX: &str = "tl:";
 
-/// Per-World events page bounds (unchanged wire contract).
+/// note: Per-World events page bounds (unchanged wire contract).
 const EVENTS_DEFAULT_PAGE_SIZE: u32 = 20;
 const EVENTS_MAX_PAGE_SIZE: u32 = 100;
-/// Opaque keyset cursor prefix (`ev1:` — future encodings may coexist).
+/// note: Opaque keyset cursor prefix (`ev1:` — future encodings may coexist).
 const EVENTS_CURSOR_PREFIX: &str = "ev1:";
-/// Legacy root branch fallback when `narrative_worlds.root_fork_branch_id`
+/// note: Legacy root branch fallback when `narrative_worlds.root_fork_branch_id`
 /// is unset (matches `resolve_run_branch` in the daemon compute reads).
 const ROOT_BRANCH_FALLBACK: &str = "fbk_root";
 
-/// Bounded timeline-overview page query. The Core-prefixed wrapper schema is
+/// note: Bounded timeline-overview page query. The Core-prefixed wrapper schema is
 /// owned by the P5-T0 `schemas/core/timeline-api.schema.json` Create entry.
 #[derive(Debug, Clone, Default)]
 pub struct CoreTimelineOverviewQuery {
     pub cursor: Option<String>,
 }
 
-/// Bounded per-World timeline-events page query. The Core-prefixed wrapper
+/// note: Bounded per-World timeline-events page query. The Core-prefixed wrapper
 /// schema is owned by the P5-T0 `schemas/core/timeline_events-api.schema.json`
 /// Create entry.
 #[derive(Debug, Clone, Default)]
@@ -56,7 +58,7 @@ pub struct CoreTimelineEventsQuery {
     pub cursor: Option<String>,
 }
 
-/// Overview projection: worlds with aggregated key-block counts
+/// note: Overview projection: worlds with aggregated key-block counts
 /// (`era` / `event`, live statuses only) and the last event timestamp.
 #[derive(Debug, sqlx::FromRow)]
 struct WorldOverviewRow {
@@ -67,7 +69,7 @@ struct WorldOverviewRow {
     last_event_at: Option<String>,
 }
 
-/// Overview projection query without a cursor (`?` = bound fetch limit).
+/// note: Overview projection query without a cursor (`?` = bound fetch limit).
 const OVERVIEW_PAGE_SQL: &str = r"SELECT
     nw.world_id,
     nw.title,
@@ -88,7 +90,7 @@ LEFT JOIN (
 ORDER BY nw.world_id ASC
 LIMIT ?";
 
-/// Overview projection query with a keyset cursor (`?1` = cursor `world_id`,
+/// note: Overview projection query with a keyset cursor (`?1` = cursor `world_id`,
 /// `?2` = bound fetch limit).
 const OVERVIEW_CURSOR_PAGE_SQL: &str = r"SELECT
     nw.world_id,
@@ -112,7 +114,7 @@ ORDER BY nw.world_id ASC
 LIMIT ?2";
 
 impl CoreService {
-    /// Read one bounded timeline-overview page: every workspace world with
+    /// note: Read one bounded timeline-overview page: every workspace world with
     /// its aggregated era/event counts, ordered by `world_id`, keyset
     /// cursor on `world_id`.
     ///
@@ -136,7 +138,7 @@ impl CoreService {
         overview_page(&self.inner.pool, query).await
     }
 
-    /// Read one bounded timeline-events page for an owned World
+    /// note: Read one bounded timeline-events page for an owned World
     /// (`narrative_timeline_events`), keyset cursor on
     /// `(branch_id, sequence_no)`.
     ///
@@ -160,14 +162,14 @@ impl CoreService {
     ) -> CoreResult<ListTimelineEventsResponse> {
         self.verify_principal(principal)?;
         let pool = &self.inner.pool;
-        // Ownership guard before any read: missing world → NotFound, not
+        // why: Ownership guard before any read: missing world → NotFound, not
         // owned → Forbidden. The denial renders with this route's retained
         // envelopes (`world {id} not found` / `you do not own this world`).
         check_world_owner(pool, &world_id, principal.creator_id())
             .await
             .map_err(WorldOwnerGuardFailure::into_timeline_error)?;
 
-        // The guard above proves the row exists; `fetch_optional` still
+        // why: The guard above proves the row exists; `fetch_optional` still
         // guards the concurrent-delete race. `root_fork_branch_id` unset →
         // legacy `fbk_root` fallback.
         let world_row: Option<Option<String>> = sqlx::query_scalar(
@@ -183,7 +185,7 @@ impl CoreService {
             })?
             .unwrap_or_else(|| ROOT_BRANCH_FALLBACK.to_string());
 
-        // The read always targets a single branch (explicit filter or the
+        // why: The read always targets a single branch (explicit filter or the
         // World's current branch); keep the Option for the page-query
         // signature.
         let branch_filter = Some(
@@ -200,7 +202,7 @@ impl CoreService {
             .as_deref()
             .map(decode_events_cursor)
             .transpose()?;
-        // `list_timeline_events_page` takes `Option<(&str, i64)>`; the owned
+        // why: `list_timeline_events_page` takes `Option<(&str, i64)>`; the owned
         // decoded values are reborrowed here.
         let cursor_ref = cursor
             .as_ref()
@@ -210,7 +212,7 @@ impl CoreService {
             .limit
             .unwrap_or(EVENTS_DEFAULT_PAGE_SIZE)
             .min(EVENTS_MAX_PAGE_SIZE);
-        // W-1 (QC): `limit=0` must not report `has_more` — the wire contract
+        // why: W-1 (QC): `limit=0` must not report `has_more` — the wire contract
         // states `has_more` is equivalent to `next_cursor` being non-null,
         // and a `has_more=true, next_cursor=null` response would growth-loop
         // a keyset client (null cursor → re-request page 1). An empty page
@@ -222,7 +224,7 @@ impl CoreService {
                 next_cursor: None,
             });
         }
-        // Fetch one extra row to detect has_more.
+        // why: Fetch one extra row to detect has_more.
         let rows = list_timeline_events_page(
             pool,
             &world_id,
@@ -235,7 +237,7 @@ impl CoreService {
         .await
         .map_err(|e| narrative_internal("timeline_events.page", &e))?;
 
-        // `fetch_limit = limit + 1`; more rows than `limit` means another
+        // why: `fetch_limit = limit + 1`; more rows than `limit` means another
         // page. Rows are capped by the SQL LIMIT, so this cast cannot
         // truncate.
         #[allow(clippy::cast_possible_truncation)]
@@ -270,13 +272,13 @@ impl CoreService {
     }
 }
 
-/// Read the overview page (projection body of
+/// note: Read the overview page (projection body of
 /// [`CoreService::timeline_overview`]).
 async fn overview_page(
     pool: &SqlitePool,
     query: CoreTimelineOverviewQuery,
 ) -> CoreResult<TimelineOverviewResponse> {
-    // Fetch one extra row to detect has_more.
+    // why: Fetch one extra row to detect has_more.
     let fetch_limit = i64::try_from(OVERVIEW_PAGE_SIZE + 1).map_err(|_| CoreError::Internal {
         category: "timeline_overview: page size overflow".to_string(),
     })?;
@@ -327,7 +329,7 @@ async fn overview_page(
     })
 }
 
-/// Map an overview row to the wire item; `last_event_at` tolerates only the
+/// note: Map an overview row to the wire item; `last_event_at` tolerates only the
 /// RFC3339 timestamps the projection itself produces.
 fn overview_item(w: WorldOverviewRow) -> TimelineOverviewResponseWorldsItem {
     TimelineOverviewResponseWorldsItem {
@@ -343,7 +345,7 @@ fn overview_item(w: WorldOverviewRow) -> TimelineOverviewResponseWorldsItem {
     }
 }
 
-/// Decode the opaque overview cursor (`tl:<world_id>`); `None` = first page.
+/// note: Decode the opaque overview cursor (`tl:<world_id>`); `None` = first page.
 fn decode_overview_cursor(raw: Option<&str>) -> CoreResult<Option<String>> {
     let Some(raw) = raw else {
         return Ok(None);
@@ -373,7 +375,7 @@ fn encode_overview_cursor(world_id: &str) -> String {
     format!("{OVERVIEW_CURSOR_PREFIX}{world_id}")
 }
 
-/// Decode an opaque keyset cursor into `(branch_id, sequence_no)`.
+/// note: Decode an opaque keyset cursor into `(branch_id, sequence_no)`.
 ///
 /// Format: `ev1:<branch_id>:<sequence_no>`. Branch ids are `fbk_*` /
 /// `fbk_root` (no colons), so the last `:` separator is unambiguous.
@@ -421,7 +423,7 @@ fn encode_events_cursor(branch_id: &str, sequence_no: i64) -> String {
     format!("{EVENTS_CURSOR_PREFIX}{branch_id}:{sequence_no}")
 }
 
-/// Parse the `status` filter param; defaults to `canon`.
+/// note: Parse the `status` filter param; defaults to `canon`.
 fn parse_status_filter(raw: Option<&str>) -> CoreResult<&str> {
     match raw {
         None => Ok("canon"),
@@ -441,7 +443,7 @@ fn parse_json_object(raw: Option<&str>) -> Option<Map<String, Value>> {
     raw.and_then(|s| serde_json::from_str::<Map<String, Value>>(s).ok())
 }
 
-/// Map a DB status string to the wire enum. The DB CHECK constraint
+/// note: Map a DB status string to the wire enum. The DB CHECK constraint
 /// guarantees `canon|provisional|rejected`, so failure indicates a schema
 /// regression.
 fn map_status(s: &str) -> CoreResult<TimelineEventInfoStatus> {
@@ -455,7 +457,7 @@ fn map_status(s: &str) -> CoreResult<TimelineEventInfoStatus> {
     }
 }
 
-/// Map a `narrative_timeline_events` page row to the wire `TimelineEventInfo`.
+/// note: Map a `narrative_timeline_events` page row to the wire `TimelineEventInfo`.
 ///
 /// JSON columns are parsed leniently (malformed stored JSON degrades to
 /// `None` / empty rather than failing the page); `created_at` handles both
@@ -476,7 +478,7 @@ fn event_info(r: TimelineEventPageRow) -> CoreResult<TimelineEventInfo> {
         source_command_id: r.source_command_id,
         metadata: parse_json_object(r.metadata_json.as_deref()).unwrap_or_default(),
         extensions: parse_json_object(r.extensions_nexus_json.as_deref()),
-        // V1.164 P3 T1 (AR-2): carry the functional-dialect modules verbatim
+        // why: V1.164 P3 T1 (AR-2): carry the functional-dialect modules verbatim
         // from `narrative_timeline_events.modules_json` (NULL → empty map,
         // omitted from the wire via `skip_serializing_if` — schema type
         // `object`, absent when unrecorded).

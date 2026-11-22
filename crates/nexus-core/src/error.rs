@@ -1,4 +1,5 @@
 //! Neutral core error taxonomy (mapped to HTTP at the adapter boundary).
+// why: adapters own the status mapping, so core call sites never name an HTTP code.
 
 use nexus_contracts::{
     WorldKbConflictError, WorldKbValidationError, WorldKbValidationErrorValidationSummary,
@@ -15,7 +16,7 @@ pub enum CoreError {
     AuthRequired,
     #[error("forbidden: {resource}")]
     Forbidden { resource: String },
-    /// World-ownership guard denial (`narrative_worlds.owner_creator_id`).
+    /// note: World-ownership guard denial (`narrative_worlds.owner_creator_id`).
     /// The world id and refusal reason stay split so each transport family
     /// renders its retained 403 envelope verbatim (`resource: "world {id}"`
     /// plus the family reason) at the adapter boundary.
@@ -25,7 +26,7 @@ pub enum CoreError {
     NotFound { resource: String },
     #[error("invalid input: {field} — {reason}")]
     InvalidInput { field: String, reason: String },
-    /// Retained HTTP 422 input validation carrying per-entry detail.
+    /// note: Retained HTTP 422 input validation carrying per-entry detail.
     ///
     /// Distinct from [`Self::InvalidInput`]: that variant names a single
     /// `field`/`reason` pair and the adapter renders `details` FROM them,
@@ -40,11 +41,11 @@ pub enum CoreError {
     Preset(#[from] crate::presets::PresetError),
     #[error("outline conflict")]
     OutlineConflict(OutlineConflictError),
-    /// Stale-base refusal of a candidate compose write (HTTP 409 at the adapter).
+    /// note: Stale-base refusal of a candidate compose write (HTTP 409 at the adapter).
     /// Nothing was written: the store's CAS statement matched no row.
     #[error("strategy candidate conflict")]
     StrategyCandidateConflict(StrategyCandidateConflictError),
-    /// Repeat-approve refusal (HTTP 409 at the adapter): this exact content already has a
+    /// note: Repeat-approve refusal (HTTP 409 at the adapter): this exact content already has a
     /// snapshot, and one content hash approves at most once per strategy.
     #[error("strategy already approved")]
     StrategyAlreadyApproved(StrategyAlreadyApprovedError),
@@ -62,7 +63,7 @@ pub enum CoreError {
     SchemaMismatch,
     #[error("busy")]
     Busy,
-    /// A refusal carrying the transport-retained `(code, message)` pair.
+    /// note: A refusal carrying the transport-retained `(code, message)` pair.
     ///
     /// The neutral taxonomy names the DOMAIN class; several retained surfaces
     /// additionally promise a finer lowercase wire code (`policy_blocked`,
@@ -76,7 +77,7 @@ pub enum CoreError {
     /// occurred. The adapter decides the status; the core decides the code.
     #[error("{code}: {message}")]
     Coded { code: String, message: String },
-    /// A peer's refusal, preserving the peer's own lowercase wire code.
+    /// note: A peer's refusal, preserving the peer's own lowercase wire code.
     ///
     /// The spine's public code stays `not_supported` (the same answer an
     /// unknown builtin gives); the peer's finer code (`op_unsupported`,
@@ -84,48 +85,48 @@ pub enum CoreError {
     /// it in `details.wire_code` — verbatim, never re-parsed from the message.
     #[error("peer denied {code}: {message}")]
     PeerDenied {
-        /// The spine's public code.
+        /// note: The spine's public code.
         code: String,
-        /// The peer's own wire code.
+        /// note: The peer's own wire code.
         wire_code: String,
-        /// The peer's message.
+        /// note: The peer's message.
         message: String,
     },
     #[error("closing")]
     Closing,
     #[error("interrupted")]
     Interrupted,
-    /// Retained bearer-memory 403 shape: the daemon envelope splits a
+    /// note: Retained bearer-memory 403 shape: the daemon envelope splits a
     /// resource tag and a specific reason string (`Forbidden { resource,
     /// reason }`); the generic [`CoreError::Forbidden`] collapses the reason.
     #[error("forbidden: {resource} — {reason}")]
     ForbiddenReason { resource: String, reason: String },
-    /// Retained truthful 503 ("no synthesis provider/capability registry");
+    /// note: Retained truthful 503 ("no synthesis provider/capability registry");
     /// never a background-synthesis fallback.
     #[error("service unavailable: {0}")]
     ServiceUnavailable(String),
-    /// Retained 400 narrative-quality rejection (`narrative_generation_failed`).
+    /// note: Retained 400 narrative-quality rejection (`narrative_generation_failed`).
     #[error("narrative generation failed: {0}")]
     NarrativeRejected(String),
-    /// Retained plain 409 conflict with a human message and no stable code
+    /// note: Retained plain 409 conflict with a human message and no stable code
     /// (Moment Directive `set` without `replace`).
     #[error("conflict: {0}")]
     Conflict(String),
     #[error("internal: {category}")]
     Internal { category: String },
-    /// Stable actor-family wire conflict (409 at HTTP adapters) with its
+    /// note: Stable actor-family wire conflict (409 at HTTP adapters) with its
     /// retained code and message (`character_busy`, `character_inactive`,
     /// `world_inactive`, `last_active_actor_world_binding`, …). The code is
     /// the contract (durable spec §11.1 stable codes); adapters re-render it
     /// verbatim.
     #[error("actor conflict: {code}")]
     ActorConflict { code: String, message: String },
-    /// Stable actor-family wire rejection (400 `invalid_input` at HTTP
+    /// note: Stable actor-family wire rejection (400 `invalid_input` at HTTP
     /// adapters) carrying only the retained message — the family never
     /// attached structured `field` details to these rejections.
     #[error("{0}")]
     ActorInput(String),
-    /// A remote memory-provider refusal, reduced to safe machine classification.
+    /// note: A remote memory-provider refusal, reduced to safe machine classification.
     ///
     /// The peer's message and extra details never travel: only the whitelisted
     /// effective code, a whitelisted peer wire code and the whitelisted §14.2
@@ -135,22 +136,22 @@ pub enum CoreError {
     /// classification from fields it defined.
     #[error("memory provider refused: {code}")]
     MemoryProviderRefused {
-        /// The whitelisted effective memory code (`SpokeRejectCode::as_str`).
+        /// note: The whitelisted effective memory code (`SpokeRejectCode::as_str`).
         code: String,
-        /// The peer's own wire code, present only when it names a known memory
+        /// note: The peer's own wire code, present only when it names a known memory
         /// code (never arbitrary peer text).
         wire_code: Option<String>,
-        /// The §14.2 retry class: `terminal`, `retryable` or `uncertain`.
+        /// note: The §14.2 retry class: `terminal`, `retryable` or `uncertain`.
         retry_class: String,
-        /// The coarse transport family derived from `code`.
+        /// note: The coarse transport family derived from `code`.
         family: MemoryProviderRefusal,
-        /// The retained consumer-visible conflict code (`version_mismatch`)
+        /// note: The retained consumer-visible conflict code (`version_mismatch`)
         /// when the provider proved a definite stale-revision conflict; absent
         /// for every other refusal, so an uncertain conflict never reads as a
         /// definite one.
         conflict_code: Option<String>,
     },
-    /// Workspace-creation exclusivity refusal (409 at HTTP adapters): the slug
+    /// note: Workspace-creation exclusivity refusal (409 at HTTP adapters): the slug
     /// is already registered for the creator, the resolved creative root is
     /// claimed by another workspace, or the target root already holds foreign
     /// content. The message names the concrete collision.
@@ -158,7 +159,7 @@ pub enum CoreError {
     WorkspaceConflict(String),
 }
 
-/// The coarse transport family a remote memory-provider refusal maps onto.
+/// note: The coarse transport family a remote memory-provider refusal maps onto.
 ///
 /// Derived once from the whitelisted effective memory code in the shared mapper
 /// so every projector renders the same family without a second classification
@@ -172,7 +173,7 @@ pub enum MemoryProviderRefusal {
     Unavailable,
 }
 
-/// Structured outline-canvas OCC conflict payload (HTTP 409 at the adapter).
+/// note: Structured outline-canvas OCC conflict payload (HTTP 409 at the adapter).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineConflictError {
     pub current_revision: u64,
@@ -181,7 +182,7 @@ pub struct OutlineConflictError {
     pub recovery_hint: String,
 }
 
-/// Structured stale-base payload of a candidate compose write (HTTP 409 at the
+/// note: Structured stale-base payload of a candidate compose write (HTTP 409 at the
 /// adapter), carrying exactly the plan's `strategy_candidate_conflict` details.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrategyCandidateConflictError {
@@ -192,7 +193,7 @@ pub struct StrategyCandidateConflictError {
     pub recovery_hint: String,
 }
 
-/// Structured repeat-approve payload (HTTP 409 at the adapter): the snapshot that already froze
+/// note: Structured repeat-approve payload (HTTP 409 at the adapter): the snapshot that already froze
 /// this exact content, so the client can point at it instead of re-approving.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrategyAlreadyApprovedError {
@@ -202,7 +203,7 @@ pub struct StrategyAlreadyApprovedError {
     pub candidate_revision: u64,
 }
 
-/// Structured outline-canvas validation payload (HTTP 422 at the adapter).
+/// note: Structured outline-canvas validation payload (HTTP 422 at the adapter).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineValidationError {
     pub errors: Vec<String>,
@@ -234,7 +235,7 @@ impl CoreError {
         })
     }
 
-    /// Build an `outline_conflict` error with structured recovery details.
+    /// note: Build an `outline_conflict` error with structured recovery details.
     #[must_use]
     pub fn outline_conflict(
         current_revision: u64,
@@ -250,7 +251,7 @@ impl CoreError {
         })
     }
 
-    /// Build an `outline_validation_failed` error from a validation summary.
+    /// note: Build an `outline_validation_failed` error from a validation summary.
     #[must_use]
     pub fn outline_validation_failed(errors: &[String], warnings: &[String]) -> Self {
         Self::OutlineValidation(OutlineValidationError {
@@ -260,7 +261,7 @@ impl CoreError {
     }
 }
 
-/// True for SQLite lock-contention errors (`SQLITE_BUSY` family).
+/// note: True for SQLite lock-contention errors (`SQLITE_BUSY` family).
 pub fn is_sqlite_busy(err: &sqlx::Error) -> bool {
     match err {
         sqlx::Error::Database(db) => {
@@ -272,7 +273,7 @@ pub fn is_sqlite_busy(err: &sqlx::Error) -> bool {
     }
 }
 
-/// Map a `nexus_local_db` storage error onto the core taxonomy.
+/// note: Map a `nexus_local_db` storage error onto the core taxonomy.
 pub fn local_db_err(e: LocalDbError) -> CoreError {
     match e {
         LocalDbError::OwnerBusy { .. } | LocalDbError::Sqlx(sqlx::Error::PoolTimedOut) => {
@@ -281,7 +282,7 @@ pub fn local_db_err(e: LocalDbError) -> CoreError {
         LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        // v1.207 P3 (§B.1/§C): the frozen `operation_id_conflict` refusal for a
+        // note: v1.207 P3 (§B.1/§C): the frozen `operation_id_conflict` refusal for a
         // receipt write that collides on the first-writer-wins `operation_id`.
         // The code is the contract; the transport decides its status.
         LocalDbError::OperationIdConflict { operation_id } => CoreError::Coded {
@@ -296,7 +297,7 @@ pub fn local_db_err(e: LocalDbError) -> CoreError {
     }
 }
 
-/// Map a raw SQLite driver error onto the core taxonomy (M1 precedent:
+/// note: Map a raw SQLite driver error onto the core taxonomy (M1 precedent:
 /// lock contention → `Busy`, pool timeout → `OwnerBusy`).
 pub fn db_err(e: &sqlx::Error) -> CoreError {
     if is_sqlite_busy(e) {
@@ -310,7 +311,7 @@ pub fn db_err(e: &sqlx::Error) -> CoreError {
     }
 }
 
-/// Map a storage error onto the neutral actor-family taxonomy, preserving
+/// note: Map a storage error onto the neutral actor-family taxonomy, preserving
 /// the retained wire meaning per variant: stable contract conflicts keep
 /// their code + message, not-found keeps the daemon `"{resource} {id} not
 /// found"` message, and validation keeps the plain `invalid_input` message.
@@ -324,7 +325,7 @@ pub fn actor_db_err(e: LocalDbError) -> CoreError {
             message: code.message().to_string(),
         },
         LocalDbError::HolderStateInvalid { reason } => {
-            // The registry detail stays in the log; the wire keeps the stable
+            // why: The registry detail stays in the log; the wire keeps the stable
             // `holder_state_invalid` code and its fixed product message (§2.2).
             tracing::debug!(target: "actors.holder_state", %reason, "holder registry state refused on a normal read");
             CoreError::ActorConflict {
@@ -339,7 +340,7 @@ pub fn actor_db_err(e: LocalDbError) -> CoreError {
     }
 }
 
-/// Map a storage error from a guarded actor-owned insert (knowledge entries):
+/// note: Map a storage error from a guarded actor-owned insert (knowledge entries):
 /// the insert path renders not-found WITHOUT the ` not found` suffix and
 /// treats constraint violations as plain `invalid_input` (retained daemon
 /// `map_local_db_insert_err` texture).
@@ -355,7 +356,7 @@ pub fn actor_insert_db_err(e: LocalDbError) -> CoreError {
     }
 }
 
-/// Retained bearer-memory internal wire codes the daemon adapter re-sends
+/// note: Retained bearer-memory internal wire codes the daemon adapter re-sends
 /// verbatim from `"{CODE}: {message}"` core categories (same convention as the
 /// creator cache/config carriers in `creators.rs`).
 pub const MEMORY_INTERNAL_CODES: &[&str] = &[

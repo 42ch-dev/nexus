@@ -41,10 +41,10 @@ use crate::compose::ComposeDiagnostic;
 use crate::strategy_candidates::conflict;
 use crate::{CoreError, CoreResult, CoreService, Principal, StrategyCandidate};
 
-/// At most three rounds: one deterministic materialization and two corrections.
+/// note: At most three rounds: one deterministic materialization and two corrections.
 const MAX_ROUNDS: usize = 3;
 
-/// The D8 contract: the pattern-package / IR subset a generate request may declare.
+/// note: The D8 contract: the pattern-package / IR subset a generate request may declare.
 ///
 /// The field space is the IR subset and nothing else — node declarations, edges, nest bindings and
 /// the meta fields [`validate_workflow_ir`] reads (run intents, CLI args). There is no executable
@@ -55,48 +55,48 @@ const MAX_ROUNDS: usize = 3;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerateRequest {
-    /// Entry node id. Replaces `preset.initial`.
+    /// note: Entry node id. Replaces `preset.initial`.
     pub entry: String,
-    /// Terminal node ids; a buildable document declares exactly one.
+    /// note: Terminal node ids; a buildable document declares exactly one.
     pub terminal: Vec<String>,
-    /// Node declarations: kind, id and the payload of that kind.
+    /// note: Node declarations: kind, id and the payload of that kind.
     pub nodes: Vec<WorkflowNode>,
-    /// Document edges.
+    /// note: Document edges.
     pub edges: Vec<WorkflowEdge>,
-    /// Nest bindings and pattern pins.
+    /// note: Nest bindings and pattern pins.
     pub nests: Vec<WorkflowNestBinding>,
-    /// Document meta: description, kind, run intents, CLI args.
+    /// note: Document meta: description, kind, run intents, CLI args.
     pub meta: WorkflowMeta,
 }
 
-/// One actionable correction: what is wrong, where, and what to change it to.
+/// note: One actionable correction: what is wrong, where, and what to change it to.
 ///
 /// `kind` is the stable `snake_case` machine identifier — the [`Violation`] variant, the semantic
 /// diagnostic's [`DiagnosticCategory`], or the buildability refusal kind — so a caller can count
 /// repeat kinds across rounds.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Correction {
-    /// Stable `snake_case` machine identifier.
+    /// note: Stable `snake_case` machine identifier.
     pub kind: &'static str,
-    /// The address inside the document: a document id, node id, nest id or dot path.
+    /// note: The address inside the document: a document id, node id, nest id or dot path.
     pub location: String,
-    /// What was actually seen.
+    /// note: What was actually seen.
     pub observed: String,
-    /// The imperative change, naming what to change it to.
+    /// note: The imperative change, naming what to change it to.
     pub correction: String,
 }
 
-/// A committed candidate plus the semantic warnings its passing round carried.
+/// note: A committed candidate plus the semantic warnings its passing round carried.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GenerateOutcome {
-    /// The committed candidate: the row revision is the CAS revision.
+    /// note: The committed candidate: the row revision is the CAS revision.
     pub candidate: StrategyCandidate,
-    /// The passing round's warnings. They never block; they are reported.
+    /// note: The passing round's warnings. They never block; they are reported.
     pub warnings: Vec<ValidationDiagnostic>,
 }
 
 impl GenerateOutcome {
-    /// The wire projection the HTTP and agent-tool surfaces carry: the committed document, its
+    /// note: The wire projection the HTTP and agent-tool surfaces carry: the committed document, its
     /// revision, and the passing round's warnings.
     ///
     /// Both surfaces render this one object, so a candidate never reads differently depending on
@@ -112,7 +112,7 @@ impl GenerateOutcome {
     }
 }
 
-/// The lint-correct loop ran out of rounds. Nothing was persisted and there is no resume.
+/// note: The lint-correct loop ran out of rounds. Nothing was persisted and there is no resume.
 ///
 /// One shape for both exits (spec §3): the ceiling after three failed rounds, and a failing round 1
 /// with no corrector supplied. [`Self::details`] is the D20 payload every surface renders.
@@ -132,7 +132,7 @@ impl GenerateExhaustion {
         }
     }
 
-    /// The D20 payload: one object, three renderings.
+    /// note: The D20 payload: one object, three renderings.
     #[must_use]
     pub fn details(&self) -> serde_json::Value {
         serde_json::json!({
@@ -144,7 +144,7 @@ impl GenerateExhaustion {
         })
     }
 
-    /// The core error a refused generate returns; the adapter renders `details` verbatim.
+    /// note: The core error a refused generate returns; the adapter renders `details` verbatim.
     #[must_use]
     pub fn into_error(self) -> CoreError {
         CoreError::InputValidation {
@@ -154,7 +154,7 @@ impl GenerateExhaustion {
 }
 
 impl CoreService {
-    /// Generate one candidate for this strategy from `request`, at `base_revision`.
+    /// note: Generate one candidate for this strategy from `request`, at `base_revision`.
     ///
     /// Round 1 materializes the request; each failing round hands its corrections to `corrector`
     /// for a revised document. A survivor is committed through the same CAS statement Compose
@@ -177,7 +177,7 @@ impl CoreService {
         corrector: Option<&dyn PromptExecutor>,
     ) -> CoreResult<GenerateOutcome> {
         self.verify_principal(principal)?;
-        // A stale base is refused from the row alone: three model rounds must not run for a write
+        // why: A stale base is refused from the row alone: three model rounds must not run for a write
         // the CAS refuses anyway.
         let current = self.read_strategy_candidate(principal, strategy_id).await?;
         if current.revision != base_revision {
@@ -188,7 +188,7 @@ impl CoreService {
         let mut round = 1;
         let warnings = loop {
             let (bodies, pin_diagnostics) = crate::compose::document_bodies(&document, &packages);
-            // The rollup is derived from the bytes under lint, never trusted from the request or
+            // why: The rollup is derived from the bytes under lint, never trusted from the request or
             // the corrector: an under-declared fence would hide a write from Simulate and Approve.
             let summary = document_summary(&document, &bodies);
             let linted = lint(&document, &bodies, &pin_diagnostics, &packages);
@@ -236,7 +236,7 @@ impl CoreService {
     }
 }
 
-/// The provenance of a document this kernel generated.
+/// note: The provenance of a document this kernel generated.
 ///
 /// It is the kernel's, never a model's: the three-surface drift guard reads
 /// `provenance.source == generate`, so a corrector must not be able to set it (or invent lineage)
@@ -250,7 +250,7 @@ const fn generated_provenance() -> WorkflowProvenance {
     }
 }
 
-/// Build the round-1 document from the request alone.
+/// note: Build the round-1 document from the request alone.
 ///
 /// Nothing is invented: every node, edge and nest is the request's, and the fields the request
 /// does not carry (assets, signals, roles) stay empty rather than being synthesized. The effect
@@ -285,13 +285,13 @@ fn materialize(request: GenerateRequest, strategy_id: &str) -> CoreResult<Workfl
     })
 }
 
-/// One round's verdict: the corrections that block, and the warnings a passing round carries out.
+/// note: One round's verdict: the corrections that block, and the warnings a passing round carries out.
 struct Round {
     violations: Vec<Correction>,
     warnings: Vec<ValidationDiagnostic>,
 }
 
-/// The three existing lint layers, plus the pin and slot findings Approve refuses on.
+/// note: The three existing lint layers, plus the pin and slot findings Approve refuses on.
 ///
 /// Layers 1–3 are the ones the rest of the system uses. The last two groups are the byproduct of
 /// the same pin walk Approve runs ([`crate::compose::document_bodies`] and
@@ -389,7 +389,7 @@ async fn correct(
              parse is an executor failure, not an exhaustion"
         ))
     })?;
-    // A corrected document is still this generation's candidate. Identity is the kernel's:
+    // why: A corrected document is still this generation's candidate. Identity is the kernel's:
     // provenance is this generation's origin (the drift guard asserts it), the hash is bound at
     // approval, and the IR and authored versions come from the contract. The field space stays the
     // request's (D8): assets, signals, roles and initial_action are not a generate request's to add.
@@ -405,7 +405,7 @@ async fn correct(
     Ok(document)
 }
 
-/// The document a corrector returned, tolerating the code fence a model usually wraps JSON in.
+/// note: The document a corrector returned, tolerating the code fence a model usually wraps JSON in.
 fn parse_document(text: &str) -> Option<WorkflowDocument> {
     let trimmed = text.trim();
     let body = trimmed
@@ -416,7 +416,7 @@ fn parse_document(text: &str) -> Option<WorkflowDocument> {
     serde_json::from_str(body).ok()
 }
 
-/// Every node id the document declares, for a correction that must name the legal alternatives.
+/// note: Every node id the document declares, for a correction that must name the legal alternatives.
 fn legal_node_ids(document: &WorkflowDocument) -> String {
     if document.nodes.is_empty() {
         return "this document declares no node, so declare the node it names".to_owned();
@@ -429,7 +429,7 @@ fn legal_node_ids(document: &WorkflowDocument) -> String {
     )
 }
 
-/// The stable `snake_case` identifier of one structural violation.
+/// note: The stable `snake_case` identifier of one structural violation.
 const fn structural_kind(violation: &Violation) -> &'static str {
     match violation {
         Violation::DuplicateDocumentId(_) => "duplicate_document_id",
@@ -447,12 +447,12 @@ const fn structural_kind(violation: &Violation) -> &'static str {
     }
 }
 
-/// One layer-1 violation as an actionable correction.
+/// note: One layer-1 violation as an actionable correction.
 ///
 /// The enumerable alternatives are listed from the document under lint: a dangling reference names
 /// the missing id and every legal node id, and a non-composable nest parent names the kind it found
 /// and the two kinds a nest accepts.
-#[allow(clippy::too_many_lines)] // one match arm per Violation variant: per-kind formatters, one table
+#[allow(clippy::too_many_lines)] // why: one match arm per Violation variant: per-kind formatters, one table
 fn structural_correction(violation: &Violation, document: &WorkflowDocument) -> Correction {
     let (location, observed, correction) = match violation {
         Violation::DuplicateDocumentId(id) => (
@@ -569,7 +569,7 @@ fn structural_correction(violation: &Violation, document: &WorkflowDocument) -> 
     }
 }
 
-/// One pin or slot finding from Approve's own walk as an actionable correction.
+/// note: One pin or slot finding from Approve's own walk as an actionable correction.
 ///
 /// The three reachable kinds are exactly the three Approve refuses on; `DroppedSlotBinding` is
 /// reachable only from a compose operation that drops a binding, never from a whole-document walk,
@@ -635,7 +635,7 @@ fn compose_correction(diagnostic: &ComposeDiagnostic) -> Correction {
     }
 }
 
-/// The stable `snake_case` identifier of one semantic diagnostic category.
+/// note: The stable `snake_case` identifier of one semantic diagnostic category.
 const fn category_kind(category: DiagnosticCategory) -> &'static str {
     match category {
         DiagnosticCategory::Structural => "structural",
@@ -654,7 +654,7 @@ const fn category_kind(category: DiagnosticCategory) -> &'static str {
     }
 }
 
-/// One layer-2 error as an actionable correction.
+/// note: One layer-2 error as an actionable correction.
 ///
 /// The diagnostic carries a dot path and a message, not the offending value set, so each category's
 /// sentence names the change and its constraint and leaves the concrete value to `observed`.
@@ -667,7 +667,7 @@ fn diagnostic_correction(diagnostic: &ValidationDiagnostic) -> Correction {
     }
 }
 
-/// What to change at `path` for one semantic category.
+/// note: What to change at `path` for one semantic category.
 fn category_correction(category: DiagnosticCategory, path: &str) -> String {
     match category {
         DiagnosticCategory::Structural => format!(
@@ -721,7 +721,7 @@ fn category_correction(category: DiagnosticCategory, path: &str) -> String {
     }
 }
 
-/// One layer-3 refusal as an actionable correction.
+/// note: One layer-3 refusal as an actionable correction.
 fn buildability_correction(error: &IrOuterGraphError, document: &WorkflowDocument) -> Correction {
     let document_id = document.id.as_str();
     let (kind, location, observed, correction) = match error {
@@ -781,7 +781,7 @@ fn buildability_correction(error: &IrOuterGraphError, document: &WorkflowDocumen
     }
 }
 
-/// What to change when the document cannot be projected onto a preset at all.
+/// note: What to change when the document cannot be projected onto a preset at all.
 fn projection_correction(error: &WorkflowIrError) -> String {
     match error {
         WorkflowIrError::AssetRead { path, .. } => format!(
@@ -847,7 +847,7 @@ mod tests {
         )
     }
 
-    /// Every structural kind, with what its correction must name.
+    /// note: Every structural kind, with what its correction must name.
     fn structural_cases() -> Vec<(Violation, &'static str, &'static str)> {
         vec![
             (
@@ -1152,7 +1152,7 @@ mod tests {
         );
     }
 
-    /// A document pinning a package the registry does not serve. Before `lint` read the pin
+    /// note: A document pinning a package the registry does not serve. Before `lint` read the pin
     /// findings, this round still failed buildability (a `pattern_slot` is unmappable), but nothing
     /// named the pin the registry cannot confirm — the one finding Approve refuses on.
     #[test]

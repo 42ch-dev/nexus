@@ -3,6 +3,8 @@
 //! workspace. Extracted from the legacy daemon `findings.rs` handlers
 //! (P1-T3); the watcher schedule itself is P3-T2 while mutation/query live
 //! here. HTTP envelopes stay in adapters.
+// why: the watcher schedule stays out of this module until P3-T2, so mutation and query can
+// land without it.
 
 use nexus_contracts::tristate::presence_string;
 use nexus_contracts::{
@@ -16,7 +18,7 @@ use nexus_local_db::findings::{
 use crate::error::local_db_err;
 use crate::{CoreError, CoreResult, CoreService, Principal};
 
-/// Findings-family fault carrying the legacy classification until the adapter
+/// note: Findings-family fault carrying the legacy classification until the adapter
 /// boundary. `BadRequest.code` holds the stable public code (`invalid_input`,
 /// `invalid_transition`, `too_many_findings` — HTTP 422).
 #[derive(Debug, thiserror::Error)]
@@ -25,7 +27,7 @@ enum FindingsFault {
     BadRequest { code: String, message: String },
     #[error("{0}")]
     NotFound(String),
-    /// Legacy internal classification (`DATABASE_ERROR`,
+    /// note: Legacy internal classification (`DATABASE_ERROR`,
     /// `FINDING_CREATE_FAILED`) carried verbatim as `<CODE>: <message>`.
     #[error("{code}: {message}")]
     Internal { code: String, message: String },
@@ -49,7 +51,7 @@ impl From<FindingsFault> for CoreError {
     }
 }
 
-/// Map a findings DAO error onto the family fault, mirroring the legacy
+/// note: Map a findings DAO error onto the family fault, mirroring the legacy
 /// single-PATCH/list mapping: typed lifecycle/enum variants ride their stable
 /// public codes, validation rejections ride `invalid_input`, and everything
 /// else keeps the shared storage carrier (`database_error: …`, re-classified
@@ -79,7 +81,7 @@ fn findings_db_err(error: nexus_local_db::LocalDbError) -> FindingsFault {
     }
 }
 
-/// Create a finding request body (core-owned; the wire DTO keeps serde
+/// note: Create a finding request body (core-owned; the wire DTO keeps serde
 /// defaults at the adapter).
 #[derive(Debug, Clone)]
 pub struct CreateFindingRequest {
@@ -88,32 +90,32 @@ pub struct CreateFindingRequest {
     pub title: String,
     pub description: String,
     pub target_executor: String,
-    /// V1.47 §2.1: finding category; defaults to `"craft"` at the wire.
+    /// note: V1.47 §2.1: finding category; defaults to `"craft"` at the wire.
     pub kind: String,
-    /// V1.47 §8.2: optional prose rule suggestion.
+    /// note: V1.47 §8.2: optional prose rule suggestion.
     pub rule_suggestion: Option<String>,
 }
 
-/// Findings list query (cursor-paginated; F-P2 V1.64).
+/// note: Findings list query (cursor-paginated; F-P2 V1.64).
 #[derive(Debug, Clone, Default)]
 pub struct ListFindingsQuery {
     pub chapter: Option<i64>,
-    /// Single status or comma-separated list (R-V149P0-01).
+    /// note: Single status or comma-separated list (R-V149P0-01).
     pub status: Option<String>,
     pub severity: Option<String>,
     pub limit: Option<u32>,
-    /// Opaque `v1:`-prefixed offset cursor returned by the previous page.
+    /// note: Opaque `v1:`-prefixed offset cursor returned by the previous page.
     pub cursor: Option<String>,
 }
 
-/// Cursor-paginated findings list response.
+/// note: Cursor-paginated findings list response.
 #[derive(Debug)]
 pub struct ListFindingsResponse {
     pub items: Vec<FindingDetailResponse>,
     pub pagination: PaginationInfo,
 }
 
-/// Per-finding summary entry for [`StaleFindingsResponse`].
+/// note: Per-finding summary entry for [`StaleFindingsResponse`].
 #[derive(Debug)]
 pub struct StaleFindingEntry {
     pub finding_id: String,
@@ -123,7 +125,7 @@ pub struct StaleFindingEntry {
     pub age_seconds: i64,
 }
 
-/// Stale open-findings report for the active creator (V1.39 P4 T3).
+/// note: Stale open-findings report for the active creator (V1.39 P4 T3).
 ///
 /// The stale threshold is resolved by the caller (the legacy surface reads
 /// `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS`, default 96h — daemon env
@@ -132,26 +134,26 @@ pub struct StaleFindingEntry {
 pub struct StaleFindingsResponse {
     pub stale_count: u64,
     pub threshold_seconds: i64,
-    /// Server-side epoch used as `now` for the cutoff calculation.
+    /// note: Server-side epoch used as `now` for the cutoff calculation.
     pub now_epoch: i64,
-    /// Oldest first.
+    /// note: Oldest first.
     pub findings: Vec<StaleFindingEntry>,
 }
 
-/// Retention prune outcome (V1.49 P3, quality-loop §9.4).
+/// note: Retention prune outcome (V1.49 P3, quality-loop §9.4).
 #[derive(Debug)]
 pub struct PruneFindingsOutcome {
-    /// Rows deleted (or, in dry-run, that would be deleted).
+    /// note: Rows deleted (or, in dry-run, that would be deleted).
     pub count: u64,
     pub older_than_days: i64,
     pub dry_run: bool,
     pub now_epoch: i64,
 }
 
-/// Cursor token prefix (legacy daemon `api/pagination.rs` grammar: `v1:<offset>`).
+/// note: Cursor token prefix (legacy daemon `api/pagination.rs` grammar: `v1:<offset>`).
 const CURSOR_PREFIX: &str = "v1:";
 
-/// Decode an opaque offset cursor; `None` decodes to 0. Malformed tokens are
+/// note: Decode an opaque offset cursor; `None` decodes to 0. Malformed tokens are
 /// rejected with the verbatim legacy `invalid_input` message.
 fn decode_offset_cursor(cursor: Option<&String>) -> Result<u32, FindingsFault> {
     let invalid = || FindingsFault::BadRequest {
@@ -169,7 +171,7 @@ fn decode_offset_cursor(cursor: Option<&String>) -> Result<u32, FindingsFault> {
     }
 }
 
-/// Compute `(next_cursor, has_more)` from a `limit + 1` fetch.
+/// note: Compute `(next_cursor, has_more)` from a `limit + 1` fetch.
 fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<String>, bool) {
     let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
     if fetched > limit_us {
@@ -182,7 +184,7 @@ fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<String>,
     }
 }
 
-/// Convert `target_executor` to a human-readable CLI hint (novel-quality-loop
+/// note: Convert `target_executor` to a human-readable CLI hint (novel-quality-loop
 /// §2.2, T4).
 #[must_use]
 pub fn format_routing_hint(target_executor: &str) -> String {
@@ -194,7 +196,7 @@ pub fn format_routing_hint(target_executor: &str) -> String {
     }
 }
 
-/// Map a DAO finding row onto the contract detail DTO.
+/// note: Map a DAO finding row onto the contract detail DTO.
 fn to_finding_detail(f: Finding) -> FindingDetailResponse {
     FindingDetailResponse {
         routing_hint: Some(format_routing_hint(&f.target_executor)),
@@ -213,7 +215,7 @@ fn to_finding_detail(f: Finding) -> FindingDetailResponse {
     }
 }
 
-/// Project the generated findings PATCH DTO onto the stored patch.
+/// note: Project the generated findings PATCH DTO onto the stored patch.
 ///
 /// The tri-state `rule_suggestion` rides the generated presence carrier
 /// (`schemas/core/findings-api.schema.json`, `x-nexus-tri-state`): absent keeps
@@ -244,7 +246,7 @@ fn finding_patch_from_update(request: FindingsApi) -> CoreResult<FindingPatch> {
 }
 
 impl CoreService {
-    /// Create a finding on a Work (201 at the adapter).
+    /// note: Create a finding on a Work (201 at the adapter).
     ///
     /// The target Work must exist and belong to the active creator
     /// (`resolve_owned_work` before insert, QC2-F-002 — the legacy
@@ -266,7 +268,7 @@ impl CoreService {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
         self.require_work_write()?;
-        // R-V139P1-W-2: delegate ID mint to findings module (single source of truth).
+        // why: R-V139P1-W-2: delegate ID mint to findings module (single source of truth).
         let finding_id = findings::mint_finding_id();
         let now = chrono::Utc::now().timestamp();
         let f = Finding {
@@ -291,7 +293,7 @@ impl CoreService {
         Ok(to_finding_detail(f))
     }
 
-    /// Create a finding from a review verdict (T3), after Work-ownership
+    /// note: Create a finding from a review verdict (T3), after Work-ownership
     /// verification.
     ///
     /// # Errors
@@ -322,13 +324,13 @@ impl CoreService {
             creator_id: principal.creator_id().to_string(),
             kind: request.kind,
             rule_suggestion: request.rule_suggestion,
-            // Manual API path — no originating schedule; no idempotency guard.
+            // why: Manual API path — no originating schedule; no idempotency guard.
             source_schedule_id: None,
         };
         let finding_id = findings::create_finding_from_review(&self.inner.pool, &verdict)
             .await
             .map_err(|e| {
-                // R-V139P1-W-6: explicitly log from-review hook errors for production debugging.
+                // why: R-V139P1-W-6: explicitly log from-review hook errors for production debugging.
                 tracing::warn!(work_id = %work_id, error = %e, "from-review: failed to create finding");
                 FindingsFault::Internal {
                     code: "FINDING_CREATE_FAILED".to_string(),
@@ -343,7 +345,7 @@ impl CoreService {
         Ok(to_finding_detail(f))
     }
 
-    /// Cursor-paginated findings list for a Work with status/severity filters.
+    /// note: Cursor-paginated findings list for a Work with status/severity filters.
     ///
     /// # Errors
     /// As [`CoreService::create_finding`]; additionally
@@ -359,7 +361,7 @@ impl CoreService {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
 
-        // F-P2 (V1.64): cursor-based pagination. Decode the opaque cursor into
+        // why: F-P2 (V1.64): cursor-based pagination. Decode the opaque cursor into
         // the underlying offset, fetch `limit + 1` to detect `has_more`.
         let offset = decode_offset_cursor(query.cursor.as_ref())?;
         let limit = query.limit.unwrap_or(100).min(500);
@@ -412,7 +414,7 @@ impl CoreService {
         })
     }
 
-    /// One finding, Work-ownership verified first.
+    /// note: One finding, Work-ownership verified first.
     ///
     /// The returned row is also bound to the path `work_id`: a finding
     /// stored under a different Work is reported as `NotFound` with the
@@ -434,14 +436,14 @@ impl CoreService {
             .map_err(findings_db_err)?
             .ok_or_else(|| FindingsFault::NotFound(format!("finding {finding_id}")))?;
         if f.work_id != work_id {
-            // Path `work_id` does not match the stored row: keep the legacy
+            // why: Path `work_id` does not match the stored row: keep the legacy
             // 404 shape so the mismatch is indistinguishable from absence.
             return Err(FindingsFault::NotFound(format!("finding {finding_id}")).into());
         }
         Ok(to_finding_detail(f))
     }
 
-    /// One finding, creator-scoped (V1.48 P2 — the CLI accept path resolves a
+    /// note: One finding, creator-scoped (V1.48 P2 — the CLI accept path resolves a
     /// finding by ID alone; the DAO lookup is already creator-scoped so the
     /// Work-ownership precheck is skipped exactly as before).
     ///
@@ -461,7 +463,7 @@ impl CoreService {
         Ok(to_finding_detail(f))
     }
 
-    /// Patch a finding (V1.49 F6 lifecycle validation; tri-state
+    /// note: Patch a finding (V1.49 F6 lifecycle validation; tri-state
     /// `rule_suggestion`). Creator-scoped per the selected core API; Work
     /// ownership on the `{work_id}` route is verified by the caller via
     /// [`CoreService::get_work`] before delegating here.
@@ -481,7 +483,7 @@ impl CoreService {
         finding_id: String,
         request: FindingsApi,
     ) -> CoreResult<FindingDetailResponse> {
-        // Payload shape first: the tri-state carrier is a client-shaped input,
+        // why: Payload shape first: the tri-state carrier is a client-shaped input,
         // so a malformed value is refused before the identity gates — the same
         // order the adapter's own parse had before the generated DTO replaced it.
         let patch = finding_patch_from_update(request)?;
@@ -497,7 +499,7 @@ impl CoreService {
         )
         .await
         .map_err(|err| match err {
-            // V1.49 P0 W-1: the DAO emits typed variants for the PATCH surface.
+            // why: V1.49 P0 W-1: the DAO emits typed variants for the PATCH surface.
             // `IllegalTransition` → INVALID_TRANSITION (422); `InvalidEnum` →
             // INVALID_INPUT (422). Both are observed with a structured
             // `tracing::warn!` (qc3 S-2). No string-sniffing.
@@ -544,7 +546,7 @@ impl CoreService {
         Ok(to_finding_detail(f))
     }
 
-    /// Delete a finding. Creator-scoped per the selected core API; Work
+    /// note: Delete a finding. Creator-scoped per the selected core API; Work
     /// ownership on the `{work_id}` route is verified by the caller via
     /// [`CoreService::get_work`] before delegating here.
     ///
@@ -570,7 +572,7 @@ impl CoreService {
         self.verify_principal(principal)
     }
 
-    /// Bulk update status and/or `target_executor` (V1.91 P1 additive triage
+    /// note: Bulk update status and/or `target_executor` (V1.91 P1 additive triage
     /// helper). Creator-scoped; caps at 100 IDs; partial success model — each
     /// ID updates independently through the same DAO path as the single PATCH
     /// so enum validation and lifecycle enforcement stay identical. A body
@@ -624,7 +626,7 @@ impl CoreService {
             .into());
         }
 
-        // If both fields are absent, the contract says return 200 with updated: 0.
+        // why: If both fields are absent, the contract says return 200 with updated: 0.
         if patch.status.is_none() && patch.target_executor.is_none() {
             return Ok(BatchUpdateFindingsResponse {
                 updated: 0,
@@ -670,7 +672,7 @@ impl CoreService {
                         error = %other,
                         "findings batch PATCH: internal error updating finding"
                     );
-                    // Legacy batch surface: validation rejections ride
+                    // why: Legacy batch surface: validation rejections ride
                     // `invalid_input`; every other fault (invalid enum values
                     // included) classified as `DATABASE_ERROR` via the shared
                     // storage carrier.
@@ -696,7 +698,7 @@ impl CoreService {
         })
     }
 
-    /// Stale open-findings report for the active creator. `threshold_seconds`
+    /// note: Stale open-findings report for the active creator. `threshold_seconds`
     /// is resolved by the caller (daemon env default 96h — see
     /// [`StaleFindingsResponse`]).
     ///
@@ -737,7 +739,7 @@ impl CoreService {
         })
     }
 
-    /// Prune (or preview) `resolved` findings older than the retention window
+    /// note: Prune (or preview) `resolved` findings older than the retention window
     /// (V1.49 P3). The DAO is global across creators, matching the local-first
     /// single-creator model (one active creator per workspace); principal
     /// verification keeps auth parity with the other endpoints.

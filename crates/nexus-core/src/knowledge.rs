@@ -2,6 +2,7 @@
 //! (`creator world kb queue-extract` / `extract-status`; core producer added by
 //! v1.207 P1 item 6, operator entrance rebound by v231).
 //! This is NOT the World narrative KB graph (`nexus-kb` / P0 `world_kb`).
+// why: the World narrative KB graph is a different store, so this queue only produces jobs.
 
 use nexus_home_layout::sanitize_entry_id;
 use nexus_local_db::kb_extract_job::KbExtractJob;
@@ -9,13 +10,13 @@ use nexus_local_db::kb_extract_job::KbExtractJob;
 use crate::error::db_err;
 use crate::{CoreError, CoreResult, CoreService, Principal};
 
-/// Knowledge-family fault carrying the legacy classification until the
+/// note: Knowledge-family fault carrying the legacy classification until the
 /// adapter boundary. `InvalidInput` keeps the legacy 400 mapping.
 #[derive(Debug, thiserror::Error)]
 enum KnowledgeFault {
     #[error("invalid input: {reason}")]
     InvalidInput { field: String, reason: String },
-    /// Foreign-creator entry access; carries the `kb_owner:` prefix so the
+    /// note: Foreign-creator entry access; carries the `kb_owner:` prefix so the
     /// adapter can re-emit the legacy `Forbidden { resource, reason }` pair.
     #[error("forbidden: {0}")]
     ForeignEntry(String),
@@ -40,33 +41,33 @@ fn invalid_input(field: &str, reason: impl Into<String>) -> KnowledgeFault {
     }
 }
 
-// ─── Work-entry extract queue (`creator world kb queue-extract`) ──────────
+// note: work-entry extract queue (`creator world kb queue-extract`).
 
-/// Input for [`CoreService::queue_kb_extract`].
+/// note: Input for [`CoreService::queue_kb_extract`].
 ///
 /// The creator and the workspace binding are derived from the verified
 /// principal (and the admission the open already took), so a caller cannot
 /// enqueue into a workspace it is not admitted to.
 #[derive(Debug, Clone)]
 pub struct QueueKbExtractParams {
-    /// Idempotency label for the job.
+    /// note: Idempotency label for the job.
     ///
     /// The extractor reads the Work artifact named by [`Self::work_id`] /
     /// [`Self::chapter`]; this label only keys the job.
     pub work_entry_id: String,
-    /// Target world ID for the resulting `KnowledgeEntryRecord`.
+    /// note: Target world ID for the resulting `KnowledgeEntryRecord`.
     pub world_id: String,
-    /// Source work ID (parent of the chapter artifact).
+    /// note: Source work ID (parent of the chapter artifact).
     pub work_id: Option<String>,
-    /// Chapter number sugar: `Some(n)` selects the chapter artifact locator.
+    /// note: Chapter number sugar: `Some(n)` selects the chapter artifact locator.
     pub chapter: Option<i32>,
 }
 
-/// The artifact-locator triple `(source_kind, source_locator, profile_hint)`
+/// note: The artifact-locator triple `(source_kind, source_locator, profile_hint)`
 /// the `--chapter` sugar implies.
 type ArtifactLocator = (Option<String>, Option<String>, Option<String>);
 
-/// The artifact-locator triple implied by the `--chapter N` sugar.
+/// note: The artifact-locator triple implied by the `--chapter N` sugar.
 ///
 /// A chapter below 1 names no chapter, so the producer refuses it rather than
 /// enqueueing a job whose locator cannot resolve. The refusal sentence is the
@@ -87,9 +88,9 @@ fn chapter_locator(chapter: Option<i32>) -> Result<ArtifactLocator, KnowledgeFau
 }
 
 impl CoreService {
-    // ── Work-entry extract queue (`creator world kb queue-extract` / `extract-status`) ──
+// note: work-entry extract queue (`creator world kb queue-extract` / `extract-status`).
 
-    /// Enqueue a work-scope entry for extraction into a target world.
+    /// note: Enqueue a work-scope entry for extraction into a target world.
     ///
     /// Creates a row in `kb_extract_jobs` with status `queued`; the actual
     /// extraction is performed by the `kb.extract_work` capability, so no LLM
@@ -133,7 +134,7 @@ impl CoreService {
         .map_err(|e| db_err(&e))
     }
 
-    /// List the admitted creator's extract jobs, newest first, bounded by
+    /// note: List the admitted creator's extract jobs, newest first, bounded by
     /// `limit`.
     ///
     /// # Errors
@@ -150,7 +151,7 @@ impl CoreService {
             .map_err(|e| db_err(&e))
     }
 
-    /// Fetch one extract job by ID for the admitted creator; `None` when no
+    /// note: Fetch one extract job by ID for the admitted creator; `None` when no
     /// such job exists.
     ///
     /// A job that exists but belongs to another creator is refused with

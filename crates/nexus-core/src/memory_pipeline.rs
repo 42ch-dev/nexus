@@ -21,6 +21,8 @@
 //! The writable Character arm owns the per-Character activity lease for the
 //! context's whole lifetime, so every nested DB/file/provider effect stays
 //! inside the fence (durable §11.3.1).
+// why: the context is a private-field capability kept inside one Rust call so a borrowed
+// context cannot cross napi.
 
 use crate::actor_fence::ActorActivityLease;
 use crate::error::{CoreError, CoreResult};
@@ -33,7 +35,7 @@ use nexus_memory_provider::MemoryDisposition;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
-/// Internal wire-code carrier: `"{CODE}: {message}"` core categories the
+/// note: Internal wire-code carrier: `"{CODE}: {message}"` core categories the
 /// daemon adapter re-renders as the retained `Internal` envelopes.
 pub fn internal_err(code: &str, message: impl std::fmt::Display) -> CoreError {
     CoreError::Internal {
@@ -41,7 +43,7 @@ pub fn internal_err(code: &str, message: impl std::fmt::Display) -> CoreError {
     }
 }
 
-/// Map a local-db error to the retained bearer-memory envelope: a foreign or
+/// note: Map a local-db error to the retained bearer-memory envelope: a foreign or
 /// missing actor row stays the `character_memory` 403; everything else is the
 /// `DATABASE_ERROR` internal classification.
 pub fn map_local_db_error(e: LocalDbError) -> CoreError {
@@ -54,12 +56,12 @@ pub fn map_local_db_error(e: LocalDbError) -> CoreError {
     }
 }
 
-/// Map a raw driver error (the daemon mapped `NexusApiError::from(sqlx)`).
+/// note: Map a raw driver error (the daemon mapped `NexusApiError::from(sqlx)`).
 pub fn sqlx_internal(e: impl std::fmt::Display) -> CoreError {
     internal_err("database_error", e)
 }
 
-/// Whether a pipeline context may mutate. A read-only context (built by
+/// note: Whether a pipeline context may mutate. A read-only context (built by
 /// [`MemoryPipelineCtx::character_read`]) cannot enter any mutation helper:
 /// review processing, fragment/queue advance, forced reflection persistence,
 /// or any file/DB write fail closed with an error. A writable context
@@ -68,14 +70,14 @@ pub fn sqlx_internal(e: impl std::fmt::Display) -> CoreError {
 #[derive(Debug)]
 enum BearerCapability {
     ReadOnly,
-    /// The optional lease is held for the context's whole lifetime so every
+    /// note: The optional lease is held for the context's whole lifetime so every
     /// nested DB/file/provider effect stays inside the activity fence; it is
     /// dropped with the context. Never read explicitly.
     #[allow(dead_code)]
     Writable(Option<ActorActivityLease>),
 }
 
-/// A bearer plus its scope provenance for one pipeline run.
+/// note: A bearer plus its scope provenance for one pipeline run.
 ///
 /// This is an **authorization capability**, not a passive data bag: the
 /// fields are private and the only ways to build one are [`Self::creator`]
@@ -99,7 +101,7 @@ pub struct MemoryPipelineCtx {
 }
 
 impl MemoryPipelineCtx {
-    /// Build a Creator-arm context (trusted operator; the principal's own
+    /// note: Build a Creator-arm context (trusted operator; the principal's own
     /// creator id). Creator behavior is unchanged: writable, no per-Character
     /// lease needed.
     pub(crate) fn creator(creator_id: &str, scope_id: Option<&str>) -> Self {
@@ -111,7 +113,7 @@ impl MemoryPipelineCtx {
         }
     }
 
-    /// Build a read-only Character-arm context for retained-data reads.
+    /// note: Build a read-only Character-arm context for retained-data reads.
     ///
     /// Validates the bearer format and current ownership (foreign or missing
     /// Character is `404 not_found`, indistinguishable) but imposes no
@@ -141,7 +143,7 @@ impl MemoryPipelineCtx {
         }
     }
 
-    /// Build a writable Character-arm context from an already-admitted
+    /// note: Build a writable Character-arm context from an already-admitted
     /// activity lease. Verifies the lease identity matches the supplied ids;
     /// the lease is transferred into the context and held for its whole
     /// lifetime (all DB/file/provider effects).
@@ -168,7 +170,7 @@ impl MemoryPipelineCtx {
         })
     }
 
-    /// Closed bearer format validation (path-safe ids) before any capability
+    /// note: Closed bearer format validation (path-safe ids) before any capability
     /// is minted.
     fn validated_bearer(owner_creator_id: &str, character_id: &str) -> CoreResult<()> {
         MemoryBearerRef::Character {
@@ -182,9 +184,9 @@ impl MemoryPipelineCtx {
         })
     }
 
-    /// Borrow the bearer for a read path. Readable contexts and writable
+    /// note: Borrow the bearer for a read path. Readable contexts and writable
     /// contexts both allow reads.
-    #[allow(clippy::option_if_let_else)] // the match names both wire bearers directly
+    #[allow(clippy::option_if_let_else)] // why: the match names both wire bearers directly
     pub(crate) fn bearer_ref(&self) -> MemoryBearerRef<'_> {
         match &self.character_id {
             None => MemoryBearerRef::Creator(&self.owner_creator_id),
@@ -195,12 +197,12 @@ impl MemoryPipelineCtx {
         }
     }
 
-    /// Borrow the scope (Creator world id / Character binding id).
+    /// note: Borrow the scope (Creator world id / Character binding id).
     pub(crate) fn scope(&self) -> Option<&str> {
         self.scope_id.as_deref()
     }
 
-    /// Borrow the bearer only when writable; mutation helpers call this first
+    /// note: Borrow the bearer only when writable; mutation helpers call this first
     /// so a read-only context cannot write. Returns `forbidden` otherwise.
     pub(crate) fn bearer_for_write(&self) -> Result<MemoryBearerRef<'_>, CoreError> {
         match &self.capability {
@@ -213,15 +215,13 @@ impl MemoryPipelineCtx {
     }
 }
 
-// ── Review pipeline ────────────────────────────────────────────────────────
-
-/// Maximum pending rows inspected per review call (V1.80 REL-01).
+/// note: Maximum pending rows inspected per review call (V1.80 REL-01).
 pub const REVIEW_BATCH_LIMIT: i64 = 50;
 
-/// Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
+/// note: Maximum allowed digest size in bytes (256 KiB). R-V133P4-06.
 pub const MAX_DIGEST_BYTES: usize = 256 * 1024;
 
-/// Outcome of a bounded review batch (V1.80 REL-01).
+/// note: Outcome of a bounded review batch (V1.80 REL-01).
 #[derive(Debug)]
 pub struct ReviewBatchOutcome {
     pub promoted: i64,
@@ -249,31 +249,31 @@ impl ReviewBatchOutcome {
     }
 }
 
-/// Counts produced by a single row's classify+action. Each field is 0 or 1.
+/// note: Counts produced by a single row's classify+action. Each field is 0 or 1.
 struct RowActionCounts {
     promoted: i64,
     fragmented: i64,
     dropped: i64,
 }
 
-/// One pending candidate the review drain may classify.
+/// note: One pending candidate the review drain may classify.
 ///
 /// The provider candidate is the review input: its classifier fields come from
 /// the bridge's `nexus_legacy` block (E11's classifier is unchanged), and its
 /// immutable capture scope decides whether a promotion is binding-local.
 pub struct ReviewBatchRow {
-    /// The provider candidate the decision consumes.
+    /// note: The provider candidate the decision consumes.
     pub candidate_id: String,
-    /// The revision the candidate read served, used as the CAS precondition.
+    /// note: The revision the candidate read served, used as the CAS precondition.
     pub expected_revision: u64,
-    /// The retained classifier input.
+    /// note: The retained classifier input.
     pub input: nexus_creator_memory::review::PendingReviewInput,
-    /// A Character candidate captured under `context(binding_id)`: a promotion
+    /// note: A Character candidate captured under `context(binding_id)`: a promotion
     /// must stay binding-local (only the explicit fragment promotion shares it).
     pub binding_local: bool,
 }
 
-/// Process a bounded slice of a bearer's review queue.
+/// note: Process a bounded slice of a bearer's review queue.
 ///
 /// Bearer-agnostic: classifies each pending candidate and consumes it through
 /// the provider (`memory.candidates.review`), so a drain writes provider
@@ -306,7 +306,7 @@ pub async fn process_bearer_review_batch(
         }
 
         let decision = nexus_creator_memory::review::classify_pending_review(&row.input);
-        // A row that has started runs to completion: the provider journals each
+        // why: A row that has started runs to completion: the provider journals each
         // decision, and cancelling one mid-transaction can leave its target
         // unsettled, which would refuse the bearer's next read. The call budget
         // is therefore checked between rows, never inside one.
@@ -325,7 +325,7 @@ pub async fn process_bearer_review_batch(
     Ok(outcome)
 }
 
-/// Classify one pending candidate and consume it through the provider.
+/// note: Classify one pending candidate and consume it through the provider.
 ///
 /// A provider refusal leaves the candidate pending and the row counts stay
 /// zero, so the caller reports `has_more` instead of a false completion.
@@ -343,7 +343,7 @@ async fn consume_review_decision(
     };
 
     let decision = match action {
-        // Binding-local Character pending must stay binding-local: a
+        // why: Binding-local Character pending must stay binding-local: a
         // Promote decision on a World-life (binding) scope is coerced to
         // the fragment path so it retains binding provenance (blocking
         // binding removal via `binding_has_local_memory`) and only becomes
@@ -363,7 +363,7 @@ async fn consume_review_decision(
         },
         ReviewAction::FragmentOnly => fragment_decision(&row.input),
         ReviewAction::Drop => json!({ "action": "drop" }),
-        // MergeIntoExisting and TriggerSoulExperienceOnly are later features.
+        // why: MergeIntoExisting and TriggerSoulExperienceOnly are later features.
         _ => {
             tracing::debug!(
                 pending_id = %row.input.pending_id,
@@ -374,7 +374,7 @@ async fn consume_review_decision(
         }
     };
 
-    // D18: a binding-local candidate's dependency namespace is its binding; a
+    // why: D18: a binding-local candidate's dependency namespace is its binding; a
     // shared candidate (Creator arm or shared Character scope) carries none.
     let binding_id = if row.binding_local {
         row.input.scope_id.as_deref()
@@ -408,7 +408,7 @@ async fn consume_review_decision(
     counts
 }
 
-/// The §7.15 fragment decision: one `fact` record carrying the retained
+/// note: The §7.15 fragment decision: one `fact` record carrying the retained
 /// summary, keywords, TTL, session and pending provenance. The record inherits
 /// the candidate's immutable capture scope.
 fn fragment_decision(input: &nexus_creator_memory::review::PendingReviewInput) -> Value {
@@ -431,7 +431,7 @@ fn fragment_decision(input: &nexus_creator_memory::review::PendingReviewInput) -
     })
 }
 
-/// The §7.15 promote decision for shared Character and whole-Creator scope: the
+/// note: The §7.15 promote decision for shared Character and whole-Creator scope: the
 /// retained long-term body (passthrough summarizer, UNTRUSTED header included)
 /// under the task-kind-derived `nexus.<MemoryKind>` record kind.
 async fn promote_decision(
@@ -448,14 +448,14 @@ async fn promote_decision(
         )
         .await
         .map_err(|error| internal_err("promote_to_long_term_failed", error))?;
-    // The authored identity the CLI addresses a long-term memory by: the
+    // why: The authored identity the CLI addresses a long-term memory by: the
     // promotion derives it from the pending row, because the retained file
     // promotion's slug came from its minted `memory_id` and a promoted record
     // with no slug cannot be listed, shown, edited or deleted
     // (fix round 1, Greptile `memory_pipeline.rs:441`).
     let memory_kind = nexus_creator_memory::review::task_kind_to_memory_kind(&input.task_kind);
     let memory_id = format!("mem_{}", input.pending_id);
-    // The prefix above is local, so a slug-less id is a broken invariant rather
+    // why: The prefix above is local, so a slug-less id is a broken invariant rather
     // than a pending row the pipeline can serve (fix round 3, F3).
     let slug = nexus_creator_memory::long_term_memory::slug_from_memory_id(&memory_id);
     let slug = slug.ok_or_else(|| {
@@ -479,16 +479,16 @@ async fn promote_decision(
     }))
 }
 
-/// Passthrough summarizer that returns the raw digest with a provenance
+/// note: Passthrough summarizer that returns the raw digest with a provenance
 /// header (V1.33 R-V133P4-03/06 behavior preserved for the Creator arm).
 pub struct PassthroughSummarizer {
-    /// Header key (`creator_id` or `character_id`) for the bearer.
+    /// note: Header key (`creator_id` or `character_id`) for the bearer.
     id_key: &'static str,
-    /// Header value.
+    /// note: Header value.
     id_value: String,
-    /// Header key (`world_id` or `binding_id`) for the scope.
+    /// note: Header key (`world_id` or `binding_id`) for the scope.
     scope_key: &'static str,
-    /// Header scope value.
+    /// note: Header scope value.
     scope_value: String,
 }
 
@@ -511,7 +511,7 @@ impl PassthroughSummarizer {
     }
 }
 
-// `summarize` performs no async I/O (passthrough) — trait contract requires
+// why: `summarize` performs no async I/O (passthrough) — trait contract requires
 // `async`; clippy 1.98 `unused_async_trait_impl` is toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
 impl SessionDigestSummarizer for PassthroughSummarizer {

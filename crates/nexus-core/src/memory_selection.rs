@@ -4,27 +4,28 @@
 //! The selection names an authority and its non-secret references only. It is
 //! validated at every trust boundary that reads it (disk → open, CLI → write)
 //! and never carries credential material.
+// why: only an authority and its non-secret references may leave disk.
 
 use nexus_home_layout::MemoryProviderConfig;
 
 use crate::error::{CoreError, CoreResult};
 
-/// Credential ids are also file stems, so the grammar is path-safe by
+/// note: Credential ids are also file stems, so the grammar is path-safe by
 /// construction: `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`.
 const MAX_CREDENTIAL_ID_LEN: usize = 64;
 const MAX_SPACE_ID_LEN: usize = 128;
 const PUBKEY_HEX_LEN: usize = 64;
 
-/// The memory provider authority selected for one open.
+/// note: The memory provider authority selected for one open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryProviderSelection {
-    /// Built-in local provider (the implicit default).
+    /// note: Built-in local provider (the implicit default).
     Local,
-    /// Remote Connect provider reference.
+    /// note: Remote Connect provider reference.
     Remote(RemoteMemoryProviderSelection),
 }
 
-/// Non-secret remote provider reference: ids, endpoint and trusted peers.
+/// note: Non-secret remote provider reference: ids, endpoint and trusted peers.
 ///
 /// The fields are public as the §2.1 surface declares, so every reader and
 /// writer validates through [`MemoryProviderSelection::from_config`],
@@ -35,19 +36,19 @@ pub enum MemoryProviderSelection {
 /// [`CoreHomeService::set_memory_provider_selection`]: crate::CoreHomeService::set_memory_provider_selection
 #[derive(Clone, PartialEq, Eq)]
 pub struct RemoteMemoryProviderSelection {
-    /// Provider space the selected authority serves.
+    /// note: Provider space the selected authority serves.
     pub space_id: String,
-    /// Operator-provisioned credential file id (not the secret itself).
+    /// note: Operator-provisioned credential file id (not the secret itself).
     pub credential_id: String,
-    /// `wss://` endpoint, or `ws://` for loopback tests only.
+    /// note: `wss://` endpoint, or `ws://` for loopback tests only.
     pub connect_endpoint: String,
-    /// Remote Ed25519 public key, 64 lowercase hex characters.
+    /// note: Remote Ed25519 public key, 64 lowercase hex characters.
     pub remote_pubkey_hex: String,
-    /// Trusted remote peer ids (fail-closed handshake).
+    /// note: Trusted remote peer ids (fail-closed handshake).
     pub allowlist: Vec<String>,
 }
 
-// The selection may be logged: show ids and the sanitized endpoint, never
+// why: The selection may be logged: show ids and the sanitized endpoint, never
 // credential-file contents or token material (§2.1).
 impl std::fmt::Debug for RemoteMemoryProviderSelection {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -66,7 +67,7 @@ impl std::fmt::Debug for RemoteMemoryProviderSelection {
 }
 
 impl MemoryProviderSelection {
-    /// Convert the on-disk table into a validated selection.
+    /// note: Convert the on-disk table into a validated selection.
     ///
     /// A missing table is the implicit local default (§2.2, rule 3), not an
     /// error.
@@ -99,7 +100,7 @@ impl MemoryProviderSelection {
         }
     }
 
-    /// The on-disk table this selection serializes to.
+    /// note: The on-disk table this selection serializes to.
     #[must_use]
     pub fn to_config(&self) -> MemoryProviderConfig {
         match self {
@@ -114,7 +115,7 @@ impl MemoryProviderSelection {
         }
     }
 
-    /// Validate the selection before it is persisted or opened.
+    /// note: Validate the selection before it is persisted or opened.
     ///
     /// # Errors
     ///
@@ -128,7 +129,7 @@ impl MemoryProviderSelection {
 }
 
 impl RemoteMemoryProviderSelection {
-    /// Validate the remote reference (§3.1 id grammar, §3.2 endpoint, peer
+    /// note: Validate the remote reference (§3.1 id grammar, §3.2 endpoint, peer
     /// identity shape).
     ///
     /// # Errors
@@ -174,7 +175,7 @@ impl RemoteMemoryProviderSelection {
     }
 }
 
-/// Whether `id` is a valid credential-file stem (§3.1).
+/// note: Whether `id` is a valid credential-file stem (§3.1).
 #[must_use]
 pub fn is_valid_credential_id(id: &str) -> bool {
     let mut characters = id.chars();
@@ -193,7 +194,7 @@ fn is_valid_space_id(id: &str) -> bool {
 }
 
 fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
-    // Validate the exact raw string the dial path hands to
+    // why: Validate the exact raw string the dial path hands to
     // `tokio_tungstenite::connect_async`: it parses that text as an
     // `http::Uri` (`IntoClientRequest for &str`), so this is the transport's
     // own grammar rather than a second, normalized parser (§3.2).
@@ -212,7 +213,7 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
     let authority = uri
         .authority()
         .ok_or_else(|| invalid("connect_endpoint", "must name a host"))?;
-    // The transport keeps userinfo in the authority it forwards; the raw
+    // why: The transport keeps userinfo in the authority it forwards; the raw
     // component must be rejected even when it is empty (`wss://@host`).
     if authority.as_str().contains('@') {
         return Err(invalid("connect_endpoint", "must not carry userinfo"));
@@ -227,7 +228,7 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
     if host.is_empty() {
         return Err(invalid("connect_endpoint", "must name a host"));
     }
-    // The transport connects to `uri.port_u16()` or the scheme default, so an
+    // why: The transport connects to `uri.port_u16()` or the scheme default, so an
     // unreadable or empty port must not silently become 443/80.
     let port_suffix = authority.as_str().strip_prefix(host).unwrap_or_default();
     if !port_suffix.is_empty() {
@@ -250,7 +251,7 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
     }
 }
 
-/// The locked `ws://` host set (§3.2): exactly `127.0.0.1`, `::1` or
+/// note: The locked `ws://` host set (§3.2): exactly `127.0.0.1`, `::1` or
 /// `localhost`, not the whole 127/8 range.
 fn is_locked_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
@@ -268,7 +269,7 @@ fn is_locked_loopback_host(host: &str) -> bool {
         .is_ok_and(|address| address.is_loopback())
 }
 
-/// Drop userinfo, query and fragment so a hand-built invalid value can never
+/// note: Drop userinfo, query and fragment so a hand-built invalid value can never
 /// leak credentials through [`std::fmt::Debug`].
 fn sanitized_endpoint(endpoint: &str) -> String {
     let without_fragment = endpoint.split('#').next().unwrap_or_default();

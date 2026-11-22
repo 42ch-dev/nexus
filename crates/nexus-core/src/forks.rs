@@ -1,6 +1,8 @@
 //! Local timeline forks: immutable parent history, canon lineage markers.
 //! The storage write is the shared narrative repository operation; no branch
 //! registry, history copy or community/social fork is introduced here.
+// why: the shared narrative repository write is the whole fork; no branch registry or
+// history copy is added.
 
 use crate::error::db_err;
 use crate::world_kb::guards;
@@ -10,7 +12,7 @@ use nexus_local_db::narrative_write;
 use serde_json::json;
 
 impl CoreService {
-    /// Create a local branch at an existing event in an owned World.
+    /// note: Create a local branch at an existing event in an owned World.
     ///
     /// # Errors
     /// Rejects invalid principals, read-only access, missing/foreign Worlds,
@@ -77,7 +79,7 @@ impl CoreService {
             category: format!("fork marker append: {e}"),
         })?;
 
-        // The generated response owns the timestamp format validation.
+        // why: The generated response owns the timestamp format validation.
         serde_json::from_value(json!({
             "branch_id": branch_id,
             "parent_branch_id": request.parent_branch_id,

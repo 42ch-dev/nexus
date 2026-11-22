@@ -5,6 +5,8 @@
 //! flow or generic `auth.json` credential map. The secret value stays inside
 //! this loader and the remote adapter options it feeds — it is never logged,
 //! persisted or returned from a public API.
+// why: operator provisioning keeps the secret out of the wire, the logs and every persisted
+// record.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -14,25 +16,25 @@ use serde::Deserialize;
 use crate::error::{CoreError, CoreResult};
 use crate::memory_selection::is_valid_credential_id;
 
-/// Maximum accepted credential-file size (§3.1).
+/// note: Maximum accepted credential-file size (§3.1).
 pub const MAX_CREDENTIAL_FILE_BYTES: u64 = 16 * 1024;
-/// Coded refusal category for every credential-file failure (§3.1). Shared with
+/// note: Coded refusal category for every credential-file failure (§3.1). Shared with
 /// the remote dial, which refuses a proof that does not decode through the
 /// published type under the same category.
 pub const CREDENTIAL_INVALID_CODE: &str = "memory_credential_invalid";
 
-/// File shape, verbatim from §3.1. Unknown keys are refused so an ambiguous
+/// note: File shape, verbatim from §3.1. Unknown keys are refused so an ambiguous
 /// document is never half-interpreted.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CredentialFile {
     identity_seed_hex: String,
-    /// Declared field (§3.1), required: `null` means no proof, and an absent
+    /// note: Declared field (§3.1), required: `null` means no proof, and an absent
     /// field is a malformed document (a plain `Option` would accept absence).
     capability_token: serde_json::Value,
 }
 
-/// A validated, loaded memory credential.
+/// note: A validated, loaded memory credential.
 ///
 /// No `Clone`/`Serialize`/public accessor: the seed leaves this value only
 /// through the crate-private accessor the remote dial path consumes.
@@ -42,7 +44,7 @@ pub struct MemoryCredential {
 }
 
 impl MemoryCredential {
-    /// Load and validate the credential named by `credential_id`.
+    /// note: Load and validate the credential named by `credential_id`.
     ///
     /// # Errors
     ///
@@ -73,20 +75,20 @@ impl MemoryCredential {
         })
     }
 
-    /// Raw Ed25519 seed for the remote identity.
-    #[allow(dead_code)] // consumed by the remote dial path (dependent plan)
+    /// note: Raw Ed25519 seed for the remote identity.
+    #[allow(dead_code)] // why: consumed by the remote dial path (dependent plan)
     pub(crate) const fn identity_seed(&self) -> &[u8; 32] {
         &self.identity_seed
     }
 
-    /// Optional capability-token proof for outbound invokes.
-    #[allow(dead_code)] // consumed by the remote dial path (dependent plan)
+    /// note: Optional capability-token proof for outbound invokes.
+    #[allow(dead_code)] // why: consumed by the remote dial path (dependent plan)
     pub(crate) const fn capability_token(&self) -> Option<&serde_json::Value> {
         self.capability_token.as_ref()
     }
 }
 
-// A credential must never be printable: even a refactor that adds `{:?}` to a
+// why: A credential must never be printable: even a refactor that adds `{:?}` to a
 // log line cannot leak the seed.
 impl std::fmt::Debug for MemoryCredential {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -100,7 +102,7 @@ fn credential_file_path(user_home: &Path, credential_id: &str) -> PathBuf {
         .join(format!("{credential_id}.json"))
 }
 
-/// Open the credential file so the final component cannot be a symlink and a
+/// note: Open the credential file so the final component cannot be a symlink and a
 /// substituted special file cannot block the open.
 ///
 /// `O_NOFOLLOW` makes the refusal atomic with the open (no lstat-then-open
@@ -118,7 +120,7 @@ fn open_credential_file(path: &Path) -> CoreResult<std::fs::File> {
         .map_err(|_| invalid("credential file is not a regular file reached without a symlink"))
 }
 
-/// `FILE_FLAG_OPEN_REPARSE_POINT` opens the reparse point itself instead of
+/// note: `FILE_FLAG_OPEN_REPARSE_POINT` opens the reparse point itself instead of
 /// resolving it, so a symlink/junction substitution cannot redirect the open;
 /// the descriptor's reparse attribute then refuses it. A directory needs a
 /// backup-semantics handle and fails the open, which is also a refusal.
@@ -143,7 +145,7 @@ fn open_credential_file(path: &Path) -> CoreResult<std::fs::File> {
     Ok(file)
 }
 
-/// No race-free no-follow open exists on this target, so the credential path
+/// note: No race-free no-follow open exists on this target, so the credential path
 /// fails closed instead of keeping a check-then-open credential path.
 #[cfg(not(any(unix, windows)))]
 fn open_credential_file(_path: &Path) -> CoreResult<std::fs::File> {
@@ -171,7 +173,7 @@ fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
         }
     }
 
-    // Windows carries no Unix mode bit, so the privacy policy is the DACL of
+    // why: Windows carries no Unix mode bit, so the privacy policy is the DACL of
     // the already-open handle (§3.1): only the file's owner, SYSTEM and the
     // Administrators group may hold any grant — read or nonread — and an
     // unverifiable policy refuses before any byte is accepted.
@@ -182,7 +184,7 @@ fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
         )
     })?;
 
-    // Bound the read itself: a file that grows after the metadata check still
+    // why: Bound the read itself: a file that grows after the metadata check still
     // cannot make this loader allocate past the declared limit.
     let mut bytes = Vec::new();
     file.take(MAX_CREDENTIAL_FILE_BYTES + 1)
@@ -218,11 +220,11 @@ const fn hex_digit(byte: u8) -> u8 {
     match byte {
         b'0'..=b'9' => byte - b'0',
         b'a'..=b'f' => byte - b'a' + 10,
-        _ => 0, // unreachable after the lowercase-hex check above
+        _ => 0, // why: unreachable after the lowercase-hex check above
     }
 }
 
-/// Borrowed view of the published `spoke_connect::core::CapabilityTokenProof`
+/// note: Borrowed view of the published `spoke_connect::core::CapabilityTokenProof`
 /// wire shape (§3.1): the default core graph carries no Connect edge, so the
 /// value is deserialized against this mirror of the published
 /// `CapabilityTokenProof`/`CapabilityClaims` fields, types and
@@ -253,7 +255,7 @@ struct ClaimsView<'a> {
     jti: Option<&'a str>,
 }
 
-/// Validate the nullable upstream `CapabilityTokenProof` (`{v, claims, sig}`)
+/// note: Validate the nullable upstream `CapabilityTokenProof` (`{v, claims, sig}`)
 /// against the published serialized shape without importing it.
 ///
 /// Ownership map (I-000332, SPOKE 0.16.0 wire-shape trigger): the canonical
@@ -281,7 +283,7 @@ fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
 
 #[cfg(all(test, feature = "memory-remote"))]
 mod token_equivalence_tests {
-    // I-000332 drift guard: the mirror (`validate_capability_token`) must
+    // why: I-000332 drift guard: the mirror (`validate_capability_token`) must
     // accept/reject exactly what the published `spoke_connect` 0.16.0
     // `CapabilityTokenProof` accepts/rejects on every shared vector. The
     // vectors enumerate the declared shape — including each declared
@@ -309,7 +311,7 @@ mod token_equivalence_tests {
         })
     }
 
-    /// Mirror acceptance == published acceptance, verdict by verdict.
+    /// note: Mirror acceptance == published acceptance, verdict by verdict.
     fn assert_equivalent(token: serde_json::Value, label: &str) {
         let mirror = validate_capability_token(&token);
         let published = serde_json::from_value::<CapabilityTokenProof>(token);
@@ -324,10 +326,10 @@ mod token_equivalence_tests {
 
     #[test]
     fn mirror_matches_published_capability_token() {
-        // Shared accept vector.
+        // why: Shared accept vector.
         assert_equivalent(valid_token(), "valid");
 
-        // Shared reject vectors (representative malformed shapes).
+        // why: Shared reject vectors (representative malformed shapes).
         let mut unknown_claim = valid_token();
         unknown_claim["claims"]["unknown_field"] = serde_json::json!(1);
         assert_equivalent(unknown_claim, "unknown claim field");
@@ -348,7 +350,7 @@ mod token_equivalence_tests {
         bad_capabilities["claims"]["capabilities"] = serde_json::json!("memory.describe");
         assert_equivalent(bad_capabilities, "bad capabilities type");
 
-        // The coded refusal surface stays stable for every reject.
+        // why: The coded refusal surface stays stable for every reject.
         let err = validate_capability_token(&serde_json::json!({}))
             .expect_err("empty object is rejected");
         assert!(
@@ -356,7 +358,7 @@ mod token_equivalence_tests {
         );
     }
 
-    /// Declared optional members agree in every presence state (I-000338):
+    /// note: Declared optional members agree in every presence state (I-000338):
     /// present, absent (serde default) and explicit null all deserialize to
     /// the same value on both sides. The 0.15.2 → 0.16.0 lockstep produced
     /// exactly this class of member; a vector set that only exercises the
@@ -364,22 +366,22 @@ mod token_equivalence_tests {
     #[test]
     fn declared_optional_members_agree_across_presence_states() {
         for member in ["iat", "jti"] {
-            // Present: the full-shape vector already carries both.
+            // why: Present: the full-shape vector already carries both.
             assert_equivalent(valid_token(), &format!("{member} present"));
 
-            // Absent: `#[serde(default)]` fills `None` on both sides.
+            // why: Absent: `#[serde(default)]` fills `None` on both sides.
             let mut absent = valid_token();
             absent["claims"].as_object_mut().unwrap().remove(member);
             assert_equivalent(absent, &format!("{member} absent"));
 
-            // Null: `Option` deserializes it to `None` on both sides.
+            // why: Null: `Option` deserializes it to `None` on both sides.
             let mut null = valid_token();
             null["claims"][member] = serde_json::Value::Null;
             assert_equivalent(null, &format!("{member} null"));
         }
     }
 
-    /// Additive-member tripwire (I-000338): today both sides reject an
+    /// note: Additive-member tripwire (I-000338): today both sides reject an
     /// unknown claim field, so the vector is green — the mirror's coded
     /// refusal for it is pinned explicitly. The moment a future upstream
     /// version starts ACCEPTING a member the mirror does not declare, the
@@ -393,7 +395,7 @@ mod token_equivalence_tests {
         let mut additive = valid_token();
         additive["claims"]["nbf"] = serde_json::json!(1_700_000_000_u64);
 
-        // The mirror's coded refusal surface for the extra field.
+        // why: The mirror's coded refusal surface for the extra field.
         let err = validate_capability_token(&additive)
             .expect_err("the mirror refuses a claim field it does not declare");
         assert!(
@@ -401,13 +403,13 @@ mod token_equivalence_tests {
             "the refusal stays the coded credential failure: {err:?}"
         );
 
-        // And that refusal is exactly the published refusal today — which is
+        // why: And that refusal is exactly the published refusal today — which is
         // precisely the equivalence a future additive member breaks.
         assert_equivalent(additive, "hypothetical additive member");
     }
 }
 
-/// Static coded refusal: the message never interpolates file contents.
+/// note: Static coded refusal: the message never interpolates file contents.
 fn invalid(reason: &str) -> CoreError {
     CoreError::Coded {
         code: CREDENTIAL_INVALID_CODE.to_string(),

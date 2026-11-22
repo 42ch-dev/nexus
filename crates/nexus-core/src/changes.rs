@@ -1,4 +1,5 @@
 //! `core_changes` outbox reads.
+// note: read-only over the store's outbox table; no writer lives here.
 
 use nexus_contracts::{
     core_changes_response::{
@@ -15,7 +16,7 @@ const DEFAULT_LIMIT: i64 = 64;
 const MAX_LIMIT: i64 = 256;
 const RETENTION_MIN_SEQUENCE_GAP: i64 = 4096;
 
-/// One `core_changes` row as bound by `query_as`: `(sequence, world_id,
+/// note: One `core_changes` row as bound by `query_as`: `(sequence, world_id,
 /// resource_kind, resource_id, resource_revision, change_kind, writer_id)`.
 type ChangeRow = (i64, String, String, String, Option<String>, String, String);
 
@@ -53,7 +54,7 @@ pub async fn read_changes(
     .await
     .map_err(|e| db_err(&e))?;
 
-    // `limit` is clamped to 1..=MAX_LIMIT above, so this conversion cannot fail.
+    // why: `limit` is clamped to 1..=MAX_LIMIT above, so this conversion cannot fail.
     let take = usize::try_from(limit).unwrap_or_default();
     let has_extra = rows.len() > take;
     let page = rows.into_iter().take(take);
@@ -84,7 +85,7 @@ pub async fn read_changes(
     }
 
     if has_extra {
-        // next_sequence already points at the last row returned on this page.
+        // why: next_sequence already points at the last row returned on this page.
     }
 
     Ok(CoreChangesResponse {

@@ -7,6 +7,8 @@
 //! the shared `SqliteNarrativeGateway` repository and writes reuse the shared
 //! `narrative_write` repository — no second SQL implementation, the same one
 //! the CLI uses.
+// why: reads and writes reuse the shared repositories, so there is no second SQL
+// implementation.
 
 use nexus_contracts::daemon_api::{CreateWorldRequest, CreateWorldResponse};
 use nexus_local_db::narrative_gateway::SqliteNarrativeGateway;
@@ -20,7 +22,7 @@ use crate::principal::Principal;
 use crate::service::CoreService;
 use crate::CoreAccess;
 
-/// `CoreError::Forbidden.resource` marker for a World hard-delete blocked by
+/// note: `CoreError::Forbidden.resource` marker for a World hard-delete blocked by
 /// remaining Character bindings.
 ///
 /// The HTTP adapter translates it back to the retained
@@ -29,7 +31,7 @@ use crate::CoreAccess;
 pub const DELETE_WORLD_BLOCKED_BY_BINDINGS: &str = "world_has_actor_bindings";
 
 impl CoreService {
-    /// List the workspace's worlds, oldest first (shared gateway read).
+    /// note: List the workspace's worlds, oldest first (shared gateway read).
     ///
     /// Read-scope invariant (workspace-single-owner): the workspace state DB
     /// holds one owner's workspace, so the lifecycle reads intentionally
@@ -51,7 +53,7 @@ impl CoreService {
             .map_err(|e| narrative_internal("worlds.list", &e))
     }
 
-    /// Project one world's state; unknown ids are [`CoreError::NotFound`].
+    /// note: Project one world's state; unknown ids are [`CoreError::NotFound`].
     ///
     /// Like [`Self::list_worlds`], this read is workspace-scoped: it returns
     /// the requested row without an `owner_creator_id` filter (workspace
@@ -80,7 +82,7 @@ impl CoreService {
             })
     }
 
-    /// Create a World owned by the principal's creator (V1.130 P2 contract).
+    /// note: Create a World owned by the principal's creator (V1.130 P2 contract).
     ///
     /// Validates the title (1-200 chars after trim), derives the ASCII
     /// kebab-case slug, and persists through the shared `narrative_write`
@@ -138,7 +140,7 @@ impl CoreService {
         })
     }
 
-    /// Hard-delete a World (V1.129 P2 architect lock: hard, not soft).
+    /// note: Hard-delete a World (V1.129 P2 architect lock: hard, not soft).
     ///
     /// Ownership is the only precondition; a remaining Character binding
     /// blocks deletion with the [`DELETE_WORLD_BLOCKED_BY_BINDINGS`] marker.
@@ -169,7 +171,7 @@ fn require_write_access(service: &CoreService, what: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// Derive an ASCII kebab-case slug from a title (shared `title_to_slug`
+/// note: Derive an ASCII kebab-case slug from a title (shared `title_to_slug`
 /// normalization; `"world"` when it yields empty, e.g. CJK-only titles).
 fn derive_world_slug(title: &str) -> String {
     let slug = nexus_local_db::inspiration_items::title_to_slug(title);
@@ -186,9 +188,9 @@ pub fn narrative_internal(what: &str, e: &nexus_narrative::NarrativeError) -> Co
     }
 }
 
-/// Hard-delete transaction (ported verbatim from the daemon handler).
+/// note: Hard-delete transaction (ported verbatim from the daemon handler).
 async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) -> CoreResult<()> {
-    // Existence + ownership check using the shared narrative_write admission
+    // why: Existence + ownership check using the shared narrative_write admission
     // gate. This is the only precondition before mutation; worlds have no
     // runtime lock analogue.
     let owned = narrative_write::is_world_owned(pool, creator_id, world_id)
@@ -257,7 +259,7 @@ async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) 
     {
         Ok(res) => res.rows_affected(),
         Err(e) => {
-            // Last resort after the declarative binding pre-count.
+            // why: Last resort after the declarative binding pre-count.
             if let sqlx::Error::Database(db) = &e {
                 if db.is_foreign_key_violation() {
                     return Err(CoreError::Forbidden {
@@ -270,7 +272,7 @@ async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) 
     };
 
     if deleted == 0 {
-        // Concurrent delete raced; treat as not found — row is gone. The tx
+        // why: Concurrent delete raced; treat as not found — row is gone. The tx
         // rolls back on Drop, discarding the no-op manual cleanup above.
         return Err(CoreError::NotFound {
             resource: format!("World {world_id} not found"),

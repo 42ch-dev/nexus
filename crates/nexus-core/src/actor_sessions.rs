@@ -10,6 +10,8 @@
 //!
 //! Indexes only Actor-mode sessions. Legacy creates never enter these maps.
 //! Concurrent creates for one exact key serialize on a per-key lock.
+// why: activity and transition fencing stays with the P2 CoreService leases, so owner,
+// tombstone and lifecycle_epoch are indexed exactly once.
 
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
@@ -37,14 +39,14 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::actors::{AdmittedActor, AdmittedActorContext};
 use crate::error::{CoreError, CoreResult};
 
-/// Discriminant participating in exact Actor session equality.
+/// note: Discriminant participating in exact Actor session equality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ActorSessionKind {
     Creator,
     Character,
 }
 
-/// Canonical exact-match key for an Actor-mode host session.
+/// note: Canonical exact-match key for an Actor-mode host session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ActorSessionKey {
     pub provider_id: String,
@@ -57,11 +59,11 @@ pub struct ActorSessionKey {
     pub binding_id: Option<String>,
     pub branch_id: Option<String>,
     pub event_id: Option<String>,
-    /// Stored Character `lifecycle_epoch` at admission (`None` for Creator).
+    /// note: Stored Character `lifecycle_epoch` at admission (`None` for Creator).
     /// A material archive/restore bumps the epoch, so a post-transition admit
     /// can never reuse a pre-transition session.
     pub character_epoch: Option<i64>,
-    /// Knowledge fingerprint at admission (durable §4.3): the server-chosen
+    /// note: Knowledge fingerprint at admission (durable §4.3): the server-chosen
     /// read-policy kind plus the stored World/Character `knowledge_revision`
     /// pair. A material governance change (or a policy switch) retires the
     /// session on its next use instead of reusing a context that no longer
@@ -69,20 +71,20 @@ pub struct ActorSessionKey {
     pub knowledge: crate::actor_knowledge::ActorKnowledgeIdentity,
 }
 
-/// Outcome of revalidating one indexed session against a freshly admitted
+/// note: Outcome of revalidating one indexed session against a freshly admitted
 /// knowledge fingerprint (durable §4.3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnowledgeReuse {
-    /// The recorded fingerprint still matches; the session stays indexed and
+    /// note: The recorded fingerprint still matches; the session stays indexed and
     /// its reuse key stays live.
     Reusable,
-    /// The fingerprint diverged: the session was retired in place through the
+    /// note: The fingerprint diverged: the session was retired in place through the
     /// tombstone machinery and must never be reused. The id is returned for
     /// one physical Host shutdown attempt.
     Retired(HostSessionId),
 }
 
-/// The retained `409 actor_session_stale` refusal for an indexed/retired Actor
+/// note: The retained `409 actor_session_stale` refusal for an indexed/retired Actor
 /// session whose admission no longer describes stored state.
 pub(crate) fn actor_session_stale(session_id: &str) -> CoreError {
     CoreError::ActorConflict {
@@ -96,7 +98,7 @@ struct IndexedActorSession {
     ctx: AdmittedActorContext,
 }
 
-/// Retired-session tombstone: retains owner + Actor identity so retired ids
+/// note: Retired-session tombstone: retains owner + Actor identity so retired ids
 /// stay recognizably Actor-mode (never legacy) and authorize owner-only
 /// safety/observation operations.
 #[derive(Debug, Clone)]
@@ -110,7 +112,7 @@ struct RetiredActorSession {
     event_id: Option<String>,
 }
 
-/// Internal phase for per-operation cancel/finalize ordering.
+/// note: Internal phase for per-operation cancel/finalize ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OperationPhase {
     Running,
@@ -130,7 +132,7 @@ enum OperationPhase {
 /// record the result path would serve. Test builds construct one through
 /// [`CharacterOperationSnapshot::new`].
 #[derive(Debug, Clone)]
-#[allow(clippy::struct_field_names)] // fields mirror the contract's id-typed naming (`owner_creator_id`, `session_id`, `operation_id`); stripping the postfix would drop the type signal
+#[allow(clippy::struct_field_names)] // why: fields mirror the contract's id-typed naming (`owner_creator_id`, `session_id`, `operation_id`); stripping the postfix would drop the type signal
 pub struct CharacterOperationSnapshot {
     pub(crate) owner_creator_id: String,
     pub(crate) session_id: HostSessionId,
@@ -138,7 +140,7 @@ pub struct CharacterOperationSnapshot {
 }
 
 impl CharacterOperationSnapshot {
-    /// Test-only constructor (see the type's note): the snapshot a caller-built
+    /// note: Test-only constructor (see the type's note): the snapshot a caller-built
     /// record needs. Compiled out of the production build, where the only
     /// constructor is `execute`'s own admission.
     #[cfg(any(test, feature = "test-hooks"))]
@@ -160,7 +162,7 @@ struct CharacterOperationRecord {
     owner_creator_id: String,
     session_id: HostSessionId,
     phase: OperationPhase,
-    /// Whether a latched cancel intent has been CONFIRMED by the provider.
+    /// note: Whether a latched cancel intent has been CONFIRMED by the provider.
     /// The host cancel path latches intent BEFORE awaiting the provider, so an
     /// unconfirmed intent must not let the drain record `cancelled`: if the
     /// provider then refuses, that would record a refused cancel as an
@@ -168,7 +170,7 @@ struct CharacterOperationRecord {
     /// race; a provisional one leaves the run's own terminal as the truth.
     cancel_confirmed: bool,
     outcome: CharacterOperationResult,
-    /// The operation's bounded observation reader, once installed.
+    /// note: The operation's bounded observation reader, once installed.
     ///
     /// It lives INSIDE the record on purpose. Reservation is the only way to
     /// create a record, so a reader can neither be installed for an id that
@@ -180,7 +182,7 @@ struct CharacterOperationRecord {
     _seq: u64,
 }
 
-/// Live work of ONE session plus its settlement signal — the session-scoped
+/// note: Live work of ONE session plus its settlement signal — the session-scoped
 /// twin of [`ActorSessionRegistry`]'s registry-wide `live_drains`/`drain_settled`
 /// pair, so a session shutdown joins exactly the work it is retiring instead of
 /// the whole authority's.
@@ -198,7 +200,7 @@ struct SessionLiveness {
     settled: tokio::sync::Notify,
 }
 
-/// One admitted operation's slot in its SESSION's live-work accounting — the
+/// note: One admitted operation's slot in its SESSION's live-work accounting — the
 /// session-scoped arm of the same barrier the Host handle's `AuthorityAdmission`
 /// holds authority-wide.
 ///
@@ -241,7 +243,7 @@ fn running_outcome(snapshot: &CharacterOperationSnapshot) -> CharacterOperationR
     }
 }
 
-/// The owner-authorized accepted cancellation's terminal (§5): an accepted
+/// note: The owner-authorized accepted cancellation's terminal (§5): an accepted
 /// local cancel classifies `cancelled`, never a rollback claim about provider
 /// effects. Capture stays `disabled` like every Character result in this batch.
 pub(crate) fn cancelled_outcome(
@@ -266,9 +268,9 @@ pub(crate) fn cancelled_outcome(
 /// `HostFacade::exec` stream says about the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CharacterTerminal {
-    /// A matching `OpFinished`: the provider named the stop reason.
+    /// note: A matching `OpFinished`: the provider named the stop reason.
     Finished(FinishReason),
-    /// A matching fault: a matching `OpFailed` of ANY error category, a stream
+    /// note: A matching fault: a matching `OpFailed` of ANY error category, a stream
     /// error, a matching `SessionStopped`, or EOF before any terminal.
     Fault,
 }
@@ -302,7 +304,7 @@ pub(crate) fn character_terminal_for(
         {
             Some(CharacterTerminal::Fault)
         }
-        // The session this operation runs on stopped before a terminal: the run
+        // why: The session this operation runs on stopped before a terminal: the run
         // can no longer complete honestly, so it is a fault.
         HostEvent::SessionStopped(stopped) if &stopped.session_id == session_id => {
             Some(CharacterTerminal::Fault)
@@ -359,20 +361,20 @@ struct RegistryMaps {
     by_session: HashMap<HostSessionId, IndexedActorSession>,
     key_locks: HashMap<ActorSessionKey, Arc<AsyncMutex<()>>>,
     retired: HashMap<HostSessionId, RetiredActorSession>,
-    /// Indexed Actor operations whose Host session may not yet expose
+    /// note: Indexed Actor operations whose Host session may not yet expose
     /// `active_op_id` (fail-closed cancel authorization).
     indexed_operations: HashMap<HostOperationId, HostSessionId>,
     character_operations: HashMap<HostOperationId, CharacterOperationRecord>,
     terminal_fifo: VecDeque<HostOperationId>,
     operation_seq: u64,
-    /// Live-work accounting per session, so a session shutdown joins the
+    /// note: Live-work accounting per session, so a session shutdown joins the
     /// drains AND the admitted operations of the session it retires — the
     /// registered drains alone are not that proof, because an operation
     /// registers its drain only after asynchronous admission. An entry exists
     /// only while that session has live work: the session's last live unit
     /// removes it.
     session_liveness: HashMap<HostSessionId, Arc<SessionLiveness>>,
-    /// Actor drains this authority minted, in spawn order. Retained until they
+    /// note: Actor drains this authority minted, in spawn order. Retained until they
     /// settle, so an authority close that cannot confirm them keeps owning
     /// them — and the knowledge leases they hold — instead of detaching live
     /// work and forgetting it.
@@ -380,16 +382,16 @@ struct RegistryMaps {
     closed: bool,
 }
 
-/// Process-lifetime maps: `key -> HostSessionId` and `HostSessionId -> context`.
+/// note: Process-lifetime maps: `key -> HostSessionId` and `HostSessionId -> context`.
 #[derive(Clone)]
 pub struct ActorSessionRegistry {
     maps: Arc<Mutex<RegistryMaps>>,
-    /// Actor drains minted by this authority that have not settled. The
+    /// note: Actor drains minted by this authority that have not settled. The
     /// authority-owned join (`join_actor_drains`) reads it, so a join that is
     /// cancelled by an outer deadline loses nothing: the handle stays in the
     /// registry and a retry joins it.
     live_drains: Arc<AtomicUsize>,
-    /// Signalled once per settled drain, so the join waits on an event instead
+    /// note: Signalled once per settled drain, so the join waits on an event instead
     /// of polling task handles.
     drain_settled: Arc<tokio::sync::Notify>,
 }
@@ -410,7 +412,7 @@ fn host_err(err: &nexus_agent_host::HostError) -> CoreError {
     }
 }
 
-/// Publish ONE unit of a session's live work settling: drop its count, wake
+/// note: Publish ONE unit of a session's live work settling: drop its count, wake
 /// EVERY joiner, and let the session's accounting entry die with its last unit.
 ///
 /// Both live units of a session — a settling drain and a retired admission —
@@ -445,7 +447,7 @@ fn retire_session_liveness(
     }
 }
 
-/// Settle one reserved Character operation exactly once, under the registry
+/// note: Settle one reserved Character operation exactly once, under the registry
 /// lock: the first writer records the terminal phase, the outcome update and
 /// the retention slot; every later settlement is a no-op, so the recorded truth
 /// is immutable and the terminal FIFO never sees a duplicate.
@@ -465,7 +467,7 @@ fn settle_terminal_locked(
     maps.terminal_fifo.push_back(operation_id.clone());
     while maps.terminal_fifo.len() > MAX_TERMINAL_OPERATIONS {
         if let Some(evicted) = maps.terminal_fifo.pop_front() {
-            // Removing the record drops its observation reader with it: an
+            // why: Removing the record drops its observation reader with it: an
             // evicted operation has no detailed outcome left to observe.
             maps.character_operations.remove(&evicted);
         }
@@ -473,7 +475,7 @@ fn settle_terminal_locked(
 }
 
 impl ActorSessionRegistry {
-    /// Empty process-lifetime registry.
+    /// note: Empty process-lifetime registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -502,7 +504,7 @@ impl ActorSessionRegistry {
         })
     }
 
-    /// Canonicalize cwd with the Agent Host workspace-root helper.
+    /// note: Canonicalize cwd with the Agent Host workspace-root helper.
     ///
     /// # Errors
     ///
@@ -517,7 +519,7 @@ impl ActorSessionRegistry {
         })
     }
 
-    /// Build the exact tuple key from an admitted Actor context and its
+    /// note: Build the exact tuple key from an admitted Actor context and its
     /// admitted knowledge fingerprint.
     ///
     /// # Errors
@@ -555,7 +557,7 @@ impl ActorSessionRegistry {
         })
     }
 
-    /// Revalidate one indexed Actor session against a freshly admitted
+    /// note: Revalidate one indexed Actor session against a freshly admitted
     /// knowledge fingerprint (durable §4.3): the session is reusable only
     /// while the read-policy kind and both stored knowledge revisions still
     /// match. On divergence the session is retired in place through the
@@ -566,7 +568,7 @@ impl ActorSessionRegistry {
     ///
     /// Returns `actor_session_stale` when the id is not a live indexed Actor
     /// session (retired ids and legacy ids are never reusable).
-    #[allow(clippy::significant_drop_tightening)] // the session map guard is held across the identity comparison and the retire
+    #[allow(clippy::significant_drop_tightening)] // why: the session map guard is held across the identity comparison and the retire
     pub fn revalidate_knowledge(
         &self,
         session_id: &HostSessionId,
@@ -588,7 +590,7 @@ impl ActorSessionRegistry {
         Ok(KnowledgeReuse::Retired(session_id.clone()))
     }
 
-    /// Admitted context for an indexed Actor session, if any.
+    /// note: Admitted context for an indexed Actor session, if any.
     #[must_use]
     pub fn context_for(&self, session_id: &HostSessionId) -> Option<AdmittedActorContext> {
         self.maps()
@@ -597,14 +599,14 @@ impl ActorSessionRegistry {
             .map(|row| row.ctx.clone())
     }
 
-    /// True when the id is currently indexed or was retired (never treated as legacy).
+    /// note: True when the id is currently indexed or was retired (never treated as legacy).
     #[must_use]
     pub fn is_actor_session(&self, session_id: &HostSessionId) -> bool {
         let maps = self.maps();
         maps.by_session.contains_key(session_id) || maps.retired.contains_key(session_id)
     }
 
-    /// Stored owner + retirement state of an indexed or retired Actor session.
+    /// note: Stored owner + retirement state of an indexed or retired Actor session.
     ///
     /// `None` means never indexed (legacy/Creator-direct path, unchanged
     /// behavior). Retired tombstones retain owner identity so a foreign id is
@@ -628,7 +630,7 @@ impl ActorSessionRegistry {
         self.maps().retired.get(session_id).cloned()
     }
 
-    /// Record an indexed Actor operation for fail-closed cancel authorization
+    /// note: Record an indexed Actor operation for fail-closed cancel authorization
     /// when the Host has not yet bound `active_op_id`.
     pub fn register_indexed_operation(&self, op_id: HostOperationId, session_id: HostSessionId) {
         if self.is_actor_session(&session_id) {
@@ -636,7 +638,7 @@ impl ActorSessionRegistry {
         }
     }
 
-    /// Resolve a cancel target to its indexed Actor session when Host listing
+    /// note: Resolve a cancel target to its indexed Actor session when Host listing
     /// has not yet bound `active_op_id`.
     #[must_use]
     pub fn resolve_indexed_operation_session(
@@ -646,7 +648,7 @@ impl ActorSessionRegistry {
         self.maps().indexed_operations.get(op_id).cloned()
     }
 
-    /// Install the bounded observation reader ON an already-reserved Character
+    /// note: Install the bounded observation reader ON an already-reserved Character
     /// operation, before the Host starts executing it.
     ///
     /// The reader is a field of the operation record, so retention cannot be
@@ -677,7 +679,7 @@ impl ActorSessionRegistry {
         Ok(())
     }
 
-    /// The observation reader of one operation, if it is still retained.
+    /// note: The observation reader of one operation, if it is still retained.
     #[must_use]
     pub fn observation(&self, operation_id: &HostOperationId) -> Option<Arc<ProviderEventReader>> {
         self.maps()
@@ -686,7 +688,7 @@ impl ActorSessionRegistry {
             .and_then(|record| record.observation.clone())
     }
 
-    /// Bounded observation-window occupancy (tests / diagnostics): the records
+    /// note: Bounded observation-window occupancy (tests / diagnostics): the records
     /// that carry a reader, which can never outnumber the operation records.
     #[must_use]
     pub fn observation_count(&self) -> usize {
@@ -697,7 +699,7 @@ impl ActorSessionRegistry {
             .count()
     }
 
-    /// Reserve a Character operation outcome before Host exec.
+    /// note: Reserve a Character operation outcome before Host exec.
     ///
     /// Crate-visible: [`crate::HostHandle::execute`] is the only production
     /// caller, so no caller outside this crate can mint a record the authority's
@@ -739,7 +741,7 @@ impl ActorSessionRegistry {
         Ok(())
     }
 
-    /// Owner-scoped authoritative operation outcome.
+    /// note: Owner-scoped authoritative operation outcome.
     ///
     /// Crate-visible like the reservation itself: the authority's own
     /// `character_operation` read is the one production entry, so the registry
@@ -771,7 +773,7 @@ impl ActorSessionRegistry {
         Ok(outcome)
     }
 
-    /// Whether `operation_id` is a recorded Character operation owned by
+    /// note: Whether `operation_id` is a recorded Character operation owned by
     /// `owner_creator_id` — the owner-scoped gate the control path applies
     /// before any mutation. A missing or foreign id is `false`, never a leak.
     #[must_use]
@@ -786,7 +788,7 @@ impl ActorSessionRegistry {
             .is_some_and(|record| record.owner_creator_id == owner_creator_id)
     }
 
-    /// Every recorded operation whose phase is not terminal yet — the work an
+    /// note: Every recorded operation whose phase is not terminal yet — the work an
     /// Actor-only quiesce must request cancellation for.
     #[must_use]
     pub fn nonterminal_operations(&self) -> Vec<HostOperationId> {
@@ -798,7 +800,7 @@ impl ActorSessionRegistry {
             .collect()
     }
 
-    /// The nonterminal operations recorded for one session — the work a
+    /// note: The nonterminal operations recorded for one session — the work a
     /// session shutdown cancels before it tears the session down.
     #[must_use]
     pub fn nonterminal_operations_for_session(
@@ -816,13 +818,13 @@ impl ActorSessionRegistry {
             .collect()
     }
 
-    /// Remove an unstarted reservation after exec admission failure, dropping
+    /// note: Remove an unstarted reservation after exec admission failure, dropping
     /// the reader it had already installed with the record.
     pub fn remove_operation_reservation(&self, operation_id: &HostOperationId) {
         self.maps().character_operations.remove(operation_id);
     }
 
-    /// Latch CONFIRMED cancel intent. The caller vouches that the cancellation
+    /// note: Latch CONFIRMED cancel intent. The caller vouches that the cancellation
     /// is authoritative (the test/ seam that drives the drain race directly):
     /// a drain that finalizes while this intent is latched records `cancelled`.
     ///
@@ -854,7 +856,7 @@ impl ActorSessionRegistry {
                 Ok(())
             }
             OperationPhase::CancelRequested => {
-                // A confirmed latch upgrades a provisional one in place.
+                // why: A confirmed latch upgrades a provisional one in place.
                 record.cancel_confirmed = true;
                 Ok(())
             }
@@ -869,7 +871,7 @@ impl ActorSessionRegistry {
         result
     }
 
-    /// Latch a PROVISIONAL cancel intent before awaiting the provider's
+    /// note: Latch a PROVISIONAL cancel intent before awaiting the provider's
     /// answer, protecting the phase race exactly like
     /// [`Self::request_operation_cancel`] while the call is in flight — but an
     /// UNCONFIRMED intent must not let the drain record `cancelled`: if the
@@ -919,7 +921,7 @@ impl ActorSessionRegistry {
         result
     }
 
-    /// Undo a latched cancel intent after the provider refused it, so a
+    /// note: Undo a latched cancel intent after the provider refused it, so a
     /// refusal can never be recorded as an accepted cancellation.
     ///
     /// Only a still-unfinalized `CancelRequested` returns to `Running`: once
@@ -940,7 +942,7 @@ impl ActorSessionRegistry {
         drop(maps);
     }
 
-    /// Move a draining operation into finalization and return whether a
+    /// note: Move a draining operation into finalization and return whether a
     /// CONFIRMED cancel intent was latched. The cancel read and phase
     /// transition are atomic under the registry lock so no window can observe
     /// stale cancel state; a merely provisional intent (the provider call is
@@ -964,7 +966,7 @@ impl ActorSessionRegistry {
         }
     }
 
-    /// Commit terminal outcome and enforce terminal FIFO retention.
+    /// note: Commit terminal outcome and enforce terminal FIFO retention.
     ///
     /// Crate-visible because terminal truth is written only from inside the
     /// authority that owns the original exec stream ([`crate::host`]): the
@@ -1034,12 +1036,12 @@ impl ActorSessionRegistry {
             .map(|r| r.session_id.clone())
     }
 
-    /// Drop a registered indexed operation after cancel or terminal completion.
+    /// note: Drop a registered indexed operation after cancel or terminal completion.
     pub fn clear_indexed_operation(&self, op_id: &HostOperationId) {
         self.maps().indexed_operations.remove(op_id);
     }
 
-    /// Overlay `actor_ref/viewpoint` for the native list/get rows: the live
+    /// note: Overlay `actor_ref/viewpoint` for the native list/get rows: the live
     /// indexed context first, then its retired tombstone, so a leftover Host
     /// row stays recognizable as an Actor session.
     ///
@@ -1070,13 +1072,13 @@ impl ActorSessionRegistry {
         ))
     }
 
-    /// True once the process-lifetime maps are closed (authority shutdown).
+    /// note: True once the process-lifetime maps are closed (authority shutdown).
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.maps().closed
     }
 
-    /// Retire every indexed session of a Character after a **material**
+    /// note: Retire every indexed session of a Character after a **material**
     /// committed transition, while the exclusive lease is still held:
     /// remove old-epoch reuse keys and move their ids to owner-retaining
     /// tombstones. Returns the retired ids for one physical Host shutdown
@@ -1103,7 +1105,7 @@ impl ActorSessionRegistry {
         retired_ids
     }
 
-    /// Close the process-lifetime maps (authority shutdown). In-flight creates
+    /// note: Close the process-lifetime maps (authority shutdown). In-flight creates
     /// cannot repopulate.
     pub fn close(&self) {
         let mut maps = self.maps();
@@ -1118,7 +1120,7 @@ impl ActorSessionRegistry {
         maps.by_session.clear();
         maps.key_locks.clear();
         maps.indexed_operations.clear();
-        // The observation readers die with the authority's Actor side: a
+        // why: The observation readers die with the authority's Actor side: a
         // closed registry exposes no stream to pull. The records themselves
         // stay (their terminal outcomes are read owner-scoped until the
         // authority is gone), so the reader slot is what is cleared.
@@ -1127,7 +1129,7 @@ impl ActorSessionRegistry {
         }
     }
 
-    /// Spawn an authority-owned Actor drain.
+    /// note: Spawn an authority-owned Actor drain.
     ///
     /// This is the ONE spawn path for core-owned Actor drains: the spawned
     /// task's handle is retained in the authority's registry instead of being
@@ -1159,7 +1161,7 @@ impl ActorSessionRegistry {
         self.live_drains.fetch_add(1, Ordering::AcqRel);
         let live = Arc::clone(&self.live_drains);
         let settled = Arc::clone(&self.drain_settled);
-        // The session entry and its increment are taken under the maps lock, so
+        // why: The session entry and its increment are taken under the maps lock, so
         // a joiner observes either this drain or an entry that already counts
         // it — an entry is never removed while an increment is in flight.
         let session = {
@@ -1173,7 +1175,7 @@ impl ActorSessionRegistry {
         let maps_handle = Arc::clone(&self.maps);
         let handle = tokio::spawn(async move {
             drain.await;
-            // Publication order matters: the count drops BEFORE the wakeup, so
+            // why: Publication order matters: the count drops BEFORE the wakeup, so
             // a joiner that registered and then read a non-zero count is still
             // woken by this settlement.
             //
@@ -1183,7 +1185,7 @@ impl ActorSessionRegistry {
             // would let one joiner recheck zero while a second stayed suspended.
             live.fetch_sub(1, Ordering::AcqRel);
             settled.notify_waiters();
-            // The session's accounting entry dies with its last live unit —
+            // why: The session's accounting entry dies with its last live unit —
             // which is this drain, or an admission that has not retired yet.
             retire_session_liveness(&maps_handle, &session_id, &session_settled);
         });
@@ -1192,7 +1194,7 @@ impl ActorSessionRegistry {
         maps.drains.push(handle);
     }
 
-    /// Await every retained Actor drain and return how many were unsettled
+    /// note: Await every retained Actor drain and return how many were unsettled
     /// when the join returned (`0` when the Actor side settled).
     ///
     /// Cancellation-safe: the drain handles stay in the registry, so a caller
@@ -1219,7 +1221,7 @@ impl ActorSessionRegistry {
         }
     }
 
-    /// Admit one operation against its SESSION's live-work accounting.
+    /// note: Admit one operation against its SESSION's live-work accounting.
     ///
     /// The count is taken under the maps lock before the operation's first
     /// await — so a joiner observes either this admission or an entry that
@@ -1247,7 +1249,7 @@ impl ActorSessionRegistry {
         }
     }
 
-    /// Await every retained drain of ONE session — the join a session shutdown
+    /// note: Await every retained drain of ONE session — the join a session shutdown
     /// runs before it retires that session and before it reports success.
     ///
     /// Cancellation-safe like [`Self::join_actor_drains`]: the handles stay
@@ -1276,7 +1278,7 @@ impl ActorSessionRegistry {
             let Some(session) = session else {
                 return;
             };
-            // Arm AND enable the notification BEFORE reading the count, exactly
+            // why: Arm AND enable the notification BEFORE reading the count, exactly
             // like the authority-wide join: the settlement broadcasts without
             // storing a permit, so a waiter that was not registered yet would
             // miss its only wakeup and wait on work that already settled.
@@ -1290,7 +1292,7 @@ impl ActorSessionRegistry {
         }
     }
 
-    /// Drop settled drain handles, retain unsettled ones, and report how many
+    /// note: Drop settled drain handles, retain unsettled ones, and report how many
     /// remain live — the drain ownership an unsettled authority close keeps.
     #[must_use]
     pub fn prune_settled_drains(&self) -> usize {
@@ -1299,13 +1301,13 @@ impl ActorSessionRegistry {
         maps.drains.len()
     }
 
-    /// Count the retained Actor drains that have not settled yet.
+    /// note: Count the retained Actor drains that have not settled yet.
     #[must_use]
     pub fn unsettled_drain_count(&self) -> usize {
         self.live_drains.load(Ordering::Acquire)
     }
 
-    /// Shut down every retired Actor host session (authority drain).
+    /// note: Shut down every retired Actor host session (authority drain).
     ///
     /// # Errors
     ///
@@ -1324,18 +1326,18 @@ impl ActorSessionRegistry {
         first_err.map_or(Ok(()), Err)
     }
 
-    /// Drop the process-lifetime maps (authority shutdown).
+    /// note: Drop the process-lifetime maps (authority shutdown).
     pub fn clear(&self) {
         self.close();
     }
 
-    /// Count indexed Actor sessions (tests / diagnostics).
+    /// note: Count indexed Actor sessions (tests / diagnostics).
     #[must_use]
     pub fn len(&self) -> usize {
         self.maps().by_key.len()
     }
 
-    /// Count reserved and retained Character operation records (tests /
+    /// note: Count reserved and retained Character operation records (tests /
     /// diagnostics): running reservations plus the terminal records still
     /// inside the retention window.
     #[must_use]
@@ -1343,13 +1345,13 @@ impl ActorSessionRegistry {
         self.maps().character_operations.len()
     }
 
-    /// True when no Actor sessions are indexed.
+    /// note: True when no Actor sessions are indexed.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.maps().by_key.is_empty()
     }
 
-    /// Count retained per-key locks (tests).
+    /// note: Count retained per-key locks (tests).
     #[must_use]
     pub fn lock_entry_count(&self) -> usize {
         self.maps().key_locks.len()
@@ -1451,7 +1453,7 @@ impl ActorSessionRegistry {
                 self.reclaim(&key, &lock);
                 return Err(host_err(&err));
             }
-            // Settle the session's own drains before anything about it is
+            // why: Settle the session's own drains before anything about it is
             // retired: the manager released the session, while the drain of the
             // session's original exec stream — and the knowledge leases it
             // holds — is still this authority's to join.
@@ -1459,7 +1461,7 @@ impl ActorSessionRegistry {
             if still_indexed {
                 let mut maps = self.maps();
                 Self::evict_locked(&mut maps, &key, &session_id);
-                // The shutdown removes the session: its indexed-operation
+                // why: The shutdown removes the session: its indexed-operation
                 // fallback entries go with it (a later cancel must not resolve
                 // a session that no longer exists), and so do the observation
                 // readers of its operations — a released session exposes no
@@ -1483,7 +1485,7 @@ impl ActorSessionRegistry {
         Ok(())
     }
 
-    /// Reuse a `Ready` exact match, reject `Busy`, or mint a replacement after
+    /// note: Reuse a `Ready` exact match, reject `Busy`, or mint a replacement after
     /// stale eviction.
     ///
     /// # Errors
@@ -1588,7 +1590,7 @@ impl ActorSessionRegistry {
         Ok(session)
     }
 
-    /// Test/integration seam: index an already-known Host session id without a
+    /// note: Test/integration seam: index an already-known Host session id without a
     /// live Host create. The Host authority acceptance anchor uses this to
     /// prove stale-epoch denial happens before any provider effect; production
     /// indexing only happens inside [`Self::resolve_or_create`].
@@ -1630,7 +1632,7 @@ fn echo_conversion(code: &str, e: impl std::fmt::Display) -> CoreError {
     }
 }
 
-/// Re-parse one echoed wire id through a core-query DTO checked constructor.
+/// note: Re-parse one echoed wire id through a core-query DTO checked constructor.
 ///
 /// # Errors
 ///
@@ -1643,7 +1645,7 @@ where
     id.parse().map_err(|e| echo_conversion("QUERY_ECHO", e))
 }
 
-/// Re-create the core-query `ActorRef` sum from the authority's echo.
+/// note: Re-create the core-query `ActorRef` sum from the authority's echo.
 ///
 /// # Errors
 ///
@@ -1663,7 +1665,7 @@ fn query_actor_ref(actor_ref: NexusActorRef) -> CoreResult<QueryActorRef> {
     }
 }
 
-/// Re-create the core-query `Viewpoint` from the authority's echo.
+/// note: Re-create the core-query `Viewpoint` from the authority's echo.
 ///
 /// # Errors
 ///
@@ -1692,7 +1694,7 @@ fn query_viewpoint(viewpoint: &NexusSessionViewpoint) -> CoreResult<QueryViewpoi
     })
 }
 
-/// Map a retired-session tombstone onto generated session response optionals
+/// note: Map a retired-session tombstone onto generated session response optionals
 /// so leftover Host rows stay recognizably Actor-mode.
 ///
 /// # Errors
@@ -1735,7 +1737,7 @@ fn echo_retired_pair(
 
 /// # Errors
 ///
-/// Returns `internal` if stored ids fail generated pattern checks.
+/// note: Returns `internal` if stored ids fail generated pattern checks.
 pub fn echo_actor_pair(
     ctx: &AdmittedActorContext,
 ) -> CoreResult<(Option<NexusActorRef>, Option<NexusSessionViewpoint>)> {

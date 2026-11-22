@@ -29,7 +29,7 @@ fn receipt_internal(what: &str, e: impl std::fmt::Display) -> CoreError {
     }
 }
 
-/// The frozen `uncertain` refusal code (spec §C).
+/// note: The frozen `uncertain` refusal code (spec §C).
 ///
 /// Gated on the cohort that renders it today: the compute Run receipt
 /// recovery entry ([`crate::owner::compute::recover_stuck_compute_runs`]).
@@ -38,7 +38,7 @@ fn receipt_internal(what: &str, e: impl std::fmt::Display) -> CoreError {
 #[cfg(feature = "compute")]
 pub const UNCERTAIN_CODE: &str = "uncertain";
 
-/// The typed §B.3 item-4 refusal: a non-idempotent write with no terminal
+/// note: The typed §B.3 item-4 refusal: a non-idempotent write with no terminal
 /// receipt is **never** retried blindly.
 ///
 /// `subject` names the operation as the consumer knows it (a compute `run_id`,
@@ -57,14 +57,14 @@ pub fn uncertain_refusal(subject: &str, reason: &str) -> CoreError {
     }
 }
 
-/// Parse one stored RFC 3339 timestamp column into the wire `DateTime<Utc>`.
+/// note: Parse one stored RFC 3339 timestamp column into the wire `DateTime<Utc>`.
 fn parse_timestamp(what: &str, value: &str) -> CoreResult<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|parsed| parsed.with_timezone(&chrono::Utc))
         .map_err(|e| receipt_internal(what, e))
 }
 
-/// Project a stored receipt row onto the owned wire DTO.
+/// note: Project a stored receipt row onto the owned wire DTO.
 ///
 /// Rows are only ever written through the receipt store (which enforces the
 /// status/payload CHECK), so a row that fails projection means the stored
@@ -109,7 +109,7 @@ pub fn project_receipt(row: OperationReceipt) -> CoreResult<CoreOperationReceipt
 }
 
 impl CoreService {
-    /// Read one durable operation receipt by id (spec §B.2 read path, §B.3
+    /// note: Read one durable operation receipt by id (spec §B.2 read path, §B.3
     /// step 2).
     ///
     /// Returns `Ok(None)` for an unknown id — recovery never fabricates a
@@ -156,7 +156,7 @@ mod tests {
         }
     }
 
-    /// The store's RFC 3339 text columns project onto the wire DTO, including
+    /// note: The store's RFC 3339 text columns project onto the wire DTO, including
     /// the nullable terminal timestamp and the payload-free running shape.
     #[test]
     fn stored_rows_project_onto_the_wire_dto() {
@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(cancelled.status, CoreOperationReceiptStatus::Cancelled);
     }
 
-    /// A tampered row is an internal refusal, never a fabricated receipt.
+    /// note: A tampered row is an internal refusal, never a fabricated receipt.
     #[test]
     fn malformed_stored_rows_are_internal_refusals() {
         let mut bad_status = row(
@@ -216,7 +216,7 @@ mod tests {
         ));
     }
 
-    /// The store's first-writer-wins refusal maps onto the frozen
+    /// note: The store's first-writer-wins refusal maps onto the frozen
     /// `operation_id_conflict` code (spec §B.1/§C) at the core taxonomy seam.
     #[test]
     fn operation_id_conflict_maps_to_the_frozen_code() {

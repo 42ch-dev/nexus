@@ -5,6 +5,8 @@
 //! through a read-only pool so diagnostics never create, migrate, or seed
 //! the database. Selecting a workspace
 //! ([`CoreHomeService::select_workspace`]) is the initialization path.
+// why: diagnostics run on a read-only pool so they never create, migrate, or seed the
+// database.
 
 use nexus_home_layout::active_context::try_resolve_state_db_path;
 use nexus_local_db::{open_pool_read_only, read_versions, validate, RuntimeRole, SchemaVersions};
@@ -12,27 +14,27 @@ use nexus_local_db::{open_pool_read_only, read_versions, validate, RuntimeRole, 
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::home::CoreHomeService;
 
-/// Read-only storage diagnostics for one state DB.
+/// note: Read-only storage diagnostics for one state DB.
 #[derive(Debug, Clone)]
 pub struct CoreStorageStatus {
     /// Resolved state DB path under the ADR-014 layout.
     pub db_path: std::path::PathBuf,
-    /// Schema versions when both version keys are present and parseable.
+    /// note: Schema versions when both version keys are present and parseable.
     pub versions: Option<CoreStorageVersions>,
-    /// `true` when the read-only health check
+    /// note: `true` when the read-only health check
     /// ([`nexus_local_db::validate`], CLI role) passes.
     pub healthy: bool,
-    /// The health/versions failure reason when the store is not healthy.
+    /// note: The health/versions failure reason when the store is not healthy.
     pub health_error: Option<String>,
-    /// Existing tables, sorted by name.
+    /// note: Existing tables, sorted by name.
     pub tables: Vec<String>,
-    /// `PRAGMA journal_mode` value, when readable.
+    /// note: `PRAGMA journal_mode` value, when readable.
     pub journal_mode: Option<String>,
-    /// `PRAGMA foreign_keys` value, when readable.
+    /// note: `PRAGMA foreign_keys` value, when readable.
     pub foreign_keys: Option<i64>,
 }
 
-/// The two persisted schema version lines.
+/// note: The two persisted schema version lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreStorageVersions {
     pub db_schema_version: u32,
@@ -49,7 +51,7 @@ impl From<SchemaVersions> for CoreStorageVersions {
 }
 
 impl CoreHomeService {
-    /// Inspect the active selection's workspace state DB read-only.
+    /// note: Inspect the active selection's workspace state DB read-only.
     ///
     /// # Errors
     /// Returns [`CoreError::Uninitialized`] when no workspace selection can
@@ -64,7 +66,7 @@ impl CoreHomeService {
         }
         let pool = open_pool_read_only(&db_path).await.map_err(local_db_err)?;
 
-        // Versions + health: collected honestly (no error→default fallback);
+        // why: Versions + health: collected honestly (no error→default fallback);
         // a failing check is reported with its reason, not swallowed.
         let (versions, health_error) = match read_versions(&pool).await {
             Ok(v) => {

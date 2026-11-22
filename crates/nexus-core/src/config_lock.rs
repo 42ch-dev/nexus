@@ -4,12 +4,14 @@
 //! crate every writer can depend on, which is also where the fifth writer
 //! (`ensure_system_layout`) lives. This module only maps lock failures onto the
 //! core error carrier so every core writer keeps its original call shape.
+// why: the protocol stays in nexus-home-layout so every writer, in-process or not, takes one
+// lock.
 
 use std::path::Path;
 
 use crate::error::{CoreError, CoreResult};
 
-/// Run one `config.toml` read-modify-write under the daemon-home advisory
+/// note: Run one `config.toml` read-modify-write under the daemon-home advisory
 /// lock.
 ///
 /// Every writer of this file takes it — the service

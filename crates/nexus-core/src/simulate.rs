@@ -4,6 +4,8 @@
 //! reads, validates and returns; it persists nothing, mutates nothing and owns no revision.
 //! Fresh per call, and none at all: no capability registry, no production holder swap, no
 //! executor and no provider.
+// why: nothing is applied yet, so the request carries the whole candidate and the route
+// persists nothing.
 
 use crate::{CoreError, CoreResult, CoreService, PresetError, Principal};
 use nexus_contracts::generated::daemon_api::orchestration::strategy_simulation_request::NexusWorkflowDocumentState;
@@ -14,7 +16,7 @@ use nexus_workflow_ir::WorkflowDocument;
 use nexus_workflow_simulate::simulate_document;
 
 impl CoreService {
-    /// Read the installed strategy as a candidate IR document.
+    /// note: Read the installed strategy as a candidate IR document.
     ///
     /// `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the projection is the existing
     /// `nexus-preset` import adapter (never a second YAML→IR mapper). A disk bundle registers
@@ -46,7 +48,7 @@ impl CoreService {
 
     /// # Errors
     ///
-    /// Returns `CoreError` when the principal is rejected, the path id disagrees with the
+    /// note: Returns `CoreError` when the principal is rejected, the path id disagrees with the
     /// document, the document is not a candidate, the body is not a valid IR, or the static
     /// walk cannot produce a deterministic trajectory.
     // async is the await-symmetric public signature; the body has no await today.
@@ -79,7 +81,7 @@ impl CoreService {
             }
             .into());
         }
-        // The route wire type and the walk's IR type are two generated facades over one JSON
+        // why: The route wire type and the walk's IR type are two generated facades over one JSON
         // shape; the body is already JSON, so this is the boundary that joins them.
         let document: WorkflowDocument = serde_json::to_value(&wire)
             .and_then(serde_json::from_value)

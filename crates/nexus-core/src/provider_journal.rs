@@ -7,6 +7,7 @@
 //! These owned methods are the narrow seam that lets P4-T2 retire the
 //! transitional [`CoreService::pool()`] escape hatch — no pool or transaction
 //! handle leaves the service.
+// why: a restart must answer with what the journal observed, not a fabricated terminal.
 
 use nexus_contracts::{
     CoreProviderJournalWrite, CoreProviderJournalWriteStatus, CoreProviderOperation,
@@ -25,7 +26,7 @@ fn journal_internal(what: &str, e: impl std::fmt::Display) -> CoreError {
     }
 }
 
-/// Wire spelling of a journal write status (schema enum order).
+/// note: Wire spelling of a journal write status (schema enum order).
 const fn status_wire(status: CoreProviderJournalWriteStatus) -> &'static str {
     match status {
         CoreProviderJournalWriteStatus::Running => "running",
@@ -36,12 +37,12 @@ const fn status_wire(status: CoreProviderJournalWriteStatus) -> &'static str {
     }
 }
 
-/// Project a stored journal row onto the owned wire DTO.
+/// note: Project a stored journal row onto the owned wire DTO.
 ///
 /// Rows are only ever written through [`CoreService::journal_provider_operation`],
 /// so a row that fails projection means the stored journal was tampered with;
 /// the error is `internal`, never a fabricated success.
-#[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
+#[allow(clippy::needless_pass_by_value)] // why: callers move the owned payload in
 fn project_operation(row: JournaledOperation) -> CoreResult<CoreProviderOperation> {
     let sequence =
         u64::try_from(row.sequence).map_err(|_| journal_internal("sequence", row.sequence))?;
@@ -74,7 +75,7 @@ impl CoreService {
         Ok(())
     }
 
-    /// Read one journaled JS-provider operation by id.
+    /// note: Read one journaled JS-provider operation by id.
     ///
     /// Returns `Ok(None)` for an unknown id — a restart never fabricates a
     /// terminal status for an operation it has no durable record of.
@@ -95,7 +96,7 @@ impl CoreService {
             .transpose()
     }
 
-    /// Write-through one provider operation journal record.
+    /// note: Write-through one provider operation journal record.
     ///
     /// The sequence is assigned by the store; an already-terminal row is
     /// never downgraded back to `running` by a later write.
@@ -122,7 +123,7 @@ impl CoreService {
         .map_err(local_db_err)
     }
 
-    /// Settle orphaned journal entries: every non-terminal operation a
+    /// note: Settle orphaned journal entries: every non-terminal operation a
     /// predecessor process left behind becomes `interrupted`, and the journal
     /// is pruned to its bounded retention window. Returns the number of
     /// settled rows.

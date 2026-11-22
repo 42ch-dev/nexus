@@ -4,6 +4,7 @@
 //! One open pins exactly one binding. Every memory handler and the Character
 //! mind projection reach the same provider instance, space and authority, and
 //! a live open never re-reads or retargets its selection.
+// why: every memory path must reach the one pinned instance, space and authority.
 
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -13,21 +14,21 @@ use spoke_operations::MemoryPort;
 use crate::error::{CoreError, CoreResult};
 use nexus_memory_provider::{LocalMemoryProvider, LOCAL_AUTHORITY_HOST_ID};
 
-/// The local provider provisions its one space at generation `1`
+/// note: The local provider provisions its one space at generation `1`
 /// (`storage.rs::provision` inserts it with `INSERT OR IGNORE` and never bumps
 /// it), so the pinned local authority is that space's own constant generation.
 const LOCAL_AUTHORITY_GENERATION: NonZeroU64 = NonZeroU64::MIN;
 
-/// The single provider authority one `CoreService` open serves memory from.
+/// note: The single provider authority one `CoreService` open serves memory from.
 pub struct MemoryProviderBinding {
     port: Arc<dyn MemoryPort + Send + Sync>,
     local: Option<Arc<LocalMemoryProvider>>,
-    /// The established Connect session a remote binding serves through
+    /// note: The established Connect session a remote binding serves through
     /// (§4.1). Only a successful negotiated, authority-pinned open constructs
     /// one, so `Some` here always means `port` is that adapter.
     #[cfg(feature = "memory-remote")]
     remote: Option<Arc<spoke_connect::remote::RemoteAdapter>>,
-    /// The loaded public client identity the remote dial authenticated with
+    /// note: The loaded public client identity the remote dial authenticated with
     /// (§5.1/D18): the Ed25519 public peer id, never a credential id,
     /// profile/path, seed hash or payload principal. `None` for local; R1
     /// pins it before exposing a remote binding, and a nonlocal binding
@@ -36,7 +37,7 @@ pub struct MemoryProviderBinding {
     space_id: String,
     authority_host_id: String,
     authority_generation: NonZeroU64,
-    /// The page bound this provider advertised in `memory.describe`
+    /// note: The page bound this provider advertised in `memory.describe`
     /// (§7.0.7). Every page request names it, so a provider narrower than the
     /// adapter's former constant never refuses an over-large read.
     max_page_size: NonZeroU64,
@@ -44,7 +45,7 @@ pub struct MemoryProviderBinding {
 }
 
 impl MemoryProviderBinding {
-    /// Pin the local provider: its one default space is the authority.
+    /// note: Pin the local provider: its one default space is the authority.
     pub(crate) fn pin_local(provider: Arc<LocalMemoryProvider>) -> Self {
         Self {
             writable: provider.is_writable(),
@@ -60,7 +61,7 @@ impl MemoryProviderBinding {
         }
     }
 
-    /// Pin one established remote session (`n3-provider-binding.md` §4.1).
+    /// note: Pin one established remote session (`n3-provider-binding.md` §4.1).
     ///
     /// The caller ([`crate::memory_remote`]) only reaches this after the signed
     /// hello, the negotiated `spoke-memory` family, `describe` v1, the exact
@@ -83,7 +84,7 @@ impl MemoryProviderBinding {
             space_id,
             authority_host_id,
             authority_generation,
-            // The advertised value is a maximum, not permission to enlarge a
+            // why: The advertised value is a maximum, not permission to enlarge a
             // request: the original client ceiling still bounds every page, so
             // a wider provider never makes this client ask for more.
             max_page_size: max_page_size.min(nexus_memory_provider::policy::MAX_PAGE_SIZE_BOUND),
@@ -93,23 +94,23 @@ impl MemoryProviderBinding {
         }
     }
 
-    /// The `MemoryPort` every standard operation runs through.
+    /// note: The `MemoryPort` every standard operation runs through.
     pub(crate) fn port(&self) -> &(dyn MemoryPort + Send + Sync) {
         self.port.as_ref()
     }
 
-    /// The provider space this open serves.
+    /// note: The provider space this open serves.
     pub(crate) fn space_id(&self) -> &str {
         &self.space_id
     }
 
-    /// The page bound this binding serves: the smaller of the client's own
+    /// note: The page bound this binding serves: the smaller of the client's own
     /// ceiling and the provider's advertised maximum (§7.0.7).
     pub(crate) const fn page_size(&self) -> NonZeroU64 {
         self.max_page_size
     }
 
-    /// Close the provider handle this binding pins (§4.1 `close`).
+    /// note: Close the provider handle this binding pins (§4.1 `close`).
     ///
     /// A local binding closes the one provider it owns, so the writer
     /// admission that provider opened ends with this open. A remote binding
@@ -125,7 +126,7 @@ impl MemoryProviderBinding {
         }
     }
 
-    /// The provider-local concrete handle, for strict local-only internals.
+    /// note: The provider-local concrete handle, for strict local-only internals.
     ///
     /// Ordinary local/remote dispatch must use [`Self::is_local`] instead, so an
     /// expected remote branch never constructs the refusal below.
@@ -140,7 +141,7 @@ impl MemoryProviderBinding {
         })
     }
 
-    /// Whether this open pinned the local provider.
+    /// note: Whether this open pinned the local provider.
     ///
     /// The cheap read-only discriminator for ordinary local/remote dispatch: it
     /// reads the immutable pinned slot, deriving the answer from existing state
@@ -152,19 +153,19 @@ impl MemoryProviderBinding {
         self.local.is_some()
     }
 
-    /// Whether this open may mutate provider state.
+    /// note: Whether this open may mutate provider state.
     #[must_use]
     pub(crate) const fn is_writable(&self) -> bool {
         self.writable
     }
 
-    /// The pinned `(authority_host_id, authority_generation)` pair.
+    /// note: The pinned `(authority_host_id, authority_generation)` pair.
     #[must_use]
     pub(crate) fn authority(&self) -> (&str, NonZeroU64) {
         (&self.authority_host_id, self.authority_generation)
     }
 
-    /// The actual public client identity the remote dial authenticated with
+    /// note: The actual public client identity the remote dial authenticated with
     /// (§5.1/D18), or `None` for a local binding.
     ///
     /// This is the Ed25519 public peer id R1 derives from the loaded signing
@@ -178,7 +179,7 @@ impl MemoryProviderBinding {
     }
 }
 
-/// A dropped binding releases an established remote session.
+/// note: A dropped binding releases an established remote session.
 ///
 /// [`MemoryProviderBinding::close`] stays the normal path — it also closes the
 /// local provider. Nothing else ends a *delivered* remote session: the SDK's

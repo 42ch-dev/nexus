@@ -3,19 +3,21 @@
 //! The reader owns discovery, manifest validation and the fragment pin; this module only points it
 //! at the home layout and hands the observed packages to the wire. Nothing here writes, creates the
 //! directory or loads a capability: a missing directory is an empty listing.
+// why: a missing patterns directory must stay an empty listing, so discovery never creates
+// it.
 
 use crate::{CoreError, CoreResult, CoreService, Principal};
 use nexus_contracts::generated::daemon_api::patterns::pattern_summary::PatternSummary;
 
 impl CoreService {
-    /// Every package directory under `<nexus_home>/patterns`, unavailable ones included.
+    /// note: Every package directory under `<nexus_home>/patterns`, unavailable ones included.
     ///
     /// # Errors
     ///
     /// Returns `CoreError::Internal` when the root directory cannot be enumerated, and the
     /// principal/auth errors of [`CoreService::verify_principal`] otherwise.
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the scan is sync
-    #[allow(clippy::unused_async_trait_impl)] // same signature shape as the sibling listing methods
+    #[allow(clippy::unused_async)] // why: async is the await-symmetric public signature; the scan is sync
+    #[allow(clippy::unused_async_trait_impl)] // why: same signature shape as the sibling listing methods
     pub async fn list_patterns(&self, principal: &Principal) -> CoreResult<Vec<PatternSummary>> {
         self.verify_principal(principal)?;
         let patterns_dir = self.inner.nexus_home.join("patterns");

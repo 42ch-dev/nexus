@@ -28,76 +28,76 @@ use crate::compose::{
 use crate::strategy_candidates::{conflict, current_revision};
 use crate::{CoreError, CoreResult, CoreService, Principal, StrategyAlreadyApprovedError};
 
-/// Why an approval was refused. Nothing was written when one is returned.
+/// note: Why an approval was refused. Nothing was written when one is returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApproveRefusal {
-    /// The request carried no trajectory, so no simulation evidence exists for the content.
+    /// note: The request carried no trajectory, so no simulation evidence exists for the content.
     SimulationMissing {
-        /// The candidate's current canonical content hash.
+        /// note: The candidate's current canonical content hash.
         current_hash: String,
     },
-    /// The supplied trajectory was produced for different content: its recorded hash is not the
+    /// note: The supplied trajectory was produced for different content: its recorded hash is not the
     /// current document hash.
     SimulationStale {
-        /// The trajectory's `ir_content_hash`.
+        /// note: The trajectory's `ir_content_hash`.
         recorded_hash: String,
-        /// The current document's canonical content hash.
+        /// note: The current document's canonical content hash.
         current_hash: String,
     },
-    /// The supplied trajectory carries the current hash but is not byte-for-byte what the walk
+    /// note: The supplied trajectory carries the current hash but is not byte-for-byte what the walk
     /// produces for these bytes.
     SimulationMismatch {
-        /// The candidate's canonical content hash.
+        /// note: The candidate's canonical content hash.
         content_hash: String,
     },
-    /// The static walk cannot produce a trajectory for this document.
+    /// note: The static walk cannot produce a trajectory for this document.
     SimulationUnavailable {
-        /// The walk's refusal.
+        /// note: The walk's refusal.
         reason: String,
     },
-    /// The shared structural or nest-policy validation rejected the document.
+    /// note: The shared structural or nest-policy validation rejected the document.
     InvalidDocument {
-        /// The shared walk's violations, in walk order.
+        /// note: The shared walk's violations, in walk order.
         violations: Vec<String>,
     },
-    /// A required slot of a pinned package carries no binding.
+    /// note: A required slot of a pinned package carries no binding.
     SlotUnbound {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package, as `id@version`.
+        /// note: The pinned package, as `id@version`.
         package: String,
-        /// The unbound required slot.
+        /// note: The unbound required slot.
         slot: String,
     },
-    /// The registry now serves bytes that do not hash to the pin the document recorded.
+    /// note: The registry now serves bytes that do not hash to the pin the document recorded.
     PinChanged {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package id.
+        /// note: The pinned package id.
         package_id: String,
-        /// The pinned package version.
+        /// note: The pinned package version.
         package_version: String,
-        /// The hash the document recorded.
+        /// note: The hash the document recorded.
         recorded_hash: String,
-        /// The hash the registry now serves.
+        /// note: The hash the registry now serves.
         scanned_hash: String,
     },
-    /// The document records a pin the registry does not resolve at all, so there are no bytes to
+    /// note: The document records a pin the registry does not resolve at all, so there are no bytes to
     /// compare and the approval would freeze a hash nobody can check.
     PinUnavailable {
-        /// The nest that pins the package.
+        /// note: The nest that pins the package.
         nest_id: String,
-        /// The pinned package id.
+        /// note: The pinned package id.
         package_id: String,
-        /// The pinned package version.
+        /// note: The pinned package version.
         package_version: String,
-        /// The hash the document recorded.
+        /// note: The hash the document recorded.
         recorded_hash: String,
     },
 }
 
 impl ApproveRefusal {
-    /// The stable lowercase reason a client branches on.
+    /// note: The stable lowercase reason a client branches on.
     #[must_use]
     pub const fn reason(&self) -> &'static str {
         match self {
@@ -112,7 +112,7 @@ impl ApproveRefusal {
         }
     }
 
-    /// The non-mutating validation envelope's `details`, carrying the hashes or package the
+    /// note: The non-mutating validation envelope's `details`, carrying the hashes or package the
     /// refusal names.
     #[must_use]
     pub fn details(&self) -> Value {
@@ -204,7 +204,7 @@ impl ApproveRefusal {
         Value::Object(details)
     }
 
-    /// The core error a refused approval returns; the adapter renders `details` verbatim.
+    /// note: The core error a refused approval returns; the adapter renders `details` verbatim.
     #[must_use]
     pub fn into_error(self) -> CoreError {
         CoreError::InputValidation {
@@ -212,7 +212,7 @@ impl ApproveRefusal {
         }
     }
 
-    /// Reuse compose's own findings as approval refusals: the three the walk reports as refusals
+    /// note: Reuse compose's own findings as approval refusals: the three the walk reports as refusals
     /// to an approval are a slot a pinned pattern requires, a pin whose bytes moved, and a pin
     /// whose package the registry no longer resolves.
     fn from_diagnostic(diagnostic: ComposeDiagnostic) -> Self {
@@ -328,7 +328,7 @@ fn approval_internal(detail: impl std::fmt::Display) -> CoreError {
     }
 }
 
-/// The snapshot row as it is frozen. Serialized to the generated wire type; every member is the
+/// note: The snapshot row as it is frozen. Serialized to the generated wire type; every member is the
 /// value the approval proved, never a recomputation at read time.
 #[derive(serde::Serialize)]
 struct FrozenSnapshot<'a> {
@@ -343,7 +343,7 @@ struct FrozenSnapshot<'a> {
     approved_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// The structural verdict on `document`, before any simulation evidence is judged.
+/// note: The structural verdict on `document`, before any simulation evidence is judged.
 ///
 /// This is ONE composition for Approve and import, so the two cannot disagree about which
 /// documents are approvable: the shared validation walk with the imported-preset outer-state loop
@@ -363,7 +363,7 @@ pub fn structural_refusal(
         .err()
         .unwrap_or_default()
         .into_iter()
-        // Outer-state loops are legal for imported presets (the same exception compose makes).
+        // why: Outer-state loops are legal for imported presets (the same exception compose makes).
         .filter(|violation| !matches!(violation, Violation::GraphCycle { .. }))
         .collect();
     if !violations.is_empty() {
@@ -371,7 +371,7 @@ pub fn structural_refusal(
             violations: violations.iter().map(ToString::to_string).collect(),
         });
     }
-    // The pins refuse before the slots: an unavailable package still reports the slots its manifest
+    // why: The pins refuse before the slots: an unavailable package still reports the slots its manifest
     // declared, so the pin is the root cause and must be the refusal.
     if let Some(unconfirmed) = diagnostics.into_iter().find(|finding| {
         matches!(
@@ -388,7 +388,7 @@ pub fn structural_refusal(
 }
 
 impl CoreService {
-    /// Approve the candidate at `base_revision` against `trajectory`, freezing one immutable
+    /// note: Approve the candidate at `base_revision` against `trajectory`, freezing one immutable
     /// snapshot.
     ///
     /// # Errors
@@ -470,7 +470,7 @@ impl CoreService {
         let revision = i64::try_from(candidate.revision)
             .map_err(|_| approval_internal("revision does not fit the row column"))?;
 
-        // The insert is the CAS: the row lands only while the stored candidate still sits at the
+        // why: The insert is the CAS: the row lands only while the stored candidate still sits at the
         // revision this approval verified (an absent row is revision 0). A compose that commits in
         // between makes the predicate fail, so it wins and this writer gets the typed conflict.
         let written = sqlx::query(

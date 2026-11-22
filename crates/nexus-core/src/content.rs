@@ -1,6 +1,7 @@
 //! Work chapter content (manuscript body, per-chapter outline prose and
 //! chapter metadata) over the guarded core workspace.
 //! HTTP envelopes stay in adapters; these projections are owned domain values.
+// why: adapters own the HTTP envelopes, so these values stay reusable outside HTTP.
 
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -14,7 +15,7 @@ use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord}
 
 use crate::{CoreError, CoreResult, CoreService, Principal};
 
-/// Core-owned chapter content query (path arguments stay explicit method
+/// note: Core-owned chapter content query (path arguments stay explicit method
 /// parameters). Wire parity with `nexus_contracts::ChapterContentQuery`:
 /// a present `volume` must be non-zero.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -30,7 +31,7 @@ impl From<ChapterContentQuery> for CoreChapterContentQuery {
     }
 }
 
-/// Content-family fault carrying the legacy classification until the adapter
+/// note: Content-family fault carrying the legacy classification until the adapter
 /// boundary (same carrier scheme as the Work family).
 #[derive(Debug, thiserror::Error)]
 enum ContentFault {
@@ -51,7 +52,7 @@ impl From<ContentFault> for CoreError {
                 field: code,
                 reason: message,
             },
-            // The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR,
+            // why: The legacy internal classification (DATABASE_ERROR, CONTRACT_ERROR,
             // FILE_READ_ERROR, …) rides verbatim as `<CODE>: <message>`; the
             // daemon content adapter re-emits the code instead of collapsing it
             // to the shared `CORE_ERROR` shape.
@@ -64,7 +65,7 @@ impl From<ContentFault> for CoreError {
     }
 }
 
-/// Wire-equivalent typify copy conversion (see `works::wire_cast`); the legacy
+/// note: Wire-equivalent typify copy conversion (see `works::wire_cast`); the legacy
 /// `CONTRACT_ERROR` code rides the shared internal category verbatim.
 pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
     value: S,
@@ -76,11 +77,11 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
         })
 }
 
-// ─── Guarded filesystem primitives (shared by content + outline) ───────────
+// note: guarded filesystem primitives, shared by content and outline.
 
 /// # Errors
 ///
-/// Returns `CoreError` when the principal is rejected, the work/chapter is
+/// note: Returns `CoreError` when the principal is rejected, the work/chapter is
 /// unknown, or the guarded file read fails.
 /// Resolve a relative path under the workspace root and enforce the
 /// W-002-style path guard: the resolved absolute path must remain inside
@@ -137,7 +138,7 @@ pub fn resolve_guarded_path(
             field: "chapter_path_unresolvable".to_string(),
             reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
         })?;
-        // Component-wise comparison (Path::starts_with). A plain string prefix
+        // why: Component-wise comparison (Path::starts_with). A plain string prefix
         // match would let `/home/user-data/evil.md` slip past a `/home/user`
         // root because the string starts with "/home/user".
         if !canonical_target.starts_with(&canonical_root) {
@@ -145,14 +146,14 @@ pub fn resolve_guarded_path(
         }
         Ok(canonical_target)
     } else {
-        // For creatable targets, normalize the joined path and verify it stays
+        // why: For creatable targets, normalize the joined path and verify it stays
         // within the workspace root. We walk up to the nearest existing parent
         // so that missing intermediate directories are still allowed as long
         // as they would be created inside the root.
         let mut probe = joined.as_path();
         loop {
             if let Ok(canonical) = probe.canonicalize() {
-                // Component-wise comparison (Path::starts_with) — see read branch.
+                // why: Component-wise comparison (Path::starts_with) — see read branch.
                 if !canonical.starts_with(&canonical_root) {
                     return Err(forbidden(rel_path));
                 }
@@ -175,7 +176,7 @@ pub fn resolve_guarded_path(
 
 /// # Errors
 ///
-/// Returns `CoreError` when the principal is rejected, the work/chapter is
+/// note: Returns `CoreError` when the principal is rejected, the work/chapter is
 /// unknown, or the guarded file read fails.
 /// Async wrapper around [`resolve_guarded_path`] that runs the blocking
 /// `std::fs::canonicalize` syscalls on the tokio blocking pool. Shared by the
@@ -195,13 +196,13 @@ pub async fn resolve_guarded_path_async(
     })?
 }
 
-/// Create the parent directories of a guarded target. Callers map the
+/// note: Create the parent directories of a guarded target. Callers map the
 /// I/O failure to their legacy `DIRECTORY_CREATE_ERROR` message.
 pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
     tokio::fs::create_dir_all(parent).await
 }
 
-/// Durability mechanics shared by every chapter/outline markdown write:
+/// note: Durability mechanics shared by every chapter/outline markdown write:
 /// temp file + fsync + atomic rename + final-file fsync + parent-dir fsync.
 /// The caller owns path-guard resolution, parent-directory creation and the
 /// legacy error-code mapping; the temp file is cleaned up on failure.
@@ -235,7 +236,7 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
         Err(join) => Err(std::io::Error::other(join)),
     };
 
-    // Commit only runs when the caller is still live: a dropped future
+    // why: Commit only runs when the caller is still live: a dropped future
     // never reaches the second blocking task, so the target keeps its
     // previous content. It goes through `spawn_blocking` because the
     // rename + fsyncs must not stall a Tokio worker.
@@ -259,7 +260,7 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     cleanup_temp_on_failure(write_result, &temp_path).await
 }
 
-/// `fsync_write_atomic`'s single failure-exit: remove the caller-owned temp
+/// note: `fsync_write_atomic`'s single failure-exit: remove the caller-owned temp
 /// file and return the error, or pass `Ok` through. Every failure path —
 /// kernel error or blocking-task join failure — funnels through here so the
 /// temp file never survives a failed write.
@@ -276,7 +277,7 @@ async fn cleanup_temp_on_failure(
     }
 }
 
-/// Per-Work advisory runtime lock (single-writer authoring contract, DF-60 §4)
+/// note: Per-Work advisory runtime lock (single-writer authoring contract, DF-60 §4)
 /// shared by the content and outline services. The low-level acquire/release
 /// primitives live in `nexus_local_db::runtime_lock`; this guard only carries
 /// the legacy `locked/DATABASE_ERROR` classification.
@@ -344,9 +345,7 @@ impl WorkLock {
     }
 }
 
-// ─── Chapter content domain helpers ────────────────────────────────────────
-
-/// Parse a chapter number path parameter.
+/// note: Parse a chapter number path parameter.
 fn parse_chapter(n: &str) -> Result<i32, ContentFault> {
     n.parse::<i32>()
         .map_err(|_| ContentFault::BadRequest {
@@ -365,10 +364,10 @@ fn parse_chapter(n: &str) -> Result<i32, ContentFault> {
         })
 }
 
-/// Prefix for chapter keyset cursors.
+/// note: Prefix for chapter keyset cursors.
 const CHAPTER_CURSOR_PREFIX: &str = "v2:";
 
-/// Decode an opaque chapter-list cursor into the `(volume, chapter)` tuple
+/// note: Decode an opaque chapter-list cursor into the `(volume, chapter)` tuple
 /// that the next page must start after.
 ///
 /// `None` decodes to `(1, 0)` so the first page includes all chapters.
@@ -399,12 +398,12 @@ fn decode_chapter_cursor(cursor: Option<&String>) -> Result<(i32, i32), ContentF
     }
 }
 
-/// Encode a `(volume, chapter)` tuple into an opaque cursor token.
+/// note: Encode a `(volume, chapter)` tuple into an opaque cursor token.
 fn encode_chapter_cursor(volume: i32, chapter: i32) -> String {
     format!("{CHAPTER_CURSOR_PREFIX}{volume}:{chapter}")
 }
 
-/// Compute `(next_cursor, has_more)` for a keyset-paginated chapter page.
+/// note: Compute `(next_cursor, has_more)` for a keyset-paginated chapter page.
 fn chapter_page_meta(records: &[WorkChapterRecord], limit: u32) -> (Option<String>, bool) {
     let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
     if records.len() > limit_us {
@@ -417,7 +416,7 @@ fn chapter_page_meta(records: &[WorkChapterRecord], limit: u32) -> (Option<Strin
     }
 }
 
-/// Compute protection metadata for a chapter based on its status.
+/// note: Compute protection metadata for a chapter based on its status.
 fn chapter_protection(status: &str) -> Result<ChapterProtection, ContentFault> {
     let (level, reason) = match status {
         "finalized" => (
@@ -436,7 +435,7 @@ fn chapter_protection(status: &str) -> Result<ChapterProtection, ContentFault> {
     })
 }
 
-/// Map a DB record to a `ChapterSummary` contract DTO.
+/// note: Map a DB record to a `ChapterSummary` contract DTO.
 fn to_summary(r: &WorkChapterRecord) -> Result<ChapterSummary, ContentFault> {
     Ok(ChapterSummary {
         work_id: r.work_id.clone(),
@@ -454,7 +453,7 @@ fn to_summary(r: &WorkChapterRecord) -> Result<ChapterSummary, ContentFault> {
     })
 }
 
-/// Map a DB record to a `ChapterDetail` contract DTO.
+/// note: Map a DB record to a `ChapterDetail` contract DTO.
 ///
 /// `workspace_root` is used to probe whether the stored `outline_path` is still
 /// inside the active workspace; if the root is unavailable, the outline is
@@ -490,12 +489,12 @@ fn to_detail(
     })
 }
 
-/// `i64 → NonZeroU64` with the legacy clamp-to-1 fallback for degenerate rows.
+/// note: `i64 → NonZeroU64` with the legacy clamp-to-1 fallback for degenerate rows.
 fn nz(value: i64) -> NonZeroU64 {
     NonZeroU64::new(u64::try_from(value).unwrap_or(1)).unwrap_or(NonZeroU64::MIN)
 }
 
-/// Read a text file after path-guard verification.
+/// note: Read a text file after path-guard verification.
 ///
 /// Enforces a 10 MiB size cap to prevent unbounded memory reads on
 async fn read_guarded_file(
@@ -553,7 +552,7 @@ async fn read_guarded_file(
     }
 }
 
-/// Atomically write plain `content` to `rel_path` under `workspace_root`,
+/// note: Atomically write plain `content` to `rel_path` under `workspace_root`,
 /// creating parent directories as needed (temp+rename+file fsync+dir fsync).
 ///
 /// Persist per-chapter outline prose to the `outline_path` markdown file with
@@ -584,7 +583,7 @@ pub async fn atomic_write_text(
         })
 }
 
-/// Validate that a requested chapter status transition is allowed.
+/// note: Validate that a requested chapter status transition is allowed.
 fn validate_status_transition(from: &str, to: &str) -> Result<(), ContentFault> {
     if from == to {
         return Ok(());
@@ -601,7 +600,7 @@ fn validate_status_transition(from: &str, to: &str) -> Result<(), ContentFault> 
 }
 
 impl CoreService {
-    /// Best-effort workspace root for editability probes (`None` when unset).
+    /// note: Best-effort workspace root for editability probes (`None` when unset).
     pub(crate) fn optional_workspace_root(
         &self,
         principal: &Principal,
@@ -612,14 +611,14 @@ impl CoreService {
             .map(PathBuf::from))
     }
 
-    /// Required workspace root; `Uninitialized` mirrors the pre-extraction
+    /// note: Required workspace root; `Uninitialized` mirrors the pre-extraction
     /// handler behavior when no active workspace root is configured.
     pub(crate) fn workspace_root(&self, principal: &Principal) -> Result<PathBuf, CoreError> {
         self.optional_workspace_root(principal)?
             .ok_or(CoreError::Uninitialized)
     }
 
-    /// Cursor-paginated chapter summaries for a Work.
+    /// note: Cursor-paginated chapter summaries for a Work.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
@@ -642,7 +641,7 @@ impl CoreService {
         Ok(response)
     }
 
-    /// Chapter detail (metadata + protection + editability probe).
+    /// note: Chapter detail (metadata + protection + editability probe).
     ///
     /// # Errors
     /// As [`CoreService::list_chapters`]; additionally
@@ -664,7 +663,7 @@ impl CoreService {
         Ok(detail)
     }
 
-    /// Read the per-chapter outline markdown.
+    /// note: Read the per-chapter outline markdown.
     ///
     /// # Errors
     /// As [`CoreService::chapter_detail`]; additionally [`CoreError::NotFound`]
@@ -688,7 +687,7 @@ impl CoreService {
         Ok(outline)
     }
 
-    /// Read the chapter body markdown (read-only).
+    /// note: Read the chapter body markdown (read-only).
     ///
     /// # Errors
     /// As [`CoreService::chapter_detail`]; additionally [`CoreError::NotFound`]
@@ -713,7 +712,7 @@ impl CoreService {
         Ok(body)
     }
 
-    /// Partial structure update of a chapter (slug/word count/volume/status).
+    /// note: Partial structure update of a chapter (slug/word count/volume/status).
     ///
     /// `holder` is the per-Work runtime-lock caller label (see
     /// [`WorkLock::acquire`]); the daemon content surface passes `http`.
@@ -763,7 +762,7 @@ async fn list_chapters(
     let pool = &service.inner.pool;
 
     let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
-    // Clamp to [1, 100]: the generated `NonZeroU64` limit type enforces the
+    // why: Clamp to [1, 100]: the generated `NonZeroU64` limit type enforces the
     // schema `minimum: 1` at deserialization (`?limit=0` rejects as 400
     // instead of reaching `chapter_page_meta`), so only the upper bound is
     // clamped here. Default 50 when absent.
@@ -923,7 +922,7 @@ async fn chapter_body(
     })
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the generated request DTO field set
+#[allow(clippy::too_many_arguments)] // why: mirrors the generated request DTO field set
 #[allow(clippy::too_many_lines)]
 async fn patch_chapter(
     service: &CoreService,
@@ -942,7 +941,7 @@ async fn patch_chapter(
 
     let record = load_chapter(service, work_id, chapter, volume).await?;
 
-    // Reject display-only title writes in V1.65. This is field validation, not
+    // why: Reject display-only title writes in V1.65. This is field validation, not
     // a preset gate, so use BadRequest (HTTP 400, code `bad_request`) rather
     // than PresetGatesFailed (HTTP 422, `preset_gates_failed`) — the previous
     // observable contract and the semantic meaning of both error categories.
@@ -954,13 +953,13 @@ async fn patch_chapter(
         });
     }
 
-    // Validate status transition before acquiring lock.
+    // why: Validate status transition before acquiring lock.
     if let Some(target_status) = &req.status {
         let target = target_status.as_str();
         validate_status_transition(&record.status, target)?;
     }
 
-    // Structural edit protection for finalized/published chapters.
+    // why: Structural edit protection for finalized/published chapters.
     let has_structural_edit = req.slug.is_some()
         || req.planned_word_count.is_some()
         || req.volume.is_some()
@@ -984,7 +983,7 @@ async fn patch_chapter(
             _ => {}
         }
     }
-    // Acquire runtime lock before mutating DB metadata.
+    // why: Acquire runtime lock before mutating DB metadata.
     let lock = WorkLock::acquire(pool, creator_id, work_id, holder).await?;
 
     let updated: Result<WorkChapterRecord, ContentFault> = async {
@@ -1007,7 +1006,7 @@ async fn patch_chapter(
             .then_some(())
             .ok_or_else(|| ContentFault::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-        // Re-fetch using the POST-patch volume. If `req.volume` changed it, the
+        // why: Re-fetch using the POST-patch volume. If `req.volume` changed it, the
         // row now lives at the new volume; re-fetching with the original query
         // `volume` would miss it and return 404 on a fully-committed write.
         let fetch_volume = patch.volume.unwrap_or(volume);
@@ -1051,7 +1050,7 @@ mod tests {
         assert!(temp_path.exists(), "successful write keeps the temp path");
     }
 
-    /// Dropping `fsync_write_atomic` while its prepare stage is still queued
+    /// note: Dropping `fsync_write_atomic` while its prepare stage is still queued
     /// on the blocking pool leaves the target untouched — proven after the
     /// cancelled task has fully exited, not just after its bytes landed.
     ///
@@ -1088,7 +1087,7 @@ mod tests {
                 outcome.is_err(),
                 "prepare must still be queued when the write is cancelled"
             );
-            // Release the parked slot. The cancelled task's prepare now
+            // why: Release the parked slot. The cancelled task's prepare now
             // runs and exits; the sentinel submitted behind it resolves
             // only once the pool is free again — FIFO on a single slot.
             let _ = release_tx.send(());

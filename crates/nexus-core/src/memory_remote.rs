@@ -22,6 +22,7 @@
 //! `spaces.list` is pending releases exactly its own session.
 //!
 //! Nexus serves no memory family — this is a client only.
+// why: a session that cannot be pinned must close rather than become a provider.
 
 use std::num::NonZeroU64;
 use std::path::Path;
@@ -50,22 +51,22 @@ use crate::memory_credentials::{MemoryCredential, CREDENTIAL_INVALID_CODE};
 use crate::memory_selection::RemoteMemoryProviderSelection;
 use crate::service::CoreAccess;
 
-/// The signed memory protocol version this client speaks (§4.1 step 2).
+/// note: The signed memory protocol version this client speaks (§4.1 step 2).
 const MEMORY_PROTOCOL_VERSION: u64 = 1;
-/// Bound on the WebSocket connect and on the owned close after a failed dial.
+/// note: Bound on the WebSocket connect and on the owned close after a failed dial.
 const CONNECT_BOUND: Duration = Duration::from_secs(10);
-/// Bound on the space discovery walk: the exact space must appear within this
+/// note: Bound on the space discovery walk: the exact space must appear within this
 /// many pages, or the open fails instead of paging a provider forever.
 const MAX_SPACE_PAGES: usize = 8;
 
-/// Static refusal categories (§3.1). Peer-controlled text never reaches them.
+/// note: Static refusal categories (§3.1). Peer-controlled text never reaches them.
 const HANDSHAKE_REFUSED: &str = "memory_remote_handshake";
 const UNAVAILABLE: &str = "memory_remote_unavailable";
 const CAPABILITY_REFUSED: &str = "memory_remote_capability";
 const SPACE_REFUSED: &str = "memory_remote_space";
 const AUTHORITY_REFUSED: &str = "memory_remote_authority";
 
-/// Open the selected remote provider and pin it as this open's binding.
+/// note: Open the selected remote provider and pin it as this open's binding.
 ///
 /// # Errors
 ///
@@ -95,7 +96,7 @@ pub async fn open_remote_binding(
             })?,
         ),
     };
-    // The identity this dial presents, and the identity the binding pins: the
+    // why: The identity this dial presents, and the identity the binding pins: the
     // Ed25519 PUBLIC peer id derived from the same loaded seed the signed hello
     // signs with. It is never the credential id, a path, a seed hash or a
     // payload principal (§5.1/D18).
@@ -136,7 +137,7 @@ pub async fn open_remote_binding(
     let adapter = match dialed {
         Ok(adapter) => adapter,
         Err(error) => {
-            // The SDK closes the session on its own handshake failures. Its
+            // why: The SDK closes the session on its own handshake failures. Its
             // fail-closed pre-I/O refusal returns before an adapter exists, so
             // this end still owns the transport and closes it here.
             let _ = tokio::time::timeout(CONNECT_BOUND, transport.close()).await;
@@ -144,7 +145,7 @@ pub async fn open_remote_binding(
         }
     };
 
-    // From here the session is established but not yet pinned: the guard owns
+    // why: From here the session is established but not yet pinned: the guard owns
     // its cleanup until a binding takes it (see `UndeliveredSession`).
     let session = UndeliveredSession::new(adapter);
 
@@ -161,14 +162,14 @@ pub async fn open_remote_binding(
                 access != CoreAccess::ReadOnly,
             ))
         }
-        // The explicit refusal is returned unchanged; the guard closes the
+        // why: The explicit refusal is returned unchanged; the guard closes the
         // session on the way out, and the caller's failed-open path then
         // releases the pool admission.
         Err(error) => Err(error),
     }
 }
 
-/// Owns one established, not-yet-pinned session.
+/// note: Owns one established, not-yet-pinned session.
 ///
 /// The admission sequence awaits `memory.describe` and `memory.spaces.list`
 /// after the signed handshake, and a provider can leave either call pending.
@@ -192,7 +193,7 @@ impl UndeliveredSession {
             .expect("the guard holds its adapter until handed over")
     }
 
-    /// Hand the session to the binding; cleanup becomes the binding's job.
+    /// note: Hand the session to the binding; cleanup becomes the binding's job.
     fn into_adapter(mut self) -> Arc<RemoteAdapter> {
         self.0
             .take()
@@ -208,7 +209,7 @@ impl Drop for UndeliveredSession {
     }
 }
 
-/// The typed admission the §4.1 sequence requires, over the established
+/// note: The typed admission the §4.1 sequence requires, over the established
 /// session.
 async fn admit(
     adapter: &RemoteAdapter,
@@ -221,7 +222,7 @@ async fn admit(
             "the signed hello carried no remote manifest",
         )
     })?;
-    // The negotiated set is the intersection of the two authenticated hello
+    // why: The negotiated set is the intersection of the two authenticated hello
     // manifests. This dial's manifest advertises exactly the memory family it
     // is a client of, so the remote side must declare the same family.
     if !manifest
@@ -234,7 +235,7 @@ async fn admit(
             "the remote host did not negotiate the spoke-memory family",
         ));
     }
-    // The adapter ignores this value: the server maps the authenticated peer id
+    // why: The adapter ignores this value: the server maps the authenticated peer id
     // to its own stable principal (§4.1), so this is a label, never authority.
     let principal = client_principal(client_identity)?;
     let described = adapter
@@ -287,7 +288,7 @@ async fn admit(
     ))
 }
 
-/// Find the exact configured space in bounded provider pages.
+/// note: Find the exact configured space in bounded provider pages.
 ///
 /// Zero matches and several matches both fail: the selection names one space,
 /// and silently taking the first page's entry would bind another authority.
@@ -356,7 +357,7 @@ async fn discover_space(
     })
 }
 
-/// One bounded `memory.spaces.list` page over the configured space family.
+/// note: One bounded `memory.spaces.list` page over the configured space family.
 fn spaces_request(cursor: Option<&str>, limit: NonZeroU64) -> CoreResult<MemorySpacesListRequest> {
     let mut body = json!({ "limit": limit.get() });
     if let Some(cursor) = cursor {
@@ -370,7 +371,7 @@ fn spaces_request(cursor: Option<&str>, limit: NonZeroU64) -> CoreResult<MemoryS
     })
 }
 
-/// The local hello manifest: this client's own identity and the one family it
+/// note: The local hello manifest: this client's own identity and the one family it
 /// dials for. It declares no served op and no tool — Nexus serves no memory
 /// responder (§1).
 fn client_manifest(client_identity: &str) -> CoreResult<HostCapabilityManifest> {
@@ -390,7 +391,7 @@ fn client_manifest(client_identity: &str) -> CoreResult<HostCapabilityManifest> 
     })
 }
 
-/// The public peer id of the loaded seed: the keypair the signed hello signs
+/// note: The public peer id of the loaded seed: the keypair the signed hello signs
 /// with and the identity the binding pins (§5.1/D18).
 fn client_public_peer_id(seed: &[u8; 32]) -> String {
     let verifying_key = ed25519_dalek::SigningKey::from_bytes(seed)
@@ -399,7 +400,7 @@ fn client_public_peer_id(seed: &[u8; 32]) -> String {
     derive_peer_id_from_ed25519_pubkey(&verifying_key)
 }
 
-/// The label the adapter's `MemoryPort` methods take (`RemoteAdapter` ignores
+/// note: The label the adapter's `MemoryPort` methods take (`RemoteAdapter` ignores
 /// it; the server's admission maps the authenticated peer id instead).
 fn client_principal(client_identity: &str) -> CoreResult<Principal> {
     serde_json::from_value(json!({
@@ -414,7 +415,7 @@ fn client_principal(client_identity: &str) -> CoreResult<Principal> {
     })
 }
 
-/// Decode the selection's already-validated 32-byte peer key.
+/// note: Decode the selection's already-validated 32-byte peer key.
 fn decode_pubkey_hex(text: &str) -> CoreResult<[u8; 32]> {
     if text.len() != 64 {
         return Err(invalid_pubkey());
@@ -443,7 +444,7 @@ fn invalid_pubkey() -> CoreError {
     }
 }
 
-/// Classify one dial failure without copying any upstream message: the SDK's
+/// note: Classify one dial failure without copying any upstream message: the SDK's
 /// error text can carry peer-supplied detail, so only the static class
 /// survives (§3.1).
 fn dial_refusal(error: &RemoteAdapterError) -> CoreError {
@@ -466,7 +467,7 @@ fn dial_refusal(error: &RemoteAdapterError) -> CoreError {
     }
 }
 
-/// One static coded refusal.
+/// note: One static coded refusal.
 fn coded(code: &str, message: &str) -> CoreError {
     CoreError::Coded {
         code: code.to_string(),

@@ -1,14 +1,15 @@
 //! Transport-neutral core service (v1.189 P1 → v1.190 P2).
+// note: every adapter (HTTP, napi, CLI) links this crate, so no transport type enters it.
 
 mod actor_fence;
 mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
 mod actors;
-// Private atomic-write durability kernel shared by content/creators/presets
+// note: Private atomic-write durability kernel shared by content/creators/presets
 // (I-000564); deliberately not re-exported.
 mod atomic_write;
-// v1.241 P3.5 Task 2: the apply write stays execution-owned (approval/apply
+// note: v1.241 P3.5 Task 2: the apply write stays execution-owned (approval/apply
 // recovery runs on the execution cohort). Approve itself is authoring: it
 // re-simulates the candidate, so it links only with `strategy-authoring`.
 #[cfg(feature = "execution")]
@@ -17,7 +18,7 @@ mod apply;
 mod approve;
 mod changes;
 mod chronology;
-// The Connect protocol stack lives in `nexus-connect` (v1.244 extraction):
+// note: The Connect protocol stack lives in `nexus-connect` (v1.244 extraction):
 // the dependency direction is `nexus-core → nexus-connect`, never back, and
 // callers name the crate directly.
 mod compose;
@@ -28,7 +29,7 @@ mod creators;
 mod error;
 mod findings;
 mod forks;
-// Generate produces a whole candidate through the three shared lint layers; the authoring
+// note: Generate produces a whole candidate through the three shared lint layers; the authoring
 // surface that simulates and approves it lives on `strategy-authoring`, so Generate rides
 // that feature rather than the bare execution edge.
 #[cfg(feature = "strategy-authoring")]
@@ -40,22 +41,22 @@ mod knowledge;
 mod memory;
 #[cfg(feature = "execution")]
 pub mod owner;
-// v1.229 N3 Task 3: the one provider authority an open pins.
+// note: v1.229 N3 Task 3: the one provider authority an open pins.
 mod memory_binding;
 mod memory_credentials;
 mod memory_pipeline;
-// v1.245 extraction: the provider's own error taxonomy projected onto the
+// note: v1.245 extraction: the provider's own error taxonomy projected onto the
 // core's. The provider crate names no core type, so this `From` impl is the
 // whole boundary between them.
 mod memory_provider_error;
-// v1.229 N3 Task 1: the signed Connect open of a selected remote provider.
+// note: v1.229 N3 Task 1: the signed Connect open of a selected remote provider.
 #[cfg(feature = "memory-remote")]
 mod memory_remote;
-// v1.229 NXM-9: the validated `[memory_provider]` selection an open resolves.
+// note: v1.229 NXM-9: the validated `[memory_provider]` selection an open resolves.
 mod memory_selection;
 mod operation_receipts;
 pub mod slug;
-// v1.207 P3-T1 (spec §B.1): the stable durable operation id every receipt
+// note: v1.207 P3-T1 (spec §B.1): the stable durable operation id every receipt
 // consumer resolves through. Root-level and gated on its own tiny feature so
 // the Connect host (which links no `execution`) reuses the ONE derivation.
 #[cfg(feature = "operation-id")]
@@ -127,21 +128,21 @@ pub use memory::{
     CharacterTomBeliefRow, CharacterTomListQuery, CharacterTomPage, CharacterTomRecordInput,
     CharacterTomService, MemoryRevision,
 };
-/// The review-drain step-point a deterministic concurrency regression arms
+/// note: The review-drain step-point a deterministic concurrency regression arms
 /// (NXM-5 Task 2 fix round 2, finding F1). Test builds only.
 #[cfg(feature = "test-hooks")]
 pub use memory::{MemoryReviewPause, MemoryReviewRendezvous};
 pub use memory_credentials::MemoryCredential;
 pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelection};
 pub use nexus_home_layout::MemoryProviderConfig;
-// The migration report the legacy pass returns; the provider crate owns both
+// note: The migration report the legacy pass returns; the provider crate owns both
 // types, and `nexus_core` keeps the path its callers already name.
 pub use nexus_memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 #[cfg(feature = "execution")]
 pub use owner::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use presets::PresetError;
 pub use principal::Principal;
-// Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
+// note: Provider-owned memory contract objects (spoke §6): the E1/E2 direct-core
 // callers name the Creator record and SOUL profile documents through
 // `nexus_core` instead of a second DTO set.
 #[cfg(feature = "execution")]
@@ -150,7 +151,7 @@ pub use compose::{
     BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
     PatternPackageRef, ReplaceSubtreeOp, UnnestOp,
 };
-// Generate shares the compose registry and the CAS commit with Compose, and the authoring
+// note: Generate shares the compose registry and the CAS commit with Compose, and the authoring
 // surface (simulate/approve/import) is what consumes its candidates, so it rides
 // `strategy-authoring`.
 #[cfg(feature = "strategy-authoring")]
@@ -174,7 +175,7 @@ pub use world_pack::{
     REVIEW_IMPORT_MAX_ATOMS,
 };
 pub use world_rules::RulePatchPresence;
-/// Test-only write-lock rendezvous for the rule write path (`test-hooks`).
+/// note: Test-only write-lock rendezvous for the rule write path (`test-hooks`).
 #[cfg(any(test, feature = "test-hooks"))]
 pub use world_rules::{set_rule_write_gate, RuleWriteGate};
 pub use worlds::DELETE_WORLD_BLOCKED_BY_BINDINGS;

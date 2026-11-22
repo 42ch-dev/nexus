@@ -14,6 +14,8 @@
 //! admission context can never be replayed as authority. The wire projection
 //! that may cross napi is [`AdmittedActorContext`]-shaped data assembled by
 //! the host, not this token.
+// why: request bodies never carry ownership; lifecycle_epoch and ownership are re-read after
+// every fence acquisition.
 
 use nexus_contracts::generated::core::core_actor_admission_request::{
     NexusActorRef, NexusSessionViewpoint,
@@ -54,22 +56,20 @@ use crate::principal::Principal;
 use crate::service::CoreService;
 use sqlx::Row;
 
-/// Wire-mapping failure carrier: the daemon adapter re-sends the retained
+/// note: Wire-mapping failure carrier: the daemon adapter re-sends the retained
 /// `CHARACTER_WIRE_INVALID` internal code from this exact category prefix.
 pub const CHARACTER_WIRE_INVALID_PREFIX: &str = "character_wire_invalid";
 
-// ── Admission types ─────────────────────────────────────────────────────
-
-/// Pair classification for optional Actor/Viewpoint fields.
+/// note: Pair classification for optional Actor/Viewpoint fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorPairMode {
-    /// Both fields absent — exact legacy path.
+    /// note: Both fields absent — exact legacy path.
     Legacy,
-    /// Both fields present — Actor mode.
+    /// note: Both fields present — Actor mode.
     Actor,
 }
 
-/// Optional viewpoint identifiers after pair classification.
+/// note: Optional viewpoint identifiers after pair classification.
 #[derive(Debug, Clone)]
 pub struct ActorViewpoint {
     pub world_id: String,
@@ -78,7 +78,7 @@ pub struct ActorViewpoint {
     pub event_id: Option<String>,
 }
 
-/// Discriminant admitted from stored owners (never from payload claims).
+/// note: Discriminant admitted from stored owners (never from payload claims).
 ///
 /// Opaque on purpose: no `Serialize`/`Deserialize`, so a serialized context
 /// cannot be replayed as authority.
@@ -89,7 +89,7 @@ pub enum AdmittedActor {
 }
 
 impl AdmittedActor {
-    /// The Character id when this admission is a Character; `None` for Creator.
+    /// note: The Character id when this admission is a Character; `None` for Creator.
     #[must_use]
     pub const fn character_id(&self) -> Option<&str> {
         match self {
@@ -99,11 +99,11 @@ impl AdmittedActor {
     }
 }
 
-/// Admitted Actor + viewpoint plus the bounded `KnowledgeView`.
+/// note: Admitted Actor + viewpoint plus the bounded `KnowledgeView`.
 #[derive(Debug, Clone)]
 pub struct AdmittedActorContext {
     pub actor: AdmittedActor,
-    /// Trusted owner: the active Creator admitted at request time. Stored in
+    /// note: Trusted owner: the active Creator admitted at request time. Stored in
     /// the session index and retired tombstones for later owner authorization;
     /// never taken from a request body.
     pub owner_creator_id: String,
@@ -111,14 +111,14 @@ pub struct AdmittedActorContext {
     pub binding_id: Option<String>,
     pub branch_id: Option<String>,
     pub event_id: Option<String>,
-    /// Stored Character `lifecycle_epoch` at admission (`None` for Creator).
+    /// note: Stored Character `lifecycle_epoch` at admission (`None` for Creator).
     /// Execution compares this indexed epoch against the current stored epoch
     /// after activity admission; a mismatch is `actor_session_stale`.
     pub character_epoch: Option<i64>,
     pub view: ActorKnowledgePage,
 }
 
-/// Classify the optional pair. Partial pairs are a stable 400.
+/// note: Classify the optional pair. Partial pairs are a stable 400.
 ///
 /// # Errors
 ///
@@ -143,7 +143,7 @@ fn invalid_input(message: impl Into<String>) -> CoreError {
     CoreError::ActorInput(message.into())
 }
 
-// ── Wire mapping (record → generated DTO) ───────────────────────────────
+// note: wire mapping from the stored record to the generated DTO.
 
 pub fn wire_err(err: impl std::fmt::Display) -> CoreError {
     CoreError::Internal {
@@ -167,7 +167,7 @@ pub fn nexus_character_from_record(record: &CharacterRecord) -> CoreResult<Detai
     nexus_character_with_holder(record, None)
 }
 
-/// Identity projection with the read-only `holder_entry_id` member (durable
+/// note: Identity projection with the read-only `holder_entry_id` member (durable
 /// §7): the holder is service-resolved from the registry and never accepted
 /// from a request, so it is a projection input rather than a stored column on
 /// [`CharacterRecord`].
@@ -245,10 +245,8 @@ pub fn binding_pagination_wire(
     )
 }
 
-// ── Admission + fencing commands ────────────────────────────────────────
-
 impl CoreService {
-    /// Admit a stored Actor: validate the closed `actor_ref`/`viewpoint`
+    /// note: Admit a stored Actor: validate the closed `actor_ref`/`viewpoint`
     /// against stored ownership (active Creator self-ownership, active owned
     /// World, active owned Character and its active stored binding) and mint
     /// the opaque [`AdmittedActor`] token. No host/MCA/session side effects.
@@ -271,7 +269,7 @@ impl CoreService {
         Ok(actor)
     }
 
-    /// Admit one side-effecting Character activity: owner-check before
+    /// note: Admit one side-effecting Character activity: owner-check before
     /// allocating a fence, hold the shared lease, then re-read status/epoch
     /// under the fence (durable §11.3.1). The caller holds the returned
     /// lease through every DB/file/provider/terminal-capture effect; drop
@@ -304,13 +302,13 @@ impl CoreService {
             return Err(invalid_input("activity leases fence Character actors only"));
         };
         let pool = &self.inner.pool;
-        // Owner-check before allocating a fence (no fence state leaks existence).
+        // why: Owner-check before allocating a fence (no fence state leaks existence).
         require_character_row(pool, principal.creator_id(), character_id).await?;
         let parts = self
             .inner
             .character_fences
             .try_acquire_activity(character_id)?;
-        // Re-read under the fence: a transition holds the exclusive write
+        // why: Re-read under the fence: a transition holds the exclusive write
         // guard, so this status/epoch pair is exact for the lease's lifetime.
         let stored = require_character_row(pool, principal.creator_id(), character_id).await?;
         if stored.status != "active" {
@@ -327,7 +325,7 @@ impl CoreService {
         ))
     }
 
-    /// Try to take the exclusive lifecycle lease for archive/restore
+    /// note: Try to take the exclusive lifecycle lease for archive/restore
     /// (durable §11.3.2): busy refusal, never forced cancellation or waiting
     /// on a provider. The lease re-reads ownership and the pre-transition
     /// lifecycle epoch under the fence.
@@ -349,7 +347,7 @@ impl CoreService {
             .inner
             .character_fences
             .try_acquire_transition(&character_id)?;
-        // Re-read under the exclusive fence so the pre-transition epoch is
+        // why: Re-read under the exclusive fence so the pre-transition epoch is
         // exact for material-vs-no-op session retirement (§11.3.2–§11.3.3).
         let stored = require_character_row(pool, principal.creator_id(), &character_id).await?;
         Ok(crate::actor_fence::CharacterTransitionLease::new(
@@ -360,7 +358,7 @@ impl CoreService {
         ))
     }
 
-    /// Commit a Character lifecycle transition while holding the exclusive
+    /// note: Commit a Character lifecycle transition while holding the exclusive
     /// lease from [`Self::acquire_character_transition`] (durable §11.3.2–
     /// §11.3.3). The lease proves the fence; the committed record's epoch is
     /// written back onto the lease so hosts can detect a material transition
@@ -400,7 +398,7 @@ impl CoreService {
                 CharacterStatus::Active
             }
         };
-        // §2.2: resolve the identity's holder through the same exported read the
+        // why: §2.2: resolve the identity's holder through the same exported read the
         // admission paths use, before the lifecycle write. The storage layer
         // re-resolves it inside the transaction, so the archive/restore commit
         // still fails closed on a registry that changed under the fence.
@@ -433,7 +431,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// One-call Character lifecycle transition: exclusive lease acquisition
+    /// note: One-call Character lifecycle transition: exclusive lease acquisition
     /// (busy refusal + epoch/ownership re-read) then the revision-checked
     /// commit. Host session retirement is a host concern — hosts that must
     /// retire old-epoch sessions under the fence compose
@@ -456,7 +454,7 @@ impl CoreService {
     }
 }
 
-/// Mint the token from the closed wire sum (schema-derived discriminator —
+/// note: Mint the token from the closed wire sum (schema-derived discriminator —
 /// never an ownership claim).
 fn admit_actor_token(
     caller_creator_id: &str,
@@ -476,7 +474,7 @@ fn admit_actor_token(
     })
 }
 
-#[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
+#[allow(clippy::needless_pass_by_value)] // why: callers move the owned payload in
 fn admit_viewpoint(viewpoint: NexusSessionViewpoint) -> ActorViewpoint {
     ActorViewpoint {
         world_id: viewpoint.world_id.to_string(),
@@ -486,7 +484,7 @@ fn admit_viewpoint(viewpoint: NexusSessionViewpoint) -> ActorViewpoint {
     }
 }
 
-/// Validate stored ownership for an admission (durable §11.3 admission
+/// note: Validate stored ownership for an admission (durable §11.3 admission
 /// ordering: Creator self-ownership, binding shape, active owned World,
 /// active owned Character, active stored binding).
 pub async fn require_admitted_ownership(
@@ -515,14 +513,14 @@ pub async fn require_admitted_ownership(
             require_active_binding(pool, character_id, binding, &viewpoint.world_id).await?;
         }
     }
-    // §2.1: the identity is usable only while its holder registry row exists;
+    // why: §2.1: the identity is usable only while its holder registry row exists;
     // admission is a normal read, so missing/corrupt registry state fails
     // closed here instead of provisioning a holder.
     require_actor_holder(pool, caller_creator_id, actor).await?;
     Ok(())
 }
 
-/// Resolve the stable holder of an admitted Actor's stored identity for a
+/// note: Resolve the stable holder of an admitted Actor's stored identity for a
 /// normal read (durable §2.2).
 ///
 /// Fails closed when the registry row is missing or corrupt
@@ -596,7 +594,7 @@ pub async fn require_active_owned_world(
     }
 }
 
-/// Active owned Character: foreign/missing → 404, owned but archived → 409
+/// note: Active owned Character: foreign/missing → 404, owned but archived → 409
 /// `character_inactive`. Returns the stored record for epoch capture.
 ///
 /// # Errors
@@ -619,7 +617,7 @@ pub async fn require_active_owned_character(
     Ok(stored)
 }
 
-/// Ownership-scoped Character row or a 404 (foreign ids are not
+/// note: Ownership-scoped Character row or a 404 (foreign ids are not
 /// distinguished from missing).
 pub async fn require_character_row(
     pool: &SqlitePool,
@@ -632,7 +630,7 @@ pub async fn require_character_row(
         .ok_or_else(|| not_found("character", character_id))
 }
 
-/// Active stored binding tuple: the binding exists, belongs to
+/// note: Active stored binding tuple: the binding exists, belongs to
 /// `character_id`, targets `world_id`, and is active; anything else is 404
 /// (existence hidden).
 pub async fn require_active_binding(
@@ -661,10 +659,8 @@ pub async fn require_active_binding(
     }
 }
 
-// ── Character / binding family ──────────────────────────────────────────
-
 impl CoreService {
-    /// Create an owned Character with its initial active binding in one
+    /// note: Create an owned Character with its initial active binding in one
     /// atomic write (display name uniqueness, persona/`WorldSheet` validation
     /// and the FK-prechecks stay in the shared storage repository).
     ///
@@ -706,7 +702,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// List the principal's Characters, oldest first, with offset pagination.
+    /// note: List the principal's Characters, oldest first, with offset pagination.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
@@ -741,7 +737,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// Project one owned Character; foreign/unknown ids are 404.
+    /// note: Project one owned Character; foreign/unknown ids are 404.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
@@ -763,7 +759,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// Patch an owned, active Character behind the shared activity lease
+    /// note: Patch an owned, active Character behind the shared activity lease
     /// (CAS-checked in one `BEGIN IMMEDIATE` write).
     ///
     /// # Errors
@@ -787,7 +783,7 @@ impl CoreService {
                 },
             )
             .await?;
-        // §2.2: the lifecycle write resolves the identity's holder through the
+        // why: §2.2: the lifecycle write resolves the identity's holder through the
         // same exported read the admission paths use (the storage layer
         // re-resolves it inside its own transaction).
         require_actor_holder(
@@ -816,7 +812,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// The **identity detail** projection of one stored Character (durable §7):
+    /// note: The **identity detail** projection of one stored Character (durable §7):
     /// the same wire shape as [`nexus_character_from_record`] plus the
     /// read-only `holder_entry_id`, resolved from the holder registry. The
     /// registry is only ever **read** here — a missing row fails closed as
@@ -837,7 +833,7 @@ impl CoreService {
         nexus_character_with_holder(record, Some(holder))
     }
 
-    /// Add one active `ActorWorldBinding` behind the shared activity lease.
+    /// note: Add one active `ActorWorldBinding` behind the shared activity lease.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
@@ -879,7 +875,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// List one owned Character's bindings; foreign Characters are 404.
+    /// note: List one owned Character's bindings; foreign Characters are 404.
     ///
     /// # Errors
     /// Returns [`CoreError::AuthRequired`] when the principal fails
@@ -916,7 +912,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// Project one owned binding (retained reads tolerate archived
+    /// note: Project one owned binding (retained reads tolerate archived
     /// Character/World status); foreign/missing/tuple-mismatched ids are 404.
     ///
     /// # Errors
@@ -939,7 +935,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// Patch the optional `WorldSheet` link on an owned active binding behind
+    /// note: Patch the optional `WorldSheet` link on an owned active binding behind
     /// the shared activity lease (CAS-checked).
     ///
     /// # Errors
@@ -979,7 +975,7 @@ impl CoreService {
             .map_err(wire_err)
     }
 
-    /// Remove one active binding behind the shared activity lease. The last
+    /// note: Remove one active binding behind the shared activity lease. The last
     /// active binding is a zero-mutation 409
     /// (`last_active_actor_world_binding`), as is a binding that still owns
     /// knowledge or local memory.
@@ -1012,7 +1008,7 @@ impl CoreService {
         .map_err(actor_db_err)
     }
 
-    /// Owner-scoped binding detail row (`None` for foreign/missing rows).
+    /// note: Owner-scoped binding detail row (`None` for foreign/missing rows).
     async fn owned_binding_row(
         &self,
         owner: &str,
@@ -1038,7 +1034,7 @@ fn optional_str(value: Option<&impl std::ops::Deref<Target = String>>) -> Option
     value.map(|s| s.as_str())
 }
 
-/// Offset-backed page meta (retained `v1:` cursor convention).
+/// note: Offset-backed page meta (retained `v1:` cursor convention).
 pub fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<String>, bool) {
     let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
     if fetched > limit_us {
@@ -1048,7 +1044,7 @@ pub fn offset_page_meta(fetched: usize, limit: u32, offset: u32) -> (Option<Stri
     }
 }
 
-/// serde round-trip between the shared and response-local generated clones of
+/// note: serde round-trip between the shared and response-local generated clones of
 /// a wire type (the retained `map_wire` translation, now core-side).
 pub fn map_wire_items<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     items: Vec<T>,
@@ -1057,7 +1053,7 @@ pub fn map_wire_items<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     serde_json::from_value(value).map_err(wire_err)
 }
 
-/// serde round-trip between the shared and response-local generated clones of
+/// note: serde round-trip between the shared and response-local generated clones of
 /// a wire type (the retained `map_wire` translation, now core-side).
 pub fn map_wire_one<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     value: T,
@@ -1066,7 +1062,7 @@ pub fn map_wire_one<T: serde::Serialize, U: serde::de::DeserializeOwned>(
     serde_json::from_value(json).map_err(wire_err)
 }
 
-/// Pool-bound stored admission for hosts that compose admission around
+/// note: Pool-bound stored admission for hosts that compose admission around
 /// their own session registry (the daemon agent-host shim until P4-T2
 /// consumes the core leases).
 ///
@@ -1079,7 +1075,7 @@ pub struct CoreActorAdmission {
 }
 
 impl CoreActorAdmission {
-    /// Bind admission to a workspace pool.
+    /// note: Bind admission to a workspace pool.
     #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
         Self {
@@ -1088,7 +1084,7 @@ impl CoreActorAdmission {
         }
     }
 
-    /// Admit stored Creator/Character/World/binding ownership and load the
+    /// note: Admit stored Creator/Character/World/binding ownership and load the
     /// bounded view (durable §11.3 admission ordering).
     ///
     /// # Errors
@@ -1130,7 +1126,7 @@ impl CoreActorAdmission {
                     .await?;
             }
         }
-        // §2.1/§2.2: the same fail-closed holder resolution as the core
+        // why: §2.1/§2.2: the same fail-closed holder resolution as the core
         // admission path — a normal read never provisions a missing holder.
         require_actor_holder(&self.pool, caller_creator_id, &actor).await?;
         let view = self

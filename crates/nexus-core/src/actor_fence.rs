@@ -59,6 +59,8 @@
 //! order. Acquisition stays non-blocking per subject and a failure releases
 //! every lease already taken in that attempt (returning the partial set is a
 //! bug: the caller never sees a half-held plan).
+// why: the fence is split into a per-service in-process table and an OS file lock so
+// independently opened cores and processes race correctly.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -68,7 +70,7 @@ use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 use crate::error::{CoreError, CoreResult};
 
-/// Lock family for one fenced subject kind (§4.3).
+/// note: Lock family for one fenced subject kind (§4.3).
 ///
 /// The kind selects the lock namespace and the busy refusal code; it is not an
 /// authority carrier and grants nothing on its own.
@@ -79,7 +81,7 @@ pub enum ActorFenceKind {
 }
 
 impl ActorFenceKind {
-    /// Lock subdirectory under the state DB directory.
+    /// note: Lock subdirectory under the state DB directory.
     #[must_use]
     pub const fn dir_name(self) -> &'static str {
         match self {
@@ -89,17 +91,17 @@ impl ActorFenceKind {
     }
 }
 
-/// The per-subject process fence cell: one `RwLock` per `(kind, subject)`,
+/// note: The per-subject process fence cell: one `RwLock` per `(kind, subject)`,
 /// reclaimed once no guard keeps it alive.
 type FenceCell = Arc<RwLock<()>>;
 
-/// Per-subject fence state owned by a [`crate::CoreService`].
+/// note: Per-subject fence state owned by a [`crate::CoreService`].
 pub struct ActorFenceTable {
     process: Mutex<HashMap<(ActorFenceKind, String), FenceCell>>,
     locks_dir: PathBuf,
 }
 
-/// Shared activity lease (durable §11.3.1): hold through every DB/file/
+/// note: Shared activity lease (durable §11.3.1): hold through every DB/file/
 /// provider/terminal-capture effect; drop releases both fence layers.
 pub struct ActorActivityLease {
     _read: OwnedRwLockReadGuard<()>,
@@ -109,7 +111,7 @@ pub struct ActorActivityLease {
     epoch: i64,
 }
 
-/// Shared knowledge-effect leases for one admitted read/effect plan (§4.3).
+/// note: Shared knowledge-effect leases for one admitted read/effect plan (§4.3).
 ///
 /// The plan is acquired World ids then Character ids; the guards are held
 /// together and dropped together, so a caller cannot hold a Character lease
@@ -122,7 +124,7 @@ pub struct KnowledgeEffectLeases {
     character_os: Vec<OsSharedLock>,
 }
 
-/// Exclusive governance lease for one World or Character subject (§4.3).
+/// note: Exclusive governance lease for one World or Character subject (§4.3).
 ///
 /// Busy refusal against every in-flight shared knowledge lease of that exact
 /// subject: a disclosure edit is refused while a read/stream is still running,
@@ -134,7 +136,7 @@ pub struct KnowledgeGovernanceLease {
     _os: OsExclusiveLock,
 }
 
-/// Exclusive transition lease (durable §11.3.2).
+/// note: Exclusive transition lease (durable §11.3.2).
 ///
 /// Busy refusal, epoch re-read under the fence, updated to the committed
 /// epoch by [`crate::CoreService::commit_character_transition`] so the host
@@ -158,14 +160,14 @@ impl ActorFenceTable {
         }
     }
 
-    /// Stable per-subject OS lock file path (its own namespace per kind).
+    /// note: Stable per-subject OS lock file path (its own namespace per kind).
     fn lock_path(&self, kind: ActorFenceKind, subject_id: &str) -> PathBuf {
         self.locks_dir
             .join(kind.dir_name())
             .join(format!("{subject_id}.lock"))
     }
 
-    /// Fetch or create the per-subject process fence, sweeping entries with
+    /// note: Fetch or create the per-subject process fence, sweeping entries with
     /// no live guard (live-Arc reclaim, mirroring the daemon §11.3.6 sweep).
     fn fence_for(&self, kind: ActorFenceKind, subject_id: &str) -> Arc<RwLock<()>> {
         let mut fences = self
@@ -180,7 +182,7 @@ impl ActorFenceTable {
         )
     }
 
-    /// Try to take one shared fence: process read guard first, then the
+    /// note: Try to take one shared fence: process read guard first, then the
     /// non-blocking OS shared lock.
     fn try_shared(
         &self,
@@ -195,7 +197,7 @@ impl ActorFenceTable {
         Ok((read, os))
     }
 
-    /// Try to take one exclusive fence: process write guard, then the
+    /// note: Try to take one exclusive fence: process write guard, then the
     /// non-blocking OS exclusive lock.
     fn try_exclusive(
         &self,
@@ -210,7 +212,7 @@ impl ActorFenceTable {
         Ok((write, os))
     }
 
-    /// Try to take the shared activity fence for one Character: process read
+    /// note: Try to take the shared activity fence for one Character: process read
     /// guard first, then the non-blocking OS shared lock.
     ///
     /// Non-blocking by contract (arch §2 / durable §11.3: "shared effect
@@ -228,7 +230,7 @@ impl ActorFenceTable {
         Ok(ActivityFenceParts { read, os })
     }
 
-    /// Try to take the exclusive transition fence (busy refusal, never
+    /// note: Try to take the exclusive transition fence (busy refusal, never
     /// waiting): process write guard, then the non-blocking OS exclusive
     /// lock. Any outstanding activity lease refuses with `character_busy`.
     pub(crate) fn try_acquire_transition(
@@ -239,7 +241,7 @@ impl ActorFenceTable {
         Ok(TransitionFenceParts { write, os })
     }
 
-    /// Try to take the whole shared knowledge-effect plan (§4.3): World ids
+    /// note: Try to take the whole shared knowledge-effect plan (§4.3): World ids
     /// then Character ids, lexicographically within each kind, duplicates
     /// collapsed.
     ///
@@ -275,7 +277,7 @@ impl ActorFenceTable {
         })
     }
 
-    /// Try to take the exclusive governance fence for one World/Character
+    /// note: Try to take the exclusive governance fence for one World/Character
     /// subject (§4.3). Non-blocking: any in-flight shared knowledge lease of
     /// that subject is the busy refusal.
     pub(crate) fn try_acquire_knowledge_governance(
@@ -293,7 +295,7 @@ impl ActorFenceTable {
     }
 }
 
-/// Canonical acquisition order inside one kind: lexical, duplicates collapsed.
+/// note: Canonical acquisition order inside one kind: lexical, duplicates collapsed.
 fn canonical_subjects(ids: &[String]) -> Vec<&str> {
     let mut unique: Vec<&str> = ids.iter().map(String::as_str).collect();
     unique.sort_unstable();
@@ -301,7 +303,7 @@ fn canonical_subjects(ids: &[String]) -> Vec<&str> {
     unique
 }
 
-/// Translate a non-blocking lock outcome: a held lease is the retained busy
+/// note: Translate a non-blocking lock outcome: a held lease is the retained busy
 /// refusal for that kind; anything else is a real fault.
 fn lock_error(kind: ActorFenceKind, subject_id: &str, err: std::fs::TryLockError) -> CoreError {
     match err {
@@ -312,7 +314,7 @@ fn lock_error(kind: ActorFenceKind, subject_id: &str, err: std::fs::TryLockError
     }
 }
 
-/// The retained refusal for a contended subject: `character_busy` keeps its
+/// note: The retained refusal for a contended subject: `character_busy` keeps its
 /// verbatim daemon wording, World contention is its own typed code.
 fn busy(kind: ActorFenceKind, subject_id: &str) -> CoreError {
     match kind {
@@ -326,19 +328,19 @@ fn busy(kind: ActorFenceKind, subject_id: &str) -> CoreError {
     }
 }
 
-/// Raw fence halves handed to the lease constructors.
+/// note: Raw fence halves handed to the lease constructors.
 pub struct ActivityFenceParts {
     read: OwnedRwLockReadGuard<()>,
     os: OsSharedLock,
 }
 
-/// Raw transition fence halves handed to the lease constructors.
+/// note: Raw transition fence halves handed to the lease constructors.
 pub struct TransitionFenceParts {
     write: OwnedRwLockWriteGuard<()>,
     os: OsExclusiveLock,
 }
 
-/// The retained `409 character_busy` refusal (verbatim daemon wording).
+/// note: The retained `409 character_busy` refusal (verbatim daemon wording).
 pub fn busy_error(character_id: &str) -> CoreError {
     CoreError::ActorConflict {
         code: "character_busy".to_string(),
@@ -348,7 +350,7 @@ pub fn busy_error(character_id: &str) -> CoreError {
     }
 }
 
-/// One descriptor per live lease: OS locks ride on the open file description,
+/// note: One descriptor per live lease: OS locks ride on the open file description,
 /// so two descriptors in the same process contend exactly like two processes.
 fn open_lock_file(path: &Path) -> std::io::Result<std::fs::File> {
     if let Some(parent) = path.parent() {
@@ -362,18 +364,18 @@ fn open_lock_file(path: &Path) -> std::io::Result<std::fs::File> {
         .open(path)
 }
 
-/// Shared (read) OS lock released on drop.
+/// note: Shared (read) OS lock released on drop.
 struct OsSharedLock {
     file: std::fs::File,
 }
 
 impl OsSharedLock {
-    /// Acquire non-blocking; a held exclusive lease surfaces as
+    /// note: Acquire non-blocking; a held exclusive lease surfaces as
     /// [`TryLockError::WouldBlock`] and is translated to the retained busy
     /// refusal by the caller. Never waits on the blocking pool: an admission
     /// blocked behind an in-flight transition would stall the caller instead
     /// of reporting busy, which the lease contract forbids.
-    #[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
+    #[allow(clippy::needless_pass_by_value)] // why: callers move the owned payload in
     fn try_acquire(path: PathBuf) -> Result<Self, std::fs::TryLockError> {
         let file = open_lock_file(&path).map_err(std::fs::TryLockError::Error)?;
         file.try_lock_shared()?;
@@ -383,21 +385,21 @@ impl OsSharedLock {
 
 impl Drop for OsSharedLock {
     fn drop(&mut self) {
-        // Released with the descriptor; an explicit unlock keeps the release
+        // why: Released with the descriptor; an explicit unlock keeps the release
         // independent of when the file handle is finally closed.
         let _ = self.file.unlock();
     }
 }
 
-/// Exclusive (write) OS lock released on drop.
+/// note: Exclusive (write) OS lock released on drop.
 struct OsExclusiveLock {
     file: std::fs::File,
 }
 
 impl OsExclusiveLock {
-    /// Acquire non-blocking; a held lease surfaces as [`TryLockError::WouldBlock`]
+    /// note: Acquire non-blocking; a held lease surfaces as [`TryLockError::WouldBlock`]
     /// and is translated to the retained busy refusal by the caller.
-    #[allow(clippy::needless_pass_by_value)] // callers move the owned payload in
+    #[allow(clippy::needless_pass_by_value)] // why: callers move the owned payload in
     fn try_acquire(path: PathBuf) -> Result<Self, std::fs::TryLockError> {
         let file = open_lock_file(&path).map_err(std::fs::TryLockError::Error)?;
         file.try_lock()?;
@@ -427,19 +429,19 @@ impl ActorActivityLease {
         }
     }
 
-    /// Trusted owner (active Creator) admitted with this activity.
+    /// note: Trusted owner (active Creator) admitted with this activity.
     #[must_use]
     pub fn owner_creator_id(&self) -> &str {
         &self.owner_creator_id
     }
 
-    /// Character this activity lease covers.
+    /// note: Character this activity lease covers.
     #[must_use]
     pub fn character_id(&self) -> &str {
         &self.character_id
     }
 
-    /// Stored lifecycle epoch re-read under the fence at admission.
+    /// note: Stored lifecycle epoch re-read under the fence at admission.
     #[must_use]
     pub const fn epoch(&self) -> i64 {
         self.epoch
@@ -472,19 +474,19 @@ impl CharacterTransitionLease {
         }
     }
 
-    /// Trusted owner (active Creator) admitted for the transition.
+    /// note: Trusted owner (active Creator) admitted for the transition.
     #[must_use]
     pub fn owner_creator_id(&self) -> &str {
         &self.owner_creator_id
     }
 
-    /// Character this transition lease covers.
+    /// note: Character this transition lease covers.
     #[must_use]
     pub fn character_id(&self) -> &str {
         &self.character_id
     }
 
-    /// Stored lifecycle epoch re-read under the exclusive fence at
+    /// note: Stored lifecycle epoch re-read under the exclusive fence at
     /// transition start; after a committed
     /// [`crate::CoreService::commit_character_transition`] this is the
     /// committed epoch, so hosts can detect material transitions by
@@ -511,7 +513,7 @@ impl std::fmt::Debug for CharacterTransitionLease {
 
 impl std::fmt::Debug for KnowledgeEffectLeases {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Non-exhaustive: the held subject ids are not retained here, and the
+        // why: Non-exhaustive: the held subject ids are not retained here, and the
         // guards must not be introspected beyond their counts.
         f.debug_struct("KnowledgeEffectLeases")
             .field("world_read_leases", &self.world_read.len())
@@ -523,13 +525,13 @@ impl std::fmt::Debug for KnowledgeEffectLeases {
 }
 
 impl KnowledgeGovernanceLease {
-    /// Fenced subject kind.
+    /// note: Fenced subject kind.
     #[must_use]
     pub const fn kind(&self) -> ActorFenceKind {
         self.kind
     }
 
-    /// Fenced World/Character id.
+    /// note: Fenced World/Character id.
     #[must_use]
     pub fn subject_id(&self) -> &str {
         &self.subject_id

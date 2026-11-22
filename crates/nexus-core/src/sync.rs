@@ -14,6 +14,8 @@
 //! with no retry time, durable row retained). Manual review remains a
 //! caller-side no-op: a CLI that resolves nothing simply does not call
 //! [`CoreService::resolve_outbox`].
+// why: platform auth, push and pull stay in the existing CLI cloud clients; this surface is
+// local and never re-sends by itself.
 
 use nexus_cloud_sync::outbox::Outbox;
 use nexus_cloud_sync::pool::{OutboxPool, DEFAULT_POOL_SIZE};
@@ -30,12 +32,12 @@ use crate::home::newtype_value;
 use crate::principal::Principal;
 use crate::service::CoreService;
 
-/// Status page bound (the generated surface is a bounded page, not an
+/// note: Status page bound (the generated surface is a bounded page, not an
 /// unbounded dump).
 const OUTBOX_STATUS_PAGE: i64 = 100;
 
 impl CoreService {
-    /// Bounded page (newest first) of the durable send-queue entries of this
+    /// note: Bounded page (newest first) of the durable send-queue entries of this
     /// workspace's state DB, each with delivery state, retry accounting and
     /// last error.
     ///
@@ -58,7 +60,7 @@ impl CoreService {
         Ok(CoreOutboxStatus { entries })
     }
 
-    /// Resolve one stuck local outbox entry: `retry` re-queues it for
+    /// note: Resolve one stuck local outbox entry: `retry` re-queues it for
     /// delivery, `discard` drops it locally. Only stuck (`conflicted`/
     /// `failed`) entries are resolvable; resolution is local and never
     /// re-sends by itself.
@@ -117,7 +119,7 @@ impl CoreService {
         Ok(())
     }
 
-    /// Open the existing cloud-sync Outbox on its private guarded pool for
+    /// note: Open the existing cloud-sync Outbox on its private guarded pool for
     /// this workspace's state DB.
     async fn open_outbox(&self) -> CoreResult<Outbox> {
         let pool = OutboxPool::new(&self.inner.db_path, DEFAULT_POOL_SIZE)
@@ -127,7 +129,7 @@ impl CoreService {
     }
 }
 
-/// Map a sync/outbox error onto the core taxonomy. Missing entries are
+/// note: Map a sync/outbox error onto the core taxonomy. Missing entries are
 /// not-found; stuck-state and input violations are caller errors; everything
 /// else is an honest internal failure with its category string.
 fn sync_err(e: SyncError) -> CoreError {
@@ -152,7 +154,7 @@ fn sync_err(e: SyncError) -> CoreError {
     }
 }
 
-/// Project one durable outbox row onto the generated status entry.
+/// note: Project one durable outbox row onto the generated status entry.
 fn map_entry(
     entry: nexus_contracts::local::domain::OutboxEntry,
 ) -> CoreResult<CoreOutboxStatusEntriesItem> {

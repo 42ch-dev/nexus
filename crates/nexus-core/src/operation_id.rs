@@ -22,21 +22,23 @@
 //! Explicit non-model: `HostOperationId::new()` (random-unique per attempt)
 //! is stable *uniqueness*, not replay stability — receipts exist to cover
 //! what that scheme cannot.
+// why: the actor/session/action/args tuple is the whole scope, so retries derive the same id
+// and two scopes never collide.
 
 use crate::error::CoreError;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// Wire prefix of a durable operation id.
+/// note: Wire prefix of a durable operation id.
 pub const OPERATION_ID_PREFIX: &str = "op_";
-/// Number of lowercase hex characters after [`OPERATION_ID_PREFIX`] (128 bits).
+/// note: Number of lowercase hex characters after [`OPERATION_ID_PREFIX`] (128 bits).
 pub const OPERATION_ID_HEX_LEN: usize = 32;
-/// Exact wire shape of a durable operation id (spec §B.1).
+/// note: Exact wire shape of a durable operation id (spec §B.1).
 pub const OPERATION_ID_PATTERN: &str = "^op_[0-9a-f]{32}$";
-/// Wire field a caller may use to supply its own id (spec §B.1).
+/// note: Wire field a caller may use to supply its own id (spec §B.1).
 pub const OPERATION_ID_FIELD: &str = "operation_id";
 
-/// The scope tuple the operation id is derived from (spec §B.1).
+/// note: The scope tuple the operation id is derived from (spec §B.1).
 ///
 /// - `actor` — the principal (`creator_id`);
 /// - `session` — Connect: the authenticated peer session id; compute Run:
@@ -45,32 +47,32 @@ pub const OPERATION_ID_FIELD: &str = "operation_id";
 /// - `args` — the operation arguments.
 #[derive(Debug, Clone, Copy)]
 pub struct OperationScope<'a> {
-    /// The principal (`creator_id`).
+    /// note: The principal (`creator_id`).
     pub actor: &'a str,
-    /// The consumer's session scope.
+    /// note: The consumer's session scope.
     pub session: &'a str,
-    /// The op/tool id string.
+    /// note: The op/tool id string.
     pub action: &'a str,
-    /// The operation arguments.
+    /// note: The operation arguments.
     pub args: &'a Value,
 }
 
-/// Refusal from the operation-id shape/derivation layer.
+/// note: Refusal from the operation-id shape/derivation layer.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OperationIdError {
-    /// A caller-supplied id does not match [`OPERATION_ID_PATTERN`].
+    /// note: A caller-supplied id does not match [`OPERATION_ID_PATTERN`].
     #[error("invalid operation_id {value:?}: must match op_<32 lowercase hex>")]
     Malformed {
-        /// The rejected value, verbatim.
+        /// note: The rejected value, verbatim.
         value: String,
     },
-    /// `args.operation_id` is present but is not a string.
+    /// note: `args.operation_id` is present but is not a string.
     #[error("args.operation_id must be a string")]
     NotAString,
 }
 
 impl From<OperationIdError> for CoreError {
-    /// The malformed caller id is the retained `invalid_input` (422) refusal
+    /// note: The malformed caller id is the retained `invalid_input` (422) refusal
     /// at adapters, naming the same wire field the caller used.
     fn from(err: OperationIdError) -> Self {
         Self::InvalidInput {
@@ -80,13 +82,13 @@ impl From<OperationIdError> for CoreError {
     }
 }
 
-/// Append `text` as a canonical JSON string scalar (quoted, escaped exactly as
+/// note: Append `text` as a canonical JSON string scalar (quoted, escaped exactly as
 /// the tree form would render it) — no intermediate `Value`.
 fn write_canonical_str(text: &str, out: &mut String) {
     out.push_str(&serde_json::to_string(text).expect("serializing a &str is infallible"));
 }
 
-/// Append the canonical JSON of `value` — object keys sorted at every level, so
+/// note: Append the canonical JSON of `value` — object keys sorted at every level, so
 /// `{"a":1,"b":2}` and `{"b":2,"a":1}` render identically — WITHOUT
 /// materializing an owned copy of the value.
 ///
@@ -127,7 +129,7 @@ fn write_canonical_json(value: &Value, out: &mut String) {
     }
 }
 
-/// Canonical JSON of the scope tuple `{actor, session, action, args}`.
+/// note: Canonical JSON of the scope tuple `{actor, session, action, args}`.
 ///
 /// The tuple is written straight into the buffer (keys in sorted order) instead
 /// of materializing a tuple tree and then a full recursive copy of `args` on
@@ -148,7 +150,7 @@ fn canonical_operation_json(scope: &OperationScope<'_>) -> String {
     out
 }
 
-/// Validate the `op_<hex32>` shape of a durable operation id.
+/// note: Validate the `op_<hex32>` shape of a durable operation id.
 ///
 /// # Errors
 ///
@@ -171,7 +173,7 @@ pub fn validate_operation_id(id: &str) -> Result<(), OperationIdError> {
     Ok(())
 }
 
-/// Derive the default `op_<hex32>` id for a logical call (spec §B.1).
+/// note: Derive the default `op_<hex32>` id for a logical call (spec §B.1).
 ///
 /// Same logical call retried/replayed ⇒ identical tuple ⇒ identical id; any
 /// scope difference ⇒ a different id.
@@ -188,7 +190,7 @@ pub fn derive_operation_id(scope: &OperationScope<'_>) -> String {
     )
 }
 
-/// A logical call's durable identity: the id to address its receipt with, and
+/// note: A logical call's durable identity: the id to address its receipt with, and
 /// the fingerprint the store compares first-writer-wins.
 ///
 /// Resolved together so the canonical document is serialized, and hashed,
@@ -196,13 +198,13 @@ pub fn derive_operation_id(scope: &OperationScope<'_>) -> String {
 /// of the same digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationIdentity {
-    /// The durable operation id (`op_<hex32>`, or the caller-supplied id).
+    /// note: The durable operation id (`op_<hex32>`, or the caller-supplied id).
     pub operation_id: String,
-    /// SHA-256 (64 hex chars) of the same canonical logical request.
+    /// note: SHA-256 (64 hex chars) of the same canonical logical request.
     pub request_fingerprint: String,
 }
 
-/// Resolve the id AND the request fingerprint of one logical call in a single
+/// note: Resolve the id AND the request fingerprint of one logical call in a single
 /// pass (spec §B.1 derivation + §B.2 fingerprint).
 ///
 /// # Errors
@@ -213,7 +215,7 @@ pub struct OperationIdentity {
 pub fn resolve_operation_identity(
     scope: &OperationScope<'_>,
 ) -> Result<OperationIdentity, OperationIdError> {
-    // One canonical serialization, one digest: the id keeps its first 16 bytes
+    // why: One canonical serialization, one digest: the id keeps its first 16 bytes
     // and the fingerprint the whole digest.
     let canonical = canonical_operation_json(scope);
     let digest = Sha256::digest(canonical.as_bytes());
@@ -234,7 +236,7 @@ pub fn resolve_operation_identity(
     })
 }
 
-/// Resolve the id for a logical call: a caller-supplied `args.operation_id`
+/// note: Resolve the id for a logical call: a caller-supplied `args.operation_id`
 /// is used verbatim after shape validation, otherwise the default
 /// derivation applies (spec §B.1).
 ///
@@ -254,7 +256,7 @@ pub fn resolve_operation_id(scope: &OperationScope<'_>) -> Result<String, Operat
     }
 }
 
-/// SHA-256 (full 64 hex chars) of the canonical **logical request** — the
+/// note: SHA-256 (full 64 hex chars) of the canonical **logical request** — the
 /// `request_fingerprint` the receipt store compares first-writer-wins
 /// (spec §B.2).
 ///
@@ -365,7 +367,7 @@ mod tests {
         let args = json!({"operation_id": supplied, "k": "v"});
         let resolved = resolve_operation_id(&scope("creator-1", "session-1", "op", &args)).unwrap();
         assert_eq!(resolved, supplied);
-        // ...and it is not silently re-derived.
+        // why: ...and it is not silently re-derived.
         let derived =
             derive_operation_id(&scope("creator-1", "session-1", "op", &json!({"k": "v"})));
         assert_ne!(resolved, derived);
@@ -387,12 +389,12 @@ mod tests {
             "",
             "op_",
             "op_123",
-            "op_0000000000000000000000000000000",   // 31 hex
-            "op_000000000000000000000000000000000", // 33 hex
-            "op_0000000000000000000000000000000G",  // non-hex char
-            "op_0000000000000000000000000000000A",  // uppercase hex
-            "OP_00000000000000000000000000000000",  // uppercase prefix
-            "00000000000000000000000000000000",     // missing prefix
+            "op_0000000000000000000000000000000",   // note: 31 hex
+            "op_000000000000000000000000000000000", // note: 33 hex
+            "op_0000000000000000000000000000000G",  // note: non-hex char
+            "op_0000000000000000000000000000000A",  // note: uppercase hex
+            "OP_00000000000000000000000000000000",  // note: uppercase prefix
+            "00000000000000000000000000000000",     // note: missing prefix
         ] {
             let args = json!({"operation_id": bad});
             let err =
@@ -424,7 +426,7 @@ mod tests {
         );
     }
 
-    /// The reference canonicalization: build the sorted tree, then serialize it.
+    /// note: The reference canonicalization: build the sorted tree, then serialize it.
     /// Kept as the in-test oracle for the allocation-light writer.
     fn reference_canonical_json(value: &Value) -> String {
         fn canonicalize(value: &Value) -> Value {
@@ -446,7 +448,7 @@ mod tests {
             .expect("serializing a serde_json::Value is infallible")
     }
 
-    /// The direct canonical writer must render byte-identically to the
+    /// note: The direct canonical writer must render byte-identically to the
     /// tree-building reference on every shape, including the escaping corners:
     /// the id and the fingerprint are digests of this exact text, so a rendering
     /// difference would silently change every durable id.
@@ -480,7 +482,7 @@ mod tests {
         }
     }
 
-    /// A FIXED vector pins the byte-level contract: the canonical JSON, the
+    /// note: A FIXED vector pins the byte-level contract: the canonical JSON, the
     /// derived id and the fingerprint must not drift across refactors — the id
     /// and the fingerprint are two projections of this exact document.
     #[test]
@@ -500,7 +502,7 @@ mod tests {
             "89c4a8b6b29ced2ea04b424c46ec3e78b695ee019b5a05c1d8ab0c405422e6ce"
         );
 
-        // The single-pass identity resolves exactly those two projections.
+        // why: The single-pass identity resolves exactly those two projections.
         let identity = resolve_operation_identity(&fixed_scope).expect("derived identity");
         assert_eq!(identity.operation_id, derive_operation_id(&fixed_scope));
         assert_eq!(
@@ -508,7 +510,7 @@ mod tests {
             request_fingerprint(&fixed_scope)
         );
 
-        // A caller-supplied id is kept verbatim.
+        // why: A caller-supplied id is kept verbatim.
         let supplied = json!({"operation_id": format!("op_{}", "1".repeat(32))});
         let supplied_scope = scope("creator-1", "session-1", "op", &supplied);
         assert_eq!(
@@ -519,7 +521,7 @@ mod tests {
         );
     }
 
-    /// §B.2 `request_fingerprint`: the fingerprint binds the COMPLETE logical
+    /// note: §B.2 `request_fingerprint`: the fingerprint binds the COMPLETE logical
     /// request scope — so a caller-supplied id can never silence a different
     /// caller/session/action — is stable under canonical key order, and is
     /// content-addressed.
@@ -547,7 +549,7 @@ mod tests {
              fingerprint identically on every attempt"
         );
 
-        // Every scope component participates: two peers (or two grant actors)
+        // why: Every scope component participates: two peers (or two grant actors)
         // that share a verbatim caller-supplied id but differ in scope must
         // NOT collide, or one would silently replay the other's receipt.
         for (label, other) in [

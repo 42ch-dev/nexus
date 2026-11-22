@@ -11,12 +11,14 @@
 //! meaning a caller acts on: a missing `admin` grant reads `forbidden`, and a
 //! conflicting adopted body reads `idempotency_conflict`, so an operator can act
 //! on a migration refusal instead of seeing one flat internal error.
+// why: the provider names no core type, so this From impl is the whole boundary and is
+// deliberately not one-to-one.
 
 use nexus_memory_provider::ProviderError;
 
 use crate::error::CoreError;
 
-/// The conflict code a migration pass reports when its recorded manifest no
+/// note: The conflict code a migration pass reports when its recorded manifest no
 /// longer matches the legacy source, or when an adopted object's stored body
 /// differs from it.
 const IDEMPOTENCY_CONFLICT_CODE: &str = "idempotency_conflict";
@@ -25,7 +27,7 @@ impl From<ProviderError> for CoreError {
     fn from(error: ProviderError) -> Self {
         match error {
             ProviderError::Internal(reason) => Self::Internal { category: reason },
-            // `ReadOnly` carries the provider's own refusal sentence naming the
+            // why: `ReadOnly` carries the provider's own refusal sentence naming the
             // entry point (`memory: migrate-legacy needs the workspace writer`),
             // which is what the retained 403 `Forbidden` slot renders; the
             // variant has no separate resource id to split out.
@@ -38,7 +40,7 @@ impl From<ProviderError> for CoreError {
                 code: IDEMPOTENCY_CONFLICT_CODE.to_string(),
                 message: error.message(),
             },
-            // `NotFound`'s payload is the bare target (`space abc`); its
+            // why: `NotFound`'s payload is the bare target (`space abc`); its
             // `message()` already appends "not found" for the wire, so routing
             // it here would render `not found: space abc not found`.
             ProviderError::NotFound(target) => Self::NotFound { resource: target },

@@ -8,31 +8,33 @@
 //! target except through the rename itself, and it does not clean up the
 //! caller's temp path on failure — each wrapper keeps its own rollback
 //! policy. The stage-tagged error lets callers keep their legacy error codes.
+// why: the caller owns the temp path and rollback policy, so the kernel only stages and
+// commits.
 
 use std::io;
 use std::path::Path;
 
-/// Which stage of the atomic write produced the error.
+/// note: Which stage of the atomic write produced the error.
 #[derive(Debug)]
 pub enum Stage {
-    /// Writing the caller's temp file failed.
+    /// note: Writing the caller's temp file failed.
     Write,
-    /// Opening the temp file for fsync failed.
+    /// note: Opening the temp file for fsync failed.
     TempOpen,
-    /// `sync_all` on the temp file failed.
+    /// note: `sync_all` on the temp file failed.
     TempSync,
-    /// Renaming the temp file over the target failed.
+    /// note: Renaming the temp file over the target failed.
     Rename,
-    /// Opening or `sync_all` on the renamed target failed
+    /// note: Opening or `sync_all` on the renamed target failed
     /// (only when final-file fsync is enabled).
     FinalSync,
-    /// `sync_all` on the target's parent directory failed.
+    /// note: `sync_all` on the target's parent directory failed.
     DirSync,
-    /// Opening the target's parent directory failed.
+    /// note: Opening the target's parent directory failed.
     DirOpen,
 }
 
-/// An I/O failure tagged with the kernel stage that produced it.
+/// note: An I/O failure tagged with the kernel stage that produced it.
 #[derive(Debug)]
 pub struct AtomicWriteError {
     pub stage: Stage,
@@ -44,7 +46,7 @@ impl AtomicWriteError {
         move |source| Self { stage, source }
     }
 
-    /// Discard the stage tag; used by callers that report a plain
+    /// note: Discard the stage tag; used by callers that report a plain
     /// `io::Result` or fold every stage into one error code.
     pub fn into_io(self) -> io::Error {
         self.source
@@ -57,7 +59,7 @@ impl std::fmt::Display for AtomicWriteError {
     }
 }
 
-/// Stage one: write `content` to `tmp_path` and fsync it.
+/// note: Stage one: write `content` to `tmp_path` and fsync it.
 ///
 /// `tmp_path` must be a sibling of the eventual target on the same
 /// filesystem; it is created and owned by the caller, and is left in place
@@ -77,7 +79,7 @@ pub fn prepare_temp(tmp_path: &Path, content: &[u8]) -> Result<(), AtomicWriteEr
     Ok(())
 }
 
-/// Stage two: rename `tmp_path` over `target_path`, then fsync the renamed
+/// note: Stage two: rename `tmp_path` over `target_path`, then fsync the renamed
 /// file (when `fsync_final`) and the parent directory.
 ///
 /// `tmp_path` must be the file [`prepare_temp`] already wrote and fsynced.
@@ -108,7 +110,7 @@ pub fn commit(
     Ok(())
 }
 
-/// Write `content` to `tmp_path`, fsync it, rename it over `target_path`,
+/// note: Write `content` to `tmp_path`, fsync it, rename it over `target_path`,
 /// then fsync the renamed file (when `fsync_final`) and the parent directory.
 ///
 /// `tmp_path` must be a sibling of `target_path` on the same filesystem; it
@@ -131,7 +133,7 @@ pub fn atomic_write(
 mod tests {
     use super::*;
 
-    /// Negative control for the two-phase kernel: `prepare_temp` alone never
+    /// note: Negative control for the two-phase kernel: `prepare_temp` alone never
     /// touches the target — the rename only happens in `commit`. Mirrors the
     /// `content` cancellation contract, where a dropped future stops between
     /// the two stages.

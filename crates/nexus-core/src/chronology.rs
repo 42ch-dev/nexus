@@ -5,10 +5,11 @@
 //! P6-T1 can migrate the CLI leaf onto the core without a second Work-lookup
 //! authority. `set` and `advance` stay on their existing surfaces
 //! (`nexus-local-db` write / `nexus_orchestration::auto_chronology`).
+// why: the CLI leaf can migrate onto the core without a second Work-lookup authority.
 
 use crate::{CoreError, CoreResult, CoreService, Principal};
 
-/// Owned auto-chronology state projection for a Work.
+/// note: Owned auto-chronology state projection for a Work.
 ///
 /// Mirrors the `chronology show` payload minus the CLI-local last-advance
 /// filesystem label (that scan is bound to CLI workspace-root discovery).
@@ -19,7 +20,7 @@ pub struct CoreWorkChronology {
 }
 
 impl CoreService {
-    /// Resolve a Work by `work_ref` slug or `work_id` and project its
+    /// note: Resolve a Work by `work_ref` slug or `work_id` and project its
     /// auto-chronology state (behavior matches the CLI `chronology show`
     /// read path: creator + workspace scoped, ref precedence per
     /// `resolve_work_id_by_ref_or_id`).

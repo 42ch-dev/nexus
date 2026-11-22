@@ -6,18 +6,20 @@
 //! names and trailing dots were enforced in only one of them. This module is
 //! the single authority; callers only translate the reason into their own
 //! error type.
+// why: home, knowledge and the CLI creator/workspace selection used to carry drifting copies
+// of this rule.
 
-/// Longest accepted slug, in characters (not bytes).
+/// note: Longest accepted slug, in characters (not bytes).
 pub const MAX_SLUG_LEN: usize = 80;
 
-/// Windows reserved device names (case-insensitive): a slug that would create
+/// note: Windows reserved device names (case-insensitive): a slug that would create
 /// an unopenable directory on Windows is refused on every platform.
 const RESERVED_NAMES: [&str; 22] = [
     "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
-/// Validate a single-segment slug.
+/// note: Validate a single-segment slug.
 ///
 /// Covered: emptiness, length, path separators (`.`/`..`/`/`/`\`), control
 /// characters, a trailing dot, trailing whitespace and Windows reserved device
@@ -47,7 +49,7 @@ pub fn validate_slug_name(slug: &str) -> Result<(), &'static str> {
     if slug.ends_with(char::is_whitespace) {
         return Err("must not end with whitespace");
     }
-    // Windows reserves the STEM with any extension (`CON.txt`, `nul.backup`)
+    // why: Windows reserves the STEM with any extension (`CON.txt`, `nul.backup`)
     // and ignores everything after the first dot when resolving the device, so
     // the comparison is on the part before it. A dot in the tail is otherwise
     // legal (`my.con`).
@@ -90,13 +92,13 @@ mod tests {
             ("a\nb", "must not contain control characters"),
             ("novel.", "must not end with '.'"),
             ("novel ", "must not end with whitespace"),
-            // A tab is a control character first; a plain trailing space is the
+            // note: A tab is a control character first; a plain trailing space is the
             // whitespace rule Windows silently strips.
             ("novel\t", "must not contain control characters"),
             ("con", "must not be a reserved device name"),
             ("CON", "must not be a reserved device name"),
             ("lpt9", "must not be a reserved device name"),
-            // Windows reserves the stem regardless of extension.
+            // why: Windows reserves the stem regardless of extension.
             ("CON.txt", "must not be a reserved device name"),
             ("nul.backup", "must not be a reserved device name"),
             ("Aux.v2.yaml", "must not be a reserved device name"),

@@ -3,6 +3,7 @@
 //! are owned domain values. Extracted from the legacy daemon `reading.rs`
 //! handlers (V1.89 surface, P1-T3): scope/isolation, pagination-free chapter
 //! listing and the explicit nullable note-update semantics are preserved.
+// why: adapters own the HTTP envelopes, so these values stay reusable outside HTTP.
 
 use std::num::NonZeroU64;
 
@@ -21,7 +22,7 @@ use crate::{CoreError, CoreResult, CoreService, Principal};
 const ANNOTATION_ID_PREFIX: &str = "ann_";
 const VALID_COLORS: [&str; 4] = ["yellow", "blue", "green", "pink"];
 
-/// Reading-family fault carrying the legacy classification until the adapter
+/// note: Reading-family fault carrying the legacy classification until the adapter
 /// boundary (same carrier scheme as the content family).
 #[derive(Debug, thiserror::Error)]
 enum ReadingFault {
@@ -29,7 +30,7 @@ enum ReadingFault {
     BadRequest { message: String },
     #[error("{0}")]
     NotFound(String),
-    /// Foreign-creator annotation access; the resource carries the
+    /// note: Foreign-creator annotation access; the resource carries the
     /// `annotation_owner:` prefix so the adapter can re-emit the legacy
     /// `Forbidden { resource, reason }` pair verbatim.
     #[error("forbidden: {0}")]
@@ -52,7 +53,7 @@ impl From<ReadingFault> for CoreError {
     }
 }
 
-/// Map a reading DAO error onto the family fault. Validation rejections ride
+/// note: Map a reading DAO error onto the family fault. Validation rejections ride
 /// the legacy `invalid_input` 422; everything else keeps the shared storage
 /// carrier (`database_error: …`, re-classified to `DATABASE_ERROR` by the
 /// daemon adapter).
@@ -66,12 +67,12 @@ fn reading_db_err(error: nexus_local_db::LocalDbError) -> CoreError {
     }
 }
 
-/// Convert a `NonZeroU64` chapter number to i64 for local-db calls.
+/// note: Convert a `NonZeroU64` chapter number to i64 for local-db calls.
 fn chapter_i64(ch: NonZeroU64) -> i64 {
     i64::try_from(u64::from(ch)).unwrap_or(1)
 }
 
-/// Convert a `u64` offset/progress value to `i64`, returning a 422 if it
+/// note: Convert a `u64` offset/progress value to `i64`, returning a 422 if it
 /// does not fit (defense-in-depth; schema bounds keep values well within range).
 fn u64_to_i64(value: u64, field: &str) -> Result<i64, ReadingFault> {
     i64::try_from(value).map_err(|_| ReadingFault::BadRequest {
@@ -79,7 +80,7 @@ fn u64_to_i64(value: u64, field: &str) -> Result<i64, ReadingFault> {
     })
 }
 
-/// Validate a highlight color against the V1.89 enum.
+/// note: Validate a highlight color against the V1.89 enum.
 fn validate_color(color: &str) -> Result<(), ReadingFault> {
     if VALID_COLORS.contains(&color) {
         Ok(())
@@ -93,7 +94,7 @@ fn validate_color(color: &str) -> Result<(), ReadingFault> {
     }
 }
 
-/// Map a database annotation row to the contract DTO.
+/// note: Map a database annotation row to the contract DTO.
 fn to_annotation_dto(row: &AnnotationRow) -> Result<ReadingAnnotation, CoreError> {
     Ok(ReadingAnnotation {
         annotation_id: row.annotation_id.clone(),
@@ -115,7 +116,7 @@ fn to_annotation_dto(row: &AnnotationRow) -> Result<ReadingAnnotation, CoreError
     })
 }
 
-/// Fetch an annotation and enforce creator ownership.
+/// note: Fetch an annotation and enforce creator ownership.
 async fn load_annotation_for_creator(
     service: &CoreService,
     principal: &Principal,
@@ -136,7 +137,7 @@ async fn load_annotation_for_creator(
 }
 
 impl CoreService {
-    /// Persisted scroll progress for a (work, volume, chapter); zero with a fresh
+    /// note: Persisted scroll progress for a (work, volume, chapter); zero with a fresh
     /// timestamp when nothing was ever saved.
     ///
     /// # Errors
@@ -170,7 +171,7 @@ impl CoreService {
         })
     }
 
-    /// Upsert scroll progress for a (work, volume, chapter).
+    /// note: Upsert scroll progress for a (work, volume, chapter).
     ///
     /// `work_id` is the authoritative Work reference; it is repeated inside
     /// `request` only for wire compatibility with the legacy body shape.
@@ -209,7 +210,7 @@ impl CoreService {
         })
     }
 
-    /// Delete persisted scroll progress for a (work, volume, chapter).
+    /// note: Delete persisted scroll progress for a (work, volume, chapter).
     ///
     /// # Errors
     /// As [`CoreService::put_reading_progress`] minus the progress validation.
@@ -233,7 +234,7 @@ impl CoreService {
         self.verify_principal(principal)
     }
 
-    /// List annotations for a chapter, oldest first per the DAO ordering.
+    /// note: List annotations for a chapter, oldest first per the DAO ordering.
     ///
     /// # Errors
     /// As [`CoreService::get_reading_progress`].
@@ -262,7 +263,7 @@ impl CoreService {
         Ok(ReadingAnnotationListResponse { items })
     }
 
-    /// Create an annotation (highlight) on a chapter.
+    /// note: Create an annotation (highlight) on a chapter.
     ///
     /// # Errors
     /// As [`CoreService::get_reading_progress`]; additionally
@@ -302,7 +303,7 @@ impl CoreService {
         self.verify_principal(principal)?;
         to_annotation_dto(&row)
     }
-    /// Patch an annotation's color and/or note.
+    /// note: Patch an annotation's color and/or note.
     ///
     /// The note update is explicitly tri-state: a missing field keeps the
     /// stored note, an empty (or whitespace-only) string clears it, and any
@@ -327,7 +328,7 @@ impl CoreService {
             validate_color(&color.to_string())?;
         }
 
-        // Translate empty-string note to None (clear note); missing field stays None
+        // why: Translate empty-string note to None (clear note); missing field stays None
         // on the request, which we interpret as "do not change" via `note: None` below.
         let note_change = request.note.as_ref().map(|n| {
             let trimmed = n.trim();
@@ -355,7 +356,7 @@ impl CoreService {
         to_annotation_dto(&row)
     }
 
-    /// Delete an annotation.
+    /// note: Delete an annotation.
     ///
     /// # Errors
     /// As [`CoreService::patch_annotation`] minus the validation.
