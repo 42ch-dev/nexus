@@ -1,8 +1,8 @@
 //! Read-only checkpoint accessors for the daemon-free `nexus42 ops inspect`
 //! surface (V1.182 P1 BL-04).
 //!
-// why: scoped so the public storage surface stays storage-neutral for the
-//! daemon's `SessionStorage` contract — these row shapes are read-only
+//! Scoped so the public storage surface stays storage-neutral for the
+//! daemon's `SessionStorage` contract: these row shapes are read-only
 //! projections of `orchestration_sessions` and exist ONLY for the CLI
 //! inspector (single consumer today; revisit when a second consumer appears,
 //! qc1 W2). The accessors are `impl SqliteSessionStorage` methods defined in
@@ -19,8 +19,9 @@
 //! - The list view never loads `context_json` (it can embed chat history);
 //!   it projects the resume-rule predicates in SQL instead.
 //! - Timestamps are unix epoch seconds written on every save.
+// why: single CLI consumer today (qc1 W2) — revisit when a second consumer appears.
 
-/// note: detail-mode row — the full checkpoint projection of
+/// note: Detail-mode row: the full checkpoint projection of
 /// `orchestration_sessions` (identity columns + persisted position +
 /// timestamps + the raw context blob + the durable v1 execution metadata).
 ///
@@ -33,24 +34,28 @@
 /// versions are unsupported.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CheckpointRow {
-    /// note: run id is the PRIMARY KEY.
+    /// note: Run id (PRIMARY KEY).
     pub session_id: String,
+    /// note: Owning creator id.
     pub creator_id: String,
+    /// note: Strategy / preset id.
     pub preset_id: String,
+    /// note: Strategy / preset version.
     pub preset_version: i64,
-    /// note: `None` = no position recorded yet.
+    /// note: Persisted position (`None` = no position recorded yet).
     pub current_task_id: Option<String>,
     /// note: raw DB status column — authoritative for v1 rows, diagnostic for v0.
     pub status: String,
+    /// note: Raw serialized session context blob.
     pub context_json: Vec<u8>,
     /// note: execution version — `0` = legacy/unverified, `1` = v1 authoritative
     /// (A2); negative/forward versions are unsupported.
     pub execution_version: i64,
-    /// note: state revision is the CAS anchor (`0` on v0 rows).
+    /// note: State revision (CAS anchor; `0` on v0 rows).
     pub state_revision: i64,
-    /// note: serialized [`crate::run_state::RunStateV1`] for v1 rows
-    /// (`None` = corrupt/absent).
+    /// note: Serialized [`crate::run_state::RunStateV1`] for v1 rows (`None` = corrupt/absent).
     pub run_state_json: Option<Vec<u8>>,
+    /// note: Serialized [`crate::run_state::RunDescriptorV1`] for v1 rows.
     pub run_descriptor_json: Option<Vec<u8>>,
     /// note: first-save timestamp (unix epoch seconds).
     pub created_at: i64,
@@ -58,7 +63,7 @@ pub struct CheckpointRow {
     pub updated_at: i64,
 }
 
-/// note: list-mode row — a lean, storage-neutral projection.
+/// note: List-mode row: a lean, storage-neutral projection.
 ///
 /// `context_json` is never loaded — the resume-rule predicates are
 /// evaluated in SQL (JSON1: `json_valid` / `json_type` / `json_extract` /
@@ -80,23 +85,27 @@ pub struct CheckpointRow {
 /// [`crate::resume_rules::classify_resumability_extracted`].
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct CheckpointSummary {
-    /// note: run id is the PRIMARY KEY.
+    /// note: Run id (PRIMARY KEY).
     pub session_id: String,
+    /// note: Owning creator id.
     pub creator_id: String,
+    /// note: Strategy / preset id.
     pub preset_id: String,
+    /// note: Strategy / preset version.
     pub preset_version: i64,
-    /// note: `None` = no position recorded yet.
+    /// note: Persisted position (`None` = no position recorded yet).
     pub current_task_id: Option<String>,
     /// note: raw DB status column — authoritative for v1 rows, diagnostic for v0.
     pub status: String,
     /// note: execution version — `0` = legacy/unverified, `1` = v1 authoritative;
     /// negative/forward versions are unsupported and non-replayable.
     pub execution_version: i64,
-    /// note: state revision is the CAS anchor (`0` on v0 rows).
+    /// note: State revision (CAS anchor; `0` on v0 rows).
     pub state_revision: i64,
-    /// note: serialized [`crate::run_state::RunStateV1`] for v1 rows, raw
+    /// note: Serialized [`crate::run_state::RunStateV1`] for v1 rows, raw
     /// (`None` = absent on v0 rows or corrupt/absent blob on v1 rows).
     pub run_state_json: Option<Vec<u8>>,
+    /// note: Serialized [`crate::run_state::RunDescriptorV1`] for v1 rows.
     pub run_descriptor_json: Option<Vec<u8>>,
     /// note: first-save timestamp (unix epoch seconds).
     pub created_at: i64,

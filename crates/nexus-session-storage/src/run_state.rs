@@ -1,4 +1,4 @@
-//! note: durable run state types (v1.186 P0, A2).
+//! Durable run state types (v1.186 P0, A2).
 //!
 //! Authoritative contracts for the durable workflow-state slice. These types
 //! freeze the server-side run descriptor, the durable wait/in-flight/cancel/
@@ -6,6 +6,7 @@
 //! checkpoints under a root revision compare-and-swap.
 //!
 //! Design: `docs/specs/orchestration/orchestration-engine.md` §15 (V1.186 A2/A4/A5, local record).
+// why: the design record above freezes the server-side contract; the types have no other home.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -23,10 +24,13 @@ use nexus_preset::source_identity::PresetSourceIdentity;
 /// preset session after restart.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunDescriptorV1 {
+    /// note: Owning creator id.
     pub creator_id: String,
     /// note: optional work id (schedule/chain origin).
     pub work_id: Option<String>,
+    /// note: Resolved workspace root the run executes in.
     pub workspace_root: PathBuf,
+    /// note: Preset identifier.
     pub preset_id: String,
     /// note: preset schema version of the **bundle** admission resolved.
     ///
@@ -43,7 +47,9 @@ pub struct RunDescriptorV1 {
     /// user bundle can carry the apply, but the bytes the run executes are the
     /// applied document's. Recovery reads it on the no-apply arm only.
     pub source: PresetSourceIdentity,
+    /// note: Frozen preset input map.
     pub input: serde_json::Map<String, serde_json::Value>,
+    /// note: Role → provider binding map (A1).
     pub agent_bindings: HashMap<String, AgentBinding>,
     /// note: parent session id for inner-graph child runs.
     pub parent_session_id: Option<SessionId>,
@@ -75,16 +81,21 @@ pub struct RunDescriptorV1 {
     pub intake_mode: Option<nexus_home_layout::strategy_intake::StrategyIntakeMode>,
 }
 
+/// note: The applied identity a run was admitted under.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppliedRunIdentity {
-    /// note: the `strategy_applies.apply_id` that was current at admission.
+    /// note: The `strategy_applies.apply_id` that was current at admission.
     pub apply_id: String,
+    /// note: The `content_hash` that apply pinned.
     pub content_hash: String,
 }
 
+/// note: Role → provider binding (A1).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentBinding {
+    /// note: Provider id.
     pub provider_id: String,
+    /// note: Optional model id.
     pub model: Option<String>,
 }
 
@@ -118,15 +129,19 @@ pub struct ScheduleAdmissionGate {
 /// CAS consumes it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WaitRecord {
-    /// note: fresh UUID token per arrival.
+    /// note: Fresh UUID token per arrival.
     pub wait_id: String,
+    /// note: Task id at the wait point.
     pub task_id: String,
+    /// note: Child session id when the wait is on a nested child.
     pub child_session_id: Option<String>,
+    /// note: Child task id when the wait is on a nested child.
     pub child_task_id: Option<String>,
     /// note: wait kind — always `manual` for human waits.
     pub kind: WaitKind,
 }
 
+/// note: Wait kind.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WaitKind {
@@ -141,9 +156,11 @@ pub enum WaitKind {
 /// interrupted (never auto-replayed).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptAttempt {
-    /// note: attempt id (UUID).
+    /// note: Attempt id (UUID).
     pub attempt_id: String,
+    /// note: Task id the prompt belongs to.
     pub task_id: String,
+    /// note: Dispatch phase.
     pub phase: PromptPhase,
     /// note: host session id once allocated.
     pub host_session_id: Option<String>,
@@ -153,6 +170,7 @@ pub struct PromptAttempt {
     pub process_identity: Option<OwnedProcessIdentity>,
 }
 
+/// note: Prompt dispatch phase.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptPhase {
@@ -166,6 +184,7 @@ pub enum PromptPhase {
 /// owned group identity; never PID alone.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OwnedProcessIdentity {
+    /// note: Process id.
     pub pid: u32,
     /// note: platform process-birth identity (e.g. start time) for reuse detection.
     pub process_birth: Option<String>,
@@ -176,21 +195,23 @@ pub struct OwnedProcessIdentity {
 /// note: stable machine failure code (A2) — not provider-prose parsing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunFailure {
+    /// note: Stable machine code.
     pub code: String,
+    /// note: Human-readable message.
     pub message: String,
 }
 
 /// note: durable run state (A2).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RunStateV1 {
-    /// note: active human wait (`None` when not waiting).
+    /// note: Active human wait (None when not waiting).
     pub wait: Option<WaitRecord>,
     /// invariant: current task id set before stepping, cleared only with a completed
     /// checkpoint (a current-position safety marker, not an activity journal).
     pub step_in_flight: Option<String>,
-    /// note: in-flight prompt attempt (`None` when no prompt is dispatching/active).
+    /// note: In-flight prompt attempt (None when no prompt is dispatching/active).
     pub in_flight: Option<PromptAttempt>,
-    /// note: durable failure record (`None` when not failed).
+    /// note: Durable failure record (None when not failed).
     pub failure: Option<RunFailure>,
     /// note: cancellation requested but not yet confirmed.
     pub cancel_requested: bool,
@@ -203,6 +224,7 @@ pub struct RunStateV1 {
 /// authoritative status plus descriptor and state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunRecord {
+    /// note: Run id.
     pub session_id: SessionId,
     /// note: authoritative status (v1 rows) or legacy diagnostic (v0 rows).
     pub status: SessionStatus,
@@ -222,8 +244,11 @@ pub struct RunRecord {
 /// note: child checkpoint (A2) — carries the child session, status and run state.
 #[derive(Debug, Clone)]
 pub struct ChildCheckpoint {
+    /// note: Child session snapshot.
     pub session: graph_flow::Session,
+    /// note: Child status.
     pub status: SessionStatus,
+    /// note: Child durable run state.
     pub state: RunStateV1,
     /// note: child state revision (CAS anchor for the child row).
     pub state_revision: u64,
@@ -237,13 +262,16 @@ pub struct ChildCheckpoint {
 /// clone at the trait boundary.
 #[derive(Debug, Clone)]
 pub struct RunCheckpoint<'a> {
+    /// note: Root session snapshot.
     pub root: &'a graph_flow::Session,
+    /// note: Child session snapshots.
     pub children: &'a [ChildCheckpoint],
 }
 
 /// note: terminal status written by the single settlement authority (P4 §6.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalSettlementTarget {
+    /// note: Normal completion.
     Completed,
     /// note: confirmed cancellation after cleanup.
     Cancelled,
@@ -262,6 +290,7 @@ pub enum SettlementResult {
 }
 
 impl SettlementResult {
+    /// note: The durable record either written or observed.
     #[must_use]
     pub const fn record(&self) -> &RunRecord {
         match self {

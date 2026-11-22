@@ -42,13 +42,13 @@ use crate::run_state::{
 };
 use crate::{SessionId, SessionStatus, SessionSummary, StorageError};
 
-/// note: SQLite-backed storage sharing `nexus-local-db`'s pool.
+/// note: SQLite-backed session storage sharing `nexus-local-db`'s pool.
 pub struct SqliteSessionStorage {
     pool: Arc<sqlx::SqlitePool>,
 }
 
 impl SqliteSessionStorage {
-    /// note: creates storage backed by the given shared pool.
+    /// note: Create a new storage backed by the given shared pool.
     ///
     /// The pool must already have migrations applied (including the
     /// `orchestration_sessions` table). Call
@@ -58,7 +58,7 @@ impl SqliteSessionStorage {
         Self { pool }
     }
 
-    /// note: lists all sessions with non-terminal status (WS2 R1).
+    /// note: List all sessions with non-terminal status (WS2 R1).
     ///
     /// Queries persisted sessions where status is `running`, `paused`, or
     /// `waiting_for_input`. Used by the engine on daemon restart to repopulate
@@ -2949,6 +2949,7 @@ impl WorkflowStateStore for SqliteSessionStorage {
     }
 }
 
+/// note: Internal row mapping for SELECT queries.
 #[derive(sqlx::FromRow)]
 struct SessionRow {
     session_id: String,
@@ -2961,6 +2962,7 @@ struct SessionRow {
 mod tests {
     use super::*;
 
+    /// note: Helper: open a fresh on-disk temp `SQLite` pool with migrations applied.
     async fn fresh_pool() -> (Arc<sqlx::SqlitePool>, tempfile::NamedTempFile) {
         let db = tempfile::NamedTempFile::new().unwrap();
         let guarded = nexus_local_db::init_engine_pool(db.path())
