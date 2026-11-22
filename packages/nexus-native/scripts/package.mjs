@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * P3-T1 — deterministic local packaging for the four `@42ch/nexus-native-*`
+ * why: deterministic local packaging for the four `@42ch/nexus-native-*`
  * target packages plus the `@42ch/nexus-native` loader package.
  *
  * Contract (frozen by P2, consumed unchanged here):
@@ -44,7 +44,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..', '..');
 const IS_WIN = process.platform === 'win32';
 
-/** The frozen target map (architecture-contracts §9). */
+/** note: the four shipped target triples and their package suffixes. */
 const TARGETS = {
   'aarch64-apple-darwin': { suffix: 'darwin-arm64', os: 'darwin', cpu: 'arm64' },
   'x86_64-apple-darwin': { suffix: 'darwin-x64', os: 'darwin', cpu: 'x64' },
@@ -58,9 +58,9 @@ const TARGETS = {
 };
 
 const REQUIRED_NAPI_MINIMUM = 8;
-/** Files a target package directory may contain besides `native/`. */
+/** note: files a target package directory may contain besides `native/`. */
 const PLATFORM_DIR_ALLOWLIST = new Set(['package.json', 'AGENTS.md', '.gitignore']);
-/** Exact payload of a target package tarball (paths inside the archive). */
+/** note: exact payload of a target package tarball (paths inside the archive). */
 const PLATFORM_ARCHIVE_ENTRIES = [
   'package/package.json',
   'package/AGENTS.md',
@@ -69,7 +69,7 @@ const PLATFORM_ARCHIVE_ENTRIES = [
 ];
 const LOADER_ARCHIVE_REQUIRED = ['package/package.json', 'package/dist/index.js', 'package/dist/loader.js'];
 /**
- * Entries the packer adds to a workspace package tarball on its own. pnpm copies
+ * why: entries the packer adds to a workspace package tarball on its own. pnpm copies
  * the workspace-root LICENSE into every packed package; it is verified against
  * the root file below and is never allowed to stand in for the payload pair.
  */
@@ -98,12 +98,12 @@ function archiveReceipt(path, tag) {
   try {
     renameSync(path, `${path.replace(/\.json$/, '')}.${tag}-${Date.now()}.json`);
   } catch {
-    // nothing left to archive (or it was already replaced) — the fresh write proceeds
+    // note: nothing left to archive (or it was already replaced); the fresh write proceeds
   }
 }
 
 /**
- * A failed run must leave its own record: a stale `pass` receipt on disk would
+ * why: a failed run must leave its own record — a stale `pass` receipt on disk would
  * otherwise be read as a green result by the matrix summary.
  */
 function writeFailReceipt(message, detail) {
@@ -134,7 +134,7 @@ function writeFailReceipt(message, detail) {
       )}\n`,
     );
   } catch {
-    // the original failure is reported on stderr; a failed receipt write must not mask it
+    // note: the original failure is on stderr; a failed receipt write must not mask it
   }
 }
 
@@ -143,7 +143,7 @@ function run(command, args, options = {}) {
     cwd: options.cwd ?? ROOT,
     env: options.env ?? process.env,
     encoding: 'utf8',
-    // A shell is only needed on Windows, where the pnpm/tar shims are .cmd
+    // why: a shell is only needed on Windows, where the pnpm/tar shims are .cmd
     // files. Inline `node -e` payloads are always spawned with shell: false
     // so their quoting is never re-interpreted.
     shell: options.shell ?? (IS_WIN && command !== process.execPath),
@@ -200,7 +200,7 @@ function detectLibc() {
     const report = process.report?.getReport?.();
     if (report?.header?.glibcVersionRuntime) return 'glibc';
   } catch {
-    // fall through to musl
+    // note: a missing glibc runtime report means this host is musl.
   }
   return 'musl';
 }
@@ -214,7 +214,7 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
-/** Key-order independent comparison of packed and on-disk manifests. */
+/** note: key-order independent comparison of packed and on-disk manifests. */
 function canonicalJson(text) {
   const value = typeof text === 'string' ? JSON.parse(text) : text;
   return JSON.stringify(value, (_key, item) => {
@@ -223,7 +223,7 @@ function canonicalJson(text) {
   });
 }
 
-/** The exact command envelope every P3-T1 evidence file carries. */
+/** note: the exact command envelope every packaging evidence file carries. */
 function evidenceHeader(startedAt, target) {
   return {
     script: SCRIPT,
@@ -243,11 +243,11 @@ function evidenceHeader(startedAt, target) {
 }
 
 /**
- * A runner may only package the target it can execute: the shipped
+ * why: a runner may only package the target it can execute — the shipped
  * `compatibility.json` is read out of the real binary, so a foreign-arch or
  * foreign-libc artifact would either need fabricated metadata or a
- * translation layer. Both are refused (architecture-contracts §9: no
- * emulation-as-native claim).
+ * translation layer. Both are refused: an emulated binary may not claim
+ * native status.
  */
 function assertNativeHost(target, spec) {
   if (process.platform !== spec.os) {
@@ -292,7 +292,7 @@ function targetDir() {
 }
 
 /**
- * Ad-hoc signing is required before an arm64 macOS dylib can be loaded at all.
+ * why: ad-hoc signing is required before an arm64 macOS dylib can be loaded at all.
  * This is a development signature for the local proof artifact, NOT the
  * signed/notarized distribution that SEC-1 requires (plan P3-T3).
  */
@@ -305,7 +305,7 @@ function adhocSign(path) {
 }
 
 /**
- * Read `compatibility()` out of the real artifact in a short-lived child.
+ * why: read `compatibility()` out of the real artifact in a short-lived child.
  *
  * `require()` only registers a loader for the `.node` extension; the Rust
  * cdylib that `cargo build` produces is `libnexus_core_node.{dylib,so,dll}`
@@ -394,7 +394,7 @@ function tarRead(tarball, entry) {
 }
 
 /**
- * A package payload must be self-contained: no build-machine path may leak
+ * why: a package payload must be self-contained — no build-machine path may leak
  * into a manifest or the compatibility document, and no `workspace:` protocol
  * may survive into an installable archive.
  */
@@ -409,7 +409,7 @@ function assertNoHostPaths(text, label, checks) {
 }
 
 /**
- * Pack into a fresh directory, then move the single archive into `packDir`.
+ * why: pack into a fresh directory, then move the single archive into `packDir`.
  * `pnpm pack` overwrites a same-named tarball in place, so packing straight
  * into an existing `--out` directory silently reuses the previous file name and
  * looks like it produced nothing on a re-run.
@@ -485,7 +485,6 @@ for (const required of ['dist/index.js', 'dist/loader.js']) {
   }
 }
 
-// --- 1. build (or reuse) the target artifact -------------------------------
 const profile = args.release ? 'release' : 'debug';
 const built = args.artifact
   ? { command: null, reused: resolve(args.artifact), stdout_tail: '', stderr_tail: '' }
@@ -497,7 +496,6 @@ if (!existsSync(artifact)) {
 
 const signing = spec.os === 'darwin' ? adhocSign(artifact) : null;
 
-// --- 2. derive the compatibility manifest from the real binary -------------
 const compatibility = assertCompatibilityShape(
   JSON.parse(readCompatibility(artifact)),
   args.target,
@@ -505,7 +503,6 @@ const compatibility = assertCompatibilityShape(
 );
 const compatibilityText = `${JSON.stringify(compatibility, null, 2)}\n`;
 
-// --- 3. stage the target package payload ----------------------------------
 const nativeDir = join(platformPkgRoot, 'native');
 rmSync(nativeDir, { recursive: true, force: true });
 mkdirSync(nativeDir, { recursive: true });
@@ -523,7 +520,6 @@ if (nativeFiles.join(',') !== 'compatibility.json,nexus_core_node.node') {
   fail(`target package native/ payload is not the frozen pair`, { nativeFiles });
 }
 
-// --- 4. pack both packages locally (no publish) ---------------------------
 assertNoHostPaths(JSON.stringify(platformManifest), `${platformPkgName}/package.json`, [ROOT]);
 const platformPack = packPackage(platformPkgRoot, packDir, platformPkgName);
 const loaderPack = packPackage(loaderPkgRoot, packDir, 'nexus-native');
@@ -539,7 +535,7 @@ const unexpectedPlatformEntries = platformEntries.filter(
 if (unexpectedPlatformEntries.length > 0) {
   fail(`${platformPack.name} carries entries outside the frozen payload`, { unexpectedPlatformEntries });
 }
-// pnpm injects the workspace-root LICENSE into workspace package tarballs
+// note: pnpm injects the workspace-root LICENSE into workspace package tarballs
 // (verified byte-identical below); record it instead of rejecting the packer's
 // own behaviour, and keep rejecting every other extra entry.
 const packerInjectedEntries = platformEntries

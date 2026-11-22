@@ -204,8 +204,8 @@ describe('fixture modes (real SDK)', () => {
   });
 });
 
-// A deterministic ACP protocol peer with real SDK validation. It advertises a
-// non-hardcoded model config ID and requests permission during each prompt.
+// note: a deterministic ACP protocol peer with real SDK validation. It advertises
+// a non-hardcoded model config ID and requests permission during each prompt.
 const controlPeer = String.raw`
 const { createInterface } = require('node:readline');
 const { appendFileSync } = require('node:fs');
@@ -363,8 +363,8 @@ describe('HostOperation callback contract', () => {
         assert.equal(reply.ok, true, 'the other provider must not close this owned session');
         await finishedEvents(provider, reply.operation_id);
       }
-      // Both connections deliberately use the same ACP session ID. Their
-      // notification callbacks must still target distinct Nexus operations.
+      // invariant: both connections deliberately use the same ACP session ID.
+      // Their notification callbacks must still target distinct Nexus operations.
       const replies = await Promise.all(sessions.map((sessionId) => provider.call(request('execute', sessionId, {
         Prompt: { op_id: randomUUID(), content: [{ Text: { text: 'hello' } }], permission_scope: null },
       }))));

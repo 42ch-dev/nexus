@@ -1,5 +1,4 @@
-// Product local-state reset through the real unsigned native binding
-// (v1.192 P0-T3R; plan row 19, compass D18/D20).
+// why: Product local-state reset through the real unsigned native binding.
 //
 // The Rust integration test (`crates/nexus-local-db/tests/desktop_reset.rs`)
 // proves the fence/busy and denial semantics against real files; this test
@@ -39,17 +38,17 @@ describe('desktop local-state reset (real native binding)', () => {
   test('resets exactly the product state files and preserves everything else', async () => {
     const home = makeHome();
     const store = seedStore(home, 'ctr_alpha', 'default');
-    // Sibling workspace data and the store's stable admission locks stay.
+    // note: Sibling workspace data and the store's stable admission locks stay.
     writeFileSync(join(store, 'state.db.migration.lock'), '');
     writeFileSync(join(store, 'state.db.engine.lock'), '');
     writeFileSync(join(store, 'workspace.toml'), 'keep');
     mkdirSync(join(store, 'kb', 'entries'), { recursive: true });
     writeFileSync(join(store, 'kb', 'entries', 'note.md'), 'keep');
-    // A store holding only WAL/SHM siblings is an exact-file target too.
+    // note: A store holding only WAL/SHM siblings is an exact-file target too.
     const siblingsOnly = seedStore(home, 'ctr_beta', 'ws2', ['state.db-wal', 'state.db-shm']);
-    // A non-workspace entry under `creators/` is not a store.
+    // note: A non-workspace entry under `creators/` is not a store.
     writeFileSync(join(home, '.nexus42', 'creators', 'stray.txt'), 'keep');
-    // The creative user workspace is never a reset target.
+    // invariant: The creative user workspace is never a reset target.
     const userDoc = join(home, 'Documents', 'nexus', 'default');
     mkdirSync(userDoc, { recursive: true });
     writeFileSync(join(userDoc, 'state.db'), 'user-document');
@@ -85,7 +84,7 @@ describe('desktop local-state reset (real native binding)', () => {
         return true;
       });
 
-      // The refusal is a scan-time denial: nothing anywhere was deleted.
+      // safety: The refusal is a scan-time denial: nothing anywhere was deleted.
       for (const name of STATE_FILES) {
         assert.equal(existsSync(join(intact, name)), true);
       }
@@ -105,7 +104,7 @@ describe('desktop local-state reset (real native binding)', () => {
       );
       return true;
     });
-    // The empty/non-string boundary keeps its own rejection.
+    // note: The empty/non-string boundary keeps its own rejection.
     await assert.rejects(resetLocalState(''), /must be a non-empty path string/);
   });
 

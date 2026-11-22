@@ -52,7 +52,7 @@ function resolveAdmittedPython() {
     try {
       const resolved = execFileSync('which', [candidate], { encoding: 'utf8' }).trim();
       if (resolved.startsWith('/')) return realpathSync(resolved);
-    } catch { /* next */ }
+    } catch {}
   }
   throw new Error('no_absolute_python_executable');
 }
@@ -89,7 +89,7 @@ function observeProcessGuard(pid) {
       birth_ms = Date.now() - Math.round((uptimeSec - starttime / hz) * 1000);
     }
   } catch {
-    /* best-effort identity */
+    /* note: identity is best-effort; birth_ms stays null when unavailable. */
   }
   return { pid, birth_ms, pgid, alive };
 }
@@ -112,8 +112,8 @@ async function closeWithEvidence(core, opts = {}) {
   const closeStarted = Date.now();
   const closeReport = decode(await core.close());
   const close_ms = Date.now() - closeStarted;
-  // A confirmed close must leave no owned descendant behind. Give the reaped
-  // group a short, bounded settle window before recording survivors.
+  // why: a confirmed close must leave no owned descendant behind, so the reaped
+  // group gets a short, bounded settle window before survivors are recorded.
   let surviving_pids = findFixtureChildPids();
   const settleDeadline = Date.now() + 1_500;
   while (surviving_pids.length > 0 && Date.now() < settleDeadline) {
@@ -124,8 +124,8 @@ async function closeWithEvidence(core, opts = {}) {
     closeReport,
     close_ms,
     deadline_ms,
-    // `elapsed_ms` is the measured duration of THIS close against the shared
-    // absolute budget; `scenario_elapsed_ms` is the whole-scenario duration.
+    // note: `elapsed_ms` is the measured duration of THIS close against the
+    // shared absolute budget; `scenario_elapsed_ms` is the whole-scenario duration.
     elapsed_ms: close_ms,
     scenario_elapsed_ms: Date.now() - startedMs,
     cleanup_confirmed: Boolean(closeReport.cleanup_confirmed),
@@ -204,7 +204,7 @@ function seedHome() {
 }
 
 /**
- * Q3-W6: RSS must be measured where the native workload actually lives. A worker
+ * note: RSS must be measured where the native workload actually lives. A worker
  * thread has its own OS RSS that the wrapper process cannot see, so each scenario
  * reports its own numbers and the wrapper aggregates them.
  */
@@ -214,7 +214,7 @@ function rssSnapshot() {
 }
 
 /**
- * Q3-S8: bounded growth across 100 open/close cycles. A leak of even 1 MiB per
+ * note: bounded growth across 100 open/close cycles. A leak of even 1 MiB per
  * cycle would show up here long before it matters in production. The threshold is
  * deliberately generous relative to noise but far below a per-cycle leak:
  * 50 MiB total growth over 100 cycles (about 512 KiB per cycle).
@@ -256,10 +256,10 @@ function isProviderNotRegisteredError(err) {
   return /not registered/i.test(formatProviderError(err));
 }
 
-/// A launch-class failure for a provider whose declared command cannot be
-/// executed. The host sanitizes subprocess detail, so the observable category
-/// is the launch/provider-unavailable one — never the "not registered" case,
-/// which would mean the proof never reached the configured provider at all.
+/// why: the host sanitizes subprocess detail, so a launch failure for an
+/// unexecutable command is only observable as the launch/provider-unavailable
+/// category — never the "not registered" case, which would mean the proof never
+/// reached the configured provider at all.
 function isBadExecutableLaunchError(err) {
   const s = formatProviderError(err);
   if (!s) return false;
@@ -353,7 +353,7 @@ function isOversizedOutcome(batchOrReply) {
 
 function cleanupFixtureChildren() {
   for (const pid of findFixtureChildPids()) {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+    try { process.kill(pid, 'SIGKILL'); } catch { /* why: the child is already gone, so ESRCH is expected. */ }
   }
 }
 
@@ -373,7 +373,8 @@ async function runOpenClose100() {
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
   const providers = await providersForScenario();
 
-  // RSS is sampled inside the worker that owns the native environment.
+  // why: RSS is sampled inside the worker that owns the native environment, where
+  // that memory is actually attributable.
   const rssStart = rssSnapshot();
   let rssPeak = rssStart.rss;
   const perCycleRss = [];
@@ -394,7 +395,7 @@ async function runOpenClose100() {
   const rssEnd = rssSnapshot();
   const growth = rssEnd.rss - rssStart.rss;
 
-  // Q3-S8: bounded growth. A leak must fail the proof, not merely be reported.
+  // why: bounded growth. A leak must fail the proof, not merely be reported.
   if (growth > OPEN_CLOSE_RSS_GROWTH_LIMIT_BYTES) {
     return fail(
       'open_close_100',
@@ -500,7 +501,7 @@ enabled = true
   steps.push('open');
   const providers = await providersForScenario();
   const core = binding.open(accessJson, providers);
-  // A configured provider is only launch-admitted once a bounded probe
+  // why: a configured provider is only launch-admitted once a bounded probe
   // succeeds, so the probe is what actually attempts `/nonexistent/nexus-bad-acp`.
   steps.push('probe_bad_child');
   const badProbe = await core.providerCall(encode({
@@ -604,7 +605,7 @@ async function runEofWhileLive() {
   } catch (error) {
     return fail('eof_after_close', String(error), { executed_steps: steps, launchErr, launch });
   }
-  // The close verdict is authoritative and is gated by `assertCloseGate`
+  // why: the close verdict is authoritative and is gated by `assertCloseGate`
   // above; a launch error that mentions cleanup is the failed-session message,
   // not a close result, and must not be conflated with one.
   if (envelope.closeReport.cleanup_confirmed !== true) {
@@ -737,7 +738,7 @@ async function runFullQueueShutdown() {
       active_callbacks: activeCallbacks,
       queue_profile: 'ts_callback_pending_budget_1MiB_16_requests',
       control_bypass: true,
-      // The callback-budget profile owns no subprocess, so there is no OS
+      // why: the callback-budget profile owns no subprocess, so there is no OS
       // process identity to guard; declare that explicitly.
       child_observed: false,
     }, {
@@ -756,8 +757,8 @@ async function runFullQueueShutdown() {
     }));
   }
 
-  // rust-acp: fill the bridge's bounded *request* queue against a full active
-  // budget, reject the 17th request at the LocalSet bridge (never at host
+  // note: rust-acp path — fill the bridge's bounded *request* queue against a full
+  // active budget, reject the 17th request at the LocalSet bridge (never at host
   // session admission), then close while the queue is still full.
   const providers = await providersForScenario();
   steps.push('open');
@@ -816,7 +817,7 @@ async function runFullQueueShutdown() {
   const rejectedCode = formatProviderError(reject17.error);
   const rejectedBusy = !reject17.ok && isLocalSetBusy(reject17.error);
 
-  // Observe one owned child's identity (pid + OS birth + group) before close.
+  // why: the guard must be captured while the child is still alive.
   const preClosePids = findFixtureChildPids().filter((pid) => !beforePids.includes(pid));
   const process_guard = preClosePids[0] ? observeProcessGuard(preClosePids[0]) : null;
   if (!process_guard || process_guard.birth_ms === null) {
@@ -937,8 +938,8 @@ async function runWorkerTermination() {
   const launchedPids = findFixtureChildPids().filter((pid) => !beforePids.includes(pid));
   const victim = launchedPids[0];
   if (!victim) return fail('worker_termination', 'no fixture child pid observed', { executed_steps: steps });
-  // Observe the owned process identity (pid + real OS birth + group) BEFORE the
-  // kill: after the action there is nothing left to identify.
+  // why: the owned process identity (pid + real OS birth + group) must be
+  // observed BEFORE the kill: after the action there is nothing left to identify.
   const process_guard = observeProcessGuard(victim);
   if (!process_guard || process_guard.birth_ms === null) {
     return fail('worker_termination', `process guard missing OS birth identity: ${JSON.stringify(process_guard)}`, { executed_steps: steps });
@@ -954,9 +955,9 @@ async function runWorkerTermination() {
   steps.push('pull_op_started');
   await core.nextProviderEvents(execResult.operation_id, 1, 256 * 1024);
   steps.push('kill_child');
-  try { process.kill(victim, 'SIGKILL'); } catch { /* already dead */ }
+  try { process.kill(victim, 'SIGKILL'); } catch { /* why: the child is already gone, so ESRCH is expected. */ }
   steps.push('await_pull_after_kill');
-  // Keep pulling until the in-flight operation reports a terminal: an empty
+  // why: keep pulling until the in-flight operation reports a terminal — an empty
   // batch with has_more is neither success nor failure.
   let transportObserved = false;
   let inFlightTerminalFailed = false;
@@ -1142,8 +1143,8 @@ async function runReentrantCall() {
   writeAgentHostConfig(home, fixture, ws, { BLOCK_PROMPT: '1' });
   const accessJson = JSON.stringify({ user_home: home, access: 'engine_owner', allow_uninitialized: false });
 
-  // The ts-acp provider answers a pull as soon as it has nothing pending, so
-  // hold its first same-operation pull open to make the outstanding-pull window
+  // why: the ts-acp provider answers a pull as soon as it has nothing pending, so
+  // its first same-operation pull is held open to make the outstanding-pull window
   // observable; the real SDK provider still serves every other call.
   let baseProviders = null;
   let heldOpId = null;

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Read-only legacy-snapshot loading through the real native binding.
+// why: Read-only legacy-snapshot loading through the real native binding.
 //
 // The Rust integration test (`crates/nexus-core/tests/readonly_config_open.rs`)
 // proves the service semantics; this suite proves the native prerequisite path
@@ -33,7 +33,7 @@ import { openCore } from '../dist/index.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
-/** A provisioned home (config.toml + workspace DB) via the fixture seed bin. */
+/** note: A provisioned home (config.toml + workspace DB) via the fixture seed bin. */
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-readonly-config-'));
   const seeded = spawnSync(
@@ -45,7 +45,7 @@ function seedHome() {
   return home;
 }
 
-/** Replace the provisioned `config.toml` with the legacy two-field snapshot. */
+/** note: Replace the provisioned `config.toml` with the legacy two-field snapshot. */
 function legacyHome() {
   const home = seedHome();
   const nexusHome = join(home, '.nexus42');

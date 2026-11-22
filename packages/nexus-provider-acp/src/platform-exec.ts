@@ -1,5 +1,5 @@
 /**
- * Platform command seam for the Windows-owned-process lane.
+ * why: platform command seam for the Windows-owned-process lane.
  *
  * Windows process identity and tree termination need OS queries (`Get-CimInstance`
  * for CreationDate/parent, `taskkill /T /F` for the owned tree) that cannot run on

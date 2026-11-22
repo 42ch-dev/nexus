@@ -36,9 +36,9 @@ export interface NativeCoreBinding {
   changes(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   providerCall(requestJson: Uint8Array): Promise<Uint8Array>;
   nextProviderEvents(operationId: string, maxEvents: number, maxBytes: number): Promise<Uint8Array>;
-  // ── Actor Host authority surface (P0-T5) ─────────────────────────────────
-  // Raw napi signatures; the typed facade lives in `index.ts`. `principal` is
-  // the encoded handle the native side re-verifies on every call.
+  // note: Actor Host authority surface; raw napi signatures only — the typed
+  // facade lives in `index.ts`, and `principal` is the encoded handle the native
+  // side re-verifies on every call.
   hostCreateSession(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   hostExecuteOperation(
     principal: string,
@@ -56,8 +56,8 @@ export interface NativeCoreBinding {
     maxBytes: number,
   ): Promise<Uint8Array>;
   close(): Promise<Uint8Array>;
-  // ── P5-T1 World / Work / content / knowledge family surface ──────────────
-  // Raw napi signatures; the typed facade lives in `index.ts`.
+  // note: World / Work / content / knowledge family surface; raw napi signatures
+  // only — the typed facade lives in `index.ts`.
   narrativeListWorlds(principal: string): Promise<Uint8Array>;
   narrativeGetWorld(principal: string, worldId: string): Promise<Uint8Array>;
   createWorld(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
@@ -196,7 +196,6 @@ export interface NativeCoreBinding {
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
   deleteAnnotation(principal: string, annotationId: string): Promise<Uint8Array>;
-  // ── P5-T2 Actor / memory / context family surface ─────────────────────────
   listCharacters(principal: string, queryJson: Uint8Array): Promise<Uint8Array>;
   createCharacter(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   getCharacter(principal: string, characterId: string): Promise<Uint8Array>;
@@ -264,13 +263,12 @@ export interface NativeCoreBinding {
   setActiveCreator(requestJson: Uint8Array): Promise<Uint8Array>;
   getActiveCreator(): Promise<Uint8Array>;
   logoutCreator(creatorId: string): Promise<Uint8Array>;
-  // ── Workspace home family (plan v1219 shell Task 4) ─────────────────────
   listWorkspaces(): Promise<Uint8Array>;
   getActiveWorkspace(): Promise<Uint8Array>;
   selectWorkspace(requestJson: Uint8Array): Promise<Uint8Array>;
   createWorkspace(requestJson: Uint8Array): Promise<Uint8Array>;
   /**
-   * Promote the service-only shell to the full core after a first-run
+   * note: promote the service-only shell to the full core after a first-run
    * workspace selection (idempotent once published).
    */
   promoteCore(): Promise<void>;
@@ -334,7 +332,6 @@ export interface NativeCoreBinding {
   reflectCreatorSoul(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   inspectMoment(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   momentDirective(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
-  // ── P5-T3 Execution / preset / strategy family surface ─────────────────────
   startExecutionOwner(): Promise<Uint8Array>;
   listPresets(principal: string): Promise<Uint8Array>;
   getPreset(principal: string, presetId: string): Promise<Uint8Array>;
@@ -403,11 +400,9 @@ export interface NativeCoreBinding {
     scheduleId: string,
     requestJson: Uint8Array,
   ): Promise<Uint8Array>;
-  // ── P1-T3 same-run event subscriptions ─────────────────────────────────────
   subscribeWorkflowEvents(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
   nextWorkflowEvents(principal: string, subscriptionId: string): Promise<Uint8Array>;
   releaseWorkflowEvents(principal: string, subscriptionId: string): Promise<Uint8Array>;
-  // ── P2-T3 Compute module/run/transaction surface ───────────────────────────
   listComputeModules(principal: string): Promise<Uint8Array>;
   getComputeModule(principal: string, moduleId: string): Promise<Uint8Array>;
   computeRun(principal: string, requestJson: Uint8Array): Promise<Uint8Array>;
@@ -422,14 +417,14 @@ export interface NativeBinding {
   compatibility(): string;
   open(optionsJson: string, callbacks?: ProviderCallbacksNative): NativeCoreBinding;
   /**
-   * Reset the product's local state (`state.db` + WAL/SHM siblings) under the
+   * note: reset the product's local state (`state.db` + WAL/SHM siblings) under the
    * trusted `home`; resolves with the number of reset stores, rejects with the
    * wire `CoreError` envelope. Deletion happens in Rust behind the writer
    * protocol's exclusive migration fences (v1.192 P0-T3R).
    */
   resetLocalState(home: string): Promise<number>;
   /**
-   * Publish a complete config document at the absolute `path` through the
+   * note: publish a complete config document at the absolute `path` through the
    * native publisher (probe → policy capture → sealed staging → ordered
    * reapplication → rename). Opens no core; rejects with the wire `CoreError`
    * envelope (`invalid_input` / `forbidden` / `internal`).
@@ -469,7 +464,7 @@ export function detectLinuxLibc(): 'glibc' | 'musl' {
       | undefined;
     if (report?.header?.glibcVersionRuntime) return 'glibc';
   } catch {
-    // fall through to musl
+    // note: a missing glibc runtime report means this host is musl.
   }
   return 'musl';
 }
@@ -518,7 +513,7 @@ export function readPackageManifest(pkgName: string): PlatformPackageManifest {
   return parsed;
 }
 
-/** Exact-platform fencing: os/cpu (and Linux libc) are required, not optional. */
+/** note: exact-platform fencing — os/cpu (and Linux libc) are required, not optional. */
 function assertPlatformManifest(
   manifest: PlatformPackageManifest,
   target: PlatformTarget,
@@ -557,6 +552,7 @@ export function loadNodePath(): string {
 
 export function loadNativeBinding(): NativeBinding {
   const nodePath = loadNodePath();
+  // why: the native addon is loaded by absolute path at runtime and has no ESM import form.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require(nodePath) as NativeBinding;
 }
@@ -606,8 +602,8 @@ export function assertCompatibility(
   manifest: NativeCompatibility,
   expected?: RuntimeExpectations,
 ): void {
-  // Fixed contract value first: the declared N-API floor is part of the
-  // compatibility contract, not a per-build choice.
+  // why: the declared N-API floor is part of the compatibility contract, not a
+  // per-build choice.
   if (manifest.napi_minimum !== REQUIRED_NAPI_MINIMUM) {
     throw new Error(
       `napi_minimum must be the contract value ${REQUIRED_NAPI_MINIMUM}, got ${manifest.napi_minimum}`,

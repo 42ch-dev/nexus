@@ -36,7 +36,7 @@ export function parseNativeCoreError(error: unknown): CoreError | null {
       return parsed;
     }
   } catch {
-    // not JSON
+    // note: the native reason is plain text, so a JSON envelope is absent.
   }
   return null;
 }

@@ -1,5 +1,5 @@
 /**
- * The single wire-validation seam for `@42ch/nexus-native`.
+ * why: the single wire-validation seam for `@42ch/nexus-native`.
  *
  * Message shapes are bound to the generated contract types (`satisfies
  * ShapeOf<T>`), so a contract field added or renamed fails this build instead
@@ -17,7 +17,7 @@ import type {
 
 export const MAX_SAFE_INTEGER = 9007199254740991;
 
-/** `world-kb-entity-patch.schema.json` module key shape. */
+/** note: mirrors `schemas/daemon-api/canvas/world-kb/world-kb-entity-patch.schema.json`. */
 const MODULE_KEY_PATTERN = /^[a-z][a-z0-9_-]*$/;
 
 /** Fixed N-API contract value declared by `native-compatibility.schema.json`. */
@@ -34,30 +34,30 @@ interface FieldSpec {
   readonly minLength?: number;
   readonly maxLength?: number;
   readonly nullable?: boolean;
-  /** Nested object schema (`kind: 'object'` only). */
+  /** note: nested object schema (`kind: 'object'` only). */
   readonly shape?: Shape;
-  /** JSON Schema `propertyNames.pattern` for object keys. */
+  /** note: JSON Schema `propertyNames.pattern` for object keys. */
   readonly valuePattern?: RegExp;
-  /** JSON Schema `oneOf` — an object must satisfy exactly one arm shape. */
+  /** note: JSON Schema `oneOf` — an object must satisfy exactly one arm shape. */
   readonly oneOf?: readonly Shape[];
-  /** JSON Schema `anyOf` values for object maps. */
+  /** note: JSON Schema `anyOf` values for object maps. */
   readonly values?: readonly FieldSpec[];
-  /** Item spec for `kind: 'array'`. */
+  /** note: item spec for `kind: 'array'`. */
   readonly items?: FieldSpec;
 }
 
 export interface Shape {
   readonly fields: Readonly<Record<string, FieldSpec>>;
-  /** JSON Schema `required`: every listed property must be present. */
+  /** note: JSON Schema `required`: every listed property must be present. */
   readonly required: readonly string[];
-  /** `additionalProperties: false` when omitted. */
+  /** note: `additionalProperties: false` when omitted. */
   readonly open?: boolean;
-  /** JSON Schema `minProperties` on this object. */
+  /** note: JSON Schema `minProperties` on this object. */
   readonly minProperties?: number;
 }
 
 /**
- * Binds a shape to a generated contract type: every key of `T` needs a spec
+ * note: binds a shape to a generated contract type: every key of `T` needs a spec
  * (add/rename drift fails this build) and `required` must name only keys of `T`.
  */
 type ShapeOf<T> = Omit<Shape, 'fields' | 'required'> & {
@@ -134,7 +134,7 @@ function checkField(value: unknown, spec: FieldSpec, path: string): void {
             matched = true;
             break;
           } catch {
-            // Try the next closed arm.
+            // note: try the next closed arm.
           }
         }
         if (!matched) throw new Error(`invalid ${path}: value does not match an allowed arm`);

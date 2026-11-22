@@ -95,7 +95,7 @@ function string(value: unknown): string {
   return value;
 }
 
-/** Decode the existing Rust HostOperation representation, not a second DTO. */
+/** note: decode the existing Rust HostOperation representation, not a second DTO. */
 function parseOperation(payload: Record<string, unknown>, controlId: string) {
   if (Object.keys(payload).length !== 1) {
     throw new OperationError('invalid_input', 'expected_one_host_operation');
@@ -118,7 +118,7 @@ function parseOperation(payload: Record<string, unknown>, controlId: string) {
         throw new OperationError('invalid_input', 'invalid_permission_scope');
       }
     }
-    // The callback's existing host permission policy denies every request.
+    // safety: the callback's existing host permission policy denies every request.
     // Intersection with any valid narrowing scope remains deny-all; never
     // turn a scope's true bits into an approval or discard a false bit.
   }
@@ -161,11 +161,11 @@ function mapSessionUpdate(
   return null;
 }
 
-/** Default ceiling when a caller supplies no deadline. */
+/** note: default ceiling when a caller supplies no deadline. */
 const DEFAULT_DEADLINE_MS = 5_000;
 
 /**
- * The ONE absolute deadline for a cancel/shutdown handler, derived from the
+ * invariant: the ONE absolute deadline for a cancel/shutdown handler, derived from the
  * caller's `deadline_ms`.
  *
  * Every phase of the handler — protocol cancel, prompt settlement, forced
@@ -178,7 +178,7 @@ function handlerDeadlineMs(deadlineMs: number | null | undefined): number {
 }
 
 /**
- * Budget left before `deadline`.
+ * note: budget left before `deadline`.
  *
  * Never negative and never a fresh default: a spent deadline yields `0`, which
  * the reap reads as "cannot confirm" and fences rather than signalling blind.
@@ -188,7 +188,7 @@ function remainingBudgetMs(deadline: number): number {
 }
 
 /**
- * Bound `work` by the remaining budget.
+ * why: bound `work` by the remaining budget.
  *
  * The caller's `deadline_ms` is authoritative: whatever happens, a cancel or
  * shutdown must reach the owned-process reap inside it rather than awaiting a
@@ -337,7 +337,7 @@ export class AcpProviderEngine {
   }
 
   private async recoverUnpublishedOwners(deadline: number): Promise<void> {
-    // Do not queue or race a second reap against the currently owned attempt.
+    // invariant: do not queue or race a second reap against the currently owned attempt.
     if (this.recoveringUnpublishedOwners) {
       throw new CleanupUnconfirmedError('cleanup_recovery_in_flight');
     }
@@ -353,12 +353,12 @@ export class AcpProviderEngine {
             break;
           }
         }
-        // Published sessions retain their original cancel/shutdown route.
+        // note: published sessions retain their original cancel/shutdown route.
         if (published) continue;
         const remaining = remainingBudgetMs(deadline);
         if (remaining <= 0) throw new CleanupUnconfirmedError('cleanup_fence_active');
         await this.requireConfirmedCleanup(owned, key, 'unpublished_child_not_reaped', remaining);
-        // Only confirmed reaping releases recipe ownership.
+        // invariant: only confirmed reaping releases recipe ownership.
         for (const [ownerKey, candidate] of this.recipeOwners) {
           if (this.ownerIdentityKey(candidate) === identity) this.recipeOwners.delete(ownerKey);
         }
@@ -368,7 +368,7 @@ export class AcpProviderEngine {
         throw new OperationError('interrupted', 'cleanup_recovery_deadline_exhausted');
       }
     } finally {
-      // No detached timeout race: keep admission locked until reap returns.
+      // invariant: no detached timeout race — keep admission locked until reap returns.
       this.recoveringUnpublishedOwners = false;
     }
   }
@@ -401,7 +401,7 @@ export class AcpProviderEngine {
   }
 
   /**
-   * Confirm the owned child is gone, spending only `budgetMs`.
+   * note: confirm the owned child is gone, spending only `budgetMs`.
    *
    * `budgetMs` is the caller's REMAINING handler budget — passing `undefined`
    * means "this is a standalone settlement attempt" (a later retry or an eviction),
@@ -418,7 +418,7 @@ export class AcpProviderEngine {
       this.retainCleanupFence(fenceKey, owned);
       throw new CleanupUnconfirmedError(failureMessage);
     }
-    // The child is gone, so every fence for this owner is settled — leaving a
+    // note: the child is gone, so every fence for this owner is settled — leaving a
     // stale one behind would block a later reopen for no reason.
     this.clearFencesForOwner(owned);
     return reap;
@@ -462,7 +462,7 @@ export class AcpProviderEngine {
   }
 
   private routeSessionUpdate(sessionId: string, acpSessionId: string, update: unknown): void {
-    // ACP IDs are connection-local; different providers may return identical
+    // note: ACP IDs are connection-local; different providers may return identical
     // IDs. The connection closure, not a global ACP-ID scan, owns the update.
     const session = this.sessions.get(sessionId);
     if (!session || session.owned.acpSessionId !== acpSessionId) return;
@@ -558,7 +558,7 @@ export class AcpProviderEngine {
         activeOperationId: null,
         configOptions: created.configOptions ?? [],
       };
-      // LaunchSpec's retained model/mode settings use the same discovered
+      // note: LaunchSpec's retained model/mode settings use the same discovered
       // control paths as subsequent operations, on this exact ACP session.
       if (request.payload.model != null) await this.setModel(session, string(request.payload.model));
       if (request.payload.mode != null) await this.setMode(session, string(request.payload.mode));
@@ -578,7 +578,7 @@ export class AcpProviderEngine {
     }
   }
 
-  /** @internal test hook for launch cleanup retry / fence semantics. */
+  /** note: `@internal` test hook for launch cleanup retry / fence semantics. */
   async finalizeLaunchFailure(
     error: unknown,
     owned: OwnedConnection | null,
@@ -647,7 +647,7 @@ export class AcpProviderEngine {
     };
     void task.then(release, release);
     if (operation.kind !== 'prompt') {
-      // A control RPC rejection is not a successful operation. Keep its
+      // note: a control RPC rejection is not a successful operation. Keep its
       // owned task visible to shutdown while awaiting the real acknowledgement.
       await task;
     }
@@ -763,18 +763,18 @@ export class AcpProviderEngine {
     if (!op) throw new Error('operation_not_found');
     const session = this.sessions.get(op.sessionId);
     if (!session?.owned.acpSessionId) throw new Error('session_not_found');
-    // ONE absolute deadline for this entire handler: the protocol cancel, the
+    // invariant: ONE absolute deadline for this entire handler — the protocol cancel, the
     // prompt join, and the TERM/KILL reap all draw from it. No phase may take a
     // fresh default, or the handler would outlive the deadline it was given.
     const deadline = handlerDeadlineMs(request.deadline_ms);
     op.cancelled = true;
-    // A retained terminal does not prove the previous reap succeeded. Retrying
+    // note: a retained terminal does not prove the previous reap succeeded. Retrying
     // cancel must settle this owner's fence before acknowledging cleanup.
     if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' }) &&
         !this.hasCleanupFenceForOwner(session.owned)) {
       return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
     }
-    // Narrowing does not survive the closure boundary, so capture it here.
+    // note: narrowing does not survive the closure boundary, so capture it here.
     const acpSessionId = session.owned.acpSessionId;
     await boundedByDeadline(
       remainingBudgetMs(deadline),
@@ -784,7 +784,7 @@ export class AcpProviderEngine {
             sessionId: acpSessionId,
           });
         } catch {
-          // best effort; the reap below is what must be confirmed
+          // note: best effort; the reap below is what must be confirmed
         }
         if (op.promptTask) await op.promptTask.catch(() => undefined);
       })(),
@@ -792,7 +792,7 @@ export class AcpProviderEngine {
     if (session.activeOperationId === operationId) session.activeOperationId = null;
     const ownerKey = `${session.recipeGeneration}:${session.sessionId}`;
     try {
-      // Whatever the cancel phase left is the ONLY budget the reap may spend.
+      // note: whatever the cancel phase left is the ONLY budget the reap may spend.
       await this.requireConfirmedCleanup(
         session.owned,
         ownerKey,
@@ -815,7 +815,7 @@ export class AcpProviderEngine {
     if (!sessionId) throw new Error('shutdown_requires_session');
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('session_not_found');
-    // A session may be shutting down while a prompt is still in flight (a
+    // why: a session may be shutting down while a prompt is still in flight (a
     // native close reaps sessions that are mid-operation). Cooperate with the
     // owned child first: without the ACP cancel notification a blocked prompt
     // never settles, so awaiting the prompt task would hang forever instead of
@@ -837,7 +837,7 @@ export class AcpProviderEngine {
                   sessionId: acpSessionId,
                 });
               } catch {
-                // best effort; the owned reap below is what must be confirmed
+                // note: best effort; the owned reap below is what must be confirmed
               }
             }
             if (active.promptTask) await active.promptTask.catch(() => undefined);
@@ -918,7 +918,7 @@ export class AcpProviderEngine {
     return interruptedReply(requestId, error.message);
   }
 
-  /** @internal tests: adopt a session with an owned connection. */
+  /** note: `@internal` tests — adopt a session with an owned connection. */
   adoptSession(
     sessionId: string,
     owned: OwnedConnection,
@@ -928,7 +928,7 @@ export class AcpProviderEngine {
       sessionId,
       providerId: 'mock-acp',
       recipeGeneration: generation,
-      // The ambient process shim has no `cwd`; the test hook only needs a
+      // note: the ambient process shim has no `cwd`; the test hook only needs a
       // placeholder since no launch path reads it here.
       cwd: '',
       owned,
@@ -938,7 +938,7 @@ export class AcpProviderEngine {
     this.recipeOwners.set(`${generation}:${sessionId}`, owned);
   }
 
-  /** @internal tests: register an in-flight operation for a session. */
+  /** note: `@internal` tests — register an in-flight operation for a session. */
   adoptOperation(
     sessionId: string,
     opId: string,
@@ -958,7 +958,7 @@ export class AcpProviderEngine {
     if (session) session.activeOperationId = opId;
   }
 
-  /** @internal test hook: attempt confirmed settlement of all cleanup fences. */
+  /** note: `@internal` test hook — attempt confirmed settlement of all cleanup fences. */
   async trySettleCleanupFences(): Promise<{ settled: string[]; pending: string[] }> {
     const settled: string[] = [];
     const pending: string[] = [];
@@ -978,7 +978,7 @@ export class AcpProviderEngine {
     return this.cleanupFences.size;
   }
 
-  /** @internal tests: adopt a pre-engine owner into the engine fence. */
+  /** note: `@internal` tests — adopt a pre-engine owner into the engine fence. */
   adoptCleanupOwner(key: string, owner: OwnedConnection): void {
     this.retainCleanupFence(key, owner);
   }

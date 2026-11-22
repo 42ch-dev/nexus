@@ -21,7 +21,7 @@ describe('unconfirmed cleanup fencing', () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // ignore
+      // safety: the child is already gone; nothing left to release.
     }
     assert.equal(reap.confirmed, false);
     assert.equal(reap.signal, 'identity_mismatch');

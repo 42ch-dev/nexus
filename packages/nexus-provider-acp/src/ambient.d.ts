@@ -1,3 +1,4 @@
+// note: DOM types supply the ACP SDK's ambient surface; the package otherwise targets a narrower lib.
 /// <reference lib="dom" />
 
 declare module 'node:crypto' {
@@ -73,7 +74,7 @@ declare module 'node:fs' {
 }
 
 /**
- * Node 22 provides `Promise.withResolvers`, but this package compiles against an
+ * why: Node 22 provides `Promise.withResolvers`, but this package compiles against an
  * older `lib`. Declaring the runtime surface here keeps the implementation free
  * of the executor anti-pattern without widening the compile target.
  */

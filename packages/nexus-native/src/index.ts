@@ -286,23 +286,23 @@ export interface NativeCore {
   ): Promise<WorldKbCandidatesResponse>;
   hostQuery(request: CoreHostQuery): Promise<CoreHostQueryResponse>;
   /**
-   * Agent-host config (`{home}/agent-host/config.toml`). The shape is the
+   * note: Agent-host config (`{home}/agent-host/config.toml`). The shape is the
    * native serde document and is owned by the service wire type; this facade
    * only crosses the JSON buffer, exactly like `hostQuery`.
    */
   getAgentHostConfig(): Promise<unknown>;
   saveAgentHostConfig(config: unknown): Promise<void>;
   /**
-   * Apply the saved provider config in-process: settle the hosted execution
+   * note: apply the saved provider config in-process: settle the hosted execution
    * owner, re-read the config document, re-probe, and establish a fresh owner.
    * Returns the same `{ engine_epoch, provider_ready }` facts as
    * `startExecutionOwner`.
    */
   restartExecutionOwner(): Promise<unknown>;
-  /** The live orchestration capability registry rows (`{ items }`). */
+  /** note: the live orchestration capability registry rows (`{ items }`). */
   listCapabilities(): Promise<unknown>;
   /**
-   * Every pattern package directory under `<home>/.nexus42/patterns`, unavailable
+   * note: every pattern package directory under `<home>/.nexus42/patterns`, unavailable
    * ones included with their reason. Read-only: it never writes or creates the root.
    */
   listPatterns(principal: PrincipalHandle): Promise<PatternSummary[]>;
@@ -313,10 +313,10 @@ export interface NativeCore {
     maxEvents: number,
     maxBytes: number,
   ): Promise<ProviderEventBatch>;
-  // ── Actor Host authority surface (P0-T5) ─────────────────────────────────
-  // The core's Actor-aware session/effect/observation/control methods. The
-  // principal is resolved and verified natively on every call; the raw
-  // providerCall/nextProviderEvents lane above refuses Actor ids.
+  // note: Actor Host authority surface — the core's Actor-aware
+  // session/effect/observation/control methods. The principal is resolved and
+  // verified natively on every call; the raw providerCall/nextProviderEvents
+  // lane above refuses Actor ids.
   hostCreateSession(
     principal: PrincipalHandle,
     request: CreateSessionRequest,
@@ -346,9 +346,9 @@ export interface NativeCore {
     maxBytes: number,
   ): Promise<ProviderEventBatch>;
   close(): Promise<CoreCloseReport>;
-  // ── P5-T1 World / Work / content / knowledge family surface ──────────────
-  // Owned payloads cross as JSON; the stored Principal is minted natively and
-  // the handle only proves it. Every payload schema is the wire SSOT.
+  // note: World / Work / content / knowledge family surface — owned payloads
+  // cross as JSON; the stored Principal is minted natively and the handle only
+  // proves it. Every payload schema is the wire SSOT.
   narrativeListWorlds(principal: PrincipalHandle): Promise<NarrativeWorldsListResponse>;
   narrativeGetWorld(principal: PrincipalHandle, worldId: string): Promise<NarrativeWorldResponse>;
   createWorld(principal: PrincipalHandle, request: CreateWorldRequest): Promise<CreateWorldResponse>;
@@ -408,7 +408,7 @@ export interface NativeCore {
   ): Promise<ListTimelineEventsResponse>;
   listWorks(principal: PrincipalHandle, query: ListWorksQuery): Promise<ListWorksResponse>;
   getWork(principal: PrincipalHandle, workId: string): Promise<WorkDetailResponse>;
-  /** `[created, response]` — the adapter maps the flag to 201/200. */
+  /** note: `[created, response]` — the adapter maps the flag to 201/200. */
   createWork(
     principal: PrincipalHandle,
     request: CreateWorkRequest,
@@ -575,10 +575,9 @@ export interface NativeCore {
     request: ReadingAnnotationPatchRequest,
   ): Promise<ReadingAnnotation>;
   deleteAnnotation(principal: PrincipalHandle, annotationId: string): Promise<void>;
-  // ── P5-T2 Actor / memory / context family surface ─────────────────────────
-  // Same owned-JSON-payload policy as the P5-T1 block above: the stored
-  // Principal is minted natively, the handle only proves it, and every
-  // payload schema is the wire SSOT.
+  // note: Actor / memory / context family surface — same owned-JSON-payload
+  // policy as the World/Work block above: the stored Principal is minted
+  // natively, the handle only proves it, and every payload schema is the wire SSOT.
   listCharacters(principal: PrincipalHandle, query: ListCharactersQuery): Promise<ListCharactersResponse>;
   createCharacter(
     principal: PrincipalHandle,
@@ -660,7 +659,7 @@ export interface NativeCore {
   selectWorkspace(request: SetActiveWorkspaceRequest): Promise<SetActiveWorkspaceResponse>;
   createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse>;
   /**
-   * Promote the status-only shell to the full core in process. Runs the same
+   * note: promote the status-only shell to the full core in process. Runs the same
    * admission/publication as the startup open; idempotent once published.
    */
   promoteCore(): Promise<void>;
@@ -744,9 +743,8 @@ export interface NativeCore {
     principal: PrincipalHandle,
     request: MomentDirectiveRequest,
   ): Promise<MomentDirectiveResponse>;
-  // ── P5-T3 Execution / preset / strategy family surface ────────────────────
   /**
-   * Establish the ONE hosted execution owner (v1.195 P0-T5) and report the
+   * note: establish the ONE hosted execution owner and report the
    * facts to publish: `engine_epoch` is the actual established owner's epoch,
    * or `null` when this profile's selected workspace cannot host an owner
    * (no registered creative root); `provider_ready` is the native-owned
@@ -803,7 +801,7 @@ export interface NativeCore {
     request: StrategyComposeRequest,
   ): Promise<StrategyComposeResponse>;
   /**
-   * `POST /v1/daemon/strategies/{strategy_id}/generate` — one committed candidate from the
+   * note: `POST /v1/daemon/strategies/{strategy_id}/generate` — one committed candidate from the
    * `GenerateRequest` contract. Lint exhaustion is the native `invalid_input` carrying the D20
    * payload under `details`, so a caller reads it through the same error envelope as everything
    * else.
@@ -814,7 +812,7 @@ export interface NativeCore {
     request: StrategyGenerateRequest,
   ): Promise<StrategyGenerateResponse>;
   /**
-   * One `nexus.*` host-tool call through the capability spine — the agent-tool surface. The
+   * note: one `nexus.*` host-tool call through the capability spine — the agent-tool surface. The
    * owner's admission pipeline, dispatch and audit are the spine's, not this facade's.
    */
   executeTool(principal: PrincipalHandle, request: ToolsApi): Promise<CoreToolExecuteResponse>;
@@ -854,7 +852,7 @@ export interface NativeCore {
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse>;
   /**
-   * The durable control reads and the core-context edit (v1.195 P0-T6), over
+   * note: the durable control reads and the core-context edit, over
    * the SAME established owner as the mutations. Every list/read is scoped to
    * the principal's stored creator and answers with the generated public DTO;
    * a foreign or absent identity closes with the same not-found refusal.
@@ -878,7 +876,7 @@ export interface NativeCore {
     request: EditCoreContextRequest,
   ): Promise<EditCoreContextResponse>;
   /**
-   * Same-run event observation (v1.195 P1-T3), over the SAME established
+   * note: same-run event observation, over the SAME established
    * owner as the control surface. `subscribeWorkflowEvents` authorizes the
    * run's STORED root ownership before opening the bounded ring subscription
    * and returns the opaque environment-local token; `nextWorkflowEvents`
@@ -898,9 +896,8 @@ export interface NativeCore {
     subscriptionId: string,
   ): Promise<CoreWorkflowEventBatch>;
   releaseWorkflowEvents(principal: PrincipalHandle, subscriptionId: string): Promise<void>;
-  // ── v1.195 P2-T3 Compute module/run/transaction surface ────────────────────
   /**
-   * The retained C1–C8 Compute operations over the SAME hosted owner the
+   * why: the retained C1–C8 Compute operations run over the SAME hosted owner the
    * control surface uses. Discovery/detail read the compiled-in module
    * registry (the invocation schema Run Studio renders comes from the shipped
    * manifest, never from TS); run/detail/history/discard/clear delegate to the
@@ -993,7 +990,7 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     async nextProviderEvents(operationId, maxEvents, maxBytes) {
       return parseJsonBuffer(await inner.nextProviderEvents(operationId, maxEvents, maxBytes));
     },
-    // The generated request types bind every call site and the native side
+    // why: the generated request types bind every call site and the native side
     // re-parses each buffer into the same generated DTO (`deny_unknown_fields`),
     // so the schema stays the shape authority — no handwritten shape table
     // (the same rule the domain surface below documents).
@@ -1033,18 +1030,7 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
 }
 
 /**
- * World / Work / content / knowledge family surface (P5-T1).
- *
- * Owned payloads cross as JSON buffers. There is deliberately no handwritten
- * TS shape table for these payloads: the generated contract types bind every
- * call site (the interface above), `assertSafeNumbers` rejects integers the
- * exactly-representable wire policy excludes, and the native side re-parses
- * every buffer into the generated DTO (`deny_unknown_fields`), so the schema
- * stays the single shape authority. Duplicating ~60 shapes here would be the
- * second handwritten shape set the plan forbids.
- */
-/**
- * The domain-method subset of `NativeCore`, spread into the facade object
+ * why: the domain-method subset of `NativeCore`, spread into the facade object
  * that carries the pre-existing methods. The `Pick` gives every wrapper
  * method its parameter types from the one interface declaration — no second
  * signature table.
@@ -1201,6 +1187,17 @@ type DomainSurface = Pick<
   | 'clearComputeRuns'
 >;
 
+/**
+ * note: World / Work / content / knowledge family surface.
+ *
+ * Owned payloads cross as JSON buffers. There is deliberately no handwritten
+ * TS shape table for these payloads: the generated contract types bind every
+ * call site (the interface above), `assertSafeNumbers` rejects integers the
+ * exactly-representable wire policy excludes, and the native side re-parses
+ * every buffer into the generated DTO (`deny_unknown_fields`), so the schema
+ * stays the single shape authority. Duplicating ~60 shapes here would be the
+ * second handwritten shape set the plan forbids.
+ */
 function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
   const wire = (value: unknown, label: string): Uint8Array =>
     encodeWireBuffer(value, undefined, label);
@@ -1404,7 +1401,6 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     async deleteAnnotation(principal, annotationId) {
       await inner.deleteAnnotation(principal, annotationId);
     },
-    // ── P5-T2 Actor / memory / context family surface ────────────────────────
     async listCharacters(principal, query) {
       return json(await inner.listCharacters(principal, wire(query, 'query')));
     },
@@ -1609,7 +1605,6 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     async momentDirective(principal, request) {
       return json(await inner.momentDirective(principal, wire(request, 'request')));
     },
-    // ── P5-T3 Execution / preset / strategy family surface ──────────────────
     async startExecutionOwner() {
       return json(await inner.startExecutionOwner());
     },
@@ -1735,7 +1730,6 @@ function wrapDomainSurface(inner: NativeCoreBinding): DomainSurface {
     async releaseWorkflowEvents(principal, subscriptionId) {
       await inner.releaseWorkflowEvents(principal, subscriptionId);
     },
-    // ── v1.195 P2-T3 Compute module/run/transaction surface ──────────────────
     async listComputeModules(principal) {
       return json(await inner.listComputeModules(principal));
     },

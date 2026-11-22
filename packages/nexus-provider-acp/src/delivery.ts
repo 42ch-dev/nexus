@@ -81,7 +81,7 @@ export class OperationDelivery {
     return true;
   }
 
-  /** First terminal wins; later attempts are ignored. */
+  /** note: first terminal wins; later attempts are ignored. */
   trySetTerminal(terminal: DeliveryTerminal): boolean {
     if (this.closed || this.overflow || this.terminal !== null) return false;
     const controlBytes = new TextEncoder().encode(JSON.stringify(terminal)).length;
@@ -112,7 +112,7 @@ export class OperationDelivery {
     this.pendingBytes = 0;
   }
 
-  /** Pull data events only; terminal uses a separate control slot on a later pull. */
+  /** note: pull data events only; terminal uses a separate control slot on a later pull. */
   pull(maxEvents: number, maxBytes: number): ProviderEventBatch {
     const capEvents = Math.min(maxEvents, MAX_BATCH_EVENTS);
     const capBytes = Math.min(maxBytes, MAX_BATCH_BYTES);
@@ -137,7 +137,7 @@ export class OperationDelivery {
     };
   }
 
-  /** Consume the pending terminal control slot exactly once after data is drained. */
+  /** note: consume the pending terminal control slot exactly once after data is drained. */
   consumeTerminal(sessionId: string, opId: string): ProviderHostEvent[] | null {
     if (!this.hasPendingTerminal || !this.terminal) return null;
     const events = this.materializeTerminal(sessionId, opId);

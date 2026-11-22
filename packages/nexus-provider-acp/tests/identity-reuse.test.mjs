@@ -32,7 +32,7 @@ describe('real OS identity fencing', () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // ignore
+      // safety: the child is already gone; nothing left to release.
     }
   });
 
@@ -50,7 +50,7 @@ describe('real OS identity fencing', () => {
     try {
       child.kill('SIGKILL');
     } catch {
-      // ignore
+      // safety: the child is already gone; nothing left to release.
     }
   });
 });

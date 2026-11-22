@@ -22,7 +22,7 @@ const outDir = process.argv.includes('--out')
   ? process.argv[process.argv.indexOf('--out') + 1]
   : join(root, '.mstar', 'iterations', 'v1.189', 'guides', 'evidence', 'native-wire');
 
-// Preserve the previous run's evidence before this run can overwrite it —
+// why: preserve the previous run's evidence before this run can overwrite it,
 // including the early failure paths below.
 archiveEvidencePreFix6(join(outDir, 'lifecycle.json'));
 
@@ -116,7 +116,7 @@ function resolveAdmittedPython() {
         return realpathSync(resolved);
       }
     } catch {
-      // try next candidate
+      // note: candidate unresolvable; the next one is tried
     }
   }
   throw new Error('no_absolute_python_executable');
@@ -147,9 +147,9 @@ function isStaleGenerationError(err) {
   return /stale generation|generation mismatch|invalid principal|tombstone|dead_env|env_dead|provider port unavailable/i.test(s);
 }
 
-// EOF/close/queue behaviour is proved per adapter in the isolated workers
+// why: EOF/close/queue behaviour is proved per adapter in the isolated workers
 // (`proof-isolated-worker.mjs`); those scenarios carry the close envelope, so
-// this module no longer keeps a second, weaker implementation of them.
+// this module does not keep a second, weaker implementation of them.
 
 const CLOSE_DEADLINE_MS = 5_000;
 const SCENARIO_EVIDENCE_FIELDS = [
@@ -161,7 +161,7 @@ const SCENARIO_EVIDENCE_FIELDS = [
   'surviving_pids',
 ];
 
-// Scenarios that do not own a close of their own: they run inside the
+// why: these scenarios do not own a close of their own — they run inside the
 // happy-path session whose close is measured at the top level, so the close
 // envelope gate is applied to their parent instead of to them.
 const INHERITS_CLOSE_FROM = {
@@ -170,13 +170,9 @@ const INHERITS_CLOSE_FROM = {
   late_generation: 'happy_lifecycle',
 };
 
-// EOF/close/queue behaviour is proved per adapter in the isolated workers
-// (`proof-isolated-worker.mjs`); those scenarios carry the close envelope, so
-// this module no longer keeps a second, weaker implementation of them.
-
-/// Reject a scenario whose close evidence is missing, over budget, unconfirmed,
-/// or leaves a survivor behind. Returns an error string, or null when the
-/// scenario's evidence satisfies the contract.
+/// note: rejects a scenario whose close evidence is missing, over budget,
+/// unconfirmed, or leaves a survivor behind. Returns an error string, or null
+/// when the scenario's evidence satisfies the contract.
 function validateScenarioEvidence(key, scenario) {
   if (!scenario?.ok) return null;
   if (INHERITS_CLOSE_FROM[key]) {
@@ -198,8 +194,8 @@ function validateScenarioEvidence(key, scenario) {
     return `${key}: surviving_pids ${scenario.surviving_pids.join(',')}`;
   }
   if (key === 'open_close_100') {
-    // Q3-S8: the per-cycle growth bound must be present and satisfied in the
-    // evidence itself, not only in the worker's own verdict.
+    // why: the per-cycle growth bound (Q3-S8) must be present and satisfied in
+    // the evidence itself, not only in the worker's own verdict.
     if (typeof scenario.rss_growth_bytes !== 'number') {
       return `${key}: missing per-cycle RSS growth measurement`;
     }
@@ -214,9 +210,9 @@ function validateScenarioEvidence(key, scenario) {
     }
   }
   if (key === 'worker_termination' || key === 'full_queue_shutdown') {
-    // Either the scenario observed an owned child — and then it must carry that
-    // child's real OS identity as observed *before* the action — or it must say
-    // so explicitly, so a missing guard can never pass silently.
+    // invariant: either the scenario observed an owned child — and then it must
+    // carry that child's real OS identity as observed *before* the action — or
+    // it must say so explicitly, so a missing guard can never pass silently.
     if (typeof scenario.child_observed !== 'boolean') {
       return `${key}: must declare child_observed`;
     }
@@ -361,7 +357,7 @@ async function runAdapterScenarios(core, ctx) {
         })
       : failScenario('terminal_identity', 'terminal operation/session identity mismatch');
 
-  // cooperative cancel <=2s
+  // note: cooperative cancel scenario, budget <=2s
   try {
     const launch = decode(
       await core.providerCall(
@@ -515,8 +511,8 @@ async function runAdapterScenarios(core, ctx) {
   }
   const rssEnd = rssSnapshot();
   rssPeak = Math.max(rssPeak, rssEnd.rss);
-  // Q3-W6: the isolated workers own the native workload, so their RSS is the
-  // measurement that matters. Aggregate what they reported and keep the
+  // why: the isolated workers own the native workload (Q3-W6), so their RSS is
+  // the measurement that matters. Aggregate what they reported and keep the
   // wrapper's own numbers as a separate, clearly-labelled figure.
   const workerRss = Object.entries(scenarios)
     .filter(([key]) => !key.startsWith('_'))
@@ -537,7 +533,7 @@ async function runAdapterScenarios(core, ctx) {
     wrapper_rss_start: rssStart.rss,
     wrapper_rss_end: rssEnd.rss,
     wrapper_rss_peak: rssPeak,
-    // Aggregated from the isolated workers that ran the native environments.
+    // note: aggregated from the isolated workers that ran the native environments.
     worker_rss_peak: workerPeak,
     worker_rss_samples: workerRss,
     rss_source: workerPeak > 0 ? 'isolated_workers' : 'wrapper_only',
@@ -688,7 +684,7 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
     process.exit(1);
   }
 
-  // Adapter scenarios need an open provider port; run before env close.
+  // invariant: adapter scenarios need an open provider port, so they run before env close.
   const adapterScenarios = await runAdapterScenarios(core, {
     adapter,
     home,
@@ -776,8 +772,8 @@ async function runAcpLifecycleSession(core, { adapter, sdk, admittedMeta = {}, h
   delete scenarios._rss;
   const survivingPids = findFixtureChildPids();
   if (survivingPids.length > 0) {
-    // An owned child that outlives the proof is a leak, never a success: report
-    // it in the evidence and fail the run.
+    // safety: an owned child that outlives the proof is a leak, never a success —
+    // report it in the evidence and fail the run.
     const report = {
       adapter,
       cleanup_confirmed: closeReport.cleanup_confirmed,
