@@ -37,46 +37,46 @@ use wasmtime::{Caller, Extern, Linker, Memory, StoreLimits};
 use crate::error::Result;
 use crate::manifest::{HostFunction, ModuleManifest};
 
-/// Sentinel returned by host functions when the lookup yields nothing.
+/// note: Sentinel returned by host functions when the lookup yields nothing.
 pub const RET_NOT_FOUND: i64 = -1;
-/// Sentinel returned when the caller's output buffer is too small.
+/// note: Sentinel returned when the caller's output buffer is too small.
 pub const RET_OVERFLOW: i64 = -2;
 
-/// Read-only snapshot served to host functions during one invocation.
+/// note: Read-only snapshot served to host functions during one invocation.
 ///
 /// Built from the [`ComputeInput`](crate::ComputeInput) envelope: `KeyBlocks` are
 /// indexed by ID for O(1) `kb_read`, and the narrative state is passed through
 /// to `narrative_query`. Stateless — one instance per `compute()` call.
 #[derive(Clone, Debug, Default)]
 pub struct HostContext {
-    /// `key_block_id` → `KeyBlock` JSON, indexed for `kb_read`.
+    /// note: `key_block_id` → `KeyBlock` JSON, indexed for `kb_read`.
     key_blocks: HashMap<String, serde_json::Value>,
-    /// Narrative context returned by `narrative_query` (V1 pass-through).
+    /// note: Narrative context returned by `narrative_query` (V1 pass-through).
     narrative_state: serde_json::Value,
 }
 
-/// Per-invocation host state, stored inside the wasmtime `Store`.
+/// note: Per-invocation host state, stored inside the wasmtime `Store`.
 ///
 /// Combines the read-only compute snapshot (served to host functions) with the
 /// wasmtime resource limiter. Both are fresh per `compute()` call. Mirrors the
 /// documented wasmtime pattern of keeping `StoreLimits` next to the host data.
 pub struct InvocationState {
-    /// Snapshot served to `kb_read` / `narrative_query`.
+    /// note: Snapshot served to `kb_read` / `narrative_query`.
     pub ctx: HostContext,
-    /// Memory/instance/table caps applied to this invocation.
+    /// note: Memory/instance/table caps applied to this invocation.
     pub limits: StoreLimits,
 }
 
-/// Builds a [`HostContext`] from a parsed `ComputeInput`.
+/// note: Builds a [`HostContext`] from a parsed `ComputeInput`.
 ///
 /// The context indexes the bundled `KeyBlocks` by ID so `kb_read` is O(1).
 impl HostContext {
-    /// Build a host context from a `ComputeInput` envelope.
+    /// note: Build a host context from a `ComputeInput` envelope.
     #[must_use]
     pub fn from_input(input: &crate::ComputeInput) -> Self {
         let mut blocks = HashMap::with_capacity(input.key_blocks.len());
         for kb in &input.key_blocks {
-            // Re-serialize each entry so the module receives canonical JSON.
+            // why: re-serialize each entry so the module receives canonical JSON.
             // V1.139 P0 fallback: ComputeInput.key_blocks is an opaque JSON-map
             // Vec (spoke $ref unresolved at codegen), so the id is read from the
             // serialized spoke KnowledgeEntry's `entry_id` field.
@@ -88,7 +88,7 @@ impl HostContext {
                 blocks.insert(id.to_string(), json);
             }
         }
-        // `narrative_state` is a generated struct; serialize it back to the
+        // note: `narrative_state` is a generated struct; serialize it back to the
         // freeform JSON the module's `narrative_query` host import returns.
         let narrative_state = serde_json::to_value(&input.narrative_state).unwrap_or_default();
         Self {
@@ -97,13 +97,13 @@ impl HostContext {
         }
     }
 
-    /// Look up a `KeyBlock` by ID. Returns its JSON value, or `None`.
+    /// note: Look up a `KeyBlock` by ID. Returns its JSON value, or `None`.
     #[must_use]
     pub fn kb_read(&self, id: &str) -> Option<&serde_json::Value> {
         self.key_blocks.get(id)
     }
 
-    /// Query narrative context. V1 returns the invocation's `narrative_state`
+    /// note: Query narrative context. V1 returns the invocation's `narrative_state`
     /// verbatim; a richer query engine lands in a later iteration.
     #[must_use]
     pub fn narrative_query(&self, _query: &serde_json::Value) -> serde_json::Value {
@@ -111,11 +111,7 @@ impl HostContext {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Linker wiring
-// ---------------------------------------------------------------------------
-
-/// Register the whitelisted host imports on a [`Linker`].
+/// note: Register the whitelisted host imports on a [`Linker`].
 ///
 /// Only the functions listed in `manifest.host_functions` are linked. A module
 /// that imports a non-registered `nexus::*` function fails instantiation — the
@@ -137,7 +133,6 @@ pub fn register_host_imports(
                 let Some(mem) = current_memory(&mut caller) else {
                     return Ok(RET_NOT_FOUND);
                 };
-                // Read the requested key_block_id.
                 let Some(id_bytes) = read_bytes(&caller, &mem, id_ptr, id_len) else {
                     return Ok(RET_NOT_FOUND);
                 };
@@ -184,12 +179,12 @@ pub fn register_host_imports(
     Ok(())
 }
 
-/// Fetch the calling instance's exported linear `memory`.
+/// note: Fetch the calling instance's exported linear `memory`.
 fn current_memory<T>(caller: &mut Caller<'_, T>) -> Option<Memory> {
     caller.get_export("memory").and_then(Extern::into_memory)
 }
 
-/// Read `len` bytes from `[ptr, ptr+len)` out of the instance memory.
+/// note: Read `len` bytes from `[ptr, ptr+len)` out of the instance memory.
 fn read_bytes<T>(caller: &Caller<'_, T>, mem: &Memory, ptr: u32, len: u32) -> Option<Vec<u8>> {
     let len = usize::try_from(len).ok()?;
     let ptr = usize::try_from(ptr).ok()?;
@@ -198,7 +193,7 @@ fn read_bytes<T>(caller: &Caller<'_, T>, mem: &Memory, ptr: u32, len: u32) -> Op
     Some(buf)
 }
 
-/// Write `bytes` to `[ptr, ptr+bytes.len())`, respecting `cap`. Returns the
+/// note: Write `bytes` to `[ptr, ptr+bytes.len())`, respecting `cap`. Returns the
 /// number of bytes written or the overflow sentinel.
 fn write_or_overflow<T>(
     caller: &mut Caller<'_, T>,
@@ -261,7 +256,7 @@ mod tests {
         cfg.consume_fuel(true);
         let engine = Engine::new(&cfg).unwrap();
 
-        // The probe module: places the id "kb-a" at offset 0 and exports a
+        // note: the probe module places the id "kb-a" at offset 0 and exports a
         // function that calls the imported `kb_read` to fetch that block.
         let probe_wat = r#"(module
             (import "nexus" "kb_read"
@@ -309,7 +304,7 @@ mod tests {
             .get_typed_func::<(u32, u32), i64>(&mut store, "probe_kb_read")
             .unwrap();
 
-        // out buffer well clear of the "kb-a" data segment at offset 0.
+        // why: the out buffer sits well clear of the "kb-a" data segment at offset 0.
         let out_ptr: u32 = 32;
         let written = probe.call(&mut store, (out_ptr, 60_000)).unwrap();
         assert!(written > 0, "kb_read must find kb-a; got {written}");
@@ -323,7 +318,7 @@ mod tests {
         assert_eq!(fetched["canonical_name"], "Alice");
     }
 
-    /// A module that imports a non-whitelisted host function must FAIL to
+    /// note: A module that imports a non-whitelisted host function must FAIL to
     /// instantiate — that is the explicit enforcement of the whitelist.
     #[test]
     fn non_whitelisted_import_rejected_at_instantiation() {
@@ -350,7 +345,8 @@ mod tests {
         );
         store.limiter(|s| &mut s.limits);
 
-        // Manifest does NOT whitelist kb_read -> import is left undefined.
+        // note: the manifest does NOT whitelist kb_read, so the import is left
+        // undefined.
         let manifest: ModuleManifest = serde_json::from_str(
             r#"{"module_id":"m","name":"M","version":"0.1.0","nexus_abi_version":1,
                "required_key_block_types":[],"compute_export":"compute","init_export":""}"#,

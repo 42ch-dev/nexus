@@ -12,17 +12,19 @@
 //! When the wasm target is not installed (`build.rs` sets
 //! `nexus_no_wasm_target`), this module switches to empty stubs so `cargo check
 //! --all` can complete on developer machines without the target (R-V1139P0-005).
+// note: `include_dir!` is expanded at compile time, so `build.rs` must stage the
+// tree before this crate is compiled.
 
-/// **Real embedded module tree** — only compiled when the wasm target is
+/// note: **Real embedded module tree** — only compiled when the wasm target is
 /// available (build.rs does not set `nexus_no_wasm_target`).
 #[cfg(not(nexus_no_wasm_target))]
 mod real {
     use include_dir::{include_dir, Dir};
 
-    /// The compiled-in module tree.
+    /// note: The compiled-in module tree.
     static EMBEDDED_MODULES: Dir = include_dir!("$CARGO_MANIFEST_DIR/embedded-modules");
 
-    /// Fetch a compiled-in module's `.wasm` bytes by id (e.g. `"basic-combat"`).
+    /// note: Fetch a compiled-in module's `.wasm` bytes by id (e.g. `"basic-combat"`).
     #[must_use]
     pub fn embedded_module_bytes(id: &str) -> Option<&'static [u8]> {
         EMBEDDED_MODULES
@@ -30,7 +32,7 @@ mod real {
             .map(include_dir::File::contents)
     }
 
-    /// Fetch a compiled-in module's `manifest.json` text by id.
+    /// note: Fetch a compiled-in module's `manifest.json` text by id.
     #[must_use]
     pub fn embedded_module_manifest(id: &str) -> Option<&'static str> {
         EMBEDDED_MODULES
@@ -38,14 +40,13 @@ mod real {
             .and_then(|f| f.contents_utf8())
     }
 
-    /// Enumerate the ids of all compiled-in modules.
+    /// note: Enumerate the ids of all compiled-in modules.
     #[must_use]
     pub fn embedded_module_ids() -> Vec<&'static str> {
         EMBEDDED_MODULES
             .dirs()
             .filter_map(|d| {
                 let name = d.path().file_name()?.to_str()?;
-                // A module dir is one that ships a `<name>.wasm`.
                 d.get_file(format!("{name}/{name}.wasm"))
                     .is_some()
                     .then_some(name)
@@ -54,7 +55,7 @@ mod real {
     }
 }
 
-/// **Empty stub** — used when the wasm target is absent (build.rs sets
+/// note: **Empty stub** — used when the wasm target is absent (build.rs sets
 /// `nexus_no_wasm_target`). All queries return nothing.
 #[cfg(nexus_no_wasm_target)]
 mod real {
@@ -80,11 +81,11 @@ pub use real::*;
 mod tests {
     use super::*;
 
-    /// Only meaningful when embedded modules were actually compiled.
+    /// note: Only meaningful when embedded modules were actually compiled.
     #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn basic_combat_is_embedded() {
-        // Populated by build.rs, which compiles modules/basic-combat/ into
+        // why: build.rs compiles modules/basic-combat/ into
         // embedded-modules/basic-combat/basic-combat.wasm at build time.
         assert!(
             embedded_module_bytes("basic-combat").is_some(),
@@ -95,9 +96,8 @@ mod tests {
 
     #[test]
     fn no_wasm_target_stubs_return_nothing() {
-        // When cfg is active, stubs always return None/empty. This test is
-        // trivially true on real builds too (the functions exist and compile);
-        // on stub builds it asserts the stub contract.
+        // note: on a stub build the id list is empty, so the loop is vacuous; on
+        // a real build every enumerated id must resolve to bytes.
         let ids = embedded_module_ids();
         for id in ids {
             assert!(

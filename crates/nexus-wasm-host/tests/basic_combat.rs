@@ -5,6 +5,8 @@
 //!
 //! Only meaningful when embedded modules were actually compiled (the wasm
 //! target is installed); skipped when `nexus_no_wasm_target` is set (R-V1139P0-005).
+// note: the file-level cfg below is what keeps `cargo test` green on a host
+// without the wasm target.
 #![cfg(not(nexus_no_wasm_target))]
 
 use nexus_wasm_host::{
@@ -12,7 +14,7 @@ use nexus_wasm_host::{
     WasmEngine,
 };
 
-/// Build a `ComputeInput` with two characters: attacker `kb-atk` (ATK 20) and
+/// note: Build a `ComputeInput` with two characters: attacker `kb-atk` (ATK 20) and
 /// defender `kb-def` (DEF 5, current HP 30). Bodies follow the V1.61 KB
 /// structured shape (compass Q4/Q5): `attributes` (immutable) + nested
 /// `state.character.*` (mutable).
@@ -68,14 +70,14 @@ fn basic_combat_resolves_attack_into_four_part_output() {
         .compute(&module, &manifest, &combat_input())
         .expect("compute succeeds");
 
-    // 1) battle_report carries the combat discriminator (typed surface is
+    // note: 1) battle_report carries the combat discriminator (typed surface is
     // `kind` only; module-specific fields are validated pre-deserialize).
     assert!(
         output.battle_report.kind.is_some(),
         "battle_report.kind must be present"
     );
 
-    // Combat math is asserted via state_delta + timeline_events below.
+    // note: combat math is asserted via state_delta + timeline_events below.
     let delta = output
         .state_delta
         .iter()
@@ -85,7 +87,7 @@ fn basic_combat_resolves_attack_into_four_part_output() {
     assert_eq!(delta.path.to_string(), "character.current_hp");
     assert_eq!(delta.value, Some(serde_json::json!(15)));
 
-    // 3) timeline_events: one state_update event recording the outcome.
+    // note: 3) timeline_events: one state_update event recording the outcome.
     assert_eq!(output.timeline_events.len(), 1);
     let ev = &output.timeline_events[0];
     assert_eq!(ev.event_type.to_string(), "state_update");
@@ -104,19 +106,20 @@ fn basic_combat_resolves_attack_into_four_part_output() {
         &["kb_atk", "kb_def"]
     );
 
-    // 4) new_key_blocks empty for basic combat.
+    // note: 4) new_key_blocks empty for basic combat.
     assert_eq!(
         output.new_key_blocks,
         [] as [serde_json::Map<std::string::String, serde_json::Value>; 0]
     );
 
-    // The whole envelope must round-trip through serde (already did; sanity-check size).
+    // note: the envelope must round-trip through serde; the assertions below only
+    // check the encoded keys.
     let json = serde_json::to_string(&output).unwrap();
     assert!(json.contains("state_delta"));
     assert!(json.contains("battle_report"));
 }
 
-/// A second invocation on a fresh instance is fully independent (compass Q6:
+/// note: A second invocation on a fresh instance is fully independent (compass Q6:
 /// per-invocation sandbox). Two computes back-to-back produce identical,
 /// reproducible results.
 #[test]
@@ -136,7 +139,7 @@ fn compute_is_reproducible_across_invocations() {
     );
 }
 
-/// A killing blow (damage >= current HP) drives HP to 0 and sets `is_alive=false`.
+/// note: A killing blow (damage >= current HP) drives HP to 0 and sets `is_alive=false`.
 #[test]
 fn killing_blow_marks_defender_not_alive() {
     let engine = WasmEngine::new().unwrap();
@@ -162,7 +165,7 @@ fn killing_blow_marks_defender_not_alive() {
         .iter()
         .find(|d| d.path.to_string() == "character.current_hp")
         .expect("hp delta present");
-    assert_eq!(hp_delta.value, Some(serde_json::json!(48))); // 50 ATK − 2 DEF
+    assert_eq!(hp_delta.value, Some(serde_json::json!(48))); // why: 50 ATK − 2 DEF
 
     let alive_delta = out
         .state_delta

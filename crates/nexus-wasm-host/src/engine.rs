@@ -5,13 +5,15 @@
 //! wall-time deadline) are applied per-invocation in [`compute`](crate::compute)
 //! against a fresh [`Store`](wasmtime::Store), in line with the per-invocation
 //! sandbox decision (compass Q6).
+// note: the proposal set below is pinned to the v48 admission set explicitly, so
+// a wasmtime default flip cannot silently widen what the sandbox accepts.
 
 use nexus_compute_policy::SandboxConfig;
 use wasmtime::{Config, Engine, Module};
 
 use crate::error::{ComputeError, Result};
 
-/// A WebAssembly module compiled by [`WasmEngine`].
+/// note: A WebAssembly module compiled by [`WasmEngine`].
 ///
 /// Cheap to clone (wasmtime `Module` is internally `Arc`-shared). A compiled
 /// module may be reused across many `compute()` calls; each call still gets a
@@ -22,14 +24,14 @@ pub struct WasmModule {
 }
 
 impl WasmModule {
-    /// Returns the underlying wasmtime module (for advanced embedding).
+    /// note: Returns the underlying wasmtime module (for advanced embedding).
     #[must_use]
     pub const fn as_wasmtime(&self) -> &Module {
         &self.module
     }
 }
 
-/// Owns the wasmtime engine and compiles compute modules.
+/// note: Owns the wasmtime engine and compiles compute modules.
 ///
 /// Construct once (e.g. at daemon startup in P-last) and reuse for every
 /// `compute()` call. The engine's [`Config`] enables fuel + epoch interruption;
@@ -46,7 +48,7 @@ impl Default for WasmEngine {
 }
 
 impl WasmEngine {
-    /// Create an engine with the default sandbox configuration.
+    /// note: Create an engine with the default sandbox configuration.
     ///
     /// # Errors
     /// Returns [`ComputeError::Wasmtime`] if wasmtime cannot initialize the
@@ -55,7 +57,7 @@ impl WasmEngine {
         Self::with_config(SandboxConfig::default())
     }
 
-    /// Create an engine with a custom default sandbox configuration. The
+    /// note: Create an engine with a custom default sandbox configuration. The
     /// `fuel` / `wall_time` / `max_memory_bytes` are defaults; per-call overrides
     /// via the module manifest take precedence in [`compute`](crate::compute).
     ///
@@ -63,21 +65,21 @@ impl WasmEngine {
     /// Returns [`ComputeError::Wasmtime`] on engine init failure.
     pub fn with_config(default_sandbox: SandboxConfig) -> Result<Self> {
         let mut config = Config::new();
-        // Fuel: per-instruction budget, set per-invocation via Store::set_fuel.
+        // note: per-instruction budget, set per-invocation via Store::set_fuel.
         config.consume_fuel(true);
-        // Epoch interruption: enables the wall-time watchdog to trap runaway
-        // modules via Engine::increment_epoch().
+        // note: epoch interruption is what lets the wall-time watchdog trap a
+        // runaway module via Engine::increment_epoch().
         config.epoch_interruption(true);
-        // Debug-info off for release-grade modules; speed over introspection.
+        // note: debug-info off for release-grade modules; speed over introspection.
         config.debug_info(false);
-        // Wasmtime 47+ enables the GC, function-references and exceptions
+        // why: Wasmtime 47+ enables the GC, function-references and exceptions
         // proposals by default. Preserve the v46 module-admission set: the
         // Nexus module ABI is core Wasm, and accepting these proposals would
         // silently widen what the sandbox admits.
         config.wasm_gc(false);
         config.wasm_function_references(false);
         config.wasm_exceptions(false);
-        // Wasmtime 49 additionally enables the wide-arithmetic proposal by
+        // why: Wasmtime 49 additionally enables the wide-arithmetic proposal by
         // default (it is part of the `WASM3` default feature set). Keep the v48
         // admission set here too: `i64.add128` / `i64.mul_wide_*` are not part
         // of the Nexus module ABI, so modules using them must stay rejected at
@@ -91,19 +93,19 @@ impl WasmEngine {
         })
     }
 
-    /// The default sandbox limits applied when a manifest does not override.
+    /// note: The default sandbox limits applied when a manifest does not override.
     #[must_use]
     pub const fn default_sandbox(&self) -> SandboxConfig {
         self.default_sandbox
     }
 
-    /// Borrow the underlying wasmtime [`Engine`].
+    /// note: Borrow the underlying wasmtime [`Engine`].
     #[must_use]
     pub const fn engine(&self) -> &Engine {
         &self.engine
     }
 
-    /// Validate and compile a WebAssembly module from raw bytes.
+    /// note: Validate and compile a WebAssembly module from raw bytes.
     ///
     /// Compilation results are cached by wasmtime on disk (when enabled), so
     /// repeated loads of the same bytes are fast.
@@ -124,7 +126,7 @@ mod tests {
     #[test]
     fn loads_valid_module() {
         let engine = WasmEngine::new().unwrap();
-        // A minimal valid wasm module (empty, no exports).
+        // note: a minimal valid wasm module (empty, no exports).
         let empty = wat::parse_str("(module)").unwrap_or_default();
         engine.load_module(&empty).expect("empty module loads");
     }

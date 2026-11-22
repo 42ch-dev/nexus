@@ -10,11 +10,13 @@
 //! under `#[cfg(test)]`, from the crate's lib test harness (via
 //! `#[path = "../build_walk.rs"]`) so the walker's unit tests run under
 //! `cargo test`.
+// note: output order follows `read_dir` and is unspecified; callers that care
+// sort the collected paths.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Recursively collect every file under `dir` into `out` (depth-first).
+/// note: Recursively collect every file under `dir` into `out` (depth-first).
 ///
 /// Unreadable entries are skipped defensively; the build script's own
 /// freshness check (`is_fresh`) and the per-module compile step surface real
@@ -47,7 +49,7 @@ mod tests {
         fs::write(path, contents).unwrap();
     }
 
-    /// R-V1147P0-001 regression: the emitted `rerun-if-changed` list must
+    /// note: R-V1147P0-001 regression: the emitted `rerun-if-changed` list must
     /// cover files in nested subdirectories, not just direct children.
     #[test]
     fn walk_files_covers_nested_files() {

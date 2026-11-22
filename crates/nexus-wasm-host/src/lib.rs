@@ -47,6 +47,8 @@
 //! # Ok(())
 //! # }
 //! ```
+// why: embedded at build time so the daemon ships its compute modules inside the
+// binary and resolves no module files at runtime.
 
 mod compute;
 mod embedded;
@@ -68,17 +70,16 @@ pub use nexus_contracts::generated::daemon_api::compute::{
 };
 pub use registry::{get_module, list_modules};
 
-// Re-export the compute ABI types from nexus-contracts so consumers depend on a
-// single crate. These are the generated wire types for `schemas/daemon-api/compute/`.
+// why: consumers depend on a single crate for the ABI types; these are the
+// generated wire types for `schemas/daemon-api/compute/`.
 pub use nexus_contracts::generated::daemon_api::compute::compute_input::ComputeInput;
 pub use nexus_contracts::generated::daemon_api::compute::compute_output::{
     ComputeOutput, ComputeOutputStateDeltaItem as ComputeOutputStateDelta,
 };
 
-// The build-script walker (R-V1147P0-001: per-file `rerun-if-changed`) is
-// compiled from `build.rs` as `mod build_walk;`. Include the same file here
-// under `#[cfg(test)]` so its unit tests run with `cargo test` (build scripts
-// are not test targets).
+// why: build scripts are not test targets, so the walker
+// (R-V1147P0-001: per-file `rerun-if-changed`) is compiled from `build.rs` as
+// `mod build_walk;` and again here under `#[cfg(test)]` for `cargo test`.
 #[cfg(test)]
 #[path = "../build_walk.rs"]
 mod build_walk;

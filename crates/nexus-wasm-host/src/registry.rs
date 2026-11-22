@@ -2,6 +2,7 @@
 //!
 //! Exposes the embedded module loader as a read-only registry for daemon API
 //! discovery endpoints. No compute invocation or state mutation happens here.
+// note: read-only by construction — every entry point resolves embedded bytes.
 
 use nexus_contracts::generated::daemon_api::compute::{
     module_detail::ModuleDetail,
@@ -12,7 +13,7 @@ use tracing::warn;
 use crate::embedded::{embedded_module_ids, embedded_module_manifest};
 use crate::manifest::{manifest_to_detail, ModuleManifest};
 
-/// List all embedded compute modules as summaries.
+/// note: List all embedded compute modules as summaries.
 ///
 /// Modules whose manifest cannot be parsed are surfaced with `status: "broken"`
 /// rather than silently dropped, so the daemon API and UI can distinguish
@@ -38,7 +39,7 @@ pub fn list_modules() -> Vec<ModuleSummary> {
         .collect()
 }
 
-/// Get the full manifest detail for a single embedded module by id.
+/// note: Get the full manifest detail for a single embedded module by id.
 ///
 /// Returns `Ok(None)` when the module is not installed, and `Err(...)` when
 /// the module is present but its manifest cannot be parsed. This lets callers
@@ -58,7 +59,8 @@ pub fn get_module(id: &str) -> Result<Option<ModuleDetail>, serde_json::Error> {
 }
 
 fn manifest_to_summary(manifest: &ModuleManifest) -> ModuleSummary {
-    // Keep field mapping aligned with `manifest_to_detail` in manifest.rs.
+    // invariant: this field mapping stays aligned with `manifest_to_detail` in
+    // manifest.rs.
     ModuleSummary {
         module_id: manifest.module_id.clone(),
         name: manifest.name.clone(),
@@ -86,7 +88,7 @@ fn broken_summary(id: &str) -> ModuleSummary {
 mod tests {
     use super::*;
 
-    /// Only meaningful when embedded modules were compiled by build.rs.
+    /// note: Only meaningful when embedded modules were compiled by build.rs.
     #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn list_modules_includes_basic_combat() {
@@ -97,7 +99,7 @@ mod tests {
         );
     }
 
-    /// Only meaningful when embedded modules were compiled by build.rs.
+    /// note: Only meaningful when embedded modules were compiled by build.rs.
     #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn list_modules_marks_valid_modules_ok() {
@@ -146,7 +148,7 @@ mod tests {
         assert_eq!(summary.status.to_string(), "ok");
     }
 
-    /// Only meaningful when embedded modules were compiled by build.rs.
+    /// note: Only meaningful when embedded modules were compiled by build.rs.
     #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn get_module_returns_basic_combat_detail() {
@@ -169,7 +171,7 @@ mod tests {
         assert!(get_module("no-such-module").unwrap().is_none());
     }
 
-    /// Only meaningful when embedded modules were compiled by build.rs.
+    /// note: Only meaningful when embedded modules were compiled by build.rs.
     #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn list_modules_and_get_module_agree_on_basic_combat() {
@@ -201,7 +203,7 @@ mod tests {
         );
     }
 
-    /// Test helper that parses a manifest JSON string as a detail lookup would.
+    /// note: Test helper that parses a manifest JSON string as a detail lookup would.
     fn get_module_detail_from_manifest(
         manifest_json: &str,
     ) -> Result<Option<ModuleDetail>, serde_json::Error> {

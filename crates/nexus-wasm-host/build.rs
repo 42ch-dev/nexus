@@ -27,6 +27,8 @@
 //! `manifest.json`). `cargo:rerun-if-changed` directives keep this aligned with
 //! Cargo's own change detection, so a clean incremental `cargo build` does not
 //! pay the wasm-compile cost when nothing changed.
+// why: the compiled blobs are embedded with `include_dir!`, so staleness here
+// ships silently instead of failing a later build.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,12 +37,12 @@ use std::time::SystemTime;
 
 mod build_walk;
 
-/// Module ids that must be embedded. Each id must match a source crate under
+/// note: Module ids that must be embedded. Each id must match a source crate under
 /// `../../modules/<id>/`.
 const MODULE_IDS: &[&str] = &["basic-combat"];
 
 fn main() {
-    // Declare the custom cfg flag early so rustc does not warn about
+    // why: declared early so rustc does not warn about
     // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
 
@@ -49,9 +51,9 @@ fn main() {
     );
     let embedded_root = manifest_dir.join("embedded-modules");
 
-    // Detect whether the wasm32-unknown-unknown target is installed before
-    // attempting any WASM compilation. A missing target is the overwhelmingly
-    // common reason `cargo check --all` breaks on developer machines that have
+    // why: detect the wasm32-unknown-unknown target before attempting any WASM
+    // compilation. A missing target is the overwhelmingly common reason
+    // `cargo check --all` breaks on developer machines that have
     // not added it — and `cargo check` does not need the compiled blobs, just
     // type-check completion. We emit a cfg flag so the crate's source can
     // switch to empty stubs when the target is absent (R-V1139P0-005).
@@ -62,8 +64,8 @@ fn main() {
              runtime. Install the target with: rustup target add wasm32-unknown-unknown"
         );
         println!("cargo:rustc-cfg=nexus_no_wasm_target");
-        // Still create empty directory so anything that stat-checks the path
-        // does not trip over a missing dir.
+        // why: still create the empty directory so anything that stat-checks the
+        // path does not trip over a missing dir.
         create_dir_all_or_die(&embedded_root);
         return;
     }
@@ -76,7 +78,7 @@ fn main() {
     }
 }
 
-/// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
+/// note: Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
 ///
 /// Uses `rustc --print sysroot --target wasm32-unknown-unknown` which exits 0
 /// only when the target is available. This is a fast metadata query — it does
@@ -89,7 +91,7 @@ fn has_wasm_target() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// Compile one module's `.wasm` from source, stage its manifest, and inject
+/// note: Compile one module's `.wasm` from source, stage its manifest, and inject
 /// the `wasm_sha256` pairing field (from the staged bytes), unless the
 /// embedded copy is already up to date.
 fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
@@ -98,7 +100,7 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
     let src_cargo = src_dir.join("Cargo.toml");
     let src_code = src_dir.join("src");
 
-    // Tell Cargo to re-run this script when the module's sources change.
+    // why: Cargo must re-run this script when the module's sources change.
     // Per-file directives (not dir-level): `cargo:rerun-if-changed=<dir>` does
     // NOT recurse into subdirectories, so an edit to a nested module source
     // file (e.g. `modules/basic-combat/src/lib.rs`) would otherwise go
@@ -124,12 +126,12 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
 
     create_dir_all_or_die(&dest_dir);
 
-    // Always mirror the manifest (tiny) so the embedded copy tracks the source.
+    // why: always mirror the manifest (tiny) so the embedded copy tracks the source.
     copy_or_die(&src_manifest, &dest_manifest, "manifest.json");
 
     if !is_fresh(&dest_wasm, &src_cargo, &src_manifest, &src_code) {
         compile_module(id, &src_dir);
-        // cdylib artifact names use underscores (crate name `basic-combat` →
+        // why: cdylib artifact names use underscores (crate name `basic-combat` →
         // `basic_combat.wasm`); the embedded id keeps the dash.
         //
         // The nested module build inherits `CARGO_TARGET_DIR` when the repo's
@@ -155,14 +157,14 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
     }
 
-    // Content-based pairing (Greptile P1): the embedded manifest must declare
+    // why: content-based pairing (Greptile P1) — the embedded manifest must declare
     // the SHA-256 of the EXACT bytes it ships with. Recompute on every run
     // (not just on recompile) so a staged pair from an older build — whose
     // manifest predates the field — is upgraded to a self-consistent one.
     inject_wasm_sha256(id, &dest_wasm, &dest_manifest);
 }
 
-/// Inject `wasm_sha256` into the staged `manifest.json`, computed from the
+/// note: Inject `wasm_sha256` into the staged `manifest.json`, computed from the
 /// staged `.wasm` bytes. The embedded manifest always declares the hash of
 /// the artifact it ships with, so the loader's content-based pairing check
 /// can never reject an embedded module. The source `modules/<id>/manifest.json`
@@ -177,7 +179,7 @@ fn inject_wasm_sha256(id: &str, wasm_path: &Path, manifest_path: &Path) {
     }
 }
 
-/// Emit one `cargo:rerun-if-changed` directive per file under `dir` (walk).
+/// note: Emit one `cargo:rerun-if-changed` directive per file under `dir` (walk).
 ///
 /// Dir-level directives do not recurse (R-V1147P0-001); per-file emission
 /// makes Cargo re-run this script when any nested module source changes.
@@ -189,7 +191,7 @@ fn emit_rerun_if_changed(dir: &Path) {
     }
 }
 
-/// Returns `true` only if `artifact` exists and is no older than every source
+/// note: Returns `true` only if `artifact` exists and is no older than every source
 /// file. Any read failure is treated as "stale" so the compile surfaces the
 /// real error rather than silently embedding a stale blob.
 #[must_use]
@@ -206,7 +208,7 @@ fn is_fresh(artifact: &Path, src_cargo: &Path, src_manifest: &Path, src_dir: &Pa
     !dir_contains_newer(src_dir, artifact_mtime)
 }
 
-/// `true` if `path` was modified strictly after `threshold`.
+/// note: `true` if `path` was modified strictly after `threshold`.
 #[must_use]
 fn is_newer_than(path: &Path, threshold: SystemTime) -> bool {
     fs::metadata(path)
@@ -214,11 +216,11 @@ fn is_newer_than(path: &Path, threshold: SystemTime) -> bool {
         .is_ok_and(|t| t > threshold)
 }
 
-/// Recursively checks whether any file under `dir` is newer than `threshold`.
+/// note: Recursively checks whether any file under `dir` is newer than `threshold`.
 #[must_use]
 fn dir_contains_newer(dir: &Path, threshold: SystemTime) -> bool {
     let Ok(entries) = fs::read_dir(dir) else {
-        return true; // unreadable src tree → force a rebuild attempt
+        return true; // why: an unreadable src tree forces a rebuild attempt
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -238,7 +240,7 @@ fn dir_contains_newer(dir: &Path, threshold: SystemTime) -> bool {
     false
 }
 
-/// Runs `cargo build --release --target wasm32-unknown-unknown` in the module's
+/// note: Runs `cargo build --release --target wasm32-unknown-unknown` in the module's
 /// source directory, exiting with a clear message on failure.
 fn compile_module(id: &str, src_dir: &Path) {
     let output = Command::new("cargo")
@@ -268,7 +270,7 @@ fn compile_module(id: &str, src_dir: &Path) {
     die(&format!("failed to compile module `{id}`:\n{stderr}"));
 }
 
-/// Detects the rustc/cargo error emitted when the wasm sysroot is absent (the
+/// note: Detects the rustc/cargo error emitted when the wasm sysroot is absent (the
 /// overwhelmingly common cause of a module build failure here).
 #[must_use]
 fn is_missing_target_error(stderr: &str) -> bool {

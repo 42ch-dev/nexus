@@ -4,7 +4,7 @@
 
 use nexus_wasm_host::{ComputeError, ComputeInput, ModuleManifest, WasmEngine};
 
-/// A module that exports the V1 ABI (`alloc`, `init`, `compute`, `memory`) but
+/// note: A module that exports the V1 ABI (`alloc`, `init`, `compute`, `memory`) but
 /// whose `compute` is an **infinite loop**. With fuel consumption enabled, the
 /// loop traps with `Trap::OutOfFuel` — mapped to [`ComputeError::OutOfFuel`].
 fn infinite_loop_module() -> Vec<u8> {
@@ -57,7 +57,7 @@ fn infinite_loop_is_bounded_by_fuel() {
     );
 }
 
-/// A tiny fuel budget set via the manifest also bounds a finite-but-greedy
+/// note: A tiny fuel budget set via the manifest also bounds a finite-but-greedy
 /// module (here, the same infinite loop). Confirms manifest-level override
 /// wiring.
 #[test]
@@ -65,7 +65,7 @@ fn manifest_fuel_override_bounds_compute() {
     let engine = WasmEngine::new().unwrap();
     let module = engine.load_module(&infinite_loop_module()).unwrap();
     let mut manifest = manifest();
-    manifest.max_fuel = Some(1_000); // barely enough to instantiate, not to loop
+    manifest.max_fuel = Some(1_000); // why: barely enough to instantiate, not to loop
 
     let err = engine
         .compute(&module, &manifest, &empty_input())
@@ -77,7 +77,7 @@ fn manifest_fuel_override_bounds_compute() {
     );
 }
 
-/// A module whose initial memory already exceeds the invocation's memory cap.
+/// note: A module whose initial memory already exceeds the invocation's memory cap.
 /// The refusal is decided by the pre-instantiation structured check (the
 /// module's declared memory minimum vs the invocation cap) and must surface as
 /// [`ComputeError::MemoryCapExceeded`], not a generic trap or a host crash.
@@ -103,7 +103,7 @@ fn big_memory_module() -> Vec<u8> {
 #[test]
 fn memory_cap_is_enforced_at_instantiation() {
     let engine = WasmEngine::new().unwrap();
-    // 64 pages = 4 MiB initial memory; the manifest tightens the cap to 1 MiB.
+    // note: 64 pages = 4 MiB initial memory; the manifest tightens the cap to 1 MiB.
     let module = engine.load_module(&big_memory_module()).unwrap();
     let mut manifest = manifest();
     manifest.max_memory_mib = Some(1);
@@ -118,7 +118,7 @@ fn memory_cap_is_enforced_at_instantiation() {
     );
 }
 
-/// V1.206 P2 site 2 (Greptile fix): a module may export an in-cap `memory` and
+/// note: V1.206 P2 site 2 (Greptile fix): a module may export an in-cap `memory` and
 /// declare a second, unexported memory above the cap. The pre-check must read
 /// every *declared* memory, not only the exports — otherwise the oversized
 /// unexported memory slips past it and the refusal degrades to a generic
@@ -146,7 +146,7 @@ fn oversized_unexported_memory_module() -> Vec<u8> {
 #[test]
 fn memory_cap_covers_unexported_memories() {
     let engine = WasmEngine::new().unwrap();
-    // The exported memory (1 page) is inside the 1 MiB cap; only the
+    // note: the exported memory (1 page) is inside the 1 MiB cap; only the
     // unexported memory (64 pages = 4 MiB) exceeds it.
     let module = engine
         .load_module(&oversized_unexported_memory_module())
@@ -164,7 +164,7 @@ fn memory_cap_covers_unexported_memories() {
     );
 }
 
-/// The wall-time watchdog must trap a runaway module independently of fuel:
+/// note: The wall-time watchdog must trap a runaway module independently of fuel:
 /// with the default fuel budget intact but a 1 ms wall-time deadline, the
 /// infinite loop must surface as [`ComputeError::WallTimeExceeded`]
 /// (epoch interruption), not `OutOfFuel`.
@@ -185,7 +185,7 @@ fn wall_time_deadline_traps_independently_of_fuel() {
     );
 }
 
-/// Wasmtime 49 turns the wide-arithmetic proposal ON by default (it is part of
+/// note: Wasmtime 49 turns the wide-arithmetic proposal ON by default (it is part of
 /// the `WASM3` default feature set); the engine pins it OFF (`engine.rs`) so the
 /// module admission set stays at v48. A module whose code section uses
 /// `i64.mul_wide_u` must be rejected at load time.
@@ -213,7 +213,7 @@ fn rejects_wide_arithmetic_module() {
     );
 }
 
-/// Wasmtime 47+ enables the GC / function-references / exceptions proposals by
+/// note: Wasmtime 47+ enables the GC / function-references / exceptions proposals by
 /// default; the engine pins them OFF (`engine.rs`) to preserve the v46 module
 /// admission set. A module requiring the exceptions proposal (`try_table`)
 /// must be rejected at load time.
