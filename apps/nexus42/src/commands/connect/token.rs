@@ -22,29 +22,36 @@ use spoke_connect::CapabilityTokenProvider;
 use std::path::Path;
 use std::sync::Arc;
 
-/// note: `connect token` subcommands.
+/// `connect token` subcommands.
+// note: doc line is user-visible CLI help text.
 #[derive(Debug, Subcommand)]
 pub enum TokenCommand {
-    /// note: issue a signed capability token with the persisted issuer key.
+    /// Issue a signed capability token with the persisted issuer key.
     ///
     /// Prints the wire proof `{v, claims, sig}` (JCS claims, base64url
     /// signature) as JSON on stdout.
+    // note: doc lines are user-visible CLI help text.
     Issue {
-        /// note: subject peer id — who may present the token.
+        /// Subject peer id — who may present the token.
+        // note: doc line is user-visible CLI help text.
         #[arg(long, value_name = "PEER_ID")]
         sub: String,
-        /// note: audience peer id — the verifying node.
+        /// Audience peer id — the verifying node.
+        // note: doc line is user-visible CLI help text.
         #[arg(long, value_name = "PEER_ID")]
         aud: String,
-        /// note: comma-separated capability names granted to `sub` (non-empty).
+        /// Comma-separated capability names granted to `sub` (non-empty).
+        // note: doc line is user-visible CLI help text.
         #[arg(long, value_name = "C1,C2")]
         capabilities: String,
-        /// note: expiry as Unix time seconds (UTC); must be beyond
+        /// Expiry as Unix time seconds (UTC); must be beyond
         /// now + 60s clock skew.
+        // note: doc lines are user-visible CLI help text.
         #[arg(long, value_name = "UNIX_SECONDS")]
         exp: u64,
-        /// note: issuer peer id override (defaults to the issuer key's derived
+        /// Issuer peer id override (defaults to the issuer key's derived
         /// peer id — MUST equal it, spoke normative rule).
+        // note: doc lines are user-visible CLI help text.
         #[arg(long, value_name = "PEER_ID")]
         iss: Option<String>,
     },

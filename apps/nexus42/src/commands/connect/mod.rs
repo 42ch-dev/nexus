@@ -72,29 +72,34 @@ use std::sync::Arc;
 /// binding a routable interface is an explicit operator choice, N-C0 §5.3).
 const DEFAULT_LISTEN: &str = "/ip4/127.0.0.1/tcp/0";
 
-/// note: Connect Host subcommands.
+/// Connect Host subcommands.
+// note: doc line is user-visible CLI help text.
 #[derive(Debug, Subcommand)]
 pub enum ConnectCommand {
-    /// note: start the Connect Host node (handshake + manifest + the served
+    /// Start the Connect Host node (handshake + manifest + the served
     /// invoke surface: world-scoped upsert/promote/relate/check/assemble,
     /// World/module/Actor-gated compute, and the host-level
     /// `tools.nexus.list_observed_peers` / `tools.nexus.list_modules` reads;
     /// project/unknown ops refused)
+    // note: doc lines are user-visible CLI help text.
     Start {
-        /// note: peer IDs to allowlist for this run (repeatable; unioned with
+        /// Peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`).
+        // note: doc lines are user-visible CLI help text.
         #[arg(long = "allow-peer", value_name = "PEER_ID")]
         allow_peer: Vec<String>,
-        /// note: listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
+        /// Listen multiaddr (repeatable; default `/ip4/127.0.0.1/tcp/0`).
+        // note: doc line is user-visible CLI help text.
         #[arg(long, value_name = "MULTIADDR", default_value = DEFAULT_LISTEN)]
         listen: Vec<String>,
     },
-    /// note: inspect observed peer hosts (N-C3 multi-host production).
+    /// Inspect observed peer hosts (N-C3 multi-host production).
+    // note: doc line is user-visible CLI help text.
     Peers {
         #[command(subcommand)]
         command: PeersCommand,
     },
-    /// note: dial a peer host and record its manifest (N-C3 multi-host
+    /// Dial a peer host and record its manifest (N-C3 multi-host
     /// production).
     ///
     /// The production outbound dial surface: boots a Connect node, dials
@@ -104,30 +109,35 @@ pub enum ConnectCommand {
     /// prints the dialed peer's id / `host_id` / capabilities. Fail-closed: a
     /// dial failure or a recording reject aborts the command (no silent
     /// no-op recording).
+    // note: doc lines are user-visible CLI help text.
     Dial {
-        /// note: multiaddr of the peer host to dial (e.g. `/ip4/127.0.0.1/tcp/4321`).
+        /// Multiaddr of the peer host to dial (e.g. `/ip4/127.0.0.1/tcp/4321`).
+        // note: doc line is user-visible CLI help text.
         #[arg(value_name = "MULTIADDR")]
         peer: String,
-        /// note: peer IDs to allowlist for this run (repeatable; unioned with
+        /// Peer IDs to allowlist for this run (repeatable; unioned with
         /// `~/.nexus42/connect/allowlist.json`). The dialed peer MUST be
         /// allowlisted: the session allowlist is mutual (a connected peer
         /// can invoke this host on the same session), so dialing a
         /// non-allowlisted peer is refused at the handshake.
+        // note: doc lines are user-visible CLI help text.
         #[arg(long = "allow-peer", value_name = "PEER_ID")]
         allow_peer: Vec<String>,
     },
-    /// note: issue signed capability tokens (V1.155 P1 production issuance).
+    /// Issue signed capability tokens (V1.155 P1 production issuance).
     ///
     /// The operator issuance surface: loads or creates the issuer key
     /// (`~/.nexus42/connect/issuer.key`, create-once 0600) and prints the
     /// signed wire proof `{v, claims, sig}` as JSON on stdout.
+    // note: doc lines are user-visible CLI help text.
     Token {
         #[command(subcommand)]
         command: token::TokenCommand,
     },
 }
 
-/// note: `connect peers` subcommands.
+/// `connect peers` subcommands.
+// note: doc line is user-visible CLI help text.
 #[derive(Debug, Subcommand)]
 pub enum PeersCommand {
     /// List observed peer hosts — `host_id`, capabilities, `last_seen`.
