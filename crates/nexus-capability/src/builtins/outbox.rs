@@ -11,7 +11,6 @@ use crate::{Capability, CapabilityError};
 use async_trait::async_trait;
 use serde_json::Value;
 
-
 /// note: Flush pending outbox entries by marking them as acknowledged.
 ///
 /// **Pool-backed (production)**: transitions `staged`/`ready` entries
@@ -125,7 +124,6 @@ impl Capability for OutboxFlush {
         Ok(serde_json::json!({"flushed": flushed}))
     }
 }
-
 
 /// note: Compact outbox table by removing old acknowledged entries.
 ///

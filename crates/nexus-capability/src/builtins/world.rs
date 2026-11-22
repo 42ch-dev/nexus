@@ -366,17 +366,15 @@ impl Capability for WorldDeltaPropose {
                     // note: create path — no prior value.
                     Some(Value::Null)
                 }
-                ("world_metadata", _) if ch.field == "title" => {
-                    sqlx::query_scalar::<_, String>(
-                        "SELECT title FROM narrative_worlds WHERE world_id = ?",
-                    )
-                    .bind(&parsed.world_id)
-                    .fetch_optional(&**pool)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(Value::String)
-                }
+                ("world_metadata", _) if ch.field == "title" => sqlx::query_scalar::<_, String>(
+                    "SELECT title FROM narrative_worlds WHERE world_id = ?",
+                )
+                .bind(&parsed.world_id)
+                .fetch_optional(&**pool)
+                .await
+                .ok()
+                .flatten()
+                .map(Value::String),
                 (other_entity, _) => {
                     return Err(CapabilityError::InputInvalid(format!(
                         "unsupported entity '{other_entity}' (V1.60: kb_key_block, world_metadata)"
