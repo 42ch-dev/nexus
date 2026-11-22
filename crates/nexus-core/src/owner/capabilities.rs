@@ -42,11 +42,12 @@
 //! `invalid_input` → 422) are part of the public contract and are carried on
 //! [`CoreError::Coded`]; the adapter renders the status from its own table, so
 //! one refusal reads identically on every transport.
+// why: the spine is the single resolver, so the builtin and peer sets cannot silently diverge.
 
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::too_many_lines)]
 
-// Test-only observation of the fallback lanes (see `fallback_consultations`).
+// why: Test-only observation of the fallback lanes (see `fallback_consultations`).
 #[cfg(any(test, feature = "test-hooks"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -56,7 +57,7 @@ use super::work_artifact::{
 };
 use crate::content::resolve_guarded_path_async;
 use crate::error::{CoreError, CoreResult};
-// The handlers below were extracted from the daemon, where the refusal type is
+// why: The handlers below were extracted from the daemon, where the refusal type is
 // named `NexusApiError`. It IS the same type as `CoreError` — the daemon's
 // adapter renders the HTTP envelope — so the alias keeps the extracted bodies
 // readable without a 200-site rename that would obscure the diff.
@@ -65,9 +66,9 @@ use crate::service::CoreService;
 use crate::tool_catalog::{
     host_tool_catalog, lookup_host_tool, Access, AdmissionGate, HostToolId, HostToolMetadata,
 };
-// The request DTOs live at the crate root, not in `works`.
+// why: The request DTOs live at the crate root, not in `works`.
 use crate::{ArchivePoolRequest, PromotePoolRequest, WorkDetails, WorkPatchRequest};
-// The tool invocation request is the generated `schemas/core/tools-api.schema.json`
+// why: The tool invocation request is the generated `schemas/core/tools-api.schema.json`
 // DTO (the schema lane's authority, item 3); the daemon's handwritten copy it was
 // moved from — plus its response envelope — is deleted, not shadowed.
 use nexus_connect::peer_tools;
@@ -87,10 +88,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-/// Fields allowed in `nexus.work.patch`.
+/// note: Fields allowed in `nexus.work.patch`.
 pub const PATCH_ALLOWED_FIELDS: &[&str] = &["title", "inspiration_log", "stage_metadata"];
 
-/// Fields explicitly rejected in `nexus.work.patch`.
+/// note: Fields explicitly rejected in `nexus.work.patch`.
 pub const PATCH_REJECTED_FIELDS: &[&str] = &[
     "current_stage",
     "stage",
@@ -103,7 +104,7 @@ pub const PATCH_REJECTED_FIELDS: &[&str] = &[
     "run_intents",
 ];
 
-/// Sub-fields allowed inside `stage_metadata`.
+/// note: Sub-fields allowed inside `stage_metadata`.
 pub const STAGE_METADATA_ALLOWED_KEYS: &[&str] = &[
     "agent_notes",
     "research_summary_ref",
@@ -112,22 +113,22 @@ pub const STAGE_METADATA_ALLOWED_KEYS: &[&str] = &[
     "last_agent_tool_request_id",
 ];
 
-/// Process-level facts the health tools report.
+/// note: Process-level facts the health tools report.
 ///
 /// Supplied by whoever owns the process (the transport at boot). The defaults
 /// describe a local-only process that has just started, which is the honest
 /// answer for a caller that supplied no facts.
 #[derive(Debug, Clone)]
 pub struct ToolRuntimeFacts {
-    /// The runtime mode.
+    /// note: The runtime mode.
     pub runtime_mode: nexus_contracts::local::domain::RuntimeMode,
-    /// Whether the workspace is initialized.
+    /// note: Whether the workspace is initialized.
     pub is_initialized: bool,
-    /// The lifecycle state, as its display string.
+    /// note: The lifecycle state, as its display string.
     pub lifecycle_state: String,
-    /// Process start time, RFC 3339.
+    /// note: Process start time, RFC 3339.
     pub started_at: String,
-    /// Process uptime in seconds.
+    /// note: Process uptime in seconds.
     pub uptime_seconds: u64,
 }
 
@@ -144,14 +145,14 @@ impl Default for ToolRuntimeFacts {
 }
 
 impl ToolRuntimeFacts {
-    /// The runtime mode as its wire string.
+    /// note: The runtime mode as its wire string.
     #[must_use]
     pub const fn runtime_mode_as_str(&self) -> &'static str {
         self.runtime_mode.as_str()
     }
 }
 
-/// The narrow owned inputs a tool dispatch consumes.
+/// note: The narrow owned inputs a tool dispatch consumes.
 ///
 /// Every field is an already-resolved value or an already-constructed
 /// collaborator — never a transport aggregate. This is what makes the
@@ -159,13 +160,13 @@ impl ToolRuntimeFacts {
 /// `WorkspaceState` or falling back to a universal `Value` RPC.
 #[derive(Clone)]
 pub struct ToolContext {
-    /// The Creator DB pool.
+    /// note: The Creator DB pool.
     pub(crate) pool: sqlx::SqlitePool,
-    /// The nexus home (`~/.nexus42`), for active-creator/workspace reads.
+    /// note: The nexus home (`~/.nexus42`), for active-creator/workspace reads.
     pub(crate) nexus_home: std::path::PathBuf,
-    /// The active workspace path, when one is attached.
+    /// note: The active workspace path, when one is attached.
     pub(crate) workspace_path: Option<String>,
-    /// Process-level facts the two health tools report.
+    /// note: Process-level facts the two health tools report.
     ///
     /// These are genuinely process state (runtime mode, HSM state, start
     /// time, uptime, initialization) that a domain service cannot derive.
@@ -174,27 +175,27 @@ pub struct ToolContext {
     /// health tools report the defaults honestly rather than inventing a
     /// running daemon.
     pub(crate) runtime_facts: ToolRuntimeFacts,
-    /// The engine-owner core, when one is open.
+    /// note: The engine-owner core, when one is open.
     pub(crate) core: Option<Arc<CoreService>>,
-    /// The live user-capability registry, when one is published.
+    /// note: The live user-capability registry, when one is published.
     ///
     /// Read LIVE at each dispatch (never cached on the context) so a
     /// hot-reloaded registry is visible to the very next call — the same
     /// discipline the engine uses through the shared holder.
     pub(crate) user_capabilities: Option<nexus_capability::CapabilityRegistryHolder>,
-    /// The Simulate plane's Work artifact port, when this context is one.
+    /// note: The Simulate plane's Work artifact port, when this context is one.
     ///
     /// `None` is production: every Work byte write commits through
     /// [`FsWorkArtifactPort`]. `Some` records the intended writes instead, so a
     /// dry run leaves the `Works/` tree byte-identical.
     pub(crate) recording_work_artifact: Option<Arc<RecordingWorkArtifactPort>>,
-    /// The Simulate plane's knowledge port, when this context is one.
+    /// note: The Simulate plane's knowledge port, when this context is one.
     ///
     /// `None` is production: knowledge writes commit through `SqliteKbStore`.
     /// `Some` records the intended writes instead, so a dry run leaves
     /// `kb_key_blocks` byte-identical.
     pub(crate) recording_knowledge_entry: Option<Arc<StubKnowledgeEntryPort>>,
-    /// The prompt executor this process composed onto its execution owner.
+    /// note: The prompt executor this process composed onto its execution owner.
     ///
     /// `None` is every context whose transport attached no model — a core-only
     /// caller, a Simulate plane, a daemon with no provider selected. A spine
@@ -205,7 +206,7 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
-    /// Compose a tool context from its owned inputs.
+    /// note: Compose a tool context from its owned inputs.
     ///
     /// The fields stay crate-private so a caller cannot mutate the authority
     /// under a running dispatch; this constructor is the public composition
@@ -234,7 +235,7 @@ impl ToolContext {
         }
     }
 
-    /// The same context with the transport's prompt executor attached.
+    /// note: The same context with the transport's prompt executor attached.
     ///
     /// The executor is the one the engine drives, so a tool's model round and a
     /// preset's model round use one Host client and one provider selection.
@@ -247,7 +248,7 @@ impl ToolContext {
         self
     }
 
-    /// The same context, with Work artifact writes recorded instead of landed.
+    /// note: The same context, with Work artifact writes recorded instead of landed.
     ///
     /// A dry run over a workspace whose `Works/` tree already holds real
     /// chapter bytes must not rewrite them; selecting the recording port here is
@@ -278,7 +279,7 @@ impl ToolContext {
         }
     }
 
-    /// The Work writes this context recorded, or `None` for a production one.
+    /// note: The Work writes this context recorded, or `None` for a production one.
     ///
     /// `None` is not an empty log: a production context commits real bytes and
     /// records nothing, so reporting `Some(vec![])` would claim a plane that
@@ -290,7 +291,7 @@ impl ToolContext {
             .map(|port| port.mutations())
     }
 
-    /// The knowledge port intents this context recorded, or `None` for a
+    /// note: The knowledge port intents this context recorded, or `None` for a
     /// production one.
     ///
     /// `None` is not an empty log: a production context commits real rows
@@ -303,7 +304,7 @@ impl ToolContext {
             .map(|port| port.mutations())
     }
 
-    /// Commit one Work artifact byte write through the selected port.
+    /// note: Commit one Work artifact byte write through the selected port.
     ///
     /// The recording port performs no filesystem, SQLite or lock operation, so
     /// a simulated dispatch claims Work-byte isolation only — the surrounding
@@ -322,7 +323,7 @@ impl ToolContext {
         }
     }
 
-    /// Replace the active workspace path.
+    /// note: Replace the active workspace path.
     ///
     /// The permission policy is read from `<workspace>/.nexus42/permissions.toml`,
     /// so a caller that resolves a different workspace must be able to point
@@ -331,7 +332,7 @@ impl ToolContext {
         self.workspace_path = path;
     }
 
-    /// Replace the live user-capability holder.
+    /// note: Replace the live user-capability holder.
     ///
     /// A dispatch reads the holder LIVE, so swapping it here is visible to the
     /// very next call — the same hot-reload discipline the engine uses.
@@ -342,26 +343,26 @@ impl ToolContext {
         self.user_capabilities = holder;
     }
 
-    /// The Creator DB pool.
+    /// note: The Creator DB pool.
     #[must_use]
-    #[allow(clippy::missing_const_for_fn)] // const here would suppress auto-deref for callers
+    #[allow(clippy::missing_const_for_fn)] // why: const here would suppress auto-deref for callers
     pub fn pool(&self) -> &sqlx::SqlitePool {
         &self.pool
     }
 
-    /// The active workspace path, when one is attached.
+    /// note: The active workspace path, when one is attached.
     #[must_use]
     pub fn workspace_path(&self) -> Option<String> {
         self.workspace_path.clone()
     }
 
-    /// The runtime mode value.
+    /// note: The runtime mode value.
     #[must_use]
     pub const fn runtime_mode(&self) -> &nexus_contracts::local::domain::RuntimeMode {
         &self.runtime_facts.runtime_mode
     }
 
-    /// The engine-owner core, or a refusal.
+    /// note: The engine-owner core, or a refusal.
     ///
     /// A tool that needs the family services (Work patch, findings, pool
     /// entries) cannot run without one: reporting a missing core is the honest
@@ -373,7 +374,7 @@ impl ToolContext {
         self.core.clone().ok_or(CoreError::Uninitialized)
     }
 
-    /// The live user-capability registry, if one is published.
+    /// note: The live user-capability registry, if one is published.
     #[must_use]
     pub fn user_capabilities(&self) -> Option<Arc<nexus_capability::CapabilityRegistry>> {
         self.user_capabilities
@@ -381,18 +382,16 @@ impl ToolContext {
             .and_then(nexus_capability::CapabilityRegistryHolder::get)
     }
 
-    /// The prompt executor this context's transport attached, if any.
+    /// note: The prompt executor this context's transport attached, if any.
     #[must_use]
     pub fn prompt_executor(&self) -> Option<&dyn nexus_capability::PromptExecutor> {
         self.prompt_executor.as_deref()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Admission and handlers
-// ---------------------------------------------------------------------------
+// note: Admission and handlers
 
-/// Dispatch one tool request through the spine and write the audit row.
+/// note: Dispatch one tool request through the spine and write the audit row.
 ///
 /// The single caller entry point both transports use: the admission pipeline
 /// runs first (five gates), then the registry resolves and invokes, then the
@@ -434,7 +433,7 @@ pub async fn execute_tool(
     result
 }
 
-/// The audit label for a refusal.
+/// note: The audit label for a refusal.
 ///
 /// The retained audit contract records the SAME lowercase code the caller
 /// receives (the daemon's `error_code()`), so a `Coded` refusal reports its own
@@ -442,7 +441,7 @@ pub async fn execute_tool(
 /// `not_supported` must find it.
 fn err_code(err: &CoreError) -> &str {
     match err {
-        // A remote memory-provider refusal reports its whitelisted effective
+        // why: A remote memory-provider refusal reports its whitelisted effective
         // memory code, the same classification the caller receives.
         CoreError::Coded { code, .. }
         | CoreError::PeerDenied { code, .. }
@@ -459,7 +458,7 @@ fn err_code(err: &CoreError) -> &str {
     }
 }
 
-// ─── Admission pipeline (spec §4.3) ───────────────────────────────────────
+// note: Admission pipeline (spec §4.3)
 /// Run the five-gate admission pipeline.
 ///
 /// Gates:
@@ -470,7 +469,7 @@ fn err_code(err: &CoreError) -> &str {
 /// 5. Audit log (written by caller `execute()`, not here)
 ///
 /// Returns `(creator_id, workspace_slug)` if all gates pass.
-#[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+#[allow(clippy::unused_async)] // why: async is the await-symmetric public signature; the body is store-only today
 pub(crate) async fn admission_pipeline(
     req: &ToolsApi,
     context: &ToolContext,
@@ -498,7 +497,7 @@ pub(crate) async fn admission_pipeline(
     }
     let creator_id = read_active_creator_id(&context.nexus_home);
 
-    // Gate 2: active creator (for nexus.* tools)
+    // why: Gate 2: active creator (for nexus.* tools)
     if is_nexus_tool {
         let creator_id = creator_id.ok_or_else(|| NexusApiError::Forbidden {
             resource: format!(
@@ -514,11 +513,11 @@ pub(crate) async fn admission_pipeline(
                 ),
             })?;
 
-        // Gate 3: workspace bounds — verified per-handler for entity lookups
+        // why: Gate 3: workspace bounds — verified per-handler for entity lookups
         // (Work, schedule, etc. include creator/workspace predicates in SQL).
         // Path-based bounds for fs/* tools are checked below.
 
-        // Gate 4: permissions.toml / policy
+        // why: Gate 4: permissions.toml / policy
         let workspace_path_str = context.workspace_path().unwrap_or_default();
         if !workspace_path_str.is_empty() {
             if let Some(policy) = load_permission_policy(&workspace_path_str) {
@@ -529,7 +528,7 @@ pub(crate) async fn admission_pipeline(
         return Ok((creator_id, workspace_slug));
     }
 
-    // For fs/* tools: existing V1.33 permission + path validation
+    // why: For fs/* tools: existing V1.33 permission + path validation
     let workspace_path = context.workspace_path();
     let workspace_path_str = workspace_path.unwrap_or_default();
     if workspace_path_str.is_empty() {
@@ -541,24 +540,24 @@ pub(crate) async fn admission_pipeline(
         });
     }
 
-    // Gate 4: permissions
+    // why: Gate 4: permissions
     if let Some(policy) = load_permission_policy(&workspace_path_str) {
         check_fs_tool_permission(&req.tool_name, &policy)?;
     }
 
-    // Gate 3 workspace bounds check intentionally skipped for fs/* tools:
+    // why: Gate 3 workspace bounds check intentionally skipped for fs/* tools:
     // execute_read_file / execute_write_file call resolve_guarded_path_async
     // before any FS access, making them the single resolution site.
 
     Ok((creator_id.unwrap_or_default(), String::new()))
 }
 
-/// Check permission for a `nexus.*` tool against policy (Gate 4).
+/// note: Check permission for a `nexus.*` tool against policy (Gate 4).
 fn check_nexus_tool_permission(
     tool_name: &str,
     policy: &WorkspacePermissionPolicy,
 ) -> Result<(), NexusApiError> {
-    // The canonical access classification, not a second write-name roster.
+    // why: The canonical access classification, not a second write-name roster.
     let is_write = lookup_host_tool(tool_name).is_some_and(|row| row.access == Access::Write);
 
     let allowed = if is_write {
@@ -583,7 +582,7 @@ fn check_nexus_tool_permission(
     })
 }
 
-/// Check permission for `fs/*` tools (V1.33 baseline behavior).
+/// note: Check permission for `fs/*` tools (V1.33 baseline behavior).
 fn check_fs_tool_permission(
     tool_name: &str,
     policy: &WorkspacePermissionPolicy,
@@ -606,7 +605,7 @@ fn check_fs_tool_permission(
     })
 }
 
-// ─── nexus.* Handlers ─────────────────────────────────────────────────────
+// note: nexus.* Handlers
 //
 // V1.53 P0 Sub-phase 3: Old `dispatch_tool()` match table removed.
 // All dispatch now routes through `CapabilityRegistry` (see
@@ -614,7 +613,7 @@ fn check_fs_tool_permission(
 // The handler functions below remain as they are referenced by the
 // `pub(crate)` registry wrapper functions.
 
-/// `nexus.context.whoami` — return active `creator_id` and workspace slug.
+/// note: `nexus.context.whoami` — return active `creator_id` and workspace slug.
 fn execute_context_whoami(
     _req: &ToolsApi,
     context: &ToolContext,
@@ -628,7 +627,7 @@ fn execute_context_whoami(
     })
 }
 
-/// `nexus.workspace.info` — return workspace roots, flags, linked world ref.
+/// note: `nexus.workspace.info` — return workspace roots, flags, linked world ref.
 fn execute_workspace_info(
     _req: &ToolsApi,
     context: &ToolContext,
@@ -646,7 +645,7 @@ fn execute_workspace_info(
     })
 }
 
-/// `nexus.work.get` — return Work row + stage fields for active creator's work.
+/// note: `nexus.work.get` — return Work row + stage fields for active creator's work.
 async fn execute_work_get(
     req: &ToolsApi,
     context: &ToolContext,
@@ -660,14 +659,14 @@ async fn execute_work_get(
                 reason: "must be a string".into(),
             })?;
 
-    // Entity lookup includes creator predicate (spec §12.5)
+    // why: Entity lookup includes creator predicate (spec §12.5)
     let record = works::get_work(context.pool(), creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             category: format!("DATABASE_ERROR: {e}"),
         })?
         .ok_or_else(|| {
-            // Could be not found OR cross-creator — return FORBIDDEN for safety
+            // why: Could be not found OR cross-creator — return FORBIDDEN for safety
             NexusApiError::Forbidden {
                 resource: format!(
                     "{}: {}",
@@ -680,7 +679,7 @@ async fn execute_work_get(
     Ok(serde_json::to_value(dto).unwrap_or_else(|_| serde_json::json!({})))
 }
 
-/// `nexus.work.patch` — append inspiration + allowed metadata fields (spec §4.4).
+/// note: `nexus.work.patch` — append inspiration + allowed metadata fields (spec §4.4).
 ///
 /// Multi-field patches (`title` + `inspiration_log` + `stage_metadata`) are applied
 /// sequentially within the same handler invocation. All mutations go through the
@@ -703,7 +702,7 @@ async fn execute_work_patch(
     let core = context.core()?;
     let principal = core.active_principal().await?;
 
-    // Validate patch fields (spec §4.4)
+    // why: Validate patch fields (spec §4.4)
     let params = req
         .parameters
         .as_object()
@@ -712,10 +711,9 @@ async fn execute_work_patch(
             reason: "must be a JSON object".into(),
         })?;
 
-    // Reject forbidden fields
     for key in params.keys() {
         if key == "work_id" {
-            continue; // work_id is a parameter, not a patch field
+            continue; // why: work_id is a parameter, not a patch field
         }
         if PATCH_REJECTED_FIELDS.contains(&key.as_str()) {
             return Err(NexusApiError::Coded {
@@ -731,7 +729,6 @@ async fn execute_work_patch(
         }
     }
 
-    // Handle inspiration_log append
     if let Some(inspiration) = params.get("inspiration_log") {
         let entries = inspiration
             .as_array()
@@ -749,7 +746,7 @@ async fn execute_work_patch(
                     reason: "each entry must include a 'text' or 'note' field".into(),
                 })?;
 
-            // The core composes the canonical inspiration entry
+            // why: The core composes the canonical inspiration entry
             // (`{"at", "note"}`); per-entry `source` sidecar values from the
             // legacy host-tool payload are normalized away by the authority.
             core.append_work_inspiration(
@@ -764,7 +761,6 @@ async fn execute_work_patch(
         }
     }
 
-    // Handle title patch
     if let Some(title) = params.get("title") {
         let title_str = title.as_str().ok_or_else(|| NexusApiError::InvalidInput {
             field: "parameters.title".into(),
@@ -789,10 +785,9 @@ async fn execute_work_patch(
         .await?;
     }
 
-    // Handle stage_metadata patch — validate sub-field allowlist (spec §4.4).
+    // why: Handle stage_metadata patch — validate sub-field allowlist (spec §4.4).
     // V1.34 minimal: accepted but stored as-is in inspiration_log as a metadata entry.
     if let Some(metadata) = params.get("stage_metadata") {
-        // Validate stage_metadata sub-field allowlist
         let metadata_obj = metadata
             .as_object()
             .ok_or_else(|| NexusApiError::InvalidInput {
@@ -829,13 +824,13 @@ async fn execute_work_patch(
         .await?;
     }
 
-    // Return the updated Work through the same core authority.
+    // why: Return the updated Work through the same core authority.
     let details = core.get_work(&principal, work_id.to_string()).await?;
     let dto = details;
     Ok(serde_json::to_value(dto).unwrap_or_else(|_| serde_json::json!({})))
 }
 
-/// `nexus.orchestration.schedule_status` — return schedules linked to `work_id`.
+/// note: `nexus.orchestration.schedule_status` — return schedules linked to `work_id`.
 async fn execute_schedule_status(
     req: &ToolsApi,
     context: &ToolContext,
@@ -849,7 +844,7 @@ async fn execute_schedule_status(
                 reason: "must be a string".into(),
             })?;
 
-    // Verify work ownership first
+    // why: Verify work ownership first
     let record = works::get_work(context.pool(), creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -872,7 +867,7 @@ async fn execute_schedule_status(
     }))
 }
 
-/// `nexus.strategy.generate` — one committed candidate for `parameters.strategy_id`.
+/// note: `nexus.strategy.generate` — one committed candidate for `parameters.strategy_id`.
 ///
 /// The tool surface of the generate kernel and nothing more: it decodes the two address fields a
 /// tool call has to name, parses `parameters.request` into the SAME [`GenerateRequest`] the CLI
@@ -910,7 +905,7 @@ async fn execute_strategy_generate(
         })?;
 
     let core = context.core()?;
-    // The spine admitted this call for the ACTIVE creator, which is the same
+    // why: The spine admitted this call for the ACTIVE creator, which is the same
     // creator the service hands out as its principal; no caller-supplied
     // identity crosses this seam.
     let principal = core.active_principal().await?;
@@ -925,7 +920,7 @@ async fn execute_strategy_generate(
         .await;
     match outcome {
         Ok(outcome) => Ok(outcome.wire()),
-        // Exhaustion is the one payload the caller acts on, so it travels as the
+        // why: Exhaustion is the one payload the caller acts on, so it travels as the
         // tool's result. Anything else is a refusal and stays one.
         Err(CoreError::InputValidation { details })
             if details.get("code").and_then(Value::as_str) == Some("lint_exhausted") =>
@@ -936,7 +931,7 @@ async fn execute_strategy_generate(
     }
 }
 
-/// `nexus.context.assemble` — local assemble-moment or `POLICY_BLOCKED` (spec §4.1).
+/// note: `nexus.context.assemble` — local assemble-moment or `POLICY_BLOCKED` (spec §4.1).
 async fn execute_context_assemble(
     req: &ToolsApi,
     context: &ToolContext,
@@ -946,7 +941,6 @@ async fn execute_context_assemble(
         .as_bool()
         .unwrap_or(false);
 
-    // Check platform_integration state
     if requires_platform
         && matches!(
             context.runtime_mode(),
@@ -960,7 +954,7 @@ async fn execute_context_assemble(
         });
     }
 
-    // If work_id is provided, verify ownership
+    // why: If work_id is provided, verify ownership
     if let Some(work_id) = req.parameters["work_id"].as_str() {
         let _record = works::get_work(context.pool(), creator_id, work_id)
             .await
@@ -975,7 +969,7 @@ async fn execute_context_assemble(
             })?;
     }
 
-    // Local-only assembly subset
+    // why: Local-only assembly subset
     Ok(serde_json::json!({
         "mode": "local",
         "creator_id": creator_id,
@@ -983,19 +977,19 @@ async fn execute_context_assemble(
     }))
 }
 
-// ─── fs/* Baseline handlers (V1.33, unchanged behavior) ───────────────────
+// note: fs/* Baseline handlers (V1.33, unchanged behavior)
 
-// Refusals shared by the read and write halves of `fs/*`: both halves judge the
+// why: Refusals shared by the read and write halves of `fs/*`: both halves judge the
 // same classification and answer from these, so the two cannot disagree.
 
-/// A case-variant `Works` spelling: neither half routes it.
+/// note: A case-variant `Works` spelling: neither half routes it.
 fn case_variant_works_refusal(path_str: &str) -> NexusApiError {
     NexusApiError::Forbidden {
         resource: format!("file: path '{path_str}' must spell the Work root 'Works' byte-exactly"),
     }
 }
 
-/// `Works/<work_ref>` itself: a directory, never a readable or writable file.
+/// note: `Works/<work_ref>` itself: a directory, never a readable or writable file.
 fn work_root_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
     NexusApiError::Forbidden {
         resource: format!(
@@ -1004,14 +998,14 @@ fn work_root_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
     }
 }
 
-/// A `..` inside the Work subtree: lexically inside, physically not.
+/// note: A `..` inside the Work subtree: lexically inside, physically not.
 fn escaped_work_refusal(path_str: &str, work_ref: &str) -> NexusApiError {
     NexusApiError::Forbidden {
         resource: format!("file: path '{path_str}' escapes the Works/{work_ref}/ boundary"),
     }
 }
 
-/// Classify the raw path and refuse the three never-routed Work spellings.
+/// note: Classify the raw path and refuse the three never-routed Work spellings.
 ///
 /// Both halves call this before the path guard, so a spelling is judged the
 /// same way whether the target exists, is missing, or resolves through a
@@ -1026,7 +1020,7 @@ fn classify_and_refuse_work_path(path_str: &str) -> Result<WorkPath<'_>, NexusAp
     }
 }
 
-/// Split a workspace-relative Work artifact path into the port's
+/// note: Split a workspace-relative Work artifact path into the port's
 /// `(work_ref, rel_child)` pair.
 ///
 /// The three never-routed Work spellings keep their shared refusals, and a
@@ -1048,11 +1042,11 @@ fn work_artifact_parts(path_str: &str) -> Result<(&str, &Path), NexusApiError> {
     }
 }
 
-/// Execute `fs/read_text_file` tool.
+/// note: Execute `fs/read_text_file` tool.
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
 /// tokio blocking pool so the async runtime is not stalled by local disk I/O.
-#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
+#[allow(clippy::similar_names)] // why: the paired names are the domain vocabulary here
 async fn execute_read_file(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1084,7 +1078,7 @@ async fn execute_read_file(
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
         .await
         .map_err(|e| match e {
-            // `must_exist = true` cannot canonicalize an absent target: that is
+            // why: `must_exist = true` cannot canonicalize an absent target: that is
             // not an escape, so it keeps a not-found answer.
             NexusApiError::InvalidInput { ref field, .. }
                 if field == "chapter_path_unresolvable" =>
@@ -1122,11 +1116,11 @@ async fn execute_read_file(
     }))
 }
 
-/// Execute `fs/write_text_file` tool.
+/// note: Execute `fs/write_text_file` tool.
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
 /// tokio blocking pool so the async runtime is not stalled by local disk I/O.
-#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
+#[allow(clippy::similar_names)] // why: the paired names are the domain vocabulary here
 async fn execute_write_file(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1218,10 +1212,10 @@ async fn execute_write_file(
     }))
 }
 
-// ─── Permission / path helpers ────────────────────────────────────────────
-// ─── Permission / path helpers ────────────────────────────────────────────
+// note: Permission / path helpers
+// note: Permission / path helpers
 
-/// Mirrors `nexus-acp-host::PermissionPolicy::evaluate` without linking that crate
+/// note: Mirrors `nexus-acp-host::PermissionPolicy::evaluate` without linking that crate
 /// (daemon-runtime linkage matrix forbids `nexus-acp-host`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PolicyDecision {
@@ -1290,7 +1284,7 @@ fn is_capability_granted(capability: &str, policy: &WorkspacePermissionPolicy) -
     }
 }
 
-/// Load permission policy from workspace if available.
+/// note: Load permission policy from workspace if available.
 ///
 /// Returns `None` if no policy file exists (all tools permitted).
 fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPolicy> {
@@ -1326,9 +1320,9 @@ fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPol
     })
 }
 
-// ─── Audit logging (spec §12.6) ───────────────────────────────────────────
+// note: Audit logging (spec §12.6)
 
-/// Audit tool execution to `SQLite` (Gate 5).
+/// note: Audit tool execution to `SQLite` (Gate 5).
 pub(crate) async fn audit_tool_execution(
     req: &ToolsApi,
     decision: &str,
@@ -1342,7 +1336,7 @@ pub(crate) async fn audit_tool_execution(
         .caller_kind
         .map_or_else(|| "http".to_string(), |k| k.to_string());
 
-    // Redact parameter summary — only include top-level keys
+    // why: Redact parameter summary — only include top-level keys
     let param_summary: Vec<String> = req
         .parameters
         .as_object()
@@ -1376,10 +1370,10 @@ pub(crate) async fn audit_tool_execution(
     Ok(())
 }
 
-// ─── V1.53 P1: DF-46 read-heavy nexus.* handlers ─────────────────────────
-// ─── V1.53 P1: DF-46 read-heavy nexus.* handlers ─────────────────────────
+// note: V1.53 P1: DF-46 read-heavy nexus.* handlers
+// note: V1.53 P1: DF-46 read-heavy nexus.* handlers
 
-/// Verify that `creator_id` owns `world_id` by querying `narrative_worlds`.
+/// note: Verify that `creator_id` owns `world_id` by querying `narrative_worlds`.
 ///
 /// V1.67 P2 (R-V160P0-QC2-W001): delegates to the shared
 /// `nexus_local_db::narrative_write::is_world_owned` gate so the ownership
@@ -1407,7 +1401,7 @@ async fn ensure_world_accessible_for_creator(
     }
 }
 
-/// `nexus.world.snapshot.get` — consistent read of structured world snapshot.
+/// note: `nexus.world.snapshot.get` — consistent read of structured world snapshot.
 async fn execute_world_snapshot_get(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1423,7 +1417,7 @@ async fn execute_world_snapshot_get(
 
     ensure_world_accessible_for_creator(context.pool(), creator_id, world_id).await?;
 
-    // The gateway is a thin projection over the same pool this context carries,
+    // why: The gateway is a thin projection over the same pool this context carries,
     // so the core composes its own rather than reaching into a transport.
     let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
     let world_state = gw.get_world_state(world_id).await.map_err(
@@ -1440,7 +1434,7 @@ async fn execute_world_snapshot_get(
     Ok(serde_json::to_value(world_state).unwrap_or_else(|_| serde_json::json!({})))
 }
 
-/// `nexus.timeline.recent.get` — fetch recent timeline events for continuity.
+/// note: `nexus.timeline.recent.get` — fetch recent timeline events for continuity.
 async fn execute_timeline_recent_get(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1456,14 +1450,14 @@ async fn execute_timeline_recent_get(
 
     ensure_world_accessible_for_creator(context.pool(), creator_id, world_id).await?;
 
-    // Default limit 100, clamp to max 500
+    // why: Default limit 100, clamp to max 500
     let limit: usize = req.parameters["limit"]
         .as_u64()
         .and_then(|v| usize::try_from(v).ok())
         .unwrap_or(100)
         .min(500);
 
-    // The gateway is a thin projection over the same pool this context carries,
+    // why: The gateway is a thin projection over the same pool this context carries,
     // so the core composes its own rather than reaching into a transport.
     let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
     let mut events = gw.get_timeline(world_id, None, Some(limit)).await.map_err(
@@ -1472,12 +1466,12 @@ async fn execute_timeline_recent_get(
         },
     )?;
 
-    // SQL returns DESC order when limit is set; reverse to ASC for display.
+    // why: SQL returns DESC order when limit is set; reverse to ASC for display.
     events.reverse();
     Ok(serde_json::to_value(&events).unwrap_or_else(|_| serde_json::json!([])))
 }
 
-/// `nexus.kb_snapshot.read` — focused KB snapshot read for a world.
+/// note: `nexus.kb_snapshot.read` — focused KB snapshot read for a world.
 async fn execute_kb_snapshot_read(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1495,7 +1489,7 @@ async fn execute_kb_snapshot_read(
 
     ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
 
-    // The snapshot is a model-facing payload: the rows are read through the
+    // why: The snapshot is a model-facing payload: the rows are read through the
     // admitted Creator ActorView (durable §4.1/§4.2), so another holder's
     // `owner-private` World row is not in the snapshot and an unresolvable
     // selection refuses instead of falling back to the World listing.
@@ -1523,7 +1517,7 @@ async fn execute_kb_snapshot_read(
     Ok(serde_json::to_value(&blocks).unwrap_or_else(|_| serde_json::json!([])))
 }
 
-/// `nexus.manuscript.chapter.get` — read a single manuscript chapter record.
+/// note: `nexus.manuscript.chapter.get` — read a single manuscript chapter record.
 async fn execute_manuscript_chapter_get(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1555,7 +1549,7 @@ async fn execute_manuscript_chapter_get(
 
     let pool = context.pool();
 
-    // Verify work ownership first (reuse existing pattern from execute_work_get)
+    // why: Verify work ownership first (reuse existing pattern from execute_work_get)
     let _record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -1584,7 +1578,7 @@ async fn execute_manuscript_chapter_get(
     )
 }
 
-/// `nexus.observability.daemon.health` — agent-visible daemon health status.
+/// note: `nexus.observability.daemon.health` — agent-visible daemon health status.
 ///
 /// **R-V153P1QC2-003 (V1.54 closure):** The `registry_ids` field exposes all
 /// tool IDs to authorized callers. This is acceptable for daemon-local
@@ -1610,7 +1604,7 @@ fn execute_daemon_health(
     })
 }
 
-// ─── Registry handler wrappers (V1.53 P0) ─────────────────────────────────
+// note: Registry handler wrappers (V1.53 P0)
 //
 // These `pub(crate)` wrappers adapt the existing private handler functions
 // to the `RegistryHandlerFn` signature used by `CapabilityRegistry`.
@@ -1620,7 +1614,7 @@ fn execute_daemon_health(
 // Each wrapper uses an explicit named lifetime `'a` to satisfy the
 // higher-ranked trait bound `for<'a> fn(&'a ..., &'a ..., &'a str) -> ...`.
 
-/// Registry wrapper: `nexus.context.whoami` — sync → async wrapper.
+/// note: Registry wrapper: `nexus.context.whoami` — sync → async wrapper.
 pub(crate) fn registry_context_whoami<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1630,7 +1624,7 @@ pub(crate) fn registry_context_whoami<'a>(
     Box::pin(async move { Ok(result) })
 }
 
-/// Registry wrapper: `nexus.workspace.info` — sync → async wrapper.
+/// note: Registry wrapper: `nexus.workspace.info` — sync → async wrapper.
 pub(crate) fn registry_workspace_info<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1640,7 +1634,7 @@ pub(crate) fn registry_workspace_info<'a>(
     Box::pin(async move { Ok(result) })
 }
 
-/// Registry wrapper: `nexus.work.get` — async passthrough.
+/// note: Registry wrapper: `nexus.work.get` — async passthrough.
 pub(crate) fn registry_work_get<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1649,7 +1643,7 @@ pub(crate) fn registry_work_get<'a>(
     Box::pin(execute_work_get(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.work.patch` — async passthrough.
+/// note: Registry wrapper: `nexus.work.patch` — async passthrough.
 pub(crate) fn registry_work_patch<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1658,7 +1652,7 @@ pub(crate) fn registry_work_patch<'a>(
     Box::pin(execute_work_patch(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.orchestration.schedule_status` — async passthrough.
+/// note: Registry wrapper: `nexus.orchestration.schedule_status` — async passthrough.
 pub(crate) fn registry_schedule_status<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1667,7 +1661,7 @@ pub(crate) fn registry_schedule_status<'a>(
     Box::pin(execute_schedule_status(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.strategy.generate` — async passthrough.
+/// note: Registry wrapper: `nexus.strategy.generate` — async passthrough.
 #[cfg(feature = "strategy-authoring")]
 pub(crate) fn registry_strategy_generate<'a>(
     req: &'a ToolsApi,
@@ -1677,7 +1671,7 @@ pub(crate) fn registry_strategy_generate<'a>(
     Box::pin(execute_strategy_generate(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.context.assemble` — async passthrough.
+/// note: Registry wrapper: `nexus.context.assemble` — async passthrough.
 pub(crate) fn registry_context_assemble<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1686,7 +1680,7 @@ pub(crate) fn registry_context_assemble<'a>(
     Box::pin(execute_context_assemble(req, context, creator_id))
 }
 
-/// Registry wrapper: `fs/read_text_file` — async passthrough (ignores `creator_id`).
+/// note: Registry wrapper: `fs/read_text_file` — async passthrough (ignores `creator_id`).
 pub(crate) fn registry_read_file<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1695,7 +1689,7 @@ pub(crate) fn registry_read_file<'a>(
     Box::pin(execute_read_file(req, context))
 }
 
-/// Registry wrapper: `fs/write_text_file` — async passthrough (ignores `creator_id`).
+/// note: Registry wrapper: `fs/write_text_file` — async passthrough (ignores `creator_id`).
 pub(crate) fn registry_write_file<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1704,9 +1698,9 @@ pub(crate) fn registry_write_file<'a>(
     Box::pin(execute_write_file(req, context))
 }
 
-// ─── V1.53 P1: Registry wrappers for DF-46 read-heavy tools ───────────────
+// note: V1.53 P1: Registry wrappers for DF-46 read-heavy tools
 
-/// Registry wrapper: `nexus.world.snapshot.get` — async passthrough.
+/// note: Registry wrapper: `nexus.world.snapshot.get` — async passthrough.
 pub(crate) fn registry_world_snapshot_get<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1715,7 +1709,7 @@ pub(crate) fn registry_world_snapshot_get<'a>(
     Box::pin(execute_world_snapshot_get(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.timeline.recent.get` — async passthrough.
+/// note: Registry wrapper: `nexus.timeline.recent.get` — async passthrough.
 pub(crate) fn registry_timeline_recent_get<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1724,7 +1718,7 @@ pub(crate) fn registry_timeline_recent_get<'a>(
     Box::pin(execute_timeline_recent_get(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.kb_snapshot.read` — async passthrough.
+/// note: Registry wrapper: `nexus.kb_snapshot.read` — async passthrough.
 pub(crate) fn registry_kb_snapshot_read<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1733,7 +1727,7 @@ pub(crate) fn registry_kb_snapshot_read<'a>(
     Box::pin(execute_kb_snapshot_read(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.manuscript.chapter.get` — async passthrough.
+/// note: Registry wrapper: `nexus.manuscript.chapter.get` — async passthrough.
 pub(crate) fn registry_manuscript_chapter_get<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1742,7 +1736,7 @@ pub(crate) fn registry_manuscript_chapter_get<'a>(
     Box::pin(execute_manuscript_chapter_get(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.observability.daemon.health` — sync → async wrapper.
+/// note: Registry wrapper: `nexus.observability.daemon.health` — sync → async wrapper.
 pub(crate) fn registry_daemon_health<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -1752,9 +1746,9 @@ pub(crate) fn registry_daemon_health<'a>(
     Box::pin(async move { Ok(result) })
 }
 
-// ─── V1.56 P1: nexus.registry.refresh ──────────────────────────────────────
+// note: V1.56 P1: nexus.registry.refresh
 
-/// `nexus.registry.refresh` — return the registry snapshot (synthetic or CDN).
+/// note: `nexus.registry.refresh` — return the registry snapshot (synthetic or CDN).
 async fn execute_registry_refresh(
     _req: &ToolsApi,
     _context: &ToolContext,
@@ -1775,15 +1769,15 @@ pub(crate) fn registry_registry_refresh<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
 
-    // ─── V1.56 P1 + V1.54 P0: registry.refresh + write tools ─────────────────
+    // note: V1.56 P1 + V1.54 P0: registry.refresh + write tools
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
     Box::pin(execute_registry_refresh(req, context, creator_id))
 }
 
-// ─── V1.54 P0: DF-46 write tool handlers ──────────────────────────────────
+// note: V1.54 P0: DF-46 write tool handlers
 
-/// The refusal a kb store gate reports — the one shape both the production
+/// note: The refusal a kb store gate reports — the one shape both the production
 /// INSERT and the simulated pre-check answer with.
 fn kb_store_refusal(e: &nexus_knowledge::world_kb::store::KbStoreError) -> NexusApiError {
     NexusApiError::Internal {
@@ -1813,7 +1807,7 @@ fn kb_store_refusal(e: &nexus_knowledge::world_kb::store::KbStoreError) -> Nexus
 /// `(world_id, block_type, canonical_name)` is already held by a live row still
 /// previews as writable and collides on `idx_kb_key_blocks_active_unique` at
 /// apply, as does a `key_block_id` repeated by a sibling block of the same
-/// request. Upgrade only with the DDL-derived design pass `I-000515` requires.
+/// request. upgrade: only with the DDL-derived design pass `I-000515` requires.
 async fn execute_kb_snapshot_write(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1846,7 +1840,7 @@ async fn execute_kb_snapshot_write(
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),
             })?;
-        // C-001: reject blocks whose embedded world_id does not match the
+        // why: C-001: reject blocks whose embedded world_id does not match the
         // request-level world_id (prevents cross-world block payload bypass).
         if kb.world_id() != Some(world_id) {
             return Err(NexusApiError::Forbidden {
@@ -1870,14 +1864,14 @@ async fn execute_kb_snapshot_write(
     if let Some(port) = context.recording_knowledge_entry.as_deref() {
         let mut suppressed = Vec::with_capacity(records.len());
         for kb in records {
-            // The conversion asserts the store's record gates with `.expect`; a
+            // why: The conversion asserts the store's record gates with `.expect`; a
             // simulation that never writes still has to establish them, or it
             // panics on the caller input production refuses. No extension
             // document exists on this path (nothing is built or inserted).
             kb_store
                 .validate_key_block(&kb, None)
                 .map_err(|e| kb_store_refusal(&e))?;
-            // A taken id is the primary-key collision the INSERT reports, so the
+            // why: A taken id is the primary-key collision the INSERT reports, so the
             // preview asks the store's own predicate rather than recording a
             // `Put` production would refuse.
             kb_store
@@ -1922,7 +1916,7 @@ async fn execute_kb_snapshot_write(
     }))
 }
 
-/// `nexus.manuscript.chapter.update` — update chapter content and metadata.
+/// note: `nexus.manuscript.chapter.update` — update chapter content and metadata.
 async fn execute_manuscript_chapter_update(
     req: &ToolsApi,
     context: &ToolContext,
@@ -1954,7 +1948,7 @@ async fn execute_manuscript_chapter_update(
 
     let pool = context.pool();
 
-    // Verify work ownership first (keep record for work_ref used in W-003 path).
+    // why: Verify work ownership first (keep record for work_ref used in W-003 path).
     let work_record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -1967,7 +1961,6 @@ async fn execute_manuscript_chapter_update(
             ),
         })?;
 
-    // Check chapter exists
     let chapter_exists = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -1980,7 +1973,6 @@ async fn execute_manuscript_chapter_update(
         });
     }
 
-    // Update body content if provided
     let now = chrono::Utc::now().to_rfc3339();
     let body_path: Option<String> = if let Some(content) = req.parameters["content"].as_str() {
         let workspace_root = context
@@ -1988,7 +1980,7 @@ async fn execute_manuscript_chapter_update(
             .ok_or_else(|| NexusApiError::Internal {
                 category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available"),
             })?;
-        // W-003: use the canonical body_path from the existing chapter record
+        // why: W-003: use the canonical body_path from the existing chapter record
         // (set by seed_chapters), which follows Works/{work_ref}/Stories/{slug}.md.
         // Fall back to constructing the path if the chapter has no body_path yet.
         let canonical_path = chapter_exists
@@ -2000,7 +1992,7 @@ async fn execute_manuscript_chapter_update(
                 format!("Works/{wr}/Stories/{ch_nn}-{ch_nn}.md")
             });
 
-        // W-002: defense-in-depth path guard — a DB-sourced path still has to
+        // why: W-002: defense-in-depth path guard — a DB-sourced path still has to
         // resolve inside the workspace root. The port below re-checks the
         // narrower `Works/<work_ref>/` boundary itself.
         resolve_guarded_path_async(
@@ -2033,14 +2025,14 @@ async fn execute_manuscript_chapter_update(
                 content,
             })
             .await?;
-        // W-003: store the relative canonical path in the DB, matching
+        // why: W-003: store the relative canonical path in the DB, matching
         // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
         Some(canonical_path)
     } else {
         None
     };
 
-    // Update chapter DB row if body_path or word count changed.
+    // why: Update chapter DB row if body_path or word count changed.
     // C-002: the bytes already committed through the port above; the DB update
     // still runs in its own transaction so a failure rolls the row back.
     if let Some(bp) = &body_path {
@@ -2084,7 +2076,6 @@ async fn execute_manuscript_chapter_update(
         })?;
     }
 
-    // Read back updated chapter
     let updated = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -2101,8 +2092,8 @@ async fn execute_manuscript_chapter_update(
     )
 }
 
-/// `nexus.world.configure` — update world metadata.
-#[allow(clippy::useless_let_if_seq)] // three independent if-let accumulations on `updated`
+/// note: `nexus.world.configure` — update world metadata.
+#[allow(clippy::useless_let_if_seq)] // why: three independent if-let accumulations on `updated`
 async fn execute_world_configure(
     req: &ToolsApi,
     context: &ToolContext,
@@ -2123,7 +2114,6 @@ async fn execute_world_configure(
     let now = chrono::Utc::now().to_rfc3339();
     let mut updated = false;
 
-    // Update title if provided
     if let Some(title) = req.parameters["title"].as_str() {
         if title.trim().is_empty() {
             return Err(NexusApiError::InvalidInput {
@@ -2147,7 +2137,6 @@ async fn execute_world_configure(
         updated = true;
     }
 
-    // Update visibility if provided
     if let Some(visibility) = req.parameters["visibility"].as_str() {
         let valid = ["public", "private", "invited"].contains(&visibility);
         if !valid {
@@ -2174,7 +2163,6 @@ async fn execute_world_configure(
         updated = true;
     }
 
-    // Update time_policy if provided
     if let Some(time_policy) = req.parameters["time_policy"].as_str() {
         let valid = ["manual", "auto_advance"].contains(&time_policy);
         if !valid {
@@ -2207,7 +2195,7 @@ async fn execute_world_configure(
     }))
 }
 
-/// `nexus.work.schedule.set` — link/unlink schedule ids to a work.
+/// note: `nexus.work.schedule.set` — link/unlink schedule ids to a work.
 ///
 /// The mutation routes through the core Work authority (QC1-F-001 class, same
 /// as the patch/finding-resolve/pool executors); the boundary keeps payload
@@ -2233,7 +2221,7 @@ async fn execute_work_schedule_set(
                 reason: "must be an array of schedule id strings".into(),
             })?;
 
-    // Validate all entries are strings and collect the typed list for core.
+    // why: Validate all entries are strings and collect the typed list for core.
     let mut ids = Vec::with_capacity(schedule_ids.len());
     for (i, id) in schedule_ids.iter().enumerate() {
         match id.as_str() {
@@ -2266,7 +2254,7 @@ async fn execute_work_schedule_set(
     }))
 }
 
-/// `nexus.finding.resolve` — resolve/close a finding.
+/// note: `nexus.finding.resolve` — resolve/close a finding.
 async fn execute_finding_resolve(
     req: &ToolsApi,
     context: &ToolContext,
@@ -2287,7 +2275,7 @@ async fn execute_finding_resolve(
     let core = context.core()?;
     let principal = core.active_principal().await?;
 
-    // Single findings authority (QC1-F-001): principal verification, the
+    // why: Single findings authority (QC1-F-001): principal verification, the
     // work-write gate, lifecycle transition validation and the not-found
     // mapping all live in the core; this boundary keeps only the payload.
     core.update_finding(
@@ -2307,7 +2295,7 @@ async fn execute_finding_resolve(
     }))
 }
 
-/// `nexus.pool.entry.manage` — add/remove/promote pool entries.
+/// note: `nexus.pool.entry.manage` — add/remove/promote pool entries.
 async fn execute_pool_entry_manage(
     req: &ToolsApi,
     context: &ToolContext,
@@ -2333,7 +2321,7 @@ async fn execute_pool_entry_manage(
 
     match action {
         "add" | "promote" => {
-            // Core authority owns the work-ownership precheck
+            // why: Core authority owns the work-ownership precheck
             // (`resolve_owned_work`) and the write gate for promotion.
             core.promote_work_pool_entry(
                 &principal,
@@ -2345,7 +2333,7 @@ async fn execute_pool_entry_manage(
             .await?;
         }
         "remove" | "archive" => {
-            // Creator-scoped read at the boundary resolves the entry id; the
+            // why: Creator-scoped read at the boundary resolves the entry id; the
             // archive mutation itself goes through the core authority.
             let entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
                 context.pool(),
@@ -2383,9 +2371,9 @@ async fn execute_pool_entry_manage(
     }))
 }
 
-// ─── V1.54 P0: Registry wrappers for DF-46 write tools ─────────────────────
+// note: V1.54 P0: Registry wrappers for DF-46 write tools
 
-/// Registry wrapper: `nexus.kb_snapshot.write` — async passthrough.
+/// note: Registry wrapper: `nexus.kb_snapshot.write` — async passthrough.
 pub(crate) fn registry_kb_snapshot_write<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -2394,7 +2382,7 @@ pub(crate) fn registry_kb_snapshot_write<'a>(
     Box::pin(execute_kb_snapshot_write(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.manuscript.chapter.update` — async passthrough.
+/// note: Registry wrapper: `nexus.manuscript.chapter.update` — async passthrough.
 pub(crate) fn registry_manuscript_chapter_update<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -2403,7 +2391,7 @@ pub(crate) fn registry_manuscript_chapter_update<'a>(
     Box::pin(execute_manuscript_chapter_update(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.world.configure` — async passthrough.
+/// note: Registry wrapper: `nexus.world.configure` — async passthrough.
 pub(crate) fn registry_world_configure<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -2412,7 +2400,7 @@ pub(crate) fn registry_world_configure<'a>(
     Box::pin(execute_world_configure(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.work.schedule.set` — async passthrough.
+/// note: Registry wrapper: `nexus.work.schedule.set` — async passthrough.
 pub(crate) fn registry_work_schedule_set<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -2421,7 +2409,7 @@ pub(crate) fn registry_work_schedule_set<'a>(
     Box::pin(execute_work_schedule_set(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.finding.resolve` — async passthrough.
+/// note: Registry wrapper: `nexus.finding.resolve` — async passthrough.
 pub(crate) fn registry_finding_resolve<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -2430,7 +2418,7 @@ pub(crate) fn registry_finding_resolve<'a>(
     Box::pin(execute_finding_resolve(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.pool.entry.manage` — async passthrough.
+/// note: Registry wrapper: `nexus.pool.entry.manage` — async passthrough.
 pub(crate) fn registry_pool_entry_manage<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -2439,16 +2427,16 @@ pub(crate) fn registry_pool_entry_manage<'a>(
     Box::pin(execute_pool_entry_manage(req, context, creator_id))
 }
 
-// ─── V1.59 P0: DF-47 manuscript & misc capability parity batch ────────────
+// note: V1.59 P0: DF-47 manuscript & misc capability parity batch
 //
 // 9 catalog-only → shipped host tools (Track A). Each handler follows the
 // existing execute_* + registry_* wrapper pattern. See
 // the v1.59 DF-47 manuscript-and-misc capability batch (local plan record).
 
-/// Maximum body size for a single `nexus.manuscript.write` call (1 MiB).
+/// note: Maximum body size for a single `nexus.manuscript.write` call (1 MiB).
 const MANUSCRIPT_WRITE_MAX_BYTES: usize = 1024 * 1024;
 
-/// Canonical manuscript phases for `nexus.manuscript.phase.set` (spec §4).
+/// note: Canonical manuscript phases for `nexus.manuscript.phase.set` (spec §4).
 ///
 /// Ordered: `brainstorm` → `draft` → `review` → `finalize`.
 /// Backward transitions are rejected unless `force = true`.
@@ -2458,7 +2446,7 @@ fn phase_index(phase: &str) -> Option<usize> {
     MANUSCRIPT_PHASES.iter().position(|p| *p == phase)
 }
 
-/// T1: `nexus.manuscript.list` — list manuscripts (works) for the active creator.
+/// note: T1: `nexus.manuscript.list` — list manuscripts (works) for the active creator.
 async fn execute_manuscript_list(
     _req: &ToolsApi,
     context: &ToolContext,
@@ -2500,8 +2488,8 @@ async fn execute_manuscript_list(
     }))
 }
 
-/// T2: `nexus.manuscript.read_range` — read a bounded content range from a chapter body.
-#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
+/// note: T2: `nexus.manuscript.read_range` — read a bounded content range from a chapter body.
+#[allow(clippy::similar_names)] // why: the paired names are the domain vocabulary here
 async fn execute_manuscript_read_range(
     req: &ToolsApi,
     context: &ToolContext,
@@ -2531,7 +2519,7 @@ async fn execute_manuscript_read_range(
         .as_i64()
         .map_or(1, |v| i32::try_from(v).unwrap_or(1));
 
-    // Verify work ownership (fail closed for cross-creator access).
+    // why: Verify work ownership (fail closed for cross-creator access).
     let pool = context.pool();
     let _work = works::get_work(pool, creator_id, work_id)
         .await
@@ -2568,7 +2556,7 @@ async fn execute_manuscript_read_range(
     let workspace_root_path = Path::new(&workspace_root);
     let abs_body = workspace_root_path.join(&body_path);
 
-    // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
+    // why: W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
     // within the workspace root before reading. Delegates to the same canonical
     // helper used by fs/* and the manuscript write path. `must_exist` preserves
     // the existing read-path semantics: an existing file is canonicalized before
@@ -2582,7 +2570,7 @@ async fn execute_manuscript_read_range(
     )
     .await
     .map_err(|e| match e {
-        // The core names the refusal; the chapter lane reports it as a
+        // why: The core names the refusal; the chapter lane reports it as a
         // body-path validation failure.
         NexusApiError::Coded { message, .. } => NexusApiError::InvalidInput {
             field: "body_path".into(),
@@ -2601,7 +2589,7 @@ async fn execute_manuscript_read_range(
                 ),
             })?;
 
-    // Apply optional line range [start_line, end_line] (1-indexed inclusive).
+    // why: Apply optional line range [start_line, end_line] (1-indexed inclusive).
     let start_line = req.parameters["start_line"]
         .as_i64()
         .map(|v| usize::try_from(v.max(1)).unwrap_or(1));
@@ -2638,8 +2626,8 @@ async fn execute_manuscript_read_range(
     }))
 }
 
-/// T3: `nexus.manuscript.write` — write manuscript content within size quotas.
-#[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
+/// note: T3: `nexus.manuscript.write` — write manuscript content within size quotas.
+#[allow(clippy::similar_names)] // why: the paired names are the domain vocabulary here
 async fn execute_manuscript_write(
     req: &ToolsApi,
     context: &ToolContext,
@@ -2677,7 +2665,7 @@ async fn execute_manuscript_write(
                 reason: "must be a string".into(),
             })?;
 
-    // Size quota check (spec §4: "within whitelist paths and size quotas").
+    // why: Size quota check (spec §4: "within whitelist paths and size quotas").
     let content_bytes = content.len();
     if content_bytes > MANUSCRIPT_WRITE_MAX_BYTES {
         return Err(NexusApiError::InvalidInput {
@@ -2688,7 +2676,7 @@ async fn execute_manuscript_write(
         });
     }
 
-    // Verify work ownership.
+    // why: Verify work ownership.
     let pool = context.pool();
     let _work = works::get_work(pool, creator_id, work_id)
         .await
@@ -2702,7 +2690,7 @@ async fn execute_manuscript_write(
             ),
         })?;
 
-    // Chapter must exist (manuscript.write does not create chapters).
+    // why: Chapter must exist (manuscript.write does not create chapters).
     let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal {
@@ -2728,7 +2716,7 @@ async fn execute_manuscript_write(
         })?;
     let workspace_root_path = Path::new(&workspace_root);
 
-    // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
+    // why: W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
     // within the workspace root before any FS op. The port below re-checks the
     // narrower `Works/<work_ref>/` boundary itself.
     resolve_guarded_path_async(workspace_root_path.to_path_buf(), body_path.clone(), false)
@@ -2761,7 +2749,7 @@ async fn execute_manuscript_write(
         })
         .await?;
 
-    // W-001: the DB word-count update still runs in its own transaction so a
+    // why: W-001: the DB word-count update still runs in its own transaction so a
     // failure rolls the metadata back (the bytes already committed above).
     let word_count = content.split_whitespace().count();
     let now = chrono::Utc::now().to_rfc3339();
@@ -2813,7 +2801,7 @@ async fn execute_manuscript_write(
     }))
 }
 
-/// T4: `nexus.manuscript.phase.get` — read current manuscript phase.
+/// note: T4: `nexus.manuscript.phase.get` — read current manuscript phase.
 async fn execute_manuscript_phase_get(
     req: &ToolsApi,
     context: &ToolContext,
@@ -2846,7 +2834,7 @@ async fn execute_manuscript_phase_get(
     }))
 }
 
-/// T5: `nexus.manuscript.phase.set` — move between brainstorm/draft/review/finalize.
+/// note: T5: `nexus.manuscript.phase.set` — move between brainstorm/draft/review/finalize.
 async fn execute_manuscript_phase_set(
     req: &ToolsApi,
     context: &ToolContext,
@@ -2868,7 +2856,7 @@ async fn execute_manuscript_phase_set(
                 reason: "must be a string".into(),
             })?;
 
-    // Runtime check: phase must be in canonical set.
+    // why: Runtime check: phase must be in canonical set.
     let new_idx = phase_index(new_phase).ok_or_else(|| NexusApiError::InvalidInput {
         field: "parameters.phase".into(),
         reason: format!("phase '{new_phase}' is not in canonical set {MANUSCRIPT_PHASES:?}"),
@@ -2892,7 +2880,7 @@ async fn execute_manuscript_phase_set(
 
     let previous_phase = current_stage.clone();
 
-    // Runtime check: backward transitions require explicit force.
+    // why: Runtime check: backward transitions require explicit force.
     // Unknown current phase is treated as index 0 (brainstorm).
     let current_idx = phase_index(&current_stage).unwrap_or(0);
     if new_idx < current_idx && !force {
@@ -2920,7 +2908,7 @@ async fn execute_manuscript_phase_set(
     }))
 }
 
-/// T6: `nexus.workspace.paths` — enumerate allowed roots from active workspace.
+/// note: T6: `nexus.workspace.paths` — enumerate allowed roots from active workspace.
 fn execute_workspace_paths(
     _req: &ToolsApi,
     context: &ToolContext,
@@ -2933,7 +2921,7 @@ fn execute_workspace_paths(
             reason: "workspace not initialized; run `nexus42 workspace init` first".into(),
         })?;
 
-    // Allowed roots mirror the standard manuscript/workspace layout.
+    // why: Allowed roots mirror the standard manuscript/workspace layout.
     let allowed_roots = vec![
         format!("{workspace_root}/Works"),
         format!("{workspace_root}/Worlds"),
@@ -2948,7 +2936,7 @@ fn execute_workspace_paths(
     }))
 }
 
-/// T8: `nexus.runtime.health` — agent-visible runtime health (distinct from
+/// note: T8: `nexus.runtime.health` — agent-visible runtime health (distinct from
 /// `nexus.observability.daemon.health` which exposes uptime + lifecycle).
 ///
 /// Returns registry reachability, sync context, and cloud-enabled flag.
@@ -2974,7 +2962,7 @@ fn execute_runtime_health(
     })
 }
 
-/// T9: `nexus.trace.correlation` — propagate correlation IDs across tool calls.
+/// note: T9: `nexus.trace.correlation` — propagate correlation IDs across tool calls.
 ///
 /// Echoes the incoming `correlation_id` (or generates one if absent) so agents
 /// can thread trace context through multi-step tool chains.
@@ -3003,9 +2991,9 @@ fn execute_trace_correlation(
     })
 }
 
-// ─── V1.59 P0: Registry wrappers for the 9 new tools ──────────────────────
+// note: V1.59 P0: Registry wrappers for the 9 new tools
 
-/// Registry wrapper: `nexus.manuscript.list` — async passthrough.
+/// note: Registry wrapper: `nexus.manuscript.list` — async passthrough.
 pub(crate) fn registry_manuscript_list<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3014,7 +3002,7 @@ pub(crate) fn registry_manuscript_list<'a>(
     Box::pin(execute_manuscript_list(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.manuscript.read_range` — async passthrough.
+/// note: Registry wrapper: `nexus.manuscript.read_range` — async passthrough.
 pub(crate) fn registry_manuscript_read_range<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3023,7 +3011,7 @@ pub(crate) fn registry_manuscript_read_range<'a>(
     Box::pin(execute_manuscript_read_range(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.manuscript.write` — async passthrough.
+/// note: Registry wrapper: `nexus.manuscript.write` — async passthrough.
 pub(crate) fn registry_manuscript_write<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3032,7 +3020,7 @@ pub(crate) fn registry_manuscript_write<'a>(
     Box::pin(execute_manuscript_write(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.manuscript.phase.get` — async passthrough.
+/// note: Registry wrapper: `nexus.manuscript.phase.get` — async passthrough.
 pub(crate) fn registry_manuscript_phase_get<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3041,7 +3029,7 @@ pub(crate) fn registry_manuscript_phase_get<'a>(
     Box::pin(execute_manuscript_phase_get(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.manuscript.phase.set` — async passthrough.
+/// note: Registry wrapper: `nexus.manuscript.phase.set` — async passthrough.
 pub(crate) fn registry_manuscript_phase_set<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3050,7 +3038,7 @@ pub(crate) fn registry_manuscript_phase_set<'a>(
     Box::pin(execute_manuscript_phase_set(req, context, creator_id))
 }
 
-/// Registry wrapper: `nexus.workspace.paths` — sync → async wrapper.
+/// note: Registry wrapper: `nexus.workspace.paths` — sync → async wrapper.
 pub(crate) fn registry_workspace_paths<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3060,7 +3048,7 @@ pub(crate) fn registry_workspace_paths<'a>(
     Box::pin(async move { result })
 }
 
-/// Registry wrapper: `nexus.runtime.health` — sync → async wrapper.
+/// note: Registry wrapper: `nexus.runtime.health` — sync → async wrapper.
 pub(crate) fn registry_runtime_health<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3070,7 +3058,7 @@ pub(crate) fn registry_runtime_health<'a>(
     Box::pin(async move { Ok(result) })
 }
 
-/// Registry wrapper: `nexus.trace.correlation` — sync → async wrapper.
+/// note: Registry wrapper: `nexus.trace.correlation` — sync → async wrapper.
 pub(crate) fn registry_trace_correlation<'a>(
     req: &'a ToolsApi,
     context: &'a ToolContext,
@@ -3080,13 +3068,11 @@ pub(crate) fn registry_trace_correlation<'a>(
     Box::pin(async move { Ok(result) })
 }
 
-// ---------------------------------------------------------------------------
-// The capability registry (builtin rows + spine)
-// ---------------------------------------------------------------------------
+// note: The capability registry (builtin rows + spine)
 
-// ─── Registry types ────────────────────────────────────────────────────────
+// note: Registry types
 
-/// Unified handler function signature for all registered capabilities.
+/// note: Unified handler function signature for all registered capabilities.
 ///
 /// Takes references to the tool request, workspace context, and creator id,
 /// returns a boxed future resolving to `Result<serde_json::Value, NexusApiError>`.
@@ -3098,27 +3084,27 @@ pub type RegistryHandlerFn = for<'a> fn(
     Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>,
 >;
 
-// ─── Capability row ────────────────────────────────────────────────────────
+// note: Capability row
 
-/// One bound registry row: the canonical metadata plus its real handler.
+/// note: One bound registry row: the canonical metadata plus its real handler.
 #[derive(Clone, Copy)]
 pub struct CapabilityRow {
-    /// Canonical row (id, access, admission gates, schemas, failure, test).
+    /// note: Canonical row (id, access, admission gates, schemas, failure, test).
     pub metadata: &'static HostToolMetadata,
-    /// Handler function binding.
+    /// note: Handler function binding.
     pub handler: RegistryHandlerFn,
 }
 
-// ─── Registry ──────────────────────────────────────────────────────────────
+// note: Registry
 
-/// Central registry for `nexus.*` host tool capabilities.
+/// note: Central registry for `nexus.*` host tool capabilities.
 ///
 /// Built once at daemon startup. Provides O(1) lookup by
 /// capability id and a unified `dispatch()` method that
 /// mirrors the old `dispatch_tool()` behavior.
 pub struct CapabilityRegistry {
     rows: HashMap<&'static str, CapabilityRow>,
-    /// Consultations of the peer/user fallback lanes.
+    /// note: Consultations of the peer/user fallback lanes.
     ///
     /// Compiled IN by `test-hooks`, which this crate's integration tests enable
     /// through their dev-dependency self-reference; the flag must stay out of
@@ -3130,7 +3116,7 @@ pub struct CapabilityRegistry {
 }
 
 impl CapabilityRegistry {
-    /// Create an empty registry.
+    /// note: Create an empty registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -3140,7 +3126,7 @@ impl CapabilityRegistry {
         }
     }
 
-    /// How many dispatches consulted the peer/user fallback lanes.
+    /// note: How many dispatches consulted the peer/user fallback lanes.
     ///
     /// `test-hooks` only: counts lane consultations (a refused lane still
     /// records one), which is the invariant the canonical reservation owns.
@@ -3151,7 +3137,7 @@ impl CapabilityRegistry {
         self.fallback_consultations.load(Ordering::Relaxed)
     }
 
-    /// Records one peer/user fallback-lane consultation.
+    /// note: Records one peer/user fallback-lane consultation.
     ///
     /// The single increment site: both entry paths call it immediately before
     /// they ask a lane, so the probe measures the same decision in the
@@ -3161,7 +3147,7 @@ impl CapabilityRegistry {
         self.fallback_consultations.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Whether `id` is a canonical host tool this registry binds no row for.
+    /// note: Whether `id` is a canonical host tool this registry binds no row for.
     ///
     /// The one canonical-miss decision shared by the allowlist
     /// ([`Self::spine_resolves`]) and [`Self::dispatch`]: the namespace reserves
@@ -3172,7 +3158,7 @@ impl CapabilityRegistry {
         self.lookup(id).is_none() && lookup_host_tool(id).is_some()
     }
 
-    /// Register a capability row.
+    /// note: Register a capability row.
     ///
     /// # Panics
     ///
@@ -3187,24 +3173,24 @@ impl CapabilityRegistry {
         self.rows.insert(id, row);
     }
 
-    /// Look up a capability row by id.
+    /// note: Look up a capability row by id.
     #[must_use]
     pub fn lookup(&self, id: &str) -> Option<&CapabilityRow> {
         self.rows.get(id)
     }
 
-    /// Iterate over all registered capability ids.
+    /// note: Iterate over all registered capability ids.
     pub fn ids(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.rows.keys().copied()
     }
 
-    /// Number of registered capabilities.
+    /// note: Number of registered capabilities.
     #[must_use]
     pub fn len(&self) -> usize {
         self.rows.len()
     }
 
-    /// Return whether the registry is empty.
+    /// note: Return whether the registry is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
@@ -3240,7 +3226,7 @@ impl CapabilityRegistry {
             .is_some_and(|reg| user_cap_catalog_admission(reg.lookup(id)).is_ok())
     }
 
-    /// Dispatch a tool request through the registry.
+    /// note: Dispatch a tool request through the registry.
     ///
     /// Looks up the capability by `tool_name`, iterates the declared
     /// `AdmissionGate` slice as a centralized accountability checkpoint,
@@ -3279,7 +3265,7 @@ impl CapabilityRegistry {
     ) -> Result<serde_json::Value, NexusApiError> {
         let row = self.lookup(&req.tool_name);
         if row.is_none() {
-            // v1.249 S4: the canonical-miss decision owns the outcome on this
+            // why: v1.249 S4: the canonical-miss decision owns the outcome on this
             // path and on the allowlist (`spine_resolves`) alike. A reserved
             // builtin id refuses even when this build binds no handler for it
             // (feature-gated binding), so the reservation is not left to each
@@ -3306,7 +3292,7 @@ impl CapabilityRegistry {
         }
         let row = row.expect("row present");
 
-        // Exhaustiveness checkpoint over the declared gates: the match below
+        // why: Exhaustiveness checkpoint over the declared gates: the match below
         // names every recognized `AdmissionGate` variant, so a new variant
         // fails to compile here rather than shipping without a decision. It
         // checks the DECLARATION, not that each gate has a runtime enforcement
@@ -3326,7 +3312,7 @@ impl CapabilityRegistry {
                 "unhandled admission gate {gate:?} for capability {}",
                 row.metadata.id.as_str()
             );
-            let _ = gate; // Readability: gate is accounted for by the match above.
+            let _ = gate; // note: the match above accounts for every gate.
         }
 
         (row.handler)(req, context, creator_id).await
@@ -3339,10 +3325,9 @@ impl Default for CapabilityRegistry {
     }
 }
 
-// ─── Spine peer + user-capability arms (AR-68 #4/#6) ──────────────────────
+// note: Spine peer + user-capability arms (AR-68 #4/#6)
 
-/// Peer dispatch arm: structural argument gate via
-/// `validate_tool_arguments`, then reverse-invoke the owning responder./// Peer dispatch arm (AR-68 #4): structural argument gate, then the
+/// Peer dispatch arm (AR-68 #4): structural argument gate, then the
 /// reverse-invoke port.
 ///
 /// The gate runs BEFORE any transport I/O — a malformed call is refused
@@ -3359,7 +3344,7 @@ async fn dispatch_peer_tool(
     use peer_tools::PeerInvokeError;
     match peer_tools::invoke_peer_tool(entry, req.parameters.clone()).await {
         Ok(value) => Ok(value),
-        // A structural argument refusal never reached the peer; it is a
+        // why: A structural argument refusal never reached the peer; it is a
         // plain client-input error.
         Err(PeerInvokeError::Denied {
             wire_code: None,
@@ -3368,7 +3353,7 @@ async fn dispatch_peer_tool(
             code: "invalid_input".to_string(),
             message,
         }),
-        // A peer-side deny keeps the peer's own lowercase code verbatim while
+        // why: A peer-side deny keeps the peer's own lowercase code verbatim while
         // the public code stays the spine's `not_supported`.
         Err(PeerInvokeError::Denied {
             wire_code: Some(wire_code),
@@ -3404,7 +3389,7 @@ fn validate_user_cap_arguments(schema_json: &str, arguments: &Value) -> Result<(
         return Err("Tool arguments must be a JSON object".to_string());
     };
     let Ok(schema) = serde_json::from_str::<Value>(schema_json) else {
-        // The catalog admission gate already proved the schema parses as a
+        // why: The catalog admission gate already proved the schema parses as a
         // JSON object; a parse failure here means the descriptor changed
         // after admission — fail closed as invalid_input rather than
         // dispatching unvalidated.
@@ -3484,7 +3469,7 @@ pub fn user_cap_catalog_admission(
     if name.starts_with("nexus.") {
         return Err(UserCapCatalogRefusal::ReservedNamespace);
     }
-    // QC-fix S-d: the spoke-operations helper IS the grammar (single source
+    // why: QC-fix S-d: the spoke-operations helper IS the grammar (single source
     // of truth with the peer arm — the local `matches_tools_grammar` mirror
     // was removed; spoke grammar is `tools.<ns>.<tool_id>` with ns
     // `^[a-z][a-z0-9_-]*$` and tool_id `^[a-z0-9][a-z0-9_-]*$`).
@@ -3501,7 +3486,7 @@ pub fn user_cap_catalog_admission(
     Ok(cap)
 }
 
-/// AR-70 §3 inclusion rule for MCP `output_schema` payloads.
+/// note: AR-70 §3 inclusion rule for MCP `output_schema` payloads.
 ///
 /// A JSON-Schema string is carried only when it parses and declares a root
 /// `type: "object"` (MCP requires an object root; non-object outputs are
@@ -3523,17 +3508,17 @@ pub fn json_schema_has_object_root(raw: &str) -> bool {
 /// Named catalog refusal for a user capability (AR-68 #6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UserCapCatalogRefusal {
-    /// Not a user capability (builtin or absent).
+    /// note: Not a user capability (builtin or absent).
     NotUserCapability,
-    /// Name starts with `nexus.` or matches the peer grammar.
+    /// note: Name starts with `nexus.` or matches the peer grammar.
     ReservedNamespace,
-    /// `input_schema()` does not parse as a JSON object.
+    /// note: `input_schema()` does not parse as a JSON object.
     InputSchemaNotObject,
 }
 
-// ─── Registry constructor ──────────────────────────────────────────────────
+// note: Registry constructor
 
-/// Create a registry pre-populated by binding every canonical catalog row.
+/// note: Create a registry pre-populated by binding every canonical catalog row.
 ///
 /// V1.54 P0 T5: Converted to `LazyLock` singleton to eliminate per-dispatch
 /// allocation. All admission gates are `&'static [AdmissionGate]` references.
@@ -3543,7 +3528,7 @@ pub fn host_tool_registry() -> &'static CapabilityRegistry {
     &REGISTRY
 }
 
-/// Builds the full registry (called once by `LazyLock`).
+/// note: Builds the full registry (called once by `LazyLock`).
 /// Marked `pub` so benchmarks can measure cold-path initialization;
 /// external callers should use `host_tool_registry()` instead.
 #[must_use]
@@ -3551,7 +3536,7 @@ pub fn build_registry() -> CapabilityRegistry {
     build_registry_inner(None)
 }
 
-/// The ONE registration path: every canonical row this build binds a handler
+/// note: The ONE registration path: every canonical row this build binds a handler
 /// for, except the optional `unbound` one.
 ///
 /// `unbound` is the test-only shape (a canonical tool the fixture deliberately
@@ -3573,7 +3558,7 @@ fn build_registry_inner(unbound: Option<HostToolId>) -> CapabilityRegistry {
     reg
 }
 
-/// Builds the registry with one canonical tool deliberately left unbound.
+/// note: Builds the registry with one canonical tool deliberately left unbound.
 ///
 /// The id stays canonical — reserved by the catalog — but has no handler row, so
 /// it is absent from this registry's runnable ids and binds nothing in the
@@ -3585,7 +3570,7 @@ pub fn build_registry_without(unbound: HostToolId) -> CapabilityRegistry {
     build_registry_inner(Some(unbound))
 }
 
-/// The real handler for one canonical tool, or `None` when this build links no
+/// note: The real handler for one canonical tool, or `None` when this build links no
 /// binding for it.
 ///
 /// Exhaustive over [`HostToolId`], so a canonical row cannot ship without a
@@ -3625,7 +3610,7 @@ fn handler_for(id: HostToolId) -> Option<RegistryHandlerFn> {
     Some(handler)
 }
 
-/// The Generate binding: present only where the authoring feature links the
+/// note: The Generate binding: present only where the authoring feature links the
 /// kernel. Without it the canonical id keeps its reservation and dispatch
 /// refuses before any peer or user lane is asked.
 #[cfg(feature = "strategy-authoring")]
@@ -3634,7 +3619,7 @@ const STRATEGY_GENERATE_HANDLER: Option<RegistryHandlerFn> = Some(registry_strat
 #[cfg(not(feature = "strategy-authoring"))]
 const STRATEGY_GENERATE_HANDLER: Option<RegistryHandlerFn> = None;
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
+// note: Tests
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -3695,7 +3680,7 @@ mod tests {
         let workspace = tempfile::tempdir().expect("temp workspace");
         std::fs::write(
             home.path().join("config.toml"),
-            // The Work artifact port resolves the workspace partition through
+            // why: The Work artifact port resolves the workspace partition through
             // this selection (or the process default when none is recorded).
             format!(
                 "active_creator_id = \"{CREATOR}\"\n\
@@ -3796,7 +3781,7 @@ mod tests {
         assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
     }
 
-    /// Every entry below `root`, ordered by relative path, with a file's bytes.
+    /// note: Every entry below `root`, ordered by relative path, with a file's bytes.
     fn entry_snapshot(root: &std::path::Path) -> Vec<(String, Option<Vec<u8>>)> {
         fn walk(
             root: &std::path::Path,
@@ -3827,7 +3812,7 @@ mod tests {
         out
     }
 
-    /// I-000460: a dry run over a workspace that already holds real chapter
+    /// note: I-000460: a dry run over a workspace that already holds real chapter
     /// bytes must record the write and leave the file untouched. Removing the
     /// recording port from `ToolContext::new_simulated` rewrites the chapter, so
     /// this test is the negative control for that selection.
@@ -3842,7 +3827,7 @@ mod tests {
         std::fs::write(&target, "the original chapter\n").expect("seed the chapter");
         let before = entry_snapshot(fixture.workspace.path());
 
-        // The same resolved inputs the production fixture uses, plus the
+        // why: The same resolved inputs the production fixture uses, plus the
         // recording port.
         let context = ToolContext::new_simulated(
             fixture.pool.clone(),
@@ -3895,7 +3880,7 @@ mod tests {
         }
     }
 
-    /// Every `kb_key_blocks` row exactly as stored, one JSON array per row,
+    /// note: Every `kb_key_blocks` row exactly as stored, one JSON array per row,
     /// ordered by primary key.
     ///
     /// The column list is read from the schema, so every persisted column takes
@@ -3923,7 +3908,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!("SELECT json_array({rendered}) FROM kb_key_blocks ORDER BY key_block_id");
-        // Every interpolated fragment is a column name read from the schema, not
+        // why: Every interpolated fragment is a column name read from the schema, not
         // caller input — the only reason a statically-typed query is unavailable.
         sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
@@ -3931,7 +3916,7 @@ mod tests {
             .expect("kb rows")
     }
 
-    /// The world the simulated knowledge tests write into, plus one known
+    /// note: The world the simulated knowledge tests write into, plus one known
     /// `kb_key_blocks` row.
     async fn seed_kb_fixture(pool: &SqlitePool) {
         nexus_local_db::ensure_creator_row(pool, CREATOR, "Test")
@@ -3957,7 +3942,7 @@ mod tests {
         .expect("known kb row");
     }
 
-    /// The knowledge stub is selected by `ToolContext::new_simulated`: a preview
+    /// note: The knowledge stub is selected by `ToolContext::new_simulated`: a preview
     /// that reaches `nexus.kb_snapshot.write` records the intended put and leaves
     /// `kb_key_blocks` byte-identical. Removing that selection inserts the row for
     /// real, so this test is the negative control for it.
@@ -3997,7 +3982,7 @@ mod tests {
         .await
         .expect("the simulated write succeeds");
 
-        // The store comparison comes before every response-shape assertion on
+        // why: The store comparison comes before every response-shape assertion on
         // purpose: it is the claim this test exists to prove, so a run that
         // writes must fail HERE. Select `recording_knowledge_entry: None` and
         // this is the assertion that goes red, not the `written` count.
@@ -4025,7 +4010,7 @@ mod tests {
             "the attempt is recorded, not swallowed"
         );
 
-        // Zero puts still yield the explicit empty state rather than silence.
+        // why: Zero puts still yield the explicit empty state rather than silence.
         let empty = execute_kb_snapshot_write(
             &kb_write_request(&serde_json::json!([])),
             &simulated,
@@ -4036,7 +4021,7 @@ mod tests {
         assert_eq!(empty["written"], serde_json::json!(0));
         assert_eq!(empty["suppressed_writes"], serde_json::json!([]));
 
-        // A production context records nothing and still commits for real.
+        // why: A production context records nothing and still commits for real.
         assert!(
             fixture
                 .context
@@ -4059,7 +4044,7 @@ mod tests {
         assert_eq!(kb_rows(&fixture.pool).await.len(), before.len() + 1);
     }
 
-    /// A simulated write must answer the refusal production would give for the
+    /// note: A simulated write must answer the refusal production would give for the
     /// same block: these fields are `Option<String>`/`String` on the wire, so
     /// `{"disclosure": ""}` or `{"canonical_name": ""}` deserializes and reaches
     /// the store. Only the store's record gates refuse them — and
@@ -4083,7 +4068,7 @@ mod tests {
         );
         let before = kb_rows(&fixture.pool).await;
 
-        // (field, value, the store gate's own reason — asserted, because "did not
+        // why: (field, value, the store gate's own reason — asserted, because "did not
         // panic" alone would let the next refactor reintroduce the panic.)
         let cases = [
             (
@@ -4156,7 +4141,7 @@ mod tests {
         );
     }
 
-    /// A `key_block_id` an existing row already holds is the primary-key
+    /// note: A `key_block_id` an existing row already holds is the primary-key
     /// collision `insert_key_block_in_tx` reports, so the simulated branch must
     /// answer with the same refusal instead of previewing the block as writable;
     /// the same request with a free id must still preview as writable.
@@ -4205,7 +4190,7 @@ mod tests {
             "the preview must refuse a taken key_block_id exactly as production refuses it"
         );
 
-        // The same request with a free id still previews as writable.
+        // why: The same request with a free id still previews as writable.
         let mut fresh = KnowledgeEntryRecord::new("wld_sim", BlockType::Character, "sim_pk_fresh");
         fresh.entry_id = "kb_sim_fresh".to_string();
         let result = execute_kb_snapshot_write(
@@ -4238,7 +4223,7 @@ mod tests {
         );
     }
 
-    /// The snapshot must see every stored byte: `quote(TEXT)` stops at an
+    /// note: The snapshot must see every stored byte: `quote(TEXT)` stops at an
     /// embedded NUL, so a text column that gains a suffix after one would leave
     /// a `quote`-rendered snapshot unchanged. This is the renderer's own check —
     /// the type tag plus hex of the raw bytes must distinguish the two values.
@@ -4268,7 +4253,7 @@ mod tests {
         );
     }
 
-    /// The real branch must be lossless too: `CAST(REAL AS BLOB)` renders through
+    /// note: The real branch must be lossless too: `CAST(REAL AS BLOB)` renders through
     /// 15-digit decimal text, so two doubles that differ past that precision share
     /// their encoding. `revision` is INTEGER-declared but this table is not
     /// `STRICT`, so a REAL is an admissible stored value — exactly the shape that
@@ -4397,7 +4382,7 @@ mod tests {
         );
         assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
 
-        // Same classification means the same lock: a held Work lock refuses
+        // why: Same classification means the same lock: a held Work lock refuses
         // this spelling instead of writing around it on the guarded path.
         nexus_local_db::acquire_runtime_lock(
             &fixture.pool,
@@ -4433,7 +4418,7 @@ mod tests {
     #[tokio::test]
     async fn fs_leading_curdir_case_variant_spelling_is_refused_on_write_and_read() {
         let fixture = fixture(true).await;
-        // Seed both spellings so the answer is decided by the spelling, never
+        // why: Seed both spellings so the answer is decided by the spelling, never
         // by the target being absent — on a case-sensitive volume or not.
         for tree in ["works", "Works"] {
             let dir = fixture
@@ -4584,7 +4569,7 @@ mod tests {
     #[tokio::test]
     async fn execute_write_file_is_not_reentrant_for_tool_fs_write() {
         let fixture = fixture(true).await;
-        // The same process's in-flight `tool:fs_write` holder mints a fresh
+        // why: The same process's in-flight `tool:fs_write` holder mints a fresh
         // uuid per acquire, so a second write refuses instead of re-entering.
         nexus_local_db::acquire_runtime_lock(
             &fixture.pool,
@@ -4643,7 +4628,7 @@ mod tests {
         let fixture = fixture(true).await;
         let case_variant = format!("works/{WORK_REF}/Stories/ch1.md");
         let exact = format!("Works/{WORK_REF}/Stories/ch1.md");
-        // Seed both spellings so the read refusal is decided by the spelling,
+        // why: Seed both spellings so the read refusal is decided by the spelling,
         // never by the target being absent — the answer stays the same on a
         // case-sensitive and a case-insensitive volume.
         std::fs::create_dir_all(
@@ -4682,7 +4667,7 @@ mod tests {
             .expect_err("a case-variant read refuses");
         assert_case_variant_works_refusal(read_error, &case_variant);
 
-        // The spelling is judged before any lookup, exactly as on write, so a
+        // why: The spelling is judged before any lookup, exactly as on write, so a
         // missing target is the same spelling refusal rather than a not-found.
         let missing = format!("works/{WORK_REF}/Stories/missing.md");
         let missing_error = execute_read_file(&read_request(&missing), &fixture.context)
@@ -4690,13 +4675,13 @@ mod tests {
             .expect_err("a missing case-variant read is still refused");
         assert_case_variant_works_refusal(missing_error, &missing);
 
-        // The exact spelling stays readable.
+        // why: The exact spelling stays readable.
         let read = execute_read_file(&read_request(&exact), &fixture.context)
             .await
             .expect("the exact spelling reads");
         assert_eq!(read, serde_json::json!({ "content": "chapter body" }));
 
-        // A valid exact spelling that is merely absent is still not-found: only
+        // why: A valid exact spelling that is merely absent is still not-found: only
         // the invalid spelling is refused before the lookup.
         let exact_missing = format!("Works/{WORK_REF}/Stories/absent.md");
         let exact_missing_error =
@@ -4712,7 +4697,7 @@ mod tests {
     #[tokio::test]
     async fn fs_work_escape_is_refused_identically_on_write_and_read() {
         let fixture = fixture(true).await;
-        // Lexically under `Works/<ref>` but physically the case-variant tree.
+        // why: Lexically under `Works/<ref>` but physically the case-variant tree.
         let escaped = format!("Works/{WORK_REF}/../works/{WORK_REF}/x.md");
         let expected = format!("escapes the Works/{WORK_REF}/ boundary");
 
@@ -4742,7 +4727,7 @@ mod tests {
     #[tokio::test]
     async fn fs_case_variant_spelling_refusal_outranks_a_symlinked_target() {
         let fixture = fixture(true).await;
-        // `works` symlinked to an existing directory outside the workspace: the
+        // why: `works` symlinked to an existing directory outside the workspace: the
         // guard would call this an escape, so this pins the spelling-first order
         // and the identical answer on both halves.
         let outside = tempfile::tempdir().expect("outside root");

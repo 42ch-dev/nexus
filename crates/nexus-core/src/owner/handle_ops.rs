@@ -26,6 +26,8 @@
 //! the principal is verified and the run's durable ROOT ownership resolved
 //! BEFORE any ring, epoch or cursor is consulted, so neither surface can leak
 //! existence, ancestry or history for a run the caller does not own.
+// why: the three invariants and the read ordering are re-checked per call, because a typed seam
+// cannot rely on the transport having checked them.
 
 use std::sync::Arc;
 
@@ -83,20 +85,20 @@ use nexus_contracts::ToolsApi;
 use nexus_execution::run_events::{PageError, PullOutcome, SubscribeError, WorkflowSubscription};
 use nexus_execution::workflow::{RunControlError, RunEventPort, RunSignal};
 
-/// Default page size for a cursorless run-event read.
+/// note: Default page size for a cursorless run-event read.
 const DEFAULT_RUN_EVENT_LIMIT: usize = 64;
 
-/// Default page size for a cursorless durable list read (retained default).
+/// note: Default page size for a cursorless durable list read (retained default).
 const DEFAULT_LIST_LIMIT: i64 = 100;
 
-/// Maximum page size a durable list read serves (retained cap).
+/// note: Maximum page size a durable list read serves (retained cap).
 const MAX_LIST_LIMIT: i64 = 500;
 
-/// Maximum length for a `force_gates` audit reason (mirrors the transport).
+/// note: Maximum length for a `force_gates` audit reason (mirrors the transport).
 const MAX_REASON_LEN: usize = 512;
 
 impl ExecutionHandle {
-    /// Insert a new schedule for the admitted principal's creator.
+    /// note: Insert a new schedule for the admitted principal's creator.
     ///
     /// The preset's declared gates are evaluated BEFORE any write, and a
     /// `force_gates` bypass records an audit row first. The row is then
@@ -128,7 +130,7 @@ impl ExecutionHandle {
             });
         }
 
-        // The bypass reason is validated and the bypass AUDITED before anything
+        // why: The bypass reason is validated and the bypass AUDITED before anything
         // else can fail. The daemon writes the audit and schedule rows in one
         // transaction; this seam keeps ONE insertion authority (the supervisor,
         // which owns the row+deps+seed transaction) and instead guarantees the
@@ -145,12 +147,12 @@ impl ExecutionHandle {
             self.write_force_gates_audit(&request, reason).await?;
         }
 
-        // Resolve the preset ONCE: the same resolution supplies both the gate
+        // why: Resolve the preset ONCE: the same resolution supplies both the gate
         // set that must pass and the frozen source identity, so policy and the
         // frozen payload cannot disagree.
         let loaded = self.resolve_preset(&request.preset_id)?;
 
-        // A bypass skips gate evaluation entirely — it IS the audited override.
+        // why: A bypass skips gate evaluation entirely — it IS the audited override.
         // A normal request must pass every gate the preset declares.
         if audit_reason.is_none() {
             let empty_gates: &[nexus_contracts::local::orchestration::preset_gate::Gate] = &[];
@@ -163,7 +165,7 @@ impl ExecutionHandle {
         let supervisor = self.schedule_supervisor()?;
         let schedule_id = new_schedule_id();
         let schedule = build_schedule(&schedule_id, &request);
-        // C-2/I-5: a `driven_v1` row must never be published without its
+        // why: C-2/I-5: a `driven_v1` row must never be published without its
         // frozen admission payload.
         let descriptor = self.freeze_descriptor(&request, loaded.as_ref())?;
         let seed = request.seed.clone().unwrap_or_default();
@@ -178,7 +180,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// List the admitted Creator's durable schedules.
+    /// note: List the admitted Creator's durable schedules.
     ///
     /// The scope is the STORED ownership: the query is bound to the principal's
     /// creator, and an explicit foreign `creator_id` filter is refused BEFORE
@@ -206,10 +208,10 @@ impl ExecutionHandle {
         let limit = list_limit(query.limit);
 
         let pool = self.coordinator().pool();
-        // The page and its count come from ONE read snapshot, so `has_more` and
+        // why: The page and its count come from ONE read snapshot, so `has_more` and
         // the page cannot disagree under a concurrent add/delete.
         let mut tx = pool.begin().await.map_err(|e| crate::error::db_err(&e))?;
-        // The requested `status` filter is part of the bound value set and the
+        // why: The requested `status` filter is part of the bound value set and the
         // SAME fragment is appended to the page query and its count, so a
         // filtered page can never be paginated against an unfiltered total.
         let status_filter = if query.status.is_some() {
@@ -264,7 +266,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Inspect one of the admitted Creator's schedules.
+    /// note: Inspect one of the admitted Creator's schedules.
     ///
     /// A foreign id and an absent id close with the SAME `NotFound`: the scope
     /// is the STORED owner (`schedule_id` + `creator_id` in one predicate), so
@@ -301,7 +303,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// List the admitted Creator's durable workflow runs.
+    /// note: List the admitted Creator's durable workflow runs.
     ///
     /// The page is read from the DURABLE `orchestration_sessions` rows (root
     /// runs only — `parent_session_id IS NULL`), never from an in-memory engine
@@ -443,7 +445,7 @@ impl ExecutionHandle {
             resource: format!("workflow session {session_id}"),
         })?;
 
-        // `committed` is the capability's own post-condition: the SQL
+        // why: `committed` is the capability's own post-condition: the SQL
         // projection above only matched an output that carries `true`.
         let revision = row.workspace_commit_revision.take();
         Ok(SessionDetailResponse {
@@ -455,7 +457,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Append (or structurally edit) a schedule's core context.
+    /// note: Append (or structurally edit) a schedule's core context.
     ///
     /// The request is the existing `{op, body?, patch?, path?}` shape with no
     /// caller-supplied version: the version is derived inside the shared
@@ -509,7 +511,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Commit a validated change manifest through the durable workspace
+    /// note: Commit a validated change manifest through the durable workspace
     /// authority this owner was bound to.
     ///
     /// The manifest crosses the generated contract; the durable commit keeps
@@ -539,7 +541,7 @@ impl ExecutionHandle {
         authority.commit(request).await
     }
 
-    /// Apply a lifecycle signal to an existing schedule.
+    /// note: Apply a lifecycle signal to an existing schedule.
     ///
     /// Ownership is enforced BEFORE mutation: the durable row's `creator_id`
     /// must equal the admitted principal's creator, so a caller cannot pause,
@@ -604,7 +606,7 @@ impl ExecutionHandle {
                     .await;
             }
             "cancel" => {
-                // ONE CAS against the admission fence: a row that owns no run
+                // why: ONE CAS against the admission fence: a row that owns no run
                 // is durably `cancelled` here; a row that owns a run (already,
                 // or claimed by the concurrent admission that won the fence)
                 // supplies that run for the coordinator's cancel.
@@ -620,7 +622,7 @@ impl ExecutionHandle {
                             .cancel_run(&SessionId(run_id))
                             .await
                             .map_err(map_run_control_error)?;
-                        // The durable winner: `cancelled` only when stop is
+                        // why: The durable winner: `cancelled` only when stop is
                         // confirmed, `interrupted` when cleanup is not. A
                         // provider acknowledgement alone never reaches here.
                         return Ok(SignalScheduleResponse {
@@ -629,7 +631,7 @@ impl ExecutionHandle {
                             current_wait_id: result.current_wait_id,
                         });
                     }
-                    // Nothing was written: the row is already terminal (or
+                    // why: Nothing was written: the row is already terminal (or
                     // otherwise not cancellable). A completed winner is never
                     // relabelled cancelled.
                     ScheduleCancelDisposition::NotCancelled(durable_status) => {
@@ -672,7 +674,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Continue the run an admitted schedule already owns (`resume` signal).
+    /// note: Continue the run an admitted schedule already owns (`resume` signal).
     ///
     /// Admitted (the durable row carries a `current_session_id`): the signal
     /// goes to the run this schedule already owns. A manual wait is never
@@ -738,7 +740,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Reconcile the owning schedule row after an admitted same-run resume.
+    /// note: Reconcile the owning schedule row after an admitted same-run resume.
     ///
     /// `pause` writes `paused` to the schedule row WITHOUT touching the run it
     /// owns, so a successful resume of that same run must not leave the durable
@@ -789,7 +791,7 @@ impl ExecutionHandle {
         Ok(())
     }
 
-    /// Dispatch one host tool through the spine.
+    /// note: Dispatch one host tool through the spine.
     ///
     /// The handle supplies the narrow owned context (pool, home, workspace
     /// path, lifecycle scalars, and the live capability holder) and then runs
@@ -810,7 +812,7 @@ impl ExecutionHandle {
                 resource: "tool execution requires an admitted principal".into(),
             });
         }
-        // The principal must belong to THIS owner's service, not merely be
+        // why: The principal must belong to THIS owner's service, not merely be
         // well-formed: `verify_principal` checks the open generation, creator
         // and workspace against the service that established this handle, so
         // a principal minted by a DIFFERENT core (another creator, or a stale
@@ -827,7 +829,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Invoke a compute module against a World.
+    /// note: Invoke a compute module against a World.
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down, `Internal` when this build
@@ -840,14 +842,14 @@ impl ExecutionHandle {
     ) -> CoreResult<nexus_contracts::generated::daemon_api::compute::run_response::RunResponse>
     {
         self.ensure_admitting()?;
-        // Same principal binding as `execute_tool`: the creator this call
+        // why: Same principal binding as `execute_tool`: the creator this call
         // authorizes against must be the one THIS service was opened for.
         self.linked_core()?.verify_principal(principal)?;
         let context = self.compute_context(principal)?;
         crate::owner::compute::compute_run(self.linked_core()?.as_ref(), &context, request).await
     }
 
-    /// Accept a succeeded compute run's proposals, atomically.
+    /// note: Accept a succeeded compute run's proposals, atomically.
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down; the accept refusal otherwise.
@@ -871,7 +873,7 @@ impl ExecutionHandle {
         .await
     }
 
-    /// Build the narrow owned tool context for this owner.
+    /// note: Build the narrow owned tool context for this owner.
     ///
     /// The pool, home, workspace root and capability holder come from the
     /// owner itself, so a dispatch can only ever observe the authority this
@@ -902,7 +904,7 @@ impl ExecutionHandle {
         .with_prompt_executor(self.prompt_executor()))
     }
 
-    /// Build the compute context for this owner.
+    /// note: Build the compute context for this owner.
     ///
     /// # Errors
     /// `Forbidden` for a principal with no creator.
@@ -920,7 +922,7 @@ impl ExecutionHandle {
             serializer: self.compute_serializer(),
         })
     }
-    /// Read a bounded page of a run's retained events.
+    /// note: Read a bounded page of a run's retained events.
     ///
     /// The run is authorized BEFORE the ring or the cursor is touched: the
     /// scope is the STORED owner (a root `orchestration_sessions` row of the
@@ -945,7 +947,7 @@ impl ExecutionHandle {
         self.linked_core()?.verify_principal(principal)?;
         let run_id = request.run_id.as_str().to_string();
         self.owned_root_run(principal, &run_id).await?;
-        // Same re-check as the subscription path: the durable check awaits, so
+        // why: Same re-check as the subscription path: the durable check awaits, so
         // a drain that began during it must not be raced by this read either.
         self.ensure_admitting()?;
         let port = self.run_event_port()?;
@@ -980,10 +982,10 @@ impl ExecutionHandle {
         self.ensure_admitting()?;
         self.linked_core()?.verify_principal(principal)?;
         let run_id = request.run_id.as_str().to_string();
-        // Authorization FIRST: nothing about the run below this line runs for a
+        // why: Authorization FIRST: nothing about the run below this line runs for a
         // caller who does not durably own it.
         self.owned_root_run(principal, &run_id).await?;
-        // The drain fence is re-checked after EVERY await on this path: an
+        // why: The drain fence is re-checked after EVERY await on this path: an
         // owner close that began while the durable check was in flight must not
         // be raced. (The window below this point is closed by the registry's
         // seal, which is atomic with the mint.)
@@ -1001,7 +1003,7 @@ impl ExecutionHandle {
         let generation = self.engine_epoch();
         let subscription = match port.subscribe_live(&run_id, cursor.as_deref(), inspect_url) {
             Ok(live) => WorkflowSubscription::live(creator_id, generation, run_id, live),
-            // The ring answered that this history cannot be resumed. That is a
+            // why: The ring answered that this history cannot be resumed. That is a
             // stream outcome, not a request failure: the caller gets the one
             // control frame and a closed stream.
             Err(SubscribeError::HistoryUnavailable(wire)) => {
@@ -1022,12 +1024,12 @@ impl ExecutionHandle {
             Err(SubscribeError::TooManySubscribers) => return Err(CoreError::Busy),
         };
         let Some(subscription) = self.workflow_subscriptions.mint(subscription) else {
-            // The owner sealed its table while this call was in flight. The
+            // why: The owner sealed its table while this call was in flight. The
             // subscription — and with it the ring subscriber permit attached
             // just above — is dropped by the refused mint, so nothing leaks.
             return Err(CoreError::Closing);
         };
-        // The seal covers every mint from here on, but a close that sealed
+        // why: The seal covers every mint from here on, but a close that sealed
         // right after this mint already withdrew and released the entry; the
         // caller gets that honest refusal instead of a dead token.
         if self.is_draining() {
@@ -1045,7 +1047,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Take the next bounded batch of a subscribed run's stream.
+    /// note: Take the next bounded batch of a subscribed run's stream.
     ///
     /// At most 16 frames / 1 MiB, already encoded, in ring order, from the
     /// retained replay and then the live tail. One pull may be outstanding per
@@ -1085,14 +1087,14 @@ impl ExecutionHandle {
             })
             .collect::<CoreResult<Vec<_>>>()?;
         if closed {
-            // A closed stream serves no further pull: withdraw the token so a
+            // why: A closed stream serves no further pull: withdraw the token so a
             // repeat call refuses like any other released one.
             self.workflow_subscriptions.take(&subscription_id);
         }
         Ok(CoreWorkflowEventBatch { events, closed })
     }
 
-    /// Release one subscription (a disconnect, an ended stream).
+    /// note: Release one subscription (a disconnect, an ended stream).
     ///
     /// The run's subscriber permit is freed and a pull blocked on that
     /// subscription wakes with `closed` instead of waiting for a frame that
@@ -1111,7 +1113,7 @@ impl ExecutionHandle {
         self.linked_core()?.verify_principal(principal)?;
         let subscription = self.owned_subscription(principal, subscription_id)?;
         if self.workflow_subscriptions.take(subscription_id).is_none() {
-            // A concurrent release won the withdrawal: the token is gone, so
+            // why: A concurrent release won the withdrawal: the token is gone, so
             // this call refuses exactly like any other released one.
             return Err(CoreError::NotFound {
                 resource: format!("workflow event subscription {subscription_id}"),
@@ -1121,7 +1123,7 @@ impl ExecutionHandle {
         Ok(())
     }
 
-    /// The subscribed run-event port, or the same `NotFound` the page read
+    /// note: The subscribed run-event port, or the same `NotFound` the page read
     /// reports when this owner has no registry attached.
     fn run_event_port(&self) -> CoreResult<Arc<dyn RunEventPort>> {
         self.coordinator()
@@ -1131,7 +1133,7 @@ impl ExecutionHandle {
             })
     }
 
-    /// Verify that the principal durably OWNS `run_id` as a ROOT run.
+    /// note: Verify that the principal durably OWNS `run_id` as a ROOT run.
     ///
     /// The durable run row is the authority: a child session id is never
     /// authorized by stripping `:child:` from the caller's string, and an
@@ -1157,7 +1159,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Resolve a token this owner still serves AND that was minted for this
+    /// note: Resolve a token this owner still serves AND that was minted for this
     /// principal and this core generation.
     ///
     /// A released, unknown, foreign-creator or stale-generation token all close
@@ -1185,7 +1187,7 @@ impl ExecutionHandle {
         Ok(subscription)
     }
 
-    /// The owner-level fence every entry point checks.
+    /// note: The owner-level fence every entry point checks.
     ///
     /// Reuses the coordinator's T1 admission barrier (the same predicate
     /// `ensure_driving`/`admit_schedule` gate on), so an operation reaching a
@@ -1203,7 +1205,7 @@ impl ExecutionHandle {
         Ok(())
     }
 
-    /// Read one durable schedule row scoped to the principal's STORED creator.
+    /// note: Read one durable schedule row scoped to the principal's STORED creator.
     ///
     /// The predicate carries BOTH the id and the stored `creator_id`, so a
     /// foreign row and an absent row produce the same `NotFound` — the scope is
@@ -1234,7 +1236,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Require the durable schedule row to belong to the principal's creator.
+    /// note: Require the durable schedule row to belong to the principal's creator.
     ///
     /// A missing row and a foreign row return the SAME `NotFound`, so a caller
     /// cannot probe for the existence of another creator's schedules. Delegates
@@ -1250,7 +1252,7 @@ impl ExecutionHandle {
             .map(|_| ())
     }
 
-    /// Write the audited `force_gates` bypass row.
+    /// note: Write the audited `force_gates` bypass row.
     async fn write_force_gates_audit(
         &self,
         request: &AddScheduleRequest,
@@ -1280,7 +1282,7 @@ impl ExecutionHandle {
             })
     }
 
-    /// Evaluate the preset's declared gates, refusing when any gate fails.
+    /// note: Evaluate the preset's declared gates, refusing when any gate fails.
     ///
     /// Only reached for a NON-bypass request: a `force_gates` call is the
     /// audited override and skips evaluation entirely.
@@ -1293,7 +1295,7 @@ impl ExecutionHandle {
             return Ok(());
         }
 
-        // A gated preset ALWAYS requires work_id for evaluation. Failing closed
+        // why: A gated preset ALWAYS requires work_id for evaluation. Failing closed
         // here is what stops the typed seam enqueuing a gated preset unchecked.
         let work_id = request
             .input
@@ -1317,7 +1319,7 @@ impl ExecutionHandle {
             ));
         };
 
-        // The Work must exist FOR THIS CREATOR: a foreign or unknown Work is a
+        // why: The Work must exist FOR THIS CREATOR: a foreign or unknown Work is a
         // gate failure, never an empty snapshot that silently passes.
         let pool = self.coordinator().pool();
         let row: Option<WorkSnapshotRow> = sqlx::query_as::<_, WorkSnapshotRow>(
@@ -1370,7 +1372,7 @@ impl ExecutionHandle {
         vars.insert("work_id".to_string(), work_id.clone());
         let preset_input = PresetInput { vars };
 
-        // Filesystem-kind gates resolve against the SAME frozen root the engine
+        // why: Filesystem-kind gates resolve against the SAME frozen root the engine
         // and commit authority use; without one there is nothing to resolve
         // against, so fall back to the nexus home exactly as the transport does.
         let workspace_root = self
@@ -1403,7 +1405,7 @@ impl ExecutionHandle {
         }
     }
 
-    /// The attached schedule supervisor, or a typed `NotFound`.
+    /// note: The attached schedule supervisor, or a typed `NotFound`.
     fn schedule_supervisor(
         &self,
     ) -> CoreResult<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>> {
@@ -1414,12 +1416,12 @@ impl ExecutionHandle {
             })
     }
 
-    /// Resolve the preset (and therefore its gates) through the shared resolver.
+    /// note: Resolve the preset (and therefore its gates) through the shared resolver.
     ///
     /// A resolution failure is reported, never swallowed: a preset that cannot
     /// be loaded cannot have its gates evaluated, so it must not be enqueued.
     fn resolve_preset(&self, preset_id: &str) -> CoreResult<Option<nexus_preset::LoadedPreset>> {
-        // `_system.*` presets are never admitted and carry no gates.
+        // why: `_system.*` presets are never admitted and carry no gates.
         if preset_id.starts_with("_system.") {
             return Ok(None);
         }
@@ -1439,7 +1441,7 @@ impl ExecutionHandle {
             })
     }
 
-    /// Freeze a new row's admission payload at insertion.
+    /// note: Freeze a new row's admission payload at insertion.
     ///
     /// The frozen identity is the SAME resolution that supplied the gates. Role
     /// bindings prefer the caller's explicit `agent_bindings` (validated to
@@ -1454,7 +1456,7 @@ impl ExecutionHandle {
         use nexus_session_storage::run_state::{AgentBinding, RunDescriptorV1};
 
         let Some(loaded) = loaded else {
-            // `_system.*`: never admitted, so no descriptor is required.
+            // why: `_system.*`: never admitted, so no descriptor is required.
             return Ok(None);
         };
         let source = loaded
@@ -1473,7 +1475,7 @@ impl ExecutionHandle {
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
 
-        // Explicit request bindings win, but only when they cover the preset's
+        // why: Explicit request bindings win, but only when they cover the preset's
         // declared prompt roles; a partial map is a refusal, not a silent
         // partial binding.
         let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
@@ -1507,7 +1509,7 @@ impl ExecutionHandle {
         } else if roles.is_empty() {
             std::collections::HashMap::new()
         } else {
-            // Bind the coordinator (and the provider string) before the closure
+            // why: Bind the coordinator (and the provider string) before the closure
             // below captures it: `self.coordinator()` returns a temporary `Arc`
             // that would otherwise be dropped at the end of the `let-else`.
             let coordinator = self.coordinator();
@@ -1535,7 +1537,7 @@ impl ExecutionHandle {
                 .collect()
         };
 
-        // work_id resolves from the structured input OR a JSON seed, matching
+        // why: work_id resolves from the structured input OR a JSON seed, matching
         // the retained add path: a gated preset whose Work is only named in the
         // seed must still freeze that Work into the row/descriptor.
         let work_id = input
@@ -1558,7 +1560,7 @@ impl ExecutionHandle {
             agent_bindings,
             parent_session_id: None,
             graph_name: None,
-            // Insertion never resolves an apply; admission freezes the apply it
+            // why: Insertion never resolves an apply; admission freezes the apply it
             // admits under on the run's own descriptor.
             applied: None,
             intake_mode: None,
@@ -1581,7 +1583,7 @@ fn run_inspect_url(run_id: &str) -> String {
     format!("/v1/daemon/orchestration/sessions/{run_id}")
 }
 
-/// Read a bounded page of a run's retained events.
+/// note: Read a bounded page of a run's retained events.
 ///
 /// The page comes from the SAME bounded ring the SSE transport replays from
 /// (through the run-event port), so the item/byte caps and the explicit-gap
@@ -1595,7 +1597,7 @@ pub fn run_event_page(
     port: &Arc<dyn RunEventPort>,
     request: CoreRunEventsRequest,
 ) -> CoreResult<CoreRunEventsResponse> {
-    // `after_sequence` is a validated decimal-string newtype and `limit` a
+    // why: `after_sequence` is a validated decimal-string newtype and `limit` a
     // `NonZeroU64`, so both are already shape-checked by the contract.
     let after = request
         .after_sequence
@@ -1611,7 +1613,7 @@ pub fn run_event_page(
         })
         .transpose()?;
     let limit = usize::try_from(request.limit.get()).unwrap_or(DEFAULT_RUN_EVENT_LIMIT);
-    // Unwrap the request's newtypes once, up front: the ring takes `&str` and
+    // why: Unwrap the request's newtypes once, up front: the ring takes `&str` and
     // the response needs the owned id, so binding it here avoids cloning.
     let run_id = String::from(request.run_id);
     let page = port
@@ -1622,7 +1624,7 @@ pub fn run_event_page(
             },
         })?;
 
-    // `kind` is a minLength-1 newtype. The ring only ever writes non-empty
+    // why: `kind` is a minLength-1 newtype. The ring only ever writes non-empty
     // event names, so a conversion failure is a ring bug worth surfacing rather
     // than papering over with a fabricated kind.
     let events =
@@ -1660,7 +1662,7 @@ pub fn run_event_page(
     })
 }
 
-/// One durable `creator_schedules` row as read by the public list/inspect.
+/// note: One durable `creator_schedules` row as read by the public list/inspect.
 ///
 /// `concurrency_kind` is read by inspect (the list selects it too, so a single
 /// row shape serves both reads).
@@ -1679,7 +1681,7 @@ struct ScheduleRow {
     concurrency_kind: String,
 }
 
-/// One durable root `orchestration_sessions` row as read by the public list and
+/// note: One durable root `orchestration_sessions` row as read by the public list and
 /// the session detail.
 #[derive(sqlx::FromRow)]
 struct SessionRow {
@@ -1688,7 +1690,7 @@ struct SessionRow {
     preset_id: String,
     status: String,
     current_task_id: Option<String>,
-    /// Raw durable v1 run state — the actionable failure record lives here.
+    /// note: Raw durable v1 run state — the actionable failure record lives here.
     run_state_json: Option<Vec<u8>>,
     /// The run's checkpointed `workspace.commit` revision, projected in SQL
     /// from `context_json` (contract §4). `None` unless the durable graph
@@ -1701,7 +1703,7 @@ struct SessionRow {
     workspace_commit_revision: Option<String>,
 }
 
-/// Project a stored schedule row into the LIST wire item.
+/// note: Project a stored schedule row into the LIST wire item.
 ///
 /// `execution` stays absent: neither the acceptance scenarios (S0-2/S0-5) nor
 /// any consumer reads the A2/A7 run projection yet, and the schema marks the
@@ -1723,7 +1725,7 @@ fn listed_schedule_wire(row: ScheduleRow) -> ListedScheduleWire {
     }
 }
 
-/// Project a stored schedule row into the INSPECT wire item. The generated
+/// note: Project a stored schedule row into the INSPECT wire item. The generated
 /// codegen inlines the shared summary schema per response module, so the two
 /// wire items are distinct types with the same shape.
 fn inspected_schedule_wire(row: ScheduleRow) -> InspectedScheduleWire {
@@ -1742,7 +1744,7 @@ fn inspected_schedule_wire(row: ScheduleRow) -> InspectedScheduleWire {
     }
 }
 
-/// Project a stored run row into the LIST wire item.
+/// note: Project a stored run row into the LIST wire item.
 fn listed_session_wire(row: SessionRow) -> ListedSessionWire {
     let failure_reason = failure_reason(&row);
     ListedSessionWire {
@@ -1756,7 +1758,7 @@ fn listed_session_wire(row: SessionRow) -> ListedSessionWire {
     }
 }
 
-/// Project a stored run row into the DETAIL wire item (same fields, distinct
+/// note: Project a stored run row into the DETAIL wire item (same fields, distinct
 /// generated type from `session_detail_response`).
 fn detail_session_wire(row: SessionRow) -> DetailSessionWire {
     let failure_reason = failure_reason(&row);
@@ -1771,7 +1773,7 @@ fn detail_session_wire(row: SessionRow) -> DetailSessionWire {
     }
 }
 
-/// Actionable failure reason from the durable v1 run state (e.g. an
+/// note: Actionable failure reason from the durable v1 run state (e.g. an
 /// unconfirmed cancel cleanup that left the run `interrupted`).
 fn failure_reason(row: &SessionRow) -> Option<String> {
     row.run_state_json
@@ -1783,7 +1785,7 @@ fn failure_reason(row: &SessionRow) -> Option<String> {
         .map(|failure| failure.message)
 }
 
-/// Refuse an explicit creator filter that is not the admitted Creator.
+/// note: Refuse an explicit creator filter that is not the admitted Creator.
 ///
 /// Query scope is the active Creator; a foreign filter is a refusal BEFORE any
 /// query runs, never a silently empty (and therefore misleading) page.
@@ -1799,13 +1801,13 @@ fn refuse_foreign_filter(filter: Option<&str>, creator_id: &str, resource: &str)
     }
 }
 
-/// Page size for a durable list read: the retained default, capped at the
+/// note: Page size for a durable list read: the retained default, capped at the
 /// retained maximum.
 fn list_limit(limit: Option<i64>) -> i64 {
     limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT)
 }
 
-/// Decode the opaque offset cursor (the retained `v1:<offset>` grammar).
+/// note: Decode the opaque offset cursor (the retained `v1:<offset>` grammar).
 ///
 /// # Errors
 /// `InvalidInput` for a cursor this owner did not mint.
@@ -1824,12 +1826,12 @@ fn decode_offset_cursor(cursor: Option<&str>) -> CoreResult<i64> {
         })
 }
 
-/// Encode an offset cursor (opaque to clients).
+/// note: Encode an offset cursor (opaque to clients).
 fn encode_offset_cursor(offset: i64) -> String {
     format!("v1:{offset}")
 }
 
-/// Order terms for the durable schedule list.
+/// note: Order terms for the durable schedule list.
 ///
 /// `schemas/daemon-api/schedule/list-schedules-query.schema.json`: allowed keys
 /// `created_at` (**default**), `updated_at`, `status`, `preset_id`, `label`,
@@ -1848,7 +1850,7 @@ fn schedule_order(sort: Option<&str>) -> CoreResult<String> {
     )
 }
 
-/// Order terms for the durable orchestration-session list.
+/// note: Order terms for the durable orchestration-session list.
 ///
 /// `schemas/daemon-api/orchestration/sessions/list-sessions-query.schema.json`:
 /// allowed keys `session_id` (**default**), `creator_id`, `preset_id`,
@@ -1868,7 +1870,7 @@ fn session_order(sort: Option<&str>) -> CoreResult<String> {
     )
 }
 
-/// Build the `ORDER BY` clause from the request's sort terms.
+/// note: Build the `ORDER BY` clause from the request's sort terms.
 ///
 /// `default_order` is the calling resource's OWN schema-declared default (the
 /// two list schemas declare different defaults), so no shared fallback can
@@ -1916,7 +1918,7 @@ fn order_by(
     Ok(clauses.join(", "))
 }
 
-/// Translate the generated PATCH body into the derivation edit op.
+/// note: Translate the generated PATCH body into the derivation edit op.
 ///
 /// `replace` is a KNOWN op the core still refuses (a user edit may not
 /// overwrite system-managed context): refused here as invalid input so the
@@ -1948,7 +1950,7 @@ fn parse_core_context_edit(request: &EditCoreContextRequest) -> CoreResult<EditO
     }
 }
 
-/// Borrow an op's required field, or refuse with the field's name.
+/// note: Borrow an op's required field, or refuse with the field's name.
 ///
 /// # Errors
 /// `InvalidInput` naming the missing field.
@@ -1959,7 +1961,7 @@ fn required_field<'a, T>(value: Option<&'a T>, op: &str, field: &str) -> CoreRes
     })
 }
 
-/// Map a core-context refusal onto the neutral taxonomy.
+/// note: Map a core-context refusal onto the neutral taxonomy.
 fn map_context_error(
     err: nexus_orchestration::schedule::derivation::CoreContextError,
 ) -> CoreError {
@@ -1977,7 +1979,7 @@ fn map_context_error(
                 reason,
             }
         }
-        // A lost pointer advance: the append and its version row were rolled
+        // why: A lost pointer advance: the append and its version row were rolled
         // back, so this is a state conflict (the caller re-reads and retries),
         // never a successful version.
         E::VersionRace(schedule_id, version) => CoreError::Coded {
@@ -1987,7 +1989,7 @@ fn map_context_error(
                  names version {version}"
             ),
         },
-        // More than one schedule names the run: the ownership the whole
+        // why: More than one schedule names the run: the ownership the whole
         // core-context contract rests on is ambiguous, so the request is a
         // state conflict rather than a silent pick of one schedule's context.
         E::AmbiguousOwnership(run_id, owners, schedules) => CoreError::Coded {
@@ -1997,7 +1999,7 @@ fn map_context_error(
                  ({schedules}); refusing to choose one"
             ),
         },
-        // A user edit that lost the race with the schedule's settlement: the
+        // why: A user edit that lost the race with the schedule's settlement: the
         // admission is checked inside the append transaction, so no version
         // row and no pointer advance survived it. Same code as the pre-check
         // above, which is UX-only — this is the authoritative refusal.
@@ -2016,7 +2018,7 @@ fn map_context_error(
     }
 }
 
-/// Build a durable pending row from the generated add request.
+/// note: Build a durable pending row from the generated add request.
 ///
 /// Every payload-bearing field crosses: `creator/preset/label/scheduled_at` and
 /// the dependency list verbatim, and the request's concurrency declaration
@@ -2058,7 +2060,7 @@ fn build_schedule(schedule_id: &str, request: &AddScheduleRequest) -> Schedule {
     }
 }
 
-/// Build a `preset_gates_failed` refusal from the failed-gate list.
+/// note: Build a `preset_gates_failed` refusal from the failed-gate list.
 fn gate_failure(preset_id: &str, work_id: &str, failed_gates: Vec<FailedGate>) -> CoreError {
     CoreError::Preset(PresetError::Rejected {
         code: "preset_gates_failed".to_string(),
@@ -2071,7 +2073,7 @@ fn gate_failure(preset_id: &str, work_id: &str, failed_gates: Vec<FailedGate>) -
     })
 }
 
-/// Render a gate failure into the retained human-readable message.
+/// note: Render a gate failure into the retained human-readable message.
 fn render_gate_failure(failure: &PresetGatesFailed) -> String {
     use std::fmt::Write as _;
 
@@ -2086,7 +2088,7 @@ fn render_gate_failure(failure: &PresetGatesFailed) -> String {
     msg
 }
 
-/// Validate a `force_gates` bypass request, returning the audited reason.
+/// note: Validate a `force_gates` bypass request, returning the audited reason.
 ///
 /// Pure and free of I/O on purpose: it runs BEFORE any fallible precondition,
 /// so the decision to audit is made without touching the store. A non-bypass
@@ -2125,7 +2127,7 @@ fn validate_bypass_reason(request: &AddScheduleRequest) -> CoreResult<Option<Str
     Ok(Some(raw.to_string()))
 }
 
-/// Strip ANSI escape sequences and control characters from a reason string.
+/// note: Strip ANSI escape sequences and control characters from a reason string.
 ///
 /// Mirrors the transport's sanitizer without pulling `regex` into this cohort:
 /// the `ESC [ params letter` grammar is matched by hand.
@@ -2139,7 +2141,7 @@ fn sanitize_reason(raw: &str) -> String {
                 while matches!(chars.peek(), Some(d) if d.is_ascii_digit() || *d == ';') {
                     chars.next();
                 }
-                chars.next(); // the terminating letter
+                chars.next(); // why: the terminating letter
             }
             continue;
         }
@@ -2151,12 +2153,12 @@ fn sanitize_reason(raw: &str) -> String {
     out
 }
 
-/// Fresh schedule id in the daemon's retained `SCH<timestamp>` shape.
+/// note: Fresh schedule id in the daemon's retained `SCH<timestamp>` shape.
 fn new_schedule_id() -> String {
     format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"))
 }
 
-/// `work_id` from a JSON seed, mirroring the transport's fallback.
+/// note: `work_id` from a JSON seed, mirroring the transport's fallback.
 fn work_id_from_seed(seed: Option<&str>) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(seed?)
         .ok()
@@ -2168,7 +2170,7 @@ fn work_id_from_seed(seed: Option<&str>) -> Option<String> {
         })
 }
 
-/// One Work-snapshot row for gate evaluation.
+/// note: One Work-snapshot row for gate evaluation.
 #[derive(sqlx::FromRow)]
 struct WorkSnapshotRow {
     work_profile: Option<String>,
@@ -2181,7 +2183,7 @@ struct WorkSnapshotRow {
     total_planned_chapters: Option<i64>,
 }
 
-/// `PreviousPreset` gate lookup over the Creator DB.
+/// note: `PreviousPreset` gate lookup over the Creator DB.
 struct DbPreviousPresetLookup {
     pool: Arc<sqlx::SqlitePool>,
 }
@@ -2220,7 +2222,7 @@ impl PreviousPresetLookup for DbPreviousPresetLookup {
     }
 }
 
-/// Map a supervisor refusal onto the neutral taxonomy.
+/// note: Map a supervisor refusal onto the neutral taxonomy.
 fn map_supervisor_error(
     err: nexus_orchestration::schedule::supervisor::SupervisorError,
 ) -> CoreError {
@@ -2234,7 +2236,7 @@ fn map_supervisor_error(
     }
 }
 
-/// Map a coordinator control refusal onto the neutral taxonomy (§3.4).
+/// note: Map a coordinator control refusal onto the neutral taxonomy (§3.4).
 ///
 /// The two control conflicts keep their retained lowercase wire codes and
 /// their durable detail (the current status / the exact wait token) so the
@@ -2276,7 +2278,7 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
             message: format!("schedule {schedule_id} is not eligible: {reason}"),
         },
         RunControlError::Closing => CoreError::Closing,
-        // Intake refusals keep their stable wire codes: a mistyped config key
+        // why: Intake refusals keep their stable wire codes: a mistyped config key
         // or a no-apply user bundle under the default mode is an
         // operator-fixable refusal, not an internal fault.
         RunControlError::InvalidIntakeConfig { reason } => CoreError::Coded {
@@ -2291,12 +2293,12 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
                  running it (the 'yaml-only' compatibility arm was removed at v1.244.0)"
             ),
         },
-        // The applied identity's own refusal, already carrying the coded
+        // why: The applied identity's own refusal, already carrying the coded
         // `(code, message)` pair that names the strategy and the apply.
         RunControlError::AppliedIdentityInvalid { code, message } => {
             CoreError::Coded { code, message }
         }
-        // Retryable capacity refusal (never a 500): no drive started and no
+        // why: Retryable capacity refusal (never a 500): no drive started and no
         // durable work was touched.
         RunControlError::RunEventCapacity(_) => CoreError::Busy,
         RunControlError::NoWorkspace(reason) => CoreError::ServiceUnavailable(reason),
@@ -2309,20 +2311,20 @@ fn map_run_control_error(err: RunControlError) -> CoreError {
     }
 }
 
-// ── Peer control (v1.190 P4-T3) ───────────────────────────────────────────
+// note: ── Peer control (v1.190 P4-T3) ───────────────────────────────────────────
 //
 // The lane itself is `nexus_connect::PeerControlLane`; these entry points stay
 // here because Rust cannot write an inherent impl for a foreign type, and they
 // keep `CoreError`/`CoreResult` (verification, closing, ownership) rather than
 // widening connect's error taxonomy.
 
-/// The operations [`ExecutionHandle::peer_control`] dispatches. An allowlist
+/// note: The operations [`ExecutionHandle::peer_control`] dispatches. An allowlist
 /// entry outside this set matches no arm, so it authorizes nothing and every
 /// path that inserts one refuses it instead of storing it.
 #[cfg(feature = "connect-host")]
 const PEER_CONTROL_OPERATIONS: [&str; 5] = ["status", "enable", "disable", "allow", "evict"];
 
-/// The operations a DISABLED lane still admits, by name: `status`, so a
+/// note: The operations a DISABLED lane still admits, by name: `status`, so a
 /// disabled lane can still report itself, and `enable`, so it can be
 /// re-enabled — a lane that refused these would be unrecoverable. The
 /// dispatcher admits them whether or not the start allowlisted them, because
@@ -2335,7 +2337,7 @@ const PEER_CONTROL_REACHABLE_WHEN_DISABLED: [&str; 2] = ["status", "enable"];
 
 #[cfg(feature = "connect-host")]
 impl ExecutionHandle {
-    /// Install (or disable) this execution owner's peer-control lane
+    /// note: Install (or disable) this execution owner's peer-control lane
     /// (P4-T3). `enabled` is both what the lane REPORTS to the Connect surface
     /// and the gate [`Self::peer_control`] consults beside the allowlist: a
     /// lane started disabled serves only the operations that can report or
@@ -2353,8 +2355,8 @@ impl ExecutionHandle {
     /// part of the check and refuses when either no longer matches.
     /// [`CoreError::InvalidInput`] is returned when `allowed_operations` names
     /// an operation no arm dispatches.
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async_trait_impl)] // why: async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // why: async is the await-symmetric public signature; the body is store-only today
     pub async fn start_peer_control(
         &self,
         principal: &crate::principal::Principal,
@@ -2367,7 +2369,7 @@ impl ExecutionHandle {
             .into_iter()
             .map(|item| item.to_string())
             .collect();
-        // A start is a grant surface too: a name no arm dispatches would sit
+        // why: A start is a grant surface too: a name no arm dispatches would sit
         // in the lane's allowlist and authorize nothing, so it is refused here
         // rather than stored. An empty allowlist stays legal (admits nothing).
         if let Some(unknown) = allowed
@@ -2379,13 +2381,13 @@ impl ExecutionHandle {
                 reason: format!("the start allowlists an operation nothing dispatches: {unknown}"),
             });
         }
-        // Every start installs a fresh lane: a restart naming a narrower (or
+        // why: Every start installs a fresh lane: a restart naming a narrower (or
         // empty) allowlist drops the earlier grants instead of unioning them.
         let lane = std::sync::Arc::new(nexus_connect::PeerControlLane::new(
             request.enabled,
             allowed,
         ));
-        // Install and snapshot under one guard: the returned state must
+        // why: Install and snapshot under one guard: the returned state must
         // describe the lane this start installed, not a later replacement.
         let mut slot = self
             .peer_control
@@ -2397,7 +2399,7 @@ impl ExecutionHandle {
         Ok(state)
     }
 
-    /// Drive one peer-control operation against this owner's lane (P4-T3).
+    /// note: Drive one peer-control operation against this owner's lane (P4-T3).
     /// `status` reports the lane state; `enable`/`disable` flip the lane's
     /// enablement; `allow` adds the operation its payload names
     /// (`payload.operation`, which must be a dispatched operation) to the
@@ -2419,8 +2421,8 @@ impl ExecutionHandle {
     /// allowlisted but the lane is disabled and the operation is outside the
     /// reachable set, and [`CoreError::NotFound`] when `evict`
     /// names a peer with no registered tools.
-    #[allow(clippy::unused_async_trait_impl)] // async matches the trait contract; the impl has no await today
-    #[allow(clippy::unused_async)] // async is the await-symmetric public signature; the body is store-only today
+    #[allow(clippy::unused_async_trait_impl)] // why: async matches the trait contract; the impl has no await today
+    #[allow(clippy::unused_async)] // why: async is the await-symmetric public signature; the body is store-only today
     pub async fn peer_control(
         &self,
         principal: &crate::principal::Principal,
@@ -2430,7 +2432,7 @@ impl ExecutionHandle {
         core.verify_principal(principal)?;
         #[cfg(feature = "test-hooks")]
         nexus_execution::test_hooks::peer_control_gate_wait().await;
-        // One guard spans resolve → gate → mutation → snapshot: a concurrent
+        // why: One guard spans resolve → gate → mutation → snapshot: a concurrent
         // `start_peer_control` must never swap the lane between the operation
         // reading it and applying its effect, or the grant lands on the
         // discarded lane and the returned state describes that lane.
@@ -2443,7 +2445,8 @@ impl ExecutionHandle {
             reason: "peer control has not been started".into(),
         })?;
         let operation: &str = &request.operation;
-        // Admission is decided here by BOTH halves of the lane, at one point: the allowlist names
+        // why: Admission is decided here by BOTH halves of the lane, at one point: the allowlist
+        // names
         // what this owner may ever be asked to do, and the enablement says whether the lane is
         // currently willing. Keeping them side by side is what stops them from drifting apart.
         //
@@ -2464,7 +2467,8 @@ impl ExecutionHandle {
                 resource: format!("peer_control:{operation}"),
             });
         }
-        // A disabled lane refuses everything else, in a refusal distinct from the allowlist one so
+        // why: A disabled lane refuses everything else, in a refusal distinct from the allowlist
+        // one so
         // an operator can tell "never granted" from "granted but the lane is off".
         if disabled && !recoverable {
             return Err(CoreError::ForbiddenReason {
@@ -2480,7 +2484,7 @@ impl ExecutionHandle {
             "enable" => lane.set_enabled(true),
             "disable" => lane.set_enabled(false),
             "allow" => {
-                // The grant target is the payload's named operation — the
+                // why: The grant target is the payload's named operation — the
                 // request's own `operation` is just this arm's selector, so
                 // inserting it would grant `allow` itself and nothing else.
                 let granted = request
@@ -2491,7 +2495,7 @@ impl ExecutionHandle {
                         field: "payload.operation".into(),
                         reason: "the allow operation must name the operation it grants".into(),
                     })?;
-                // A grant for a name no arm dispatches is not a permission:
+                // why: A grant for a name no arm dispatches is not a permission:
                 // it would sit in the allowlist forever and authorize nothing,
                 // so it is a validation refusal naming the field.
                 if !PEER_CONTROL_OPERATIONS.contains(&granted) {
@@ -2526,7 +2530,7 @@ impl ExecutionHandle {
     }
 }
 
-/// Distinct peers with registered tools in the process-level registry (the one
+/// note: Distinct peers with registered tools in the process-level registry (the one
 /// [`nexus_connect::peer_tools`] owns; this module never keeps a second).
 #[cfg(feature = "connect-host")]
 fn active_peer_ids() -> Vec<String> {

@@ -40,6 +40,8 @@
 //! ([`crate::works::selection_matches_pinned_root`]) classifies by the raw
 //! canonical path alone, so a selection that moved to an unrepresentable root
 //! is refused as stale rather than as an environment fault.
+// why: composing from the open-time pin is what keeps the Host probe boundary, the execution
+// authority and the commit authority on one root.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -67,7 +69,7 @@ use nexus_execution::state_provider::CoreWorkspaceStateProvider;
 use nexus_execution::workflow::{ProviderCatalogPort, RunEventPort};
 
 impl CoreService {
-    /// Start the ONE hosted execution owner for this core (v1.195 P0-T2).
+    /// note: Start the ONE hosted execution owner for this core (v1.195 P0-T2).
     ///
     /// The public factory of current-host contracts §3.1. It composes the
     /// complete hosted owner from state the core ALREADY owns and calls
@@ -120,7 +122,7 @@ impl CoreService {
         providers: Arc<dyn ProviderPort>,
         timeouts: TimeoutConfig,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
-        // Refuse a non-owner core BEFORE composing anything: the admission root
+        // why: Refuse a non-owner core BEFORE composing anything: the admission root
         // is pinned for engine-owner opens only, so a service-only profile must
         // keep the documented `NotEngineOwner` refusal rather than be answered
         // with a workspace refusal it would have reached later.
@@ -132,7 +134,7 @@ impl CoreService {
             .await
             .map_err(ExecutionOpenError::Workspace)?;
 
-        // ONE bounded ring registry plus the ONE sink map: the coordinator
+        // why: ONE bounded ring registry plus the ONE sink map: the coordinator
         // reserves/publishes/closes a run's ring through the port while the
         // prompt executor publishes that run's host events into this map.
         let registry = Arc::new(RunEventRegistry::new());
@@ -146,14 +148,14 @@ impl CoreService {
             timeouts,
             Some(Arc::clone(&sinks)),
         )) as Arc<dyn PromptExecutor>);
-        // Catalog presence is a candidate, never readiness: this port answers
+        // why: Catalog presence is a candidate, never readiness: this port answers
         // "known" only, and the caller owns the readiness probe.
         deps.provider_catalog = Some(Arc::new(HostProviderCatalogPort::new(Arc::clone(&host))));
         deps.run_events = Some(Arc::new(CoreRunEventPort::new(registry, sinks)));
-        // ONE shared cancellation map: the engine, the coordinator and every
+        // why: ONE shared cancellation map: the engine, the coordinator and every
         // cancel path that fires a run's token must resolve the same token.
         deps.session_cancels = Some(Arc::new(std::sync::RwLock::new(HashMap::new())));
-        // ONE WASM engine, its warmed embedded module cache and the
+        // why: ONE WASM engine, its warmed embedded module cache and the
         // engine-global invocation serializer (current-host contracts §5),
         // constructed WITH this owner and shared by every compute request —
         // never per request. `wasmtime`'s interrupt counter is engine-global,
@@ -203,13 +205,13 @@ impl CoreService {
                 );
             }
         }
-        // The owner's own supervisor, coordinator-backed starter and clock task.
+        // why: The owner's own supervisor, coordinator-backed starter and clock task.
         deps.hosted_scheduler = Some(HostedSchedulerConfig::from_env());
 
         self.start_execution(providers, deps).await
     }
 
-    /// Assemble the workspace port bundle for hosted production.
+    /// note: Assemble the workspace port bundle for hosted production.
     ///
     /// The bundle carries the complete workspace half of the hosted owner: a
     /// real `workspace.open`/`workspace.commit` executor, the
@@ -250,10 +252,10 @@ impl CoreService {
     ///   pin already refuses such a root at open, so in practice this factory
     ///   re-check never refuses on its own.)
     pub(crate) async fn hosted_workspace_deps(&self) -> CoreResult<RunnerDeps> {
-        // The selection comes from the core's own config snapshot, so a caller
+        // why: The selection comes from the core's own config snapshot, so a caller
         // cannot inject a different creator/workspace into the bundle.
         let principal = self.active_principal().await?;
-        // ONE root for this whole owner: the canonical creative root the
+        // why: ONE root for this whole owner: the canonical creative root the
         // engine-owner admission was PINNED to at open. Resolving the selected
         // metadata again here is what let a write landing between the Host
         // probe and this factory publish a Host bound to one root beside
@@ -264,7 +266,7 @@ impl CoreService {
             Ok(None) => return Err(CoreError::Uninitialized),
             Err(err) => return Err(err.clone()),
         };
-        // The pin stays the authority, but a selection that MOVED away from it
+        // why: The pin stays the authority, but a selection that MOVED away from it
         // makes this admission stale: refuse BEFORE any authority exists, so
         // neither the probed root's lane nor a stale root's ports are published
         // as one owner. The next open (a new epoch) admits the moved root.
@@ -288,7 +290,7 @@ impl CoreService {
             );
             return Err(CoreError::AuthRequired);
         }
-        // The ports below are `String`-typed, so the pinned root is carried
+        // why: The ports below are `String`-typed, so the pinned root is carried
         // through the SAME lossless check the pin itself passed. A lossy
         // conversion here is what let one owner assemble a Host bound to the
         // real root while its executor, state provider, commit authority and
@@ -298,7 +300,7 @@ impl CoreService {
         // is ever constructed from a substituted root.
         let canonical_root_str = crate::works::lossless_root_str(&canonical_root)?.to_owned();
 
-        // ONE manager per DB: `new_recoverable` takes the exclusive
+        // why: ONE manager per DB: `new_recoverable` takes the exclusive
         // workspace-authority lease, so a second authority over the same DB
         // refuses instead of becoming a rival writer.
         let manager = Arc::new(
@@ -313,7 +315,7 @@ impl CoreService {
             .await
             .map_err(map_recovery_error)?;
 
-        // The same `~/.nexus42` the tool context hands the hot path's port, so
+        // why: The same `~/.nexus42` the tool context hands the hot path's port, so
         // `commit_work_artifact` resolves the identical creator/workspace.
         let executor: Arc<dyn WorkspaceExecutor> = Arc::new(
             WorkspaceCommitExecutor::new(Arc::clone(&manager), canonical_root_str.clone())
@@ -329,7 +331,7 @@ impl CoreService {
             workspace_executor: Some(executor),
             workspace_state_provider: Some(state_provider),
             workspace_commit: Some(commit_authority),
-            // The pin itself, not a re-parsed string: the engine's `Filesystem`
+            // why: The pin itself, not a re-parsed string: the engine's `Filesystem`
             // gates then resolve against the exact bytes the native Host probes.
             workspace_root: Some(canonical_root),
             nexus_home: Some(self.inner.nexus_home.clone()),
@@ -338,7 +340,7 @@ impl CoreService {
     }
 }
 
-/// Adapts the execution layer's provider-catalog port onto the ONE Host.
+/// note: Adapts the execution layer's provider-catalog port onto the ONE Host.
 ///
 /// The catalog read is the same one admission always performed (explicit
 /// config → PATH scan → ACP registry); the port only stops the execution layer
@@ -368,7 +370,7 @@ impl ProviderCatalogPort for HostProviderCatalogPort {
     }
 }
 
-/// Adapts the bounded per-run registry to the coordinator's [`RunEventPort`].
+/// note: Adapts the bounded per-run registry to the coordinator's [`RunEventPort`].
 ///
 /// Every operation forwards to the existing registry, so item/byte/subscriber
 /// accounting, ring reuse, the shared sink map and terminal-closing semantics
@@ -380,7 +382,7 @@ impl ProviderCatalogPort for HostProviderCatalogPort {
 /// [`RunEventRegistry`] instead of re-implementing the forwarding.
 pub struct CoreRunEventPort {
     registry: Arc<RunEventRegistry>,
-    /// The SAME sink map the prompt executor was constructed with, so a
+    /// note: The SAME sink map the prompt executor was constructed with, so a
     /// reserved ring is visible to that executor's host events.
     sinks: RunEventSinkMap,
 }
@@ -420,7 +422,7 @@ impl RunEventPort for CoreRunEventPort {
         last_event_id: Option<&str>,
         inspect_url: String,
     ) -> Result<LiveSubscription, SubscribeError> {
-        // Forwards to the same bounded ring the page reader reads, so replay,
+        // why: Forwards to the same bounded ring the page reader reads, so replay,
         // epoch validation and the explicit-gap semantics cannot drift.
         self.registry
             .subscribe_live(run_id, last_event_id, inspect_url)
@@ -432,13 +434,13 @@ impl RunEventPort for CoreRunEventPort {
         after_sequence: Option<u64>,
         limit: usize,
     ) -> Result<RunPage, PageError> {
-        // Forwards to the same bounded ring the SSE surface reads, so caps and
+        // why: Forwards to the same bounded ring the SSE surface reads, so caps and
         // explicit-gap semantics cannot drift between the two readers.
         self.registry.read_page(run_id, after_sequence, limit)
     }
 }
 
-/// Map a refused workspace-authority construction onto the neutral taxonomy.
+/// note: Map a refused workspace-authority construction onto the neutral taxonomy.
 ///
 /// [`SessionError::AuthorityBusy`] is a WRITER conflict: this DB already has a
 /// workspace commit/recovery authority, so the refusal is retryable. Every
@@ -460,7 +462,7 @@ fn map_authority_error(err: SessionError) -> CoreError {
     }
 }
 
-/// Map a refused startup intent recovery onto the neutral taxonomy.
+/// note: Map a refused startup intent recovery onto the neutral taxonomy.
 ///
 /// A recovery conflict means an unsettled intent for some root could not be
 /// resolved (another writer owns it, or its stored metadata is corrupt), so the
@@ -501,7 +503,7 @@ mod tests {
     const SLUG: &str = "default";
     const PAYLOAD: &[u8] = b"hosted workspace payload\n";
 
-    /// A user home whose selected workspace registers a real creative root.
+    /// note: A user home whose selected workspace registers a real creative root.
     struct Fixture {
         tmp: tempfile::TempDir,
         creative_root: std::path::PathBuf,
@@ -513,7 +515,7 @@ mod tests {
         let nexus_home = user_home.join(".nexus42");
         std::fs::create_dir_all(&nexus_home).expect("nexus home");
         let creative_root = user_home.join("creative");
-        // The opened scope the bundle commits through.
+        // why: The opened scope the bundle commits through.
         std::fs::create_dir_all(creative_root.join("notes")).expect("creative root");
         std::fs::write(
             nexus_home.join("config.toml"),
@@ -522,7 +524,7 @@ mod tests {
             ),
         )
         .expect("config");
-        // The core resolves the creative root from the operational meta.json —
+        // why: The core resolves the creative root from the operational meta.json —
         // the same document the daemon/CLI workspace registration writes.
         std::fs::create_dir_all(nexus_home_layout::operational_workspace_dir(
             user_home, CREATOR, SLUG,
@@ -531,7 +533,7 @@ mod tests {
         register_selected_root(user_home, &serde_json::json!(creative_root));
 
         let db_path = nexus_home_layout::workspace_state_db_path(user_home, CREATOR, SLUG);
-        // Seed through a temporary admitted pool and RELEASE the writer guard
+        // why: Seed through a temporary admitted pool and RELEASE the writer guard
         // before the engine owner opens: the owner takes an OS lock, not a
         // stealable lease, so the seeder must be gone first.
         {
@@ -563,7 +565,7 @@ mod tests {
         .expect("engine-owner core open")
     }
 
-    /// Rewrite the selected workspace's registered `local_root`.
+    /// note: Rewrite the selected workspace's registered `local_root`.
     ///
     /// This is the supported operational write the CLI's `creator workspace
     /// create --creative-root` performs, not a private seed: the same
@@ -578,21 +580,21 @@ mod tests {
         .expect("write meta");
     }
 
-    /// The fixture with its selected `local_root` set BEFORE any core opens.
+    /// note: The fixture with its selected `local_root` set BEFORE any core opens.
     async fn fixture_registering(local_root: &serde_json::Value) -> Fixture {
         let fx = fixture().await;
         register_selected_root(fx.tmp.path(), local_root);
         fx
     }
 
-    /// The lease path the workspace commit/recovery authority takes.
+    /// note: The lease path the workspace commit/recovery authority takes.
     fn authority_lease_path(core: &CoreService) -> std::path::PathBuf {
         core.inner
             .db_path
             .with_extension("workspace_authority.lock")
     }
 
-    /// Is this error the FILESYSTEM's own refusal of a name whose bytes are not
+    /// note: Is this error the FILESYSTEM's own refusal of a name whose bytes are not
     /// a valid sequence for it — the ONE condition that makes a non-UTF-8
     /// fixture name impossible to create?
     ///
@@ -607,7 +609,7 @@ mod tests {
         error.raw_os_error() == Some(nix::errno::Errno::EILSEQ as i32)
     }
 
-    /// Only the filesystem's OWN refusal of the name bytes may be reported as a
+    /// note: Only the filesystem's OWN refusal of the name bytes may be reported as a
     /// skip: every unrelated setup fault must fail the fixture instead of
     /// passing a case that never ran.
     #[cfg(unix)]
@@ -652,7 +654,7 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(content)
     }
 
-    /// A one-change commit request in the generated wire shape.
+    /// note: A one-change commit request in the generated wire shape.
     fn commit_request(session_id: &str, path: &str) -> CoreWorkspaceCommitRequest {
         CoreWorkspaceCommitRequest {
             changes: vec![CoreWorkspaceCommitRequestChangesItem {
@@ -665,7 +667,7 @@ mod tests {
         }
     }
 
-    /// Interrupt a commit that runs through the PRODUCTION authority port.
+    /// note: Interrupt a commit that runs through the PRODUCTION authority port.
     ///
     /// `WorkspaceCommitAuthority::commit` runs on the RETAINED owner, which
     /// clears inherited crash points at spawn — so arming the seam before the
@@ -695,7 +697,7 @@ mod tests {
             .expect_err("the armed crash point must interrupt the apply")
     }
 
-    /// The workspace bundle must bind every port to the SELECTED root, refuse a
+    /// note: The workspace bundle must bind every port to the SELECTED root, refuse a
     /// foreign root and a second authority, and recover an interrupted commit
     /// before it publishes those ports.
     ///
@@ -710,7 +712,7 @@ mod tests {
             .expect("canonical selected root")
             .to_string_lossy()
             .into_owned();
-        // The interrupted session, observed after the reopen: it is what proves
+        // why: The interrupted session, observed after the reopen: it is what proves
         // the reopened bundle settled THAT intent rather than merely re-reading
         // the earlier one.
         let recovered_session: SessionId;
@@ -721,7 +723,7 @@ mod tests {
                 .await
                 .expect("workspace bundle");
 
-            // ── The bundle is bound to the selected root, not a caller path. ──
+            // note: ── The bundle is bound to the selected root, not a caller path. ──
             assert_eq!(
                 deps.workspace_root.as_deref(),
                 Some(std::path::Path::new(canonical_root.as_str())),
@@ -740,14 +742,14 @@ mod tests {
                 "the commit authority must commit through the selected root"
             );
 
-            // ── No duplicate writer: a second bundle over the same DB must
+            // note: ── No duplicate writer: a second bundle over the same DB must
             // refuse rather than open a rival commit/recovery authority. ──
             assert!(
                 matches!(core.hosted_workspace_deps().await, Err(CoreError::Busy)),
                 "a second workspace bundle must not become a duplicate writer"
             );
 
-            // ── One authorized write through the real executor port. ──
+            // note: ── One authorized write through the real executor port. ──
             let opened = executor
                 .open(WorkspaceOpenInput {
                     path: "notes".to_string(),
@@ -767,7 +769,7 @@ mod tests {
                 PAYLOAD
             );
 
-            // ── A session persisted against a DIFFERENT root is refused, and
+            // note: ── A session persisted against a DIFFERENT root is refused, and
             // nothing is written under either root. ──
             let other_root = fx.tmp.path().join("other-root");
             std::fs::create_dir_all(&other_root).expect("other root");
@@ -789,7 +791,7 @@ mod tests {
             assert!(!fx.creative_root.join("escape.txt").exists());
             assert!(!other_root.join("escape.txt").exists());
 
-            // ── An interrupted commit, produced through the PRODUCTION ports:
+            // note: ── An interrupted commit, produced through the PRODUCTION ports:
             // the session is opened by the bundle's executor and the commit is
             // interrupted inside the authority's retained owner. ──
             let opened = executor
@@ -813,11 +815,11 @@ mod tests {
                 PAYLOAD
             );
         }
-        // The block scope is what releases the bundle: every clone of the
+        // why: The block scope is what releases the bundle: every clone of the
         // authority's manager (executor, authority) must be gone before the
         // reopen can take the workspace-authority lease again.
 
-        // ── Reopen over the same DB: the next bundle settles the interrupted
+        // note: ── Reopen over the same DB: the next bundle settles the interrupted
         // intent before it publishes a port, and no committed content is lost. ──
         let reopened = core
             .hosted_workspace_deps()
@@ -853,7 +855,7 @@ mod tests {
         }
     }
 
-    /// The admission PIN — not a metadata re-read — is what a Host probe and
+    /// note: The admission PIN — not a metadata re-read — is what a Host probe and
     /// every workspace port of the owner bind.
     ///
     /// A supported `local_root` write landing after open moves the SELECTION,
@@ -874,7 +876,7 @@ mod tests {
         );
         let lease_path = authority_lease_path(&core);
 
-        // The moved root: a real directory the metadata now selects instead.
+        // why: The moved root: a real directory the metadata now selects instead.
         let moved = fx.tmp.path().join("moved-creative-root");
         std::fs::create_dir_all(&moved).expect("moved root");
         register_selected_root(fx.tmp.path(), &serde_json::json!(moved));
@@ -896,7 +898,7 @@ mod tests {
             "the refusal must land before any workspace authority is composed"
         );
 
-        // Nothing was retained by the refusal: with the selection back on the
+        // why: Nothing was retained by the refusal: with the selection back on the
         // pinned root, the same admission composes the bundle it always would.
         register_selected_root(fx.tmp.path(), &serde_json::json!(fx.creative_root));
         assert!(
@@ -905,7 +907,7 @@ mod tests {
         );
     }
 
-    /// A selected workspace that registers no USABLE canonical root — no
+    /// note: A selected workspace that registers no USABLE canonical root — no
     /// registration, a blank path, or a root that no longer exists — pins no
     /// root, so no owner is admissible: the factory answers `Uninitialized`
     /// rather than composing ports over a fabricated boundary.
@@ -932,7 +934,7 @@ mod tests {
         }
     }
 
-    /// The port seam refuses a canonical root with no lossless UTF-8 form, and
+    /// note: The port seam refuses a canonical root with no lossless UTF-8 form, and
     /// the substitution it prevents would address a real, DIFFERENT directory.
     ///
     /// Runs wherever the harness runs: the seam is driven with an in-memory
@@ -948,7 +950,7 @@ mod tests {
             .path()
             .join(std::ffi::OsStr::from_bytes(b"creative-\xff"));
         assert!(raw.to_str().is_none(), "the fixture must not be UTF-8");
-        // The name a lossy conversion would substitute exists as a real
+        // why: The name a lossy conversion would substitute exists as a real
         // directory — the wrong root those ports must never commit through.
         let substituted = raw.to_string_lossy().into_owned();
         std::fs::create_dir(&substituted).expect("replacement-character directory");
@@ -971,7 +973,7 @@ mod tests {
         );
     }
 
-    /// A selected root with no lossless UTF-8 form is refused AT THE PIN: no
+    /// note: A selected root with no lossless UTF-8 form is refused AT THE PIN: no
     /// probe boundary, no owner and no workspace authority — instead of one
     /// owner whose Host probes the real bytes while its executor, state
     /// provider, commit authority and recovery filter write through the
@@ -992,11 +994,11 @@ mod tests {
         let fx = fixture().await;
         let raw_root = fx.tmp.path().join("raw-root");
         std::fs::create_dir_all(&raw_root).expect("raw root parent");
-        // One replacement character per invalid byte: `creative-\xff\xfe`
+        // why: One replacement character per invalid byte: `creative-\xff\xfe`
         // renders lossily as `creative-\u{FFFD}\u{FFFD}`.
         let target = raw_root.join(std::ffi::OsString::from_vec(b"creative-\xff\xfe".to_vec()));
         if let Err(error) = std::fs::create_dir(&target) {
-            // ONLY a filesystem that refuses the fixture's name BYTES may skip:
+            // why: ONLY a filesystem that refuses the fixture's name BYTES may skip:
             // any other failure here means the fixture never ran, which is a
             // failure of this test, not an unsupported-filesystem pass.
             assert!(
@@ -1012,7 +1014,7 @@ mod tests {
         }
         let sentinel = raw_root.join("creative-\u{FFFD}\u{FFFD}");
         std::fs::create_dir(&sentinel).expect("the replacement-character directory");
-        // The registration itself is representable: the symlink's NAME is
+        // why: The registration itself is representable: the symlink's NAME is
         // UTF-8, only its resolved target is not.
         let link = raw_root.join("creative-link");
         std::os::unix::fs::symlink(&target, &link).expect("symlink to the non-UTF-8 root");
@@ -1036,7 +1038,7 @@ mod tests {
                 deps.workspace_root
             ),
         }
-        // No pin means no probe boundary: the native boot binds its Host to the
+        // why: No pin means no probe boundary: the native boot binds its Host to the
         // PINNED root only, so a root the execution side cannot own is never
         // probed and no owner is ever admitted over it.
         assert!(
@@ -1058,7 +1060,7 @@ mod tests {
             );
         }
 
-        // Control over the same helper flow: a representable root still pins
+        // why: Control over the same helper flow: a representable root still pins
         // and composes, so the refusal above is about the representation and
         // not about the fixture shape.
         let control = fixture().await;
@@ -1073,7 +1075,7 @@ mod tests {
         assert_eq!(deps.workspace_root.as_deref(), Some(expected.as_path()));
     }
 
-    /// A selection that MOVED to a root the `String`-typed ports could never
+    /// note: A selection that MOVED to a root the `String`-typed ports could never
     /// carry is still a moved selection: the drift check classifies by the raw
     /// canonical path, so the factory keeps the stale-admission refusal class
     /// instead of reporting the environment fault the representability gate
@@ -1121,10 +1123,10 @@ mod tests {
             );
             return;
         }
-        // The directory a lossy conversion would have substituted instead.
+        // why: The directory a lossy conversion would have substituted instead.
         let sentinel = raw_root.join("creative-\u{FFFD}\u{FFFD}");
         std::fs::create_dir(&sentinel).expect("the replacement-character directory");
-        // The registration itself is representable: the symlink's NAME is UTF-8.
+        // why: The registration itself is representable: the symlink's NAME is UTF-8.
         let link = raw_root.join("creative-link");
         std::os::unix::fs::symlink(&target, &link).expect("symlink to the non-UTF-8 root");
         let moved = std::fs::canonicalize(&link).expect("the symlink resolves");
@@ -1166,7 +1168,7 @@ mod tests {
             );
         }
 
-        // Nothing was retained by the refusal: the pinned selection composes the
+        // why: Nothing was retained by the refusal: the pinned selection composes the
         // bundle it always would, so no manager or port survived it.
         register_selected_root(fx.tmp.path(), &serde_json::json!(fx.creative_root));
         assert!(
@@ -1175,7 +1177,7 @@ mod tests {
         );
     }
 
-    /// A registration that cannot be read is NOT a moved selection: the drift
+    /// note: A registration that cannot be read is NOT a moved selection: the drift
     /// check reports the fault verbatim instead of answering `AuthRequired`,
     /// which would tell a caller to re-open (a new epoch) for a root the
     /// document never named.
@@ -1226,7 +1228,7 @@ mod tests {
         );
     }
 
-    /// Deterministic no-model provider port: the owner/close contract is what
+    /// note: Deterministic no-model provider port: the owner/close contract is what
     /// these cases exercise, never a provider effect.
     struct RejectingProviderPort;
 
@@ -1259,7 +1261,7 @@ mod tests {
         }
     }
 
-    /// A CONFIRMED close releases the workspace commit/recovery authority the
+    /// note: A CONFIRMED close releases the workspace commit/recovery authority the
     /// owner composed, so the next owner over the same home can be established
     /// in the SAME process — with a real (advanced) engine epoch, i.e. as a new
     /// admission rather than the settled generation's — even while the closed
@@ -1277,7 +1279,7 @@ mod tests {
     async fn confirmed_close_releases_workspace_authority_to_the_next_same_process_owner() {
         let fx = fixture().await;
 
-        // ── Owner A, in the production shape: the hosted scheduler clock is
+        // note: ── Owner A, in the production shape: the hosted scheduler clock is
         // installed, so the retained supervisor/starter/registry chain exists. ──
         let core_a = open_core(&fx).await;
         let mut deps = core_a.hosted_workspace_deps().await.expect("bundle a");
@@ -1298,7 +1300,7 @@ mod tests {
             "a live hosted owner still owns its scheduler clock task"
         );
 
-        // ── A live duplicate is refused: the composed authority is held. ──
+        // note: ── A live duplicate is refused: the composed authority is held. ──
         assert!(
             matches!(
                 core_a.hosted_workspace_deps().await.map(|_| ()),
@@ -1319,12 +1321,12 @@ mod tests {
             "the confirmed close joins the owned scheduler clock task"
         );
 
-        // `core_a`, `owner_a` and the manager clone are all still referenced
+        // why: `core_a`, `owner_a` and the manager clone are all still referenced
         // here on purpose: releasing the authority must not depend on any of
         // them being dropped.
         assert!(Arc::strong_count(&manager) > 1);
 
-        // ── Owner B over the SAME home, in the SAME process. ──
+        // note: ── Owner B over the SAME home, in the SAME process. ──
         let core_b = open_core(&fx).await;
         let deps_b = core_b
             .hosted_workspace_deps()
@@ -1341,7 +1343,7 @@ mod tests {
             owner_b.engine_epoch()
         );
 
-        // ── And the new owner fences the home again. ──
+        // note: ── And the new owner fences the home again. ──
         assert!(
             matches!(
                 core_b.hosted_workspace_deps().await.map(|_| ()),
@@ -1354,7 +1356,7 @@ mod tests {
         core_b.close().await.expect("close core b");
     }
 
-    /// A settled hosted owner releases its whole composed generation once the
+    /// note: A settled hosted owner releases its whole composed generation once the
     /// owner and its service are dropped.
     ///
     /// The hosted composition installs a scheduler whose starter admitted back
@@ -1382,7 +1384,7 @@ mod tests {
         {
             let core = open_core(&fx).await;
             let mut deps = core.hosted_workspace_deps().await.expect("bundle");
-            // The manager is what the cycle ultimately retained: the engine's
+            // why: The manager is what the cycle ultimately retained: the engine's
             // state provider, the registry's workspace executor and the
             // handle's commit authority each clone this one `Arc`.
             let manager = Arc::clone(
@@ -1406,7 +1408,7 @@ mod tests {
                 .schedule_starter_clone()
                 .expect("the supervisor is coordinator-backed");
 
-            // HELD LIVE: the retained composition is exactly what a live owner
+            // why: HELD LIVE: the retained composition is exactly what a live owner
             // must still hold — the scheduler's admission upgrades back to this
             // same coordinator, so an unknown row is refused by ITS admission
             // and not by the missing-owner branch.
@@ -1435,7 +1437,7 @@ mod tests {
             );
             drop(owner);
 
-            // A clock tick that outlives its owner (the handle was dropped)
+            // why: A clock tick that outlives its owner (the handle was dropped)
             // must FAIL CLOSED: the row stays pending rather than being
             // admitted through a coordinator nobody owns.
             let released_refusal = starter
@@ -1450,12 +1452,12 @@ mod tests {
                  coordinator retained: {})",
                 coordinator_probe.upgrade().is_some()
             );
-            // This test's own handles to the supervisor chain are dropped, so
+            // why: This test's own handles to the supervisor chain are dropped, so
             // only the owner's composition can still retain the probes.
             drop(starter);
             drop(supervisor);
         }
-        // The owner, its service and this test's own manager clone are gone.
+        // why: The owner, its service and this test's own manager clone are gone.
         let coordinator_retained = coordinator_probe.upgrade().is_some();
         let manager_retained = manager_probe.upgrade().is_some();
         assert!(
@@ -1466,7 +1468,7 @@ mod tests {
         );
     }
 
-    /// A held workspace authority and an unusable lease path must not be
+    /// note: A held workspace authority and an unusable lease path must not be
     /// reported alike: the first is a retryable writer conflict, the second is
     /// an environment fault.
     #[tokio::test]
@@ -1474,7 +1476,7 @@ mod tests {
         let fx = fixture().await;
         let core = open_core(&fx).await;
 
-        // ── Environment fault: the lease file cannot even be opened (a
+        // note: ── Environment fault: the lease file cannot even be opened (a
         // directory occupies its path), so no writer holds anything and the
         // refusal must not claim one does. ──
         let lease_path = core
@@ -1490,7 +1492,7 @@ mod tests {
             other => panic!("an unusable lease path must be an environment fault, got: {other:?}"),
         }
 
-        // ── With a usable lease path the first bundle succeeds, a genuine
+        // note: ── With a usable lease path the first bundle succeeds, a genuine
         // second authority is still a conflict, and the lease is released with
         // the bundle. ──
         std::fs::remove_dir(&lease_path).expect("clear the obstruction");
@@ -1509,7 +1511,7 @@ mod tests {
         );
     }
 
-    /// Recovery through the bundle is scoped to the SELECTED root: another
+    /// note: Recovery through the bundle is scoped to the SELECTED root: another
     /// root's unsettled intent keeps its persisted state and its files.
     #[tokio::test]
     #[serial]
@@ -1536,7 +1538,7 @@ mod tests {
             let executor = deps.workspace_executor.clone().expect("workspace executor");
             let authority = deps.workspace_commit.clone().expect("commit authority");
 
-            // The SELECTED root's interrupted commit, through the real ports.
+            // why: The SELECTED root's interrupted commit, through the real ports.
             let opened = executor
                 .open(WorkspaceOpenInput {
                     path: "notes".to_string(),
@@ -1551,7 +1553,7 @@ mod tests {
                 "the armed crash point must interrupt the selected root's apply: {crashed:?}"
             );
 
-            // A DIFFERENT root's interrupted commit. The bundle refuses foreign
+            // why: A DIFFERENT root's interrupted commit. The bundle refuses foreign
             // roots by design, so this one is left through the manager's own
             // durable commit path — what an earlier process death would leave.
             // That path is a RETAINED owner too (it clears an inherited crash
@@ -1600,7 +1602,7 @@ mod tests {
             );
         }
 
-        // ── Reopen: the selected root is recovered, the foreign root is not. ──
+        // note: ── Reopen: the selected root is recovered, the foreign root is not. ──
         let reopened = core.hosted_workspace_deps().await.expect("reopened bundle");
         let state = reopened
             .workspace_state_provider

@@ -5,6 +5,8 @@
 //! shared [`nexus_execution::session::WorkspaceSessionManager`] the durable commit path
 //! writes through, so a preset's `workspace.commit` observes real durable
 //! workspace state.
+// why: binding both surfaces to the same shared session manager is what makes a preset's
+// `workspace.commit` observe real durable state.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -26,22 +28,22 @@ use crate::error::CoreResult;
 use crate::service::CoreService;
 use nexus_execution::session::{SessionError, SessionId, WorkspaceSessionManager};
 
-/// Production workspace executor bound to one canonical workspace root.
+/// note: Production workspace executor bound to one canonical workspace root.
 pub struct WorkspaceCommitExecutor {
     session_manager: Arc<WorkspaceSessionManager>,
     canonical_workspace_root: String,
-    /// What [`WorkspaceExecutor::commit_work_artifact`] commits through.
+    /// note: What [`WorkspaceExecutor::commit_work_artifact`] commits through.
     work_artifact: WorkArtifactBinding,
 }
 
-/// The Work artifact port one executor commits through.
+/// note: The Work artifact port one executor commits through.
 enum WorkArtifactBinding {
-    /// No production home attached: the commit refuses. Tests build this.
+    /// note: No production home attached: the commit refuses. Tests build this.
     Unbound,
-    /// Production filesystem port; the home resolves the active
+    /// note: Production filesystem port; the home resolves the active
     /// creator/workspace the port addresses.
     Filesystem(PathBuf),
-    /// Simulate: record the intended writes and touch nothing.
+    /// note: Simulate: record the intended writes and touch nothing.
     Recording(Arc<RecordingWorkArtifactPort>),
 }
 
@@ -58,7 +60,7 @@ impl WorkspaceCommitExecutor {
         }
     }
 
-    /// The same executor, recording Work artifact writes instead of landing
+    /// note: The same executor, recording Work artifact writes instead of landing
     /// them.
     ///
     /// A dry run through a scaffold must leave an existing `Works/` tree — real
@@ -78,7 +80,7 @@ impl WorkspaceCommitExecutor {
         }
     }
 
-    /// Attach the home whose creator/workspace config the Work artifact port
+    /// note: Attach the home whose creator/workspace config the Work artifact port
     /// resolves — the same value the hot path hands its port.
     ///
     /// A simulated executor keeps recording: attaching a home to it would
@@ -91,7 +93,7 @@ impl WorkspaceCommitExecutor {
         self
     }
 
-    /// The Work writes this executor recorded, or `None` for a production one.
+    /// note: The Work writes this executor recorded, or `None` for a production one.
     ///
     /// `None` is not an empty log: a production executor commits real bytes and
     /// records nothing.
@@ -105,7 +107,7 @@ impl WorkspaceCommitExecutor {
 }
 
 impl WorkspaceCommitExecutor {
-    /// Commit one Work artifact write through the selected port.
+    /// note: Commit one Work artifact write through the selected port.
     async fn commit_into_selected_port(
         &self,
         write: WorkArtifactWrite<'_>,
@@ -129,7 +131,7 @@ impl WorkspaceCommitExecutor {
 }
 
 impl CoreService {
-    /// The Work artifact executor for THIS core's own workspace.
+    /// note: The Work artifact executor for THIS core's own workspace.
     ///
     /// A direct-writer open (the CLI) has no execution owner, so the hosted
     /// bundle's executor is not reachable from it. This accessor returns the
@@ -190,7 +192,7 @@ fn map_session_error(err: SessionError) -> CapabilityError {
         SessionError::ActiveWorkspaceMismatch { .. } => {
             CapabilityError::InputInvalid("session workspace root mismatch".into())
         }
-        // A held workspace authority is a conflict, not a capability fault; it
+        // why: A held workspace authority is a conflict, not a capability fault; it
         // cannot arise from an executor call (the bundle takes the lease before
         // the executor exists), so this arm is only here for exhaustiveness.
         SessionError::AuthorityBusy => {
@@ -202,7 +204,7 @@ fn map_session_error(err: SessionError) -> CapabilityError {
     }
 }
 
-/// Keep the port's refusal class on the capability surface.
+/// note: Keep the port's refusal class on the capability surface.
 fn map_port_error(err: NexusApiError) -> CapabilityError {
     match err {
         NexusApiError::Forbidden { resource } => CapabilityError::Forbidden(resource),
@@ -285,14 +287,14 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        // The refusal precedes the root checks, as it did when the only
+        // why: The refusal precedes the root checks, as it did when the only
         // selection was a home.
         if matches!(self.work_artifact, WorkArtifactBinding::Unbound) {
             return Err(CapabilityError::InputInvalid(
                 "work artifact commit not wired".into(),
             ));
         }
-        // A builtin's default `works_root` is the workspace-relative `Works`,
+        // why: A builtin's default `works_root` is the workspace-relative `Works`,
         // so its owning root arrives empty. Resolve any relative/empty input
         // against the ONE canonical root this executor was built for, then
         // require the result to BE that root: a caller-supplied directory
@@ -322,7 +324,7 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.workspace_root
             )));
         }
-        // `rel_child` addresses a path BELOW `Works/<work_ref>/`: an absolute
+        // why: `rel_child` addresses a path BELOW `Works/<work_ref>/`: an absolute
         // path replaces the base entirely, and a `..` walks out of the Work
         // subtree. The port re-checks the same shape for every caller; this
         // copy refuses on the capability surface before the root canonicalize
@@ -339,7 +341,7 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.rel_child
             )));
         }
-        // One selection at construction covers this commit: a simulated
+        // why: One selection at construction covers this commit: a simulated
         // executor records the write, a production one commits it over the
         // shared pool. No second writer and no new public surface.
         self.commit_into_selected_port(WorkArtifactWrite {
@@ -364,7 +366,7 @@ mod tests {
     const WORK_ID: &str = "wrk_seam";
     const WORK_REF: &str = "demo";
 
-    /// The shape a scaffold builtin holds: the orchestration trait handle,
+    /// note: The shape a scaffold builtin holds: the orchestration trait handle,
     /// received at construction, never a `nexus_core` type.
     struct BuiltinLikeCaller {
         executor: Arc<dyn WorkspaceExecutor>,
@@ -519,7 +521,7 @@ mod tests {
         let unrelated = tempfile::tempdir().expect("unrelated directory");
         let (_pool, executor) = seam(home.path(), workspace.path()).await;
 
-        // A sibling Work's tree: with `Works/<work_ref>` absent the port's
+        // why: A sibling Work's tree: with `Works/<work_ref>` absent the port's
         // boundary probe would otherwise stop at the `Works` first-write
         // ancestor and approve this target.
         let err = executor
@@ -540,7 +542,7 @@ mod tests {
             "no directory may be created for a refused child"
         );
 
-        // An absolute child replaces the base path entirely.
+        // why: An absolute child replaces the base path entirely.
         let err = executor
             .commit_work_artifact(WorkArtifactCommitInput {
                 workspace_root: workspace.path().to_string_lossy().into_owned(),
@@ -564,7 +566,7 @@ mod tests {
         );
     }
 
-    /// The production shape: a home carrying the CLI selection, an engine pool
+    /// note: The production shape: a home carrying the CLI selection, an engine pool
     /// with one works row, and a real executor bound to `workspace`.
     async fn seam(
         home: &std::path::Path,

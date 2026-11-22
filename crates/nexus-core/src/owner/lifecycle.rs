@@ -10,6 +10,8 @@
 //! the SPA. A domain-only [`CoreService`] open starts none of these tasks —
 //! execution requires an explicit `start_execution` under
 //! [`CoreAccess::EngineOwner`].
+// why: one engine per workspace DB, because a second owner in the same process would drive the same
+// tasks twice.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,7 +37,7 @@ use nexus_execution::workflow::{
     CoordinatorScheduleRunStarter, ProviderCatalogPort, RunEventPort, WorkflowRunCoordinator,
 };
 
-/// Why an execution handle could not be established.
+/// note: Why an execution handle could not be established.
 ///
 /// `PartialEq`/`Eq` are deliberately NOT derived (v1.195 P0-T2): the hosted
 /// factory's [`ExecutionOpenError::Workspace`] carries the neutral
@@ -43,11 +45,11 @@ use nexus_execution::workflow::{
 /// compared handles' open errors.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ExecutionOpenError {
-    /// The service was not opened as [`CoreAccess::EngineOwner`]. Continuing
+    /// note: The service was not opened as [`CoreAccess::EngineOwner`]. Continuing
     /// would create a second effect owner beside the live one.
     #[error("execution requires an engine-owner core (opened as {0:?})")]
     NotEngineOwner(CoreAccess),
-    /// An execution owner already exists for this workspace DB.
+    /// note: An execution owner already exists for this workspace DB.
     ///
     /// The handle is single-owner per workspace DB, process-wide: a duplicate
     /// start must refuse (or return the established owner) and never construct
@@ -55,10 +57,10 @@ pub enum ExecutionOpenError {
     /// opened over the same file.
     #[error("an execution owner is already established for this workspace")]
     AlreadyOwned,
-    /// The service is closing.
+    /// note: The service is closing.
     #[error("core service is closing")]
     Closing,
-    /// The hosted workspace composition the owner must be built from refused.
+    /// note: The hosted workspace composition the owner must be built from refused.
     ///
     /// Only [`CoreService::start_hosted_execution`] produces this: the selected
     /// creator's canonical creative root is missing/uninitialized, this DB
@@ -70,26 +72,26 @@ pub enum ExecutionOpenError {
     Workspace(crate::CoreError),
 }
 
-/// Optional collaborators the daemon composes onto the execution handle.
+/// note: Optional collaborators the daemon composes onto the execution handle.
 ///
 /// Every field is a port or an already-constructed collaborator: the core
 /// never reaches into a transport, a host manager or a global.
 #[derive(Default)]
 pub struct RunnerDeps {
-    /// Prompt executor for `acp_prompt`-style capability nodes.
+    /// note: Prompt executor for `acp_prompt`-style capability nodes.
     pub prompt_executor: Option<Arc<dyn PromptExecutor>>,
-    /// Daemon-side `nexus.*` tool dispatch for schedule ticks.
+    /// note: Daemon-side `nexus.*` tool dispatch for schedule ticks.
     pub daemon_tool_dispatch: Option<Arc<dyn DaemonToolDispatch>>,
-    /// Production workspace executor for `workspace.open`/`workspace.commit`.
+    /// note: Production workspace executor for `workspace.open`/`workspace.commit`.
     pub workspace_executor: Option<Arc<dyn WorkspaceExecutor>>,
-    /// The transport's live capability registry holder.
+    /// note: The transport's live capability registry holder.
     ///
     /// The daemon owns the WASM singleton, the user-capability scan and the
     /// hot-reload watcher; the engine must read the SAME holder so a registry
     /// swap is visible to a running graph. When absent (core-only callers,
     /// tests) a bare builtin registry is constructed.
     pub capability_holder: Option<CapabilityRegistryHolder>,
-    /// The transport's per-run cancellation map.
+    /// note: The transport's per-run cancellation map.
     ///
     /// The engine, the coordinator and every transport caller that fires a
     /// run's token must share ONE map. The daemon already publishes this map
@@ -103,18 +105,18 @@ pub struct RunnerDeps {
             >,
         >,
     >,
-    /// Resolver for `_context.workspace.*` preset conditions, so conditional
+    /// note: Resolver for `_context.workspace.*` preset conditions, so conditional
     /// edges observe the same durable workspace authority the commit
     /// executor writes through.
     pub workspace_state_provider: Option<Arc<dyn WorkspaceStateProvider>>,
-    /// Provider catalog port used to validate agent bindings before enqueue.
+    /// note: Provider catalog port used to validate agent bindings before enqueue.
     pub provider_catalog: Option<Arc<dyn ProviderCatalogPort>>,
-    /// Sanctioned default binding provider for explicit legacy starts (C-3),
+    /// note: Sanctioned default binding provider for explicit legacy starts (C-3),
     /// resolved by the transport from its own enabling config.
     pub binding_provider: Option<String>,
-    /// Per-run live-ring registry for the run SSE surface.
+    /// note: Per-run live-ring registry for the run SSE surface.
     pub run_events: Option<Arc<dyn RunEventPort>>,
-    /// Process-level facts the tool health surface reports (P3-T3).
+    /// note: Process-level facts the tool health surface reports (P3-T3).
     ///
     /// Genuinely process state (runtime mode, HSM state, start time, uptime,
     /// initialization) that the domain cannot derive. A composer that has no
@@ -122,29 +124,29 @@ pub struct RunnerDeps {
     /// honestly rather than a fabricated running daemon.
     #[cfg(feature = "execution")]
     pub runtime_facts: Option<crate::owner::capabilities::ToolRuntimeFacts>,
-    /// The compiled WASM module cache (P3-T3, compute only).
+    /// note: The compiled WASM module cache (P3-T3, compute only).
     #[cfg(feature = "compute")]
     pub compute_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
-    /// The WASM engine (P3-T3, compute only).
+    /// note: The WASM engine (P3-T3, compute only).
     #[cfg(feature = "compute")]
     pub compute_engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
-    /// The engine-global invocation serializer (P3-T3, compute only).
+    /// note: The engine-global invocation serializer (P3-T3, compute only).
     #[cfg(feature = "compute")]
     pub compute_serializer: Option<Arc<tokio::sync::Semaphore>>,
-    /// The durable workspace commit authority (P3-T2).
+    /// note: The durable workspace commit authority (P3-T2).
     ///
     /// Supplied by the transport (or a test) with the shared session manager
     /// bound to its active canonical root. When absent the handle's
     /// `commit_workspace` reports `NotFound` rather than committing through an
     /// unbound root.
     pub workspace_commit: Option<crate::owner::workspace::WorkspaceCommitAuthority>,
-    /// Frozen workspace root written into every v1 run descriptor.
+    /// note: Frozen workspace root written into every v1 run descriptor.
     pub workspace_root: Option<std::path::PathBuf>,
-    /// Nexus home used to resolve directory presets for source identity.
+    /// note: Nexus home used to resolve directory presets for source identity.
     pub nexus_home: Option<std::path::PathBuf>,
-    /// Cancels the bounded recovery re-drive when the transport shuts down.
+    /// note: Cancels the bounded recovery re-drive when the transport shuts down.
     pub shutdown_notify: Option<Arc<tokio::sync::Notify>>,
-    /// Cadence for the ONE retained supervisor wake/clock task (v1.195 P0-T2).
+    /// note: Cadence for the ONE retained supervisor wake/clock task (v1.195 P0-T2).
     ///
     /// `Some` is what makes this a HOSTED owner: `build_execution` constructs
     /// the production [`nexus_orchestration::schedule::supervisor::ScheduleSupervisor`]
@@ -155,7 +157,7 @@ pub struct RunnerDeps {
     /// attach their own supervisor) installs neither, so a core-only start
     /// owns exactly the drives it was given.
     pub hosted_scheduler: Option<HostedSchedulerConfig>,
-    /// Optional barrier invoked after a subscription's durable ROOT ownership
+    /// note: Optional barrier invoked after a subscription's durable ROOT ownership
     /// check and BEFORE its ring attachment and token mint (P1-T1).
     ///
     /// Production supplies `None`. It exists so a test can hold the EXACT
@@ -166,7 +168,7 @@ pub struct RunnerDeps {
     /// diagnostic seam, not a collaborator: it observes no state and its only
     /// power is to delay its own caller.
     pub subscription_observer: Option<Arc<dyn ExecutionSubscriptionObserver>>,
-    /// Optional barrier invoked once the owner is fully built but BEFORE
+    /// note: Optional barrier invoked once the owner is fully built but BEFORE
     /// [`CoreService::start_execution`] publishes it into the per-service slot.
     ///
     /// Production supplies `None`. It exists so a test can hold the exact
@@ -179,7 +181,7 @@ pub struct RunnerDeps {
     pub build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
 }
 
-/// Observable point across a subscription's durable-owner check and its ring
+/// note: Observable point across a subscription's durable-owner check and its ring
 /// attachment.
 ///
 /// A single await where the caller may hold that window open (see
@@ -187,12 +189,12 @@ pub struct RunnerDeps {
 /// power is to delay its own caller.
 #[async_trait::async_trait]
 pub trait ExecutionSubscriptionObserver: Send + Sync {
-    /// Called once per subscription: after the run's durable ROOT ownership was
+    /// note: Called once per subscription: after the run's durable ROOT ownership was
     /// resolved, before the ring is attached and the token minted.
     async fn owner_resolved(&self);
 }
 
-/// Observable point in [`CoreService::start_execution`]'s build phase.
+/// note: Observable point in [`CoreService::start_execution`]'s build phase.
 ///
 /// A single await where the caller may hold the build open (see
 /// [`RunnerDeps::build_observer`]). It is a diagnostic seam, not a
@@ -200,64 +202,64 @@ pub trait ExecutionSubscriptionObserver: Send + Sync {
 /// caller's own build.
 #[async_trait::async_trait]
 pub trait ExecutionBuildObserver: Send + Sync {
-    /// Called once, after the build settles and before the install.
+    /// note: Called once, after the build settles and before the install.
     async fn built(&self);
 }
 
-/// The single owner of the execution task set and engine epoch.
+/// note: The single owner of the execution task set and engine epoch.
 ///
 /// Dropping the handle does not silently stop work — call
 /// [`ExecutionHandle::close`] so the owned drives are aborted and the engine
 /// is released in the documented order.
 pub struct ExecutionHandle {
-    /// The concrete engine. Retained so the transport can still drive the
+    /// note: The concrete engine. Retained so the transport can still drive the
     /// inherent (non-trait) surface the outer-graph builder and system-preset
     /// startup use; the trait view is [`Self::engine`].
     engine: Arc<GraphFlowEngine>,
     coordinator: Arc<WorkflowRunCoordinator>,
-    /// The live capability registry the engine reads through. The transport
+    /// note: The live capability registry the engine reads through. The transport
     /// keeps its own handle to the same holder (hot-reload swaps are visible
     /// to both), so the daemon can publish it to its runtime bundle.
     capability_holder: CapabilityRegistryHolder,
     session_cancels: Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
-    /// The prompt executor the transport composed onto this owner, if any.
+    /// note: The prompt executor the transport composed onto this owner, if any.
     ///
     /// Retained so a spine tool that needs a model (`nexus.strategy.generate`) passes the SAME
     /// executor the engine drives, instead of building a second Host client the provider
     /// selection does not know about. `None` is a transport that attached no model.
     prompt_executor: Option<Arc<dyn PromptExecutor>>,
-    /// The durable workspace commit authority this owner commits through.
+    /// note: The durable workspace commit authority this owner commits through.
     ///
     /// Bound at establishment so `commit_workspace` cannot be routed to a
     /// root the owner was not admitted for.
     workspace_commit: Option<crate::owner::workspace::WorkspaceCommitAuthority>,
-    /// The nexus home this owner resolves presets against.
+    /// note: The nexus home this owner resolves presets against.
     ///
     /// Retained so a schedule insert can freeze the preset's content-addressed
     /// source identity at insertion (the same identity admission later
     /// validates against); a `driven_v1` row must never be published without
     /// one.
     nexus_home: Option<PathBuf>,
-    /// The frozen workspace root this owner's runs execute in.
+    /// note: The frozen workspace root this owner's runs execute in.
     ///
     /// Retained so a gate evaluation resolves `Filesystem`-kind paths against
     /// the SAME root the engine and commit authority were given.
     workspace_root: Option<PathBuf>,
-    /// Process-level facts the tool health surface reports (P3-T3).
+    /// note: Process-level facts the tool health surface reports (P3-T3).
     #[cfg(feature = "execution")]
     runtime_facts: crate::owner::capabilities::ToolRuntimeFacts,
-    /// The compiled WASM module cache (P3-T3).
+    /// note: The compiled WASM module cache (P3-T3).
     #[cfg(feature = "compute")]
     compute_cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
-    /// The WASM engine (P3-T3).
+    /// note: The WASM engine (P3-T3).
     #[cfg(feature = "compute")]
     compute_engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
-    /// The engine-global invocation serializer (P3-T3).
+    /// note: The engine-global invocation serializer (P3-T3).
     #[cfg(feature = "compute")]
     compute_serializer: Arc<tokio::sync::Semaphore>,
-    /// The receipt-first recovery decisions this owner made at start for
+    /// note: The receipt-first recovery decisions this owner made at start for
     /// direct-lane compute runs left `running` (v1.207 P3, spec §B.3).
     ///
     /// Retained so the §B.3 guarantee is observable rather than log-only: each
@@ -266,7 +268,7 @@ pub struct ExecutionHandle {
     /// cannot perform one.
     #[cfg(feature = "compute")]
     compute_run_recoveries: Vec<crate::owner::compute::ComputeRunRecovery>,
-    /// The boot recovery pass's read failure, when it could not read the
+    /// note: The boot recovery pass's read failure, when it could not read the
     /// stuck-run set (v1.214 S3).
     ///
     /// `Some` makes "the read failed" distinguishable from "no run was stuck"
@@ -278,7 +280,7 @@ pub struct ExecutionHandle {
     /// failure through the boot pass's warning and does not hold it.
     #[cfg(all(feature = "compute", any(test, feature = "test-hooks")))]
     compute_run_recovery_error: Option<crate::CoreError>,
-    /// A WEAK link back to the service that established this owner.
+    /// note: A WEAK link back to the service that established this owner.
     ///
     /// The service stores the handle (`CoreInner::execution`), so a strong
     /// reference here would be a reference cycle that keeps both alive past
@@ -286,26 +288,26 @@ pub struct ExecutionHandle {
     /// operation reach the family services (`execute_tool`, `compute_run`)
     /// without the caller having to pass the service back in.
     pub(crate) service: std::sync::Weak<crate::service::CoreInner>,
-    /// The engine epoch this owner was admitted with, read from the durable
+    /// note: The engine epoch this owner was admitted with, read from the durable
     /// workspace gate at establishment. It identifies the ownership
     /// generation of every run this handle drives.
     engine_epoch: i64,
-    /// Set when `close()` begins: drives admission is fenced (C2) and
+    /// note: Set when `close()` begins: drives admission is fenced (C2) and
     /// repeated closes are no-ops. Replaced by `settled` when the drain
     /// finishes.
     closing: AtomicBool,
-    /// Set when `close()` has finished: every owned drive was cancelled and
+    /// note: Set when `close()` has finished: every owned drive was cancelled and
     /// joined (C1). Only a SETTLED owner may be superseded in the registry.
     settled: AtomicBool,
-    /// Set by the FIRST close: the ONE retained close drain was started.
+    /// note: Set by the FIRST close: the ONE retained close drain was started.
     ///
     /// The drain runs on its own task (see [`Self::close`]) so an interrupted
     /// caller cannot abandon it and a later close observes the real settlement
     /// instead of waiting forever for a drain that died with its caller.
     drain_started: AtomicBool,
-    /// Notified when the retained drain publishes [`Self::settled`].
+    /// note: Notified when the retained drain publishes [`Self::settled`].
     settled_notify: Arc<tokio::sync::Notify>,
-    /// The owner's ONE bounded supervisor wake/clock task (v1.195 P0-T2).
+    /// note: The owner's ONE bounded supervisor wake/clock task (v1.195 P0-T2).
     ///
     /// `Some` for a hosted owner (`RunnerDeps::hosted_scheduler`), `None` for
     /// every core-only/test start. `close` takes the handle and JOINS it, so no
@@ -313,57 +315,57 @@ pub struct ExecutionHandle {
     /// needs the handle by value while other readers may still probe
     /// [`ExecutionHandle::owned_tasks_finished`].
     scheduler_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    /// Fires when `close()` begins so the scheduler loop exits promptly
+    /// note: Fires when `close()` begins so the scheduler loop exits promptly
     /// instead of waiting out its interval.
     scheduler_shutdown: Arc<tokio::sync::Notify>,
-    /// The peer-control lane this execution owner admits (v1.190 P4-T3).
+    /// note: The peer-control lane this execution owner admits (v1.190 P4-T3).
     /// Empty until `start_peer_control` succeeds; closed with the owner.
     #[cfg(feature = "connect-host")]
     pub(crate) peer_control: std::sync::Mutex<Option<Arc<nexus_connect::PeerControlLane>>>,
-    /// The authorized workflow-event subscriptions this owner minted (P1-T1).
+    /// note: The authorized workflow-event subscriptions this owner minted (P1-T1).
     ///
     /// Owner-scoped, never process-global: the tokens die with the generation
     /// that minted them, and `close` wakes and withdraws every one of them.
     pub(crate) workflow_subscriptions: nexus_execution::run_events::WorkflowSubscriptionRegistry,
-    /// Optional diagnostic barrier held across a subscription's durable-owner
+    /// note: Optional diagnostic barrier held across a subscription's durable-owner
     /// check and its ring attachment (see [`RunnerDeps::subscription_observer`]).
     subscription_observer: Option<Arc<dyn ExecutionSubscriptionObserver>>,
 }
 
 impl ExecutionHandle {
-    /// The engine this handle owns, as the transport-neutral trait surface.
+    /// note: The engine this handle owns, as the transport-neutral trait surface.
     #[must_use]
     pub fn engine(&self) -> Arc<dyn OrchestrationEngine> {
         Arc::clone(&self.engine) as Arc<dyn OrchestrationEngine>
     }
 
-    /// The concrete engine, for callers that need the inherent surface
+    /// note: The concrete engine, for callers that need the inherent surface
     /// (e.g. the transport's outer-graph builder / system-preset startup).
     #[must_use]
     pub fn engine_concrete(&self) -> Arc<GraphFlowEngine> {
         Arc::clone(&self.engine)
     }
 
-    /// The owned run coordinator.
+    /// note: The owned run coordinator.
     #[must_use]
     pub fn coordinator(&self) -> Arc<WorkflowRunCoordinator> {
         Arc::clone(&self.coordinator)
     }
 
-    /// The live capability registry holder the engine reads through.
+    /// note: The live capability registry holder the engine reads through.
     /// Identical to the transport's own handle when it supplied one.
     #[must_use]
     pub fn capability_holder(&self) -> CapabilityRegistryHolder {
         self.capability_holder.clone()
     }
 
-    /// The prompt executor this owner drives, or `None` when the transport attached no model.
+    /// note: The prompt executor this owner drives, or `None` when the transport attached no model.
     #[must_use]
     pub fn prompt_executor(&self) -> Option<Arc<dyn PromptExecutor>> {
         self.prompt_executor.clone()
     }
 
-    /// Attach the schedule supervisor once it exists.
+    /// note: Attach the schedule supervisor once it exists.
     ///
     /// Ordering: the supervisor needs the coordinator's `ScheduleRunStarter`,
     /// so it is always constructed after the handle. Settlement of terminal
@@ -375,13 +377,13 @@ impl ExecutionHandle {
         self.coordinator.set_schedule_supervisor(supervisor);
     }
 
-    /// The durable engine epoch this owner was admitted with.
+    /// note: The durable engine epoch this owner was admitted with.
     #[must_use]
     pub const fn engine_epoch(&self) -> i64 {
         self.engine_epoch
     }
 
-    /// The frozen workspace root this owner's runs execute in.
+    /// note: The frozen workspace root this owner's runs execute in.
     ///
     /// Gate evaluation resolves `Filesystem`-kind paths against it, so it must
     /// be the SAME root the engine and commit authority were given.
@@ -390,14 +392,14 @@ impl ExecutionHandle {
         self.workspace_root.as_deref()
     }
 
-    /// The nexus home this owner resolves presets against, if one was
+    /// note: The nexus home this owner resolves presets against, if one was
     /// supplied. Used to freeze a schedule's source identity at insertion.
     #[must_use]
     pub fn nexus_home(&self) -> Option<&Path> {
         self.nexus_home.as_deref()
     }
 
-    /// The bound workspace commit authority, if the transport supplied one.
+    /// note: The bound workspace commit authority, if the transport supplied one.
     ///
     /// `None` on a Tier-0 core (no manager/root published yet); the typed
     /// `commit_workspace` then reports `NotFound` rather than committing
@@ -409,7 +411,7 @@ impl ExecutionHandle {
         self.workspace_commit.as_ref()
     }
 
-    /// The shared per-run cancellation map (also held by the engine).
+    /// note: The shared per-run cancellation map (also held by the engine).
     #[must_use]
     pub fn session_cancels(
         &self,
@@ -419,14 +421,14 @@ impl ExecutionHandle {
         Arc::clone(&self.session_cancels)
     }
 
-    /// Whether this owner's close has begun: drives admission is fenced
+    /// note: Whether this owner's close has begun: drives admission is fenced
     /// and repeated closes are no-ops.
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.closing.load(Ordering::SeqCst)
     }
 
-    /// The subscription observation point this owner was built with, if any.
+    /// note: The subscription observation point this owner was built with, if any.
     ///
     /// `None` in production: only a test that must force the subscribe/close
     /// interleaving supplies one (see [`RunnerDeps::subscription_observer`]).
@@ -435,35 +437,35 @@ impl ExecutionHandle {
         self.subscription_observer.clone()
     }
 
-    /// The process-level facts the tool health surface reports.
+    /// note: The process-level facts the tool health surface reports.
     #[must_use]
     #[cfg(feature = "execution")]
     pub const fn runtime_facts(&self) -> &crate::owner::capabilities::ToolRuntimeFacts {
         &self.runtime_facts
     }
 
-    /// The compiled WASM module cache, when this build linked compute.
+    /// note: The compiled WASM module cache, when this build linked compute.
     #[must_use]
     #[cfg(feature = "compute")]
     pub fn compute_cache(&self) -> Option<Arc<nexus_wasm_host::ModuleCache>> {
         self.compute_cache.clone()
     }
 
-    /// The WASM engine, when this build linked compute.
+    /// note: The WASM engine, when this build linked compute.
     #[must_use]
     #[cfg(feature = "compute")]
     pub fn compute_engine(&self) -> Option<Arc<nexus_wasm_host::WasmEngine>> {
         self.compute_engine.clone()
     }
 
-    /// The engine-global invocation serializer.
+    /// note: The engine-global invocation serializer.
     #[must_use]
     #[cfg(feature = "compute")]
     pub fn compute_serializer(&self) -> Arc<tokio::sync::Semaphore> {
         Arc::clone(&self.compute_serializer)
     }
 
-    /// The receipt-first recovery decisions taken at start for direct-lane
+    /// note: The receipt-first recovery decisions taken at start for direct-lane
     /// compute runs left `running` (v1.207 P3, spec §B.3).
     ///
     /// Each entry reports whether the run was answered from a terminal receipt
@@ -477,7 +479,7 @@ impl ExecutionHandle {
         &self.compute_run_recoveries
     }
 
-    /// The boot recovery pass's read failure, when the §B.3 receipt-first pass
+    /// note: The boot recovery pass's read failure, when the §B.3 receipt-first pass
     /// could not read the stuck-run set (v1.214 S3).
     ///
     /// `None` means the pass read successfully, so an empty
@@ -497,7 +499,7 @@ impl ExecutionHandle {
         self.compute_run_recovery_error.as_ref()
     }
 
-    /// The service that established this owner, if it is still alive.
+    /// note: The service that established this owner, if it is still alive.
     ///
     /// A `Weak` upgrade: the owner never keeps its own service alive, so a
     /// handle outliving `CoreService::close` reports `NotFound` rather than
@@ -514,7 +516,7 @@ impl ExecutionHandle {
             })
     }
 
-    /// Whether this owner has begun draining: every typed effect entry point
+    /// note: Whether this owner has begun draining: every typed effect entry point
     /// (`add_schedule`, `signal_schedule`, `commit_workspace`, `run_events`)
     /// is fenced while this is `true`.
     ///
@@ -525,7 +527,7 @@ impl ExecutionHandle {
         self.coordinator.is_draining()
     }
 
-    /// Whether this owner's close has COMPLETED: every owned drive was
+    /// note: Whether this owner's close has COMPLETED: every owned drive was
     /// cancelled and joined (C1). Only a settled owner may be superseded in
     /// the per-DB owner registry — a closing-but-draining owner keeps the
     /// fence until its drives are gone.
@@ -534,7 +536,7 @@ impl ExecutionHandle {
         self.settled.load(Ordering::SeqCst)
     }
 
-    /// Whether every background task this owner owns has finished.
+    /// note: Whether every background task this owner owns has finished.
     ///
     /// The owned supervisor wake/clock task is the observable case: while it is
     /// installed and parked on its interval this is `false`, and it reports
@@ -551,7 +553,7 @@ impl ExecutionHandle {
             .is_none_or(tokio::task::JoinHandle::is_finished)
     }
 
-    /// Stop and JOIN the owned supervisor wake/clock task, if one was
+    /// note: Stop and JOIN the owned supervisor wake/clock task, if one was
     /// installed.
     ///
     /// Idempotent: `close` is the only caller and it owns the drain, so the
@@ -570,7 +572,7 @@ impl ExecutionHandle {
         }
     }
 
-    /// Abort every owned drive and settle the handle's cleanup in the
+    /// note: Abort every owned drive and settle the handle's cleanup in the
     /// documented order.
     ///
     /// Ordering: fence new drive admission (C2), close the durable-commit
@@ -616,10 +618,10 @@ impl ExecutionHandle {
         Ok(closed_report())
     }
 
-    /// The retained drain body (see [`Self::close`] for the ordering contract).
+    /// note: The retained drain body (see [`Self::close`] for the ordering contract).
     async fn run_close(self: Arc<Self>) {
         self.coordinator.begin_shutdown();
-        // Every authorized subscription this owner minted ends HERE: a pull
+        // why: Every authorized subscription this owner minted ends HERE: a pull
         // blocked on a silent run wakes with `closed` instead of hanging past
         // the close, and no token survives the generation that minted it.
         self.workflow_subscriptions.close_all();
@@ -630,7 +632,7 @@ impl ExecutionHandle {
         self.coordinator.abort_all_drives().await;
         if let Some(authority) = &self.workspace_commit {
             authority.manager().wait_for_admitted_commits().await;
-            // A confirmed close is the whole contract here: `false` would only
+            // why: A confirmed close is the whole contract here: `false` would only
             // mean this authority held no recoverable lease (or released it
             // already), so the answer is deliberately not acted on.
             let _released = authority.release_authority();
@@ -639,12 +641,12 @@ impl ExecutionHandle {
         self.settled_notify.notify_waiters();
     }
 
-    /// Wait until the retained drain has published the settlement.
+    /// note: Wait until the retained drain has published the settlement.
     async fn await_settled(&self) {
         loop {
             let notified = self.settled_notify.notified();
             tokio::pin!(notified);
-            // Register BEFORE the check so a settlement that lands in between
+            // why: Register BEFORE the check so a settlement that lands in between
             // cannot be missed.
             notified.as_mut().enable();
             if self.is_settled() {
@@ -654,7 +656,7 @@ impl ExecutionHandle {
         }
     }
 
-    /// Close without owning the report (used by [`CoreService::close`]).
+    /// note: Close without owning the report (used by [`CoreService::close`]).
     pub(crate) async fn shutdown(self: &Arc<Self>) {
         let _ = self.close().await;
     }
@@ -669,7 +671,7 @@ const fn closed_report() -> CoreCloseReport {
     }
 }
 
-/// The registered execution owner for one workspace DB.
+/// note: The registered execution owner for one workspace DB.
 ///
 /// The `Building` reservation is what makes the claim race-safe without
 /// holding a lock across the build await: a `std::sync::MutexGuard` is not
@@ -677,14 +679,14 @@ const fn closed_report() -> CoreCloseReport {
 /// reservation installed BEFORE the await serializes concurrent starts, so
 /// the loser refuses immediately and never builds a second engine.
 enum OwnerSlot {
-    /// A `start_execution` holds the slot and is building. Transient.
+    /// note: A `start_execution` holds the slot and is building. Transient.
     Building,
-    /// An established owner. `Weak` so the registry never keeps a dropped
+    /// note: An established owner. `Weak` so the registry never keeps a dropped
     /// handle — or its engine — alive.
     Established(Weak<ExecutionHandle>),
 }
 
-/// The established execution owner per workspace DB, process-wide.
+/// note: The established execution owner per workspace DB, process-wide.
 ///
 /// The per-service slot alone cannot fence this: `CoreService::open` under
 /// [`CoreAccess::EngineOwner`] deliberately JOINS this process's retained
@@ -696,7 +698,7 @@ enum OwnerSlot {
 static OWNERS: LazyLock<Mutex<HashMap<PathBuf, OwnerSlot>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Normalize a workspace DB path so two opens of the same file collide.
+/// note: Normalize a workspace DB path so two opens of the same file collide.
 ///
 /// Canonicalization matters (e.g. macOS `/var` → `/private/var`), but the
 /// resolved path is authoritative even when it cannot be canonicalized.
@@ -708,7 +710,7 @@ fn owners_lock() -> std::sync::MutexGuard<'static, HashMap<PathBuf, OwnerSlot>> 
     OWNERS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// A held-but-not-yet-installed owner reservation.
+/// note: A held-but-not-yet-installed owner reservation.
 ///
 /// RAII: dropping the guard without [`Self::install`] frees the slot, so a
 /// failed — or panicking — build never fences its own workspace DB.
@@ -718,13 +720,13 @@ struct OwnerReservation {
 }
 
 impl OwnerReservation {
-    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
-    /// Reserve the single owner slot for `db_path`, or refuse when a live
+    #[allow(clippy::significant_drop_tightening)] // why: the guard deliberately spans the whole operation
+    /// note: Reserve the single owner slot for `db_path`, or refuse when a live
     /// owner already holds it.
     fn claim(db_path: &Path) -> Result<Self, ExecutionOpenError> {
         let key = owner_key(db_path);
         let mut owners = owners_lock();
-        // A dropped or closed owner no longer fences its DB.
+        // why: A dropped or closed owner no longer fences its DB.
         owners.retain(|_, slot| match slot {
             OwnerSlot::Building => true,
             OwnerSlot::Established(weak) => weak.upgrade().is_some_and(|h| !h.is_settled()),
@@ -736,8 +738,8 @@ impl OwnerReservation {
         Ok(Self { key, armed: true })
     }
 
-    #[allow(clippy::significant_drop_tightening)] // the guard deliberately spans the whole operation
-    /// Publish `handle` as the established owner and stop owning the slot.
+    #[allow(clippy::significant_drop_tightening)] // why: the guard deliberately spans the whole operation
+    /// note: Publish `handle` as the established owner and stop owning the slot.
     fn install(mut self, handle: &Arc<ExecutionHandle>) {
         let mut owners = owners_lock();
         owners.insert(
@@ -759,7 +761,7 @@ impl Drop for OwnerReservation {
     }
 }
 
-/// Release the registry slot for `db_path` when it still names `handle`.
+/// note: Release the registry slot for `db_path` when it still names `handle`.
 ///
 /// `Arc::ptr_eq` guards against a stale release evicting a NEWER owner that
 /// claimed the same DB after this one closed. This is the eager path: the
@@ -779,7 +781,7 @@ pub(crate) fn release_owner_slot(db_path: &Path, handle: &Arc<ExecutionHandle>) 
 }
 
 impl CoreService {
-    /// Establish the single execution owner for this engine-owner core.
+    /// note: Establish the single execution owner for this engine-owner core.
     ///
     /// Builds the engine over the core's own durable pool, wires the
     /// coordinator and recovery, and returns the handle that owns the task
@@ -816,10 +818,10 @@ impl CoreService {
         if self.inner.access != CoreAccess::EngineOwner {
             return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
         }
-        // The build-phase barrier is consumed HERE, not by the builder: it
+        // why: The build-phase barrier is consumed HERE, not by the builder: it
         // gates the install, so it must outlive `build_execution`.
         let build_observer = deps.build_observer.take();
-        // Two channels, because they mean different things:
+        // why: Two channels, because they mean different things:
         //
         // - `handoff` carries the outcome of the start;
         // - `receipt` carries the caller's acknowledgement that it RECEIVED
@@ -838,7 +840,7 @@ impl CoreService {
         });
         match handoff_rx.await {
             Ok(outcome) => {
-                // Acknowledge BEFORE returning, with NO await in between: only
+                // why: Acknowledge BEFORE returning, with NO await in between: only
                 // a caller that already holds the outcome gets here, so the
                 // receipt is exactly the proof the task needs. (Dropping this
                 // future instead closes the receipt, which tells the task to
@@ -846,19 +848,19 @@ impl CoreService {
                 let _ = receipt_tx.send(());
                 outcome
             }
-            // The retained task sends before it returns, so a vanished sender
+            // why: The retained task sends before it returns, so a vanished sender
             // means it panicked: propagate that panic instead of relabelling a
             // build bug as a well-behaved closing service.
             Err(_) => match task.await {
                 Err(err) if err.is_panic() => std::panic::resume_unwind(err.into_panic()),
-                // Not reachable in practice: the task is never aborted, so a
+                // why: Not reachable in practice: the task is never aborted, so a
                 // cancelled join can only mean the runtime is going away.
                 _ => Err(ExecutionOpenError::Closing),
             },
         }
     }
 
-    /// The retained start: reservation, build, recovery, install — and the
+    /// note: The retained start: reservation, build, recovery, install — and the
     /// settlement of an owner nobody received — fenced end to end.
     ///
     /// Runs on its own task, so the caller's cancellation cannot reach into a
@@ -881,7 +883,7 @@ impl CoreService {
             .await
         {
             Ok(handle) => {
-                // A successful `send` only QUEUES the owner, and a caller that
+                // why: A successful `send` only QUEUES the owner, and a caller that
                 // is dropped before its next poll drops it again — so the owner
                 // is only handed over once the caller acknowledges receipt.
                 // Until then this task keeps the fence (a close waits) and,
@@ -899,7 +901,7 @@ impl CoreService {
         }
     }
 
-    /// The fenced start body (see [`Self::run_retained_start`] for the fence
+    /// note: The fenced start body (see [`Self::run_retained_start`] for the fence
     /// and cancellation contract).
     async fn start_execution_fenced(
         &self,
@@ -907,7 +909,7 @@ impl CoreService {
         build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
         handoff: &tokio::sync::oneshot::Sender<Result<Arc<ExecutionHandle>, ExecutionOpenError>>,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
-        // A close that began before this task took the fence has already raised
+        // why: A close that began before this task took the fence has already raised
         // `closing` and queued its drain on the exclusive half, so this start
         // must refuse rather than build into a service that is releasing its
         // admission. (Today's `RwLock` is write-preferring, so a start arriving
@@ -915,7 +917,7 @@ impl CoreService {
         // covers exactly that ordering too.)
         self.ensure_open()
             .map_err(|_| ExecutionOpenError::Closing)?;
-        // Single owner. The fence cannot be the per-service slot alone:
+        // why: Single owner. The fence cannot be the per-service slot alone:
         // `CoreService::open` under `EngineOwner` deliberately JOINS this
         // process's retained engine admission (the daemon's transport pool and
         // its execution core co-host one DB file), so a second core over the
@@ -933,14 +935,14 @@ impl CoreService {
         // slot on the next claim.
         let reservation = OwnerReservation::claim(&self.inner.db_path)?;
         let handle = self.build_execution(deps).await?;
-        // C3 barrier (diagnostic seam): the build is complete (engine +
+        // why: C3 barrier (diagnostic seam): the build is complete (engine +
         // recovery) but nothing is published yet. A test holds this exact
         // window to force a close to arrive mid-start; production supplies
         // no observer and skips straight to the install below.
         if let Some(observer) = build_observer {
             observer.built().await;
         }
-        // C3: install-time double check. Close raises `closing` before its
+        // why: C3: install-time double check. Close raises `closing` before its
         // drain takes the START fence exclusively, and this check+install runs
         // under that fence's shared half — so either the install published the
         // handle before the drain took the fence (the drain then observes the
@@ -966,7 +968,7 @@ impl CoreService {
             }
         };
         if !installing {
-            // The service began closing — or the caller went away — while this
+            // why: The service began closing — or the caller went away — while this
             // build ran. The build ran recovery (which spawns drives), so
             // settle the freshly built owner before abandoning it: a dropped
             // handle must not leak live drives.
@@ -977,7 +979,7 @@ impl CoreService {
         Ok(handle)
     }
 
-    /// Withdraw a published owner and settle it.
+    /// note: Withdraw a published owner and settle it.
     ///
     /// Used when the caller of a start was cancelled after its owner had been
     /// installed: nobody exists to close it, so leaving it live would keep an
@@ -1020,7 +1022,7 @@ impl CoreService {
         }
     }
 
-    /// The established execution handle, if any.
+    /// note: The established execution handle, if any.
     #[must_use]
     pub fn execution(&self) -> Option<Arc<ExecutionHandle>> {
         self.inner
@@ -1030,7 +1032,7 @@ impl CoreService {
             .clone()
     }
 
-    /// Retire the established execution owner so a fresh generation can be
+    /// note: Retire the established execution owner so a fresh generation can be
     /// established over the same DB (the daemon-level restart seam, A7).
     ///
     /// A restart republishes a FRESH engine/coordinator over the SAME Creator
@@ -1070,13 +1072,13 @@ impl CoreService {
         }
     }
 
-    #[allow(clippy::too_many_lines)] // one linear domain operation
+    #[allow(clippy::too_many_lines)] // why: one linear domain operation
     async fn build_execution(
         &self,
         deps: RunnerDeps,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
         let pool = self.inner.pool.clone();
-        // The transport's map wins: the engine, the coordinator and the
+        // why: The transport's map wins: the engine, the coordinator and the
         // transport's cancel path must all fire the same per-run token.
         let session_cancels: Arc<
             std::sync::RwLock<
@@ -1089,7 +1091,7 @@ impl CoreService {
         let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let session_storage: Arc<dyn graph_flow::SessionStorage> = sqlite_storage.clone();
 
-        // The daemon owns the live holder (WASM singleton, user-cap scan,
+        // why: The daemon owns the live holder (WASM singleton, user-cap scan,
         // hot-reload watcher). A core-only caller gets a bare builtin
         // registry so the engine still has a capability surface.
         //
@@ -1145,7 +1147,7 @@ impl CoreService {
         if let Some(provider) = &deps.workspace_state_provider {
             engine.set_workspace_state_provider(Arc::clone(provider));
         }
-        // v1.195 P0-T6: outer-state boundaries render the schedule's COMMITTED
+        // why: v1.195 P0-T6: outer-state boundaries render the schedule's COMMITTED
         // core-context version, so an edit committed while a run is
         // mid-execution lands at that run's next state transition. Same Creator
         // DB pool the supervisor reads schedule pointers through.
@@ -1154,7 +1156,7 @@ impl CoreService {
                 pool.clone(),
             )),
         ));
-        // P4: recovery reads the SAME applied identity admission resolves, over
+        // why: P4: recovery reads the SAME applied identity admission resolves, over
         // the same Creator DB pool and the same workspace home — a restart
         // mid-run rebuilds the applied graph, not the descriptor's. ONE adapter
         // serves both the engine's recovery source and the coordinator's
@@ -1188,7 +1190,7 @@ impl CoreService {
         }
         let coordinator = Arc::new(coordinator);
 
-        // Hosted composition (v1.195 P0-T2): install the supervisor, its
+        // why: Hosted composition (v1.195 P0-T2): install the supervisor, its
         // coordinator-backed starter and the ONE clock task BEFORE recovery.
         // A recovered terminal run settles through this supervisor, and the
         // clock is installed-but-held until recovery completed below.
@@ -1210,13 +1212,13 @@ impl CoreService {
                 if let Some(registry) = capability_holder.get() {
                     supervisor = supervisor.with_capability_registry(registry);
                 }
-                // The supervisor's Work artifact chains write through the SAME
+                // why: The supervisor's Work artifact chains write through the SAME
                 // executor the registry receives, never a second writer.
                 if let Some(executor) = &deps.workspace_executor {
                     supervisor = supervisor.with_workspace_executor(Arc::clone(executor));
                 }
                 let supervisor = Arc::new(supervisor);
-                // The coordinator settles terminal runs through the SAME
+                // why: The coordinator settles terminal runs through the SAME
                 // supervisor the clock drives.
                 coordinator.set_schedule_supervisor(Arc::clone(&supervisor));
                 let start = Arc::new(tokio::sync::Notify::new());
@@ -1232,7 +1234,7 @@ impl CoreService {
                 (None, Arc::new(tokio::sync::Notify::new()), None)
             };
 
-        // A7 recovery: reconstruct runners from the frozen source identity and
+        // why: A7 recovery: reconstruct runners from the frozen source identity and
         // re-drive only the eligible converge/merge class through this owner.
         let decisions = coordinator
             .recover_persisted(&sqlite_storage, deps.shutdown_notify)
@@ -1240,7 +1242,7 @@ impl CoreService {
         for d in &decisions {
             tracing::info!(decision = ?d, "execution start: recovery re-drive decision");
         }
-        // v1.207 P3 (§B.3): the receipt-first recovery entry for compute runs
+        // why: v1.207 P3 (§B.3): the receipt-first recovery entry for compute runs
         // left `running` by a crash. It runs BEFORE the clock starts, asks
         // each stuck run's durable receipt first, and never re-applies an
         // effect — a terminal receipt answers the replay, and any other state
@@ -1271,12 +1273,12 @@ impl CoreService {
                     (Vec::new(), Some(err))
                 }
             };
-        // The read failure is retained on the handle only for the test-hooks seam
+        // why: The read failure is retained on the handle only for the test-hooks seam
         // (see `ExecutionHandle::compute_run_recovery_error`); a production build
         // reports it through the warning above and holds nothing.
         #[cfg(all(feature = "compute", not(any(test, feature = "test-hooks"))))]
         drop(compute_run_recovery_error);
-        // Recovery is complete: start the clock. Until this signal the owned
+        // why: Recovery is complete: start the clock. Until this signal the owned
         // scheduler task cannot tick, so an admission sweep can never race the
         // recovery pass above.
         if let Some(start) = scheduler_start {
@@ -1334,7 +1336,7 @@ impl CoreService {
     }
 }
 
-/// Read the durable engine epoch recorded by this connection's admission.
+/// note: Read the durable engine epoch recorded by this connection's admission.
 ///
 /// The writer protocol installs `nexus_engine_epoch()` per connection from
 /// the admitting context, so this reports the epoch THIS owner was admitted

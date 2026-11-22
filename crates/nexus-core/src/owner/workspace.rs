@@ -26,6 +26,7 @@
 //! Type gaps are REPORTED, never filled with a hand-written parallel shape:
 //! the wire DTOs for the commit request/response are the P5-owned generated
 //! `CoreWorkspaceCommitRequest`/`CoreWorkspaceCommitResponse` pair.
+// why: the durable commit contract is unchanged by the move; only its home is new.
 
 use std::sync::Arc;
 
@@ -40,7 +41,7 @@ use crate::error::{CoreError, CoreResult};
 use nexus_execution::session::{SessionError, SessionId, WorkspaceSessionManager};
 use nexus_execution::session_commit::CommitOutcome;
 
-/// The workspace commit authority one handle owns: the shared session manager
+/// note: The workspace commit authority one handle owns: the shared session manager
 /// plus the active canonical root it was opened against.
 ///
 /// A commit is only valid against the root this authority was opened with, so
@@ -53,7 +54,7 @@ pub struct WorkspaceCommitAuthority {
 }
 
 impl WorkspaceCommitAuthority {
-    /// Bind a session manager to the canonical root it commits against.
+    /// note: Bind a session manager to the canonical root it commits against.
     #[must_use]
     pub const fn new(manager: Arc<WorkspaceSessionManager>, active_root: String) -> Self {
         Self {
@@ -62,19 +63,19 @@ impl WorkspaceCommitAuthority {
         }
     }
 
-    /// The shared session manager (also used by the executor adapter).
+    /// note: The shared session manager (also used by the executor adapter).
     #[must_use]
     pub const fn manager(&self) -> &Arc<WorkspaceSessionManager> {
         &self.manager
     }
 
-    /// The canonical root every commit through this authority is scoped to.
+    /// note: The canonical root every commit through this authority is scoped to.
     #[must_use]
     pub fn active_root(&self) -> &str {
         &self.active_root
     }
 
-    /// Release the workspace commit/recovery authority this composition holds.
+    /// note: Release the workspace commit/recovery authority this composition holds.
     ///
     /// The owning execution handle calls this once its close is CONFIRMED
     /// (admission fenced, owned scheduler joined, drives drained): the
@@ -91,7 +92,7 @@ impl WorkspaceCommitAuthority {
             .is_some_and(|config| config.authority_lease.release())
     }
 
-    /// Commit through this authority's manager and root.
+    /// note: Commit through this authority's manager and root.
     ///
     /// # Errors
     /// Returns the mapped commit refusal (see [`commit_workspace`]).
@@ -103,7 +104,7 @@ impl WorkspaceCommitAuthority {
     }
 }
 
-/// Commit a validated change manifest through the durable authority.
+/// note: Commit a validated change manifest through the durable authority.
 ///
 /// The commit runs on the RETAINED owner: if the awaiting caller is dropped
 /// (client disconnect, shutdown), the already-admitted commit still runs to a
@@ -148,7 +149,7 @@ pub async fn commit_workspace(
     })
 }
 
-/// Map a session-layer refusal onto the neutral core taxonomy.
+/// note: Map a session-layer refusal onto the neutral core taxonomy.
 ///
 /// The taxonomy is schema-derived (`schemas/core/core-error.schema.json`,
 /// P5-owned) and carries NO dedicated workspace-commit conflict code, so the
@@ -168,7 +169,7 @@ fn map_commit_error(err: SessionError) -> CoreError {
         SessionError::NotFound(id) => CoreError::NotFound {
             resource: format!("workspace session {id}"),
         },
-        // Conflicts: stale/expired session, OCC hash mismatch, unsettled
+        // why: Conflicts: stale/expired session, OCC hash mismatch, unsettled
         // recovery intent, foreign workspace root.
         SessionError::AlreadyCommitted(_)
         | SessionError::Expired(_)
@@ -193,7 +194,7 @@ fn map_commit_error(err: SessionError) -> CoreError {
     }
 }
 
-/// One generated manifest entry -> the durable commit manifest entry.
+/// note: One generated manifest entry -> the durable commit manifest entry.
 ///
 /// The generated `contentBase64`/`expectedHash` field names and the local
 /// `content_base64`/`expected_hash` fields carry identical wire semantics, and

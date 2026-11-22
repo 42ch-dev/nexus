@@ -28,35 +28,35 @@ use crate::error::CoreError as NexusApiError;
 use crate::slug::validate_slug_name;
 use crate::works::RuntimeLockGuard;
 
-/// A raw tool path classified against the `Works/<work_ref>/` shape.
+/// note: A raw tool path classified against the `Works/<work_ref>/` shape.
 #[derive(Debug)]
 pub(crate) enum WorkPath<'a> {
-    /// Not under `Works/` — the caller keeps its existing guarded write.
+    /// note: Not under `Works/` — the caller keeps its existing guarded write.
     NonWork,
-    /// A case variant of `Works` (`works/…`, `WORKS/…`): the port writes the
+    /// note: A case variant of `Works` (`works/…`, `WORKS/…`): the port writes the
     /// literal `Works` tree, so the read and write halves of the tool surface
     /// both refuse the spelling instead of routing it.
     CaseVariantWorks,
-    /// `Works/<work_ref>/<child…>`: a writable Work artifact.
+    /// note: `Works/<work_ref>/<child…>`: a writable Work artifact.
     Artifact {
-        /// The Work directory name (or Work id) the path names.
+        /// note: The Work directory name (or Work id) the path names.
         work_ref: &'a str,
-        /// The artifact path below the Work root; non-empty, `..`-free.
+        /// note: The artifact path below the Work root; non-empty, `..`-free.
         rel_child: &'a Path,
     },
-    /// `Works/<work_ref>` itself: a directory, never a writable artifact.
+    /// note: `Works/<work_ref>` itself: a directory, never a writable artifact.
     WorkRoot {
-        /// The Work directory name the path names.
+        /// note: The Work directory name the path names.
         work_ref: &'a str,
     },
-    /// A `..` inside the Work subtree: lexically inside, physically not.
+    /// note: A `..` inside the Work subtree: lexically inside, physically not.
     EscapedWork {
-        /// The Work directory name the path names.
+        /// note: The Work directory name the path names.
         work_ref: &'a str,
     },
 }
 
-/// Classify a raw tool path against the `Works/<work_ref>/` shape.
+/// note: Classify a raw tool path against the `Works/<work_ref>/` shape.
 ///
 /// Decided on the raw string, before any I/O: the first component must be
 /// `Works` byte-exactly, and the artifact remainder must be non-empty and
@@ -71,7 +71,7 @@ pub(crate) enum WorkPath<'a> {
 #[must_use]
 pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
     let mut components = Path::new(path).components();
-    // Rust keeps a leading `./` as a `CurDir` component (interior `.` is
+    // why: Rust keeps a leading `./` as a `CurDir` component (interior `.` is
     // normalized away), so without dropping it `./Works/<ref>/x.md` would fall
     // through as `NonWork` — the generic guarded write with no port, lock or
     // boundary re-check — and `./works/<ref>/x.md` would skip the case-variant
@@ -90,7 +90,7 @@ pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
         _ => return WorkPath::NonWork,
     }
     let Some(second) = components.next() else {
-        // `Works`, `Works/`: not under any work.
+        // why: `Works`, `Works/`: not under any work.
         return WorkPath::NonWork;
     };
     let work_ref = second.as_os_str().to_str().unwrap_or_default();
@@ -113,47 +113,47 @@ pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
     }
 }
 
-/// One Work artifact byte write handed to a [`WorkArtifactPort`].
+/// note: One Work artifact byte write handed to a [`WorkArtifactPort`].
 ///
 /// The adapter builds the absolute target itself from
 /// `<workspace_root>/Works/<work_ref>/<rel_child>`, so the classification and
 /// the constructed target cannot disagree.
 pub(crate) struct WorkArtifactWrite<'a> {
-    /// The workspace whose `Works/` tree owns the artifact.
+    /// note: The workspace whose `Works/` tree owns the artifact.
     pub(crate) workspace_root: &'a Path,
-    /// The Work directory name (or Work id) the caller addressed.
+    /// note: The Work directory name (or Work id) the caller addressed.
     pub(crate) work_ref: &'a str,
-    /// The artifact path below the Work root.
+    /// note: The artifact path below the Work root.
     pub(crate) rel_child: &'a Path,
-    /// The bytes to commit.
+    /// note: The bytes to commit.
     pub(crate) content: &'a str,
 }
 
-/// One reconcile admission handed to a [`WorkArtifactPort`].
+/// note: One reconcile admission handed to a [`WorkArtifactPort`].
 ///
 /// The caller has already resolved and authorised the Work; this request only
 /// names what the port needs to reconcile its index with the tree.
 pub(crate) struct WorkReconcile<'a> {
-    /// The workspace whose `Works/` tree is the projection being reconciled.
+    /// note: The workspace whose `Works/` tree is the projection being reconciled.
     pub(crate) workspace_root: &'a Path,
-    /// Owner of the Work, from the caller's verified principal.
+    /// note: Owner of the Work, from the caller's verified principal.
     pub(crate) creator_id: &'a str,
-    /// The Work whose `work_chapters` index is reconciled.
+    /// note: The Work whose `work_chapters` index is reconciled.
     pub(crate) work_id: &'a str,
-    /// The Work directory name below `Works/`.
+    /// note: The Work directory name below `Works/`.
     pub(crate) work_ref: &'a str,
-    /// Timestamp stamped on the applied DB index rows.
+    /// note: Timestamp stamped on the applied DB index rows.
     pub(crate) now: &'a str,
-    /// Label for the minted `cli:<kind>:<uuid>` runtime-lock holder.
+    /// note: Label for the minted `cli:<kind>:<uuid>` runtime-lock holder.
     pub(crate) holder_kind: &'a str,
-    /// Report the diff without acquiring the lock or writing anything.
+    /// note: Report the diff without acquiring the lock or writing anything.
     pub(crate) dry_run: bool,
 }
 
-/// The single byte-write port for Work artifacts.
-#[allow(async_fn_in_trait)] // matches the `KbStore` precedent (nexus-knowledge)
+/// note: The single byte-write port for Work artifacts.
+#[allow(async_fn_in_trait)] // why: matches the `KbStore` precedent (nexus-knowledge)
 pub(crate) trait WorkArtifactPort {
-    /// Commit one artifact write under the per-Work runtime lock.
+    /// note: Commit one artifact write under the per-Work runtime lock.
     ///
     /// An existing `daemon:schedule:<id>` holder (a schedule-driven run owns
     /// the Work from enqueue to terminal) is written under, not re-acquired.
@@ -169,7 +169,7 @@ pub(crate) trait WorkArtifactPort {
     /// lookup, directory or write failure.
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError>;
 
-    /// Reconcile one Work's `work_chapters` index with its Markdown tree.
+    /// note: Reconcile one Work's `work_chapters` index with its Markdown tree.
     ///
     /// The read-only diff (filesystem walk + per-chapter DB reads) runs
     /// unlocked; only the write phase — each chapter file's frontmatter status
@@ -197,14 +197,14 @@ pub(crate) trait WorkArtifactPort {
     ) -> Result<ReconcileReport, NexusApiError>;
 }
 
-/// Production [`WorkArtifactPort`]: SQLite-backed Work resolution plus the
+/// note: Production [`WorkArtifactPort`]: SQLite-backed Work resolution plus the
 /// shared content primitives, built per dispatch from the tool context.
 pub(crate) struct FsWorkArtifactPort {
     pool: SqlitePool,
     nexus_home: PathBuf,
 }
 
-/// Boundary re-check for one artifact target; runs on the blocking pool.
+/// note: Boundary re-check for one artifact target; runs on the blocking pool.
 ///
 /// Mirrors the guard's canonical walk-up: the nearest existing ancestor must
 /// resolve inside `Works/<work_ref>/`, so a symlink anywhere on the way out is
@@ -226,7 +226,7 @@ fn check_works_boundary(
         .unwrap_or_else(|_| workspace_root.to_path_buf());
     let works_dir = canonical_root.join("Works");
     let allowed = works_dir.join(work_ref);
-    // The lexical ancestors a first write may legitimately stop at: with no
+    // why: The lexical ancestors a first write may legitimately stop at: with no
     // `Works/<work_ref>` yet, the nearest existing ancestor is the workspace
     // root or its `Works` directory itself.
     let works_path = workspace_root.join("Works");
@@ -234,7 +234,7 @@ fn check_works_boundary(
     loop {
         match probe.canonicalize() {
             Ok(canonical) => {
-                // Inside the Work subtree; or the probe *is* one of those two
+                // why: Inside the Work subtree; or the probe *is* one of those two
                 // ancestors, not merely a lower symlink that resolves to one of
                 // them (e.g. `Works/demo/Leak -> …/Works`).
                 let first_write_ancestor = (probe == workspace_root && canonical == canonical_root)
@@ -253,12 +253,12 @@ fn check_works_boundary(
 }
 
 impl FsWorkArtifactPort {
-    /// Build the adapter for one dispatch.
+    /// note: Build the adapter for one dispatch.
     pub(crate) const fn new(pool: SqlitePool, nexus_home: PathBuf) -> Self {
         Self { pool, nexus_home }
     }
 
-    /// Write phase of [`WorkArtifactPort::reconcile`], run while the caller
+    /// note: Write phase of [`WorkArtifactPort::reconcile`], run while the caller
     /// holds the Work runtime lock: every file resync commits through this
     /// port's own byte-write path, then the DB index operations apply.
     async fn apply_reconcile(
@@ -305,7 +305,7 @@ impl FsWorkArtifactPort {
             })
     }
 
-    /// The write itself, run while the caller holds the Work lock:
+    /// note: The write itself, run while the caller holds the Work lock:
     /// boundary re-check → parent creation → durable atomic bytes.
     async fn write_locked(&self, write: &WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
         let target = write
@@ -321,7 +321,7 @@ impl FsWorkArtifactPort {
             ),
         };
 
-        // D8 boundary re-check: the walk is blocking `stat`/`canonicalize` I/O,
+        // why: D8 boundary re-check: the walk is blocking `stat`/`canonicalize` I/O,
         // so it runs on the blocking pool, never on an async worker thread.
         let workspace_root = write.workspace_root.to_path_buf();
         let work_ref = write.work_ref.to_string();
@@ -359,7 +359,7 @@ impl FsWorkArtifactPort {
 
 impl WorkArtifactPort for FsWorkArtifactPort {
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
-        // ONE gate for every caller (tool surface, scaffolds, manuscript.write,
+        // why: ONE gate for every caller (tool surface, scaffolds, manuscript.write,
         // the executor adapter): `rel_child` must name a path BELOW
         // `Works/<work_ref>/`. An absolute path replaces that base, and a `..`
         // walks out of the Work subtree — and the boundary probe below stops at
@@ -387,7 +387,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                         .to_string(),
             });
         };
-        // A creator registered without `workspace use` records no slug; the
+        // why: A creator registered without `workspace use` records no slug; the
         // rest of the process resolves that same config to the default
         // partition (`workspace_slug_for_creator`), so the port must agree
         // instead of refusing the creator's own Work. A recorded value that
@@ -424,7 +424,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
             ),
         })?;
 
-        // Inspector BUG-01: a schedule-driven run holds `daemon:schedule:<id>`
+        // why: Inspector BUG-01: a schedule-driven run holds `daemon:schedule:<id>`
         // from enqueue until the schedule is terminal, so acquiring here would
         // always refuse the Work's own writes. That holder is the Work's single
         // writer for its lifetime: write under it and leave it untouched.
@@ -434,7 +434,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                 .map_err(|e| NexusApiError::Internal {
                     category: format!("DATABASE_ERROR: runtime_lock holder read failed: {e}"),
                 })?;
-        // F-002 residual: this exemption trusts the stored holder prefix, not
+        // why: F-002 residual: this exemption trusts the stored holder prefix, not
         // the calling run's identity, so it covers every tool writer.
         if current_holder.as_deref().is_some_and(|holder| {
             holder.starts_with(nexus_local_db::runtime_lock::SCHEDULE_HOLDER_PREFIX)
@@ -442,12 +442,12 @@ impl WorkArtifactPort for FsWorkArtifactPort {
             return self.write_locked(&write).await;
         }
 
-        // Not reentrant: every acquire mints a fresh holder uuid, so any
+        // why: Not reentrant: every acquire mints a fresh holder uuid, so any
         // existing fresh holder — including this process's own in-flight
         // `tool:fs_write` — refuses with the lock's own `work_locked:` reason.
         let lock = WorkLock::acquire(&self.pool, &creator_id, &work_id, "tool:fs_write").await?;
         let result = self.write_locked(&write).await;
-        // No `Drop` guard: a skipped release pins the Work until the TTL.
+        // why: No `Drop` guard: a skipped release pins the Work until the TTL.
         lock.release().await;
         result
     }
@@ -457,7 +457,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
         request: WorkReconcile<'_>,
         recheck: &(dyn Fn() -> Result<(), NexusApiError> + Send + Sync),
     ) -> Result<ReconcileReport, NexusApiError> {
-        // `Stories/` is novel-only: refuse an explicitly non-novel profile
+        // why: `Stories/` is novel-only: refuse an explicitly non-novel profile
         // before any walk, lock or write.
         work_chapters::ensure_novel_profile(&self.pool, request.work_id)
             .await
@@ -465,7 +465,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                 category: format!("DATABASE_ERROR: reconcile profile gate failed: {e}"),
             })?;
 
-        // Phase A (unlocked): the slow filesystem walk + per-chapter reads.
+        // why: Phase A (unlocked): the slow filesystem walk + per-chapter reads.
         let diff = work_chapters::compute_reconcile_diff(
             &self.pool,
             request.work_id,
@@ -481,7 +481,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
             return Ok(diff.to_report());
         }
 
-        // Phase B (locked): only the writes, so the window stays short. A
+        // why: Phase B (locked): only the writes, so the window stays short. A
         // read-phase failure above never acquires the lock at all. The
         // unlocked walk is the stale-read window, so the caller's
         // principal/workspace check re-runs immediately before the lock: a
@@ -505,7 +505,7 @@ impl WorkArtifactPort for FsWorkArtifactPort {
 
         let result = self.apply_reconcile(&request, &diff).await;
 
-        // V1.48 P4-fix1 (W-2 qc3): release on both Ok and Err paths — a failed
+        // why: V1.48 P4-fix1 (W-2 qc3): release on both Ok and Err paths — a failed
         // reconcile must never leave the Work unwritable until the TTL.
         lock.release().await;
         let held_ms = (chrono::Utc::now() - acquired_at).num_milliseconds().max(0);
@@ -518,20 +518,20 @@ impl WorkArtifactPort for FsWorkArtifactPort {
     }
 }
 
-/// One recorded intended write in a [`RecordingWorkArtifactPort`] log.
+/// note: One recorded intended write in a [`RecordingWorkArtifactPort`] log.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RecordedMutation {
-    /// The Work directory name the write addressed.
+    /// note: The Work directory name the write addressed.
     pub work_ref: String,
-    /// The artifact path below the Work root.
+    /// note: The artifact path below the Work root.
     pub rel_child: String,
-    /// Byte length of the content that *would* have been written.
+    /// note: Byte length of the content that *would* have been written.
     pub bytes: usize,
-    /// sha256 hex digest of the content (same convention as the tree digest).
+    /// note: sha256 hex digest of the content (same convention as the tree digest).
     pub sha256: String,
 }
 
-/// Simulate/dry-run [`WorkArtifactPort`]: records intended mutations in
+/// note: Simulate/dry-run [`WorkArtifactPort`]: records intended mutations in
 /// commit order and performs no filesystem, SQLite or lock operation.
 ///
 /// Production defaults never select it: [`super::capabilities::ToolContext::new`]
@@ -550,7 +550,7 @@ impl RecordingWorkArtifactPort {
         }
     }
 
-    /// Snapshot of the log in commit order.
+    /// note: Snapshot of the log in commit order.
     #[must_use]
     pub(crate) fn mutations(&self) -> Vec<RecordedMutation> {
         self.mutations
@@ -561,7 +561,7 @@ impl RecordingWorkArtifactPort {
 }
 
 impl WorkArtifactPort for RecordingWorkArtifactPort {
-    // The trait signature is async; the stub records synchronously.
+    // why: The trait signature is async; the stub records synchronously.
     #[allow(clippy::unused_async_trait_impl)]
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
         let mut sha = Sha256::new();
@@ -579,7 +579,7 @@ impl WorkArtifactPort for RecordingWorkArtifactPort {
         Ok(())
     }
 
-    // Reconcile diffs the tree against the DB index; this stub performs no
+    // why: Reconcile diffs the tree against the DB index; this stub performs no
     // read, so it refuses rather than reporting an invented empty diff.
     #[allow(clippy::unused_async_trait_impl)]
     async fn reconcile(
@@ -653,7 +653,7 @@ mod tests {
         fixture_selecting_workspace(seed_work, Some("default")).await
     }
 
-    /// `active_slug: None` writes a config that records no workspace selection.
+    /// note: `active_slug: None` writes a config that records no workspace selection.
     async fn fixture_selecting_workspace(seed_work: bool, active_slug: Option<&str>) -> Fixture {
         let home = tempfile::tempdir().expect("temp home");
         let workspace = tempfile::tempdir().expect("temp workspace");
@@ -774,7 +774,7 @@ mod tests {
             classify_work_path("/Works/demo/x.md"),
             WorkPath::NonWork
         ));
-        // A case-variant `Works` is refused, never routed: the port writes the
+        // why: A case-variant `Works` is refused, never routed: the port writes the
         // literal `Works` tree and the read path refuses the same spelling.
         assert!(matches!(
             classify_work_path("works/demo/x.md"),
@@ -806,7 +806,7 @@ mod tests {
             }
             other => panic!("expected an artifact, got {other:?}"),
         }
-        // A leading `./` is not part of the path's identity: Rust keeps it as a
+        // why: A leading `./` is not part of the path's identity: Rust keeps it as a
         // component, so classifying it away is what stops `./Works/…` from
         // falling through as `NonWork` and skipping the port.
         assert!(matches!(
@@ -882,7 +882,7 @@ mod tests {
 
     #[tokio::test]
     async fn commit_refuses_an_unusable_recorded_workspace_selection() {
-        // A recorded value that names no partition is the user's explicit
+        // why: A recorded value that names no partition is the user's explicit
         // (broken) selection: the port refuses rather than acting on the
         // default partition they never chose. An empty record is *not* this
         // case — it is the "never chose" state (`Unselected`).
@@ -913,7 +913,7 @@ mod tests {
 
     #[tokio::test]
     async fn commit_writes_without_a_recorded_workspace_selection() {
-        // A creator registered without `workspace use` records no slug, and a
+        // why: A creator registered without `workspace use` records no slug, and a
         // blank recorded value is the same "never chose" state. The rest of
         // the process resolves both to the default partition
         // (`workspace_slug_for_creator`), so the port must agree instead of
@@ -945,7 +945,7 @@ mod tests {
         let fixture = fixture(true).await;
         let absolute_child = fixture.workspace.path().join("outside.md");
 
-        // The port is the single gate every caller shares, so both shapes are
+        // why: The port is the single gate every caller shares, so both shapes are
         // refused here — before any Work lookup, lock or directory creation.
         for rel_child in [
             PathBuf::from("../sibling/Stories/ch1.md"),
@@ -1054,7 +1054,7 @@ mod tests {
     #[tokio::test]
     async fn commit_releases_the_lock_when_the_write_fails() {
         let fixture = fixture(true).await;
-        // A regular file where the artifact's parent directory must go makes
+        // why: A regular file where the artifact's parent directory must go makes
         // `create_dir_all` fail after the lock is held.
         std::fs::create_dir_all(fixture.workspace.path().join("Works/demo")).expect("work dir");
         std::fs::write(fixture.workspace.path().join("Works/demo/Stories"), b"file")
@@ -1082,7 +1082,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn commit_refuses_symlinks_aliasing_the_first_write_ancestors() {
-        // A lower symlink resolving to the workspace root or its `Works`
+        // why: A lower symlink resolving to the workspace root or its `Works`
         // directory must not borrow the first-write ancestor exception and
         // create bytes outside the addressed Work.
         for link_to_works_dir in [false, true] {
@@ -1170,7 +1170,7 @@ mod tests {
         );
     }
 
-    /// The `fs/write_text_file` production route: the tool surface classifies
+    /// note: The `fs/write_text_file` production route: the tool surface classifies
     /// a raw `Works/<ref>/…` path and hands the artifact shape to the
     /// production adapter, which lands the real bytes on disk.
     #[tokio::test]
@@ -1258,7 +1258,7 @@ mod tests {
         assert_eq!(holder(&fixture.pool).await, None, "dry-run takes no lock");
     }
 
-    /// The principal is re-validated after the unlocked walk and before the
+    /// note: The principal is re-validated after the unlocked walk and before the
     /// lock: a refusal there takes no lock and writes nothing, even though the
     /// diff already named a write.
     #[tokio::test]

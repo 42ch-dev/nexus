@@ -25,7 +25,7 @@ use nexus_session_storage::run_state::AppliedRunIdentity;
 use crate::apply::ApplyLoadRefusal;
 use crate::error::{CoreError, CoreResult};
 
-/// The intake mode one new admission runs under (P6 condition 6).
+/// note: The intake mode one new admission runs under (P6 condition 6).
 ///
 /// `Ok(None)` = the preset is not a user bundle (embedded, `_system.`, or a
 /// directory the loader resolved as system): the intake key never governs it
@@ -48,7 +48,7 @@ pub fn intake_mode_for_admission(
     nexus_home_layout::strategy_intake::strategy_intake_mode(nexus_home).map(Some)
 }
 
-/// Resolve the apply `preset_id` runs under: its current identity plus the
+/// note: Resolve the apply `preset_id` runs under: its current identity plus the
 /// document the identity pins, or `None` when the strategy has no current apply.
 ///
 /// This is the ONE route to an applied document. Schedule admission,
@@ -78,7 +78,7 @@ pub async fn resolve_applied_document(
     preset_id: &str,
     loaded: Option<&LoadedPreset>,
 ) -> CoreResult<Result<Option<AppliedDocument>, ApplyLoadRefusal>> {
-    // An embedded bundle's applied identity is its own compiled-in bytes, not a
+    // why: An embedded bundle's applied identity is its own compiled-in bytes, not a
     // store row: the document is constructed here from the same `EMBEDDED_PRESETS`
     // tree the run reads, so admission and recovery reach one identity through
     // one route. A hash failure is a fault of this route (outer `Err`), never a
@@ -111,7 +111,7 @@ pub async fn resolve_applied_document(
             })));
         }
     }
-    // The loader's own classification, exactly as admission reads it: only a
+    // why: The loader's own classification, exactly as admission reads it: only a
     // user bundle with a current apply has an applied identity. `None` is the
     // applied re-entry (I-000443: the run's bundle may be gone), and it cannot
     // skip a refusal a `Some` would raise — `Some` of a NON-user bundle answers
@@ -138,7 +138,7 @@ pub async fn resolve_applied_document(
     }
 }
 
-/// Reads the current apply of a strategy out of the Creator DB.
+/// note: Reads the current apply of a strategy out of the Creator DB.
 ///
 /// ONE home serves both routes: [`AppliedAdmissionPort::admit`] and
 /// [`AppliedDocumentSource::applied_document`] both re-compare the frozen pins
@@ -155,7 +155,7 @@ pub struct CreatorAppliedDocuments {
 }
 
 impl CreatorAppliedDocuments {
-    /// Bind the source to the Creator DB pool admission resolves applies on, and
+    /// note: Bind the source to the Creator DB pool admission resolves applies on, and
     /// to the workspace home BOTH admission and recovery read — the engine's own
     /// `nexus_home`, so an admission resolves the pins against the same
     /// workspace a restart re-compares them against.
@@ -172,7 +172,7 @@ impl AppliedAdmissionPort for CreatorAppliedDocuments {
         preset_id: &str,
         loaded: &LoadedPreset,
     ) -> Result<AppliedAdmission, AppliedAdmissionError> {
-        // The intake key governs user bundles only; a non-user bundle reads no
+        // why: The intake key governs user bundles only; a non-user bundle reads no
         // apply under it. The one remaining arm (`ir-only`) always resolves.
         let intake_mode = intake_mode_for_admission(&self.nexus_home, preset_id, loaded)
             .map_err(AppliedAdmissionError::InvalidIntakeConfig)?;
@@ -181,7 +181,7 @@ impl AppliedAdmissionPort for CreatorAppliedDocuments {
                 .await
                 .map_err(|error| AppliedAdmissionError::Store(error.to_string()))?
                 .map_err(|refusal| AppliedAdmissionError::AppliedIdentity {
-                    // The coded pair `ApplyLoadRefusal::into_error` builds: the
+                    // why: The coded pair `ApplyLoadRefusal::into_error` builds: the
                     // stable code plus the sentence naming strategy and apply.
                     code: refusal.reason().to_string(),
                     message: refusal.to_string(),
@@ -203,7 +203,7 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
         resolve_applied_document(&self.pool, &self.nexus_home, preset_id, loaded)
             .await
             .map_err(|error| error.to_string())?
-            // The stable code travels with the message: recovery wraps whatever
+            // why: The stable code travels with the message: recovery wraps whatever
             // arrives here in `reconstruction_unavailable`, so a bare human
             // sentence would lose the `applied_pin_*` family a caller branches on.
             .map_err(|refusal| format!("{}: {refusal}", refusal.reason()))
@@ -215,7 +215,7 @@ mod tests {
     use super::*;
     use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
 
-    /// A pool neither the embedded arm nor the system arm may query. `connect_lazy`
+    /// note: A pool neither the embedded arm nor the system arm may query. `connect_lazy`
     /// builds it without opening a connection, so a stray query fails the test loudly
     /// instead of being answered by an empty database.
     fn unqueried_pool() -> sqlx::SqlitePool {
@@ -228,7 +228,7 @@ mod tests {
         std::path::PathBuf::from("/nonexistent-nexus-home")
     }
 
-    /// An embedded bundle resolves the document it executes, under the compass D10
+    /// note: An embedded bundle resolves the document it executes, under the compass D10
     /// identity — computed from the same constructor admission and recovery use.
     #[tokio::test]
     async fn an_embedded_preset_resolves_the_document_it_runs() {
@@ -262,7 +262,7 @@ mod tests {
         );
     }
 
-    /// A `_system.` directory bundle keeps `Ok(None)`: it executes from its manifest,
+    /// note: A `_system.` directory bundle keeps `Ok(None)`: it executes from its manifest,
     /// never through an applied identity, and the store is never read for it.
     #[tokio::test]
     async fn a_system_bundle_resolves_no_applied_document() {

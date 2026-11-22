@@ -42,6 +42,8 @@
 //! registers no executable module. A caller without the feature cannot reach
 //! this code at all, so "compute-off" is a compile-time absence, not a
 //! runtime check that could be inverted.
+// why: ownership is checked before status and every write shares one transaction, so a foreign run
+// leaks no lifecycle state and no failed accept leaves a partial effect.
 
 #![cfg(feature = "compute")]
 
@@ -83,26 +85,26 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::operation_id::{self, OperationScope};
 
-/// The `action` component of a compute run's durable operation scope (spec
+/// note: The `action` component of a compute run's durable operation scope (spec
 /// §B.1).
 const COMPUTE_RUN_ACTION: &str = "compute.run";
 
-/// The typed §B.3 Busy refusal code for a `running` receipt (spec §C).
+/// note: The typed §B.3 Busy refusal code for a `running` receipt (spec §C).
 const OPERATION_IN_PROGRESS_CODE: &str = "operation_in_progress";
 
-/// Maximum response size (1 MiB) before the proposals payload is truncated.
+/// note: Maximum response size (1 MiB) before the proposals payload is truncated.
 ///
 /// The untruncated output stays durable on the run row, so a truncated
 /// response is a read-path limit, never data loss.
 const RESPONSE_BYTE_CAP: usize = 1024 * 1024;
 
-/// Run-list page size when the caller omits `limit`.
+/// note: Run-list page size when the caller omits `limit`.
 const DEFAULT_RUN_LIST_LIMIT: u32 = 20;
 
-/// Hard cap on the run-list page size.
+/// note: Hard cap on the run-list page size.
 const MAX_RUN_LIST_LIMIT: u32 = 100;
 
-/// The compute operation ids THIS process is executing right now (v1.207 P3
+/// note: The compute operation ids THIS process is executing right now (v1.207 P3
 /// §B.3 live-owner signal), mirroring the Connect lane's `InFlightWrites`.
 ///
 /// §B.3 distinguishes a `running` receipt whose owner is LIVE (the typed Busy
@@ -123,7 +125,7 @@ const MAX_RUN_LIST_LIMIT: u32 = 100;
 static IN_FLIGHT_RUNS: LazyLock<Mutex<HashSet<(PathBuf, String)>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-/// The in-flight claim key for one operation of one receipt store.
+/// note: The in-flight claim key for one operation of one receipt store.
 ///
 /// The store half is canonicalized so two spellings of the same `state.db`
 /// (a relative and an absolute path) still resolve to one store; a path that
@@ -133,13 +135,13 @@ fn in_flight_key(store: &Path, operation_id: &str) -> (PathBuf, String) {
     (store, operation_id.to_string())
 }
 
-/// True when THIS process is running the effect for `operation_id` of the
+/// note: True when THIS process is running the effect for `operation_id` of the
 /// receipt store at `store` now.
 ///
 /// A poisoned lock reports `false`, which degrades to the `uncertain`
 /// refusal — never to a claim of live ownership.
 fn receipt_owner_is_live(store: &Path, operation_id: &str) -> bool {
-    // The key (and its `canonicalize` syscall) is built BEFORE the lock is
+    // why: The key (and its `canonicalize` syscall) is built BEFORE the lock is
     // taken: the registry mutex never spans a filesystem call.
     let key = in_flight_key(store, operation_id);
     IN_FLIGHT_RUNS
@@ -147,7 +149,7 @@ fn receipt_owner_is_live(store: &Path, operation_id: &str) -> bool {
         .is_ok_and(|in_flight| in_flight.contains(&key))
 }
 
-/// RAII registration of an acquired compute operation in the process-local
+/// note: RAII registration of an acquired compute operation in the process-local
 /// in-flight registry.
 ///
 /// Dropping it ends the live-owner claim — on settlement, on an early return,
@@ -163,7 +165,7 @@ struct InFlightComputeGuard {
 }
 
 impl InFlightComputeGuard {
-    /// Mark an acquired operation as running in this process.
+    /// note: Mark an acquired operation as running in this process.
     fn register(store: &Path, operation_id: &str) -> Self {
         let key = in_flight_key(store, operation_id);
         if let Ok(mut in_flight) = IN_FLIGHT_RUNS.lock() {
@@ -181,7 +183,7 @@ impl Drop for InFlightComputeGuard {
     }
 }
 
-/// The daemon-wide compute serialization permit, acquired before every
+/// note: The daemon-wide compute serialization permit, acquired before every
 /// invocation.
 ///
 /// `wasmtime`'s epoch counter is engine-GLOBAL: the first watchdog to fire
@@ -192,7 +194,7 @@ impl Drop for InFlightComputeGuard {
 /// its own.
 pub type ComputeSerializer = Arc<tokio::sync::Semaphore>;
 
-/// The narrow owned inputs a compute operation needs.
+/// note: The narrow owned inputs a compute operation needs.
 ///
 /// Every field is an already-resolved value or a port the core owns — never
 /// a transport state object. This is what replaces the daemon's
@@ -201,25 +203,25 @@ pub type ComputeSerializer = Arc<tokio::sync::Semaphore>;
 /// transport it does not depend on.
 #[derive(Clone)]
 pub struct ComputeContext {
-    /// The Creator owning this operation, already admitted.
+    /// note: The Creator owning this operation, already admitted.
     pub creator_id: String,
-    /// The WASM engine, when the build linked one.
+    /// note: The WASM engine, when the build linked one.
     pub engine: Option<Arc<nexus_wasm_host::WasmEngine>>,
-    /// The compiled module cache.
+    /// note: The compiled module cache.
     pub cache: Option<Arc<nexus_wasm_host::ModuleCache>>,
-    /// Engine-global invocation serializer.
+    /// note: Engine-global invocation serializer.
     pub serializer: ComputeSerializer,
 }
 
 impl ComputeContext {
-    /// The engine, or a typed refusal naming the missing capability.
+    /// note: The engine, or a typed refusal naming the missing capability.
     fn engine(&self) -> CoreResult<Arc<nexus_wasm_host::WasmEngine>> {
         self.engine.clone().ok_or_else(|| CoreError::Internal {
             category: "WASM compute engine is not available".to_string(),
         })
     }
 
-    /// The module cache, or a typed refusal.
+    /// note: The module cache, or a typed refusal.
     fn cache(&self) -> CoreResult<Arc<nexus_wasm_host::ModuleCache>> {
         self.cache.clone().ok_or_else(|| CoreError::Internal {
             category: "WASM module cache is not available".to_string(),
@@ -227,7 +229,7 @@ impl ComputeContext {
     }
 }
 
-/// List installed compute modules.
+/// note: List installed compute modules.
 ///
 /// Reads the compiled-in module registry, so it requires no pool and no
 /// owner: a module listing is machine capability, not domain state. The
@@ -241,7 +243,7 @@ pub fn list_compute_modules() -> CoreResult<Vec<ModuleSummary>> {
     Ok(nexus_wasm_host::list_modules())
 }
 
-/// Read one module's manifest detail.
+/// note: Read one module's manifest detail.
 ///
 /// # Errors
 /// `NotFound` when no module with `module_id` is installed; `Internal` when
@@ -258,7 +260,7 @@ pub fn get_compute_module(module_id: &str) -> CoreResult<ModuleDetail> {
     }
 }
 
-/// Invoke a compute module against a World.
+/// note: Invoke a compute module against a World.
 ///
 /// Ownership is checked before the module is resolved, so a foreign World is
 /// refused without disclosing whether the named module exists.
@@ -267,7 +269,7 @@ pub fn get_compute_module(module_id: &str) -> CoreResult<ModuleDetail> {
 /// `Forbidden` for a World the creator does not own, `NotFound` for an
 /// unknown module, `Preset`-style coded refusals for sandbox limits and
 /// invalid input, `Internal` for storage faults.
-#[allow(clippy::too_many_lines)] // one linear domain operation
+#[allow(clippy::too_many_lines)] // why: one linear domain operation
 pub async fn compute_run(
     core: &CoreService,
     context: &ComputeContext,
@@ -278,7 +280,7 @@ pub async fn compute_run(
 
     ensure_world_owned(pool, creator_id, &request.world_id).await?;
 
-    // v1.207 P3 (§B.1): a caller that supplies an `operation_id` owns its replay
+    // why: v1.207 P3 (§B.1): a caller that supplies an `operation_id` owns its replay
     // identity. Resolve it and ask the receipt store FIRST (§B.3 step 2) —
     // before any run row exists and before the effect runs — so a retry after a
     // lost response is answered from the stored receipt instead of executing the
@@ -308,14 +310,14 @@ pub async fn compute_run(
     let module_version = cached.manifest.version.clone();
     let manifest = cached.manifest.clone();
 
-    // Resolve the run's branch BEFORE assembling input so the module observes
+    // why: Resolve the run's branch BEFORE assembling input so the module observes
     // exactly the position snapshotted onto the run row.
     let (branch_id, timeline_head_event_id) =
         resolve_run_branch(pool, &request.world_id, request.branch_id.as_deref()).await?;
 
     let invocation_params = request.invocation_params.clone();
     let invocation_params_str = serde_json::to_string(&invocation_params).ok();
-    // The module input is a model-facing payload, so it reads through the
+    // why: The module input is a model-facing payload, so it reads through the
     // admitted Creator ActorView — never a management review (durable §4.1/§4.2).
     // A Creator whose holder registry row is missing refuses here instead of
     // falling back to a World-wide read.
@@ -351,7 +353,7 @@ pub async fn compute_run(
     .await
     .map_err(crate::error::local_db_err)?;
 
-    // v1.207 P3 (§B.2/§B.3): the run's durable receipt shadows the
+    // why: v1.207 P3 (§B.2/§B.3): the run's durable receipt shadows the
     // `compute_sessions` transitions. §B.3 step 3 — the `running` receipt is
     // written BEFORE the effect (WASM execution + outcome persistence), so a
     // crash mid-run leaves a durable "the effect may have started" record
@@ -376,7 +378,7 @@ pub async fn compute_run(
     };
     let operation_id = identity.operation_id;
     let request_fingerprint = identity.request_fingerprint;
-    // The receipt-begin rendezvous seam (tests only; compiled out of production
+    // why: The receipt-begin rendezvous seam (tests only; compiled out of production
     // builds). It lets a test force both same-id callers past their run-row
     // insert and the receipt pre-check before either reaches `begin_operation`,
     // so the post-insert first-writer-wins conflict is deterministic.
@@ -392,7 +394,7 @@ pub async fn compute_run(
     .await
     {
         Ok(outcome) => outcome,
-        // A concurrent first use under the same id with DIFFERENT args won the
+        // why: A concurrent first use under the same id with DIFFERENT args won the
         // receipt. Our freshly created run row never executed the module: settle
         // it (never the winner's receipt) so it is not left `running` forever —
         // an orphan only boot recovery would flag and Clear would never reach —
@@ -421,7 +423,7 @@ pub async fn compute_run(
     };
     match begin_outcome {
         BeginOutcome::Acquired(_) => {}
-        // Unreachable for a freshly generated run id (the receipt's subject is
+        // why: Unreachable for a freshly generated run id (the receipt's subject is
         // the id itself). A caller-supplied id can lose a concurrent first-use
         // race here: settle our duplicate run row (never the owned receipt) and
         // answer from the receipt instead of running the effect twice.
@@ -444,12 +446,12 @@ pub async fn compute_run(
         }
     }
 
-    // §B.3 live-owner signal (v1.207 P3 wave 4): from here until the guard
+    // why: §B.3 live-owner signal (v1.207 P3 wave 4): from here until the guard
     // drops, THIS process owns the effect for `operation_id` in THIS receipt
     // store, so a concurrent or retried call is answered with the typed Busy
     // refusal instead of `uncertain`.
     let _in_flight = InFlightComputeGuard::register(&core.inner.db_path, &operation_id);
-    // The live-owner rendezvous seam (tests only; compiled out of production
+    // why: The live-owner rendezvous seam (tests only; compiled out of production
     // builds): the registered owner parks here so a test can issue a retry
     // against a KNOWN live owner deterministically.
     #[cfg(any(test, feature = "test-hooks"))]
@@ -469,7 +471,7 @@ pub async fn compute_run(
     let manifest_task = cached.manifest.clone();
     let input_task = compute_input.clone();
 
-    // `engine.compute` is CPU-bound for up to the wall-time budget: run it on
+    // why: `engine.compute` is CPU-bound for up to the wall-time budget: run it on
     // the blocking pool, never inline on an async worker (a long run would
     // stall the whole runtime).
     let compute_result = match tokio::task::spawn_blocking(move || {
@@ -480,7 +482,7 @@ pub async fn compute_run(
     {
         Ok(result) => result,
         Err(join_err) => {
-            // The blocking task panicked. Best-effort compensating persist so
+            // why: The blocking task panicked. Best-effort compensating persist so
             // the row is not stuck in 'running' forever; retries on the same
             // run_id are forbidden by the status guard.
             persist_failure(
@@ -502,12 +504,12 @@ pub async fn compute_run(
     let output = match compute_result {
         Ok(output) => output,
         Err(nexus_wasm_host::ComputeError::InputValidationFailed(entries)) => {
-            // Manifest validation failures are a CLIENT-input problem, not an
+            // why: Manifest validation failures are a CLIENT-input problem, not an
             // internal fault. The run still fails (row persisted Failed) and
             // the refusal stays an honest coded error with per-entry detail —
             // invalid entries are never silently skipped.
             let entries_value = serde_json::to_value(&entries).unwrap_or_else(|_| json!([]));
-            // The persisted row and the response carry the SAME structured
+            // why: The persisted row and the response carry the SAME structured
             // detail by construction, so `GET /runs/{id}` and the refusal
             // agree on `details.invalid_entries`.
             let details = json!({ "invalid_entries": entries_value });
@@ -536,7 +538,7 @@ pub async fn compute_run(
                 json!({ "code": error_code, "message": err.to_string() }),
             )
             .await;
-            // Sandbox limits are an input/budget refusal; everything else is
+            // why: Sandbox limits are an input/budget refusal; everything else is
             // an internal fault. The code is preserved so the transport can
             // render the retained 422 body verbatim.
             if error_code == "internal" {
@@ -552,7 +554,7 @@ pub async fn compute_run(
         category: format!("serialize compute output: {e}"),
     })?;
     if let Err(db_err) = compute_runs::set_run_succeeded(pool, &run_id, &proposals_json).await {
-        // Compensating failure persist so the row is not stuck in 'running'
+        // why: Compensating failure persist so the row is not stuck in 'running'
         // forever (it can never be accepted, and retries on the same run_id
         // are forbidden by the status guard).
         persist_failure(
@@ -578,7 +580,7 @@ pub async fn compute_run(
         &proposals_raw,
     )?;
 
-    // §B.3: settle the receipt terminally with the EXACT answer the caller got.
+    // why: §B.3: settle the receipt terminally with the EXACT answer the caller got.
     // The receipt is the durable replay answer that OUTLIVES the run row — Clear
     // history can delete `compute_sessions`, so a replay must never depend on it
     // (and never fall back to re-running). Storing the answer also makes a
@@ -603,7 +605,7 @@ pub async fn compute_run(
     Ok(response)
 }
 
-/// Accept a succeeded run's proposals: apply them ATOMICALLY.
+/// note: Accept a succeeded run's proposals: apply them ATOMICALLY.
 ///
 /// The ownership gate runs FIRST — before the status pre-check — so a foreign
 /// run never leaks lifecycle state (refused as ownership, not as status).
@@ -628,7 +630,7 @@ pub async fn compute_run(
 /// opacity — the two close with the same shape), a coded conflict when the
 /// run is already `applied` or `discarded`, `InvalidInput` for a non-`succeeded`
 /// run or an unknown event id, `Internal` for storage faults.
-#[allow(clippy::too_many_lines)] // one linear domain operation
+#[allow(clippy::too_many_lines)] // why: one linear domain operation
 pub async fn accept_compute_run(
     core: &CoreService,
     principal: &Principal,
@@ -666,7 +668,7 @@ pub async fn accept_compute_run(
             category: format!("parse run proposals: {e}"),
         })?;
 
-    // Accept appends to the branch SNAPSHOTTED at run time, not the current
+    // why: Accept appends to the branch SNAPSHOTTED at run time, not the current
     // fork head — the fork may have moved between run and accept. Pre-fix
     // rows carry a NULL `branch_id`; fall back to the legacy constant to
     // preserve their behavior exactly.
@@ -687,7 +689,7 @@ pub async fn accept_compute_run(
 
     let accepted_at = chrono::Utc::now().to_rfc3339();
 
-    // Every delta target must resolve inside the run's world — a foreign
+    // why: Every delta target must resolve inside the run's world — a foreign
     // target rejects the whole accept (full rollback on drop).
     let state_delta_count = nexus_capability::state_delta::apply_state_delta_in_tx(
         &mut tx,
@@ -723,7 +725,7 @@ pub async fn accept_compute_run(
         {
             continue;
         }
-        // Canon (not provisional): an accepted Run is author-committed world
+        // why: Canon (not provisional): an accepted Run is author-committed world
         // truth. Discard/failed paths never reach this write.
         let affected_json = if evt.affected_key_block_ids.is_empty() {
             None
@@ -745,7 +747,7 @@ pub async fn accept_compute_run(
             evt.summary.as_deref(),
             &provenance,
             affected_json.as_deref(),
-            // modules_json: compute proposals do not carry `modules` on the
+            // why: modules_json: compute proposals do not carry `modules` on the
             // domain wire; the persistence plumbing exists for future writers.
             None,
         )
@@ -756,7 +758,7 @@ pub async fn accept_compute_run(
         timeline_event_ids.push(result.event_id);
     }
 
-    // The CAS: `WHERE status = 'succeeded'` means a concurrent accept updates
+    // why: The CAS: `WHERE status = 'succeeded'` means a concurrent accept updates
     // zero rows, and the error rolls the whole transaction back.
     compute_runs::set_run_applied_in_tx(&mut tx, run_id, &accepted_at)
         .await
@@ -786,7 +788,7 @@ pub async fn accept_compute_run(
     })
 }
 
-/// Discard a succeeded run's proposals.
+/// note: Discard a succeeded run's proposals.
 ///
 /// No domain effect: the proposals are dropped and the row flips to
 /// `discarded`. The World is left exactly as it was.
@@ -803,7 +805,7 @@ pub async fn discard_compute_run(
     let pool = &core.inner.pool;
     let creator_id = principal.creator_id();
 
-    // Existence-opacity gate: an unknown id and a foreign-World run refuse
+    // why: Existence-opacity gate: an unknown id and a foreign-World run refuse
     // identically here (QC F-001 keeps the typed distinction internal).
     visible_run_or_hidden(run_visibility(pool, creator_id, run_id).await?, run_id)?;
 
@@ -819,7 +821,7 @@ pub async fn discard_compute_run(
     Ok(())
 }
 
-/// Clear a World's TERMINAL run history, returning how many rows went (C8).
+/// note: Clear a World's TERMINAL run history, returning how many rows went (C8).
 ///
 /// Clear is World-scoped, never a world-wide purge: `query.world_id` is
 /// required by the generated query, and ownership is verified BEFORE any row
@@ -860,7 +862,7 @@ pub async fn clear_compute_runs(
         .await
         .map_err(crate::error::local_db_err)?;
 
-    // The wire field is `i64` (the generated schema's integer) while SQLite
+    // why: The wire field is `i64` (the generated schema's integer) while SQLite
     // reports a `u64`. A row count is bounded by the table, so the conversion
     // is total in practice; refuse rather than truncate if it ever is not.
     let deleted = i64::try_from(deleted).map_err(|_| CoreError::Internal {
@@ -870,7 +872,7 @@ pub async fn clear_compute_runs(
     Ok(ClearRunsResponse { deleted })
 }
 
-/// List runs for the creator's owned Worlds, cursor-paginated.
+/// note: List runs for the creator's owned Worlds, cursor-paginated.
 ///
 /// The query is the generated `list-runs-query` DTO, so the native/service
 /// boundary and this authority agree on one query shape instead of two
@@ -896,7 +898,7 @@ pub async fn list_compute_runs(
 
     let owned_worlds = list_owned_world_ids(pool, creator_id).await?;
 
-    // The wire carries an unbounded integer while the durable reader takes a
+    // why: The wire carries an unbounded integer while the durable reader takes a
     // `u32`. A negative value is a client-input fault and is refused rather
     // than coerced into a page size the caller never asked for.
     let requested = limit.unwrap_or_else(|| i64::from(DEFAULT_RUN_LIST_LIMIT));
@@ -912,7 +914,7 @@ pub async fn list_compute_runs(
     let filters = RunListFilters {
         world_id,
         module_id,
-        // The generated status enum renders its exact wire spelling, which is
+        // why: The generated status enum renders its exact wire spelling, which is
         // the durable column's vocabulary.
         status: status.map(|status| status.to_string()),
         creator_world_ids: Some(owned_worlds),
@@ -934,7 +936,7 @@ pub async fn list_compute_runs(
                 "succeeded" => NexusRunSummaryStatus::Succeeded,
                 "applied" => NexusRunSummaryStatus::Applied,
                 "discarded" => NexusRunSummaryStatus::Discarded,
-                // "failed" and anything else.
+                // why: "failed" and anything else.
                 _ => NexusRunSummaryStatus::Failed,
             },
             created_at: parse_rfc3339(&r.created_at),
@@ -950,7 +952,7 @@ pub async fn list_compute_runs(
     })
 }
 
-/// Read one run's detail, including its proposals and error.
+/// note: Read one run's detail, including its proposals and error.
 ///
 /// # Errors
 /// `NotFound` for an unknown run or a run of a foreign World (existence
@@ -986,11 +988,9 @@ pub async fn get_compute_run(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Generated-DTO facade on the execution owner
-// ---------------------------------------------------------------------------
+// note: Generated-DTO facade on the execution owner
 
-/// The Compute operation surface the native/service boundary drives.
+/// note: The Compute operation surface the native/service boundary drives.
 ///
 /// Each method is a typed entry point over the authority functions above: the
 /// owner fence and the principal binding are applied EXACTLY as the
@@ -1003,7 +1003,7 @@ pub async fn get_compute_run(
 /// `compute_run` and `accept_compute_run` already exist in `handle_ops` with
 /// the retained signatures (current-host-contracts §5) and are not duplicated.
 impl ExecutionHandle {
-    /// List the installed compute modules (C1).
+    /// note: List the installed compute modules (C1).
     ///
     /// The registry is compiled in, so the list is machine capability rather
     /// than domain state: there is no per-creator filter. The principal is
@@ -1020,14 +1020,14 @@ impl ExecutionHandle {
             .into_iter()
             .map(module_summary_row)
             .collect();
-        // The registry is compiled in and complete: there is no page 2.
+        // why: The registry is compiled in and complete: there is no page 2.
         Ok(ListModulesResponse {
             items,
             has_more: false,
         })
     }
 
-    /// Read one installed module's manifest detail — the invocation schema Run
+    /// note: Read one installed module's manifest detail — the invocation schema Run
     /// Studio renders (C2).
     ///
     /// # Errors
@@ -1044,7 +1044,7 @@ impl ExecutionHandle {
         crate::owner::compute::get_compute_module(module_id)
     }
 
-    /// Read one run's detail: its proposals, or the recorded failure (C4).
+    /// note: Read one run's detail: its proposals, or the recorded failure (C4).
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down; `AuthRequired` when the
@@ -1063,7 +1063,7 @@ impl ExecutionHandle {
         crate::owner::compute::get_compute_run(core.as_ref(), principal, &run_id).await
     }
 
-    /// List the principal creator's runs, cursor-paginated (C5).
+    /// note: List the principal creator's runs, cursor-paginated (C5).
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down; `AuthRequired` when the
@@ -1080,7 +1080,7 @@ impl ExecutionHandle {
         crate::owner::compute::list_compute_runs(core.as_ref(), principal, query).await
     }
 
-    /// Discard a succeeded run's proposals; the World is left untouched (C7).
+    /// note: Discard a succeeded run's proposals; the World is left untouched (C7).
     ///
     /// # Errors
     /// `Closing` when the owner is shutting down; `AuthRequired` when the
@@ -1103,7 +1103,7 @@ impl ExecutionHandle {
         })
     }
 
-    /// Clear the creator's TERMINAL run history for ONE owned World (C8),
+    /// note: Clear the creator's TERMINAL run history for ONE owned World (C8),
     /// returning the generated `{deleted}` count.
     ///
     /// # Errors
@@ -1123,11 +1123,9 @@ impl ExecutionHandle {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
+// note: Internals
 
-/// Convert one registry summary into a list-response row.
+/// note: Convert one registry summary into a list-response row.
 ///
 /// `list-modules-response.schema.json` references the summary shape, which
 /// codegen inlines into a second generated struct. The two are structurally
@@ -1149,7 +1147,7 @@ fn module_summary_row(summary: ModuleSummary) -> NexusComputeModuleSummary {
     }
 }
 
-/// A coded refusal: the transport renders the retained lowercase wire code.
+/// note: A coded refusal: the transport renders the retained lowercase wire code.
 ///
 /// The retained compute codes (`invalid_state`, `compute_fuel_exhausted`, …)
 /// and the already-accepted/discarded conflict all promise a specific
@@ -1162,12 +1160,12 @@ fn coded_refusal(code: &str, message: impl Into<String>) -> CoreError {
     }
 }
 
-/// A coded 409-class conflict (an already-applied/discarded run).
+/// note: A coded 409-class conflict (an already-applied/discarded run).
 fn coded_conflict(message: impl Into<String>) -> CoreError {
     coded_refusal("conflict", message)
 }
 
-/// Refuse unless `creator_id` owns `world_id`.
+/// note: Refuse unless `creator_id` owns `world_id`.
 ///
 /// Runs BEFORE any status or existence check on a run, so a foreign run never
 /// leaks lifecycle state.
@@ -1188,7 +1186,7 @@ async fn ensure_world_owned(
     }
 }
 
-/// The single not-found shape for a run the caller may not see (V1.206 P2
+/// note: The single not-found shape for a run the caller may not see (V1.206 P2
 /// site 4; compass D4 existence opacity).
 ///
 /// An unknown run id and a run belonging to a foreign World close with this
@@ -1202,7 +1200,7 @@ fn run_not_found(run_id: &str) -> CoreError {
     }
 }
 
-/// Internal typed visibility of a run id for the calling creator (V1.206 P2
+/// note: Internal typed visibility of a run id for the calling creator (V1.206 P2
 /// site 4).
 ///
 /// The existence-opacity contract (`.agents/knowledge/api-design/resource-refusal-opacity.md`)
@@ -1212,15 +1210,15 @@ fn run_not_found(run_id: &str) -> CoreError {
 /// of the run-ID routes, pinned by the in-module unit tests below.
 #[derive(Debug)]
 pub(crate) enum RunVisibility {
-    /// The row exists and its World is owned by the caller.
+    /// note: The row exists and its World is owned by the caller.
     Visible(Box<compute_runs::ComputeRunRow>),
-    /// No row exists with this id.
+    /// note: No row exists with this id.
     Absent,
-    /// The row exists, but its World belongs to another creator.
+    /// note: The row exists, but its World belongs to another creator.
     ForeignDenied,
 }
 
-/// Classify a run id for `creator_id` on the run-ID routes (`accept` /
+/// note: Classify a run id for `creator_id` on the run-ID routes (`accept` /
 /// `discard` / detail).
 ///
 /// Performs the row lookup and the World-ownership check, keeping the typed
@@ -1252,7 +1250,7 @@ pub(crate) async fn run_visibility(
     }
 }
 
-/// Outward rendering of [`RunVisibility`] on the run-ID routes.
+/// note: Outward rendering of [`RunVisibility`] on the run-ID routes.
 ///
 /// Existence opacity: `Absent` and `ForeignDenied` collapse into the same
 /// [`run_not_found`] shape (an unknown id and a foreign id must be
@@ -1269,7 +1267,7 @@ fn visible_run_or_hidden(
     }
 }
 
-/// Resolve the effective run branch and its timeline head.
+/// note: Resolve the effective run branch and its timeline head.
 ///
 /// - absent → the World root branch, whose head is the World's
 ///   `current_timeline_head_id`;
@@ -1320,7 +1318,7 @@ async fn resolve_run_branch(
             })?;
             match branch_head {
                 Some(Some(head)) => Ok((req.to_string(), Some(head))),
-                // `Some(None)` / `None`: no event on that branch in this
+                // why: `Some(None)` / `None`: no event on that branch in this
                 // world, so the branch is unknown here.
                 Some(None) | None => Err(coded_refusal(
                     "invalid_input",
@@ -1331,7 +1329,7 @@ async fn resolve_run_branch(
     }
 }
 
-/// The World ids `creator_id` owns.
+/// note: The World ids `creator_id` owns.
 async fn list_owned_world_ids(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -1348,7 +1346,7 @@ async fn list_owned_world_ids(
     Ok(rows)
 }
 
-/// Resolve `evt_<index>` ids to proposal indices, or `None` for "accept all".
+/// note: Resolve `evt_<index>` ids to proposal indices, or `None` for "accept all".
 ///
 /// An unknown id refuses the whole accept BEFORE any write.
 fn select_event_indices(
@@ -1386,7 +1384,7 @@ fn select_event_indices(
     }
 }
 
-/// Best-effort compensating failure persist.
+/// note: Best-effort compensating failure persist.
 ///
 /// A failure here is logged, never propagated: the caller is already
 /// returning the ORIGINAL error, and replacing it with a storage error would
@@ -1407,7 +1405,7 @@ async fn persist_failure(pool: &sqlx::SqlitePool, operation_id: &str, run_id: &s
             error = %db_err,
             "compensating set_run_failed also failed"
         );
-        // The row did not flip, so the run's outcome is not durable: leave the
+        // why: The row did not flip, so the run's outcome is not durable: leave the
         // receipt `running`. Recovery classifies it as ambiguous and never
         // re-applies — the honest answer, not a fabricated `failed`.
         return;
@@ -1422,7 +1420,7 @@ async fn persist_failure(pool: &sqlx::SqlitePool, operation_id: &str, run_id: &s
     }
 }
 
-/// The typed effect-committed refusal (spec §B.3 item 4): the run's effect
+/// note: The typed effect-committed refusal (spec §B.3 item 4): the run's effect
 /// already committed but its required durable receipt did not land.
 ///
 /// Modelled on the provider-port precedent
@@ -1445,23 +1443,23 @@ fn effect_committed_refusal(
     }
 }
 
-/// One direct-lane compute run that was stuck `running` at boot, and the
+/// note: One direct-lane compute run that was stuck `running` at boot, and the
 /// receipt-first answer recovery decided for it.
 #[derive(Debug, Clone)]
 pub struct ComputeRunRecovery {
-    /// The stuck run row's id.
+    /// note: The stuck run row's id.
     pub run_id: String,
-    /// The receipt's operation id, when a receipt exists for the run.
+    /// note: The receipt's operation id, when a receipt exists for the run.
     pub operation_id: Option<String>,
-    /// The §B.3 decision. Deliberately a report: recovery never re-applies
+    /// note: The §B.3 decision. Deliberately a report: recovery never re-applies
     /// and never fabricates a terminal for an orphan.
     pub outcome: ComputeRunRecoveryOutcome,
 }
 
-/// The receipt-first decision for a stuck compute run (§B.3 steps 2–4).
+/// note: The receipt-first decision for a stuck compute run (§B.3 steps 2–4).
 #[derive(Debug, Clone)]
 pub enum ComputeRunRecoveryOutcome {
-    /// A terminal receipt exists: the replay is answered **from the
+    /// note: A terminal receipt exists: the replay is answered **from the
     /// receipt** (§B.3 step 3) and the run is **not** re-applied.
     ///
     /// The complete stored receipt travels here — status, the exactly-one
@@ -1470,15 +1468,15 @@ pub enum ComputeRunRecoveryOutcome {
     /// the timestamps — so a caller inspecting the startup recovery can serve
     /// the terminal answer without re-deriving or re-applying anything.
     AnsweredFromReceipt {
-        /// The stored terminal receipt, projected onto the wire DTO.
+        /// note: The stored terminal receipt, projected onto the wire DTO.
         receipt: CoreOperationReceipt,
     },
-    /// No terminal receipt: the §B.3 item-4 typed refusal — never a blind
+    /// note: No terminal receipt: the §B.3 item-4 typed refusal — never a blind
     /// retry, and no terminal is fabricated for the orphaned run.
     Uncertain(CoreError),
 }
 
-/// The §B.3 boot recovery entry point for direct-lane compute runs.
+/// note: The §B.3 boot recovery entry point for direct-lane compute runs.
 ///
 /// Called once at execution start (before any effect can run), it finds every
 /// direct-lane row still in `running` and asks the receipt store **first** —
@@ -1517,11 +1515,11 @@ pub async fn recover_stuck_compute_runs(
             .await
             .map_err(crate::error::local_db_err)?;
         let operation_id = receipt.as_ref().map(|row| row.operation_id.clone());
-        // At boot no run owner can still be live, so a `running` receipt is
+        // why: At boot no run owner can still be live, so a `running` receipt is
         // an orphan by definition.
         let outcome = match classify_recovery(receipt.as_ref(), false) {
             RecoveryDecision::AnswerFromReceipt(terminal) => {
-                // The replay is answered FROM the receipt (§B.3 step 3): the
+                // why: The replay is answered FROM the receipt (§B.3 step 3): the
                 // complete stored terminal receipt travels out with the
                 // decision, so the caller never has to re-derive or re-apply.
                 ComputeRunRecoveryOutcome::AnsweredFromReceipt {
@@ -1550,7 +1548,7 @@ pub async fn recover_stuck_compute_runs(
     Ok(recovered)
 }
 
-/// Map a sandbox error onto its retained lowercase wire code.
+/// note: Map a sandbox error onto its retained lowercase wire code.
 const fn compute_error_code(e: &nexus_wasm_host::ComputeError) -> &'static str {
     use nexus_wasm_host::ComputeError;
     match e {
@@ -1559,7 +1557,7 @@ const fn compute_error_code(e: &nexus_wasm_host::ComputeError) -> &'static str {
         ComputeError::MemoryCapExceeded => "compute_memory_cap_exceeded",
         ComputeError::Trap { .. } => "compute_module_trapped",
         ComputeError::ModuleComputeFailed { .. } => "compute_module_error",
-        // Manifest-schema validation failures are input problems, not internal
+        // why: Manifest-schema validation failures are input problems, not internal
         // faults. The aggregated per-entry form is handled with full detail in
         // `compute_run`; the single-aspect form falls through here.
         ComputeError::ManifestValidationFailed { .. } | ComputeError::InputValidationFailed(_) => {
@@ -1569,7 +1567,7 @@ const fn compute_error_code(e: &nexus_wasm_host::ComputeError) -> &'static str {
     }
 }
 
-/// Map an input-builder failure onto the core taxonomy.
+/// note: Map an input-builder failure onto the core taxonomy.
 fn map_build_error(e: nexus_capability::compute_input_builder::ComputeBuildError) -> CoreError {
     use nexus_capability::compute_input_builder::ComputeBuildError;
     match e {
@@ -1587,7 +1585,7 @@ fn map_build_error(e: nexus_capability::compute_input_builder::ComputeBuildError
     }
 }
 
-/// Map a state-delta application failure onto the core taxonomy.
+/// note: Map a state-delta application failure onto the core taxonomy.
 fn map_delta_error(e: nexus_capability::CapabilityError) -> CoreError {
     use nexus_capability::CapabilityError;
     match e {
@@ -1598,7 +1596,7 @@ fn map_delta_error(e: nexus_capability::CapabilityError) -> CoreError {
     }
 }
 
-/// Create new key blocks inside the accept transaction.
+/// note: Create new key blocks inside the accept transaction.
 ///
 /// The lane is World-owned only: a block naming another world (or carrying a
 /// non-World owner) refuses the whole accept.
@@ -1622,7 +1620,7 @@ async fn create_key_blocks_in_tx(
             category: format!("decode new_key_block owner: {e}"),
         })?;
 
-        // World-scoped insert lane: reject any non-World owner.
+        // why: World-scoped insert lane: reject any non-World owner.
         if kb.world_id() != Some(world_id) {
             return Err(coded_refusal(
                 "invalid_input",
@@ -1634,7 +1632,7 @@ async fn create_key_blocks_in_tx(
             ));
         }
 
-        // The store primitive keeps the insert inside the caller's accept
+        // why: The store primitive keeps the insert inside the caller's accept
         // transaction and populates `extensions_nexus_json` with the World
         // owner carrier. The settlement lane carries no governance: a proposal
         // may name a wire `owner`/`disclosure`, but the record is normalised
@@ -1651,7 +1649,7 @@ async fn create_key_blocks_in_tx(
             .insert_key_block_in_tx(&mut *tx, kb)
             .await
             .map_err(|e| match e {
-                // A refused record is a caller-input fault, not a storage
+                // why: A refused record is a caller-input fault, not a storage
                 // fault: keep the coded `invalid_input` taxonomy the raw lane
                 // surfaced.
                 nexus_knowledge::world_kb::KbStoreError::Validation(_)
@@ -1669,7 +1667,7 @@ async fn create_key_blocks_in_tx(
     Ok(created)
 }
 
-/// Build the truncated proposals payload for an over-budget response.
+/// note: Build the truncated proposals payload for an over-budget response.
 fn build_truncated_proposals() -> Value {
     json!({
         "schema_version": 1,
@@ -1686,7 +1684,7 @@ fn build_truncated_proposals() -> Value {
     })
 }
 
-/// The `args` of a caller-supplied-identity scope: the request without its
+/// note: The `args` of a caller-supplied-identity scope: the request without its
 /// `operation_id` envelope field.
 ///
 /// The id is envelope metadata, not part of the logical request, so it is
@@ -1700,7 +1698,7 @@ fn args_without_operation_id(request_value: &Value) -> Value {
     value
 }
 
-/// Resolve the durable identity of a caller-supplied `operation_id` (spec §B.1).
+/// note: Resolve the durable identity of a caller-supplied `operation_id` (spec §B.1).
 ///
 /// The id is used verbatim after wire-shape validation — nothing is derived.
 /// The scope is retry-stable: `session` is the id itself (no run id exists yet,
@@ -1724,7 +1722,7 @@ fn supplied_operation_identity(
     })
 }
 
-/// Ask the receipt store FIRST for a caller-supplied id (spec §B.3 steps 1–3).
+/// note: Ask the receipt store FIRST for a caller-supplied id (spec §B.3 steps 1–3).
 ///
 /// `store` is the receipt store's identity (`CoreInner::db_path`), used to read
 /// the live-owner signal for THIS store's in-flight runs — a neighbouring
@@ -1759,7 +1757,7 @@ async fn replay_from_receipt(
     )?))
 }
 
-/// The §B.3 answer for a receipt that already owns an operation id.
+/// note: The §B.3 answer for a receipt that already owns an operation id.
 ///
 /// `owner_is_live` is the caller's ACTUAL ownership knowledge (see
 /// [`receipt_owner_is_live`]), never an assumption: a `running` receipt THIS
@@ -1778,7 +1776,7 @@ fn answer_from_receipt(receipt: &OperationReceipt, owner_is_live: bool) -> CoreR
             &receipt.operation_id,
             "its receipt is still `running` and its owner cannot be confirmed",
         )),
-        // `classify_recovery` never yields `ApplyOnce` for a present receipt;
+        // why: `classify_recovery` never yields `ApplyOnce` for a present receipt;
         // refusing honestly beats a panic if that invariant ever changes.
         RecoveryDecision::ApplyOnce => Err(CoreError::Internal {
             category: "operation receipt classification returned ApplyOnce for a stored receipt"
@@ -1787,7 +1785,7 @@ fn answer_from_receipt(receipt: &OperationReceipt, owner_is_live: bool) -> CoreR
     }
 }
 
-/// Rebuild the replay answer from a TERMINAL receipt (§B.3 step 3).
+/// note: Rebuild the replay answer from a TERMINAL receipt (§B.3 step 3).
 ///
 /// A `finished` receipt stores the exact `RunResponse` the first call returned,
 /// so the answer is reconstructable from the RECEIPT ALONE for its whole
@@ -1815,7 +1813,7 @@ fn answer_from_terminal_receipt(receipt: &OperationReceipt) -> CoreResult<RunRes
     })
 }
 
-/// Render a terminal non-`finished` receipt as the refusal the first call
+/// note: Render a terminal non-`finished` receipt as the refusal the first call
 /// produced: the stored `code`/`message` (and structured detail), never a
 /// fabricated success.
 ///
@@ -1865,7 +1863,7 @@ fn replayed_failure_refusal(receipt: &OperationReceipt) -> CoreError {
     }
 }
 
-/// The typed §B.3 Busy refusal for a `running` receipt (spec §C).
+/// note: The typed §B.3 Busy refusal for a `running` receipt (spec §C).
 fn operation_in_progress_refusal(operation_id: &str) -> CoreError {
     CoreError::Coded {
         code: OPERATION_IN_PROGRESS_CODE.to_string(),
@@ -1876,7 +1874,7 @@ fn operation_in_progress_refusal(operation_id: &str) -> CoreError {
     }
 }
 
-/// Assemble the run response from the durable run facts and the module output,
+/// note: Assemble the run response from the durable run facts and the module output,
 /// applying the 1 MiB response cap (the full output stays durable on the row).
 ///
 /// Shared by the first-run path and a receipt replay, so a replay returns the
@@ -1900,7 +1898,7 @@ fn build_run_response(
         category: format!("build run response: {err}"),
     })?;
 
-    // Response cap: when the full payload is over budget, truncate all four
+    // why: Response cap: when the full payload is over budget, truncate all four
     // proposal parts. The untruncated output remains durable on the row.
     if serde_json::to_vec(&response).unwrap_or_default().len() > RESPONSE_BYTE_CAP {
         return serde_json::from_value(json!({
@@ -1920,7 +1918,7 @@ fn build_run_response(
     Ok(response)
 }
 
-/// Parse an RFC 3339 timestamp, falling back to the Unix epoch.
+/// note: Parse an RFC 3339 timestamp, falling back to the Unix epoch.
 fn parse_rfc3339(raw: &str) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::parse_from_rfc3339(raw)
         .unwrap_or_else(|_| chrono::DateTime::UNIX_EPOCH.into())
@@ -1933,12 +1931,14 @@ mod tests {
     //! site 4). [`RunVisibility`] is crate-private by design (it must not carry
     //! a SQL pool onto the public surface), so the three-way distinction is
     //! asserted here rather than from an integration test.
+    // why: `RunVisibility` is crate-private so it cannot carry a pool onto the public surface,
+    // which is why the three-way distinction is pinned in-module.
     use super::*;
 
     const CALLER: &str = "ctr_caller";
     const OTHER: &str = "ctr_other";
 
-    /// A migrated workspace DB held under the engine writer lease — writes are
+    /// note: A migrated workspace DB held under the engine writer lease — writes are
     /// fenced to the admitted writer, so the guard must stay alive for the
     /// whole test.
     async fn engine_pool() -> (nexus_local_db::GuardedPool, tempfile::TempDir) {
@@ -1968,7 +1968,7 @@ mod tests {
         .expect("seed world");
     }
 
-    /// QC F-001: the opacity collapse is an outward rendering only — the core
+    /// note: QC F-001: the opacity collapse is an outward rendering only — the core
     /// must still tell an absent id, a foreign-World row and an owned row
     /// apart internally.
     #[tokio::test]
