@@ -1,4 +1,5 @@
 //! Sync Command Types
+// note: module-level documentation for the items below.
 //!
 //! Domain-level command variants built on top of the generated `SyncCommand` type.
 //! These commands represent user-initiated operations that produce deltas for bundles.
@@ -10,45 +11,45 @@ use std::str::FromStr;
 
 use crate::errors::{SyncError, SyncResult};
 
-/// Extended command types for sync operations.
+/// note: Extended command types for sync operations.
 ///
 /// These wrap the generated `SyncCommand` with domain-specific command variants
 /// that map to specific delta operations in bundles.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncCommandVariant {
-    /// Advance world state with new deltas.
+    /// note: Advance world state with new deltas.
     AdvanceWorld {
         world_id: String,
         creator_id: String,
     },
-    /// Inject a future event into the world timeline.
+    /// note: Inject a future event into the world timeline.
     InjectFutureEvent {
         world_id: String,
         creator_id: String,
     },
-    /// Extract knowledge base summary from world state.
+    /// note: Extract knowledge base summary from world state.
     ExtractKb {
         world_id: String,
         creator_id: String,
     },
-    /// Push local changes to platform.
+    /// note: Push local changes to platform.
     SyncPush {
         world_id: String,
         creator_id: String,
     },
-    /// Pull remote state from platform.
+    /// note: Pull remote state from platform.
     SyncPull {
         world_id: String,
         creator_id: String,
     },
-    /// Fork world to a new branch.
+    /// note: Fork world to a new branch.
     ForkWorld {
         world_id: String,
         creator_id: String,
         target_world_id: String,
     },
-    /// Publish story to output.
+    /// note: Publish story to output.
     PublishStory {
         world_id: String,
         creator_id: String,
@@ -56,7 +57,7 @@ pub enum SyncCommandVariant {
 }
 
 impl SyncCommandVariant {
-    /// Get the `command_type` string matching the generated `SyncCommand` schema.
+    /// note: Get the `command_type` string matching the generated `SyncCommand` schema.
     #[must_use]
     pub const fn command_type_str(&self) -> &str {
         match self {
@@ -70,7 +71,7 @@ impl SyncCommandVariant {
         }
     }
 
-    /// Get the `world_id` from this command variant.
+    /// note: Get the `world_id` from this command variant.
     #[must_use]
     pub fn world_id(&self) -> &str {
         match self {
@@ -84,7 +85,7 @@ impl SyncCommandVariant {
         }
     }
 
-    /// Get the `creator_id` from this command variant.
+    /// note: Get the `creator_id` from this command variant.
     #[must_use]
     pub fn creator_id(&self) -> &str {
         match self {
@@ -98,7 +99,7 @@ impl SyncCommandVariant {
         }
     }
 
-    /// Convert a generated `SyncCommand` into a `SyncCommandVariant`.
+    /// note: Convert a generated `SyncCommand` into a `SyncCommandVariant`.
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -129,7 +130,7 @@ impl SyncCommandVariant {
                 creator_id,
             }),
             "fork_world" => {
-                // Fork world requires target_world_id — check requested_by for V1.0
+                // why: the wire command has no target_world_id field, so V1.0 carries it in requested_by.
                 let target_world_id = cmd
                     .requested_by
                     .as_ref()
@@ -155,7 +156,7 @@ impl SyncCommandVariant {
         }
     }
 
-    /// Convert this variant into a generated `SyncCommand`.
+    /// note: Convert this variant into a generated `SyncCommand`.
     ///
     /// # Panics
     /// Panics if `command_type_str` or `origin` does not parse correctly.
@@ -191,7 +192,7 @@ impl SyncCommandVariant {
     }
 }
 
-/// Command origin (matches generated SyncCommand.origin).
+/// note: Command origin (matches generated SyncCommand.origin).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandOrigin {

@@ -1,11 +1,12 @@
 //! Apply a platform [`SyncPullResponse`] to the local [`Outbox`].
+// note: module-level documentation for the items below.
 
 use nexus_contracts::generated::SyncPullResponse;
 
 use crate::errors::SyncResult;
 use crate::outbox::Outbox;
 
-/// Summary of applying a pull response to the outbox.
+/// note: Summary of applying a pull response to the outbox.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullApplySummary {
     pub world_revision: u64,
@@ -14,7 +15,7 @@ pub struct PullApplySummary {
     pub skipped_duplicate_bundles: usize,
 }
 
-/// Deserialize each bundle in `response` and stage it when `bundle_id` is not already present.
+/// note: Deserialize each bundle in `response` and stage it when `bundle_id` is not already present.
 ///
 /// # Errors
 /// Returns the specific error type if the operation fails.
@@ -30,7 +31,7 @@ pub async fn apply_pull_response_to_outbox(
     let mut skipped_duplicate_bundles = 0usize;
 
     for envelope in &response.bundles {
-        // `SyncPullResponse.bundles` uses typify's inlined `NexusDeltaBundleEnvelope`;
+        // note: `SyncPullResponse.bundles` uses typify's inlined `NexusDeltaBundleEnvelope`;
         // the outbox stores the canonical `Bundle`. Wire-equivalent (drift gate).
         let bundle: nexus_contracts::Bundle =
             serde_json::from_value(serde_json::to_value(envelope).unwrap_or_default())

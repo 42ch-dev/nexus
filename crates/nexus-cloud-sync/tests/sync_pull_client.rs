@@ -1,4 +1,5 @@
 //! Integration tests: platform pull client (wiremock).
+// note: module-level documentation for the items below.
 
 use nexus_cloud_sync::sync_client::SyncClient;
 use nexus_contracts::generated::SyncPullRequest;

@@ -1,4 +1,5 @@
 //! Partial Apply Semantics
+// note: module-level documentation for the items below.
 //!
 //! Handles Phase A/B partial success per roadmap §3.1.4 (P1).
 //!
@@ -14,42 +15,42 @@ use serde::{Deserialize, Serialize};
 use crate::errors::{SyncError, SyncResult};
 use crate::sync_client::PushResponse;
 
-/// Result of a partial bundle apply.
+/// note: Result of a partial bundle apply.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PartialApplyResult {
-    /// Total number of deltas in the bundle.
+    /// note: Total number of deltas in the bundle.
     pub total_count: usize,
-    /// Number of deltas that were successfully applied.
+    /// note: Number of deltas that were successfully applied.
     pub succeeded_count: usize,
-    /// Number of deltas that failed.
+    /// note: Number of deltas that failed.
     pub failed_count: usize,
-    /// Details of succeeded deltas (indices and entity revisions).
+    /// note: Details of succeeded deltas (indices and entity revisions).
     pub succeeded_deltas: Vec<DeltaApplyInfo>,
-    /// Details of failed deltas (indices and error codes).
+    /// note: Details of failed deltas (indices and error codes).
     pub failed_deltas: Vec<DeltaApplyInfo>,
-    /// Whether the failed deltas can be retried.
+    /// note: Whether the failed deltas can be retried.
     pub retryable: bool,
-    /// Server-side data freshness hint.
+    /// note: Server-side data freshness hint.
     pub data_freshness_hint: Option<String>,
-    /// Last indexed bundle ID on the server.
+    /// note: Last indexed bundle ID on the server.
     pub last_indexed_bundle_id: Option<String>,
 }
 
-/// Per-delta apply information.
+/// note: Per-delta apply information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DeltaApplyInfo {
-    /// Index into the original deltas[] array.
+    /// note: Index into the original deltas[] array.
     pub delta_index: usize,
-    /// Apply status: applied, rejected, or `skipped_dependency`.
+    /// note: Apply status: applied, rejected, or `skipped_dependency`.
     pub apply_status: String,
-    /// Error code if the delta was rejected.
+    /// note: Error code if the delta was rejected.
     pub error_code: Option<String>,
-    /// Entity revision after successful apply.
+    /// note: Entity revision after successful apply.
     pub applied_entity_revision: Option<u64>,
 }
 
 impl PartialApplyResult {
-    /// Parse a partial apply result from a push response.
+    /// note: Parse a partial apply result from a push response.
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -98,7 +99,6 @@ impl PartialApplyResult {
                 "applied" => succeeded_deltas.push(info),
                 "rejected" => failed_deltas.push(info),
                 "skipped_dependency" => {
-                    // Skipped due to dependency failure — treat as failed
                     failed_deltas.push(info);
                 }
                 _ => {
@@ -111,7 +111,7 @@ impl PartialApplyResult {
         let failed_count = failed_deltas.len();
         let total_count = succeeded_count + failed_count;
 
-        // Determine if the failed deltas are retryable.
+        // note: determine whether the failed deltas are retryable.
         // Deltas with dependency skips are retryable once their dependencies are resolved.
         let retryable = failed_deltas.iter().all(|d| {
             d.apply_status == "skipped_dependency"
@@ -140,25 +140,25 @@ impl PartialApplyResult {
         })
     }
 
-    /// Whether all deltas were applied (not a partial result).
+    /// note: Whether all deltas were applied (not a partial result).
     #[must_use]
     pub const fn is_full_success(&self) -> bool {
         self.failed_count == 0
     }
 
-    /// Whether all deltas failed (total failure).
+    /// note: Whether all deltas failed (total failure).
     #[must_use]
     pub const fn is_total_failure(&self) -> bool {
         self.succeeded_count == 0 && self.failed_count > 0
     }
 
-    /// Get indices of failed deltas for retry.
+    /// note: Get indices of failed deltas for retry.
     #[must_use]
     pub fn failed_delta_indices(&self) -> Vec<usize> {
         self.failed_deltas.iter().map(|d| d.delta_index).collect()
     }
 
-    /// Get a summary string for logging.
+    /// note: Get a summary string for logging.
     #[must_use]
     pub fn summary(&self) -> String {
         let mut lines = vec![format!(
@@ -182,7 +182,7 @@ impl PartialApplyResult {
     }
 }
 
-/// Error codes that are considered retryable.
+/// note: Error codes that are considered retryable.
 const RETRYABLE_ERROR_CODES: &[&str] = &[
     "dependency_not_found",
     "optimistic_lock_failed",
@@ -191,23 +191,23 @@ const RETRYABLE_ERROR_CODES: &[&str] = &[
     "projection_failed",
 ];
 
-/// Stored partial apply state for retry.
+/// note: Stored partial apply state for retry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PartialApplyState {
-    /// Bundle ID that had the partial apply.
+    /// note: Bundle ID that had the partial apply.
     pub bundle_id: String,
-    /// World ID.
+    /// note: World ID.
     pub world_id: String,
-    /// The partial apply result.
+    /// note: The partial apply result.
     pub result: PartialApplyResult,
-    /// When this state was recorded.
+    /// note: When this state was recorded.
     pub recorded_at: String,
-    /// Number of times we've retried this partial apply.
+    /// note: Number of times we've retried this partial apply.
     pub retry_count: u32,
 }
 
 impl PartialApplyState {
-    /// Create a new partial apply state record.
+    /// note: Create a new partial apply state record.
     #[must_use]
     pub fn new(bundle_id: &str, world_id: &str, result: PartialApplyResult) -> Self {
         Self {
@@ -219,7 +219,7 @@ impl PartialApplyState {
         }
     }
 
-    /// Increment the retry count.
+    /// note: Increment the retry count.
     pub fn increment_retry(&mut self) {
         self.retry_count += 1;
         self.recorded_at = chrono::Utc::now().to_rfc3339();

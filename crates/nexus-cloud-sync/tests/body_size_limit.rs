@@ -1,4 +1,5 @@
 //! Integration tests: HTTP body size limits (chunked read path).
+// note: module-level documentation for the items below.
 
 use nexus_cloud_sync::errors::SyncError;
 use nexus_cloud_sync::sync_client::SyncClient;

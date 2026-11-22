@@ -1,4 +1,5 @@
 //! Device Flow HTTP Client
+// note: module-level documentation for the items below.
 //!
 //! Lightweight HTTP client for RFC 8628 Device Authorization Grant against
 //! the Nexus platform endpoints:
@@ -14,25 +15,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{SyncError, SyncResult};
 
-/// Default request timeout in seconds for device flow requests.
+/// note: Default request timeout in seconds for device flow requests.
 const DEVICE_FLOW_TIMEOUT_SECS: u64 = 30;
 
-/// Device flow error codes returned by the platform (RFC 8628 §3.5).
+/// note: Device flow error codes returned by the platform (RFC 8628 §3.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceFlowError {
-    /// User hasn't approved yet — keep polling.
+    /// note: User hasn't approved yet — keep polling.
     AuthorizationPending,
-    /// Polling too fast — increase interval.
+    /// note: Polling too fast — increase interval.
     SlowDown,
-    /// Device code has expired — restart flow.
+    /// note: Device code has expired — restart flow.
     ExpiredToken,
-    /// User denied authorization.
+    /// note: User denied authorization.
     AccessDenied,
-    /// Other error from the platform.
+    /// note: Other error from the platform.
     Other(String),
 }
 
-/// Response from `POST /api/v1/auth/device/code`.
+/// note: Response from `POST /api/v1/auth/device/code`.
 ///
 /// Platform response shape:
 /// ```json
@@ -53,16 +54,16 @@ pub struct DeviceCodeResponse {
     pub device_code: String,
     pub user_code: String,
     pub verification_uri: String,
-    /// Optional verification URI with `user_code` pre-filled.
+    /// note: Optional verification URI with `user_code` pre-filled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_uri_complete: Option<String>,
-    /// Seconds until the device code expires.
+    /// note: Seconds until the device code expires.
     pub expires_in: u64,
-    /// Minimum seconds between polling attempts.
+    /// note: Minimum seconds between polling attempts.
     pub interval: u64,
 }
 
-/// Response from `POST /api/v1/auth/device/token` on success.
+/// note: Response from `POST /api/v1/auth/device/token` on success.
 ///
 /// Platform response shape:
 /// ```json
@@ -82,15 +83,15 @@ pub struct DeviceTokenResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
-    /// `OAuth2` refresh token (optional — platform delivers in V1.11+).
+    /// note: `OAuth2` refresh token (optional — platform delivers in V1.11+).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
-    /// ISO 8601 expiry timestamp for the refresh token (optional).
+    /// note: ISO 8601 expiry timestamp for the refresh token (optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_expires_at: Option<String>,
 }
 
-/// Client for RFC 8628 Device Authorization Grant against the Nexus platform.
+/// note: Client for RFC 8628 Device Authorization Grant against the Nexus platform.
 pub struct DeviceFlowClient {
     client: Client,
     base_url: String,
@@ -126,7 +127,7 @@ impl DeviceFlowClient {
         })
     }
 
-    /// Request a device authorization code.
+    /// note: Request a device authorization code.
     ///
     /// Calls `POST /api/v1/auth/device/code` with optional `client_id` and `scope`.
     ///
@@ -168,7 +169,7 @@ impl DeviceFlowClient {
             return Err(SyncError::PlatformError { status, body: text });
         }
 
-        // Parse the platform envelope: { success: true, data: { ... } }
+        // note: platform envelope shape is { success: true, data: { ... } }.
         let envelope: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))?;
 
@@ -180,7 +181,7 @@ impl DeviceFlowClient {
             .map_err(|e| SyncError::Serialization(e.to_string()))
     }
 
-    /// Poll for a device token.
+    /// note: Poll for a device token.
     ///
     /// Calls `POST /api/v1/auth/device/token` with the `device_code`.
     ///
@@ -221,7 +222,7 @@ impl DeviceFlowClient {
             .unwrap_or_else(|e| format!("Failed to read response body: {e}"));
 
         if status == 400 {
-            // Parse the error envelope: { success: false, error: { code, details: { error } } }
+            // note: error envelope shape is { success: false, error: { code, details: { error } } }.
             if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(&text) {
                 if let Some(error_code) = envelope
                     .get("error")
@@ -252,7 +253,7 @@ impl DeviceFlowClient {
             )));
         }
 
-        // Parse the success envelope: { success: true, data: { ... } }
+        // note: success envelope shape is { success: true, data: { ... } }.
         let envelope: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
             DeviceFlowError::Other(format!("Failed to parse success response as JSON: {e}"))
         })?;
@@ -263,7 +264,7 @@ impl DeviceFlowClient {
             .map_err(|e| DeviceFlowError::Other(format!("Failed to parse token response: {e}")))
     }
 
-    /// Get the base URL (for testing).
+    /// note: Get the base URL (for testing).
     #[cfg(test)]
     #[must_use]
     pub fn base_url(&self) -> &str {
@@ -525,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn device_token_response_backward_compat_without_refresh() {
-        // Pre-V1.11 response without refresh_token fields
+        // note: pre-V1.11 response without refresh_token fields.
         let json = serde_json::json!({
             "access_token": "tok_old",
             "token_type": "Bearer",

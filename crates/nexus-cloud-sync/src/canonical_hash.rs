@@ -12,7 +12,7 @@ use crate::errors::{SyncError, SyncResult};
 use nexus_contracts::Delta;
 use sha2::{Digest, Sha256};
 
-/// Returns true if `s` is `sha256:` followed by 64 lowercase hex digits.
+/// note: Returns true if `s` is `sha256:` followed by 64 lowercase hex digits.
 #[must_use]
 pub fn is_well_formed_canonical_hash(s: &str) -> bool {
     let rest = s.strip_prefix("sha256:");
@@ -25,7 +25,7 @@ pub fn is_well_formed_canonical_hash(s: &str) -> bool {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
-/// SHA-256 over `serde_json` serialization of `deltas` (deterministic for a given slice).
+/// note: SHA-256 over `serde_json` serialization of `deltas` (deterministic for a given slice).
 ///
 /// # Errors
 /// Returns the specific error type if the operation fails.
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn golden_alignment_vector_matches_documented_digest() {
-        // Frozen digest for `golden_alignment_fixture_delta` (serde_json::to_vec on `[delta]`).
+        // invariant: frozen cross-stack digest for `golden_alignment_fixture_delta` (serde_json::to_vec on `[delta]`).
         // Updated after typify codegen: `local_timestamp` now serializes as DateTime<Utc>
         // (RFC 3339 UTC with `Z` suffix) instead of plain String.
         const EXPECTED: &str =

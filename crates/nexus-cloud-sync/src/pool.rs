@@ -1,4 +1,5 @@
 //! `SQLite` connection pool for nexus-cloud-sync
+// note: module-level documentation for the items below.
 //!
 //! Provides async connection pooling via `sqlx::SqlitePool`, re-exported from
 //! `nexus-local-db`. The pool uses WAL mode for better concurrent read/write
@@ -15,10 +16,10 @@
 
 use std::path::Path;
 
-/// Default pool size for nexus-cloud-sync
+/// note: Default pool size for nexus-cloud-sync
 pub const DEFAULT_POOL_SIZE: usize = 4;
 
-/// Connection pool wrapper for `SQLite` outbox operations
+/// note: Connection pool wrapper for `SQLite` outbox operations
 ///
 /// Wraps `sqlx::SqlitePool` and provides the same pool interface.
 #[derive(Clone)]
@@ -27,7 +28,7 @@ pub struct OutboxPool {
 }
 
 impl OutboxPool {
-    /// Create a new connection pool for the given database path
+    /// note: Create a new connection pool for the given database path
     ///
     /// # Arguments
     /// * `db_path` - Path to the `SQLite` database file
@@ -39,7 +40,7 @@ impl OutboxPool {
         db_path: &Path,
         max_size: usize,
     ) -> Result<Self, nexus_local_db::LocalDbError> {
-        // Checked conversion: `max_size` is usize from the caller; a value
+        // note: `max_size` is usize from the caller; a value
         // beyond the `u32` connection domain is rejected rather than
         // truncated (fail-closed).
         let max_connections = u32::try_from(max_size).map_err(|_| {
@@ -60,7 +61,7 @@ impl OutboxPool {
         Ok(Self { pool })
     }
 
-    /// Get the underlying `SqlitePool` reference
+    /// note: Get the underlying `SqlitePool` reference
     #[must_use]
     pub const fn inner(&self) -> &nexus_local_db::SqlitePool {
         &self.pool
@@ -77,12 +78,12 @@ impl From<nexus_local_db::SqlitePool> for OutboxPool {
 mod tests {
     use super::*;
 
-    /// Helper to create a test database with schema
+    /// note: Helper to create a test database with schema
     fn create_test_db() -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
 
-        // Create the file so sqlx can open it
+        // why: sqlx requires the database file to exist before opening.
         std::fs::File::create(&db_path).unwrap();
 
         (tmp, db_path)
@@ -91,7 +92,7 @@ mod tests {
     #[tokio::test]
     async fn pool_max_size_beyond_u32_is_rejected_not_truncated() {
         let (_tmp, db_path) = create_test_db();
-        // A max_size above the u32 connection domain must fail closed rather
+        // note: a max_size above the u32 connection domain must fail closed rather
         // than truncate to a smaller pool.
         let huge = usize::try_from(u64::from(u32::MAX)).unwrap() + 1;
         let err = match OutboxPool::new(&db_path, huge).await {
@@ -110,7 +111,6 @@ mod tests {
         let pool = OutboxPool::new(&db_path, 2)
             .await
             .expect("Pool creation should succeed");
-        // Pool is usable
         let _ = pool.inner();
     }
 
@@ -157,7 +157,6 @@ mod tests {
             .await
             .expect("test table creation failed");
 
-        // Spawn 4 concurrent tasks that each insert and read
         let handles: Vec<_> = (0..4)
             .map(|i| {
                 let pool = pool.clone();

@@ -1,4 +1,5 @@
 //! Conflict Resolution
+// note: module-level documentation for the items below.
 //!
 //! Handles sync conflicts detected by the platform during bundle push.
 //! Implements conflict types from hard-vs-soft-validation-v1.md §7:
@@ -17,17 +18,17 @@ use serde_json::Value;
 
 use crate::errors::{SyncError, SyncResult};
 
-/// Conflict type categories matching hard-vs-soft-validation-v1.md §7.
+/// note: Conflict type categories matching hard-vs-soft-validation-v1.md §7.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictType {
-    /// Client `world_revision` is stale compared to server.
+    /// note: Client `world_revision` is stale compared to server.
     VersionMismatch,
-    /// Client `delta_sequence` has gaps or overlaps.
+    /// note: Client `delta_sequence` has gaps or overlaps.
     SequenceConflict,
-    /// Hard validation failure — schema/contract violation (blocking).
+    /// note: Hard validation failure — schema/contract violation (blocking).
     HardValidationFailure,
-    /// Soft validation warning — non-blocking but noteworthy.
+    /// note: Soft validation warning — non-blocking but noteworthy.
     SoftValidationWarning,
 }
 
@@ -42,7 +43,7 @@ impl ConflictType {
         }
     }
 
-    /// Parse a conflict type from a string.
+    /// note: Parse a conflict type from a string.
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -65,15 +66,15 @@ impl std::fmt::Display for ConflictType {
     }
 }
 
-/// Resolution strategy for a conflict.
+/// note: Resolution strategy for a conflict.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictResolution {
-    /// Accept server state, discard local changes (rebase/refresh).
+    /// note: Accept server state, discard local changes (rebase/refresh).
     AutoAccept,
-    /// Keep local state, force-push (risky).
+    /// note: Keep local state, force-push (risky).
     AutoReject,
-    /// Present conflict to user for manual resolution.
+    /// note: Present conflict to user for manual resolution.
     ManualReview,
 }
 
@@ -87,7 +88,7 @@ impl ConflictResolution {
         }
     }
 
-    /// Parse a resolution strategy from a string.
+    /// note: Parse a resolution strategy from a string.
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -102,49 +103,49 @@ impl ConflictResolution {
         }
     }
 
-    /// Whether this resolution requires user interaction.
+    /// note: Whether this resolution requires user interaction.
     #[must_use]
     pub const fn requires_manual_review(&self) -> bool {
         matches!(self, Self::ManualReview)
     }
 }
 
-/// A single conflict detail within a conflict response.
+/// note: A single conflict detail within a conflict response.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConflictDetail {
-    /// Machine-readable conflict code.
+    /// note: Machine-readable conflict code.
     pub code: String,
-    /// Human-readable conflict description.
+    /// note: Human-readable conflict description.
     pub message: String,
-    /// Index into the deltas[] array, if applicable.
+    /// note: Index into the deltas[] array, if applicable.
     pub delta_index: Option<usize>,
-    /// Expected value that caused the conflict.
+    /// note: Expected value that caused the conflict.
     pub expected: Option<Value>,
-    /// Actual value received.
+    /// note: Actual value received.
     pub actual: Option<Value>,
-    /// Suggested resolution strategy.
+    /// note: Suggested resolution strategy.
     pub resolution_hint: Option<ConflictResolution>,
 }
 
-/// Parsed conflict response from the platform.
+/// note: Parsed conflict response from the platform.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConflictResponse {
-    /// Always false for conflict responses.
+    /// note: Always false for conflict responses.
     pub success: bool,
-    /// Category of conflict.
+    /// note: Category of conflict.
     pub conflict_type: ConflictType,
-    /// Individual conflict details.
+    /// note: Individual conflict details.
     pub conflicts: Vec<ConflictDetail>,
-    /// Current world revision on the server.
+    /// note: Current world revision on the server.
     pub server_world_revision: u64,
-    /// Current confirmed delta sequence on the server.
+    /// note: Current confirmed delta sequence on the server.
     pub server_delta_sequence: Option<u64>,
-    /// Suggested retry delay in seconds, if applicable.
+    /// note: Suggested retry delay in seconds, if applicable.
     pub retry_after: Option<u64>,
 }
 
 impl ConflictResponse {
-    /// Parse a conflict response from a JSON body.
+    /// note: Parse a conflict response from a JSON body.
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -198,7 +199,7 @@ impl ConflictResponse {
         })
     }
 
-    /// Whether this conflict is a hard failure (blocking).
+    /// note: Whether this conflict is a hard failure (blocking).
     #[must_use]
     pub const fn is_hard_failure(&self) -> bool {
         matches!(
@@ -207,13 +208,13 @@ impl ConflictResponse {
         )
     }
 
-    /// Whether this conflict is a soft warning (non-blocking).
+    /// note: Whether this conflict is a soft warning (non-blocking).
     #[must_use]
     pub const fn is_soft_warning(&self) -> bool {
         matches!(self.conflict_type, ConflictType::SoftValidationWarning)
     }
 
-    /// Get the suggested resolution for this conflict.
+    /// note: Get the suggested resolution for this conflict.
     ///
     /// Defaults to `ManualReview` for hard failures, `AutoAccept` for soft warnings.
     #[must_use]
@@ -225,7 +226,7 @@ impl ConflictResponse {
         }
     }
 
-    /// Build a human-readable conflict summary for user review.
+    /// note: Build a human-readable conflict summary for user review.
     #[must_use]
     pub fn summary(&self) -> String {
         let mut lines = vec![format!("Conflict: {}", self.conflict_type.as_str())];
@@ -254,7 +255,7 @@ impl ConflictResponse {
         lines.join("\n")
     }
 
-    /// Convert this conflict's `retry_after` field to a [`crate::outbox::RetryAfterPolicy`].
+    /// note: Convert this conflict's `retry_after` field to a [`crate::outbox::RetryAfterPolicy`].
     ///
     /// Returns `RetryAfterPolicy::AfterSeconds` if `retry_after` is set, or
     /// `RetryAfterPolicy::None` otherwise. The caller is responsible for storing
@@ -269,7 +270,7 @@ impl ConflictResponse {
     }
 }
 
-/// Parse a conflict detail from a JSON value.
+/// note: Parse a conflict detail from a JSON value.
 ///
 /// # Errors
 /// Returns the specific error type if the operation fails.
@@ -303,14 +304,13 @@ fn parse_conflict_detail(val: &Value) -> ConflictDetail {
     }
 }
 
-/// Conflict resolver that determines the appropriate resolution strategy.
+/// note: Conflict resolver that determines the appropriate resolution strategy.
 pub struct ConflictResolver;
 
 impl ConflictResolver {
-    /// Determine the resolution strategy for a conflict response.
+    /// note: Determine the resolution strategy for a conflict response.
     #[must_use]
     pub fn resolve(conflict: &ConflictResponse) -> ConflictResolution {
-        // Use per-conflict hints if all agree
         let hints: Vec<&ConflictResolution> = conflict
             .conflicts
             .iter()
@@ -321,7 +321,7 @@ impl ConflictResolver {
             return conflict.suggested_resolution();
         }
 
-        // If all hints agree, use that; otherwise, manual review
+        // note: unanimous hints win; disagreement requires manual review.
         let first = hints[0];
         if hints.iter().all(|h| *h == first) {
             first.clone()
@@ -330,7 +330,7 @@ impl ConflictResolver {
         }
     }
 
-    /// Log a conflict for user review.
+    /// note: Log a conflict for user review.
     ///
     /// Returns a formatted log entry string.
     pub fn log_conflict(conflict: &ConflictResponse) -> String {
@@ -564,7 +564,7 @@ mod tests {
         assert_eq!(detail, recovered);
     }
 
-    // ── retry_after tests (SYNC-R11) ────────────────────────────
+    // note: retry_after tests (SYNC-R11).
 
     #[test]
     fn conflict_response_parse_retry_after() {

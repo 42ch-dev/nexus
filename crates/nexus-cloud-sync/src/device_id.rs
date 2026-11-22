@@ -1,4 +1,5 @@
 //! Device ID generation and persistence.
+// note: module-level documentation for the items below.
 //!
 //! V1.148 P3 N-C0: the implementation moved to `nexus-home-layout` (the path
 //! layout SSOT already owns `device_id_path`; the value read/write belongs

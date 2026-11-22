@@ -1,4 +1,5 @@
 //! Golden-style integration: mock platform accepts push then returns an empty pull window.
+// note: module-level documentation for the items below.
 
 use nexus_cloud_sync::delta_bundle::{BundleBuilder, LocalDelta};
 use nexus_cloud_sync::sync_client::SyncClient;

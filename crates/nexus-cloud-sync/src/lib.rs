@@ -1,4 +1,5 @@
 //! Nexus Cloud Sync Library
+// note: module-level documentation for the items below.
 //!
 //! Provides the sync mechanism for CLI ↔ Platform synchronization using
 //! Command, `DeltaBundle`, and Outbox patterns.
@@ -36,7 +37,6 @@
 //! - [`pool`]: `SQLite` connection pool for outbox
 //! - [`partial_apply`]: Partial apply semantics (Phase A/B)
 
-// ── Always-available modules ──────────────────────────────────────────
 pub mod canonical_hash;
 pub mod command;
 pub mod conflict;
@@ -46,7 +46,6 @@ pub mod device_id;
 pub mod errors;
 pub mod precheck;
 
-// ── Legacy sync modules (gated behind feature flag) ──────────────────
 #[cfg(feature = "legacy-sync")]
 pub mod outbox;
 #[cfg(feature = "legacy-sync")]
@@ -60,17 +59,14 @@ pub mod pull_apply;
 #[cfg(feature = "legacy-sync")]
 pub mod sync_client;
 
-// Re-export common types from nexus-contracts
 pub use nexus_contracts::{
     generated::{Bundle, SyncCommand},
     local::domain::OutboxEntry,
     BundleType, CreatorId, ManuscriptPhase, WorldId,
 };
 
-// Re-export sync error types (always available)
 pub use errors::{SyncError, SyncResult};
 
-// Re-export legacy sync types (gated)
 #[cfg(feature = "legacy-sync")]
 pub use platform_client::{classify_platform_error, StagedPlatformError};
 #[cfg(feature = "legacy-sync")]

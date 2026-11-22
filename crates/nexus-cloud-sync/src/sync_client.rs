@@ -36,22 +36,22 @@ use crate::conflict::ConflictResponse;
 use crate::errors::{SyncError, SyncResult};
 use crate::partial_apply::PartialApplyResult;
 
-/// Default request timeout in seconds.
+/// note: Default request timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
-/// Default maximum HTTP body size (10MB).
+/// note: Default maximum HTTP body size (10MB).
 const DEFAULT_BODY_MAX_SIZE: usize = 10 * 1024 * 1024;
 
-/// Maximum number of automatic retries for transient errors.
+/// note: Maximum number of automatic retries for transient errors.
 const MAX_HTTP_RETRIES: u32 = 3;
 
-/// Base delay for HTTP retry backoff in milliseconds.
+/// note: Base delay for HTTP retry backoff in milliseconds.
 const BASE_RETRY_DELAY_MS: u64 = 500;
 
-/// Minimum required auth token length.
+/// note: Minimum required auth token length.
 const MIN_AUTH_TOKEN_LENGTH: usize = 64;
 
-/// Validate auth token format.
+/// note: Validate auth token format.
 ///
 /// Token must:
 /// - Not be empty (handled separately in `with_config`)
@@ -84,41 +84,41 @@ const fn is_auth_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | '/' | '=')
 }
 
-/// Successful push response from the platform.
+/// note: Successful push response from the platform.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PushResponse {
-    /// Whether the bundle was fully applied.
+    /// note: Whether the bundle was fully applied.
     pub success: bool,
-    /// Bundle apply status: `all_success`, partial, or failed.
+    /// note: Bundle apply status: `all_success`, partial, or failed.
     pub bundle_apply_status: Option<String>,
-    /// Server-side world revision after apply.
+    /// note: Server-side world revision after apply.
     pub world_revision: Option<u64>,
-    /// Server-side confirmed delta sequence after apply.
+    /// note: Server-side confirmed delta sequence after apply.
     pub confirmed_delta_sequence: Option<u64>,
-    /// Per-delta results (if partial).
+    /// note: Per-delta results (if partial).
     pub delta_results: Option<Vec<serde_json::Value>>,
-    /// Data freshness hint (last indexed bundle ID).
+    /// note: Data freshness hint (last indexed bundle ID).
     pub data_freshness_hint: Option<String>,
-    /// Last indexed bundle ID on the server.
+    /// note: Last indexed bundle ID on the server.
     pub last_indexed_bundle_id: Option<String>,
 }
 
-/// Pull response from the platform.
+/// note: Pull response from the platform.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullResponse {
-    /// Current world revision on the server.
+    /// note: Current world revision on the server.
     pub world_revision: u64,
-    /// Current confirmed delta sequence on the server.
+    /// note: Current confirmed delta sequence on the server.
     pub confirmed_delta_sequence: u64,
-    /// Server-side bundle count.
+    /// note: Server-side bundle count.
     pub bundle_count: u64,
-    /// Whether the local state is up to date.
+    /// note: Whether the local state is up to date.
     pub is_up_to_date: bool,
-    /// Latest bundle ID on the server.
+    /// note: Latest bundle ID on the server.
     pub latest_bundle_id: Option<String>,
 }
 
-/// Builder for creating a `SyncClient` with custom configuration.
+/// note: Builder for creating a `SyncClient` with custom configuration.
 pub struct SyncClientBuilder {
     body_max_size: usize,
     timeout_secs: u64,
@@ -126,7 +126,7 @@ pub struct SyncClientBuilder {
 }
 
 impl SyncClientBuilder {
-    /// Create a new builder with default configuration.
+    /// note: Create a new builder with default configuration.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -136,7 +136,7 @@ impl SyncClientBuilder {
         }
     }
 
-    /// Set the maximum HTTP body size in bytes.
+    /// note: Set the maximum HTTP body size in bytes.
     ///
     /// Default: 10MB (10 * 1024 * 1024 bytes).
     ///
@@ -148,7 +148,7 @@ impl SyncClientBuilder {
         self
     }
 
-    /// Set the request timeout in seconds.
+    /// note: Set the request timeout in seconds.
     ///
     /// Default: 30 seconds.
     #[must_use]
@@ -157,7 +157,7 @@ impl SyncClientBuilder {
         self
     }
 
-    /// Set the maximum number of retries for transient errors.
+    /// note: Set the maximum number of retries for transient errors.
     ///
     /// Default: 3.
     #[must_use]
@@ -166,7 +166,7 @@ impl SyncClientBuilder {
         self
     }
 
-    /// Build a `SyncClient` with the configured settings.
+    /// note: Build a `SyncClient` with the configured settings.
     ///
     /// # Arguments
     /// * `platform_base_url` - Base URL of the platform sync API
@@ -191,7 +191,7 @@ impl Default for SyncClientBuilder {
     }
 }
 
-/// Sync client for platform API interactions.
+/// note: Sync client for platform API interactions.
 pub struct SyncClient {
     client: Client,
     base_url: String,
@@ -201,7 +201,7 @@ pub struct SyncClient {
 }
 
 impl SyncClient {
-    /// Create a new sync client with default configuration.
+    /// note: Create a new sync client with default configuration.
     ///
     /// # Arguments
     /// * `platform_base_url` - Base URL of the platform sync API (e.g. `{NEXUS42_BASE_URL}` / your staging origin)
@@ -222,7 +222,7 @@ impl SyncClient {
         )
     }
 
-    /// Create a new sync client with custom configuration.
+    /// note: Create a new sync client with custom configuration.
     fn with_config(
         platform_base_url: &str,
         auth_token: &str,
@@ -241,7 +241,6 @@ impl SyncClient {
             ));
         }
 
-        // Validate auth token format
         validate_auth_token(auth_token)?;
 
         let client = Client::builder()
@@ -251,7 +250,6 @@ impl SyncClient {
             // For HTTP/2, there's no direct size limit, but we can check Content-Length
             .build()?;
 
-        // Normalize base URL: remove trailing slash
         let base_url = platform_base_url.trim_end_matches('/').to_string();
 
         Ok(Self {
@@ -263,27 +261,27 @@ impl SyncClient {
         })
     }
 
-    /// Create a builder for custom client configuration.
+    /// note: Create a builder for custom client configuration.
     #[must_use]
     pub const fn builder() -> SyncClientBuilder {
         SyncClientBuilder::new()
     }
 
-    /// Get the base URL (for testing).
+    /// note: Get the base URL (for testing).
     #[cfg(test)]
     #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
-    /// Get the configured body max size.
+    /// note: Get the configured body max size.
     #[cfg(test)]
     #[must_use]
     pub const fn body_max_size(&self) -> usize {
         self.body_max_size
     }
 
-    /// Read the full response body as UTF-8, enforcing a maximum accumulated byte size.
+    /// note: Read the full response body as UTF-8, enforcing a maximum accumulated byte size.
     ///
     /// Uses incremental [`Response::chunk`](reqwest::Response::chunk) reads so oversized
     /// responses do not require loading the entire body into memory before the limit check.
@@ -312,7 +310,7 @@ impl SyncClient {
         String::from_utf8(buf).map_err(|e| SyncError::Serialization(e.to_string()))
     }
 
-    /// Push a bundle to the platform sync API.
+    /// note: Push a bundle to the platform sync API.
     ///
     /// Returns either a successful `PushResponse` or a `ConflictResponse`.
     /// Transient HTTP errors are retried automatically.
@@ -333,7 +331,7 @@ impl SyncClient {
 
         let status = response.status().as_u16();
 
-        // Check Content-Length header before reading body (SYNC-R5)
+        // note: check Content-Length before reading the body (SYNC-R5).
         if let Some(content_length) = response.headers().get(reqwest::header::CONTENT_LENGTH) {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
@@ -362,7 +360,7 @@ impl SyncClient {
             });
         }
 
-        // Parse response body as JSON to check for conflict indicators
+        // note: parse the body as JSON to detect conflict indicators.
         let body: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))?;
 
@@ -395,7 +393,7 @@ impl SyncClient {
         Ok(push_response)
     }
 
-    /// Pull current sync state from the platform.
+    /// note: Pull current sync state from the platform.
     ///
     /// Returns server-side world revision and delta sequence for comparison.
     ///
@@ -411,7 +409,7 @@ impl SyncClient {
 
         let status = response.status().as_u16();
 
-        // Check Content-Length header (SYNC-R5)
+        // note: check Content-Length before reading the body (SYNC-R5).
         if let Some(content_length) = response.headers().get(reqwest::header::CONTENT_LENGTH) {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
@@ -441,7 +439,7 @@ impl SyncClient {
         Ok(pull_response)
     }
 
-    /// Pull pending bundles from the platform (incremental sync down).
+    /// note: Pull pending bundles from the platform (incremental sync down).
     ///
     /// Calls `POST /v1/sync/pull` with [`SyncPullRequest`]. Applies the same body-size
     /// limits and retry policy as [`Self::push_bundle`].
@@ -466,7 +464,7 @@ impl SyncClient {
         Ok(pull_response)
     }
 
-    /// Fork a world on the platform (`POST /v1/worlds/fork`).
+    /// note: Fork a world on the platform (`POST /v1/worlds/fork`).
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -480,7 +478,7 @@ impl SyncClient {
         self.post_platform_json(&url, req).await
     }
 
-    /// Capture a world snapshot cursor on the platform (`POST /v1/worlds/snapshot`).
+    /// note: Capture a world snapshot cursor on the platform (`POST /v1/worlds/snapshot`).
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -493,7 +491,7 @@ impl SyncClient {
         self.post_platform_json(&url, req).await
     }
 
-    /// Read-only Explore browse (`POST /v1/explore/browse`).
+    /// note: Read-only Explore browse (`POST /v1/explore/browse`).
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -506,7 +504,7 @@ impl SyncClient {
         self.post_platform_json(&url, req).await
     }
 
-    /// Read-only Explore search (`POST /v1/explore/search`).
+    /// note: Read-only Explore search (`POST /v1/explore/search`).
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -519,7 +517,7 @@ impl SyncClient {
         self.post_platform_json(&url, req).await
     }
 
-    /// Publish a manuscript story on the platform (`POST /v1/publish/story`).
+    /// note: Publish a manuscript story on the platform (`POST /v1/publish/story`).
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -536,7 +534,7 @@ impl SyncClient {
         self.post_platform_json(&url, req).await
     }
 
-    /// Paginated publish history for a manuscript (`POST /v1/publish/history`).
+    /// note: Paginated publish history for a manuscript (`POST /v1/publish/history`).
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -553,7 +551,7 @@ impl SyncClient {
         self.post_platform_json(&url, req).await
     }
 
-    /// POST JSON body, enforce body limits, map HTTP errors — shared by pull-style endpoints.
+    /// note: POST JSON body, enforce body limits, map HTTP errors — shared by pull-style endpoints.
     #[allow(clippy::future_not_send)]
     async fn post_platform_json<Req: Serialize + ?Sized, Resp: DeserializeOwned>(
         &self,
@@ -589,7 +587,7 @@ impl SyncClient {
         serde_json::from_str(&text).map_err(|e| SyncError::Serialization(e.to_string()))
     }
 
-    /// Execute an HTTP request with automatic retry for transient errors.
+    /// note: Execute an HTTP request with automatic retry for transient errors.
     #[allow(clippy::future_not_send)]
     async fn execute_with_retry<T: Serialize + ?Sized>(
         &self,
@@ -605,7 +603,7 @@ impl SyncClient {
             match request.send().await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    // Only retry on transient errors (connection, timeout)
+                    // note: only transient errors (connection, timeout) are retried.
                     if e.is_connect() || e.is_timeout() {
                         let err_str = e.to_string();
                         last_error = Some(e);
@@ -627,13 +625,12 @@ impl SyncClient {
             }
         }
 
-        // All retries exhausted
         Err(SyncError::HttpError(
             last_error.expect("retry loop exhausted without transient error"),
         ))
     }
 
-    /// Build an authenticated HTTP request.
+    /// note: Build an authenticated HTTP request.
     fn build_request<T: Serialize + ?Sized>(
         &self,
         method: Method,
@@ -654,7 +651,7 @@ impl SyncClient {
         request
     }
 
-    /// Parse a push response body into a partial apply result, if applicable.
+    /// note: Parse a push response body into a partial apply result, if applicable.
     ///
     /// # Errors
     /// Returns the specific error type if the operation fails.
@@ -690,7 +687,7 @@ impl SyncClient {
 mod tests {
     use super::*;
 
-    // Valid auth token for tests (64+ chars, alphanumeric + hyphens + underscores + dots)
+    // note: valid test auth token: 64+ chars of alphanumerics, hyphens, underscores, and dots.
     const VALID_TOKEN: &str =
         "valid_token_1234567890123456789012345678901234567890123456789012345678901234567890";
 
@@ -717,7 +714,7 @@ mod tests {
 
     #[test]
     fn client_creation_rejects_short_token() {
-        let short_token = "short_token_123"; // 15 chars
+        let short_token = "short_token_123";
         let result = SyncClient::new("https://api.example.com", short_token);
         assert!(matches!(result, Err(SyncError::AuthTokenInvalid(_))));
         if let Err(SyncError::AuthTokenInvalid(msg)) = result {
@@ -744,7 +741,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Platform tokens may use standard Base64 (+ / =); previously rejected by `validate_auth_token`.
+    /// note: Platform tokens may use standard Base64 (+ / =); previously rejected by `validate_auth_token`.
     #[test]
     fn client_creation_accepts_base64_alphabet_token() {
         let token = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ab";
@@ -796,7 +793,7 @@ mod tests {
             .timeout_secs(60)
             .build("https://api.example.com", VALID_TOKEN)
             .expect("build");
-        // Timeout is internal to client, we trust it's set correctly
+        // note: the timeout is internal to the client; this test assumes it is set.
         assert_ne!(client.base_url(), "");
     }
 
@@ -906,7 +903,7 @@ mod tests {
 
         let body = mock_response.to_string();
 
-        // Since we can't easily spin up a mock server in unit tests,
+        // note: since a mock server is impractical in unit tests,
         // we test deserialization instead. The integration test with
         // a real mock server is covered by the push_response tests above.
 

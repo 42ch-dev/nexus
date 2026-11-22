@@ -1,4 +1,5 @@
 //! Platform Client
+// note: module-level documentation for the items below.
 //!
 //! HTTP client for non-sync platform interactions — creator registration,
 //! verification, and future entitlement/auth operations.
@@ -17,10 +18,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{SyncError, SyncResult};
 
-/// Default request timeout in seconds.
+/// note: Default request timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
-/// Deterministic CLI-visible error bucket for staged platform operations.
+/// note: Deterministic CLI-visible error bucket for staged platform operations.
 ///
 /// Maps low-level [`SyncError`] variants into a small, stable set of
 /// error categories that the CLI can display and test against without
@@ -30,25 +31,25 @@ const DEFAULT_TIMEOUT_SECS: u64 = 30;
 /// harness (DF-14).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StagedPlatformError {
-    /// Upstream platform request timed out.
+    /// note: Upstream platform request timed out.
     Timeout,
-    /// Client configuration is incomplete or invalid.
+    /// note: Client configuration is incomplete or invalid.
     Config(String),
-    /// Authentication token is missing, empty, or rejected.
+    /// note: Authentication token is missing, empty, or rejected.
     Auth(String),
-    /// Platform returned a non-success HTTP response.
+    /// note: Platform returned a non-success HTTP response.
     Platform {
-        /// HTTP status code.
+        /// note: HTTP status code.
         status: u16,
-        /// Sanitized response body (capped length, secrets redacted).
+        /// note: Sanitized response body (capped length, secrets redacted).
         body: String,
     },
 }
 
-/// Maximum length for displayed error bodies.
+/// note: Maximum length for displayed error bodies.
 const ERROR_BODY_CAP: usize = 200;
 
-/// Sanitize an upstream error body for safe CLI display.
+/// note: Sanitize an upstream error body for safe CLI display.
 ///
 /// - Caps the body length to [`ERROR_BODY_CAP`] characters.
 /// - Redacts patterns that look like API keys, bearer tokens, or long
@@ -56,25 +57,25 @@ const ERROR_BODY_CAP: usize = 200;
 fn sanitize_error_body(body: &str) -> String {
     let mut s = body.to_string();
 
-    // Redact Bearer tokens: "Bearer <token>"
+    // note: redact Bearer tokens written as "Bearer <token>".
     if let Some(pos) = s.find("Bearer ") {
-        let after_bearer = pos + 7; // len("Bearer ")
+        let after_bearer = pos + 7; // note: 7 == len("Bearer ").
         let end = s[after_bearer..]
             .find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '}')
             .map_or(s.len(), |i| after_bearer + i);
         s.replace_range(pos..end, "Bearer [REDACTED]");
     }
 
-    // Redact sk- prefixed keys (case-insensitive)
+    // note: redact sk- prefixed keys, case-insensitive.
     s = redact_prefixed_tokens(&s, "sk-");
     s = redact_prefixed_tokens(&s, "sk_");
     s = redact_prefixed_tokens(&s, "nexus_live_");
     s = redact_prefixed_tokens(&s, "nexus_test_");
 
-    // Redact long hex-like strings (32+ hex chars)
+    // note: redact long hex-like strings (32+ hex chars).
     s = redact_long_pattern(&s, |c: char| c.is_ascii_hexdigit(), 32, "[REDACTED_HEX]");
 
-    // Redact long base64-like strings (40+ alphanumeric+/= chars)
+    // note: redact long base64-like strings (40+ alphanumeric+/= chars).
     s = redact_long_pattern(
         &s,
         |c: char| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=',
@@ -82,7 +83,6 @@ fn sanitize_error_body(body: &str) -> String {
         "[REDACTED_B64]",
     );
 
-    // Cap length
     if s.len() > ERROR_BODY_CAP {
         s.truncate(ERROR_BODY_CAP);
         s.push('…');
@@ -91,7 +91,7 @@ fn sanitize_error_body(body: &str) -> String {
     s
 }
 
-/// Find and replace tokens starting with `prefix` (case-insensitive match).
+/// note: Find and replace tokens starting with `prefix` (case-insensitive match).
 fn redact_prefixed_tokens(s: &str, prefix: &str) -> String {
     let lower = s.to_ascii_lowercase();
     let prefix_lower = prefix.to_ascii_lowercase();
@@ -101,12 +101,12 @@ fn redact_prefixed_tokens(s: &str, prefix: &str) -> String {
     while let Some(pos) = lower[offset..].find(&prefix_lower) {
         let abs_pos = offset + pos;
         let after_prefix = abs_pos + prefix.len();
-        // Token ends at next whitespace, comma, quote, or brace
+        // invariant: token ends at next whitespace, comma, quote, or brace.
         let end = result[after_prefix..]
             .find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '}')
             .map_or(result.len(), |i| after_prefix + i);
         result.replace_range(abs_pos..end, "[REDACTED_KEY]");
-        // Advance past the replacement to avoid infinite loop
+        // why: advance past the replacement so the scan cannot loop forever.
         offset = abs_pos + "[REDACTED_KEY]".len();
         if offset >= result.len() {
             break;
@@ -116,7 +116,7 @@ fn redact_prefixed_tokens(s: &str, prefix: &str) -> String {
     result
 }
 
-/// Redact long runs of characters matching `is_valid` that exceed `min_len`.
+/// note: Redact long runs of characters matching `is_valid` that exceed `min_len`.
 fn redact_long_pattern(
     s: &str,
     is_valid: impl Fn(char) -> bool,
@@ -140,7 +140,6 @@ fn redact_long_pattern(
                 result.push(ch);
             }
         }
-        // Append non-matching character(s)
         if i < chars.len() && !is_valid(chars[i]) {
             result.push(chars[i]);
             i += 1;
@@ -165,7 +164,7 @@ impl std::fmt::Display for StagedPlatformError {
 
 impl std::error::Error for StagedPlatformError {}
 
-/// Classify a [`SyncError`] into a deterministic CLI-visible error bucket.
+/// note: Classify a [`SyncError`] into a deterministic CLI-visible error bucket.
 ///
 /// The mapping is:
 /// - `SyncTimeout` → `Timeout`
@@ -184,7 +183,7 @@ pub fn classify_platform_error(err: SyncError) -> StagedPlatformError {
             body: sanitize_error_body(&body),
         },
         SyncError::HttpError(e) => {
-            // reqwest timeout errors surface as HttpError with is_timeout()
+            // note: reqwest timeout errors surface as HttpError with is_timeout().
             if e.is_timeout() {
                 StagedPlatformError::Timeout
             } else {
@@ -201,19 +200,19 @@ pub fn classify_platform_error(err: SyncError) -> StagedPlatformError {
     }
 }
 
-/// Request body for creator registration.
+/// note: Request body for creator registration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisterRequest {
-    /// Display name for the creator.
+    /// note: Display name for the creator.
     pub display_name: String,
-    /// Registration source (e.g. "cli", "`web_agent`").
+    /// note: Registration source (e.g. "cli", "`web_agent`").
     pub registration_source: String,
-    /// Optional creator handle (4–15 chars, `[a-z0-9-_.]`).
+    /// note: Optional creator handle (4–15 chars, `[a-z0-9-_.]`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
 }
 
-/// Response from creator registration endpoint.
+/// note: Response from creator registration endpoint.
 ///
 /// Matches the platform API contract (design doc §2):
 /// ```json
@@ -231,39 +230,39 @@ pub struct RegisterRequest {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisterResponse {
-    /// Unique creator identifier.
+    /// note: Unique creator identifier.
     pub creator_id: String,
-    /// Display name as registered.
+    /// note: Display name as registered.
     pub display_name: String,
-    /// Pending API key (activated after verification).
+    /// note: Pending API key (activated after verification).
     pub creator_api_key: String,
-    /// Verification challenge details.
+    /// note: Verification challenge details.
     pub verification: VerificationChallenge,
 }
 
-/// Verification challenge returned by the registration endpoint.
+/// note: Verification challenge returned by the registration endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VerificationChallenge {
-    /// Unique code for this verification attempt.
+    /// note: Unique code for this verification attempt.
     pub verification_code: String,
-    /// Obfuscated math challenge text.
+    /// note: Obfuscated math challenge text.
     pub challenge_text: String,
-    /// ISO 8601 expiry timestamp.
+    /// note: ISO 8601 expiry timestamp.
     pub expires_at: String,
-    /// Human-readable instructions.
+    /// note: Human-readable instructions.
     pub instructions: String,
 }
 
-/// Request body for challenge verification.
+/// note: Request body for challenge verification.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VerifyRequest {
-    /// The verification code from the registration response.
+    /// note: The verification code from the registration response.
     pub verification_code: String,
-    /// The solved answer (numeric string).
+    /// note: The solved answer (numeric string).
     pub answer: String,
 }
 
-/// Response from the verification endpoint.
+/// note: Response from the verification endpoint.
 ///
 /// Matches the platform API contract (design doc §2):
 /// ```json
@@ -275,31 +274,31 @@ pub struct VerifyRequest {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VerifyResponse {
-    /// Verification result status.
+    /// note: Verification result status.
     pub status: VerifyStatus,
-    /// The activated API key (only present on success).
+    /// note: The activated API key (only present on success).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creator_api_key: Option<String>,
-    /// Remaining verification attempts (on `wrong_answer`).
+    /// note: Remaining verification attempts (on `wrong_answer`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_attempts: Option<u32>,
 }
 
-/// Verification result status.
+/// note: Verification result status.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifyStatus {
-    /// Challenge solved successfully.
+    /// note: Challenge solved successfully.
     Verified,
-    /// Answer was incorrect.
+    /// note: Answer was incorrect.
     WrongAnswer,
-    /// Challenge has expired.
+    /// note: Challenge has expired.
     Expired,
-    /// Account is permanently locked.
+    /// note: Account is permanently locked.
     Locked,
 }
 
-/// Platform client for non-sync API interactions.
+/// note: Platform client for non-sync API interactions.
 ///
 /// Handles creator registration and verification flows.
 pub struct PlatformClient {
@@ -350,7 +349,7 @@ impl PlatformClient {
         })
     }
 
-    /// Register a new creator on the platform.
+    /// note: Register a new creator on the platform.
     ///
     /// Calls `POST /api/v1/creators/register` with the display name
     /// and registration source.
@@ -391,7 +390,7 @@ impl PlatformClient {
             .map_err(|e| SyncError::Serialization(e.to_string()))
     }
 
-    /// Verify a creator registration by submitting the challenge answer.
+    /// note: Verify a creator registration by submitting the challenge answer.
     ///
     /// Calls `POST /api/v1/creators/verify` with the verification code
     /// and the solved answer.
@@ -430,7 +429,7 @@ impl PlatformClient {
             .map_err(|e| SyncError::Serialization(e.to_string()))
     }
 
-    /// Build an authenticated HTTP request.
+    /// note: Build an authenticated HTTP request.
     fn build_request<T: Serialize + ?Sized>(
         &self,
         method: Method,
@@ -452,7 +451,7 @@ impl PlatformClient {
         request
     }
 
-    /// Execute an HTTP request.
+    /// note: Execute an HTTP request.
     #[allow(clippy::future_not_send)]
     async fn execute_request<T: Serialize + ?Sized>(
         &self,
@@ -464,7 +463,7 @@ impl PlatformClient {
         request.send().await.map_err(SyncError::from)
     }
 
-    /// Get the base URL (for testing).
+    /// note: Get the base URL (for testing).
     #[cfg(test)]
     #[must_use]
     pub fn base_url(&self) -> &str {
@@ -476,7 +475,6 @@ impl PlatformClient {
 mod tests {
     use super::*;
 
-    // ── StagedPlatformError classification tests ──────────────────
 
     #[test]
     fn classify_timeout_maps_to_staged_timeout() {
@@ -562,7 +560,7 @@ mod tests {
 
     #[test]
     fn sanitize_redacts_long_hex_string() {
-        let body = format!("token={}", "deadbeef".repeat(8)); // 64 hex chars
+        let body = format!("token={}", "deadbeef".repeat(8));
         let sanitized = sanitize_error_body(&body);
         assert!(
             !sanitized.contains("deadbeef"),
@@ -634,7 +632,6 @@ mod tests {
         assert!(msg.contains("platform integration failed"));
     }
 
-    // ── Struct serialization/deserialization tests ──────────────────
 
     #[test]
     fn register_request_serialization() {
@@ -646,7 +643,7 @@ mod tests {
         let json = serde_json::to_string(&req).expect("serialize");
         assert!(json.contains("Test Creator"));
         assert!(json.contains("cli"));
-        // When handle is None, the field should be omitted from JSON
+        // note: a None handle must be omitted from JSON.
         assert!(!json.contains("handle"));
     }
 
@@ -748,7 +745,6 @@ mod tests {
         }
     }
 
-    // ── PlatformClient construction tests ──────────────────────────
 
     #[test]
     fn client_creation_requires_base_url() {
@@ -783,7 +779,6 @@ mod tests {
         assert_eq!(client.base_url(), "https://api.example.com");
     }
 
-    // ── Wiremock integration tests ─────────────────────────────────
 
     #[tokio::test]
     async fn register_creator_success() {

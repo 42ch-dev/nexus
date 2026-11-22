@@ -1,4 +1,5 @@
 //! Local Precheck Stage
+// note: module-level documentation for the items below.
 //!
 //! Validates bundles locally before HTTP upload to save round-trips.
 //!
@@ -15,23 +16,23 @@ use nexus_contracts::generated::Bundle;
 use crate::canonical_hash::is_well_formed_canonical_hash;
 use crate::errors::{SyncError, SyncResult};
 
-/// Authentication context for precheck validation.
+/// note: Authentication context for precheck validation.
 ///
 /// In multi-creator worlds, the `submitting_creator_id` in a bundle must
 /// match the authenticated creator to prevent identity spoofing (SYNC-R6).
 /// In single-creator worlds, auth validation is skipped.
 #[derive(Debug, Clone)]
 pub struct AuthContext {
-    /// The authenticated creator ID from the active session/token.
+    /// note: The authenticated creator ID from the active session/token.
     /// `None` means no auth context is available (single-creator or unauthenticated).
     pub authenticated_creator_id: Option<String>,
-    /// Whether this world is multi-creator.
+    /// note: Whether this world is multi-creator.
     /// If `false`, auth match validation is skipped regardless of `authenticated_creator_id`.
     pub is_multi_creator: bool,
 }
 
 impl AuthContext {
-    /// Create an auth context for a multi-creator world with an authenticated creator.
+    /// note: Create an auth context for a multi-creator world with an authenticated creator.
     #[must_use]
     pub fn multi_creator(authenticated_creator_id: &str) -> Self {
         Self {
@@ -40,7 +41,7 @@ impl AuthContext {
         }
     }
 
-    /// Create an auth context for a single-creator world (auth validation skipped).
+    /// note: Create an auth context for a single-creator world (auth validation skipped).
     #[must_use]
     pub const fn single_creator() -> Self {
         Self {
@@ -49,7 +50,7 @@ impl AuthContext {
         }
     }
 
-    /// Create an unauthenticated context (no auth available).
+    /// note: Create an unauthenticated context (no auth available).
     #[must_use]
     pub const fn unauthenticated() -> Self {
         Self {
@@ -59,41 +60,41 @@ impl AuthContext {
     }
 }
 
-/// Result of a local precheck validation.
+/// note: Result of a local precheck validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrecheckResult {
-    /// Bundle passes all prechecks and is ready for upload.
+    /// note: Bundle passes all prechecks and is ready for upload.
     Valid,
-    /// Bundle failed precheck with specific issues.
+    /// note: Bundle failed precheck with specific issues.
     Invalid(PrecheckReport),
 }
 
-/// A precheck validation report containing all issues found.
+/// note: A precheck validation report containing all issues found.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PrecheckReport {
-    /// List of validation issues.
+    /// note: List of validation issues.
     pub issues: Vec<PrecheckIssue>,
 }
 
 impl PrecheckReport {
-    /// Create a new empty report.
+    /// note: Create a new empty report.
     #[must_use]
     pub const fn new() -> Self {
         Self { issues: Vec::new() }
     }
 
-    /// Add an issue to the report.
+    /// note: Add an issue to the report.
     pub fn add_issue(&mut self, issue: PrecheckIssue) {
         self.issues.push(issue);
     }
 
-    /// Whether the report has any issues.
+    /// note: Whether the report has any issues.
     #[must_use]
     pub const fn has_issues(&self) -> bool {
         !self.issues.is_empty()
     }
 
-    /// Whether any issue is a hard error (prevents upload).
+    /// note: Whether any issue is a hard error (prevents upload).
     #[must_use]
     pub fn has_errors(&self) -> bool {
         self.issues
@@ -101,13 +102,13 @@ impl PrecheckReport {
             .any(|i| i.severity == PrecheckSeverity::Error)
     }
 
-    /// Whether any issue is a warning only.
+    /// note: Whether any issue is a warning only.
     #[must_use]
     pub fn has_warnings_only(&self) -> bool {
         self.has_issues() && !self.has_errors()
     }
 
-    /// Get a human-readable summary.
+    /// note: Get a human-readable summary.
     #[must_use]
     pub fn summary(&self) -> String {
         if self.issues.is_empty() {
@@ -137,12 +138,12 @@ impl std::fmt::Display for PrecheckReport {
     }
 }
 
-/// Severity of a precheck issue.
+/// note: Severity of a precheck issue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrecheckSeverity {
-    /// Hard error — bundle must not be uploaded.
+    /// note: Hard error — bundle must not be uploaded.
     Error,
-    /// Warning — bundle can be uploaded but may have issues.
+    /// note: Warning — bundle can be uploaded but may have issues.
     Warning,
 }
 
@@ -156,21 +157,21 @@ impl PrecheckSeverity {
     }
 }
 
-/// A single precheck validation issue.
+/// note: A single precheck validation issue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecheckIssue {
-    /// Severity level.
+    /// note: Severity level.
     pub severity: PrecheckSeverity,
-    /// Human-readable description of the issue.
+    /// note: Human-readable description of the issue.
     pub message: String,
-    /// Optional hint for fixing the issue.
+    /// note: Optional hint for fixing the issue.
     pub fix_hint: Option<String>,
-    /// Field or path that caused the issue.
+    /// note: Field or path that caused the issue.
     pub field_path: Option<String>,
 }
 
 impl PrecheckIssue {
-    /// Create a new error-level issue.
+    /// note: Create a new error-level issue.
     #[must_use]
     pub fn error(message: &str) -> Self {
         Self {
@@ -181,7 +182,7 @@ impl PrecheckIssue {
         }
     }
 
-    /// Create a new error-level issue with fix hint.
+    /// note: Create a new error-level issue with fix hint.
     #[must_use]
     pub fn error_with_hint(message: &str, hint: &str) -> Self {
         Self {
@@ -192,7 +193,7 @@ impl PrecheckIssue {
         }
     }
 
-    /// Create a new warning-level issue.
+    /// note: Create a new warning-level issue.
     #[must_use]
     pub fn warning(message: &str) -> Self {
         Self {
@@ -204,19 +205,19 @@ impl PrecheckIssue {
     }
 }
 
-/// Local state snapshot needed for precheck validation.
+/// note: Local state snapshot needed for precheck validation.
 #[derive(Debug, Clone)]
 pub struct LocalState {
-    /// Current world revision known locally.
+    /// note: Current world revision known locally.
     pub world_revision: u64,
-    /// Last confirmed delta sequence known locally.
+    /// note: Last confirmed delta sequence known locally.
     pub last_confirmed_delta_sequence: Option<u64>,
-    /// Current timeline head event ID, if known.
+    /// note: Current timeline head event ID, if known.
     pub timeline_head_id: Option<String>,
 }
 
 impl LocalState {
-    /// Create a new local state snapshot.
+    /// note: Create a new local state snapshot.
     #[must_use]
     pub const fn new(world_revision: u64) -> Self {
         Self {
@@ -226,14 +227,14 @@ impl LocalState {
         }
     }
 
-    /// Set the last confirmed delta sequence.
+    /// note: Set the last confirmed delta sequence.
     #[must_use]
     pub const fn with_delta_sequence(mut self, seq: u64) -> Self {
         self.last_confirmed_delta_sequence = Some(seq);
         self
     }
 
-    /// Set the timeline head ID.
+    /// note: Set the timeline head ID.
     #[must_use]
     pub fn with_timeline_head(mut self, id: &str) -> Self {
         self.timeline_head_id = Some(id.to_string());
@@ -241,7 +242,7 @@ impl LocalState {
     }
 }
 
-/// Run local precheck on a bundle before upload (without auth context).
+/// note: Run local precheck on a bundle before upload (without auth context).
 ///
 /// Validates:
 /// 1. Required fields are present
@@ -258,7 +259,7 @@ pub fn precheck_bundle(bundle: &Bundle, local_state: &LocalState) -> PrecheckRes
     precheck_bundle_with_auth(bundle, local_state, &AuthContext::unauthenticated())
 }
 
-/// Run local precheck on a bundle before upload with auth context.
+/// note: Run local precheck on a bundle before upload with auth context.
 ///
 /// Validates:
 /// 1. Required fields are present
@@ -277,28 +278,22 @@ pub fn precheck_bundle_with_auth(
 ) -> PrecheckResult {
     let mut report = PrecheckReport::new();
 
-    // 1. Check required string fields are non-empty
     check_required_fields(bundle, &mut report);
 
-    // 1b. Canonical hash (production bundles with deltas must carry a valid sha256: preimage id)
+    // note: production bundles with deltas must carry a valid sha256: preimage id.
     check_canonical_hash(bundle, &mut report);
 
-    // 2. Check ID prefixes
     check_id_prefixes(bundle, &mut report);
 
-    // 3. Check delta sequence monotonicity
     check_sequence_monotonicity(bundle, local_state, &mut report);
 
-    // 4. Check world revision
     check_world_revision(bundle, local_state, &mut report);
 
-    // 5. Check command consistency
     check_command_consistency(bundle, &mut report);
 
-    // 6. Check schema compliance
     check_schema_compliance(bundle, &mut report);
 
-    // 7. Check auth match (SYNC-R6)
+    // note: auth match check (SYNC-R6).
     check_auth_match(bundle, auth_context, &mut report);
 
     if report.has_errors() {
@@ -314,7 +309,7 @@ pub fn precheck_bundle_with_auth(
             warning_count = report.issues.len(),
             "Precheck passed with warnings"
         );
-        PrecheckResult::Valid // Warnings don't block upload
+        PrecheckResult::Valid // note: warnings do not block upload.
     } else {
         tracing::debug!(
             bundle_id = %bundle.bundle_id,
@@ -324,7 +319,7 @@ pub fn precheck_bundle_with_auth(
     }
 }
 
-/// Convert a `PrecheckResult` into a `SyncResult`.
+/// note: Convert a `PrecheckResult` into a `SyncResult`.
 ///
 /// # Errors
 /// Returns the specific error type if the operation fails.
@@ -471,7 +466,6 @@ fn check_world_revision(bundle: &Bundle, local_state: &LocalState, report: &mut 
 }
 
 fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
-    // Check for duplicate create operations on the same target
     let mut seen_creates: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (i, delta) in bundle.deltas.iter().enumerate() {
@@ -479,7 +473,6 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
         let operation = Some(delta.operation.as_str());
         let target_id = delta.target_entity_id.as_deref();
 
-        // Check that delta_type and operation are present
         if delta_type.is_none() {
             report.add_issue(PrecheckIssue::error(&format!(
                 "delta[{i}] missing delta_type"
@@ -491,14 +484,13 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
             )));
         }
 
-        // Check for create with existing target_id (inconsistent)
         if operation == Some("create") && target_id.is_some() {
             report.add_issue(PrecheckIssue::warning(&format!(
                 "delta[{i}]: 'create' operation should not have target_entity_id"
             )));
         }
 
-        // Check for duplicate creates (only for creates WITH target_id to avoid hash collision)
+        // why: only creates WITH target_id are de-duplicated; the hash covers payload otherwise.
         if operation == Some("create") {
             if let (Some(dt), Some(tid)) = (delta_type, target_id) {
                 let key = format!("{dt}:{tid}");
@@ -511,7 +503,6 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
             }
         }
 
-        // Warn about missing payload
         let has_payload = !delta.payload.is_empty();
         if !has_payload {
             report.add_issue(PrecheckIssue::warning(&format!(
@@ -522,7 +513,6 @@ fn check_command_consistency(bundle: &Bundle, report: &mut PrecheckReport) {
 }
 
 fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
-    // Check schema_version
     if bundle.schema_version != 1 {
         report.add_issue(PrecheckIssue::error_with_hint(
             &format!("unexpected schema_version: {}", bundle.schema_version),
@@ -530,14 +520,13 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
         ));
     }
 
-    // Warn if manuscript_phase is not set (recommended but optional)
+    // note: manuscript_phase is recommended but optional.
     if bundle.manuscript_phase.is_none() {
         report.add_issue(PrecheckIssue::warning(
             "manuscript_phase is not set (recommended for downstream gate validation)",
         ));
     }
 
-    // Warn if base_versions is empty
     let bv = &bundle.base_versions;
     if bv.world_revision.is_none() && bv.timeline_head_id.is_none() && bv.canon_revision.is_none() {
         report.add_issue(PrecheckIssue::warning(
@@ -546,21 +535,19 @@ fn check_schema_compliance(bundle: &Bundle, report: &mut PrecheckReport) {
     }
 }
 
-/// Check that `submitting_creator_id` matches the authenticated creator (SYNC-R6).
+/// note: Check that `submitting_creator_id` matches the authenticated creator (SYNC-R6).
 ///
 /// In multi-creator worlds, this prevents identity spoofing — a malicious actor
 /// cannot submit bundles claiming to be another creator.
 ///
 /// In single-creator worlds or when no auth context is available, this check is skipped.
 fn check_auth_match(bundle: &Bundle, auth_context: &AuthContext, report: &mut PrecheckReport) {
-    // Skip validation if not multi-creator
     if !auth_context.is_multi_creator {
         return;
     }
 
-    // Skip validation if no authenticated creator ID (unauthenticated session)
     let Some(authenticated_id) = &auth_context.authenticated_creator_id else {
-        // In multi-creator world without auth, that's a configuration issue
+        // why: a multi-creator world without auth is a configuration issue.
         report.add_issue(PrecheckIssue::error_with_hint(
             "multi-creator world requires authentication, but no auth context provided",
             "Ensure the daemon has a valid auth token for the authenticated creator",
@@ -654,8 +641,8 @@ mod tests {
 
     #[test]
     fn precheck_sequence_not_monotonic() {
-        let bundle = valid_bundle(); // has last_confirmed_delta_sequence: 10
-        let local_state = LocalState::new(5).with_delta_sequence(15); // local is ahead
+        let bundle = valid_bundle(); // note: last_confirmed_delta_sequence is 10.
+        let local_state = LocalState::new(5).with_delta_sequence(15);
 
         let result = precheck_bundle(&bundle, &local_state);
         assert!(matches!(result, PrecheckResult::Invalid(_)));
@@ -672,7 +659,7 @@ mod tests {
         let mut bundle = valid_bundle();
         bundle.base_versions =
             serde_json::from_value(serde_json::json!({"world_revision": 3})).unwrap();
-        let local_state = LocalState::new(5); // local is ahead
+        let local_state = LocalState::new(5);
 
         let result = precheck_bundle(&bundle, &local_state);
         assert!(matches!(result, PrecheckResult::Invalid(_)));
@@ -691,7 +678,6 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
-        // Warning-only doesn't block
         assert_eq!(result, PrecheckResult::Valid);
     }
 
@@ -703,7 +689,7 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
-        assert_eq!(result, PrecheckResult::Valid); // Warning only
+        assert_eq!(result, PrecheckResult::Valid);
     }
 
     #[test]
@@ -728,11 +714,11 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
-        // This is a warning, but there might be other errors from missing prefix on target_entity_id
+        // note: a create with target_id is a warning, but other prefix errors may also appear.
         // Let's just verify the result
         match result {
             PrecheckResult::Valid | PrecheckResult::Invalid(_) => {
-                // create with target_id is a warning, bundle should still be valid
+                // note: create with target_id is a warning, so the bundle stays valid.
             }
         }
     }
@@ -787,11 +773,11 @@ mod tests {
         assert_eq!(state.timeline_head_id, Some("evt_123".to_string()));
     }
 
-    // ── Auth match validation tests (SYNC-R6) ──────────────────
+    // note: auth match validation tests (SYNC-R6).
 
     #[test]
     fn precheck_auth_match_valid() {
-        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::multi_creator("ctr_test");
 
@@ -801,7 +787,7 @@ mod tests {
 
     #[test]
     fn precheck_auth_match_mismatch_rejects() {
-        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::multi_creator("ctr_other");
 
@@ -818,11 +804,11 @@ mod tests {
 
     #[test]
     fn precheck_auth_match_single_creator_skips() {
-        let bundle = valid_bundle(); // submitting_creator_id = "ctr_test"
+        let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::single_creator();
 
-        // Single-creator world should skip auth validation even though
+        // note: single-creator worlds skip auth validation even though
         // there's no authenticated creator
         let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
         assert_eq!(result, PrecheckResult::Valid);
@@ -832,9 +818,8 @@ mod tests {
     fn precheck_auth_match_no_auth_in_multi_creator_rejects() {
         let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
-        let auth = AuthContext::unauthenticated(); // no auth, is_multi_creator=false
+        let auth = AuthContext::unauthenticated();
 
-        // unauthenticated() has is_multi_creator=false, so it skips
         let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
         assert_eq!(result, PrecheckResult::Valid);
     }
@@ -843,7 +828,7 @@ mod tests {
     fn precheck_auth_multi_creator_without_auth_context_rejects() {
         let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
-        // Multi-creator world but no authenticated creator ID
+        // note: multi-creator world but no authenticated creator ID.
         let auth = AuthContext {
             authenticated_creator_id: None,
             is_multi_creator: true,
@@ -861,7 +846,7 @@ mod tests {
 
     #[test]
     fn precheck_without_auth_always_passes_auth_check() {
-        // Legacy precheck_bundle (no auth) should always pass regardless of
+        // note: legacy precheck_bundle (no auth) always passes regardless of
         // submitting_creator_id
         let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
@@ -906,7 +891,6 @@ mod tests {
         assert!(matches!(result, PrecheckResult::Invalid(_)));
         if let PrecheckResult::Invalid(report) = result {
             assert!(report.has_errors());
-            // Auth mismatch error should be present
             assert!(report
                 .issues
                 .iter()

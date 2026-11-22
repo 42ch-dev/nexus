@@ -1,4 +1,5 @@
 //! Integration tests: sync conflict and merge scenarios.
+// note: module-level documentation for the items below.
 //!
 //! Tests push with conflicts, pull with merge scenarios,
 //! reject workflow with conflict resolution, and bidirectional sync loops.
@@ -14,7 +15,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const VALID_TOKEN: &str =
     "valid_token_1234567890123456789012345678901234567890123456789012345678901234567890";
 
-/// Test sync push when platform returns a conflict via success=false.
+/// note: Test sync push when platform returns a conflict via success=false.
 #[tokio::test]
 async fn push_handles_version_mismatch_conflict() {
     let mock_server = MockServer::start().await;
@@ -52,10 +53,10 @@ async fn push_handles_version_mismatch_conflict() {
         .expect("bundle");
 
     let result = client.push_bundle(&bundle).await;
-    // Conflict response is returned as SyncError::SyncConflict
+    // note: the client surfaces a conflict response as SyncError::SyncConflict.
     match result {
         Ok(resp) => {
-            // If success=false is handled gracefully, bundle_apply_status would be set
+            // note: success=false is handled gracefully; bundle_apply_status would be set.
             assert!(!resp.success || resp.bundle_apply_status.is_some());
         }
         Err(SyncError::SyncConflict { conflict_type, .. }) => {
@@ -65,7 +66,7 @@ async fn push_handles_version_mismatch_conflict() {
     }
 }
 
-/// Test sync push with partial success (some deltas applied, others rejected).
+/// note: Test sync push with partial success (some deltas applied, others rejected).
 #[tokio::test]
 async fn push_partial_success() {
     let mock_server = MockServer::start().await;
@@ -111,7 +112,7 @@ async fn push_partial_success() {
     assert_eq!(resp.world_revision, Some(5));
 }
 
-/// Test sync pull with incoming bundles (merge scenario).
+/// note: Test sync pull with incoming bundles (merge scenario).
 #[tokio::test]
 async fn pull_with_incoming_bundles() {
     let mock_server = MockServer::start().await;
@@ -170,7 +171,7 @@ async fn pull_with_incoming_bundles() {
     assert_eq!(resp.bundles[0].bundle_id.to_string(), "bdl_001");
 }
 
-/// Test sync pull with empty response (already up to date).
+/// note: Test sync pull with empty response (already up to date).
 #[tokio::test]
 async fn pull_empty_when_up_to_date() {
     let mock_server = MockServer::start().await;
@@ -203,12 +204,11 @@ async fn pull_empty_when_up_to_date() {
     assert_eq!(resp.confirmed_delta_sequence, 42);
 }
 
-/// Test bidirectional sync: push then pull to get remote changes.
+/// note: Test bidirectional sync: push then pull to get remote changes.
 #[tokio::test]
 async fn bidirectional_push_then_pull() {
     let mock_server = MockServer::start().await;
 
-    // Push response
     let push_json = json!({
         "success": true,
         "bundle_apply_status": "all_success",
@@ -221,7 +221,6 @@ async fn bidirectional_push_then_pull() {
         .mount(&mock_server)
         .await;
 
-    // Pull response with remote changes
     let pull_json = json!({
         "schema_version": 1,
         "world_revision": 9u64,
@@ -262,7 +261,6 @@ async fn bidirectional_push_then_pull() {
     let base = mock_server.uri();
     let client = SyncClient::new(base.trim_end_matches('/'), VALID_TOKEN).expect("client");
 
-    // Push local delta
     let local_delta = LocalDelta {
         delta_type: "key_block".parse().unwrap(),
         operation: "create".parse().unwrap(),
@@ -283,7 +281,6 @@ async fn bidirectional_push_then_pull() {
     assert!(push_resp.success);
     assert_eq!(push_resp.world_revision, Some(8));
 
-    // Pull to get remote changes
     let pull_req = SyncPullRequest {
         schema_version: std::num::NonZeroU64::new(1).unwrap(),
         world_id: "wld_bidir".parse().unwrap(),
@@ -296,7 +293,7 @@ async fn bidirectional_push_then_pull() {
     assert_eq!(pull_resp.bundles[0].bundle_id.to_string(), "bdl_remote001");
 }
 
-/// Test sync push rejected due to version mismatch conflict (409 status).
+/// note: Test sync push rejected due to version mismatch conflict (409 status).
 #[tokio::test]
 async fn push_rejected_with_version_mismatch_409() {
     let mock_server = MockServer::start().await;
@@ -343,12 +340,11 @@ async fn push_rejected_with_version_mismatch_409() {
     }
 }
 
-/// Test pull after rejection: need to re-sync from scratch.
+/// note: Test pull after rejection: need to re-sync from scratch.
 #[tokio::test]
 async fn pull_after_rejection_refreshes_state() {
     let mock_server = MockServer::start().await;
 
-    // After rejection, pull gives fresh state
     let refresh_json = json!({
         "schema_version": 1,
         "world_revision": 11u64,
@@ -368,7 +364,7 @@ async fn pull_after_rejection_refreshes_state() {
     let req = SyncPullRequest {
         schema_version: std::num::NonZeroU64::new(1).unwrap(),
         world_id: "wld_refresh".parse().unwrap(),
-        after_confirmed_delta_sequence: None, // Full sync after rejection
+        after_confirmed_delta_sequence: None,
     };
 
     let resp = client.pull_bundles(&req).await.expect("pull");
@@ -377,13 +373,13 @@ async fn pull_after_rejection_refreshes_state() {
     assert_eq!(resp.is_up_to_date, Some(true));
 }
 
-/// Test multiple sequential pushes maintain sequence integrity.
+/// note: Test multiple sequential pushes maintain sequence integrity.
 #[tokio::test]
 async fn sequential_pushes_maintain_sequence() {
     let mock_server = MockServer::start().await;
 
-    // Track sequences with static responses (wiremock doesn't support mutable closures well)
-    // Instead, test individual pushes each succeed
+    // note: wiremock lacks mutable closures, so sequences use static responses.
+    // note: instead, each individual push is tested to succeed.
     let push_json = json!({
         "success": true,
         "bundle_apply_status": "all_success",
@@ -421,12 +417,11 @@ async fn sequential_pushes_maintain_sequence() {
     }
 }
 
-/// Test sync pull with pagination (`has_more` = true via `is_up_to_date=false`).
+/// note: Test sync pull with pagination (`has_more` = true via `is_up_to_date=false`).
 #[tokio::test]
 async fn pull_response_indicates_more_bundles() {
     let mock_server = MockServer::start().await;
 
-    // First page with more data available
     let page1_json = json!({
         "schema_version": 1,
         "world_revision": 5u64,
@@ -466,12 +461,11 @@ async fn pull_response_indicates_more_bundles() {
     };
 
     let resp = client.pull_bundles(&req).await.expect("pull");
-    // is_up_to_date = false indicates more data is available
     assert_eq!(resp.is_up_to_date, Some(false));
     assert!(!resp.bundles.is_empty());
 }
 
-/// Test sync push with `all_success` status.
+/// note: Test sync push with `all_success` status.
 #[tokio::test]
 async fn push_all_success_response() {
     let mock_server = MockServer::start().await;

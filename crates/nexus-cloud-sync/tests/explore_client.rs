@@ -1,4 +1,5 @@
 //! Integration tests: platform Explore browse/search clients (wiremock).
+// note: module-level documentation for the items below.
 
 use nexus_cloud_sync::sync_client::SyncClient;
 use nexus_contracts::{ExploreBrowseRequest, ExploreSearchRequest};
