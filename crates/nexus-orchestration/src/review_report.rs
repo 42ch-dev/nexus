@@ -24,7 +24,7 @@
 
 use std::collections::HashMap;
 
-/// Finding `kind` vocabulary (spec §2.1 / §8).
+/// note: finding `kind` vocabulary (spec §2.1 / §8).
 ///
 /// Source-of-truth is the DB layer's closed set
 /// (`nexus_local_db::findings::FindingKind::ALL_STRS`); this array mirrors it
@@ -39,17 +39,17 @@ pub const KNOWN_FINDING_KINDS: &[&str] = &[
     "consistency",
     "plot_hole",
     "world_inconsistency",
-    // `other` is a DB-side catch-all; reports should emit one of the above
+    // why: `other` is a DB-side catch-all; reports should emit one of the above
     // (the parser falls back to `craft` for unknown tokens per spec §1.2).
 ];
 
-/// Finding `severity` vocabulary (spec §2.1).
+/// note: finding `severity` vocabulary (spec §2.1).
 pub const KNOWN_FINDING_SEVERITIES: &[&str] = &["info", "minor", "major", "blocker"];
 
-/// Finding `target_executor` vocabulary (spec §2.2).
+/// note: finding `target_executor` vocabulary (spec §2.2).
 pub const KNOWN_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
 
-/// Map report-side severity tokens → finding-side severity enum.
+/// note: map report-side severity tokens to the finding-side severity enum.
 ///
 /// Reports written by the `novel-chapter-review` preset use
 /// `critical / major / minor` (review-framework vocabulary). The findings
@@ -63,12 +63,12 @@ pub fn map_severity(report_token: &str) -> &'static str {
         "critical" | "blocker" => "blocker",
         "major" => "major",
         "minor" => "minor",
-        // `info`, unknown, or empty → safe default.
+        // note: `info`, unknown, or empty fall back to the safe default.
         _ => "info",
     }
 }
 
-/// Map a report-side `kind` token to the finding-side closed set.
+/// note: map a report-side `kind` token to the finding-side closed set.
 ///
 /// Returns `None` for tokens that are not in [`KNOWN_FINDING_KINDS`]; the
 /// caller applies the `craft` fallback per spec §1.2.
@@ -81,7 +81,7 @@ pub fn map_kind(report_token: &str) -> Option<&'static str> {
         .find(|&known| known == normalized.as_str())
 }
 
-/// Map a report-side `target_executor` hint to the finding-side vocabulary.
+/// note: map a report-side `target_executor` hint to the finding-side vocabulary.
 ///
 /// Spec §1.2 default rule: `write` when the kind is `craft` or `continuity`;
 /// else `brainstorm`. When the report names a known executor explicitly, that
@@ -96,44 +96,44 @@ pub fn map_target_executor(report_token: &str, fallback_kind: &str) -> &'static 
     {
         return matched;
     }
-    // Spec §1.2 default.
+    // note: spec §1.2 default.
     match fallback_kind {
         "craft" | "continuity" => "write",
         _ => "brainstorm",
     }
 }
 
-/// One parsed finding row from a review report.
+/// note: one parsed finding row from a review report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedFinding {
-    /// Closed-set kind (`continuity` / `craft` / `plot_hole` /
+    /// note: closed-set kind (`continuity` / `craft` / `plot_hole` /
     /// `world_inconsistency` / `pacing`). Never empty.
     pub kind: String,
-    /// Closed-set severity (`info` / `minor` / `major` / `blocker`).
+    /// note: closed-set severity (`info` / `minor` / `major` / `blocker`).
     pub severity: String,
-    /// Finding body — the issue description from the report. Never empty for
+    /// note: finding body — the issue description from the report. Never empty for
     /// a parsed row; callers may truncate before persisting.
     pub body: String,
-    /// Optional Layer-2 rule suggestion prose; `None` when the report does
+    /// note: optional Layer-2 rule suggestion prose; `None` when the report does
     /// not include one.
     pub rule_suggestion: Option<String>,
-    /// Closed-set routing hint (`write` / `brainstorm` / `none` / `master`).
+    /// note: closed-set routing hint (`write` / `brainstorm` / `none` / `master`).
     pub target_executor: String,
 }
 
-/// Outcome of parsing a review report.
+/// note: outcome of parsing a review report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedReviewReport {
-    /// ≥0 parsed findings. Empty when the report contains no `## Issues`
+    /// note: ≥0 parsed findings. Empty when the report contains no `## Issues`
     /// section or no parseable bullets (caller treats this as the
     /// "malformed → fallback" branch per spec §1.3).
     pub findings: Vec<ParsedFinding>,
-    /// Best-effort overall assessment text from the report (used as a
+    /// note: best-effort overall assessment text from the report (used as a
     /// fallback `body` excerpt when no individual issues parse).
     pub overall_assessment: Option<String>,
 }
 
-/// Parse a `review-report.md` body into structured findings.
+/// note: parse a `review-report.md` body into structured findings.
 ///
 /// Looks for an `## Issues` (or `### Issues`) section and parses each bullet
 /// as one finding row. Recognizes inline `kind:` / `severity:` / `executor:`
@@ -175,15 +175,15 @@ pub fn parse_review_report(content: &str) -> Result<ParsedReviewReport, ParseErr
     })
 }
 
-/// Parse failures for [`parse_review_report`].
+/// note: parse failures for [`parse_review_report`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseError {
-    /// Input was empty or whitespace-only.
+    /// note: input was empty or whitespace-only.
     #[error("review report content is empty")]
     Empty,
 }
 
-/// Split a markdown body into `(heading, body)` pairs by `##` (and `###`)
+/// note: split a markdown body into `(heading, body)` pairs by `##` (and `###`)
 /// ATX headings. Lines before the first heading are attached to an empty
 /// heading (discarded by callers that look up specific sections).
 fn split_sections(content: &str) -> Vec<(String, String)> {
@@ -194,7 +194,7 @@ fn split_sections(content: &str) -> Vec<(String, String)> {
 
     for line in content.lines() {
         let trimmed = line.trim_start();
-        // Match `### ` before `## ` so an h3 heading doesn't get its first
+        // why: match `### ` before `## ` so an h3 heading doesn't get its first
         // `#` swallowed by the h2 prefix.
         if let Some(rest) = trimmed
             .strip_prefix("### ")
@@ -206,7 +206,7 @@ fn split_sections(content: &str) -> Vec<(String, String)> {
                     std::mem::take(&mut current_body),
                 ));
             } else {
-                // First ever content was a heading — no preamble to push.
+                // note: the first content was a heading — no preamble to push.
                 current_heading.clear();
                 current_body.clear();
             }
@@ -227,12 +227,12 @@ fn heading_eq(actual: &str, expected_lower: &str) -> bool {
     actual.trim().to_ascii_lowercase() == expected_lower
 }
 
-/// Parse bullets inside the `## Issues` section body into findings.
+/// note: parse bullets inside the `## Issues` section body into findings.
 fn parse_issues_bullets(section_body: &str) -> Vec<ParsedFinding> {
     section_body.lines().filter_map(parse_issue_line).collect()
 }
 
-/// Parse one `- ...` (or `* ...`) bullet into a finding.
+/// note: parse one `- ...` (or `* ...`) bullet into a finding.
 fn parse_issue_line(line: &str) -> Option<ParsedFinding> {
     let trimmed = line.trim();
     let bullet = trimmed
@@ -275,7 +275,7 @@ fn parse_issue_line(line: &str) -> Option<ParsedFinding> {
     })
 }
 
-/// Recognized inline tag keys (case-insensitive). The value is the next
+/// note: recognized inline tag keys (case-insensitive). The value is the next
 /// whitespace-delimited token after the `key:` marker.
 const TAG_KEYS: &[&str] = &[
     "kind",
@@ -286,7 +286,7 @@ const TAG_KEYS: &[&str] = &[
     "rule",
 ];
 
-/// Scan a bullet string token-by-token, separating inline `key: value` tags
+/// note: scan a bullet string token-by-token, separating inline `key: value` tags
 /// from prose tokens.
 ///
 /// Tags are recognized when a token ends with `:` (after trimming trailing
@@ -311,7 +311,7 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
     let mut i = 0;
     while i < raw_tokens.len() {
         let tok = raw_tokens[i];
-        // Recognize `key:` (optionally followed by other punctuation that
+        // why: recognize `key:` (optionally followed by other punctuation that
         // split_whitespace has already isolated).
         if let Some(key) = tok
             .strip_suffix(':')
@@ -319,7 +319,7 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
             .filter(|k| TAG_KEYS.contains(&k.as_str()))
         {
             if matches!(key.as_str(), "rule_suggestion" | "rule") {
-                // Capture the rest of the line as prose, stopping if another
+                // note: capture the rest of the line as prose, stopping if another
                 // recognized tag appears later.
                 let mut value_parts: Vec<&str> = Vec::new();
                 let mut j = i + 1;
@@ -342,7 +342,7 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
                 i = j;
                 continue;
             }
-            // Single-token value tag (kind/severity/executor/...).
+            // note: single-token value tag (kind/severity/executor/...).
             if let Some(value_tok) = raw_tokens.get(i + 1) {
                 let value = value_tok.trim_end_matches([',', '.']).to_string();
                 if !value.is_empty() {
@@ -351,11 +351,11 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
                     continue;
                 }
             }
-            // Lone `key:` with no following value — drop the marker token.
+            // note: lone `key:` with no following value — drop the marker token.
             i += 1;
             continue;
         }
-        // Prose token. Trim trailing comma-only artifacts so the body reads
+        // note: prose token. Trim trailing comma-only artifacts so the body reads
         // naturally (`, ` separators don't belong in prose).
         prose.push(tok.trim_end_matches(',').to_string());
         i += 1;
@@ -368,8 +368,6 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
 mod tests {
     use super::*;
 
-    // ── Vocabulary mapping ────────────────────────────────────────────────
-
     #[test]
     fn map_severity_translates_review_vocab_to_finding_vocab() {
         assert_eq!(map_severity("critical"), "blocker");
@@ -379,7 +377,7 @@ mod tests {
         assert_eq!(map_severity("MAJOR"), "major");
         assert_eq!(map_severity("minor"), "minor");
         assert_eq!(map_severity("info"), "info");
-        // Unknown tokens fall back to the safe default.
+        // note: unknown tokens fall back to the safe default.
         assert_eq!(map_severity("severe"), "info");
         assert_eq!(map_severity(""), "info");
     }
@@ -396,21 +394,19 @@ mod tests {
 
     #[test]
     fn map_target_executor_uses_explicit_hint_then_kind_default() {
-        // Explicit known executor wins.
+        // note: an explicit known executor wins.
         assert_eq!(map_target_executor("write", "craft"), "write");
         assert_eq!(map_target_executor("brainstorm", "craft"), "brainstorm");
         assert_eq!(map_target_executor("master", "plot_hole"), "master");
-        // Unknown token + craft kind → write (spec §1.2).
+        // note: unknown token + craft kind → write (spec §1.2).
         assert_eq!(map_target_executor("", "craft"), "write");
         assert_eq!(map_target_executor("nonsense", "craft"), "write");
-        // Unknown token + continuity → write.
+        // note: unknown token + continuity → write.
         assert_eq!(map_target_executor("", "continuity"), "write");
-        // Unknown token + other kind → brainstorm.
+        // note: unknown token + other kind → brainstorm.
         assert_eq!(map_target_executor("", "plot_hole"), "brainstorm");
         assert_eq!(map_target_executor("", "world_inconsistency"), "brainstorm");
     }
-
-    // ── Full-parse contract ───────────────────────────────────────────────
 
     #[test]
     fn parse_empty_content_is_an_error() {
@@ -451,11 +447,11 @@ Solid chapter overall; a couple of craft issues to address.
         assert!(f0.body.contains("POV drifts mid-chapter"));
         assert!(f0.rule_suggestion.is_none());
 
-        // critical → blocker mapping.
+        // note: critical → blocker mapping.
         let f1 = &parsed.findings[1];
         assert_eq!(f1.kind, "world_inconsistency");
         assert_eq!(f1.severity, "blocker");
-        // No executor + world_inconsistency kind → brainstorm default.
+        // note: no executor + world_inconsistency kind → brainstorm default.
         assert_eq!(f1.target_executor, "brainstorm");
 
         let f2 = &parsed.findings[2];
@@ -478,9 +474,9 @@ rule_suggestion: Pin dialect per region in AGENTS.md
             f.rule_suggestion.as_deref(),
             Some("Pin dialect per region in AGENTS.md")
         );
-        // Body is the prose minus the tag chunks.
+        // note: body is the prose minus the tag chunks.
         assert!(f.body.contains("Inconsistent dialect"));
-        // Tag value must NOT leak into the body.
+        // invariant: tag values never leak into the body.
         assert!(!f.body.contains("Pin dialect"));
         assert!(!f.body.contains("kind:"));
     }
@@ -511,7 +507,7 @@ rule_suggestion: Pin dialect per region in AGENTS.md
 
     #[test]
     fn parse_missing_issues_section_yields_empty_findings_but_keeps_overall() {
-        // No ## Issues heading → findings empty, overall_assessment preserved.
+        // note: no ## Issues heading → findings empty, overall_assessment preserved.
         // The caller (auto_chain wiring) falls back to the placeholder shape
         // per spec §1.3 when findings is empty.
         let report = "\
@@ -544,7 +540,7 @@ Adequate; no actionable issues.
 
     #[test]
     fn parse_skips_malformed_bullets_but_keeps_good_ones() {
-        // Best-effort: the second bullet (empty prose after tag-strip) is
+        // note: best-effort — the second bullet (empty prose after tag-strip) is
         // dropped; the first and third are kept.
         let report = "\
 ## Issues

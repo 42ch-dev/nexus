@@ -45,28 +45,20 @@ use anyhow::{Context, Result};
 use nexus_capability::builtins::work_commit::{commit_work_bytes, require_executor};
 use nexus_capability::WorkspaceExecutor;
 
-// ---------------------------------------------------------------------------
-// Canonical table geometry
-// ---------------------------------------------------------------------------
-
-/// Canonical header row for `foreshadowing.md` (matches the scaffolded template).
+/// note: Canonical header row for `foreshadowing.md` (matches the scaffolded template).
 const FORESHADOWING_HEADER: &str = "| ID | Description | Planted | Paid off | Status |";
-/// Canonical separator row for `foreshadowing.md`.
+/// note: Canonical separator row for `foreshadowing.md`.
 const FORESHADOWING_SEPARATOR: &str = "| --- | --- | --- | --- | --- |";
 
-/// Canonical header row for `event-index.md` (matches the scaffolded template).
+/// note: Canonical header row for `event-index.md` (matches the scaffolded template).
 const EVENT_HEADER: &str = "| ID | Description | Chapter | Impact |";
-/// Canonical separator row for `event-index.md`.
+/// note: Canonical separator row for `event-index.md`.
 const EVENT_SEPARATOR: &str = "| --- | --- | --- | --- | --- |";
 
-/// Expected number of columns in a foreshadowing data row.
+/// note: Expected number of columns in a foreshadowing data row.
 const FORESHADOWING_COL_COUNT: usize = 5;
 
-// ---------------------------------------------------------------------------
-// Foreshadowing status (typed closed vocabulary — overlay §3)
-// ---------------------------------------------------------------------------
-
-/// Closed status vocabulary for a foreshadowing row (overlay §3).
+/// note: Closed status vocabulary for a foreshadowing row (overlay §3).
 ///
 /// Canonical wire strings (emitted by [`Display`], parsed by [`FromStr`]):
 /// `"planned"` | `"buried"` | `"paid_off"`.
@@ -77,16 +69,16 @@ const FORESHADOWING_COL_COUNT: usize = 5;
 /// stable regardless of how the value was originally cased.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForeshadowingStatus {
-    /// Seed is declared but not yet planted in the narrative.
+    /// note: Seed is declared but not yet planted in the narrative.
     Planned,
-    /// Seed is planted but will intentionally never pay off.
+    /// note: Seed is planted but will intentionally never pay off.
     Buried,
-    /// Seed has resolved / paid off.
+    /// note: Seed has resolved / paid off.
     PaidOff,
 }
 
 impl ForeshadowingStatus {
-    /// Canonical lowercase wire string for the variant.
+    /// note: Canonical lowercase wire string for the variant.
     #[must_use]
     pub const fn as_canonical_str(self) -> &'static str {
         match self {
@@ -106,7 +98,7 @@ impl std::fmt::Display for ForeshadowingStatus {
 impl FromStr for ForeshadowingStatus {
     type Err = ForeshadowingStatusError;
 
-    /// Parse a status cell into a typed variant.
+    /// note: Parse a status cell into a typed variant.
     ///
     /// Tolerates surrounding whitespace and mixed casing. Only the three
     /// canonical underscore forms are recognised (e.g. `paid_off`, not
@@ -123,10 +115,10 @@ impl FromStr for ForeshadowingStatus {
     }
 }
 
-/// Error returned when a status cell does not match the closed vocabulary.
+/// note: Error returned when a status cell does not match the closed vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeshadowingStatusError {
-    /// The rejected input value (as found in the source document).
+    /// note: The rejected input value (as found in the source document).
     pub input: String,
 }
 
@@ -143,16 +135,16 @@ impl std::fmt::Display for ForeshadowingStatusError {
 
 impl std::error::Error for ForeshadowingStatusError {}
 
-/// Structured error from foreshadowing index table parsing.
+/// note: Structured error from foreshadowing index table parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexParseError {
-    /// A status cell did not match the [`ForeshadowingStatus`] vocabulary.
+    /// note: A status cell did not match the [`ForeshadowingStatus`] vocabulary.
     InvalidStatus {
-        /// Zero-based index of the offending data row within the parsed table
+        /// note: Zero-based index of the offending data row within the parsed table
         /// (counting every `|`-delimited data row, including placeholder rows
         /// that were skipped due to empty id).
         row_index: usize,
-        /// The rejected status value as found in the source document.
+        /// note: The rejected status value as found in the source document.
         value: String,
     },
 }
@@ -173,30 +165,26 @@ impl std::fmt::Display for IndexParseError {
 
 impl std::error::Error for IndexParseError {}
 
-// ---------------------------------------------------------------------------
-// Foreshadowing row
-// ---------------------------------------------------------------------------
-
-/// A single `F###` row in `Outlines/foreshadowing.md`.
+/// note: A single `F###` row in `Outlines/foreshadowing.md`.
 ///
 /// Field order matches the canonical table header
 /// (`ID | Description | Planted | Paid off | Status`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeshadowingRow {
-    /// `F` + three-digit zero-padded integer (e.g. `F001`).
+    /// note: `F` + three-digit zero-padded integer (e.g. `F001`).
     pub id: String,
-    /// Short human label / what is foreshadowed.
+    /// note: Short human label / what is foreshadowed.
     pub description: String,
-    /// Chapter number where the seed is planted (empty until planted).
+    /// note: Chapter number where the seed is planted (empty until planted).
     pub planted: String,
-    /// Chapter number where it resolves (empty until resolved).
+    /// note: Chapter number where it resolves (empty until resolved).
     pub paid_off: String,
-    /// Lifecycle status (overlay §3 closed vocabulary, typed).
+    /// note: Lifecycle status (overlay §3 closed vocabulary, typed).
     pub status: ForeshadowingStatus,
 }
 
 impl ForeshadowingRow {
-    /// Build a freshly-allocated row with `planned` status and empty chapter
+    /// note: Build a freshly-allocated row with `planned` status and empty chapter
     /// columns (the shape produced by promotion of a new declaration).
     const fn new_allocated(id: String, description: String) -> Self {
         Self {
@@ -209,24 +197,20 @@ impl ForeshadowingRow {
     }
 }
 
-/// A single `E###` row in `Outlines/event-index.md` (P1 read-only surface).
+/// note: A single `E###` row in `Outlines/event-index.md` (P1 read-only surface).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventRow {
-    /// `E` + three-digit zero-padded integer (e.g. `E001`).
+    /// note: `E` + three-digit zero-padded integer (e.g. `E001`).
     pub id: String,
-    /// What happens.
+    /// note: What happens.
     pub description: String,
-    /// Chapter number where the event occurs.
+    /// note: Chapter number where the event occurs.
     pub chapter: String,
-    /// Downstream consequences.
+    /// note: Downstream consequences.
     pub impact: String,
 }
 
-// ---------------------------------------------------------------------------
-// Parser
-// ---------------------------------------------------------------------------
-
-/// Parse the `foreshadowing.md` markdown table into rows.
+/// note: Parse the `foreshadowing.md` markdown table into rows.
 ///
 /// Tolerates the surrounding prose (title, bullet list, trailing stub note)
 /// emitted by the scaffold template: only lines that look like table data rows
@@ -270,7 +254,7 @@ pub fn parse_foreshadowing_index(content: &str) -> Result<Vec<ForeshadowingRow>,
     Ok(rows)
 }
 
-/// Parse the `event-index.md` markdown table into rows (P1 read stub).
+/// note: Parse the `event-index.md` markdown table into rows (P1 read stub).
 ///
 /// Full E### CRUD is deferred to V1.50 per overlay §4; this read path lets the
 /// prompt surface existing events when the file is populated. An empty or
@@ -294,7 +278,7 @@ pub fn parse_event_index(content: &str) -> Vec<EventRow> {
         .collect()
 }
 
-/// Split a markdown document into table data rows.
+/// note: Split a markdown document into table data rows.
 ///
 /// Scans for the first header/separator pair (a `|`-delimited row immediately
 /// followed by a `| --- |`-style separator), then collects every subsequent
@@ -306,7 +290,7 @@ fn parse_table(content: &str, col_count: usize) -> Vec<Vec<String>> {
     let lines: Vec<&str> = content.lines().collect();
     let mut rows = Vec::new();
 
-    // Locate the header: the first pipe-row whose following line is a separator.
+    // note: Locate the header: the first pipe-row whose following line is a separator.
     let mut i = 0;
     let mut header_at = None;
     while i + 1 < lines.len() {
@@ -320,12 +304,12 @@ fn parse_table(content: &str, col_count: usize) -> Vec<Vec<String>> {
         return Vec::new();
     };
 
-    // Data rows start after header + separator.
+    // note: Data rows start after header + separator.
     let mut idx = header_idx + 2;
     while idx < lines.len() {
         let line = lines[idx];
         if !is_table_row(line) {
-            // A blank line or prose ends the table block.
+            // note: A blank line or prose ends the table block.
             break;
         }
         let cells = split_row(line, col_count);
@@ -335,13 +319,13 @@ fn parse_table(content: &str, col_count: usize) -> Vec<Vec<String>> {
     rows
 }
 
-/// `true` if the line is a pipe-delimited table row (not a separator).
+/// note: `true` if the line is a pipe-delimited table row (not a separator).
 fn is_table_row(line: &str) -> bool {
     let t = line.trim();
     t.starts_with('|') && !is_separator_row(line)
 }
 
-/// `true` if the line is a markdown table separator (`| --- | --- | …`).
+/// note: `true` if the line is a markdown table separator (`| --- | --- | …`).
 fn is_separator_row(line: &str) -> bool {
     let t = line.trim();
     if !t.starts_with('|') {
@@ -352,7 +336,7 @@ fn is_separator_row(line: &str) -> bool {
         .all(|cell| cell.trim().trim_matches('-').is_empty() && !cell.trim().is_empty())
 }
 
-/// Split a `| a | b | c |` row into exactly `col_count` trimmed cells.
+/// note: Split a `| a | b | c |` row into exactly `col_count` trimmed cells.
 ///
 /// The bounding pipes and any extra trailing empty cells are collapsed; short
 /// rows are padded with empty strings so positional access is safe.
@@ -363,7 +347,7 @@ fn split_row(line: &str, col_count: usize) -> Vec<String> {
         .split('|')
         .map(|c| c.trim().to_string())
         .collect();
-    // Drop trailing empties introduced by a trailing `| ` but keep at least
+    // note: Drop trailing empties introduced by a trailing `| ` but keep at least
     // `col_count` slots when the row is well-formed.
     while cells.len() > col_count && cells.last().is_some_and(String::is_empty) {
         cells.pop();
@@ -372,16 +356,12 @@ fn split_row(line: &str, col_count: usize) -> Vec<String> {
     cells
 }
 
-/// Safe positional cell accessor.
+/// note: Safe positional cell accessor.
 fn cell(cells: &[String], idx: usize) -> String {
     cells.get(idx).cloned().unwrap_or_default()
 }
 
-// ---------------------------------------------------------------------------
-// Serializer
-// ---------------------------------------------------------------------------
-
-/// Serialize rows back into the canonical `foreshadowing.md` table.
+/// note: Serialize rows back into the canonical `foreshadowing.md` table.
 ///
 /// Emits the canonical header + separator (byte-identical to the scaffolded
 /// template) followed by one row per entry, preserving the
@@ -409,7 +389,7 @@ pub fn serialize_foreshadowing_index(rows: &[ForeshadowingRow]) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-/// Serialize rows into the canonical `event-index.md` table (P1 writer stub).
+/// note: Serialize rows into the canonical `event-index.md` table (P1 writer stub).
 #[must_use]
 pub fn serialize_event_index(rows: &[EventRow]) -> String {
     let mut lines: Vec<String> = vec![
@@ -431,24 +411,20 @@ pub fn serialize_event_index(rows: &[EventRow]) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-// ---------------------------------------------------------------------------
-// Id allocation
-// ---------------------------------------------------------------------------
-
-/// Return the next sequential `F###` id (`max(existing numeric suffix) + 1`,
+/// note: Return the next sequential `F###` id (`max(existing numeric suffix) + 1`,
 /// per overlay §3.1). With no rows, returns `F001`.
 #[must_use]
 pub fn next_f_id(rows: &[ForeshadowingRow]) -> String {
     next_seq_id(rows.iter().map(|r| r.id.as_str()), 'F')
 }
 
-/// Return the next sequential `E###` id (helper for the deferred E### writer).
+/// note: Return the next sequential `E###` id (helper for the deferred E### writer).
 #[must_use]
 pub fn next_e_id(rows: &[EventRow]) -> String {
     next_seq_id(rows.iter().map(|r| r.id.as_str()), 'E')
 }
 
-/// Core sequential allocator shared by F### / E###.
+/// note: Core sequential allocator shared by F### / E###.
 ///
 /// Parses the numeric suffix of every id matching `<prefix><digits>` and returns
 /// `<prefix>{max+1:03}`. Ids that do not match the expected shape are ignored.
@@ -460,12 +436,12 @@ where
         .into_iter()
         .filter_map(|id| {
             let rest = id.strip_prefix(prefix)?;
-            // Only well-formed numeric suffixes participate.
+            // note: Only well-formed numeric suffixes participate.
             rest.parse::<u32>().ok()
         })
         .max()
         .unwrap_or(0);
-    // `max + 1`: overlay §3.1 "next id = max(existing numeric suffix) + 1".
+    // note: `max + 1`: overlay §3.1 "next id = max(existing numeric suffix) + 1".
     // `checked_add` keeps the nursery `arithmetic_side_effects` lint quiet;
     // overflow is impossible for realistic chapter counts.
     let next = max
@@ -474,22 +450,18 @@ where
     format!("{prefix}{next:03}")
 }
 
-// ---------------------------------------------------------------------------
-// Outline section extraction + inline declarations
-// ---------------------------------------------------------------------------
-
-/// One inline foreshadowing declaration authored in a chapter outline's
+/// note: One inline foreshadowing declaration authored in a chapter outline's
 /// `## Foreshadowing Touched (F###)` section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FDeclaration {
-    /// `Some("F001")` when the author wrote an explicit id; `None` means
+    /// note: `Some("F001")` when the author wrote an explicit id; `None` means
     /// "declare this title, allocate the next `F###`".
     pub id: Option<String>,
-    /// Human label / description text.
+    /// note: Human label / description text.
     pub description: String,
 }
 
-/// Extract the `## Foreshadowing Touched (F###)` section body from a chapter
+/// note: Extract the `## Foreshadowing Touched (F###)` section body from a chapter
 /// outline document.
 ///
 /// Returns the raw section text (everything after the section header up to the
@@ -499,17 +471,17 @@ pub struct FDeclaration {
 #[must_use]
 pub fn extract_foreshadowing_section(outline_content: &str) -> Option<String> {
     let mut lines = outline_content.lines();
-    // Advance to the section header.
+    // note: Advance to the section header.
     let header = lines.find(|line| {
         let t = line.trim_start();
-        // Match `## Foreshadowing Touched` (level-2 heading per outline-chapter.md).
+        // note: Match `## Foreshadowing Touched` (level-2 heading per outline-chapter.md).
         t.starts_with("## ") && t.contains("Foreshadowing Touched")
     })?;
-    let _ = header; // positioned just past the header
+    let _ = header; // note: positioned just past the header
     let mut body = String::new();
     for line in lines {
         let t = line.trim_start();
-        // Stop at the next heading of level <= 2 (a sibling/parent section).
+        // note: Stop at the next heading of level <= 2 (a sibling/parent section).
         if t.starts_with("# ") || t.starts_with("## ") {
             break;
         }
@@ -523,7 +495,7 @@ pub fn extract_foreshadowing_section(outline_content: &str) -> Option<String> {
     }
 }
 
-/// Parse inline `F###` declarations from a "Foreshadowing Touched" section body.
+/// note: Parse inline `F###` declarations from a "Foreshadowing Touched" section body.
 ///
 /// Only bullets that contain an explicit `F###` token (with at least one
 /// digit, followed by `:` or whitespace) are yielded as declarations. Bullets
@@ -552,7 +524,7 @@ pub fn extract_inline_f_declarations(outline_section: &str) -> Vec<FDeclaration>
         .collect()
 }
 
-/// Parse a single line into a declaration, or `None` if it is not one.
+/// note: Parse a single line into a declaration, or `None` if it is not one.
 ///
 /// A declaration requires an explicit `F###` token (at least one digit after
 /// `F`, followed by `:` or whitespace, with non-empty description text). Lines
@@ -562,11 +534,11 @@ fn parse_declaration_line(line: &str) -> Option<FDeclaration> {
     if body.is_empty() {
         return None;
     }
-    // Skip the explicit "nothing touched" sentinel from the prompt.
+    // note: Skip the explicit "nothing touched" sentinel from the prompt.
     if body.to_ascii_lowercase().contains("no foreshadowing") {
         return None;
     }
-    // Strip a leading bullet (`-` / `*`).
+    // note: Strip a leading bullet (`-` / `*`).
     let stripped = body
         .strip_prefix("- ")
         .or_else(|| body.strip_prefix("* "))
@@ -575,7 +547,7 @@ fn parse_declaration_line(line: &str) -> Option<FDeclaration> {
     if stripped.is_empty() {
         return None;
     }
-    // `F###` with at least one digit, followed by `:` or whitespace.
+    // note: `F###` with at least one digit, followed by `:` or whitespace.
     if let Some(rest) = stripped.strip_prefix('F') {
         if let Some(digits_end) = rest.find(|c: char| !c.is_ascii_digit()) {
             let (digits, tail) = rest.split_at(digits_end);
@@ -593,27 +565,23 @@ fn parse_declaration_line(line: &str) -> Option<FDeclaration> {
                 });
             }
         } else if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
-            // `F001` with no description on the line — treat as id-only ref,
+            // note: `F001` with no description on the line — treat as id-only ref,
             // not a declaration (nothing to promote). Skip.
             return None;
         }
     }
-    // W-2: bullets without an explicit `F###` token are NOT declarations.
+    // note: W-2: bullets without an explicit `F###` token are NOT declarations.
     // Notes, TODOs, and prose are ignored to avoid polluting the index with
     // spurious allocated ids.
     None
 }
 
-// ---------------------------------------------------------------------------
-// Promotion (read-modify-write `foreshadowing.md`)
-// ---------------------------------------------------------------------------
-
-/// Path to a Work's `foreshadowing.md` index under its Work directory.
+/// note: Path to a Work's `foreshadowing.md` index under its Work directory.
 fn foreshadowing_index_path(work_dir: &Path) -> PathBuf {
     work_dir.join("Outlines").join("foreshadowing.md")
 }
 
-/// Promote inline `F###` declarations from a chapter outline section into the
+/// note: Promote inline `F###` declarations from a chapter outline section into the
 /// Work's `foreshadowing.md` index.
 ///
 /// Reads the current index (creating it fresh if absent), then for each
@@ -665,7 +633,7 @@ pub async fn promote_outline_to_index(
     let declarations = extract_inline_f_declarations(outline_section);
     let mut allocated = Vec::new();
     for decl in declarations {
-        // W-2: `extract_inline_f_declarations` only yields declarations that
+        // note: W-2: `extract_inline_f_declarations` only yields declarations that
         // carry an explicit `F###` token, so `decl.id` is always `Some`.
         // Defensive guard: if a future change reintroduces id-less
         // declarations, skip them rather than allocating silently.
@@ -674,7 +642,7 @@ pub async fn promote_outline_to_index(
         };
         if let Some(row) = rows.iter().find(|r| r.id == id) {
             if row.description == decl.description {
-                // Idempotent: same id + same description already indexed.
+                // note: Idempotent: same id + same description already indexed.
                 continue;
             }
             anyhow::bail!(
@@ -690,7 +658,7 @@ pub async fn promote_outline_to_index(
     }
 
     if allocated.is_empty() {
-        // Nothing to do — avoid touching the file's mtime.
+        // why: nothing to do — avoid touching the file's mtime.
         return Ok(Vec::new());
     }
 
@@ -707,11 +675,7 @@ pub async fn promote_outline_to_index(
     Ok(allocated)
 }
 
-// ---------------------------------------------------------------------------
-// Summary for prompt injection
-// ---------------------------------------------------------------------------
-
-/// Read `Works/<work_ref>/Outlines/foreshadowing.md` and return a compact
+/// note: Read `Works/<work_ref>/Outlines/foreshadowing.md` and return a compact
 /// one-line-per-row Markdown summary for outline/draft prompt injection.
 ///
 /// Returns `None` when the file is missing, empty, or contains no rows, so the
@@ -747,16 +711,11 @@ pub fn read_foreshadowing_summary(work_dir: &Path) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-// ===========================================================================
-// Tests
-// ===========================================================================
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    // ── parse_foreshadowing_index ──────────────────────────────────────────
 
     #[test]
     fn parse_foreshadowing_index_handles_empty_file() {
@@ -772,7 +731,7 @@ mod tests {
 
     #[test]
     fn parse_foreshadowing_index_handles_full_table() {
-        // Content mirrors the scaffolded template shape + real rows.
+        // note: Content mirrors the scaffolded template shape + real rows.
         let content = "# Foreshadowing Index\n\nintro prose\n\n\
             | ID | Description | Planted | Paid off | Status |\n\
             | --- | --- | --- | --- | --- |\n\
@@ -793,7 +752,7 @@ mod tests {
 
     #[test]
     fn parse_foreshadowing_index_skips_placeholder_row() {
-        // The scaffolded stub row `| | | | | |` must not yield a phantom row.
+        // note: The scaffolded stub row `| | | | | |` must not yield a phantom row.
         let content = "\
             | ID | Description | Planted | Paid off | Status |\n\
             | --- | --- | --- | --- | --- |\n\
@@ -806,15 +765,13 @@ mod tests {
 
     #[test]
     fn parse_foreshadowing_index_parses_scaffolded_template_verbatim() {
-        // The actual scaffolded file (prose + table + trailing stub).
+        // note: The actual scaffolded file (prose + table + trailing stub).
         let content = include_str!(
             "../../nexus-preset/embedded-presets/novel-writing/templates/foreshadowing.md"
         );
         let rows = parse_foreshadowing_index(content).unwrap();
         assert!(rows.is_empty(), "empty scaffold must parse to zero rows");
     }
-
-    // ── serialize round-trip ───────────────────────────────────────────────
 
     #[test]
     fn serialize_then_parse_roundtrip_is_stable() {
@@ -837,7 +794,7 @@ mod tests {
         let serialized = serialize_foreshadowing_index(&rows);
         let reparsed = parse_foreshadowing_index(&serialized).unwrap();
         assert_eq!(reparsed, rows);
-        // Header is byte-identical to the scaffolded template.
+        // note: Header is byte-identical to the scaffolded template.
         assert!(serialized.contains(FORESHADOWING_HEADER));
         assert!(serialized.contains(FORESHADOWING_SEPARATOR));
     }
@@ -852,14 +809,12 @@ mod tests {
         );
     }
 
-    // ── next_f_id ──────────────────────────────────────────────────────────
-
     #[test]
     fn next_f_id_allocates_sequentially() {
         assert_eq!(next_f_id(&[]), "F001");
         let rows = vec![row("F001"), row("F002")];
         assert_eq!(next_f_id(&rows), "F003");
-        // max+1 (not count+1) per overlay §3.1 — a gap is preserved.
+        // note: max+1 (not count+1) per overlay §3.1 — a gap is preserved.
         let rows = vec![row("F001"), row("F003")];
         assert_eq!(next_f_id(&rows), "F004");
     }
@@ -873,8 +828,6 @@ mod tests {
             status: ForeshadowingStatus::Planned,
         }
     }
-
-    // ── event-index read stub ──────────────────────────────────────────────
 
     #[test]
     fn parse_event_index_reads_populated_table() {
@@ -897,8 +850,6 @@ mod tests {
         );
     }
 
-    // ── extract_inline_f_declarations ──────────────────────────────────────
-
     #[test]
     fn extract_inline_f_declarations_handles_dash_form() {
         let section = "\
@@ -918,7 +869,7 @@ mod tests {
 
     #[test]
     fn extract_inline_f_declarations_handles_inline_form() {
-        // No bullet, colon form.
+        // note: No bullet, colon form.
         let section = "F001: the locket\n";
         let decls = extract_inline_f_declarations(section);
         assert_eq!(decls.len(), 1);
@@ -928,7 +879,7 @@ mod tests {
 
     #[test]
     fn extract_inline_f_declarations_handles_space_form() {
-        // Tolerated space delimiter.
+        // note: Tolerated space delimiter.
         let decls = extract_inline_f_declarations("- F007 the scar");
         assert_eq!(decls.len(), 1);
         assert_eq!(decls[0].id.as_deref(), Some("F007"));
@@ -946,7 +897,7 @@ mod tests {
 
     #[test]
     fn extract_inline_f_declarations_ignores_bullets_without_f_token() {
-        // W-2: bullets without an explicit `F###` token are NOT declarations.
+        // note: W-2: bullets without an explicit `F###` token are NOT declarations.
         let section = "\
             - This is a note\n\
             - TODO: resolve the locket payoff next chapter\n\
@@ -964,14 +915,12 @@ mod tests {
 
     #[test]
     fn extract_inline_f_declarations_handles_bullet_with_existing_f_id() {
-        // A bullet that references an existing F### with a short note.
+        // note: A bullet that references an existing F### with a short note.
         let decls = extract_inline_f_declarations("- F001 already planted");
         assert_eq!(decls.len(), 1);
         assert_eq!(decls[0].id.as_deref(), Some("F001"));
         assert_eq!(decls[0].description, "already planted");
     }
-
-    // ── extract_foreshadowing_section ──────────────────────────────────────
 
     #[test]
     fn extract_foreshadowing_section_finds_body() {
@@ -991,11 +940,9 @@ mod tests {
         assert!(extract_foreshadowing_section("# Chapter 1\n\nno section\n").is_none());
     }
 
-    // ── promote_outline_to_index ───────────────────────────────────────────
-
     const TEST_WORK_REF: &str = "test-novel";
 
-    /// A temp workspace root plus the Work directory the port writes into.
+    /// note: A temp workspace root plus the Work directory the port writes into.
     fn work_dir() -> (TempDir, PathBuf) {
         let tmp = TempDir::new().unwrap();
         let work = tmp.path().join("Works").join(TEST_WORK_REF);
@@ -1040,11 +987,11 @@ mod tests {
     async fn promote_outline_to_index_does_not_duplicate_existing_f_id() {
         let (tmp, work) = work_dir();
         let exec = executor();
-        // First promotion.
+        // note: First promotion.
         promote_outline_to_index(tmp.path(), TEST_WORK_REF, "- F001: the locket", Some(&exec))
             .await
             .unwrap();
-        // Re-promote the SAME id + description → no-op, no duplicate.
+        // note: Re-promote the SAME id + description → no-op, no duplicate.
         let allocated =
             promote_outline_to_index(tmp.path(), TEST_WORK_REF, "- F001: the locket", Some(&exec))
                 .await
@@ -1081,7 +1028,7 @@ mod tests {
 
     #[tokio::test]
     async fn promote_outline_to_index_does_not_allocate_for_prose_bullets() {
-        // W-2: prose bullets without an explicit `F###` token must not allocate
+        // note: W-2: prose bullets without an explicit `F###` token must not allocate
         // new ids. Only the F###-tokened bullet is promoted.
         let (tmp, work) = work_dir();
         let exec = executor();
@@ -1107,7 +1054,7 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().any(|r| r.id == "F001"));
         assert!(rows.iter().any(|r| r.id == "F002"));
-        // No spurious ids allocated for the prose bullets.
+        // note: No spurious ids allocated for the prose bullets.
         assert!(!rows.iter().any(|r| r.id == "F003"));
     }
 
@@ -1148,7 +1095,7 @@ mod tests {
         let path = work.join("Outlines/foreshadowing.md");
         let mtime_before = fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        // Empty section → nothing to promote → no write.
+        // note: Empty section → nothing to promote → no write.
         let allocated = promote_outline_to_index(tmp.path(), TEST_WORK_REF, "", Some(&exec))
             .await
             .unwrap();
@@ -1157,14 +1104,12 @@ mod tests {
         assert_eq!(mtime_before, mtime_after, "no-op must not rewrite the file");
     }
 
-    // ── read_foreshadowing_summary ─────────────────────────────────────────
-
     #[test]
     fn read_foreshadowing_summary_returns_none_for_empty() {
         let (_tmp, work) = work_dir();
-        // Missing file.
+        // note: Missing file.
         assert!(read_foreshadowing_summary(&work).is_none());
-        // Empty-stub file (scaffolded shape, zero rows).
+        // note: Empty-stub file (scaffolded shape, zero rows).
         fs::write(
             work.join("Outlines/foreshadowing.md"),
             serialize_foreshadowing_index(&[]),
@@ -1188,11 +1133,9 @@ mod tests {
         let summary = read_foreshadowing_summary(&work).expect("non-empty");
         assert!(summary.contains("- F001 | the locket | planned"));
         assert!(summary.contains("- F002 | the prophecy | planned"));
-        // Compact: one line per row, no trailing blank line.
+        // note: Compact: one line per row, no trailing blank line.
         assert_eq!(summary.lines().count(), 2);
     }
-
-    // ── ForeshadowingStatus typed vocabulary (W-1) ─────────────────────────
 
     #[test]
     fn foreshadowing_status_display_is_canonical_lowercase() {
@@ -1203,7 +1146,7 @@ mod tests {
 
     #[test]
     fn foreshadowing_status_fromstr_is_case_insensitive() {
-        // Case-insensitive tolerance for author typos in hand-edited files.
+        // why: case-insensitive tolerance for author typos in hand-edited files.
         assert_eq!(
             "PLANNED".parse::<ForeshadowingStatus>().unwrap(),
             ForeshadowingStatus::Planned
@@ -1216,7 +1159,7 @@ mod tests {
             "PAID_OFF".parse::<ForeshadowingStatus>().unwrap(),
             ForeshadowingStatus::PaidOff
         );
-        // Surrounding whitespace is tolerated.
+        // note: Surrounding whitespace is tolerated.
         assert_eq!(
             "  planned  ".parse::<ForeshadowingStatus>().unwrap(),
             ForeshadowingStatus::Planned
@@ -1240,7 +1183,7 @@ mod tests {
 
     #[test]
     fn parse_foreshadowing_index_rejects_unknown_status() {
-        // Unknown / typo'd status values must produce a structured error,
+        // note: Unknown / typo'd status values must produce a structured error,
         // not silently pass through as a String.
         let content = "\
             | ID | Description | Planted | Paid off | Status |\n\
@@ -1250,7 +1193,7 @@ mod tests {
         let err = parse_foreshadowing_index(content).unwrap_err();
         match err {
             IndexParseError::InvalidStatus { row_index, value } => {
-                // Data row index 1 (zero-based, counting placeholder rows too).
+                // note: Data row index 1 (zero-based, counting placeholder rows too).
                 assert_eq!(row_index, 1);
                 assert_eq!(value, "Payed off");
             }
@@ -1285,7 +1228,7 @@ mod tests {
         let serialized = serialize_foreshadowing_index(&rows);
         let reparsed = parse_foreshadowing_index(&serialized).unwrap();
         assert_eq!(reparsed, rows);
-        // Canonical wire strings present in the serialized output.
+        // note: Canonical wire strings present in the serialized output.
         assert!(serialized.contains("planned"));
         assert!(serialized.contains("buried"));
         assert!(serialized.contains("paid_off"));

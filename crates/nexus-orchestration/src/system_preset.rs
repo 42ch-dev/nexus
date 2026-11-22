@@ -13,17 +13,13 @@ use nexus_capability::CapabilityRegistry;
 use serde_json::Value;
 use std::sync::Arc;
 
-// ---------------------------------------------------------------------------
-// EndTask — terminal node returning NextAction::End
-// ---------------------------------------------------------------------------
-
-/// A terminal task that marks a graph as complete.
+/// note: a terminal task that marks a graph as complete.
 ///
 /// Shared by the system graph and by preset inner graphs (see
 /// [`crate::preset_runtime`]): graph-flow only reports `Completed` when a task
 /// returns `NextAction::End`, so every graph needs an explicit terminal node.
 pub(crate) struct EndTask {
-    /// Response text recorded for the terminal step.
+    /// note: response text recorded for the terminal step.
     message: String,
 }
 
@@ -49,11 +45,7 @@ impl Task for EndTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// CapabilityTask — one-shot task wrapping a named capability
-// ---------------------------------------------------------------------------
-
-/// A graph-flow Task that invokes a capability by name.
+/// note: a graph-flow Task that invokes a capability by name.
 ///
 /// Unlike the generic `CapabilityTask` in `tasks/mod.rs` (which reads the
 /// capability name from Context), this variant has the name baked in at
@@ -88,7 +80,7 @@ impl Task for PresetCapabilityTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // C3 contract: a reserved-only name — admitted without a binding in
+        // note: C3 contract — a reserved-only name (admitted without a binding in
         // this build — refuses BEFORE any effect with the same TaskResult
         // shape run() would produce for its worker refusal; unknown names
         // keep the existing not-found refusal.
@@ -112,7 +104,7 @@ impl Task for PresetCapabilityTask {
 
         match cap.run(Value::Null).await {
             Ok(_output) => {
-                // Store output in context for debugging.
+                // note: store output in context for debugging.
                 context.set(format!("_{}_output", self.name.replace('.', "_")), true)?;
                 Ok(TaskResult::new(
                     Some(format!("{} completed", self.name)),
@@ -128,11 +120,7 @@ impl Task for PresetCapabilityTask {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/// Build the hardcoded `_system.maintenance` graph.
+/// note: build the hardcoded `_system.maintenance` graph.
 ///
 /// Accepts a shared [`CapabilityRegistry`] so that the daemon can pass its
 /// own instance (avoids duplicate registries with diverging state).
@@ -164,20 +152,15 @@ pub fn build(registry: Arc<CapabilityRegistry>) -> Arc<Graph> {
         .add_task(outbox_flush)
         .add_task(registry_refresh)
         .add_task(end)
-        // Linear edges.
+        // note: the chain is linear; start task is set automatically (first task added = sync_pull).
         .add_edge("sync_pull", "outbox_flush")
         .add_edge("outbox_flush", "registry_refresh")
         .add_edge("registry_refresh", "end")
-        // Start task is set automatically (first task added = sync_pull).
         .build()
         .expect("fixed _system.maintenance topology must build");
 
     Arc::new(graph)
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -188,7 +171,7 @@ mod tests {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let graph = build(registry);
         assert_eq!(graph.id, "_system.maintenance");
-        // Verify the graph has nodes.
+        // note: all four expected task IDs exist.
         assert!(graph.get_task("sync_pull").is_some());
         assert!(graph.get_task("outbox_flush").is_some());
         assert!(graph.get_task("registry_refresh").is_some());
@@ -207,11 +190,11 @@ mod tests {
     fn graph_has_four_tasks() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let graph = build(registry);
-        // Verify all expected task IDs exist.
+        // note: every expected task ID exists.
         for id in &["sync_pull", "outbox_flush", "registry_refresh", "end"] {
             assert!(graph.get_task(id).is_some(), "expected task '{id}'");
         }
-        // Verify a nonexistent task returns None.
+        // note: a nonexistent task returns None.
         assert!(graph.get_task("nonexistent").is_none());
     }
 }

@@ -6,44 +6,41 @@
 //!
 //! On failure: structured `PresetGatesFailed` error with per-gate remediation.
 //! On `--force-gates`: bypass evaluation, log audit row.
+// note: evaluates preset.gates at enqueue time to enforce preconditions before scheduling.
 
 pub use nexus_contracts::local::orchestration::preset_gate::*;
 
 use std::path::{Path, PathBuf};
 
-// ---------------------------------------------------------------------------
-// Gate evaluation context
-// ---------------------------------------------------------------------------
-
-/// Work fields available for gate evaluation (snapshot at enqueue time).
+/// note: Work fields available for gate evaluation (snapshot at enqueue time).
 #[derive(Debug, Clone)]
 pub struct WorkSnapshot {
-    /// Work entity ID.
+    /// note: Work entity ID.
     pub work_id: String,
-    /// Creator ID owning the Work.
+    /// note: Creator ID owning the Work.
     pub creator_id: String,
-    /// `work_profile` column value (None if NULL).
+    /// note: `work_profile` column value (None if NULL).
     pub work_profile: Option<String>,
-    /// `work_ref` column value.
+    /// note: `work_ref` column value.
     pub work_ref: Option<String>,
-    /// `workspace_slug` column value.
+    /// note: `workspace_slug` column value.
     pub workspace_slug: Option<String>,
-    /// `intake_status` column value.
+    /// note: `intake_status` column value.
     pub intake_status: Option<String>,
-    /// `world_id` column value.
+    /// note: `world_id` column value.
     pub world_id: Option<String>,
-    /// `status` column value.
+    /// note: `status` column value.
     pub status: Option<String>,
-    /// `current_stage` column value.
+    /// note: `current_stage` column value.
     pub current_stage: Option<String>,
-    /// `title` column value.
+    /// note: `title` column value.
     pub title: Option<String>,
-    /// `total_planned_chapters` column value.
+    /// note: `total_planned_chapters` column value.
     pub total_planned_chapters: Option<i64>,
 }
 
 impl WorkSnapshot {
-    /// Look up a field value by column name.
+    /// note: Look up a field value by column name.
     #[must_use]
     pub fn get_field(&self, field: &str) -> Option<serde_json::Value> {
         match field {
@@ -89,15 +86,15 @@ impl WorkSnapshot {
     }
 }
 
-/// Preset input variables for path substitution.
+/// note: Preset input variables for path substitution.
 #[derive(Debug, Clone)]
 pub struct PresetInput {
-    /// Key-value pairs from `AddScheduleRequest.input` or prompt vars.
+    /// note: Key-value pairs from `AddScheduleRequest.input` or prompt vars.
     pub vars: std::collections::HashMap<String, String>,
 }
 
 impl PresetInput {
-    /// Substitute `{{key}}` placeholders in a path template.
+    /// note: Substitute `{{key}}` placeholders in a path template.
     ///
     /// # Errors
     ///
@@ -109,7 +106,7 @@ impl PresetInput {
             let pattern = format!("{{{{{k}}}}}");
             result = result.replace(&pattern, v);
         }
-        // Path safety (spec §7.6.1): reject absolute paths before joining.
+        // note: Path safety (spec §7.6.1): reject absolute paths before joining.
         if result.starts_with('/') {
             return Err(GateEvalError::PathSafety {
                 path: template.to_string(),
@@ -119,7 +116,7 @@ impl PresetInput {
         Ok(PathBuf::from(result))
     }
 
-    /// Validate that a resolved path stays within `workspace_root` using
+    /// note: Validate that a resolved path stays within `workspace_root` using
     /// canonicalize (spec §7.6.1).
     ///
     /// Returns the canonical `full_path` on success.
@@ -133,10 +130,10 @@ impl PresetInput {
         workspace_root: &Path,
     ) -> Result<PathBuf, GateEvalError> {
         let full_path = workspace_root.join(resolved);
-        // If the path does not exist, fail early — gates check existence
+        // note: If the path does not exist, fail early — gates check existence
         // separately, but canonicalize on a missing path errors.
         if !full_path.exists() {
-            // Not a safety violation; return the joined path for existence
+            // why: not a safety violation; return the joined path for existence
             // check downstream. Canonicalize is only needed for paths that
             // exist (to detect symlink escapes).
             return Ok(full_path);
@@ -158,19 +155,19 @@ impl PresetInput {
     }
 }
 
-/// Previous-preset lookup result (provided by the caller from DB).
+/// note: Previous-preset lookup result (provided by the caller from DB).
 #[derive(Debug, Clone)]
 pub struct PreviousPresetResult {
-    /// Whether a matching session was found.
+    /// note: Whether a matching session was found.
     pub found: bool,
-    /// Whether the session reached terminal completion.
+    /// note: Whether the session reached terminal completion.
     pub is_complete: bool,
 }
 
-/// Callback trait for `previous_preset` lookups (DB access).
+/// note: Callback trait for `previous_preset` lookups (DB access).
 #[async_trait::async_trait]
 pub trait PreviousPresetLookup: Send + Sync {
-    /// Look up whether the named preset has the required status for the given
+    /// note: Look up whether the named preset has the required status for the given
     /// `work_id` and `creator_id`.
     fn lookup(
         &self,
@@ -186,35 +183,27 @@ pub trait PreviousPresetLookup: Send + Sync {
     >;
 }
 
-// ---------------------------------------------------------------------------
-// Gate evaluation error
-// ---------------------------------------------------------------------------
-
-/// Internal error during gate evaluation (not a gate failure per se).
+/// note: Internal error during gate evaluation (not a gate failure per se).
 #[derive(Debug, thiserror::Error)]
 pub enum GateEvalError {
-    /// Path safety violation.
+    /// note: Path safety violation.
     #[error("path safety violation for '{path}': {reason}")]
     PathSafety { path: String, reason: String },
-    /// Database error during evaluation.
+    /// note: Database error during evaluation.
     #[error("database error: {0}")]
     Database(String),
-    /// Unknown gate kind.
+    /// note: Unknown gate kind.
     #[error("unknown gate kind: {0}")]
     UnknownKind(String),
-    /// Unknown operator.
+    /// note: Unknown operator.
     #[error("unknown gate operator: {0}")]
     UnknownOp(String),
-    /// Unknown field name.
+    /// note: Unknown field name.
     #[error("unknown work field: {0}")]
     UnknownField(String),
 }
 
-// ---------------------------------------------------------------------------
-// Gate evaluator
-// ---------------------------------------------------------------------------
-
-/// Evaluate a list of gates against the given context.
+/// note: Evaluate a list of gates against the given context.
 ///
 /// Returns `Ok(Ok(()))` if all gates pass, `Ok(Err(PresetGatesFailed))`
 /// if any gate fails, or `Err(GateEvalError)` for internal errors.
@@ -250,7 +239,7 @@ pub async fn evaluate_gates(
             }
             Gate::Filesystem { path, must_exist } => {
                 let resolved = input.substitute_path(path)?;
-                // Canonicalize to prevent symlink/traversal escape (spec §7.6.1).
+                // why: canonicalize to prevent symlink/traversal escape (spec §7.6.1).
                 let full_path = PresetInput::canonicalize_within(&resolved, workspace_root)?;
                 let exists = full_path.exists();
                 let should_exist = *must_exist;
@@ -319,11 +308,7 @@ pub async fn evaluate_gates(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Gate evaluation helpers
-// ---------------------------------------------------------------------------
-
-/// Evaluate a `work_field` gate operator against the actual value.
+/// note: Evaluate a `work_field` gate operator against the actual value.
 fn evaluate_work_field_op(op: &GateOp, actual: Option<&serde_json::Value>) -> bool {
     match op {
         GateOp::Required => actual.is_some(),
@@ -349,7 +334,7 @@ fn describe_actual(value: Option<&serde_json::Value>) -> String {
 }
 
 fn work_field_remediation(field: &str) -> String {
-    // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
+    // note: V1.47 P1: normalize user-facing copy — spec names, not repo paths.
     // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
     match field {
         "work_profile" => "Ensure the Work has `work_profile: novel` set. \
@@ -358,7 +343,7 @@ fn work_field_remediation(field: &str) -> String {
         "work_ref" => "Run `creator bootstrap --init-preset novel-project-init` to set work_ref. \
              See the creator-run-preset-entry spec"
             .to_string(),
-        // R-V146P1-QC3-S1: the previous remediation suggested
+        // note: R-V146P1-QC3-S1: the previous remediation suggested
         // `creator bootstrap --preset creative-brief-intake`, which is wrong:
         // `--preset` overrides the PRODUCTION preset (not intake — intake is
         // always `creative-brief-intake` and hardcoded in bootstrap), and
@@ -380,7 +365,7 @@ fn work_field_remediation(field: &str) -> String {
 }
 
 fn filesystem_remediation(must_exist: bool, path: &str) -> String {
-    // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
+    // note: V1.47 P1: normalize user-facing copy — spec names, not repo paths.
     // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
     if must_exist {
         if path.contains("Outlines") || path.contains("Stories") {
@@ -397,7 +382,7 @@ fn filesystem_remediation(must_exist: bool, path: &str) -> String {
 }
 
 fn previous_preset_remediation(preset: &str) -> String {
-    // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
+    // note: V1.47 P1: normalize user-facing copy — spec names, not repo paths.
     // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
     match preset {
         "novel-project-init" => "Run `creator bootstrap --init-preset novel-project-init` first. \
@@ -410,28 +395,20 @@ fn previous_preset_remediation(preset: &str) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Force-gates audit logging
-// ---------------------------------------------------------------------------
-
-/// Audit record for a forced gate bypass.
+/// note: Audit record for a forced gate bypass.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForceGatesAudit {
-    /// Preset ID that was force-started.
+    /// note: Preset ID that was force-started.
     pub preset_id: String,
-    /// Work ID.
+    /// note: Work ID.
     pub work_id: String,
-    /// Creator ID who authorized the bypass.
+    /// note: Creator ID who authorized the bypass.
     pub creator_id: String,
-    /// User-provided reason text.
+    /// note: User-provided reason text.
     pub reason: String,
-    /// ISO-8601 timestamp.
+    /// note: ISO-8601 timestamp.
     pub timestamp: String,
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -490,8 +467,6 @@ mod tests {
             })
         }
     }
-
-    // ── work_field gates ──────────────────────────────────────────────
 
     #[tokio::test]
     async fn work_field_equals_passes() {
@@ -567,7 +542,7 @@ mod tests {
             field: "world_id".to_string(),
             op: GateOp::Required,
         }];
-        let work = make_work(); // world_id = None
+        let work = make_work(); // note: world_id = None
         let input = make_input();
         let lookup = MockPreviousLookup {
             found: false,
@@ -611,8 +586,6 @@ mod tests {
         .unwrap();
         assert!(result.is_ok());
     }
-
-    // ── filesystem gates ──────────────────────────────────────────────
 
     #[tokio::test]
     async fn filesystem_must_exist_passes() {
@@ -665,9 +638,9 @@ mod tests {
     #[tokio::test]
     async fn filesystem_path_traversal_rejected_by_canonicalize() {
         let tmp = tempfile::tempdir().unwrap();
-        // Create a real directory outside the workspace to serve as an escape target.
+        // note: Create a real directory outside the workspace to serve as an escape target.
         let outside = tempfile::tempdir().unwrap();
-        // Create a symlink at Works/escape pointing outside the workspace.
+        // note: Create a symlink at Works/escape pointing outside the workspace.
         let works = tmp.path().join("Works");
         std::fs::create_dir_all(&works).unwrap();
         #[cfg(unix)]
@@ -692,7 +665,7 @@ mod tests {
         let result =
             evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup).await;
 
-        // On Unix: symlink exists but canonicalizes outside workspace → fail
+        // note: On Unix: symlink exists but canonicalizes outside workspace → fail
         #[cfg(unix)]
         {
             assert!(result.is_err(), "symlink escape must be rejected");
@@ -702,14 +675,12 @@ mod tests {
                 "error should mention escape: {err}"
             );
         }
-        // On non-Unix (no symlink), gate fails as missing
+        // note: On non-Unix (no symlink), gate fails as missing
         #[cfg(not(unix))]
         {
             let _ = result;
         }
     }
-
-    // ── previous_preset gates ─────────────────────────────────────────
 
     #[tokio::test]
     async fn previous_preset_complete_passes() {
@@ -794,8 +765,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // ── multiple gates ────────────────────────────────────────────────
-
     #[tokio::test]
     async fn multiple_gates_all_fail() {
         let gates = vec![
@@ -825,8 +794,6 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.failed_gates.len(), 2);
     }
-
-    // ── gate types roundtrip ──────────────────────────────────────────
 
     #[test]
     fn gate_yaml_roundtrip_work_field() {
@@ -868,9 +835,7 @@ mod tests {
         assert_eq!(gate, back);
     }
 
-    // ── V1.39 P0.5 (T6): research preset gate integration ──────────────
-
-    /// Research preset gates require `intake_status` == "complete" and
+    /// note: Research preset gates require `intake_status` == "complete" and
     /// `work_ref` to be present. Verify that a Work with intake complete
     /// and a `work_ref` passes all gates.
     #[tokio::test]
@@ -887,7 +852,7 @@ mod tests {
                 op: GateOp::Required,
             },
         ];
-        let work = make_work(); // intake_status=complete, work_ref=Some
+        let work = make_work(); // note: intake_status=complete, work_ref=Some
         let input = make_input();
         let lookup = MockPreviousLookup {
             found: false,
@@ -904,7 +869,7 @@ mod tests {
         );
     }
 
-    /// Research preset gates fail when `intake_status` is not "complete".
+    /// note: Research preset gates fail when `intake_status` is not "complete".
     #[tokio::test]
     async fn research_gates_fail_when_intake_not_complete() {
         let gates = vec![Gate::WorkField {
@@ -933,7 +898,7 @@ mod tests {
         assert_eq!(err.failed_gates[0].kind, "work_field");
     }
 
-    /// Research preset gates fail when `work_ref` is missing.
+    /// note: Research preset gates fail when `work_ref` is missing.
     #[tokio::test]
     async fn research_gates_fail_when_work_ref_missing() {
         let gates = vec![Gate::WorkField {
@@ -958,9 +923,7 @@ mod tests {
         );
     }
 
-    // ── V1.43 P1 remediation citation tests ──────────────────────────────
-
-    /// Assert a failed gate's remediation cites the expected spec name and
+    /// note: Assert a failed gate's remediation cites the expected spec name and
     /// excludes raw `.mstar/` paths. Consolidates the per-test `contains()`
     /// duplication flagged by R-V146P1-QC2-S2 into one semantic helper so
     /// the assertion contract lives in one place.
@@ -977,7 +940,7 @@ mod tests {
         );
     }
 
-    /// Assert the remediation references an executable command token, not just
+    /// note: Assert the remediation references an executable command token, not just
     /// a spec filename. Per R-V146P1-QC3-S2: remediation copy must be
     /// actionable (cite a runnable command), not merely point at a doc.
     fn assert_remediation_references_command(failed: &FailedGate, command: &str) {
@@ -988,11 +951,11 @@ mod tests {
         );
     }
 
-    /// V1.43 (P1 §3 remediation — `preset_gates_failed`): `work_field` remediation
+    /// note: V1.43 (P1 §3 remediation — `preset_gates_failed`): `work_field` remediation
     /// strings cite the preset-entry spec and an executable command.
     #[tokio::test]
     async fn remediation_work_field_cites_preset_entry_spec() {
-        // R-V146P1-QC3-S2: exercise the `work_ref` branch (not `work_profile`)
+        // note: R-V146P1-QC3-S2: exercise the `work_ref` branch (not `work_profile`)
         // so the remediation includes an executable `creator bootstrap`
         // command, giving command-validity coverage in addition to the spec
         // citation. `work_profile`'s remediation is field-setting guidance
@@ -1019,7 +982,7 @@ mod tests {
         assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
-    /// V1.46 P1 (spec hygiene): filesystem gate remediation cites the
+    /// note: V1.46 P1 (spec hygiene): filesystem gate remediation cites the
     /// preset-entry spec when scaffold paths are missing.
     #[tokio::test]
     async fn remediation_filesystem_scaffold_cites_preset_entry_spec() {
@@ -1043,7 +1006,7 @@ mod tests {
         assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
-    /// V1.46 P1 (spec hygiene): `previous_preset` remediation for
+    /// note: V1.46 P1 (spec hygiene): `previous_preset` remediation for
     /// novel-project-init cites the preset-entry spec.
     #[tokio::test]
     async fn remediation_previous_preset_init_cites_preset_entry_spec() {
@@ -1068,7 +1031,7 @@ mod tests {
         assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
-    /// V1.46 P1 (spec hygiene): `previous_preset` remediation for
+    /// note: V1.46 P1 (spec hygiene): `previous_preset` remediation for
     /// novel-writing cites the author-experience spec.
     #[tokio::test]
     async fn remediation_previous_preset_writing_cites_author_experience_spec() {
@@ -1093,9 +1056,7 @@ mod tests {
         assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
-    // ── V1.47 P1 intake remediation tests (R-V146P1-QC3-S1) ──────────────
-
-    /// R-V146P1-QC3-S1: the `intake_status` gate remediation must cite an
+    /// note: R-V146P1-QC3-S1: the `intake_status` gate remediation must cite an
     /// executable `creator bootstrap` command, not the broken
     /// `creator bootstrap --preset creative-brief-intake` (which misuses
     /// `--preset` — that flag overrides the PRODUCTION preset, not intake).
@@ -1112,7 +1073,7 @@ mod tests {
             },
         }];
         let mut work = make_work();
-        // Force intake to be incomplete so the gate actually fails.
+        // note: Force intake to be incomplete so the gate actually fails.
         work.intake_status = Some("pending".to_string());
         let input = make_input();
         let lookup = MockPreviousLookup {
@@ -1127,18 +1088,18 @@ mod tests {
         let err = result.unwrap_err();
         let remediation = &err.failed_gates[0].remediation;
 
-        // Must cite an executable `creator bootstrap` command.
+        // note: Must cite an executable `creator bootstrap` command.
         assert!(
             remediation.contains("creator bootstrap"),
             "intake_status remediation should cite `creator bootstrap`: {remediation:?}"
         );
-        // Must NOT suggest the broken `--preset creative-brief-intake`
+        // note: Must NOT suggest the broken `--preset creative-brief-intake`
         // (that overrides the production preset, not intake).
         assert!(
             !remediation.contains("--preset creative-brief-intake"),
             "intake_status remediation must not suggest broken `--preset creative-brief-intake`: {remediation:?}"
         );
-        // Must not cite raw .mstar/ paths.
+        // note: Must not cite raw .mstar/ paths.
         assert!(
             !remediation.contains(".mstar/"),
             "intake_status remediation must not cite raw .mstar/ paths: {remediation:?}"
@@ -1157,10 +1118,10 @@ mod tests {
         };
         let tmp = tempfile::tempdir().unwrap();
 
-        // Collect remediation strings from every gate helper path.
+        // note: Collect remediation strings from every gate helper path.
         let mut all_remediations: Vec<String> = Vec::new();
 
-        // work_field gates — each branch in the match.
+        // note: work_field gates — each branch in the match.
         for (field, op_value) in [
             ("work_profile", serde_json::json!("essay")),
             ("work_ref", serde_json::json!("some-ref")),
@@ -1185,7 +1146,7 @@ mod tests {
             }
         }
 
-        // Force-collect the intake_status remediation explicitly (the
+        // note: Force-collect the intake_status remediation explicitly (the
         // default make_work has intake_status=complete, so the gate above
         // passes without producing a remediation string).
         {
@@ -1209,7 +1170,7 @@ mod tests {
             }
         }
 
-        // filesystem gate — scaffold path.
+        // note: filesystem gate — scaffold path.
         let gates = vec![Gate::Filesystem {
             path: "Works/{{work_ref}}/Outlines/ch01-outline.md".to_string(),
             must_exist: true,
@@ -1226,7 +1187,7 @@ mod tests {
             }
         }
 
-        // previous_preset gates — both documented branches.
+        // note: previous_preset gates — both documented branches.
         for preset in ["novel-project-init", "novel-writing"] {
             let gates = vec![Gate::PreviousPreset {
                 preset: preset.to_string(),

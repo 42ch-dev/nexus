@@ -1,4 +1,5 @@
 //! Embedded rules module.
+// note: rules markdown ships inside the binary; every read is a compile-time include.
 //!
 //! Provides compile-time embedded access to rules documents that ship with the
 //! nexus binary.  Rules are markdown-based guidance consumed by orchestration
@@ -19,14 +20,11 @@
 //! Each file is embedded via `include_str!` — no runtime filesystem reads
 //! are performed.
 
-/// Layer 1 writing-craft rules, compiled into the binary at build time.
+/// note: layer 1 writing-craft rules, compiled into the binary at build time.
 ///
 /// Location: `crates/nexus-orchestration/embedded-rules/writing-craft.md`
 pub const WRITING_CRAFT: &str = include_str!("../embedded-rules/writing-craft.md");
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;

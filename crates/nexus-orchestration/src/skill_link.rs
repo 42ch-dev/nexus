@@ -1,4 +1,5 @@
 //! Ensure project-local skill symlinks point to home-directory skill sources.
+// note: symlink creation is best-effort; Windows failures log a warning and never block the caller.
 //!
 //! When creating an ACP session for a role, the role's `recommended_skills`
 //! must be readable from the project workspace. This module creates symlinks
@@ -10,7 +11,7 @@
 
 use std::path::Path;
 
-/// Ensure a skill directory at `~/.nexus42/skills/<slug>/` is readable
+/// note: ensure a skill directory at `~/.nexus42/skills/<slug>/` is readable
 /// from the project workspace by creating a symlink at
 /// `<workspace>/.agents/skills/<slug>` → the home source.
 ///
@@ -40,7 +41,7 @@ pub fn ensure_skill_link(
     let link_path = project_skills_dir.join(skill_slug);
     let target_path = home_skills_dir.join(skill_slug);
 
-    // Verify the target exists
+    // note: skip when the home-side target is absent.
     if !target_path.is_dir() {
         tracing::warn!(
             skill = skill_slug,
@@ -50,14 +51,14 @@ pub fn ensure_skill_link(
         return Ok(false);
     }
 
-    // Create parent directories if needed
+    // note: parent directories must exist before the symlink is created.
     std::fs::create_dir_all(&project_skills_dir)?;
 
-    // Check if symlink already exists and is correct
+    // why: an existing link is only a no-op when it already resolves to the target.
     if link_path.exists() || link_path.is_symlink() {
         if let Ok(current_target) = std::fs::read_link(&link_path) {
             if current_target == target_path {
-                return Ok(false); // Already correct
+                return Ok(false); // note: already correct
             }
             tracing::warn!(
                 skill = skill_slug,
@@ -67,12 +68,12 @@ pub fn ensure_skill_link(
             );
             std::fs::remove_file(&link_path)?;
         } else {
-            // Exists but not a symlink (regular dir?) — remove
+            // note: exists but is not a symlink (a regular directory) — remove it.
             std::fs::remove_dir_all(&link_path)?;
         }
     }
 
-    // Create symlink (platform-dependent)
+    // note: the symlink primitive is per-platform (`symlink_dir`).
     symlink_dir(&target_path, &link_path, skill_slug)?;
 
     tracing::info!(
@@ -84,7 +85,7 @@ pub fn ensure_skill_link(
     Ok(true)
 }
 
-/// Ensure all recommended skills for a role are linked into the project workspace.
+/// note: ensure all recommended skills for a role are linked into the project workspace.
 ///
 /// # Returns
 ///
@@ -107,11 +108,7 @@ pub fn ensure_role_skills(
     Ok(count)
 }
 
-// ---------------------------------------------------------------------------
-// Platform-specific symlink helper
-// ---------------------------------------------------------------------------
-
-/// Create a directory symlink, platform-dependent.
+/// note: create a directory symlink, platform-dependent.
 ///
 /// On failure, logs a warning and returns `Err` — callers decide whether
 /// to propagate or swallow.
@@ -131,7 +128,7 @@ fn symlink_dir(target: &Path, link: &Path, skill_slug: &str) -> std::io::Result<
                 "Failed to create directory symlink on Windows \
                  (may need admin privileges), skipping"
             );
-            // Non-blocking: return a synthetic error the caller can swallow
+            // note: non-blocking — a synthetic error the caller can swallow.
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "symlink creation skipped on Windows",
@@ -140,22 +137,19 @@ fn symlink_dir(target: &Path, link: &Path, skill_slug: &str) -> std::io::Result<
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
 
-    /// Test: `ensure_skill_link` creates a symlink when none exists.
+    /// note: `ensure_skill_link` creates a symlink when none exists.
     #[test]
     fn test_ensure_skill_link_creates_symlink() {
         let temp = tempfile::tempdir().expect("tempdir");
         let workspace = temp.path().join("workspace");
         let home_skills = temp.path().join("home").join("skills");
 
-        // Create the target skill directory with content
+        // note: seed the home-side skill directory.
         let skill_dir = home_skills.join("my-skill");
         fs::create_dir_all(&skill_dir).expect("create skill dir");
         fs::write(skill_dir.join("SKILL.md"), "skill content").expect("write SKILL.md");
@@ -165,19 +159,19 @@ mod tests {
 
         assert!(result, "should report link was created");
 
-        // Verify symlink exists and points correctly
+        // note: the link exists and points at the home source.
         let link_path = workspace.join(".agents").join("skills").join("my-skill");
         assert!(
             link_path.is_symlink() || link_path.is_dir(),
             "link should exist"
         );
 
-        // Verify content is readable through the symlink
+        // note: content is readable through the symlink.
         let content = fs::read_to_string(link_path.join("SKILL.md")).expect("read through symlink");
         assert_eq!(content, "skill content");
     }
 
-    /// Test: calling `ensure_skill_link` twice is idempotent — second call returns Ok(false).
+    /// note: calling `ensure_skill_link` twice is idempotent — the second call returns `Ok(false)`.
     #[test]
     fn test_ensure_skill_link_idempotent() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -200,27 +194,27 @@ mod tests {
         );
     }
 
-    /// Test: missing target skill directory returns Ok(false) without panic.
+    /// note: a missing target skill directory returns `Ok(false)` without panicking.
     #[test]
     fn test_ensure_skill_link_missing_target() {
         let temp = tempfile::tempdir().expect("tempdir");
         let workspace = temp.path().join("workspace");
         let home_skills = temp.path().join("home").join("skills");
-        // Do NOT create the target directory
+        // note: the target directory is deliberately left absent.
 
         let result = ensure_skill_link(&workspace, &home_skills, "nonexistent-skill")
             .expect("should succeed even with missing target");
         assert!(!result, "should return Ok(false) for missing target");
     }
 
-    /// Test: `ensure_role_skills` counts multiple skills correctly.
+    /// note: `ensure_role_skills` counts multiple skills correctly.
     #[test]
     fn test_ensure_role_skills_counts() {
         let temp = tempfile::tempdir().expect("tempdir");
         let workspace = temp.path().join("workspace");
         let home_skills = temp.path().join("home").join("skills");
 
-        // Create three skill directories
+        // note: three home-side skills to link.
         for slug in &["skill-a", "skill-b", "skill-c"] {
             let dir = home_skills.join(slug);
             fs::create_dir_all(&dir).expect("create skill dir");
@@ -235,21 +229,21 @@ mod tests {
         let count = ensure_role_skills(&workspace, &home_skills, &skills).expect("should succeed");
         assert_eq!(count, 3, "should have created 3 links");
 
-        // Verify all three are readable
+        // note: all three links are readable.
         for slug in &["skill-a", "skill-b", "skill-c"] {
             let link = workspace.join(".agents").join("skills").join(slug);
             assert!(link.exists(), "link for {slug} should exist");
         }
     }
 
-    /// Test: symlink with wrong target is recreated.
+    /// note: a symlink with the wrong target is recreated.
     #[test]
     fn test_ensure_skill_link_recreates_wrong_target() {
         let temp = tempfile::tempdir().expect("tempdir");
         let workspace = temp.path().join("workspace");
         let home_skills = temp.path().join("home").join("skills");
 
-        // Create two skill directories
+        // note: two home-side skill directories, one of them the wrong target.
         let wrong_dir = home_skills.join("wrong-skill");
         fs::create_dir_all(&wrong_dir).expect("create wrong dir");
         fs::write(wrong_dir.join("SKILL.md"), "wrong content").expect("write");
@@ -258,7 +252,7 @@ mod tests {
         fs::create_dir_all(&correct_dir).expect("create correct dir");
         fs::write(correct_dir.join("SKILL.md"), "correct content").expect("write");
 
-        // First, create a symlink to the wrong target
+        // note: start from a symlink that points at the wrong target.
         let project_skills = workspace.join(".agents").join("skills");
         fs::create_dir_all(&project_skills).expect("create project skills dir");
         #[cfg(unix)]
@@ -272,13 +266,13 @@ mod tests {
                 .expect("create wrong symlink");
         }
 
-        // Verify it points to wrong target
+        // note: it resolves to the wrong content so far.
         let link_path = project_skills.join("target-skill");
         let wrong_content =
             fs::read_to_string(link_path.join("SKILL.md")).expect("read wrong link");
         assert_eq!(wrong_content, "wrong content");
 
-        // Now call ensure_skill_link with the correct target
+        // note: call ensure with the correct target.
         let result = ensure_skill_link(
             &workspace,
             home_skills.join("correct-skill").parent().unwrap(),
@@ -297,17 +291,16 @@ mod tests {
         // there and the initial symlink points to something else.
         let _ = result; // We'll redo the test properly below.
 
-        // Clean up and redo
         if link_path.is_symlink() || link_path.exists() {
             let _ = fs::remove_file(&link_path);
         }
 
-        // Create "target-skill" in home_skills
+        // note: seed `target-skill` in the home skills root.
         let target_dir = home_skills.join("target-skill");
         fs::create_dir_all(&target_dir).expect("create target dir");
         fs::write(target_dir.join("SKILL.md"), "target content").expect("write");
 
-        // Create symlink pointing to wrong location
+        // note: point the link at the wrong skill before calling ensure.
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&wrong_dir, &link_path).expect("wrong symlink");
@@ -317,18 +310,18 @@ mod tests {
             std::os::windows::fs::symlink_dir(&wrong_dir, &link_path).expect("wrong symlink");
         }
 
-        // Verify wrong content
+        // note: the link still resolves to the wrong content.
         assert_eq!(
             fs::read_to_string(link_path.join("SKILL.md")).expect("read"),
             "wrong content"
         );
 
-        // Call ensure — should detect mismatch and recreate
+        // note: ensure detects the mismatch and recreates the link.
         let result =
             ensure_skill_link(&workspace, &home_skills, "target-skill").expect("should succeed");
         assert!(result, "should report link was recreated");
 
-        // Verify symlink now points to correct target
+        // note: the link now resolves to the correct target.
         assert_eq!(
             fs::read_to_string(link_path.join("SKILL.md")).expect("read"),
             "target content"
