@@ -246,7 +246,7 @@ async fn put_create(
                 json!({ "entry_id": entry_id }),
             );
         }
-Ok(None) => {} // note: absent (or hidden) — the unique constraint is the race guard
+        Ok(None) => {} // note: absent (or hidden) — the unique constraint is the race guard
         Err(e) => {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -890,7 +890,6 @@ async fn put_update_in_tx(
     SpokeResult::Ok(result)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -978,7 +977,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_returns_not_found_for_missing_entry() {
         let (pool, _dir) = fresh_pool().await;
@@ -1021,7 +1019,6 @@ mod tests {
             SpokeResult::Reject(_) => panic!("expected ok"),
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_create_happy_path_bumps_revision_to_one() {
@@ -1097,7 +1094,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("the id is occupied by the stored row"),
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_update_happy_path_bumps_revision() {
@@ -1251,7 +1247,6 @@ mod tests {
         );
     }
 
-
     /// note: DB failure (dropped table) on get surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_on_dropped_table_surfaces_internal_error() {
@@ -1329,7 +1324,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected InternalError reject"),
         }
     }
-
 
     /// note: Validation failure (missing `entry_id` / `canonical_name` — rejected by the
     /// spoke boundary before any DB I/O) still surfaces `InvalidInput`.

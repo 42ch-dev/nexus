@@ -230,7 +230,6 @@ impl ScopeQueryPort for NexusAdapter<'_> {
     }
 }
 
-
 /// note: Construct the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
@@ -260,7 +259,6 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
         details: details_map,
     })
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -735,7 +733,6 @@ mod tests {
         assert!(events.is_empty());
     }
 
-
     /// note: Seed a world with timeline events across two branches for scope-filter
     /// tests: `evt_tl_0`/`evt_tl_1` on `fbk_root`, `evt_tl_2` on `fbk_fork`.
     async fn seed_world_with_timeline_events(pool: &sqlx::SqlitePool) -> (String, [String; 3]) {
@@ -831,7 +828,6 @@ mod tests {
         ExtensionKey::try_from("nexus")
             .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
     }
-
 
     /// note: DB failure (dropped table) on `list_knowledge_entries` surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

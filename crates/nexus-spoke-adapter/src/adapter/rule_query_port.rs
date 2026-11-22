@@ -284,7 +284,6 @@ where
     orchestrate_check(adapter, request, run_checker).await
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,7 +349,6 @@ mod tests {
             SpokeResult::Reject(r) => panic!("{label}: expected ok, got reject {r:?}"),
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_rules_returns_known_rules_and_omits_missing() {
@@ -488,7 +486,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected InternalError reject"),
         }
     }
-
 
     /// note: Seed a rule with explicit `canonical_name` + `status` (auto-include
     /// order / status tests need control over both).

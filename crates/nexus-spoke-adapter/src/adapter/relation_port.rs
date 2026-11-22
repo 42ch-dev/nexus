@@ -391,7 +391,6 @@ impl NexusAdapter<'_> {
 }
 
 impl NexusAdapter<'_> {
-
     /// why: Create path: `expected_base_revision = None`. Reject if the row already
     /// exists; otherwise INSERT with `revision = 1` (spoke convention) and return
     /// the resulting spoke `Relation`.
@@ -420,10 +419,10 @@ impl NexusAdapter<'_> {
                         json!({ "relation_id": relation_id }),
                     );
                 }
-Ok(false) => {} // note: hidden endpoints ⇒ absent for this caller
+                Ok(false) => {} // note: hidden endpoints ⇒ absent for this caller
                 Err(reject) => return SpokeResult::Reject(reject),
             },
-Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // note: proceed to insert
+            Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // note: proceed to insert
             Err(e) => {
                 return reject(
                     SpokeRejectCode::InternalError,
@@ -606,7 +605,6 @@ Err(LocalDbError::Sqlx(sqlx::Error::RowNotFound)) => {} // note: proceed to inse
         };
         SpokeResult::Ok(crate::conversion::kb_relationship_row_to_spoke(&row))
     }
-
 
     /// why: Update path: `expected_base_revision = Some(expected)`. Pre-read the
     /// stored row, reuse [`update_relationship_in_tx`] (CAS `WHERE revision = ?`)
@@ -870,7 +868,6 @@ fn map_relation_cas_result(
     SpokeResult::Ok(updated_row)
 }
 
-
 /// note: Resolved column values for the create INSERT, derived from the spoke
 /// `Relation` + its nexus-locals. Extracted from [`put_relation_create`] to
 /// keep that function under the `too_many_lines` budget.
@@ -1020,7 +1017,6 @@ fn serialize_extensions_nexus_json(relation: &Relation) -> Option<String> {
     serde_json::to_string(ns).ok()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1138,7 +1134,6 @@ mod tests {
             SpokeResult::Reject(r) => panic!("{label}: expected ok, got reject {r:?}"),
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_relation_returns_not_found_for_missing() {
@@ -1287,7 +1282,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_happy_path_persists_row() {
         let (pool, _dir) = fresh_pool().await;
@@ -1424,7 +1418,6 @@ mod tests {
         assert!(rows.is_empty(), "tx rolled back on rejected endpoint");
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn put_relation_update_happy_path_bumps_revision() {
         let (pool, _dir) = fresh_pool().await;
@@ -1550,7 +1543,6 @@ mod tests {
         }
     }
 
-
     /// note: Regression (V1.144 Phase 5 fix): an update that OMITS the optional
     /// nexus-locals must CLEAR them, matching the pre-cutover
     /// `update_relationship_in_tx` (which wrote every bound local —
@@ -1632,7 +1624,6 @@ mod tests {
         assert_eq!(r.label.as_deref(), Some("cleared locals"));
     }
 
-
     /// note: DB failure (dropped table) on get surfaces `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_relation_on_dropped_table_surfaces_internal_error() {
@@ -1712,7 +1703,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected InternalError reject"),
         }
     }
-
 
     /// note: Validation failure (missing required extension field) still surfaces
     /// `InvalidInput` — no DB I/O is performed before the guard.
@@ -1832,7 +1822,6 @@ mod tests {
         assert_eq!(ns.get("source"), Some(&json!("extraction")));
     }
 
-
     /// note: Create a Relation with an unknown `extensions.nexus` key, then re-read
     /// it and confirm the unknown key survives the `SQLite` round-trip.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1945,7 +1934,6 @@ mod tests {
         );
     }
 
-
     /// note: Seed a confirmed + a suggested relation through the port, then load
     /// hop edges: the loader must return only the confirmed graph, mapped to
     /// engine-local `HopEdge`s (the `RelationPort` gap — get/put only — is
@@ -2011,7 +1999,6 @@ mod tests {
             "extraction suggestion must not appear in hop edges"
         );
     }
-
 
     /// note: Seed a confirmed relation row with an explicit `updated_at` (RFC3339
     /// text) so pagination ordering assertions are deterministic.

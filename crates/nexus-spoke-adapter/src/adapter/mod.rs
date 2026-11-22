@@ -392,7 +392,6 @@ impl<'a> NexusAdapter<'a> {
     }
 }
 
-
 /// note: Contents marker for the missing-scope reject, so hosts classify it by
 /// marker instead of sniffing the message (same pattern as
 /// `module_identity_missing` / `world_conflict`).

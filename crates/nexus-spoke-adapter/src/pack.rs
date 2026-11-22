@@ -49,7 +49,6 @@ use serde_json::{Map, Value};
 use spoke_schemas::{KnowledgeEntry, Relation, SourceAnchor};
 pub mod st_lorebook;
 
-
 /// note: Errors that can occur during pack build/parse operations.
 ///
 /// This is a library-level error type — not a spoke [`SpokeReject`]. The CLI
@@ -101,7 +100,6 @@ impl From<serde_json::Error> for PackError {
     }
 }
 
-
 /// note: Pack-level metadata from `modules.pack`.
 ///
 /// Fields map to the handbook-defined field table:
@@ -147,7 +145,6 @@ pub struct ParsedPack {
     /// here) read the raw value instead of the typed [`KnowledgeEntry`].
     pub source: Value,
 }
-
 
 /// why: Build a handbook-conformant Narrative Knowledge Pack as a JSON [`Value`].
 ///
@@ -221,7 +218,6 @@ pub fn build_pack(
 
     Value::Object(root)
 }
-
 
 /// note: Parse and validate a pack JSON value into a structured [`ParsedPack`].
 ///
@@ -309,7 +305,6 @@ fn required_string(obj: &Map<String, Value>, key: &'static str) -> Result<String
         .ok_or(PackError::MissingPackField { field: key })
 }
 
-
 /// note: Parse a JSON string into a [`Value`], for convenience at the call boundary.
 ///
 /// This is a thin wrapper around [`serde_json::from_str`] that delegates to
@@ -324,12 +319,10 @@ pub fn parse_pack_str(s: &str) -> Result<ParsedPack, PackError> {
     parse_pack(&value)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
 
     fn sample_entry(id: &str, name: &str) -> KnowledgeEntry {
         serde_json::from_value(json!({
@@ -364,7 +357,6 @@ mod tests {
         }))
         .expect("sample_anchor is valid SourceAnchor JSON")
     }
-
 
     #[test]
     fn round_trip_build_parse_build() {
@@ -417,7 +409,6 @@ mod tests {
         assert_eq!(parsed2.relations.len(), 1);
     }
 
-
     #[test]
     fn error_missing_modules_pack() {
         let bad = json!({
@@ -427,7 +418,6 @@ mod tests {
         let err = parse_pack(&bad).unwrap_err();
         assert!(matches!(err, PackError::MissingModulesPack));
     }
-
 
     #[test]
     fn error_missing_title() {
@@ -456,7 +446,6 @@ mod tests {
             PackError::MissingPackField { field: "version" }
         ));
     }
-
 
     #[test]
     fn error_modules_pack_not_object() {
@@ -494,7 +483,6 @@ mod tests {
         assert!(matches!(err, PackError::Json(_)));
     }
 
-
     #[test]
     fn error_missing_entries() {
         let bad = json!({
@@ -515,7 +503,6 @@ mod tests {
         assert!(matches!(err, PackError::MissingRelations));
     }
 
-
     #[test]
     fn empty_entries_valid() {
         let pack = json!({
@@ -528,7 +515,6 @@ mod tests {
         assert!(parsed.relations.is_empty());
     }
 
-
     #[test]
     fn anchors_optional() {
         let pack = json!({
@@ -539,7 +525,6 @@ mod tests {
         let parsed = parse_pack(&pack).expect("pack without anchors must be valid");
         assert!(parsed.source_anchors.is_none());
     }
-
 
     #[test]
     fn round_trip_preserves_unknown_modules() {
@@ -579,7 +564,6 @@ mod tests {
         assert_eq!(future["priority"], json!(42));
     }
 
-
     #[test]
     fn description_optional_in_parse() {
         let pack = json!({
@@ -590,7 +574,6 @@ mod tests {
         let parsed = parse_pack(&pack).expect("pack without description must parse");
         assert!(parsed.pack_metadata.description.is_none());
     }
-
 
     #[test]
     fn build_pack_omits_anchors_when_none() {
@@ -615,7 +598,6 @@ mod tests {
             .expect("should be an array when Some(&[])");
         assert_eq!(anchors.as_slice(), &[] as &[serde_json::Value]);
     }
-
 
     #[test]
     fn parse_pack_str_round_trip() {

@@ -51,7 +51,6 @@ use std::sync::Mutex;
 
 const WORLD_ID: &str = "wld_1";
 
-
 /// note: Fresh in-memory-ish pool: `tempfile::tempdir` + `open_pool` + `run_migrations`.
 ///
 /// Mirrors the canonical nexus-local-db test harness pattern (see

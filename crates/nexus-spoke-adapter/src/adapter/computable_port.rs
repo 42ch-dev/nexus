@@ -968,7 +968,6 @@ impl ComputablePort for NexusAdapter<'_> {
     }
 }
 
-
 /// note: Convert a spoke `KnowledgeEntry` to a JSON `key_block` map suitable for the
 /// WASM module's `ComputeInput.key_blocks` snapshot.
 ///
@@ -1008,7 +1007,7 @@ fn spoke_entry_to_key_block(entry: &crate::KnowledgeEntry) -> Map<String, Value>
                         Some((trait_type.to_string(), value))
                     })
                     .collect(),
-Value::Object(m) => m, // note: already flat — pass through
+                Value::Object(m) => m, // note: already flat — pass through
                 _ => Map::new(),
             };
             body.insert("attributes".to_string(), Value::Object(flat));
@@ -1070,7 +1069,7 @@ fn add_json_path(root: &mut Map<String, Value>, path: &str, delta: &Value) {
                 .entry(seg.to_string())
                 .or_insert_with(|| Value::Object(Map::new()));
         } else {
-return; // note: Can't traverse
+            return; // note: Can't traverse
         }
     }
     let last_key = segments.last().unwrap();
@@ -1113,7 +1112,6 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
         details: details_map,
     })
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1215,7 +1213,6 @@ mod tests {
             SpokeResult::Reject(r) => panic!("{label}: expected ok, got reject {r:?}"),
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn project_happy_path_stages_session() {
@@ -1323,7 +1320,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected InvalidInput reject for duplicate"),
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_session_not_found_rejects_invalid_input() {
@@ -1651,7 +1647,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected InvalidInput for missing module_id"),
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn compute_unknown_module_rejects_invalid_input() {

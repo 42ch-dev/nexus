@@ -27,7 +27,6 @@ use spoke_operations::{
 use spoke_schemas::knowledge_entry::{KnowledgeEntryBody, KnowledgeEntryCanonicalName};
 use spoke_schemas::{Finding, KnowledgeEntry, PromoteRequest};
 
-
 fn make_knowledge_entry() -> KnowledgeEntry {
     KnowledgeEntry {
         body: KnowledgeEntryBody::default(),
@@ -81,7 +80,6 @@ fn make_promote_request() -> PromoteRequest {
 }
 
 use std::collections::HashMap;
-
 
 #[test]
 fn validate_promote_matches_spoke_result() {
@@ -218,7 +216,6 @@ fn assert_revision_matches_spoke_result() {
     assert!(assert_revision(5, 2).is_reject());
 }
 
-
 #[test]
 fn build_assemble_packet_produces_equivalent_packet() {
     let entries = vec![
@@ -290,7 +287,6 @@ fn build_assemble_packet_rejects_empty_packet_id() {
     );
     assert!(via_wrapper.is_reject());
 }
-
 
 /// note: Reduce a `SpokeResult` to a comparable ok/reject tag without requiring `T:
 /// PartialEq` (used where timestamp fields make full equality flaky).

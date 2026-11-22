@@ -115,7 +115,6 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
 // (spoke-operations src/adapter/ports.rs:135-142) auto-satisfies
 // ForkPorts → as_fork_timeline → Some(self).
 
-
 /// note: Construct a `SpokeResult::Reject` (mirrors the helper in
 /// `scope_query_port.rs` and `knowledge_entry_port.rs`).
 fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
@@ -133,7 +132,6 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
         details: details_map,
     })
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -220,7 +218,6 @@ mod tests {
         serde_json::from_value(Value::Object(wire)).expect("fork scope wire shape is schema-valid")
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_isolates_by_fork_id() {
         let (pool, _dir) = fresh_pool().await;
@@ -253,7 +250,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_empty_branch_returns_ok_empty() {
         let (pool, _dir) = fresh_pool().await;
@@ -271,7 +267,6 @@ mod tests {
         };
         assert!(events.is_empty(), "empty fork returns Ok(vec![])");
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_unknown_world_rejects() {
@@ -295,7 +290,6 @@ mod tests {
             }
         }
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_missing_fork_id_rejects() {
@@ -327,7 +321,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_filters_by_timeline_event_ids() {
         let (pool, _dir) = fresh_pool().await;
@@ -346,7 +339,6 @@ mod tests {
         );
         assert_eq!(events[0].timeline_event_id, event_ids[0]);
     }
-
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_carries_nexus_extensions() {
@@ -395,7 +387,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -419,7 +410,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_fork_timeline_events_dropped_worlds_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;
@@ -442,7 +432,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected InternalError reject on dropped worlds table"),
         }
     }
-
 
     /// note: Compile-time proof: `NexusAdapter` satisfies `ForkTimelineQueryPort`
     /// and the `ForkPorts` blanket.

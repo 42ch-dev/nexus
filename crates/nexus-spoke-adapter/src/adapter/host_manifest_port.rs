@@ -274,7 +274,6 @@ const fn reject_internal(message: String) -> crate::SpokeReject {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

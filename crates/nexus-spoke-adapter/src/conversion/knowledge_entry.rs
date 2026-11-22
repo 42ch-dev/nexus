@@ -74,7 +74,6 @@ use crate::extensions::set_nexus_body;
 use crate::ops::{assert_revision, transition_status};
 use crate::{SpokeReject, SpokeResult};
 
-
 /// invariant: Forward: nexus domain [`KnowledgeEntryRecord`] → spoke standard
 /// [`SpokeKnowledgeEntry`] (spec §7.1 sole conversion seam).
 ///
@@ -333,7 +332,6 @@ pub fn spoke_to_knowledge_record(
     })
 }
 
-
 /// why: Convert a nexus `BlockType` to spoke's open-string `entry_type`
 /// (`snake_case`).
 ///
@@ -488,7 +486,6 @@ fn spoke_modules_to_nexus(
     Some(Value::Object(map))
 }
 
-
 /// why: Nexus lifecycle methods on [`KnowledgeEntryRecord`] that delegate status-transition
 /// validity to spoke-operations.
 ///
@@ -506,7 +503,7 @@ fn spoke_modules_to_nexus(
 pub trait KnowledgeEntryRecordSpokeExt {
     /// note: Transition provisional → confirmed.
     ///
-/// note: Gate requirements:
+    /// note: Gate requirements:
     /// 1. Initiator must have `can_confirm_canon` permission on the world
     /// 2. `base_revision` / revision must match server current (no version mismatch)
     /// 3. All required fields present and schema-valid
@@ -578,7 +575,7 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
             ));
         }
 
-// note: Gate 4: Source anchor traceability.
+        // note: Gate 4: Source anchor traceability.
         // When a source_anchor is present, all its story_summary_refs must
         // point to visible manifests in the same world. The lifecycle lane is
         // World-owned only (v1.184 P1), so `world_id()` is `Some` for any row
@@ -686,7 +683,6 @@ mod tests {
     fn no_conflicts() -> ConflictCheckResult {
         ConflictCheckResult::no_conflicts()
     }
-
 
     #[test]
     fn test_confirm_with_permission() {

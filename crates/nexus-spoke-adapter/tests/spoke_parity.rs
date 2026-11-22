@@ -19,7 +19,6 @@ use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, KnowledgeEntryR
 use nexus_spoke_adapter::ops::transition_status;
 use nexus_spoke_adapter::KnowledgeEntry;
 
-
 /// note: Build a `KnowledgeEntryRecord` seeded directly into `status` (bypassing the lifecycle
 /// methods) so parity cases can start from any state.
 fn entry_in(status: &str) -> KnowledgeEntryRecord {
@@ -34,7 +33,6 @@ fn spoke_allows(from: &str, to: &str) -> bool {
     let spoke: KnowledgeEntry = knowledge_record_to_spoke(&entry_in(from));
     transition_status(&spoke, to).is_ok()
 }
-
 
 #[test]
 fn spoke_allows_the_six_edges_nexus_uses() {
@@ -86,7 +84,6 @@ fn spoke_rejects_unknown_status() {
     assert!(!spoke_allows("provisional", "frobnicated"));
     assert!(!spoke_allows("frobnicated", "confirmed"));
 }
-
 
 #[test]
 fn already_in_state_guard_is_preserved_for_self_transition() {

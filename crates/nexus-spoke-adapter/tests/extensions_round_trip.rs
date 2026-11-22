@@ -189,7 +189,6 @@ fn empty_extensions_nexus_is_valid_after_set_then_clear() {
     assert_eq!(ns.get("world_id"), Some(&json!("wld_temp")));
 }
 
-
 fn ext_map(from: &Value) -> ExtensionMap {
     from.as_object()
         .expect("extension map root is an object")

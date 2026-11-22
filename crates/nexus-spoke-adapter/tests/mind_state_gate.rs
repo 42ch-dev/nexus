@@ -77,7 +77,6 @@ fn valid_envelope(holder_entry_id: &str) -> serde_json::Value {
     })
 }
 
-
 #[tokio::test]
 async fn gate_stores_valid_mind_state_verbatim() {
     let (pool, _dir) = setup_db().await;
@@ -118,7 +117,6 @@ async fn gate_stores_valid_mind_state_verbatim() {
     assert_ne!(row.created_at, "");
     assert_ne!(row.updated_at, "");
 }
-
 
 #[tokio::test]
 async fn gate_rejects_missing_holder_entry_id_and_persists_nothing() {

@@ -158,7 +158,6 @@ async fn assert_legacy_finding_absent(pool: &sqlx::SqlitePool, finding_id: &str)
     );
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn work_scoped_finding_routes_to_legacy_findings_table() {
     let (pool, _dir) = fresh_pool().await;
@@ -217,7 +216,6 @@ async fn work_path_vocabulary_mapping_unchanged() {
         "spoke `dismissed` → nexus `wont_fix` (unchanged)"
     );
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn world_scoped_finding_routes_to_world_findings_table() {
@@ -321,7 +319,6 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
     assert_legacy_finding_absent(&pool, "fnd_wld").await;
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn both_routing_keys_reject_invalid_input() {
     let (pool, _dir) = fresh_pool().await;
@@ -377,7 +374,6 @@ async fn neither_routing_key_rejects_invalid_input() {
         .unwrap()
         .is_none());
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mixed_batch_commits_both_tables_atomically() {
@@ -445,7 +441,6 @@ async fn mixed_batch_mid_failure_rolls_back_both_tables() {
     );
     assert_legacy_finding_absent(&pool, "fnd_rb_wrk").await;
 }
-
 
 /// note: `v1191_holder_ports`: a world-scoped finding must cite a world the caller's
 /// selection authorizes, and its target entry must be one the caller can read.

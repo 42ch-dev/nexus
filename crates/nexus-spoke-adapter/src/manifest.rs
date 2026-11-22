@@ -606,7 +606,7 @@ mod tests {
     /// (roles + served ops) while keeping the full N-C0 baseline
     /// (capabilities / namespaces / no `"reasoning-complete"`).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(clippy::too_many_lines)] // note: one machine-checked honesty sweep; keep the steps linear
+    #[allow(clippy::too_many_lines)] // note: one machine-checked honesty sweep; keep the steps linear
     async fn n_c1_manifest_is_honest() {
         // note: The builder is host_id-injectable so the test is hermetic (no
         // writes to the real `~/.nexus42`).

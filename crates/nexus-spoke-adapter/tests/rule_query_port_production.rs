@@ -40,7 +40,6 @@ use nexus_local_db::spoke_rules::{insert_spoke_rule_for_test, SpokeRuleRow};
 use nexus_local_db::{open_pool, run_migrations};
 use nexus_spoke_adapter::{NexusAdapter, Rule, RuleQueryPort, SpokeResult};
 
-
 /// note: Fresh temp pool: `tempfile::tempdir` + `open_pool` + `run_migrations`.
 ///
 /// Returns the pool AND the `TempDir` guard so the temp DB stays alive for
@@ -137,7 +136,6 @@ fn sorted_ids(rules: &[Rule]) -> Vec<&str> {
     ids
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_returns_exactly_requested_rules_across_worlds() {
     let (pool, _dir) = fresh_pool().await;
@@ -178,7 +176,6 @@ async fn list_rules_returns_exactly_requested_rules_across_worlds() {
     assert_eq!(rule_a1.schema_version.get(), 1);
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_empty_refs_returns_empty_vec() {
     let (pool, _dir) = fresh_pool().await;
@@ -191,7 +188,6 @@ async fn list_rules_empty_refs_returns_empty_vec() {
         "empty refs must return Ok(vec![]) without error"
     );
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
@@ -252,7 +248,6 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
         "a rule id that exists only in Work-side stores must resolve to nothing"
     );
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_duplicate_refs_are_deduplicated() {

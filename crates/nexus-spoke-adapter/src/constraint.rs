@@ -351,7 +351,6 @@ mod tests {
     use std::collections::HashMap;
     use std::num::NonZeroU64;
 
-
     #[test]
     fn parses_module_presence_and_absence() {
         assert_eq!(
@@ -457,7 +456,6 @@ mod tests {
             "observer_cardinality"
         );
     }
-
 
     #[test]
     fn rejects_non_object_values() {
@@ -600,7 +598,6 @@ mod tests {
             );
         }
     }
-
 
     fn rule_with_extensions(extensions_json: &str) -> Rule {
         let extensions: HashMap<ExtensionKey, Map<String, Value>> =

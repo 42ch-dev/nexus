@@ -432,7 +432,6 @@ impl HostManifestPort for NexusBaselineMock {
     }
 }
 
-
 pub fn host_manifest(host_id: &str, namespaces: &[&str], roles: &[&str]) -> HostCapabilityManifest {
     serde_json::from_value(json!({
         "schema_version": 1,

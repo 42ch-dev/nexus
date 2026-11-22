@@ -46,7 +46,6 @@ use serde_json::Value;
 use spoke_schemas::ExtensionKey;
 use sqlx::SqlitePool;
 
-
 /// note: Result of [`NexusAdapter::list_knowledge_entries_scoped`] — the
 /// spoke-wire analogue of [`KbQueryResult`] (items are spoke
 /// [`KnowledgeEntry`] instead of [`KnowledgeEntryRecord`]).
@@ -161,7 +160,6 @@ impl NexusAdapter<'_> {
         })
     }
 }
-
 
 /// note: `KbStore` implementation backed by [`NexusAdapter`], used at the
 /// `assemble_moment` wiring site so the MCA `WorldKB` read crosses the
@@ -342,7 +340,6 @@ fn read_only_error(method: &str) -> KbStoreError {
     ))
 }
 
-
 /// note: Build the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// The literal `"nexus"` always satisfies the typify `^[a-z][a-z0-9_-]*$`
@@ -476,7 +473,6 @@ fn kb_query_from_scope(scope: &Scope) -> KbQuery {
         offset,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

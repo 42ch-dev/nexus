@@ -1124,7 +1124,6 @@ mod tests {
         apply_activation(entries, scan, &[])
     }
 
-
     #[test]
     fn test_secondary_absent_and_any_fires_on_any_primary() {
         let entries = vec![entry_with_activation(
@@ -1194,7 +1193,6 @@ mod tests {
         assert!(result.trace[0].reason.contains("primary-any"));
     }
 
-
     #[test]
     fn test_and_any_with_secondary_requires_both() {
         let entries = vec![entry_with_activation(
@@ -1222,7 +1220,6 @@ mod tests {
             .reason
             .contains("primary [harbor] + secondary [chapter 1]"));
     }
-
 
     #[test]
     fn test_and_all_with_secondary_requires_all_primary_and_all_secondary() {
@@ -1273,7 +1270,6 @@ mod tests {
         assert!(result.trace[0].reason.contains("missing keys [dragon]"));
     }
 
-
     #[test]
     fn test_not_any_with_secondary_excludes_when_secondary_hits() {
         let entries = vec![entry_with_activation(
@@ -1309,7 +1305,6 @@ mod tests {
         assert!(result.trace[0].reason.contains("no key matched"));
     }
 
-
     #[test]
     fn test_not_all_with_secondary_fires_when_not_every_secondary_matches() {
         let entries = vec![entry_with_activation(
@@ -1337,7 +1332,6 @@ mod tests {
         );
         assert!(result2.trace[0].reason.contains("all secondary matched"));
     }
-
 
     #[test]
     fn test_literal_is_case_insensitive_substring() {
@@ -1488,7 +1482,6 @@ mod tests {
             "unknown mode → literal (CI substring)"
         );
     }
-
 
     #[test]
     fn test_constant_true_is_always_matched() {
@@ -1816,7 +1809,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_spike_key_alias_when_keys_absent() {
         let entries = vec![entry_with_activation(
@@ -1847,7 +1839,6 @@ mod tests {
         let result2 = run(&entries, "A wizard appeared.");
         assert_eq!(result2.matched.len(), 1);
     }
-
 
     #[test]
     fn test_neutral_entry_no_modules() {
@@ -1921,7 +1912,6 @@ mod tests {
         assert!(result2.trace[0].reason.contains("treated as and_any"));
     }
 
-
     #[test]
     fn test_mixed_matched_unmatched_and_neutral() {
         let entries = vec![
@@ -1940,10 +1930,9 @@ mod tests {
             entry_with_activation("kb_m3", "Neutral", "No activation", None),
         ];
         let result = run(&entries, "The king ruled.");
-assert_eq!(result.matched.len(), 2); // note: kb_m1 (matched) + kb_m3 (neutral)
-assert_eq!(result.unmatched.len(), 1); // note: kb_m2
+        assert_eq!(result.matched.len(), 2); // note: kb_m1 (matched) + kb_m3 (neutral)
+        assert_eq!(result.unmatched.len(), 1); // note: kb_m2
     }
-
 
     #[test]
     fn test_activation_unknown_fields_ignored() {
@@ -2010,7 +1999,6 @@ assert_eq!(result.unmatched.len(), 1); // note: kb_m2
         assert_eq!(modules["other_module"]["version"], 1);
     }
 
-
     /// note: Build a fixture `HopEdge` (deterministic id derived from endpoints).
     fn edge(from_id: &str, to_id: &str, relation_type: &str) -> HopEdge {
         HopEdge {
@@ -2038,7 +2026,7 @@ assert_eq!(result.unmatched.len(), 1); // note: kb_m2
             edge("kb_a", "kb_b", "located_in"),
             edge("kb_b", "kb_c", "member_of"),
         ];
-let config = HopConfig::default(); // note: max_hops 2, no budget
+        let config = HopConfig::default(); // note: max_hops 2, no budget
 
         let result = expand_relation_hops(&seeds, &[], &pool, &edges, &config);
         assert_eq!(

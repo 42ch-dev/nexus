@@ -38,7 +38,6 @@ use nexus_spoke_adapter::{
 use serde_json::{json, Value};
 use spoke_operations::spoke_ok;
 
-
 const SEEDED_ENTRY_ID: &str = "kb_mira";
 const SEEDED_REVISION: u64 = 2;
 
@@ -81,7 +80,6 @@ fn project_request(entry_id: &str) -> ProjectRequest {
     .expect("valid ProjectRequest fixture")
 }
 
-
 #[tokio::test]
 async fn orchestrate_upsert_happy_create_path() {
     // note: Seeded mock holds kb_mira; we upsert a *different* entry so the
@@ -110,7 +108,6 @@ async fn orchestrate_upsert_happy_create_path() {
     assert_eq!(stored.revision, Some(0));
 }
 
-
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_create_when_exists() {
     // note: kb_mira is already seeded. Mask the orchestrator's get so it believes
@@ -127,7 +124,6 @@ async fn orchestrate_upsert_cas_reject_create_when_exists() {
     let result = orchestrate_upsert(&mock, request).await;
     expect_reject_with_code(result, SpokeRejectCode::KnowledgeEntryAlreadyExists);
 }
-
 
 #[tokio::test]
 async fn orchestrate_upsert_happy_update_path() {
@@ -172,7 +168,6 @@ async fn orchestrate_upsert_happy_update_path() {
     assert_eq!(stored.canonical_name.as_str(), "Mira Vale (revised)");
 }
 
-
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_stale_revision() {
     // note: Seeded entry is at revision 3. Override the orchestrator's get so it
@@ -212,7 +207,6 @@ async fn orchestrate_upsert_cas_reject_conflict() {
     expect_reject_with_code(result, SpokeRejectCode::RevisionConflict);
 }
 
-
 #[tokio::test]
 async fn orchestrate_promote_happy_path() {
     // note: Candidate claims revision 2, matching the stored provisional entry.
@@ -235,7 +229,6 @@ async fn orchestrate_promote_happy_path() {
     }
 }
 
-
 #[tokio::test]
 async fn orchestrate_promote_cas_reject_stale() {
     // note: Candidate claims revision 1; stored is at revision 2. The
@@ -247,7 +240,6 @@ async fn orchestrate_promote_cas_reject_stale() {
         orchestrate_promote(&mock, promote_request(SEEDED_ENTRY_ID, SEEDED_REVISION - 1)).await;
     expect_reject_with_code(result, SpokeRejectCode::StoredRevisionStale);
 }
-
 
 #[tokio::test]
 async fn orchestrate_assemble_happy_path() {
@@ -267,7 +259,6 @@ async fn orchestrate_assemble_happy_path() {
         _ => panic!("expected assemble success, got {result:?}"),
     }
 }
-
 
 #[tokio::test]
 async fn orchestrate_check_happy_path() {
@@ -411,7 +402,6 @@ async fn capability_missing_reject() {
     let result = orchestrate_project(&ports, project_request(SEEDED_ENTRY_ID)).await;
     expect_reject_with_code(result, SpokeRejectCode::CapabilityPortMissing);
 }
-
 
 fn expect_reject_with_code<T: std::fmt::Debug>(result: SpokeResult<T>, code: SpokeRejectCode) {
     match result {

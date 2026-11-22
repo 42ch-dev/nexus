@@ -1140,7 +1140,6 @@ mod tests {
         assert!(d.message.contains("not a JSON object"));
     }
 
-
     #[test]
     fn object_form_entries_convert_in_file_order() {
         // note: F-1: the native SillyTavern World Info export shape is a
@@ -1290,7 +1289,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn disabled_entry_emits_warning_diagnostic() {
         // note: W-2: `enabled: false` (documented ST strategy field) is not part
@@ -1431,7 +1429,6 @@ mod tests {
         assert_eq!(parsed.entries.len(), 1);
     }
 
-
     #[test]
     fn key_array_form_maps_to_activation_keys() {
         // note: W-3: the documented `key` list form (array of strings) must map to
@@ -1544,7 +1541,6 @@ mod tests {
         let entry = &outcome.pack_input["entries"][0];
         assert_eq!(entry["modules"]["activation"]["keys"], json!(["wyrm"]));
     }
-
 
     #[test]
     fn both_key_and_keys_merge_with_diagnostic() {
@@ -1760,7 +1756,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn type_mismatched_values_emit_warning_diagnostics() {
         // invariant: R2-2: `"probability": "50"` (string where a number is
@@ -1916,7 +1911,6 @@ mod tests {
         assert_eq!(d.severity, DiagnosticSeverity::Warning);
     }
 
-
     #[test]
     fn entry_ids_stable_across_middle_insertion() {
         // note: W-4: entry ids derive from the stable `uid` field, not the array
@@ -2032,7 +2026,6 @@ mod tests {
             "duplicate uid must be reported"
         );
     }
-
 
     #[test]
     fn positional_fallback_colliding_with_stable_id_is_suffixed_unique() {

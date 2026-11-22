@@ -141,7 +141,6 @@ impl NexusAdapter<'_> {
     }
 }
 
-
 /// note: Construct the typed `ExtensionKey` for the `"nexus"` namespace.
 ///
 /// Mirrors `scope_query_port::nexus_scope_key` / `mca_read::nexus_scope_key`:
@@ -555,7 +554,6 @@ mod tests {
             "result spans all three branches: {branches:?}"
         );
     }
-
 
     /// note: DB failure (dropped table) on `list_timeline_events_ordered` surfaces
     /// `InternalError`.
