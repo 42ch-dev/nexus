@@ -2,12 +2,13 @@
 //!
 //! Binding between a local workspace and a remote world.
 //! Aligned with data-model-v1.md §5.14.
+// note: data-model-v1.md is the platform repo's `v1-spec/shared/domain` spec, not vendored here.
 
 use serde::{Deserialize, Serialize};
 
 use crate::common_types::BindingStatus;
 
-/// Binding between a local workspace and a remote world.
+/// note: binding between a local workspace and a remote world.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkspaceBinding {

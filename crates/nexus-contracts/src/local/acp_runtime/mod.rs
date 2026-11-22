@@ -2,6 +2,7 @@
 //!
 //! These types describe CLI ↔ daemon / CLI ↔ CDN interactions that
 //! `nexus-platform` never observes.
+// invariant: the platform never parses these payloads.
 
 pub mod daemon_status_v2;
 pub mod registry_manifest;

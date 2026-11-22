@@ -2,39 +2,38 @@
 //!
 //! These types live in `nexus-contracts` so they can be referenced from both
 //! `nexus-orchestration` (evaluator) and the preset manifest (`PresetHeader.gates`).
+// note: shared by the evaluator and the manifest parser, so it cannot live in either crate.
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Gate declaration types (parsed from preset YAML `gates:` section)
-// ---------------------------------------------------------------------------
+// note: gate declaration types (parsed from preset YAML `gates:` section).
 
-/// A single gate declaration from a preset manifest.
+/// note: a single gate declaration from a preset manifest.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Gate {
-    /// Check a field on the `works` table.
+    /// note: check a field on the `works` table.
     WorkField {
-        /// Column name (flat column only; dot-path not supported V1.37).
+        /// note: column name (flat column only; dot-path not supported V1.37).
         field: String,
-        /// Comparison operator and value.
+        /// note: comparison operator and value.
         #[serde(flatten)]
         op: GateOp,
     },
-    /// Check a filesystem path under workspace root.
+    /// note: check a filesystem path under workspace root.
     Filesystem {
-        /// Path template with `{{var}}` substitution (e.g. `Works/{{work_ref}}/`).
+        /// note: path template with `{{var}}` substitution (e.g. `Works/{{work_ref}}/`).
         path: String,
-        /// Whether the path must exist.
+        /// note: whether the path must exist.
         must_exist: bool,
     },
-    /// Check a prior preset's completion status for the same Work.
+    /// note: check a prior preset's completion status for the same Work.
     PreviousPreset {
-        /// Preset ID to look up.
+        /// note: preset ID to look up.
         preset: String,
-        /// Required status.
+        /// note: required status.
         status: PreviousPresetStatus,
-        /// Scope: only `work` is normative V1.37.
+        /// note: scope: only `work` is normative V1.37.
         #[serde(default = "default_scope")]
         scope: String,
     },
@@ -44,55 +43,55 @@ fn default_scope() -> String {
     "work".to_string()
 }
 
-/// Comparison operator for `work_field` gates.
+/// note: comparison operator for `work_field` gates.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum GateOp {
-    /// Field must equal the given value.
+    /// note: field must equal the given value.
     Equals { value: serde_json::Value },
-    /// Field must not equal the given value.
+    /// note: field must not equal the given value.
     NotEquals { value: serde_json::Value },
-    /// Field must be non-null.
+    /// note: field must be non-null.
     Required,
-    /// Field must be one of the given values.
+    /// note: field must be one of the given values.
     #[serde(rename = "in")]
     In { value: Vec<serde_json::Value> },
-    /// Field must not be one of the given values.
+    /// note: field must not be one of the given values.
     NotIn { value: Vec<serde_json::Value> },
 }
 
-/// Status requirement for `previous_preset` gates.
+/// note: status requirement for `previous_preset` gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviousPresetStatus {
-    /// Preset must have reached terminal completion.
+    /// note: preset must have reached terminal completion.
     Complete,
-    /// Preset must have any session (completed/paused/`waiting_for_input`).
+    /// note: preset must have any session (completed/paused/`waiting_for_input`).
     AnySession,
 }
 
-/// A single failed gate with diagnostic information.
+/// note: a single failed gate with diagnostic information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FailedGate {
-    /// The gate kind.
+    /// note: the gate kind.
     pub kind: String,
-    /// Human-readable description of what was expected.
+    /// note: human-readable description of what was expected.
     pub expected: String,
-    /// Human-readable description of what was found.
+    /// note: human-readable description of what was found.
     pub actual: String,
-    /// User-facing remediation text.
+    /// note: user-facing remediation text.
     pub remediation: String,
 }
 
-/// Structured error returned when preset gates fail (spec §7.9.2).
+/// note: structured error returned when preset gates fail (spec §7.9.2).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PresetGatesFailed {
-    /// Error code (always `preset_gates_failed`).
+    /// note: error code (always `preset_gates_failed`).
     pub error: String,
-    /// Preset ID that failed gate evaluation.
+    /// note: preset ID that failed gate evaluation.
     pub preset_id: String,
-    /// Work ID being evaluated.
+    /// note: work ID being evaluated.
     pub work_id: String,
-    /// List of failed gates with diagnostics.
+    /// note: list of failed gates with diagnostics.
     pub failed_gates: Vec<FailedGate>,
 }

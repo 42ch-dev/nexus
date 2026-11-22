@@ -2,53 +2,54 @@
 //!
 //! Schema for the `ACP` Registry manifest response from the `CDN`.
 //! The registry lists available `ACP` agents with their distribution information.
+// note: fetched from the CDN, never from the platform.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// ACP Registry manifest response from the CDN.
+/// note: ACP Registry manifest response from the CDN.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct RegistryManifest {
-    /// Registry format version (e.g. "1.0.0")
+    /// note: registry format version (e.g. "1.0.0")
     pub version: String,
-    /// List of available ACP agents.
+    /// note: list of available ACP agents.
     pub agents: Vec<AgentEntry>,
-    /// Registry extensions (reserved for future use).
+    /// note: registry extensions (reserved for future use).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<Vec<serde_json::Value>>,
 }
 
-/// An ACP agent entry in the registry.
+/// note: an ACP agent entry in the registry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct AgentEntry {
-    /// Unique agent identifier.
+    /// note: unique agent identifier.
     pub id: String,
-    /// Human-readable agent name.
+    /// note: human-readable agent name.
     pub name: String,
-    /// Agent version.
+    /// note: agent version.
     pub version: String,
-    /// Agent description.
+    /// note: agent description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Agent source repository URL.
+    /// note: agent source repository URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
-    /// Agent authors.
+    /// note: agent authors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
-    /// Agent license identifier.
+    /// note: agent license identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    /// Agent icon URL.
+    /// note: agent icon URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// Agent distribution configuration (npx or binary).
+    /// note: agent distribution configuration (npx or binary).
     pub distribution: Distribution,
 }
 
-/// Agent distribution configuration (npx or binary).
+/// note: agent distribution configuration (npx or binary).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Distribution {
@@ -58,21 +59,21 @@ pub struct Distribution {
     pub binary: Option<BinaryDistribution>,
 }
 
-/// Npx-based distribution.
+/// note: npx-based distribution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NpxDistribution {
-    /// npm package name with optional version (e.g. @scope/pkg@1.0.0)
+    /// note: npm package name with optional version (e.g. @scope/pkg@1.0.0)
     pub package: String,
-    /// Additional CLI arguments.
+    /// note: additional CLI arguments.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
-    /// Environment variables to set.
+    /// note: environment variables to set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
 }
 
-/// Per-platform binary distribution.
+/// note: per-platform binary distribution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct BinaryDistribution {
@@ -96,15 +97,15 @@ pub struct BinaryDistribution {
     pub windows_x86_64: Option<PlatformBinary>,
 }
 
-/// Platform-specific binary.
+/// note: platform-specific binary.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct PlatformBinary {
-    /// Download URL for platform-specific archive.
+    /// note: download URL for platform-specific archive.
     pub archive: String,
-    /// Command to execute within the archive.
+    /// note: command to execute within the archive.
     pub cmd: String,
-    /// Additional CLI arguments.
+    /// note: additional CLI arguments.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
 }

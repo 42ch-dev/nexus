@@ -2,10 +2,11 @@
 //!
 //! Response shape for `GET /v1/daemon/daemon/status`. Superset of v1 running-probe,
 //! wire-compatible. Per daemon-lifecycle-api.md §7.1.
+// note: superset of the v1 running-probe, kept wire-compatible.
 
 use serde::{Deserialize, Serialize};
 
-/// Response shape for GET /v1/daemon/daemon/status.
+/// note: response shape for GET /v1/daemon/daemon/status.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct DaemonStatusV2 {
@@ -29,7 +30,7 @@ pub struct DaemonStatusV2 {
     pub last_error: Option<String>,
 }
 
-/// Daemon lifecycle state. 'stopped' is never emitted (pseudo-state).
+/// note: daemon lifecycle state. 'stopped' is never emitted (pseudo-state).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleState {
@@ -40,7 +41,7 @@ pub enum LifecycleState {
     Failed,
 }
 
-/// Degraded subsystems information.
+/// note: degraded subsystems information.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct DegradedInfo {
@@ -48,7 +49,7 @@ pub struct DegradedInfo {
     pub reasons: Vec<String>,
 }
 
-/// A degraded subsystem name.
+/// note: a degraded subsystem name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DegradedSubsystem {
@@ -59,7 +60,7 @@ pub enum DegradedSubsystem {
     AcpRegistry,
 }
 
-/// Health status for each subsystem.
+/// note: health status for each subsystem.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SubsystemHealth {
@@ -75,7 +76,7 @@ pub struct SubsystemHealth {
     pub acp_registry: Option<SubsystemHealthEntry>,
 }
 
-/// Subsystem health entry.
+/// note: subsystem health entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct SubsystemHealthEntry {
@@ -90,7 +91,7 @@ pub struct SubsystemHealthEntry {
     pub cache_age_ms: Option<u64>,
 }
 
-/// Subsystem health status.
+/// note: subsystem health status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HealthStatus {

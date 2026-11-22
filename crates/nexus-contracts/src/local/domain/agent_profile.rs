@@ -1,13 +1,14 @@
 //! `AgentProfile` — local-only agent configuration.
 //!
 //! Configuration for an `ACP` agent in a workspace. Aligned with data-model-v1.md §5.15.
+// note: data-model-v1.md is the platform repo's `v1-spec/shared/domain` spec, not vendored here.
 
 use serde::{Deserialize, Serialize};
 
-// Re-use wire common types for enums that live in common.schema.json
+// why: these enums are shared with the wire surface, so re-use instead of mirroring.
 use crate::common_types::{AgentProfileStatus, ProfileKind, SelectionMode, Transport};
 
-/// Configuration for an ACP agent in a workspace.
+/// note: configuration for an ACP agent in a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct AgentProfile {

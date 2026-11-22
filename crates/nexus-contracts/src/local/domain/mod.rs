@@ -2,6 +2,7 @@
 //!
 //! Domain aggregates and value objects that are local-only — not carried
 //! in sync bundles or platform HTTP payloads.
+// invariant: these never leave the local process boundary.
 
 pub mod agent_profile;
 pub mod local_identity;

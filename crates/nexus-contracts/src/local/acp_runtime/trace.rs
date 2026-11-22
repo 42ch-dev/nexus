@@ -3,10 +3,11 @@
 //! These types are owned by the Nexus CLI/daemon layer and are never observed
 //! by `nexus-platform`. Stored in per-run JSONL files under
 //! `~/.nexus42/acp/runs/<run_id>/trace.jsonl`.
+// invariant: never observed by `nexus-platform`; the daemon owns these files.
 
 use serde::{Deserialize, Serialize};
 
-/// Opaque run-level correlation identifier.
+/// note: opaque run-level correlation identifier.
 ///
 /// Generated form: `run_<32 lowercase hex chars>` (UUID v4 simple).
 /// Users may provide their own via `--run-id`.
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[serde(transparent)]
 pub struct NexusRunId(pub String);
 
-/// Opaque capability-call-level correlation identifier.
+/// note: opaque capability-call-level correlation identifier.
 ///
 /// Generated form: `cap_<32 lowercase hex chars>` (UUID v4 simple).
 /// Unique within a run; always paired with a parent `NexusRunId`.
@@ -22,17 +23,17 @@ pub struct NexusRunId(pub String);
 #[serde(transparent)]
 pub struct NexusCapabilityCallId(pub String);
 
-/// Status value for `run_finished` and `capability_call_finished` events.
+/// note: status value for `run_finished` and `capability_call_finished` events.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NexusTraceStatus {
-    /// Completed successfully.
+    /// note: completed successfully.
     Completed,
-    /// Finished with an error.
+    /// note: finished with an error.
     Failed,
-    /// Cancelled by user (Ctrl+C) or external signal.
+    /// note: cancelled by user (Ctrl+C) or external signal.
     Cancelled,
-    /// Exceeded allowed execution time.
+    /// note: exceeded allowed execution time.
     Timeout,
 }
 
@@ -47,103 +48,103 @@ impl std::fmt::Display for NexusTraceStatus {
     }
 }
 
-/// Trace event emitted when a run starts.
+/// note: trace event emitted when a run starts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NexusRunStarted {
-    /// Schema version for forward-compatible parsing.
+    /// note: schema version for forward-compatible parsing.
     pub schema_version: u32,
-    /// The run's correlation ID.
+    /// note: the run's correlation ID.
     pub run_id: NexusRunId,
-    /// What CLI entrypoint initiated this run (e.g. `acp.run`, `daemon.orchestrate.run`).
+    /// note: what CLI entrypoint initiated this run (e.g. `acp.run`, `daemon.orchestrate.run`).
     pub entrypoint: String,
-    /// Agent identifier, if known at start.
+    /// note: agent identifier, if known at start.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
-    /// Working directory of the run.
+    /// note: working directory of the run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    /// Process ID of the CLI or daemon.
+    /// note: process ID of the CLI or daemon.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
-    /// ISO 8601 / RFC 3339 timestamp.
+    /// note: ISO 8601 / RFC 3339 timestamp.
     pub timestamp: String,
 }
 
-/// Trace event emitted when a run finishes.
+/// note: trace event emitted when a run finishes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NexusRunFinished {
-    /// Schema version for forward-compatible parsing.
+    /// note: schema version for forward-compatible parsing.
     pub schema_version: u32,
-    /// The run's correlation ID.
+    /// note: the run's correlation ID.
     pub run_id: NexusRunId,
-    /// Final status of the run.
+    /// note: final status of the run.
     pub status: NexusTraceStatus,
-    /// Error message, if the run failed.
+    /// note: error message, if the run failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// ISO 8601 / RFC 3339 timestamp.
+    /// note: ISO 8601 / RFC 3339 timestamp.
     pub timestamp: String,
 }
 
-/// Trace event emitted when a capability call starts.
+/// note: trace event emitted when a capability call starts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NexusCapabilityCallStarted {
-    /// Schema version for forward-compatible parsing.
+    /// note: schema version for forward-compatible parsing.
     pub schema_version: u32,
-    /// Parent run correlation ID.
+    /// note: parent run correlation ID.
     pub run_id: NexusRunId,
-    /// This capability call's correlation ID.
+    /// note: this capability call's correlation ID.
     pub capability_call_id: NexusCapabilityCallId,
-    /// Name of the capability being invoked (e.g. `acp.prompt`).
+    /// note: name of the capability being invoked (e.g. `acp.prompt`).
     pub capability_name: String,
-    /// ACP session ID, if applicable.
+    /// note: ACP session ID, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// Orchestration task ID, if applicable.
+    /// note: orchestration task ID, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
-    /// Worker request ID, if applicable.
+    /// note: worker request ID, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_request_id: Option<String>,
-    /// ISO 8601 / RFC 3339 timestamp.
+    /// note: ISO 8601 / RFC 3339 timestamp.
     pub timestamp: String,
 }
 
-/// Trace event emitted when a capability call finishes.
+/// note: trace event emitted when a capability call finishes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct NexusCapabilityCallFinished {
-    /// Schema version for forward-compatible parsing.
+    /// note: schema version for forward-compatible parsing.
     pub schema_version: u32,
-    /// Parent run correlation ID.
+    /// note: parent run correlation ID.
     pub run_id: NexusRunId,
-    /// This capability call's correlation ID.
+    /// note: this capability call's correlation ID.
     pub capability_call_id: NexusCapabilityCallId,
-    /// Final status of the capability call.
+    /// note: final status of the capability call.
     pub status: NexusTraceStatus,
-    /// Error message, if the call failed.
+    /// note: error message, if the call failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// ISO 8601 / RFC 3339 timestamp.
+    /// note: ISO 8601 / RFC 3339 timestamp.
     pub timestamp: String,
 }
 
-/// Tagged trace event — one JSONL line per event.
+/// note: tagged trace event — one JSONL line per event.
 ///
 /// The `event` tag uses `snake_case` strings for forward-compatible parsing.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum NexusTraceEvent {
-    /// A run has started.
+    /// note: a run has started.
     RunStarted(NexusRunStarted),
-    /// A run has finished.
+    /// note: a run has finished.
     RunFinished(NexusRunFinished),
-    /// A capability call has started.
+    /// note: a capability call has started.
     CapabilityCallStarted(NexusCapabilityCallStarted),
-    /// A capability call has finished.
+    /// note: a capability call has finished.
     CapabilityCallFinished(NexusCapabilityCallFinished),
 }
 

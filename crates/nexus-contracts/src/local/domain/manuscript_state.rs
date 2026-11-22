@@ -3,12 +3,13 @@
 //! `ManuscriptState` tracks creation progression. Platform may receive
 //! `manuscript_phase` as bundle metadata but does not own this aggregate
 //! in V1.0. Aligned with data-model-v1.md §5.9B.
+// note: data-model-v1.md is the platform repo's `v1-spec/shared/domain` spec, not vendored here.
 
 use serde::{Deserialize, Serialize};
 
 use crate::common_types::ManuscriptPhase;
 
-/// `ManuscriptState` — local-only manuscript phase machine tracking.
+/// note: `ManuscriptState` — local-only manuscript phase machine tracking.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ManuscriptState {

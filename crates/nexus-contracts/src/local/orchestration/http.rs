@@ -9,69 +9,67 @@
 use crate::generated::daemon_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Sessions
-// ---------------------------------------------------------------------------
+// note: sessions.
 
-/// Query parameters for `GET /v1/daemon/orchestration/sessions`.
+/// note: query parameters for `GET /v1/daemon/orchestration/sessions`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ListSessionsQuery {
-    /// Filter by creator ID.
+    /// note: filter by creator ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creator_id: Option<String>,
-    /// Maximum number of items to return.
+    /// note: maximum number of items to return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
-    /// Opaque pagination cursor returned by the previous response's
+    /// note: opaque pagination cursor returned by the previous response's
     /// `pagination.next_cursor`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    /// Comma-separated sort terms (e.g. `-status`, `preset_id`).
+    /// note: comma-separated sort terms (e.g. `-status`, `preset_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
 }
 
-/// Response body for `GET /v1/daemon/orchestration/sessions`.
+/// note: response body for `GET /v1/daemon/orchestration/sessions`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSessionsResponse {
-    /// Active engine sessions.
+    /// note: active engine sessions.
     pub items: Vec<SessionSummary>,
-    /// Cursor-based pagination envelope.
+    /// note: cursor-based pagination envelope.
     pub pagination: PaginationInfo,
 }
 
-/// A single session summary item.
+/// note: a single session summary item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
-    /// Opaque session identifier.
+    /// note: opaque session identifier.
     pub session_id: String,
-    /// Creator that owns the session.
+    /// note: creator that owns the session.
     pub creator_id: String,
-    /// Preset the session is running.
+    /// note: preset the session is running.
     pub preset_id: String,
-    /// Current status.
+    /// note: current status.
     pub status: String,
-    /// Task the session is currently executing (if any).
+    /// note: task the session is currently executing (if any).
     pub current_task_id: Option<String>,
-    /// Actionable failure reason for terminal/uncertain outcomes (e.g. an
+    /// note: actionable failure reason for terminal/uncertain outcomes (e.g. an
     /// unconfirmed cancel cleanup that left the run `interrupted`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
-    /// Shared durable execution projection (A2/A7).
+    /// note: shared durable execution projection (A2/A7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<ExecutionProjection>,
 }
 
-/// Response body for `GET /v1/daemon/orchestration/sessions/{id}`.
+/// note: response body for `GET /v1/daemon/orchestration/sessions/{id}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSessionResponse {
     pub session: SessionSummary,
 }
 
-/// Shared durable execution projection (`A2/A7`) — the single operator-facing
+/// note: shared durable execution projection (`A2/A7`) — the single operator-facing
 /// classification used by session and schedule inspection.
 ///
 /// Field names are `snake_case` (the promoted schema SSOT) even inside the
@@ -79,25 +77,25 @@ pub struct GetSessionResponse {
 /// actionable contract, prose is never parsed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionProjection {
-    /// Durable execution version; `None` when no run exists.
+    /// note: durable execution version; `None` when no run exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_version: Option<u32>,
-    /// Durable state revision; `None` when no run exists.
+    /// note: durable state revision; `None` when no run exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_revision: Option<u64>,
-    /// Shared A7 recovery classification.
+    /// note: shared A7 recovery classification.
     pub recovery_class: String,
-    /// Current durable A4 human wait, if any.
+    /// note: current durable A4 human wait, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait: Option<ExecutionWait>,
-    /// Stable machine reason code for uncertain/terminal outcomes.
+    /// note: stable machine reason code for uncertain/terminal outcomes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason_code: Option<String>,
-    /// Legal operator actions in the current durable state.
+    /// note: legal operator actions in the current durable state.
     pub allowed_actions: Vec<String>,
 }
 
-/// The current durable A4 human wait token.
+/// note: the current durable A4 human wait token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionWait {
     pub wait_id: String,
@@ -109,7 +107,7 @@ pub struct ExecutionWait {
     pub kind: String,
 }
 
-/// Role → provider binding (`A1`) for the camelCase session-create wire
+/// note: role → provider binding (`A1`) for the camelCase session-create wire
 /// contract (`agentBindings`).
 ///
 /// The schedule path uses the `snake_case`
@@ -119,116 +117,110 @@ pub struct ExecutionWait {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentBindingDto {
-    /// Provider id.
+    /// note: provider id.
     pub provider_id: String,
-    /// Optional model id.
+    /// note: optional model id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 }
 
-/// Request body for `POST /v1/daemon/orchestration/sessions` (schedule start).
+/// note: request body for `POST /v1/daemon/orchestration/sessions` (schedule start).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionRequest {
-    /// Preset ID to run (e.g. `"novel-writing"`).
+    /// note: preset ID to run (e.g. `"novel-writing"`).
     pub preset_id: String,
-    /// Creator ID that owns this session.
+    /// note: creator ID that owns this session.
     pub creator_id: String,
-    /// Optional seed text for `preset.input.*`.
+    /// note: optional seed text for `preset.input.*`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
-    /// Role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
+    /// note: role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
     /// into the run descriptor; graph node `agent` selects the role key.
     /// Unknown role/provider references are refused before enqueue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_bindings: Option<std::collections::HashMap<String, SessionAgentBindingDto>>,
 }
 
-/// Response body for `POST /v1/daemon/orchestration/sessions` (schedule start).
+/// note: response body for `POST /v1/daemon/orchestration/sessions` (schedule start).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionResponse {
-    /// The created session ID.
+    /// note: the created session ID.
     pub session_id: String,
 }
 
-/// Request body for `POST /v1/daemon/orchestration/presets/{id}:reload`.
+/// note: request body for `POST /v1/daemon/orchestration/presets/{id}:reload`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReloadPresetRequest {}
 
-/// Response body for `POST /v1/daemon/orchestration/presets/{id}:reload`.
+/// note: response body for `POST /v1/daemon/orchestration/presets/{id}:reload`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReloadPresetResponse {
-    /// Preset ID that was reloaded.
+    /// note: preset ID that was reloaded.
     pub preset_id: String,
-    /// New source hash after reload.
+    /// note: new source hash after reload.
     pub source_hash: String,
 }
 
-/// Request body for `POST /v1/daemon/orchestration/sessions/{id}/signal`.
+/// note: request body for `POST /v1/daemon/orchestration/sessions/{id}/signal`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalSessionRequest {
-    /// One of `pause`, `resume`, `cancel`, `advance`, `continue`.
+    /// note: one of `pause`, `resume`, `cancel`, `advance`, `continue`.
     pub signal: String,
-    /// Exact durable wait token for `continue` (A4). Required for
+    /// note: exact durable wait token for `continue` (A4). Required for
     /// `signal: "continue"`; ignored/absent for other signals.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_id: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Capabilities
-// ---------------------------------------------------------------------------
+// note: capabilities.
 
-/// Query parameters for `GET /v1/daemon/orchestration/capabilities`.
+/// note: query parameters for `GET /v1/daemon/orchestration/capabilities`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ListCapabilitiesQuery {
-    /// Maximum number of items to return.
+    /// note: maximum number of items to return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
-    /// Opaque pagination cursor returned by the previous response's
+    /// note: opaque pagination cursor returned by the previous response's
     /// `pagination.next_cursor`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    /// Comma-separated sort terms (e.g. `-name`).
+    /// note: comma-separated sort terms (e.g. `-name`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
 }
 
-/// Response body for `GET /v1/daemon/orchestration/capabilities`.
+/// note: response body for `GET /v1/daemon/orchestration/capabilities`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ListCapabilitiesResponse {
-    /// Registered capabilities with their schemas.
+    /// note: registered capabilities with their schemas.
     pub items: Vec<CapabilityInfo>,
-    /// Cursor-based pagination envelope.
+    /// note: cursor-based pagination envelope.
     pub pagination: PaginationInfo,
 }
 
-/// A single capability description.
+/// note: a single capability description.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityInfo {
-    /// Dot-separated capability name, e.g. `"sync.pull"`.
+    /// note: dot-separated capability name, e.g. `"sync.pull"`.
     pub name: String,
-    /// JSON Schema (draft 2020-12) for valid inputs.
+    /// note: JSON Schema (draft 2020-12) for valid inputs.
     pub input_schema: String,
-    /// JSON Schema (draft 2020-12) for the output shape.
+    /// note: JSON Schema (draft 2020-12) for the output shape.
     pub output_schema: String,
-    /// Provenance (AR-40): `"builtin"` (ships with the engine) or `"user"`
+    /// note: provenance (AR-40): `"builtin"` (ships with the engine) or `"user"`
     /// (locally-installed developer capability). Mirrors the wire enum; the
     /// orchestration `CapabilityOrigin` enum NEVER crosses the crate boundary
     /// (dependency direction, AR-40) — the handler maps it to this string.
     pub origin: String,
 }
 
-// ---------------------------------------------------------------------------
-// Presets
-// ---------------------------------------------------------------------------
-
-// The canonical preset wire DTOs (`OrchestrationPresetListResponse` and the
+// why: the canonical preset wire DTOs (`OrchestrationPresetListResponse` and the
 // `PresetProfile*` family) are generated from
 // `schemas/core/orchestration-presets-api.schema.json` and live in
 // `crate::generated::core::orchestration_presets_api`. The handwritten copies

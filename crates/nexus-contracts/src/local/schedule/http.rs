@@ -14,13 +14,12 @@
 //! - `POST`   `/v1/daemon/orchestration/schedules/{schedule_id}/signal`
 //! - `DELETE` `/v1/daemon/orchestration/schedules/{schedule_id}`
 //! - `GET`/`PUT` `/v1/daemon/works/{work_id}/cron` — per-Work cron config (V1.171 P2 AR-29)
+// invariant: local-only; `nexus-platform` never observes these payloads.
 
 use crate::generated::daemon_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// POST /schedules — Add Schedule
-// ---------------------------------------------------------------------------
+// note: POST /schedules — Add Schedule.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddScheduleRequest {
@@ -34,39 +33,39 @@ pub struct AddScheduleRequest {
     pub depends_on: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<ScheduleConcurrencyRequest>,
-    /// `V1.5` `WS-D`: `scheduled_at` as Unix timestamp (string for JSON compatibility).
+    /// note: `V1.5` `WS-D`: `scheduled_at` as Unix timestamp (string for JSON compatibility).
     /// Accepts `ISO-8601` datetime in `CLI`; HTTP accepts Unix timestamp string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_at: Option<String>,
-    /// Structured input context for the preset (V1.37 R-V136P1-01).
+    /// note: structured input context for the preset (V1.37 R-V136P1-01).
     ///
     /// Carries `novel-project-init` grill-me answers (`work_ref`,
     /// `total_planned_chapters`, `world_id`, `title`) and other preset-specific
     /// key-value pairs into `preset.input.*` for scaffold and prompt rendering.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<serde_json::Value>,
-    /// Force bypass of preset gate evaluation (V1.37 §7.9).
+    /// note: force bypass of preset gate evaluation (V1.37 §7.9).
     ///
     /// When `true`, gate evaluation is skipped, an audit row is persisted,
     /// and the schedule is created normally. Requires `reason` to be set.
     #[serde(default)]
     pub force_gates: bool,
-    /// Audit reason for `force_gates` (required when `force_gates` is `true`).
+    /// note: audit reason for `force_gates` (required when `force_gates` is `true`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// Role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
+    /// note: role → provider binding map (A1, v1.186 P2 T1). Frozen at admission
     /// into the run descriptor; graph node `agent` selects the role key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_bindings: Option<std::collections::HashMap<String, AgentBindingDto>>,
 }
 
-/// Role → provider binding (A1) — wire form of
+/// note: role → provider binding (A1) — wire form of
 /// [`nexus_session_storage::run_state::AgentBinding`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentBindingDto {
-    /// Provider id.
+    /// note: provider id.
     pub provider_id: String,
-    /// Optional model id.
+    /// note: optional model id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 }
@@ -86,9 +85,7 @@ pub struct AddScheduleResponse {
     pub core_context_version: u32,
 }
 
-// ---------------------------------------------------------------------------
-// GET /schedules — List Schedules
-// ---------------------------------------------------------------------------
+// note: GET /schedules — List Schedules.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -97,14 +94,14 @@ pub struct ListSchedulesQuery {
     pub creator_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    /// Maximum number of items to return.
+    /// note: maximum number of items to return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
-    /// Opaque pagination cursor returned by the previous response's
+    /// note: opaque pagination cursor returned by the previous response's
     /// `pagination.next_cursor`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    /// Comma-separated sort terms (e.g. `-created_at`, `preset_id`).
+    /// note: comma-separated sort terms (e.g. `-created_at`, `preset_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
 }
@@ -112,7 +109,7 @@ pub struct ListSchedulesQuery {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSchedulesResponse {
     pub items: Vec<ScheduleSummary>,
-    /// Cursor-based pagination envelope.
+    /// note: cursor-based pagination envelope.
     pub pagination: PaginationInfo,
 }
 
@@ -122,12 +119,12 @@ pub struct ScheduleSummary {
     pub creator_id: String,
     pub preset_id: String,
     pub status: String,
-    /// Execution policy (A3): `legacy_inert`, `driven_v1`, or `system_inert`.
+    /// note: execution policy (A3): `legacy_inert`, `driven_v1`, or `system_inert`.
     pub execution_policy: String,
-    /// The owned run session ID, when the schedule has been admitted (A3).
+    /// note: the owned run session ID, when the schedule has been admitted (A3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_session_id: Option<String>,
-    /// Shared durable execution projection (A2/A7).
+    /// note: shared durable execution projection (A2/A7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::local::orchestration::http::ExecutionProjection>,
     pub label: Option<String>,
@@ -136,9 +133,7 @@ pub struct ScheduleSummary {
     pub updated_at: String,
 }
 
-// ---------------------------------------------------------------------------
-// GET /schedules/{schedule_id} — Inspect Schedule
-// ---------------------------------------------------------------------------
+// note: GET /schedules/{schedule_id} — Inspect Schedule.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InspectScheduleResponse {
@@ -147,21 +142,19 @@ pub struct InspectScheduleResponse {
     pub concurrency_kind: String,
 }
 
-// ---------------------------------------------------------------------------
-// PATCH /schedules/{schedule_id}/core-context — Apply EditOp
-// ---------------------------------------------------------------------------
+// note: PATCH /schedules/{schedule_id}/core-context — Apply EditOp.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditCoreContextRequest {
-    /// Edit operation kind: `append`, `replace`, `struct_merge`, `struct_remove`.
+    /// note: edit operation kind: `append`, `replace`, `struct_merge`, `struct_remove`.
     pub op: String,
-    /// Body text (for `append`/`replace`).
+    /// note: body text (for `append`/`replace`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    /// Patch JSON (for `struct_merge`).
+    /// note: patch JSON (for `struct_merge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch: Option<serde_json::Value>,
-    /// Key path (for `struct_remove`).
+    /// note: key path (for `struct_remove`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
@@ -171,9 +164,7 @@ pub struct EditCoreContextResponse {
     pub new_version: u32,
 }
 
-// ---------------------------------------------------------------------------
-// GET /schedules/{schedule_id}/core-context — Current content
-// ---------------------------------------------------------------------------
+// note: GET /schedules/{schedule_id}/core-context — current content.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreContextResponse {
@@ -184,9 +175,7 @@ pub struct CoreContextResponse {
     pub created_at: String,
 }
 
-// ---------------------------------------------------------------------------
-// GET /schedules/{schedule_id}/core-context-history — Version history
-// ---------------------------------------------------------------------------
+// note: GET /schedules/{schedule_id}/core-context-history — version history.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreContextHistoryResponse {
@@ -203,14 +192,12 @@ pub struct CoreContextHistoryEntry {
     pub created_at: String,
 }
 
-// ---------------------------------------------------------------------------
-// POST /schedules/{schedule_id}/signal — Pause/Resume/Cancel
-// ---------------------------------------------------------------------------
+// note: POST /schedules/{schedule_id}/signal — pause/resume/cancel.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalScheduleRequest {
     pub signal: String,
-    /// Exact durable wait token for `continue` (A4). Required for
+    /// note: exact durable wait token for `continue` (A4). Required for
     /// `signal: "continue"`; ignored/absent for other signals.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_id: Option<String>,
@@ -220,19 +207,17 @@ pub struct SignalScheduleRequest {
 pub struct SignalScheduleResponse {
     pub schedule_id: String,
     pub status: String,
-    /// Current durable wait id after the signal (null when not waiting).
+    /// note: current durable wait id after the signal (null when not waiting).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_wait_id: Option<String>,
 }
 
-// The following local-only write DTOs remain solely for isolated serde tests;
+// why: these local-only write DTOs remain solely for isolated serde tests;
 // the retired controls have no production consumer. Generated DeleteScheduleResponse
 // is a separate served wire contract and remains unchanged.
-// ---------------------------------------------------------------------------
-// PATCH /schedules/{schedule_id} — Edit label/metadata (V1.171 P2 AR-29)
-// ---------------------------------------------------------------------------
+// note: PATCH /schedules/{schedule_id} — edit label/metadata (V1.171 P2 AR-29).
 
-/// Partial edit of schedule metadata (AR-29). Only `label` is updateable
+/// note: partial edit of schedule metadata (AR-29). Only `label` is updateable
 /// today; the `creator_schedules` table carries no other metadata columns.
 /// Status/core-context have dedicated endpoints (AR-31).
 ///
@@ -241,38 +226,36 @@ pub struct SignalScheduleResponse {
 /// label cleared (never stored as an empty string).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditScheduleRequest {
-    /// New label. `null` / absent → label unchanged. `Some("")` clears it.
+    /// note: new label. `null` / absent → label unchanged. `Some("")` clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// GET/PUT /v1/daemon/works/{work_id}/cron — per-Work cron config (V1.171 P2 AR-29)
-// ---------------------------------------------------------------------------
+// note: GET/PUT /v1/daemon/works/{work_id}/cron — per-Work cron config (V1.171 P2 AR-29).
 
-/// One role's cron entry inside the per-Work schedule (spec §2.1 of
+/// note: one role's cron entry inside the per-Work schedule (spec §2.1 of
 /// `cron-staggering.md`). Mirrors the shared `WorkSchedule` model in
 /// `nexus-orchestration::schedule::work_schedule`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkCronRoleDto {
-    /// 5-field cron expression (author local TZ).
+    /// note: 5-field cron expression (author local TZ).
     pub cron: String,
-    /// Per-role opt-out without removing the schedule.
+    /// note: per-role opt-out without removing the schedule.
     pub enabled: bool,
 }
 
-/// The three-role staggering set (spec §2.1 `roles`).
+/// note: the three-role staggering set (spec §2.1 `roles`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkCronRolesDto {
-    /// `brainstorm` → `novel-brainstorm` preset.
+    /// note: `brainstorm` → `novel-brainstorm` preset.
     pub brainstorm: WorkCronRoleDto,
-    /// `write` → `novel-write` preset.
+    /// note: `write` → `novel-write` preset.
     pub write: WorkCronRoleDto,
-    /// `review` → `novel-review-master` preset.
+    /// note: `review` → `novel-review-master` preset.
     pub review: WorkCronRoleDto,
 }
 
-/// `GET /v1/daemon/works/{work_id}/cron` response — the effective per-Work
+/// note: `GET /v1/daemon/works/{work_id}/cron` response — the effective per-Work
 /// cron configuration.
 ///
 /// Returns the stored `works.schedule_json` (or the spec defaults when
@@ -280,16 +263,16 @@ pub struct WorkCronRolesDto {
 /// defaults" (AR-29 / AR-30).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkCronResponse {
-    /// IANA timezone string. Daemon converts to UTC for cron firing.
+    /// note: IANA timezone string. Daemon converts to UTC for cron firing.
     pub tz: String,
-    /// Per-role cron entries.
+    /// note: per-role cron entries.
     pub roles: WorkCronRolesDto,
-    /// `true` when `works.schedule_json` is unset/empty and this payload is
+    /// note: `true` when `works.schedule_json` is unset/empty and this payload is
     /// the spec-default schedule; `false` once a schedule has been written.
     pub is_default: bool,
 }
 
-/// `PUT /v1/daemon/works/{work_id}/cron` request — full replacement of the
+/// note: `PUT /v1/daemon/works/{work_id}/cron` request — full replacement of the
 /// per-Work cron configuration.
 ///
 /// The body is the complete `WorkSchedule` shape; `expected_current_json` is
@@ -301,11 +284,11 @@ pub struct WorkCronResponse {
 /// 409 — never a blind clobber).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateWorkCronRequest {
-    /// IANA timezone string. Daemon converts to UTC for cron firing.
+    /// note: IANA timezone string. Daemon converts to UTC for cron firing.
     pub tz: String,
-    /// Per-role cron entries.
+    /// note: per-role cron entries.
     pub roles: WorkCronRolesDto,
-    /// CAS pre-image: the exact stored `schedule_json` blob. An
+    /// note: CAS pre-image: the exact stored `schedule_json` blob. An
     /// empty/whitespace value means "must currently be unset (defaults)";
     /// `null`/absent means the write is guarded against the stored value read
     /// at write time (snapshot CAS — never unconditional). Pass the value
@@ -314,18 +297,12 @@ pub struct UpdateWorkCronRequest {
     pub expected_current_json: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// DELETE /schedules/{schedule_id} — Remove Schedule
-// ---------------------------------------------------------------------------
+// note: DELETE /schedules/{schedule_id} — remove schedule.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteScheduleResponse {
     pub deleted: bool,
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -409,7 +386,7 @@ mod tests {
             label: None,
             depends_on: None,
             concurrency: None,
-            scheduled_at: Some("253402300799".to_string()), // Unix timestamp
+            scheduled_at: Some("253402300799".to_string()),
             input: None,
             force_gates: false,
             reason: None,
@@ -448,7 +425,6 @@ mod tests {
 
     #[test]
     fn edit_core_context_request_all_ops() {
-        // append
         let req = EditCoreContextRequest {
             op: "append".to_string(),
             body: Some("more".to_string()),
@@ -458,7 +434,6 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"append\""));
 
-        // struct_merge
         let req = EditCoreContextRequest {
             op: "struct_merge".to_string(),
             body: None,
@@ -468,7 +443,6 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"struct_merge\""));
 
-        // struct_remove
         let req = EditCoreContextRequest {
             op: "struct_remove".to_string(),
             body: None,
@@ -496,10 +470,8 @@ mod tests {
         let back: EditScheduleRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.label.as_deref(), Some("edited label"));
 
-        // Absent label deserializes as None (unchanged).
         let absent: EditScheduleRequest = serde_json::from_str("{}").unwrap();
         assert!(absent.label.is_none());
-        // explicit null also None.
         let null_label: EditScheduleRequest = serde_json::from_str(r#"{"label":null}"#).unwrap();
         assert!(null_label.label.is_none());
     }
@@ -534,14 +506,12 @@ mod tests {
             Some(r#"{"tz":"UTC"}"#)
         );
 
-        // expected_current_json is optional.
         let no_cas: UpdateWorkCronRequest = serde_json::from_str(
             r#"{"tz":"UTC","roles":{"brainstorm":{"cron":"0 3,9,15,21 * * *","enabled":true},"write":{"cron":"0 4,10,16,22 * * *","enabled":true},"review":{"cron":"0,30 * * * *","enabled":true}}}"#,
         )
         .unwrap();
         assert!(no_cas.expected_current_json.is_none());
 
-        // GET response carries the is_default marker.
         let resp = WorkCronResponse {
             tz: "UTC".to_string(),
             roles: WorkCronRolesDto {

@@ -11,72 +11,68 @@ pub mod preset_gate;
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Sync capabilities
-// ---------------------------------------------------------------------------
+// note: sync capabilities.
 
-/// Input for `sync.pull` — pull remote deltas for a workspace.
+/// note: input for `sync.pull` — pull remote deltas for a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncPullInput {
-    /// Force a full re-sync even if no changes are detected.
+    /// note: force a full re-sync even if no changes are detected.
     #[serde(default)]
     pub force: bool,
 }
 
-/// Output for `sync.pull`.
+/// note: output for `sync.pull`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncPullOutput {
-    /// Number of deltas pulled.
+    /// note: number of deltas pulled.
     pub deltas_pulled: u64,
-    /// Whether any conflicts were detected.
+    /// note: whether any conflicts were detected.
     pub conflicts: bool,
 }
 
-/// Input for `sync.push` — push local outbox to remote.
+/// note: input for `sync.push` — push local outbox to remote.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncPushInput {
-    /// Force push even if outbox is empty.
+    /// note: force push even if outbox is empty.
     #[serde(default)]
     pub force: bool,
 }
 
-/// Output for `sync.push`.
+/// note: output for `sync.push`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncPushOutput {
-    /// Number of outbox entries pushed.
+    /// note: number of outbox entries pushed.
     pub entries_pushed: u64,
 }
 
-// ---------------------------------------------------------------------------
-// Outbox capabilities
-// ---------------------------------------------------------------------------
+// note: outbox capabilities.
 
-/// Input for `outbox.flush` — flush pending outbox entries.
+/// note: input for `outbox.flush` — flush pending outbox entries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutboxFlushInput {
-    /// Maximum number of entries to flush (0 = unlimited).
+    /// note: maximum number of entries to flush (0 = unlimited).
     #[serde(default)]
     pub limit: u32,
 }
 
-/// Output for `outbox.flush`.
+/// note: output for `outbox.flush`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutboxFlushOutput {
-    /// Number of entries flushed.
+    /// note: number of entries flushed.
     pub flushed: u64,
 }
 
-/// Input for `outbox.compact` — compact outbox table.
+/// note: input for `outbox.compact` — compact outbox table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutboxCompactInput {
-    /// Retention period in days for completed entries.
+    /// note: retention period in days for completed entries.
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
 }
@@ -85,21 +81,19 @@ const fn default_retention_days() -> u32 {
     30
 }
 
-/// Output for `outbox.compact`.
+/// note: output for `outbox.compact`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutboxCompactOutput {
-    /// Number of entries removed.
+    /// note: number of entries removed.
     pub removed: u64,
-    /// Number of entries retained.
+    /// note: number of entries retained.
     pub retained: u64,
 }
 
-// ---------------------------------------------------------------------------
-// Workspace capabilities (v1.188 P3 — recoverable content commit)
-// ---------------------------------------------------------------------------
+// note: workspace capabilities (v1.188 P3 — recoverable content commit).
 
-/// Input for `workspace.open` — open a scope-relative path within the bound workspace.
+/// note: input for `workspace.open` — open a scope-relative path within the bound workspace.
 ///
 /// Unknown fields are IGNORED, matching every other capability input (v1.195
 /// P0-T2 fix). The orchestration engine injects the trusted `_creator_id` /
@@ -112,26 +106,26 @@ pub struct OutboxCompactOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceOpenInput {
-    /// Safe workspace-relative scope path (required).
+    /// note: safe workspace-relative scope path (required).
     pub path: String,
 }
 
-/// Snapshot captured at `workspace.open` for OCC and commit validation.
+/// note: snapshot captured at `workspace.open` for OCC and commit validation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceOpenSnapshot {
-    /// Canonical workspace creative root (absolute).
+    /// note: canonical workspace creative root (absolute).
     pub workspace_root: String,
-    /// Scope path opened (relative to `workspace_root`).
+    /// note: scope path opened (relative to `workspace_root`).
     pub path: String,
-    /// Whether the scope path existed at open time.
+    /// note: whether the scope path existed at open time.
     pub existed: bool,
-    /// Relative path → lowercase SHA-256 hex for tracked regular files in scope.
+    /// note: relative path → lowercase SHA-256 hex for tracked regular files in scope.
     #[serde(default)]
     pub file_hashes: std::collections::HashMap<String, String>,
 }
 
-/// Output for `workspace.open`.
+/// note: output for `workspace.open`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceOpenOutput {
@@ -139,7 +133,7 @@ pub struct WorkspaceOpenOutput {
     pub snapshot: WorkspaceOpenSnapshot,
 }
 
-/// Operation type for a workspace commit manifest entry.
+/// note: operation type for a workspace commit manifest entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceChangeOp {
@@ -148,22 +142,22 @@ pub enum WorkspaceChangeOp {
     Delete,
 }
 
-/// One change in a `workspace.commit` manifest.
+/// note: one change in a `workspace.commit` manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceChangeEntry {
-    /// Scope-relative path for this change.
+    /// note: scope-relative path for this change.
     pub path: String,
     pub op: WorkspaceChangeOp,
-    /// Lowercase SHA-256 of pre-image; null/absent for create.
+    /// note: lowercase SHA-256 of pre-image; null/absent for create.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_hash: Option<String>,
-    /// Canonical base64 content for create/modify; forbidden for delete.
+    /// note: canonical base64 content for create/modify; forbidden for delete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_base64: Option<String>,
 }
 
-/// Input for `workspace.commit`.
+/// note: input for `workspace.commit`.
 ///
 /// Unknown fields are IGNORED for the same reason as
 /// [`WorkspaceOpenInput`]: the engine injects trusted `_creator_id` /
@@ -178,17 +172,17 @@ pub struct WorkspaceCommitInput {
     pub changes: Vec<WorkspaceChangeEntry>,
 }
 
-/// Output for `workspace.commit` after durable completion.
+/// note: output for `workspace.commit` after durable completion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCommitOutput {
-    /// Stable durable revision (`rev_<uuid>`).
+    /// note: stable durable revision (`rev_<uuid>`).
     pub revision: String,
-    /// True only after filesystem apply and durable intent/session consume.
+    /// note: true only after filesystem apply and durable intent/session consume.
     pub committed: bool,
 }
 
-/// Input for one Work artifact byte commit (`Works/<work_ref>/<rel_child>`).
+/// note: input for one Work artifact byte commit (`Works/<work_ref>/<rel_child>`).
 ///
 /// Carries the classified shape the caller already holds: the port builds the
 /// absolute target itself from `workspace_root` + `work_ref` + `rel_child`, so
@@ -196,29 +190,27 @@ pub struct WorkspaceCommitOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkArtifactCommitInput {
-    /// Workspace whose `Works/` tree owns the artifact (absolute).
+    /// note: workspace whose `Works/` tree owns the artifact (absolute).
     pub workspace_root: String,
-    /// The Work directory name (or Work id) the caller addressed.
+    /// note: the Work directory name (or Work id) the caller addressed.
     pub work_ref: String,
-    /// The artifact path below the Work root; non-empty, `..`-free.
+    /// note: the artifact path below the Work root; non-empty, `..`-free.
     pub rel_child: String,
-    /// The bytes to commit.
+    /// note: the bytes to commit.
     pub content: String,
 }
 
-/// Output for [`WorkArtifactCommitInput`].
+/// note: output for [`WorkArtifactCommitInput`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkArtifactCommitOutput {
-    /// True only after the bytes landed durably under the Work lock.
+    /// note: true only after the bytes landed durably under the Work lock.
     pub committed: bool,
 }
 
-// ---------------------------------------------------------------------------
-// Registry capability
-// ---------------------------------------------------------------------------
+// note: registry capability.
 
-/// Input for `registry.refresh` — refresh ACP registry cache.
+/// note: input for `registry.refresh` — refresh ACP registry cache.
 ///
 /// V1.58 P0 fix-wave (QC2 M-1): the `force` field was removed — it was a
 /// documented no-op (no cache layer exists in the daemon runtime: the
@@ -230,46 +222,44 @@ pub struct WorkArtifactCommitOutput {
 #[serde(rename_all = "camelCase")]
 pub struct RegistryRefreshInput {}
 
-/// Output for `registry.refresh`.
+/// note: output for `registry.refresh`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryRefreshOutput {
-    /// Age of the refreshed cache in milliseconds (0 for synthetic).
+    /// note: age of the refreshed cache in milliseconds (0 for synthetic).
     pub cache_age_ms: u64,
-    /// Number of registered capabilities in the snapshot/registry.
+    /// note: number of registered capabilities in the snapshot/registry.
     ///
     /// Renamed from `agent_count` in V1.56 P1 (R-V156P1-M001).
     /// The serde aliases preserve backward compatibility for consumers
     /// using the old field name.
     #[serde(alias = "agent_count", alias = "agentCount")]
     pub capability_count: u32,
-    /// Source of the registry data: `"synthetic"`, `"cdn"`, or `"synthetic_fallback"`.
+    /// note: source of the registry data: `"synthetic"`, `"cdn"`, or `"synthetic_fallback"`.
     pub source: String,
-    /// Snapshot version string (e.g. "2026-06-22.v1").
+    /// note: snapshot version string (e.g. "2026-06-22.v1").
     pub snapshot_version: String,
-    /// ISO-8601 timestamp when the output was generated.
+    /// note: ISO-8601 timestamp when the output was generated.
     pub generated_at: String,
-    /// Maximum fetch timeout in milliseconds (0 if not applicable).
+    /// note: maximum fetch timeout in milliseconds (0 if not applicable).
     pub fetch_timeout_ms: u64,
-    /// Maximum retry count (0 if not applicable).
+    /// note: maximum retry count (0 if not applicable).
     pub max_retries: u32,
-    /// Number of retries actually attempted (0 if synthetic or first-attempt success).
+    /// note: number of retries actually attempted (0 if synthetic or first-attempt success).
     pub retry_count: u32,
-    /// Human-readable error description when fallback occurred (empty if success).
+    /// note: human-readable error description when fallback occurred (empty if success).
     pub fallback_reason: String,
 }
 
-// ---------------------------------------------------------------------------
-// Creator capabilities
-// ---------------------------------------------------------------------------
+// note: creator capabilities.
 
-/// Input for `creator.read_memory` — read entries from creator memory store.
+/// note: input for `creator.read_memory` — read entries from creator memory store.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorReadMemoryInput {
-    /// Optional keyword filter.
+    /// note: optional keyword filter.
     pub keyword: Option<String>,
-    /// Maximum entries to return.
+    /// note: maximum entries to return.
     #[serde(default = "default_max_entries")]
     pub limit: u32,
 }
@@ -278,56 +268,54 @@ const fn default_max_entries() -> u32 {
     50
 }
 
-/// Output for `creator.read_memory`.
+/// note: output for `creator.read_memory`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorReadMemoryOutput {
-    /// Number of entries returned.
+    /// note: number of entries returned.
     pub count: u32,
 }
 
-/// Input for `creator.write_memory` — append/update creator memory.
+/// note: input for `creator.write_memory` — append/update creator memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorWriteMemoryInput {
-    /// Memory entry content.
+    /// note: memory entry content.
     pub content: String,
-    /// Keywords for retrieval.
+    /// note: keywords for retrieval.
     pub keywords: Vec<String>,
 }
 
-/// Output for `creator.write_memory`.
+/// note: output for `creator.write_memory`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorWriteMemoryOutput {
-    /// ID of the written memory entry.
+    /// note: ID of the written memory entry.
     pub fragment_id: String,
 }
 
-/// Input for `creator.inject_prompt` — queue a prompt for the next ACP call.
+/// note: input for `creator.inject_prompt` — queue a prompt for the next ACP call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorInjectPromptInput {
-    /// Prompt text to inject.
+    /// note: prompt text to inject.
     pub prompt: String,
-    /// Optional priority (higher = sooner).
+    /// note: optional priority (higher = sooner).
     #[serde(default)]
     pub priority: i32,
 }
 
-/// Output for `creator.inject_prompt`.
+/// note: output for `creator.inject_prompt`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorInjectPromptOutput {
-    /// Confirmation that the prompt was queued.
+    /// note: confirmation that the prompt was queued.
     pub queued: bool,
 }
 
-// ---------------------------------------------------------------------------
-// creator.write_brief — validate and persist creative brief on Work
-// ---------------------------------------------------------------------------
+// note: creator.write_brief — validate and persist creative brief on Work.
 
-/// Input for `creator.write_brief` — validate and persist a creative brief.
+/// note: input for `creator.write_brief` — validate and persist a creative brief.
 ///
 /// The `brief_text` is the raw text output from the synthesizing state,
 /// which should contain valid JSON matching the creative brief schema
@@ -335,61 +323,54 @@ pub struct CreatorInjectPromptOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorWriteBriefInput {
-    /// Work entity ID to write the brief to.
+    /// note: work entity ID to write the brief to.
     pub work_id: String,
-    /// Raw brief text (expected to be JSON matching §4 schema).
+    /// note: raw brief text (expected to be JSON matching §4 schema).
     pub brief_text: String,
 }
 
-/// Output for `creator.write_brief`.
+/// note: output for `creator.write_brief`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatorWriteBriefOutput {
-    /// Whether the brief was successfully validated and written.
+    /// note: whether the brief was successfully validated and written.
     pub written: bool,
-    /// Updated intake status of the Work.
+    /// note: updated intake status of the Work.
     pub intake_status: String,
 }
 
-// ---------------------------------------------------------------------------
-// Judge capabilities
-// ---------------------------------------------------------------------------
+// note: judge capabilities.
 
-/// Input for `judge.rule` — evaluate a pure rule (no LLM).
+/// note: input for `judge.rule` — evaluate a pure rule (no LLM).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JudgeRuleInput {
-    /// The rule expression to evaluate.
+    /// note: the rule expression to evaluate.
     pub rule: String,
-    /// The context data to evaluate against.
+    /// note: the context data to evaluate against.
     pub context_data: serde_json::Value,
 }
 
-/// Output for `judge.rule`.
+/// note: output for `judge.rule`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JudgeRuleOutput {
-    /// Whether the rule evaluated to true (go) or false (nogo).
+    /// note: whether the rule evaluated to true (go) or false (nogo).
     pub result: bool,
-    /// Human-readable reason for the decision.
+    /// note: human-readable reason for the decision.
     pub reason: String,
 }
 
-// ---------------------------------------------------------------------------
-// FL-E stages (V1.34 creator-workflow §3.1)
-// ---------------------------------------------------------------------------
+// note: FL-E stages (V1.34 creator-workflow §3.1).
 
-// FL-E stages (V1.34 creator-workflow §3.1)
-// ---------------------------------------------------------------------------
-
-/// Ordered FL-E stages — single source of truth (V1.34 creator-workflow §3.1).
+/// note: ordered FL-E stages — single source of truth (V1.34 creator-workflow §3.1).
 ///
 /// All crates that need the canonical stage list or stage-to-index mapping
 /// must `use` this constant and the associated functions rather than
 /// maintaining local copies.
 pub const FL_E_STAGES: &[&str] = &["intake", "research", "produce", "review", "persist"];
 
-/// Returns the index of a stage in the FL-E linear order.
+/// note: returns the index of a stage in the FL-E linear order.
 ///
 /// Returns `None` for unknown stage strings.
 #[must_use]
@@ -397,7 +378,7 @@ pub fn stage_index(stage: &str) -> Option<usize> {
     FL_E_STAGES.iter().position(|&s| s == stage)
 }
 
-/// Checks whether a stage string is a known FL-E stage.
+/// note: checks whether a stage string is a known FL-E stage.
 #[must_use]
 pub fn is_valid_stage(stage: &str) -> bool {
     FL_E_STAGES.contains(&stage)

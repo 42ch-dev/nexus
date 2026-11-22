@@ -2,12 +2,13 @@
 //!
 //! Does NOT sync to platform; shared excerpts go through
 //! `MemoryItem`(`memory_kind`=`research_material`). Aligned with data-model-v1.md §5.9A.
+// note: data-model-v1.md is the platform repo's `v1-spec/shared/domain` spec, not vendored here.
 
 use serde::{Deserialize, Serialize};
 
 use crate::common_types::{ReferenceSourceType, ScanStatus};
 
-/// Local-only registration of research/reference sources.
+/// note: local-only registration of research/reference sources.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ReferenceSource {

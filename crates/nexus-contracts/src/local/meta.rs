@@ -2,10 +2,11 @@
 //!
 //! Meta schema defining schema versioning and structure rules for all Nexus schemas.
 //! This is used internally for validation; platform never observes it.
+// note: internal validation only; the platform never sees this type.
 
 use serde::{Deserialize, Serialize};
 
-/// Meta schema defining schema versioning and structure rules.
+/// note: meta schema defining schema versioning and structure rules.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Meta {
@@ -21,7 +22,7 @@ pub struct Meta {
     pub r#type: MetaType,
 }
 
-/// Root type of a schema.
+/// note: root type of a schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetaType {

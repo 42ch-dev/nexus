@@ -12,13 +12,12 @@
 //! the conversion boundary explicit in caller code. When adding a new ACP
 //! mirror type, preserve the `Nexus` prefix and add a doc comment naming the
 //! SDK type it mirrors.
+// why: keep the wire DTO namespace distinct from the SDK types `nexus-acp-host` consumes.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-// ── Newtype wrappers ────────────────────────────────────────────────
-
-/// Nexus-owned session identifier.
+/// note: Nexus-owned session identifier.
 ///
 /// Wraps an opaque string. The inner value is opaque to consumers — it is
 /// only produced by the SDK adapter and passed back to it for protocol
@@ -28,7 +27,7 @@ use std::path::PathBuf;
 pub struct NexusSessionId(pub String);
 
 impl NexusSessionId {
-    /// Create a new session ID from a string.
+    /// note: create a new session ID from a string.
     #[must_use]
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
@@ -53,7 +52,7 @@ impl From<&str> for NexusSessionId {
     }
 }
 
-/// Nexus-owned protocol version identifier.
+/// note: Nexus-owned protocol version identifier.
 ///
 /// Wraps the negotiated protocol version as a string for flexibility
 /// across SDK versions.
@@ -62,19 +61,19 @@ impl From<&str> for NexusSessionId {
 pub struct NexusProtocolVersion(pub String);
 
 impl NexusProtocolVersion {
-    /// Create a new protocol version from a string.
+    /// note: create a new protocol version from a string.
     #[must_use]
     pub fn new(version: impl Into<String>) -> Self {
         Self(version.into())
     }
 
-    /// Protocol version "1" (current ACP spec).
+    /// note: protocol version "1" (current ACP spec).
     #[must_use]
     pub fn v1() -> Self {
         Self(String::from("1"))
     }
 
-    /// The latest supported protocol version.
+    /// note: the latest supported protocol version.
     #[must_use]
     pub fn latest() -> Self {
         Self::v1()
@@ -87,103 +86,91 @@ impl std::fmt::Display for NexusProtocolVersion {
     }
 }
 
-// ── Stop reason ─────────────────────────────────────────────────────
-
-/// Why the agent stopped processing a prompt turn.
+/// note: why the agent stopped processing a prompt turn.
 ///
 /// Mirrors the ACP spec `StopReason` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NexusStopReason {
-    /// The turn ended successfully.
+    /// note: the turn ended successfully.
     EndTurn,
-    /// The agent reached the maximum token count.
+    /// note: the agent reached the maximum token count.
     MaxTokens,
-    /// The agent reached the maximum number of allowed requests.
+    /// note: the agent reached the maximum number of allowed requests.
     MaxTurnRequests,
-    /// The agent refused to continue.
+    /// note: the agent refused to continue.
     Refusal,
-    /// The turn was cancelled by the client.
+    /// note: the turn was cancelled by the client.
     Cancelled,
 }
 
-// ── Auth method ─────────────────────────────────────────────────────
-
-/// An authentication method reported by the agent during initialization.
+/// note: an authentication method reported by the agent during initialization.
 ///
 /// This is a simplified view — only the fields consumers actually inspect
 /// (id, name) are exposed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusAuthMethod {
-    /// Unique identifier for this authentication method.
+    /// note: unique identifier for this authentication method.
     pub id: String,
-    /// Human-readable name.
+    /// note: human-readable name.
     pub name: String,
-    /// Optional description.
+    /// note: optional description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
-// ── Agent info ──────────────────────────────────────────────────────
-
-/// Metadata about the agent implementation (name, version).
+/// note: metadata about the agent implementation (name, version).
 ///
 /// Mirrors SDK `Implementation` — consumers read `name` and `version`
 /// for display and logging.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusAgentInfo {
-    /// Programmatic identifier (e.g. "claude-code").
+    /// note: programmatic identifier (e.g. "claude-code").
     pub name: String,
-    /// Optional human-readable title.
+    /// note: optional human-readable title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Version string (e.g. "1.0.0").
+    /// note: version string (e.g. "1.0.0").
     pub version: String,
 }
 
-// ── Agent capabilities ──────────────────────────────────────────────
-
-/// Capabilities reported by the agent during initialization.
+/// note: capabilities reported by the agent during initialization.
 ///
 /// This is a simplified view exposing only the fields Nexus consumers use.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusAgentCapabilities {
-    /// Whether the agent supports `session/load`.
+    /// note: whether the agent supports `session/load`.
     #[serde(default)]
     pub load_session: bool,
 }
 
-// ── Session mode ────────────────────────────────────────────────────
-
-/// A mode the agent can operate in (e.g. "act" / "ask").
+/// note: a mode the agent can operate in (e.g. "act" / "ask").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusSessionMode {
-    /// Mode identifier.
+    /// note: mode identifier.
     pub id: String,
-    /// Human-readable name.
+    /// note: human-readable name.
     pub name: String,
-    /// Optional description.
+    /// note: optional description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
-/// The agent's current session mode state.
+/// note: the agent's current session mode state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusSessionModeState {
-    /// The current mode the agent is in.
+    /// note: the current mode the agent is in.
     pub current_mode_id: String,
-    /// The set of modes the agent can operate in.
+    /// note: the set of modes the agent can operate in.
     pub available_modes: Vec<NexusSessionMode>,
 }
 
-// ── Content block ───────────────────────────────────────────────────
-
-/// A content block in a prompt or response.
+/// note: a content block in a prompt or response.
 ///
 /// This is a simplified view — only `Text` and `ResourceLink` variants
 /// are needed by Nexus consumers today. New variants can be added as
@@ -191,100 +178,96 @@ pub struct NexusSessionModeState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NexusContentBlock {
-    /// Text content.
+    /// note: text content.
     Text(NexusTextContent),
-    /// Reference to a resource.
+    /// note: reference to a resource.
     ResourceLink(NexusResourceLink),
 }
 
-/// Text content within a content block.
+/// note: text content within a content block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NexusTextContent {
-    /// The text content.
+    /// note: the text content.
     pub text: String,
 }
 
-/// A reference to a resource within a content block.
+/// note: a reference to a resource within a content block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusResourceLink {
-    /// The resource URI.
+    /// note: the resource URI.
     pub uri: String,
-    /// Optional resource name.
+    /// note: optional resource name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
-// ── MCP server ──────────────────────────────────────────────────────
-
-/// An MCP server configuration for a new session.
+/// note: an MCP server configuration for a new session.
 ///
 /// Mirrors the SDK `McpServer` enum — consumers construct these for
 /// `NexusNewSessionRequest`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum NexusMcpServer {
-    /// HTTP-based MCP server.
+    /// note: HTTP-based MCP server.
     #[serde(rename = "http")]
     Http(NexusMcpServerHttp),
-    /// SSE-based MCP server.
+    /// note: SSE-based MCP server.
     #[serde(rename = "sse")]
     Sse(NexusMcpServerSse),
-    /// Stdio-based MCP server.
+    /// note: stdio-based MCP server.
     #[serde(rename = "stdio")]
     Stdio(NexusMcpServerStdio),
 }
 
-/// HTTP MCP server configuration.
+/// note: HTTP MCP server configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusMcpServerHttp {
-    /// Server name.
+    /// note: server name.
     pub name: String,
-    /// Server URL.
+    /// note: server URL.
     pub url: String,
 }
 
-/// SSE MCP server configuration.
+/// note: SSE MCP server configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusMcpServerSse {
-    /// Server name.
+    /// note: server name.
     pub name: String,
-    /// Server URL.
+    /// note: server URL.
     pub url: String,
 }
 
-/// Stdio MCP server configuration.
+/// note: stdio MCP server configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusMcpServerStdio {
-    /// Server name.
+    /// note: server name.
     pub name: String,
-    /// Command to execute.
+    /// note: command to execute.
     pub command: PathBuf,
-    /// Arguments passed to the command (e.g. `["mcp", "serve"]`).
+    /// note: arguments passed to the command (e.g. `["mcp", "serve"]`).
     #[serde(default)]
     pub args: Vec<String>,
 }
 
-// ── Request DTOs ────────────────────────────────────────────────────
-
-/// Request for the ACP `initialize` handshake.
+/// note: request for the ACP `initialize` handshake.
 ///
 /// This replaces the SDK `InitializeRequest` in trait signatures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusInitializeRequest {
-    /// Protocol version the client supports.
+    /// note: protocol version the client supports.
     pub protocol_version: NexusProtocolVersion,
-    /// Client capabilities (simplified view).
+    /// note: client capabilities (simplified view).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_info: Option<NexusAgentInfo>,
 }
 
 impl NexusInitializeRequest {
-    /// Create a new initialize request with the latest protocol version.
+    /// note: create a new initialize request with the latest protocol version.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -293,7 +276,7 @@ impl NexusInitializeRequest {
         }
     }
 
-    /// Set client info.
+    /// note: set client info.
     #[must_use]
     pub fn client_info(mut self, info: NexusAgentInfo) -> Self {
         self.client_info = Some(info);
@@ -307,19 +290,19 @@ impl Default for NexusInitializeRequest {
     }
 }
 
-/// Request to create a new ACP session.
+/// note: request to create a new ACP session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusNewSessionRequest {
-    /// Working directory for the session.
+    /// note: working directory for the session.
     pub cwd: PathBuf,
-    /// MCP servers to connect to.
+    /// note: MCP servers to connect to.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<NexusMcpServer>,
 }
 
 impl NexusNewSessionRequest {
-    /// Create a new session request with the given working directory.
+    /// note: create a new session request with the given working directory.
     #[must_use]
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
@@ -328,7 +311,7 @@ impl NexusNewSessionRequest {
         }
     }
 
-    /// Add MCP servers.
+    /// note: add MCP servers.
     #[must_use]
     pub fn mcp_servers(mut self, servers: Vec<NexusMcpServer>) -> Self {
         self.mcp_servers = servers;
@@ -336,49 +319,47 @@ impl NexusNewSessionRequest {
     }
 }
 
-/// Request to send a prompt to the agent.
+/// note: request to send a prompt to the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusPromptRequest {
-    /// Session ID to send the prompt to.
+    /// note: session ID to send the prompt to.
     pub session_id: NexusSessionId,
-    /// Content blocks composing the user's message.
+    /// note: content blocks composing the user's message.
     pub prompt: Vec<NexusContentBlock>,
 }
 
 impl NexusPromptRequest {
-    /// Create a new prompt request.
+    /// note: create a new prompt request.
     #[must_use]
     pub const fn new(session_id: NexusSessionId, prompt: Vec<NexusContentBlock>) -> Self {
         Self { session_id, prompt }
     }
 }
 
-// ── Response DTOs ───────────────────────────────────────────────────
-
-/// Response from the ACP `initialize` handshake.
+/// note: response from the ACP `initialize` handshake.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusInitializeResponse {
-    /// Negotiated protocol version.
+    /// note: negotiated protocol version.
     pub protocol_version: NexusProtocolVersion,
-    /// Capabilities reported by the agent.
+    /// note: capabilities reported by the agent.
     pub agent_capabilities: NexusAgentCapabilities,
-    /// Agent metadata (name, version).
+    /// note: agent metadata (name, version).
     pub agent_info: Option<NexusAgentInfo>,
-    /// Authentication methods supported by the agent.
+    /// note: authentication methods supported by the agent.
     pub auth_methods: Vec<NexusAuthMethod>,
 }
 
-/// Response from creating a new ACP session.
+/// note: response from creating a new ACP session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusSessionCreated {
-    /// Unique session identifier.
+    /// note: unique session identifier.
     pub session_id: NexusSessionId,
-    /// Session mode state (if the agent reports modes).
+    /// note: session mode state (if the agent reports modes).
     pub modes: Option<NexusSessionModeState>,
-    /// Configuration options exposed by the agent at session creation.
+    /// note: configuration options exposed by the agent at session creation.
     ///
     /// Used for dynamic capability discovery (e.g. model switching via
     /// `set_config_option`). May be `None` if the agent does not report
@@ -387,41 +368,39 @@ pub struct NexusSessionCreated {
     pub config_options: Option<Vec<NexusConfigOption>>,
 }
 
-/// Response from sending a prompt to the agent.
+/// note: response from sending a prompt to the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusPromptCompleted {
-    /// Why the agent stopped processing the turn.
+    /// note: why the agent stopped processing the turn.
     pub stop_reason: NexusStopReason,
 }
 
-/// Result of a cancel operation.
+/// note: result of a cancel operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusCancelResult {
-    /// The session that was cancelled.
+    /// note: the session that was cancelled.
     pub session_id: NexusSessionId,
 }
 
-// ── Session config option ─────────────────────────────────────────────
-
-/// Request to set a session configuration option.
+/// note: request to set a session configuration option.
 ///
 /// Mirrors the SDK `SetSessionConfigOptionRequest` — identifies the session,
 /// the config key, and the new value (a string newtype for value IDs).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusSetConfigOptionRequest {
-    /// The session to update.
+    /// note: the session to update.
     pub session_id: NexusSessionId,
-    /// The configuration option to set.
+    /// note: the configuration option to set.
     pub config_id: String,
-    /// The value to set (a config value ID string).
+    /// note: the value to set (a config value ID string).
     pub value: String,
 }
 
 impl NexusSetConfigOptionRequest {
-    /// Create a new set-config-option request.
+    /// note: create a new set-config-option request.
     #[must_use]
     pub fn new(
         session_id: NexusSessionId,
@@ -436,148 +415,146 @@ impl NexusSetConfigOptionRequest {
     }
 }
 
-/// Category of a session configuration option (UX hint).
+/// note: category of a session configuration option (UX hint).
 ///
 /// Mirrors the SDK `SessionConfigOptionCategory` enum.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NexusConfigOptionCategory {
-    /// Session mode selector.
+    /// note: session mode selector.
     Mode,
-    /// Model selector.
+    /// note: model selector.
     Model,
-    /// Thought/reasoning level selector.
+    /// note: thought/reasoning level selector.
     ThoughtLevel,
-    /// Unknown / uncategorized.
+    /// note: unknown / uncategorized.
     Other(String),
 }
 
-/// A possible value in a select configuration option.
+/// note: a possible value in a select configuration option.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusConfigSelectOption {
-    /// Unique identifier for this option value.
+    /// note: unique identifier for this option value.
     pub value: String,
-    /// Human-readable label.
+    /// note: human-readable label.
     pub name: String,
-    /// Optional description.
+    /// note: optional description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
-/// A group of selectable options in a configuration option.
+/// note: a group of selectable options in a configuration option.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusConfigSelectGroup {
-    /// Unique identifier for this group.
+    /// note: unique identifier for this group.
     pub group: String,
-    /// Human-readable label for this group.
+    /// note: human-readable label for this group.
     pub name: String,
-    /// The set of option values in this group.
+    /// note: the set of option values in this group.
     pub options: Vec<NexusConfigSelectOption>,
 }
 
-/// Options layout for a select configuration option.
+/// note: options layout for a select configuration option.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NexusConfigSelectOptions {
-    /// A flat list of options with no grouping.
+    /// note: a flat list of options with no grouping.
     Ungrouped(Vec<NexusConfigSelectOption>),
-    /// A list of options grouped under headers.
+    /// note: a list of options grouped under headers.
     Grouped(Vec<NexusConfigSelectGroup>),
 }
 
-/// The payload for a select-type configuration option.
+/// note: the payload for a select-type configuration option.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusConfigSelect {
-    /// The currently selected value.
+    /// note: the currently selected value.
     pub current_value: String,
-    /// The selectable options.
+    /// note: the selectable options.
     pub options: NexusConfigSelectOptions,
 }
 
-/// Type-specific payload for a session configuration option.
+/// note: type-specific payload for a session configuration option.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NexusConfigKind {
-    /// Single-value selector (dropdown).
+    /// note: single-value selector (dropdown).
     Select(NexusConfigSelect),
 }
 
-/// A session configuration option returned by the agent.
+/// note: a session configuration option returned by the agent.
 ///
 /// Mirrors the SDK `SessionConfigOption` struct.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusConfigOption {
-    /// Unique identifier for the configuration option.
+    /// note: unique identifier for the configuration option.
     pub id: String,
-    /// Human-readable label.
+    /// note: human-readable label.
     pub name: String,
-    /// Optional description for display.
+    /// note: optional description for display.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Optional semantic category for the option (UX hint).
+    /// note: optional semantic category for the option (UX hint).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<NexusConfigOptionCategory>,
-    /// Type-specific payload.
+    /// note: type-specific payload.
     #[serde(flatten)]
     pub kind: NexusConfigKind,
 }
 
-/// Response from setting a session configuration option.
+/// note: response from setting a session configuration option.
 ///
 /// Mirrors the SDK `SetSessionConfigOptionResponse` — returns the full set of
 /// configuration options and their current values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusSetConfigOptionResponse {
-    /// The full set of configuration options with their current values.
+    /// note: the full set of configuration options with their current values.
     pub config_options: Vec<NexusConfigOption>,
 }
 
 impl NexusSetConfigOptionResponse {
-    /// Create a new set-config-option response.
+    /// note: create a new set-config-option response.
     #[must_use]
     pub const fn new(config_options: Vec<NexusConfigOption>) -> Self {
         Self { config_options }
     }
 }
 
-// ── Session list ───────────────────────────────────────────────────────
-
-/// Request to list sessions from the agent.
+/// note: request to list sessions from the agent.
 ///
 /// Mirrors the SDK `ListSessionsRequest` — supports filtering by cwd
 /// and cursor-based pagination.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusListSessionsRequest {
-    /// Filter sessions by working directory. Must be an absolute path.
+    /// note: filter sessions by working directory. Must be an absolute path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
-    /// Opaque cursor token from a previous response's nextCursor field
+    /// note: opaque cursor token from a previous response's nextCursor field
     /// for cursor-based pagination.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
 }
 
 impl NexusListSessionsRequest {
-    /// Create a new list sessions request with no filters.
+    /// note: create a new list sessions request with no filters.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Filter sessions by working directory.
+    /// note: filter sessions by working directory.
     #[must_use]
     pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
         self.cwd = Some(cwd.into());
         self
     }
 
-    /// Set the pagination cursor.
+    /// note: set the pagination cursor.
     #[must_use]
     pub fn cursor(mut self, cursor: impl Into<String>) -> Self {
         self.cursor = Some(cursor.into());
@@ -585,26 +562,26 @@ impl NexusListSessionsRequest {
     }
 }
 
-/// Information about a session returned by session/list.
+/// note: information about a session returned by session/list.
 ///
 /// Mirrors the SDK `SessionInfo` type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusSessionInfo {
-    /// Unique identifier for the session.
+    /// note: unique identifier for the session.
     pub session_id: NexusSessionId,
-    /// The working directory for this session. Must be an absolute path.
+    /// note: the working directory for this session. Must be an absolute path.
     pub cwd: PathBuf,
-    /// Human-readable title for the session.
+    /// note: human-readable title for the session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// ISO 8601 timestamp of last activity.
+    /// note: ISO 8601 timestamp of last activity.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
 }
 
 impl NexusSessionInfo {
-    /// Create a new session info.
+    /// note: create a new session info.
     #[must_use]
     pub fn new(session_id: NexusSessionId, cwd: impl Into<PathBuf>) -> Self {
         Self {
@@ -615,28 +592,28 @@ impl NexusSessionInfo {
         }
     }
 
-    /// Set the session title.
+    /// note: set the session title.
     #[must_use]
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
-    /// Set the session title from an Option.
+    /// note: set the session title from an Option.
     #[must_use]
     pub fn title_opt(mut self, title: Option<String>) -> Self {
         self.title = title;
         self
     }
 
-    /// Set the last activity timestamp.
+    /// note: set the last activity timestamp.
     #[must_use]
     pub fn updated_at(mut self, updated_at: impl Into<String>) -> Self {
         self.updated_at = Some(updated_at.into());
         self
     }
 
-    /// Set the last activity timestamp from an Option.
+    /// note: set the last activity timestamp from an Option.
     #[must_use]
     pub fn updated_at_opt(mut self, updated_at: Option<String>) -> Self {
         self.updated_at = updated_at;
@@ -644,16 +621,16 @@ impl NexusSessionInfo {
     }
 }
 
-/// Response from listing sessions.
+/// note: response from listing sessions.
 ///
 /// Mirrors the SDK `ListSessionsResponse` — contains session info
 /// objects and optional pagination cursor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NexusListSessionsResponse {
-    /// Array of session information objects.
+    /// note: array of session information objects.
     pub sessions: Vec<NexusSessionInfo>,
-    /// Opaque cursor token. If present, pass this in the next request's
+    /// note: opaque cursor token. If present, pass this in the next request's
     /// cursor parameter to fetch the next page. If absent, there are no
     /// more results.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -661,7 +638,7 @@ pub struct NexusListSessionsResponse {
 }
 
 impl NexusListSessionsResponse {
-    /// Create a new list sessions response.
+    /// note: create a new list sessions response.
     #[must_use]
     pub const fn new(sessions: Vec<NexusSessionInfo>) -> Self {
         Self {
@@ -670,22 +647,20 @@ impl NexusListSessionsResponse {
         }
     }
 
-    /// Set the pagination cursor.
+    /// note: set the pagination cursor.
     #[must_use]
     pub fn next_cursor(mut self, cursor: impl Into<String>) -> Self {
         self.next_cursor = Some(cursor.into());
         self
     }
 
-    /// Set the pagination cursor from an Option.
+    /// note: set the pagination cursor from an Option.
     #[must_use]
     pub fn next_cursor_opt(mut self, cursor: Option<String>) -> Self {
         self.next_cursor = cursor;
         self
     }
 }
-
-// ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -733,7 +708,6 @@ mod tests {
         assert_eq!(req.protocol_version, NexusProtocolVersion::latest());
         assert!(req.client_info.is_none());
 
-        // Default trait
         let req2 = NexusInitializeRequest::default();
         assert_eq!(req.protocol_version, req2.protocol_version);
     }
@@ -833,8 +807,6 @@ mod tests {
         }
     }
 
-    // ── Config option DTO tests ─────────────────────────────────────────────
-
     #[test]
     fn nexus_set_config_option_request_new() {
         let req = NexusSetConfigOptionRequest::new(
@@ -894,7 +866,6 @@ mod tests {
         let deserialized: NexusConfigSelectOption = serde_json::from_str(&json).unwrap();
         assert_eq!(opt, deserialized);
 
-        // Without description
         let opt_no_desc = NexusConfigSelectOption {
             value: "opt-2".to_string(),
             name: "Two".to_string(),
@@ -1040,7 +1011,6 @@ mod tests {
     fn nexus_list_sessions_request_skip_serializing_none() {
         let req = NexusListSessionsRequest::new();
         let json = serde_json::to_string(&req).unwrap();
-        // Should not contain cwd or cursor fields when None
         assert!(!json.contains("cwd"));
         assert!(!json.contains("cursor"));
     }

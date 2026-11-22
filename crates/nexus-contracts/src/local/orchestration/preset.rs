@@ -1,4 +1,5 @@
-//! Preset manifest types — hand-written, per `schemas-boundary.md` §3.
+//! Preset manifest types — hand-written, per
+//! `docs/specs/architecture/schemas-external-consumer-boundary.md` ("Rule (authoritative)").
 //!
 //! These types represent the YAML schema for `preset.yaml` as defined in
 //! `orchestration-engine.md` §7.2 and §7.5.
@@ -16,11 +17,9 @@
 
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Top-level manifest
-// ---------------------------------------------------------------------------
+// note: top-level manifest.
 
-/// Root wrapper for a preset YAML file.
+/// note: root wrapper for a preset YAML file.
 ///
 /// ```yaml
 /// preset:
@@ -35,74 +34,72 @@ use serde::{Deserialize, Serialize};
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetManifest {
-    /// Preset header metadata.
+    /// note: preset header metadata.
     pub preset: PresetHeader,
-    /// Ordered list of state definitions.
+    /// note: ordered list of state definitions.
     pub states: Vec<StateDefinition>,
-    /// Optional inner graph definitions referenced by `enter.kind = inner_graph`.
+    /// note: optional inner graph definitions referenced by `enter.kind = inner_graph`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inner_graphs: Option<std::collections::BTreeMap<String, InnerGraph>>,
-    /// Optional signal bindings (external events).
+    /// note: optional signal bindings (external events).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<SignalBinding>,
-    /// Optional role definitions for multi-agent presets (WS-E §7).
+    /// note: optional role definitions for multi-agent presets (WS-E §7).
     /// Each role defines `recommended_skills` and a `system_prompt_file`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<PresetRoleDefinition>,
 }
 
-// ---------------------------------------------------------------------------
-// PresetHeader
-// ---------------------------------------------------------------------------
+// note: `PresetHeader`.
 
-/// Metadata and configuration for the preset.
+/// note: metadata and configuration for the preset.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetHeader {
-    /// Preset identifier (must match directory name; `/^[a-z][a-z0-9._-]*$/`).
+    /// note: preset identifier (must match directory name; `/^[a-z][a-z0-9._-]*$/`).
     pub id: String,
-    /// Schema version (>= 1; bumped on breaking changes to this preset).
+    /// note: schema version (>= 1; bumped on breaking changes to this preset).
     pub version: u32,
-    /// Preset kind: `creator` (user-facing) or `system` (internal).
+    /// note: preset kind: `creator` (user-facing) or `system` (internal).
     pub kind: PresetKind,
-    /// Human-readable description (<= 240 chars).
+    /// note: human-readable description (<= 240 chars).
     pub description: String,
-    /// Capabilities this preset requires; loader rejects if any are missing.
+    /// note: capabilities this preset requires; loader rejects if any are missing.
     #[serde(default)]
     pub requires_capabilities: Vec<String>,
-    /// Declared run intents for the preset (V1.33 §5.1).
+    /// note: declared run intents for the preset (V1.33 §5.1).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub run_intents: Vec<RunIntent>,
-    /// The ID of the initial state (must match a `states[].id`).
+    /// note: the ID of the initial state (must match a `states[].id`).
     pub initial: String,
-    /// The ID of the terminal state (must match a `states[].id`).
+    /// note: the ID of the terminal state (must match a `states[].id`).
     pub terminal: String,
-    /// Preset-level World-binding requirement (`workflow-profile` §5.3.4).
+    /// note: preset-level World-binding requirement (`workflow-profile` §5.3.4).
     ///
     /// The header is authoritative: the document carries the same value at
     /// `meta.world_binding` and [`PresetHeader`] is the only place it is authored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_binding: Option<WorldBinding>,
-    /// Optional author name.
+    /// note: optional author name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
-    /// Optional homepage URL.
+    /// note: optional homepage URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage: Option<String>,
-    /// Optional license identifier.
+    /// note: optional license identifier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    /// Optional initial action for schedule creation (`WS7` §7).
+    /// note: optional initial action for schedule creation (`WS7` §7).
     /// Controls how `core_context` v0 is seeded when a schedule is created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_action: Option<InitialAction>,
-    /// Preset gates evaluated at enqueue time (V1.37 §7.9).
+    /// note: preset gates evaluated at enqueue time (V1.37 §7.9).
     ///
     /// Each gate declares a precondition that must pass before the preset
     /// is scheduled for execution. Gates are validated at load time and
     /// evaluated at enqueue time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gates: Vec<crate::local::orchestration::preset_gate::Gate>,
-    /// Preset-specific CLI argument declarations (V1.45 §3.3).
+    /// note: preset-specific CLI argument declarations (V1.45 §3.3).
     ///
     /// When non-empty, the generic `creator run <preset_id>` runner parses
     /// these flags from trailing CLI args and maps them to
@@ -112,137 +109,131 @@ pub struct PresetHeader {
     pub cli_args: Vec<PresetCliArg>,
 }
 
-// ---------------------------------------------------------------------------
-// WorldBinding (workflow-profile §5.3.4)
-// ---------------------------------------------------------------------------
+// note: `WorldBinding` (workflow-profile §5.3.4).
 
-/// Preset-level World-binding requirement, declared as `preset.world_binding:`.
+/// note: preset-level World-binding requirement, declared as `preset.world_binding:`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldBinding {
-    /// Whether a run must be bound to a World.
+    /// note: whether a run must be bound to a World.
     pub mode: WorldBindingMode,
 }
 
-/// World-binding mode (`workflow-profile` §5.3.4).
+/// note: world-binding mode (`workflow-profile` §5.3.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorldBindingMode {
-    /// A run must carry a valid `world_id`.
+    /// note: a run must carry a valid `world_id`.
     Required,
-    /// Legacy mode: a worldless run is not blocked.
+    /// note: legacy mode: a worldless run is not blocked.
     Optional,
 }
 
-// ---------------------------------------------------------------------------
-// PresetCliArg (V1.45 §3.3)
-// ---------------------------------------------------------------------------
+// note: `PresetCliArg` (V1.45 §3.3).
 
-/// A single preset-specific CLI argument declared in `preset.yaml` (V1.45 §3.3).
+/// note: a single preset-specific CLI argument declared in `preset.yaml` (V1.45 §3.3).
 ///
 /// The generic `creator run <preset_id>` runner parses these from trailing
 /// CLI args and maps them to `AddScheduleRequest.input`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PresetCliArg {
-    /// Flag name without the `--` prefix (e.g. `"chapter"`).
+    /// note: flag name without the `--` prefix (e.g. `"chapter"`).
     pub name: String,
-    /// Value type — determines parsing and JSON coercion.
+    /// note: value type — determines parsing and JSON coercion.
     pub r#type: PresetCliArgType,
-    /// Whether the flag is required (`true`) or optional (`false`).
+    /// note: whether the flag is required (`true`) or optional (`false`).
     #[serde(default)]
     pub required: bool,
-    /// Default value applied when the flag is omitted (optional only).
+    /// note: default value applied when the flag is omitted (optional only).
     /// Stored as a raw JSON value to support all types uniformly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_json::Value>,
-    /// Human-readable help text shown in `--help` output.
+    /// note: human-readable help text shown in `--help` output.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
 }
 
-/// Value types supported by `PresetCliArg` (V1.45 §3.3).
+/// note: value types supported by `PresetCliArg` (V1.45 §3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PresetCliArgType {
-    /// String value.
+    /// note: string value.
     String,
-    /// Integer value.
+    /// note: integer value.
     Integer,
-    /// Boolean flag.
+    /// note: boolean flag.
     Boolean,
 }
 
-/// Preset kind discriminator.
+/// note: preset kind discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PresetKind {
-    /// User-facing creator preset.
+    /// note: user-facing creator preset.
     Creator,
-    /// Internal system preset (e.g. `_system.maintenance`).
+    /// note: internal system preset (e.g. `_system.maintenance`).
     System,
 }
 
-/// Preset run-intent classification (V1.33 work-experience-model §5.1).
+/// note: preset run-intent classification (V1.33 work-experience-model §5.1).
 ///
 /// Closed enum — unknown strings cause loader validation errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunIntent {
-    /// May start a new Work (creator preset).
+    /// note: may start a new Work (creator preset).
     WorkInit,
-    /// May run on an existing Work; may append inspiration / context.
+    /// note: may run on an existing Work; may append inspiration / context.
     WorkContinue,
-    /// Reference / KB pipeline presets.
+    /// note: reference / KB pipeline presets.
     KnowledgeIngest,
-    /// Work-adjacent non-narrative upkeep (e.g. soul-experience-refresh).
+    /// note: work-adjacent non-narrative upkeep (e.g. soul-experience-refresh).
     WorkMaintenance,
-    /// `_system.*` only.
+    /// note: `_system.*` only.
     SystemMaintenance,
 }
 
-// ---------------------------------------------------------------------------
-// StateDefinition
-// ---------------------------------------------------------------------------
+// note: `StateDefinition`.
 
-/// A single state in the outer state machine.
+/// note: a single state in the outer state machine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateDefinition {
-    /// Unique state identifier within this preset.
+    /// note: unique state identifier within this preset.
     pub id: String,
-    /// Optional human-readable description.
+    /// note: optional human-readable description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Actions to execute when entering this state.
+    /// note: actions to execute when entering this state.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enter: Vec<EnterAction>,
-    /// Condition that must be satisfied before transitioning to `next`.
+    /// note: condition that must be satisfied before transitioning to `next`.
     /// May be absent for terminal states.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_when: Option<ExitWhen>,
-    /// Next state ID (linear) or conditional form.
+    /// note: next state ID (linear) or conditional form.
     ///
     /// If `None`, this is a terminal state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next: Option<NextTarget>,
-    /// Whether this state is terminal (no outgoing transitions).
+    /// note: whether this state is terminal (no outgoing transitions).
     #[serde(default, skip_serializing_if = "is_false")]
     pub terminal: bool,
-    /// Optional context update hook that fires on state exit (WS7 §7).
+    /// note: optional context update hook that fires on state exit (WS7 §7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_update: Option<ContextUpdateHook>,
-    /// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
+    /// note: merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
     ///
     /// When absent and the state has ≥2 incoming labeled edges, defaults to
     /// `wait-all`. States with ≤1 incoming labeled edge are not merge nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge: Option<MergeKind>,
-    /// Merge-point convergence config (V1.56 P2).
+    /// note: merge-point convergence config (V1.56 P2).
     ///
     /// When present, this state acts as a dedicated converge (merge-point) node
     /// that accepts multiple incoming edges from conditional branches. The
     /// [`ConvergeStrategy`] controls join behaviour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub converge: Option<ConvergeConfig>,
-    /// Bounded-join deadline in milliseconds (DR-06, v1.179).
+    /// note: bounded-join deadline in milliseconds (DR-06, v1.179).
     ///
     /// Valid only on join states — a state carrying `merge:` or `converge:`.
     /// When set, the join gate fails (or reroutes via [`Self::on_timeout`])
@@ -250,7 +241,7 @@ pub struct StateDefinition {
     /// first waiting tick. Absent (default `None`) = today's unbounded wait.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
-    /// Reroute target when the `timeout_ms` deadline fires (DR-06, v1.179).
+    /// note: reroute target when the `timeout_ms` deadline fires (DR-06, v1.179).
     ///
     /// Must name an existing state in the same preset (loader-validated).
     /// When the deadline fires and this resolves, arrivals are cleared and
@@ -265,11 +256,9 @@ fn is_false(b: &bool) -> bool {
     !b
 }
 
-// ---------------------------------------------------------------------------
-// EnterAction
-// ---------------------------------------------------------------------------
+// note: `EnterAction`.
 
-/// An action to execute when entering a state.
+/// note: an action to execute when entering a state.
 ///
 /// Uses `#[serde(tag = "kind")]` for tag-based YAML variants:
 /// ```yaml
@@ -280,41 +269,39 @@ fn is_false(b: &bool) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum EnterAction {
-    /// Invoke a registered capability by name.
+    /// note: invoke a registered capability by name.
     #[serde(rename = "capability")]
     Capability {
-        /// Dot-separated capability name, e.g. `creator.inject_prompt`.
+        /// note: dot-separated capability name, e.g. `creator.inject_prompt`.
         name: String,
-        /// Capability-specific arguments.
+        /// note: capability-specific arguments.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         args: Option<serde_json::Value>,
     },
-    /// Launch an inner graph (child session over a named inner graph).
+    /// note: launch an inner graph (child session over a named inner graph).
     #[serde(rename = "inner_graph")]
     InnerGraph {
-        /// Name of the inner graph (must match `inner_graphs.<name>`).
+        /// note: name of the inner graph (must match `inner_graphs.<name>`).
         name: String,
     },
-    /// Invoke a daemon-side `nexus.*` host tool (DF-47, V1.42 P3).
+    /// note: invoke a daemon-side `nexus.*` host tool (DF-47, V1.42 P3).
     ///
     /// The tool is dispatched in-process through `HostToolExecutor::dispatch_for_schedule`
     /// — no worker IPC round-trip. Designed for read-only tools like
     /// `nexus.orchestration.schedule_status`.
     #[serde(rename = "host_tool")]
     HostTool {
-        /// Tool name, e.g. `nexus.orchestration.schedule_status`.
+        /// note: tool name, e.g. `nexus.orchestration.schedule_status`.
         tool_name: String,
-        /// Tool arguments (JSON object; may contain template placeholders).
+        /// note: tool arguments (JSON object; may contain template placeholders).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         args: Option<serde_json::Value>,
     },
 }
 
-// ---------------------------------------------------------------------------
-// ExitWhen
-// ---------------------------------------------------------------------------
+// note: `ExitWhen`.
 
-/// Condition that must be satisfied before transitioning.
+/// note: condition that must be satisfied before transitioning.
 ///
 /// Uses `#[serde(tag = "kind")]` for tag-based YAML variants:
 /// ```yaml
@@ -324,42 +311,40 @@ pub enum EnterAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ExitWhen {
-    /// LLM-backed judge evaluates a go/nogo prompt.
+    /// note: LLM-backed judge evaluates a go/nogo prompt.
     #[serde(rename = "llm_judge")]
     LlmJudge {
-        /// Path to the judge prompt template.
+        /// note: path to the judge prompt template.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         template_file: Option<String>,
-        /// Which judge capability to call (default: `judge.llm`).
+        /// note: which judge capability to call (default: `judge.llm`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         judge_capability: Option<String>,
-        /// Minimum interval (ISO-8601 duration) between re-evaluations.
+        /// note: minimum interval (ISO-8601 duration) between re-evaluations.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         min_interval: Option<String>,
     },
-    /// Pure function evaluation over context.
+    /// note: pure function evaluation over context.
     #[serde(rename = "rule")]
     Rule,
-    /// Inner graph has completed execution.
+    /// note: inner graph has completed execution.
     #[serde(rename = "graph_complete")]
     GraphComplete,
-    /// User-driven advance (manual).
+    /// note: user-driven advance (manual).
     #[serde(rename = "manual")]
     Manual,
-    /// Timer-based wait.
+    /// note: timer-based wait.
     #[serde(rename = "timer")]
     Timer {
-        /// ISO-8601 duration to wait.
+        /// note: ISO-8601 duration to wait.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration: Option<String>,
     },
 }
 
-// ---------------------------------------------------------------------------
-// NextTarget (linear or conditional)
-// ---------------------------------------------------------------------------
+// note: `NextTarget` (linear or conditional).
 
-/// Transition target — linear ID or conditional form.
+/// note: transition target — linear ID or conditional form.
 ///
 /// In YAML, this can be either:
 /// ```yaml
@@ -375,14 +360,14 @@ pub enum ExitWhen {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum NextTarget {
-    /// Linear transition to a single state ID.
+    /// note: linear transition to a single state ID.
     Linear(String),
-    /// GO/NOGO conditional transition for `llm_judge` states (V1.42 minimal slice).
+    /// note: GO/NOGO conditional transition for `llm_judge` states (V1.42 minimal slice).
     ///
     /// YAML form: `next: { go: <state_id>, nogo: <state_id> }`.
     /// Only valid when `exit_when.kind` is `llm_judge`.
     GoNogo(GoNogoNext),
-    /// N-way labeled routing for `llm_judge` states (V1.52 T-B P0).
+    /// note: N-way labeled routing for `llm_judge` states (V1.52 T-B P0).
     ///
     /// YAML form: a list of labeled edges:
     /// ```yaml
@@ -393,10 +378,10 @@ pub enum NextTarget {
     ///     target: gathering
     /// ```
     Labeled(Vec<LabeledNext>),
-    /// Legacy `kind: conditional` form with `rules` field (V1.42-era shape;
+    /// note: legacy `kind: conditional` form with `rules` field (V1.42-era shape;
     /// accepted for backward compat but new presets should use `Branches` form).
     Conditional(NextConditional),
-    /// Expression-based conditional transition (V1.56 P2: Form B — expression/rule-based multi-branch).
+    /// note: expression-based conditional transition (V1.56 P2: Form B — expression/rule-based multi-branch).
     ///
     /// YAML form:
     /// ```yaml
@@ -409,7 +394,7 @@ pub enum NextTarget {
     Branches(ConditionalBranches),
 }
 
-/// GO/NOGO next form for `llm_judge` states (V1.42 P2 minimal slice).
+/// note: GO/NOGO next form for `llm_judge` states (V1.42 P2 minimal slice).
 ///
 /// The `go` branch is taken when the judge returns GO (`result: true`).
 /// The `nogo` branch is taken on NOGO or worker-unavailable.
@@ -421,13 +406,13 @@ pub enum NextTarget {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoNogoNext {
-    /// Target state ID when judge returns GO.
+    /// note: target state ID when judge returns GO.
     pub go: String,
-    /// Target state ID when judge returns NOGO or worker is unavailable.
+    /// note: target state ID when judge returns NOGO or worker is unavailable.
     pub nogo: String,
 }
 
-/// N-way labeled next edge for `llm_judge` states (V1.52 T-B P0).
+/// note: N-way labeled next edge for `llm_judge` states (V1.52 T-B P0).
 ///
 /// Generalizes the binary GO/NOGO into N-way routing: the judge returns a
 /// label string (e.g. `"outline"`, `"research"`, `"abandon"`), and the
@@ -442,17 +427,15 @@ pub struct GoNogoNext {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LabeledNext {
-    /// Label string that the judge returns to select this edge.
+    /// note: label string that the judge returns to select this edge.
     pub label: String,
-    /// Target state ID when the judge returns this label.
+    /// note: target state ID when the judge returns this label.
     pub target: String,
 }
 
-// ---------------------------------------------------------------------------
-// MergeKind (V1.52 T-B P1)
-// ---------------------------------------------------------------------------
+// note: `MergeKind` (V1.52 T-B P1).
 
-/// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
+/// note: merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
 ///
 /// When multiple `LabeledNext` edges from different `llm_judge` states converge
 /// on a single state, the orchestration engine uses the declared merge kind to
@@ -476,20 +459,20 @@ pub struct LabeledNext {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MergeKind {
-    /// Advance when ALL incoming labeled edges have produced their target label.
+    /// note: advance when ALL incoming labeled edges have produced their target label.
     All,
-    /// Advance when the FIRST incoming labeled edge produces its target label.
+    /// note: advance when the FIRST incoming labeled edge produces its target label.
     Any,
-    /// Advance when at least N of M incoming edges have produced their target label.
+    /// note: advance when at least N of M incoming edges have produced their target label.
     Quorum {
-        /// Minimum number of arrivals needed.
+        /// note: minimum number of arrivals needed.
         n: usize,
-        /// Total expected incoming labeled edges.
+        /// note: total expected incoming labeled edges.
         m: usize,
     },
 }
 
-/// Merge-point convergence strategy for the `converge` state kind (V1.56 P2).
+/// note: merge-point convergence strategy for the `converge` state kind (V1.56 P2).
 ///
 /// A converge state explicitly accepts multiple incoming edges and acts as a
 /// deterministic join point. Unlike the `merge:` field on regular states (which
@@ -507,7 +490,7 @@ pub enum MergeKind {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConvergeConfig {
-    /// Merge-point convergence strategy.
+    /// note: merge-point convergence strategy.
     #[serde(default)]
     pub strategy: ConvergeStrategy,
 }
@@ -520,22 +503,22 @@ impl Default for ConvergeConfig {
     }
 }
 
-/// Strategies for converge (merge-point) state kinds (V1.56 P2).
+/// note: strategies for converge (merge-point) state kinds (V1.56 P2).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConvergeStrategy {
-    /// Wait for ALL incoming edges before advancing (default).
+    /// note: wait for ALL incoming edges before advancing (default).
     #[default]
     #[serde(alias = "wait_for_all")]
     WaitForAll,
-    /// Advance on FIRST arrival, cancel others.
+    /// note: advance on FIRST arrival, cancel others.
     #[serde(alias = "first_completed")]
     FirstCompleted,
-    /// Idempotent — already-completed merges are no-ops; advance on first arrival.
+    /// note: idempotent — already-completed merges are no-ops; advance on first arrival.
     Any,
 }
 
-/// Conditional next form (V1.56 P2: Form B — multi-branch expression routing).
+/// note: conditional next form (V1.56 P2: Form B — multi-branch expression routing).
 ///
 /// YAML form:
 /// ```yaml
@@ -547,27 +530,27 @@ pub enum ConvergeStrategy {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConditionalBranches {
-    /// Ordered list of conditional branches (first-match semantics).
+    /// note: ordered list of conditional branches (first-match semantics).
     #[serde(default)]
     pub branches: Vec<ConditionalRule>,
-    /// Default target state if no branch matches.
+    /// note: default target state if no branch matches.
     pub default: String,
 }
 
-/// Legacy `kind: conditional` form with `rules` field (V1.42-era shape; preserved
+/// note: legacy `kind: conditional` form with `rules` field (V1.42-era shape; preserved
 /// for backward compat — new presets should use `Branches` form with expression grammar).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NextConditional {
-    /// Must be `"conditional"`.
+    /// note: must be `"conditional"`.
     pub kind: String,
-    /// Ordered list of conditional rules (legacy field name; alias for `branches`).
+    /// note: ordered list of conditional rules (legacy field name; alias for `branches`).
     #[serde(default, alias = "branches")]
     pub rules: Vec<ConditionalRule>,
-    /// Default target state if no rule matches.
+    /// note: default target state if no rule matches.
     pub default: String,
 }
 
-/// A single conditional rule (expression → target edge).
+/// note: a single conditional rule (expression → target edge).
 ///
 /// YAML form:
 /// ```yaml
@@ -576,118 +559,112 @@ pub struct NextConditional {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConditionalRule {
-    /// Simple expression to evaluate against `graph_flow::Context` JSON values.
+    /// note: simple expression to evaluate against `graph_flow::Context` JSON values.
     /// Supports: comparisons (`==`, `!=`, `>`, `<`, `>=`, `<=`), boolean ops
     /// (`&&`, `||`, `!`), parens, field access (`_context.<path>`), and literals.
     pub when: String,
-    /// Target state ID if the expression evaluates to `true`.
+    /// note: target state ID if the expression evaluates to `true`.
     #[serde(alias = "to")]
     pub target: String,
 }
 
-// ---------------------------------------------------------------------------
-// InnerGraph
-// ---------------------------------------------------------------------------
+// note: `InnerGraph`.
 
-/// Definition of an inner graph (DAG of prompt/tool nodes).
+/// note: definition of an inner graph (DAG of prompt/tool nodes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InnerGraph {
-    /// Ordered list of graph nodes.
+    /// note: ordered list of graph nodes.
     pub nodes: Vec<GraphNode>,
-    /// Which node's output is exported as the state's output.
+    /// note: which node's output is exported as the state's output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_binding: Option<String>,
 }
 
-/// A single node in an inner graph.
+/// note: a single node in an inner graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
-    /// Unique node ID within this inner graph.
+    /// note: unique node ID within this inner graph.
     pub id: String,
-    /// Node kind: `acp_prompt` (and others in future).
+    /// note: node kind: `acp_prompt` (and others in future).
     pub kind: GraphNodeKind,
-    /// Ordered list of node IDs this node depends on.
+    /// note: ordered list of node IDs this node depends on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
-    /// Template file path for prompt templates.
+    /// note: template file path for prompt templates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template_file: Option<String>,
-    /// Tool policy for ACP prompt nodes.
+    /// note: tool policy for ACP prompt nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_policy: Option<String>,
-    /// Optional role ID reference for multi-agent presets (WS-E §7).
+    /// note: optional role ID reference for multi-agent presets (WS-E §7).
     /// Must match a role ID in `roles[]` if present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
 }
 
-/// Kind of inner-graph node.
+/// note: kind of inner-graph node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphNodeKind {
-    /// Send a prompt to the ACP agent.
+    /// note: send a prompt to the ACP agent.
     AcpPrompt,
 }
 
-// ---------------------------------------------------------------------------
-// InitialAction (WS7 §7)
-// ---------------------------------------------------------------------------
+// note: `InitialAction` (WS7 §7).
 
-/// What action to take when a schedule starts using this preset.
+/// note: what action to take when a schedule starts using this preset.
 ///
 /// Declared at `preset.initial_action` level in the YAML manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InitialAction {
-    /// Use the seed text directly as `core_context` v0.
+    /// note: use the seed text directly as `core_context` v0.
     SeedDirect,
-    /// Expand the seed using a registered capability (V1.5+).
+    /// note: expand the seed using a registered capability (V1.5+).
     SeedExpansion {
-        /// Capability to call for expansion (e.g. `context.summarize`).
+        /// note: capability to call for expansion (e.g. `context.summarize`).
         capability: String,
-        /// Handlebars template file for the expansion prompt.
+        /// note: handlebars template file for the expansion prompt.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         template_file: Option<String>,
-        /// Expected payload kind after expansion.
+        /// note: expected payload kind after expansion.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payload_kind: Option<String>,
     },
 }
 
-// ---------------------------------------------------------------------------
-// ContextUpdateHook (WS7 §7)
-// ---------------------------------------------------------------------------
+// note: `ContextUpdateHook` (WS7 §7).
 
-/// A hook that fires on state exit to update the schedule's `core_context`.
+/// note: a hook that fires on state exit to update the schedule's `core_context`.
 ///
 /// Declared per-state as `states[].context_update` in the YAML manifest.
 /// Only `Append` and `StructMerge` operations are allowed; `Replace` is
 /// rejected during validation (spec §6.2 — preset hooks are strictly additive).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextUpdateHook {
-    /// The edit operation to apply.
+    /// note: the edit operation to apply.
     /// Only `append` and `struct_merge` kinds are valid for preset hooks.
     pub op: ContextUpdateOp,
-    /// Handlebars template file to render the edit content.
+    /// note: handlebars template file to render the edit content.
     pub template_file: String,
 }
 
-/// Edit operation shape for `context_update` hooks.
+/// note: edit operation shape for `context_update` hooks.
 ///
 /// A simplified subset of [`nexus_contracts::local::schedule::EditOp`] that
 /// is used at the YAML parsing level (before converting to the full `EditOp`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ContextUpdateOp {
-    /// Append text to existing content.
+    /// note: append text to existing content.
     Append {
-        /// Body content; absent in the source, where the runtime renders `template_file`.
+        /// note: body content; absent in the source, where the runtime renders `template_file`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
     },
-    /// JSON-merge into struct payload.
+    /// note: JSON-merge into struct payload.
     StructMerge {
-        /// Patch JSON; absent in the source, where the runtime renders `template_file`.
+        /// note: patch JSON; absent in the source, where the runtime renders `template_file`.
         ///
         /// Double option: `None` = key absent, `Some(None)` = an explicit `patch: null` (JSON
         /// null is a patch value), `Some(Some(patch))` = the patch. `Option` alone folds the
@@ -699,29 +676,29 @@ pub enum ContextUpdateOp {
         )]
         patch: Option<Option<serde_json::Value>>,
     },
-    /// Replace is NOT allowed for preset hooks — will be rejected by the loader.
+    /// note: replace is NOT allowed for preset hooks — will be rejected by the loader.
     Replace {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
     },
-    /// `StructRemove` is NOT allowed for preset hooks — will be rejected by the loader.
+    /// note: `StructRemove` is NOT allowed for preset hooks — will be rejected by the loader.
     StructRemove {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
     },
-    /// V1.5+ only. Invoke `context.summarize` capability to produce an
+    /// note: V1.5+ only. Invoke `context.summarize` capability to produce an
     /// LLM-driven summary of the current `core_context`.
     LlmSummarize {
-        /// Capability name to invoke (e.g. `context.summarize`).
+        /// note: capability name to invoke (e.g. `context.summarize`).
         capability: String,
     },
 }
 
-/// Deserialize a present key as `Some(..)` so an explicit `null` stays distinguishable from a
+/// note: deserialize a present key as `Some(..)` so an explicit `null` stays distinguishable from a
 /// missing key — [`serde`]'s own `Option` impl reports both as `None`.
 ///
 /// `#[serde(default)]` supplies the absent case, so this only sees keys that exist.
-#[allow(clippy::option_option)] // absent, null and a value are the three states this keeps.
+#[allow(clippy::option_option)] // why: absent, null and a value are the three states this keeps.
 fn explicit_null<'de, D>(deserializer: D) -> Result<Option<Option<serde_json::Value>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -729,44 +706,40 @@ where
     Option::<serde_json::Value>::deserialize(deserializer).map(Some)
 }
 
-// ---------------------------------------------------------------------------
-// SignalBinding
-// ---------------------------------------------------------------------------
+// note: `SignalBinding`.
 
-/// A signal that can externally push the state machine.
+/// note: a signal that can externally push the state machine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalBinding {
-    /// Signal name.
+    /// note: signal name.
     pub name: String,
-    /// What to do when the signal is received.
+    /// note: what to do when the signal is received.
     pub on_receive: SignalAction,
 }
 
-/// Action to take when a signal is received.
+/// note: action to take when a signal is received.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalAction {
-    /// The action kind.
+    /// note: the action kind.
     pub action: SignalActionKind,
-    /// Target state ID (for `force_transition`).
+    /// note: target state ID (for `force_transition`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
 }
 
-/// Signal action kinds.
+/// note: signal action kinds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalActionKind {
-    /// Pause execution.
+    /// note: pause execution.
     Pause,
-    /// Force transition to a target state.
+    /// note: force transition to a target state.
     ForceTransition,
 }
 
-// ---------------------------------------------------------------------------
-// PresetRoleDefinition (WS-E §7)
-// ---------------------------------------------------------------------------
+// note: `PresetRoleDefinition` (WS-E §7).
 
-/// A role definition for multi-agent presets (`WS-E` §7).
+/// note: a role definition for multi-agent presets (`WS-E` §7).
 ///
 /// Defines a named agent role with:
 /// - A system prompt template (via `system_prompt_file`)
@@ -785,28 +758,24 @@ pub enum SignalActionKind {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresetRoleDefinition {
-    /// Unique role ID within this preset.
+    /// note: unique role ID within this preset.
     pub id: String,
-    /// Human-readable description.
+    /// note: human-readable description.
     pub description: String,
-    /// Path to system prompt template (relative to preset bundle root).
+    /// note: path to system prompt template (relative to preset bundle root).
     pub system_prompt_file: String,
-    /// Ordered list of skill slugs to inject into the role's ACP session.
+    /// note: ordered list of skill slugs to inject into the role's ACP session.
     /// First entry is the primary skill; subsequent entries are supplementary.
     /// Skill slugs must match entries in the embedded skill manifest.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommended_skills: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Full preset YAML with `inner_graphs` and signals (shared across tests).
+    /// note: full preset YAML with `inner_graphs` and signals (shared across tests).
     static FULL_PRESET_YAML: &str = r#"
 preset:
   id: novel-writing
@@ -933,7 +902,7 @@ states:
         assert_parsed_full_preset(yaml);
     }
 
-    /// Shared helper: parse the full-preset YAML and assert key invariants.
+    /// note: shared helper: parse the full-preset YAML and assert key invariants.
     fn assert_parsed_full_preset(yaml: &str) {
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.preset.id, "novel-writing");
@@ -1080,8 +1049,6 @@ states:
         }
     }
 
-    // ── WS-E T6: Roles and recommended_skills ──────────────────────────────
-
     #[test]
     fn parse_preset_with_roles() {
         let yaml = r#"
@@ -1172,7 +1139,6 @@ inner_graphs:
 
     #[test]
     fn preset_without_roles_is_backward_compatible() {
-        // Existing presets without roles should still parse correctly.
         let yaml = r#"
 preset:
   id: single-agent
@@ -1196,8 +1162,7 @@ states:
 
     #[test]
     fn role_without_recommended_skills_parses() {
-        // recommended_skills is optional (can be empty).
-        // Loader will reject empty recommended_skills during validation.
+        // invariant: loader rejects empty recommended_skills during validation.
         let yaml = r#"
 preset:
   id: empty-roles
@@ -1223,8 +1188,6 @@ roles:
         assert_eq!(p.roles.len(), 1);
         assert_eq!(p.roles[0].recommended_skills, Vec::<String>::new());
     }
-
-    // ── V1.52 T-B P0: N-way labeled routing ─────────────────────────────
 
     #[test]
     fn parse_labeled_next_n_way_from_yaml_list() {
@@ -1276,7 +1239,6 @@ states:
 
     #[test]
     fn parse_labeled_next_two_way_like_binary_gonogo() {
-        // New form: 2-way labeled edges (equivalent to old binary GoNogo).
         let yaml = r"
 preset:
   id: labeled-2way
@@ -1321,7 +1283,6 @@ states:
 
     #[test]
     fn backward_compat_binary_gonogo_still_parses() {
-        // Old binary GoNogo shape should still parse as GoNogo.
         let yaml = r"
 preset:
   id: binary-gonogo
@@ -1416,8 +1377,6 @@ states:
         assert_eq!(back.preset.id, "roundtrip");
         assert!(back.roles.is_empty());
     }
-
-    // ── V1.52 T-B P1: Merge semantics ──────────────────────────────────
 
     #[test]
     fn parse_merge_all() {

@@ -7,11 +7,11 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Strictly increasing version number per Schedule. v0 is initial.
+/// note: strictly increasing version number per Schedule. v0 is initial.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct CoreContextVersion(pub u32);
 
-/// Full record of a single `core_context` version.
+/// note: full record of a single `core_context` version.
 ///
 /// Each row in `core_context_versions` is immutable once written.
 /// The Schedule's `current_core_context_version` column points at the head.
@@ -26,19 +26,19 @@ pub struct CoreContextRecord {
     pub created_by: CoreContextAuthor,
 }
 
-/// The "what preset execution actually sees".
+/// note: the "what preset execution actually sees".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreContextPayload {
-    /// Flat text form (V1.4 minimum).
+    /// note: flat text form (V1.4 minimum).
     /// Preset inserts `{{core_context.text}}` into prompts.
     Text { body: String },
-    /// Structured form (V1.4 optional for presets that want it).
+    /// note: structured form (V1.4 optional for presets that want it).
     /// Preset accesses specific fields via `{{core_context.struct.key}}`.
     Struct { body: serde_json::Value },
 }
 
-/// What caused this `core_context` version to be created.
+/// note: what caused this `core_context` version to be created.
 ///
 /// Uses `#[serde(tag = "kind")]` for forward-compatible tagged enum
 /// representation. `#[non_exhaustive]` on `LlmSummarize` reserves it for
@@ -46,29 +46,29 @@ pub enum CoreContextPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DerivationStep {
-    /// v0 — from `schedule add --seed`
+    /// note: v0 — from `schedule add --seed`
     Seed { raw: String },
-    /// User modify/append/delete via `schedule edit`
+    /// note: user modify/append/delete via `schedule edit`
     UserEdit {
         op: EditOp,
         #[serde(skip_serializing_if = "Option::is_none")]
         source_user: Option<String>,
     },
-    /// Preset declared `context_update` hook fired on state exit
+    /// note: preset declared `context_update` hook fired on state exit
     PresetHook { state_id: String, hook_name: String },
-    /// V1.5+ only; V1.4 does not emit this kind.
+    /// note: V1.5+ only; V1.4 does not emit this kind.
     /// A future `context.summarize` capability will write this variant.
     #[non_exhaustive]
     LlmSummarize {
         capability: String,
         prompt_hash: [u8; 32],
     },
-    /// Preset `initial_action: llm_expand` (opt-in per preset; rare)
+    /// note: preset `initial_action: llm_expand` (opt-in per preset; rare)
     PresetSeedExpansion { capability: String },
 }
 
 impl DerivationStep {
-    /// Construct a `LlmSummarize` variant.
+    /// note: construct a `LlmSummarize` variant.
     ///
     /// This is the only way to create this variant outside the defining crate
     /// because the variant is `#[non_exhaustive]`.
@@ -81,21 +81,21 @@ impl DerivationStep {
     }
 }
 
-/// Edit operations for user-driven `core_context` changes.
+/// note: edit operations for user-driven `core_context` changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EditOp {
-    /// Overwrite text content entirely
+    /// note: overwrite text content entirely
     Replace { body: String },
-    /// Append text to existing content
+    /// note: append text to existing content
     Append { body: String },
-    /// JSON-merge into struct payload
+    /// note: JSON-merge into struct payload
     StructMerge { patch: serde_json::Value },
-    /// Remove a struct key by dotted path
+    /// note: remove a struct key by dotted path
     StructRemove { path: String },
 }
 
-/// Who authored a `core_context` version.
+/// note: who authored a `core_context` version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CoreContextAuthor {

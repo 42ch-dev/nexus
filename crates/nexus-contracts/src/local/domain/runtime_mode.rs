@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Creator runtime mode controlling platform dependency behavior.
+/// note: creator runtime mode controlling platform dependency behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeMode {
