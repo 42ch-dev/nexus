@@ -4,6 +4,7 @@
 //! real `CoreService` + admitted Host authority) over a disposable temp home.
 //! The recovering-object window uses the provider's own `test-hooks` crash
 //! seam, exactly like the round-A reconcile proofs, so it is deterministic.
+// why: the rows above are local-provider only; the remote leg lives in its own file.
 
 mod support;
 
@@ -92,7 +93,7 @@ fn admin() -> schemas::Principal {
     principal(CREATOR)
 }
 
-/// Project a port result onto one assertion shape (success payload or refusal).
+/// note: Project a port result onto one assertion shape (success payload or refusal).
 fn wire<T: serde::Serialize>(result: &SpokeResult<T>) -> Value {
     match result {
         SpokeResult::Ok(value) => serde_json::to_value(value).expect("serializable response"),
@@ -181,7 +182,7 @@ fn record_id_of(body: &Value) -> String {
         .to_string()
 }
 
-/// Every regular file under `root`, as sorted `/`-separated relative paths.
+/// note: Every regular file under `root`, as sorted `/`-separated relative paths.
 fn files_under(root: &Path) -> Vec<String> {
     fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -207,7 +208,7 @@ fn files_under(root: &Path) -> Vec<String> {
     out
 }
 
-/// Every published markdown projection of the workspace, relative to the home.
+/// note: Every published markdown projection of the workspace, relative to the home.
 fn projections(env: &Env) -> Vec<String> {
     files_under(&operational_workspace_dir(
         &env.user_home,
@@ -239,7 +240,7 @@ fn legacy_memory_dir(env: &Env) -> PathBuf {
         .join("long-term")
 }
 
-/// One scalar read on the released workspace store, used only as a test oracle
+/// note: One scalar read on the released workspace store, used only as a test oracle
 /// for the original pending receipt/record identity (the same observation the
 /// existing `memory_reconcile` crash test makes).
 async fn store_scalar(db: &Path, sql: &'static str, key: &str) -> String {
@@ -295,10 +296,10 @@ async fn store_count(db: &Path, sql: &'static str) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// C-112: the local layout and `kind` frontmatter survive a normal operation
+// note: C-112: the local layout and `kind` frontmatter survive a normal operation
 // ---------------------------------------------------------------------------
 
-/// Seed the author-visible legacy artifacts the preservation contract names:
+/// note: Seed the author-visible legacy artifacts the preservation contract names:
 /// a `SOUL.md` with its required and user/pushed sections, and a long-term
 /// memory file carrying the nine-value kind frontmatter, slug, source sessions
 /// and user/pushed sections.
@@ -333,9 +334,9 @@ fn seed_legacy_artifacts(env: &Env) -> (PathBuf, PathBuf) {
     (soul_path, memory_path)
 }
 
-/// The same workspace's capture → review → promote pipeline.
+/// note: The same workspace's capture → review → promote pipeline.
 async fn c112_promote_candidate(provider: &LocalMemoryProvider) {
-    // The capture → review → promote pipeline on the same workspace.
+    // note: The capture → review → promote pipeline on the same workspace.
     let captured = wire(
         &provider
             .capture(
@@ -372,7 +373,7 @@ async fn c112_promote_candidate(provider: &LocalMemoryProvider) {
     assert_eq!(reviewed["status"], "committed", "{reviewed}");
 }
 
-/// The protected author-visible bytes stay untouched by every operation, and the
+/// note: The protected author-visible bytes stay untouched by every operation, and the
 /// consumer-visible legacy bridge still serves the authored memory.
 async fn c112_verify_legacy_untouched(
     provider: &LocalMemoryProvider,
@@ -382,7 +383,7 @@ async fn c112_verify_legacy_untouched(
     soul_before: &[u8],
     memory_before: &[u8],
 ) {
-    // The protected author-visible bytes are untouched by every operation.
+    // note: The protected author-visible bytes are untouched by every operation.
     assert_eq!(
         std::fs::read(soul_path).expect("SOUL.md bytes").as_slice(),
         soul_before,
@@ -403,7 +404,7 @@ async fn c112_verify_legacy_untouched(
         "no new file was written into the legacy layout"
     );
 
-    // The consumer-visible bridge still serves the authored legacy memory with
+    // note: The consumer-visible bridge still serves the authored legacy memory with
     // its kind and body: the bytes above are live, not orphaned.
     let creator_subject = legacy::creator_subject_id(CREATOR);
     let ensured = wire(
@@ -453,7 +454,7 @@ async fn c_112_local_layout_and_kind_frontmatter_preserved_local() {
     let provider = open_provider(&env).await;
     ensure(&provider, &admin()).await;
 
-    // A normal provider create + update (the current C-112 operation).
+    // note: A normal provider create + update (the current C-112 operation).
     let created = wire(
         &provider
             .create_record(&admin(), create_request("c112-create", KIND, TEXT))
@@ -540,10 +541,10 @@ async fn c_112_local_layout_and_kind_frontmatter_preserved_local() {
 }
 
 // ---------------------------------------------------------------------------
-// C-113 addition: a recovering object is withheld until it is resolved
+// note: C-113 addition: a recovering object is withheld until it is resolved
 // ---------------------------------------------------------------------------
 
-/// After the journal commit, the object's SQL effect is durable but its file
+/// note: After the journal commit, the object's SQL effect is durable but its file
 /// effect is not published yet. Until an open's bounded recovery settles that
 /// intent, ordinary list/recall reads must not expose it and no file may exist.
 /// The reopen then settles the ORIGINAL pending receipt/record into exactly one
@@ -554,7 +555,7 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     let provider = open_provider(&env).await;
     ensure(&provider, &admin()).await;
 
-    // A crash after the journal COMMIT: the intent committed, no file effect.
+    // note: A crash after the journal COMMIT: the intent committed, no file effect.
     provider.inject_commit_fault(true);
     let lost = wire(
         &provider
@@ -563,7 +564,7 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     );
     assert_eq!(lost["error"]["code"], "OUTCOME_UNCERTAIN", "{lost}");
 
-    // D-10 isolation: the recovering object is excluded from every normal read
+    // note: D-10 isolation: the recovering object is excluded from every normal read
     // and nothing was published.
     let listed = wire(&provider.list_records(&admin(), list_request(SUBJECT)).await);
     assert_eq!(listed["total_authorized"], 0, "{listed}");
@@ -575,7 +576,7 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "a recovering intent has no published projection"
     );
 
-    // The original identity at the supported local test/operator boundary:
+    // note: The original identity at the supported local test/operator boundary:
     // the pending receipt and the intended record this commit created, read
     // from the released store before anything reopens it.
     let db = workspace_state_db_path(&env.user_home, CREATOR, WORKSPACE);
@@ -595,7 +596,7 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     .await;
     assert_eq!(pending_status, "pending", "the original receipt is pending");
 
-    // The reopen runs the bounded recovery: the original object becomes
+    // note: The reopen runs the bounded recovery: the original object becomes
     // readable once, with its exact body and settlement.
     drop(provider);
     let provider = open_provider(&env).await;
@@ -632,7 +633,7 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "the recovered projection carries the body: {published}"
     );
 
-    // One effect: a same-key replay of the settled intent neither re-publishes
+    // note: One effect: a same-key replay of the settled intent neither re-publishes
     // nor duplicates it, and answers the original identity.
     let replay = wire(
         &provider
@@ -663,12 +664,12 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
 }
 
 // ---------------------------------------------------------------------------
-// C-115: `remember: true` stays refused on both arms
+// note: C-115: `remember: true` stays refused on both arms
 // ---------------------------------------------------------------------------
 
 const PROVIDER: &str = "n3-local-mind-fixture";
 
-/// Deterministic agent adapter: records every execution and completion, so a
+/// note: Deterministic agent adapter: records every execution and completion, so a
 /// refusal can prove it never reached this boundary and a plain prompt can
 /// prove real execution. No process, model or network is involved.
 #[derive(Default)]
@@ -761,7 +762,7 @@ impl ProviderAdapter for MindFixtureAdapter {
     }
 }
 
-/// The authority's composed provider port; the Character path never uses it.
+/// note: The authority's composed provider port; the Character path never uses it.
 struct QuietPort;
 
 #[async_trait]
@@ -801,7 +802,7 @@ fn execute_prompt(remember: bool) -> ExecuteOperationRequest {
     .expect("wire-valid prompt request")
 }
 
-/// Run `remember:true` once and require the typed refusal.
+/// note: Run `remember:true` once and require the typed refusal.
 async fn expect_remember_refusal(
     handle: &nexus_core::HostHandle,
     principal: &Principal,
@@ -864,7 +865,7 @@ fn create_request_for(
     }))
 }
 
-/// Observe one admitted subject through the public `MemoryPort`: the read must
+/// note: Observe one admitted subject through the public `MemoryPort`: the read must
 /// SUCCEED, carry exactly the seeded record/body/revision, and report no
 /// pending candidate. A refusal is a failed observation, never an empty set.
 async fn observe_subject(
@@ -921,7 +922,7 @@ async fn observe_actual_subjects(
     observe_subject(&provider, &principal, character_subject, CHARACTER_BODY).await;
 }
 
-/// Seed the real home, Creator, owned World/Character (and their admitted
+/// note: Seed the real home, Creator, owned World/Character (and their admitted
 /// subjects) this scenario's local core and Host then drive.
 async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, String) {
     let selector = CoreHomeService::open(user_home.to_path_buf()).expect("home entry opens");
@@ -943,7 +944,7 @@ async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, Stri
         .await
         .expect("select the fixture workspace");
 
-    // Create the real World/Character first, then release the writer so the
+    // note: Create the real World/Character first, then release the writer so the
     // provider fixtures can seed the ACTUAL admitted subjects.
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.to_path_buf(),
@@ -974,7 +975,7 @@ async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, Stri
         .await
         .expect("the seed core releases its writer");
 
-    // Seed one record under each REAL subject the Core memory paths address.
+    // note: Seed one record under each REAL subject the Core memory paths address.
     let creator_subject = legacy::creator_subject_id(&creator_id);
     let character_subject = legacy::character_subject_id(&character_id);
     let seeded = LocalMemoryProvider::open(user_home.to_path_buf(), &creator_id, WORKSPACE)
@@ -1016,7 +1017,7 @@ async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, Stri
     (creator_id, world, character_id, binding_id)
 }
 
-/// The admitted state one local refusal scenario observes: the attached Host,
+/// note: The admitted state one local refusal scenario observes: the attached Host,
 /// both sessions and the subjects whose durable state must not move.
 struct C115Admitted<'a> {
     handle: &'a nexus_core::HostHandle,
@@ -1030,10 +1031,10 @@ struct C115Admitted<'a> {
     adapter: &'a MindFixtureAdapter,
 }
 
-/// Every refusal is typed, precedes agent execution, leaves the admitted
+/// note: Every refusal is typed, precedes agent execution, leaves the admitted
 /// subjects unchanged, and a plain Character prompt still executes.
 async fn c115_refuse_and_control(admitted: &C115Admitted<'_>) {
-    // BEFORE / AFTER each refusal, the REAL admitted subjects are unchanged.
+    // note: BEFORE / AFTER each refusal, the REAL admitted subjects are unchanged.
     observe_actual_subjects(
         admitted.user_home,
         admitted.creator_id,
@@ -1081,7 +1082,7 @@ async fn c115_refuse_and_control(admitted: &C115Admitted<'_>) {
         "no operation completed on a refusal"
     );
 
-    // A plain Character prompt is the positive control: the adapter really
+    // note: A plain Character prompt is the positive control: the adapter really
     // executes and completes one operation. The Host's public response is
     // `started`; no per-operation terminal status is claimed beyond the
     // adapter execution/completion this fixture observes.
@@ -1140,7 +1141,7 @@ async fn c_115_remember_true_refusal_unchanged_local() {
     .expect("reopen the local core");
     let principal: Principal = core.active_principal().await.expect("principal");
 
-    // Deterministic local agent host: no process, no model, no network.
+    // note: Deterministic local agent host: no process, no model, no network.
     let adapter = Arc::new(MindFixtureAdapter::default());
     let manager = Arc::new(HostManager::new());
     manager
@@ -1190,7 +1191,7 @@ async fn c_115_remember_true_refusal_unchanged_local() {
         .await
         .expect("the admitted Character session is created");
 
-    // A real admitted non-Character Host session (the legacy no-Actor pair).
+    // note: A real admitted non-Character Host session (the legacy no-Actor pair).
     let legacy_session = handle
         .create_session(
             &principal,

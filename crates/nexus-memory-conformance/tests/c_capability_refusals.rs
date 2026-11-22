@@ -24,8 +24,9 @@
 //! attaches the terminal retry metadata to memory-boundary denials including
 //! `op_unsupported` (upstream #149 / I-000271), so the row checks the published
 //! wire result rather than a provider-local projection.
+// why: each scenario names the MEM rule it proves; a new scenario adds its rule here first.
 
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per row
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per row
 
 mod support;
 
@@ -126,7 +127,7 @@ fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_payload_secrecy(body);
 }
 
-/// Per-request/transport keys that carry no existence evidence: the caller
+/// note: Per-request/transport keys that carry no existence evidence: the caller
 /// itself supplied or already saw them. The projection drops exactly these.
 const PER_REQUEST_KEYS: [&str; 6] = [
     "request_id",
@@ -137,7 +138,7 @@ const PER_REQUEST_KEYS: [&str; 6] = [
     "signature",
 ];
 
-/// Project a refusal to its security-relevant shape: known per-request keys are
+/// note: Project a refusal to its security-relevant shape: known per-request keys are
 /// dropped and the caller-supplied requested ids are normalized. What remains
 /// (code, details, message, extensions) must be equal for a foreign and a
 /// missing target from the SAME provider, so a deterministic
@@ -172,7 +173,7 @@ fn security_projection(body: &Value, requested_ids: &[&str]) -> Value {
     project(body, requested_ids)
 }
 
-/// A permitted record/subject refusal: one of the two terminal absence codes,
+/// note: A permitted record/subject refusal: one of the two terminal absence codes,
 /// with the required `details.retry_class == "terminal"`. A pair of equal
 /// `INTERNAL_ERROR`/`retryable` bodies is rejected by this predicate even
 /// though their projected shapes are equal.
@@ -192,10 +193,10 @@ fn assert_terminal_refusal(body: &Value, what: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// K. Error envelope and retry classes
+// note: K. Error envelope and retry classes
 // ---------------------------------------------------------------------------
 
-/// C-100 (N3 base): terminal, uncertain and no-effect retryable mechanisms.
+/// note: C-100 (N3 base): terminal, uncertain and no-effect retryable mechanisms.
 async fn supported_error_envelopes_and_retry_classes(
     matrix: &Matrix,
     resources: &mut OwnedResources,
@@ -205,7 +206,7 @@ async fn supported_error_envelopes_and_retry_classes(
     let admin = matrix.admin();
     let peer_id = matrix.peer_principal().principal_id.clone();
 
-    // 1. Terminal.
+    // note: 1. Terminal.
     let denied = matrix
         .peer()
         .capture(capture_body("k-c100-denied", TEXT, &shared_scope()))
@@ -223,7 +224,7 @@ async fn supported_error_envelopes_and_retry_classes(
         .await;
     assert!(is_committed(&granted), "{granted}");
 
-    // 2. Uncertain: effect commits, response lost; replay/receipts.get resolve.
+    // note: 2. Uncertain: effect commits, response lost; replay/receipts.get resolve.
     matrix.arm_lost_response();
     let lost = matrix
         .peer()
@@ -275,7 +276,7 @@ async fn supported_error_envelopes_and_retry_classes(
     assert_eq!(stored["receipt"]["status"], json!("committed"));
     assert_eq!(pending_candidates(&admin).await, vec![candidate.clone()]);
 
-    // 3. Retryable: a real no-effect failure before the effect commits.
+    // note: 3. Retryable: a real no-effect failure before the effect commits.
     match matrix.kind() {
         Kind::Remote => {
             let window = resources
@@ -324,7 +325,7 @@ async fn supported_error_envelopes_and_retry_classes(
     }
 }
 
-/// C-100 (`_local`): the journal-predecessor state is prepared through the same
+/// note: C-100 (`_local`): the journal-predecessor state is prepared through the same
 /// served provider's operator controls; the retryable refusal is received over
 /// the actual signed transport.
 async fn local_retryable_over_the_same_signed_provider(
@@ -443,7 +444,7 @@ async fn local_retryable_over_the_same_signed_provider(
         .expect("the predecessor observer closes");
 }
 
-/// C-101: unknown op vs missing capability, with the positive on the same
+/// note: C-101: unknown op vs missing capability, with the positive on the same
 /// session and the capture baseline taken BEFORE the capability-less request.
 /// The final assertion pins the terminal retry metadata `spoke-connect` 0.16.0
 /// attaches to the unknown-op denial.
@@ -535,7 +536,7 @@ async fn unknown_op_and_missing_capability_are_distinct(
     );
 }
 
-/// C-102: normalized security-relevant refusal shape across foreign/missing
+/// note: C-102: normalized security-relevant refusal shape across foreign/missing
 /// records and subjects and a revoked read, with no existence/ownership leak.
 async fn foreign_and_missing_ids_have_no_existence_oracle(
     matrix: &Matrix,
@@ -671,7 +672,7 @@ async fn foreign_and_missing_ids_have_no_existence_oracle(
         .expect("the revoked-read observer closes");
 }
 
-/// C-103: pre-COMMIT failure (no capture receipt/row change) and post-COMMIT
+/// note: C-103: pre-COMMIT failure (no capture receipt/row change) and post-COMMIT
 /// loss (durable candidate + content-free receipt tuple, replay not double-applied).
 async fn internal_error_reports_effect_honesty(
     matrix: &Matrix,
@@ -754,7 +755,7 @@ async fn internal_error_reports_effect_honesty(
     assert_eq!(pending_candidates(&admin).await, vec![candidate]);
 }
 
-/// C-104: a revoked requester's receipt read is refused with no part of the
+/// note: C-104: a revoked requester's receipt read is refused with no part of the
 /// actual authorized receipt disclosed anywhere.
 async fn receipt_read_rechecks_revoked_authorization(
     matrix: &Matrix,
@@ -822,7 +823,7 @@ async fn receipt_read_rechecks_revoked_authorization(
     );
 }
 
-/// C-073 (N3 refusal): the unavailable reflection generation effect/receipt is
+/// note: C-073 (N3 refusal): the unavailable reflection generation effect/receipt is
 /// absent before BOTH state/list reads and after both, checked on the provider's
 /// own durable rows and exact generation receipt ids.
 async fn reflection_reads_refuse_without_capability(
@@ -989,7 +990,7 @@ async fn c_104_receipt_read_rechecks_revoked_authorization_remote() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_local() {
-    // N4-R: on the served local provider the reflection family is negotiable,
+    // note: N4-R: on the served local provider the reflection family is negotiable,
     // so the continuity row proves the refusal on the deliberately-unadvertised
     // shape (staging spec §4 N4-R).
     let matrix = Matrix::local_unadvertised().await;
@@ -1001,7 +1002,7 @@ async fn c_073_reflection_reads_refuse_without_capability_local() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_remote() {
-    // The continuity shape: the deliberately-unadvertised fixture serves the
+    // note: The continuity shape: the deliberately-unadvertised fixture serves the
     // same operations, so the reads' `capability_missing` is the real
     // dispatch denial over Connect negotiation.
     let matrix = Matrix::remote_unadvertised().await;
@@ -1011,7 +1012,7 @@ async fn c_073_reflection_reads_refuse_without_capability_remote() {
     .await;
 }
 
-/// G2 (I268) policy control: the security projection tolerates genuine
+/// note: G2 (I268) policy control: the security projection tolerates genuine
 /// per-request diagnostics, rejects an existence-correlated difference, and the
 /// terminal predicate rejects equal `INTERNAL_ERROR`/`retryable` pairs.
 #[test]
@@ -1060,7 +1061,7 @@ fn refusal_projection_control_separates_existence_from_request_diagnostics() {
     );
 }
 
-/// G3 (I269) policy control: the one receipt-privacy oracle accepts legitimate
+/// note: G3 (I269) policy control: the one receipt-privacy oracle accepts legitimate
 /// current-request echoes and unrelated booleans, and rejects an old
 /// idempotency key, an operation-specific result id, a nested receipt tuple
 /// without `receipt_id`, and a receipt-shaped object.
@@ -1095,7 +1096,7 @@ fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
     });
     support::assert_no_receipt_disclosure(&permitted, &authorized, &current);
 
-    // H1: a top-level current operation with an ordinary error, and an unrelated
+    // note: H1: a top-level current operation with an ordinary error, and an unrelated
     // op/result diagnostic, are not protected receipt tuples: recognition uses
     // the authorized receipt's actual values, not generic field names.
     let top_level_current_op = json!({
@@ -1109,7 +1110,7 @@ fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
     });
     support::assert_no_receipt_disclosure(&unrelated_diagnostic, &authorized, &current);
 
-    // J1: a bare requested-receipt-id echo is legal, but the SAME id paired
+    // note: J1: a bare requested-receipt-id echo is legal, but the SAME id paired
     // with the actual committed status is a receipt disclosure even though the
     // caller already supplied the id.
     let bare_requested_id = json!({
@@ -1167,7 +1168,7 @@ fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
     }
 }
 
-/// G4 (I270) cancellation control: a join future cancelled while its task is
+/// note: G4 (I270) cancellation control: a join future cancelled while its task is
 /// still pending leaves the same handle owned, and the owner can abort and
 /// bounded-join it afterwards. The task's abort guard proves the retained
 /// handle really settled it; a take-before-await owner would have detached it
@@ -1211,7 +1212,7 @@ async fn task_set_join_cancellation_keeps_the_handle_owned() {
     );
 }
 
-/// H2 (I270) owning-runner cancellation control: cancelling the WHOLE
+/// note: H2 (I270) owning-runner cancellation control: cancelling the WHOLE
 /// `run_matrix_scenario` future while a spawned operation is pending drops the
 /// last owning `TaskSet`, and the abort-on-drop slot aborts the task instead of
 /// detaching it. The abort guard inside the task proves the abort actually

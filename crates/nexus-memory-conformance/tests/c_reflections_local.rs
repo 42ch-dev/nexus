@@ -30,8 +30,9 @@
 //! envelope paging, tombstoned-basis exclusion) and adds the generation-flow
 //! rows (C-070/C-072/C-078/C-079/C-015), the grant-surface row (C-090) and the
 //! error-class walk (C-100) over the deterministic test-hooks seams.
+// why: the selector map above is exhaustive; a row without one is a scope gap, not a missing test.
 
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per row
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per row
 
 mod support;
 
@@ -46,18 +47,18 @@ use std::sync::Arc;
 
 use support::dto;
 
-/// C-075's granter: the provider's own provisioning identity, whose bootstrap
+/// note: C-075's granter: the provider's own provisioning identity, whose bootstrap
 /// grant is a space-wide unrestricted `admin`.
 const ADMIN: &str = "ctr_c075_admin";
-/// The context-restricted grantee under test.
+/// note: The context-restricted grantee under test.
 const GRANTEE: &str = "ctr_c075_grantee";
-/// The subject the subject-wide selections name. It is deliberately never
+/// note: The subject the subject-wide selections name. It is deliberately never
 /// ensured: admission must not consult subject existence (no existence
 /// oracle), and C-075's refusal is a grant-coverage verdict.
 const SUBJECT: &str = "sbj_c075";
-/// The only placement context the grantee's `reflect` grant covers.
+/// note: The only placement context the grantee's `reflect` grant covers.
 const CONTEXT: &str = "ctx_c075_a";
-/// A well-formed 64-lowercase-hex CAS token for the generate leg; the row
+/// note: A well-formed 64-lowercase-hex CAS token for the generate leg; the row
 /// isolates coverage, so the digest is shape-valid but arbitrary.
 const STATE_DIGEST: &str = "a7b4c2d0e9f183726554433f2e1d0c9b8a7968594a3b2c1d0e9f887766554433";
 
@@ -66,7 +67,7 @@ fn principal(principal_id: &str) -> schemas::Principal {
         .expect("principal deserializes")
 }
 
-/// Assert one reflection refusal is the C-075 verdict: `NOT_AUTHORIZED`,
+/// note: Assert one reflection refusal is the C-075 verdict: `NOT_AUTHORIZED`,
 /// classified terminal, carrying no payload branch.
 fn expect_subject_wide_refusal(reject: &SpokeReject, op: &str) {
     assert_eq!(
@@ -122,7 +123,7 @@ async fn c_075_reflection_subject_all_requires_unrestricted_grant_local() {
         "the reflect grant commits: {receipt}"
     );
 
-    // The C-075 refusal itself: all three ops, subject-wide selection.
+    // note: The C-075 refusal itself: all three ops, subject-wide selection.
     match provider
         .get_reflection_state(
             &grantee,
@@ -180,7 +181,7 @@ async fn c_075_reflection_subject_all_requires_unrestricted_grant_local() {
         }
     }
 
-    // Coverage control: the same grantee's context-scoped selection is inside
+    // note: Coverage control: the same grantee's context-scoped selection is inside
     // the grant's reach, so it must not answer the C-075 refusal. The admitted
     // request serves the (empty) basis; the refusal is the grant's reach, not
     // the family.
@@ -203,7 +204,7 @@ async fn c_075_reflection_subject_all_requires_unrestricted_grant_local() {
         SpokeResult::Ok(_) => {}
     }
 
-    // Coverage control: the admin's unrestricted `admin` grant implies
+    // note: Coverage control: the admin's unrestricted `admin` grant implies
     // `reflect` within its coverage, so the same subject-wide selection is not
     // coverage-refused for the admin.
     let admin_wide = provider
@@ -258,7 +259,7 @@ async fn c_r3_list_without_selection_requires_unrestricted_coverage_local() {
         "the context-restricted reflect grant",
     );
 
-    // No selection: the whole-subject listing is outside the grant's reach.
+    // note: No selection: the whole-subject listing is outside the grant's reach.
     match provider
         .list_reflections(
             &grantee,
@@ -274,7 +275,7 @@ async fn c_r3_list_without_selection_requires_unrestricted_coverage_local() {
         }
     }
 
-    // The context-scoped selection the grant covers still serves.
+    // note: The context-scoped selection the grant covers still serves.
     match provider
         .list_reflections(
             &grantee,
@@ -295,19 +296,19 @@ async fn c_r3_list_without_selection_requires_unrestricted_coverage_local() {
     }
 }
 
-// ── Task 3: the read path (C-073, C-042, C-076, C-071, C-077) ───────────
+// note: ── Task 3: the read path (C-073, C-042, C-076, C-071, C-077) ───────────
 
-/// The subject the Task-3 rows read; every row ensures it before writing.
+/// note: The subject the Task-3 rows read; every row ensures it before writing.
 const T3_SUBJECT: &str = "sbj_t3_reads";
-/// The unrestricted grantee that holds a plain `reflect` grant.
+/// note: The unrestricted grantee that holds a plain `reflect` grant.
 const T3_GRANTEE: &str = "ctr_t3_grantee";
-/// The placement context and provenance source the seeded rows use.
+/// note: The placement context and provenance source the seeded rows use.
 const T3_CONTEXT_A: &str = "ctx_t3_a";
 const T3_CONTEXT_B: &str = "ctx_t3_b";
 const T3_SOURCE_A: &str = "src_t3_a";
 const T3_SOURCE_B: &str = "src_t3_b";
 
-/// Unwrap one accepted op result to its wire JSON; a reject fails the row.
+/// note: Unwrap one accepted op result to its wire JSON; a reject fails the row.
 fn served<T: serde::Serialize>(result: SpokeResult<T>, what: &str) -> Value {
     match result {
         SpokeResult::Ok(response) => serde_json::to_value(&response).expect("response serializes"),
@@ -315,7 +316,7 @@ fn served<T: serde::Serialize>(result: SpokeResult<T>, what: &str) -> Value {
     }
 }
 
-/// Assert the published CAS token shape: 64 lowercase hex.
+/// note: Assert the published CAS token shape: 64 lowercase hex.
 fn expect_state_digest(body: &Value, what: &str) -> String {
     let digest = body["state_digest"]
         .as_str()
@@ -329,7 +330,7 @@ fn expect_state_digest(body: &Value, what: &str) -> String {
     digest.to_owned()
 }
 
-/// One committed `reflect` grant, unrestricted over the subject: the
+/// note: One committed `reflect` grant, unrestricted over the subject: the
 /// unrestricted wire variant carries no `context_ids` and no `shared_access`.
 async fn grant_subject_all_reflect(provider: &LocalMemoryProvider, admin: &schemas::Principal) {
     let receipt = served(
@@ -354,7 +355,7 @@ async fn grant_subject_all_reflect(provider: &LocalMemoryProvider, admin: &schem
     );
 }
 
-/// Ensure the row's subject exists, then return the principal pair.
+/// note: Ensure the row's subject exists, then return the principal pair.
 async fn t3_setup(provider: &LocalMemoryProvider) -> (schemas::Principal, schemas::Principal) {
     let admin = principal(ADMIN);
     let grantee = principal(T3_GRANTEE);
@@ -374,7 +375,7 @@ async fn t3_setup(provider: &LocalMemoryProvider) -> (schemas::Principal, schema
     (admin, grantee)
 }
 
-/// One context-scoped record write; returns the committed record id.
+/// note: One context-scoped record write; returns the committed record id.
 async fn t3_record(
     provider: &LocalMemoryProvider,
     admin: &schemas::Principal,
@@ -405,7 +406,7 @@ async fn t3_record(
         .to_owned()
 }
 
-/// The subject's whole authorized list page, with each row's id and revision.
+/// note: The subject's whole authorized list page, with each row's id and revision.
 async fn t3_records(
     provider: &LocalMemoryProvider,
     caller: &schemas::Principal,
@@ -436,7 +437,7 @@ async fn t3_records(
         .collect()
 }
 
-/// The current `state` body for one selection (+ optional provenance filter).
+/// note: The current `state` body for one selection (+ optional provenance filter).
 async fn t3_state(
     provider: &LocalMemoryProvider,
     caller: &schemas::Principal,
@@ -479,9 +480,9 @@ async fn t3_list(
     )
 }
 
-// ── Task 6: the generation flow, the envelope halves, the grant surface ──
+// note: ── Task 6: the generation flow, the envelope halves, the grant surface ──
 
-/// Assert one reflection refusal carries the expected code and retry class,
+/// note: Assert one reflection refusal carries the expected code and retry class,
 /// and return the reject so a row can keep reading its details.
 fn expect_refusal<T: std::fmt::Debug>(
     result: SpokeResult<T>,
@@ -506,7 +507,7 @@ fn expect_refusal<T: std::fmt::Debug>(
     }
 }
 
-/// One `subject_all` generate payload for the row subject.
+/// note: One `subject_all` generate payload for the row subject.
 fn generate_payload(space: &str, digest: &str, key: &str) -> Value {
     json!({
         "space_id": space,
@@ -531,7 +532,7 @@ async fn t3_generate(
         .await
 }
 
-/// The authored `personality` profile: the one MEM-R005 required kind.
+/// note: The authored `personality` profile: the one MEM-R005 required kind.
 async fn author_required_profile(provider: &LocalMemoryProvider, admin: &schemas::Principal) {
     let authored = served(
         provider
@@ -552,7 +553,7 @@ async fn author_required_profile(provider: &LocalMemoryProvider, admin: &schemas
     assert_eq!(authored["status"], json!("committed"), "{authored}");
 }
 
-/// Seed the sufficient basis (authored profile + two records) and return its
+/// note: Seed the sufficient basis (authored profile + two records) and return its
 /// CAS token: the exact shape a generate request pins.
 async fn sufficient_basis(provider: &LocalMemoryProvider, admin: &schemas::Principal) -> String {
     author_required_profile(provider, admin).await;
@@ -578,7 +579,7 @@ async fn sufficient_basis(provider: &LocalMemoryProvider, admin: &schemas::Princ
     )
 }
 
-/// The `memory.receipts.get` body of one receipt.
+/// note: The `memory.receipts.get` body of one receipt.
 async fn receipt_body_of(
     provider: &LocalMemoryProvider,
     caller: &schemas::Principal,
@@ -599,7 +600,7 @@ async fn receipt_body_of(
         .clone()
 }
 
-/// The durable (`receipt_id`, status) rows the reflection generate op recorded,
+/// note: The durable (`receipt_id`, status) rows the reflection generate op recorded,
 /// read read-only over the provider's own state database — the durable-row
 /// observation channel the matrix observers use. Safe inside the parked
 /// window: the pending receipt is transaction 1's committed row.
@@ -626,7 +627,7 @@ async fn durable_generation_receipts(
     rows
 }
 
-/// The one pending receipt's id while a generation is parked: the durable
+/// note: The one pending receipt's id while a generation is parked: the durable
 /// rows carry exactly the parked window's committed pending receipt.
 async fn parked_pending_receipt_id(user_home: &std::path::Path, space: &str) -> String {
     let rows = durable_generation_receipts(user_home, space).await;
@@ -642,7 +643,7 @@ async fn parked_pending_receipt_id(user_home: &std::path::Path, space: &str) -> 
     pending[0].0.clone()
 }
 
-/// C-073: `state` and `list` serve under `reflect` coverage — for the granted
+/// note: C-073: `state` and `list` serve under `reflect` coverage — for the granted
 /// peer and for the `admin` grant whose coverage implies `reflect` — publish
 /// the content-free empty basis, and stay served through a space freeze (the
 /// §8.2 read-only allowlist), so no basis change ever suppresses a read.
@@ -655,7 +656,7 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
     let (admin, grantee) = t3_setup(&provider).await;
     grant_subject_all_reflect(&provider, &admin).await;
 
-    // The granted peer's empty basis, published content-free.
+    // note: The granted peer's empty basis, published content-free.
     let state = t3_state(&provider, &grantee, json!({ "mode": "subject_all" }), None).await;
     assert_eq!(
         state["basis"],
@@ -675,7 +676,7 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
     );
     expect_state_digest(&state, "the state read");
 
-    // The `admin` grant implies `reflect` within its coverage: same reads.
+    // note: The `admin` grant implies `reflect` within its coverage: same reads.
     let admin_state = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
     assert_eq!(
         admin_state["basis"]["record_count"],
@@ -683,7 +684,7 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
         "the admin reads the same empty basis: {admin_state}"
     );
 
-    // Both reads stay served through a freeze (§8.2 read-only allowlist).
+    // note: Both reads stay served through a freeze (§8.2 read-only allowlist).
     let spaces = served(
         provider.list_spaces(&admin, dto(json!({}))).await,
         "the space list",
@@ -718,7 +719,7 @@ async fn c_073_reflection_reads_succeed_with_capability_local() {
     );
 }
 
-/// C-042: every basis-affecting fact class — record create, edit, delete,
+/// note: C-042: every basis-affecting fact class — record create, edit, delete,
 /// scope-promote, profile update, and an authorization change that alters the
 /// authorized set — moves the published `state_digest` at the next read, with
 /// no eager invalidation writes and `stale` honestly false while nothing is
@@ -738,13 +739,13 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
         "the empty state",
     )];
 
-    // Create.
+    // note: Create.
     let record_a = t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "basis row a").await;
     let created = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(created["basis"]["record_count"], json!(1), "{created}");
     digests.push(expect_state_digest(&created, "after create"));
 
-    // Edit.
+    // note: Edit.
     let revision = t3_records(&provider, &admin)
         .await
         .iter()
@@ -772,13 +773,13 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
         "after edit",
     ));
 
-    // Second create, in another context.
+    // note: Second create, in another context.
     let record_b = t3_record(&provider, &admin, T3_CONTEXT_B, T3_SOURCE_B, "basis row b").await;
     let grown = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(grown["basis"]["record_count"], json!(2), "{grown}");
     digests.push(expect_state_digest(&grown, "after second create"));
 
-    // Delete (a tombstone leaves the authorized set at read time, C-077).
+    // note: Delete (a tombstone leaves the authorized set at read time, C-077).
     let revision = t3_records(&provider, &admin)
         .await
         .iter()
@@ -804,7 +805,7 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
     assert_eq!(shrunk["basis"]["record_count"], json!(1), "{shrunk}");
     digests.push(expect_state_digest(&shrunk, "after delete"));
 
-    // Scope-promote: the placement is part of the selection resolution.
+    // note: Scope-promote: the placement is part of the selection resolution.
     let revision = t3_records(&provider, &admin)
         .await
         .iter()
@@ -832,7 +833,7 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
         "after promote",
     ));
 
-    // Profile update.
+    // note: Profile update.
     let profiled = served(
         provider
             .update_profile(
@@ -863,7 +864,7 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
     );
     digests.push(expect_state_digest(&profile_state, "after profile update"));
 
-    // Authorization change that alters the authorized set: a fresh peer's
+    // note: Authorization change that alters the authorized set: a fresh peer's
     // context-scoped basis moves when its grant's reach moves.
     let scoped_selection = json!({
         "mode": "selected_contexts",
@@ -894,7 +895,7 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
         "context A holds no live row any more: {peer_state}"
     );
 
-    // Every fact class moved the digest; nothing is pinned, so `stale` stays
+    // note: Every fact class moved the digest; nothing is pinned, so `stale` stays
     // honestly false throughout.
     for state in [created, grown, shrunk, profile_state] {
         assert_eq!(state["stale"], json!(false), "{state}");
@@ -906,7 +907,7 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
         "every basis-affecting fact changed the digest: {digests:?}"
     );
 
-    // The pinned half (Task 6): an envelope pins this basis, and the same
+    // note: The pinned half (Task 6): an envelope pins this basis, and the same
     // fact classes now answer `stale` honestly at the next read — computed,
     // never stored, with no eager invalidation writes.
     let pinned_digest = expect_state_digest(
@@ -957,7 +958,7 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
     );
 }
 
-/// C-076: the published basis is honest about what it reads — authored kinds,
+/// note: C-076: the published basis is honest about what it reads — authored kinds,
 /// exact counts, the sufficiency verdict over the records (profiles never flip
 /// it), a deterministic digest over unchanged state, and a digest that binds
 /// the selection/filter resolution. `stale` is recomputed at read time; with
@@ -972,7 +973,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
     grant_subject_all_reflect(&provider, &admin).await;
     let selection = json!({ "mode": "subject_all" });
 
-    // A profile alone never flips the sufficiency verdict: the verdict reads
+    // note: A profile alone never flips the sufficiency verdict: the verdict reads
     // the authorized records.
     let profiled = served(
         provider
@@ -1008,7 +1009,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
         "{profile_only}"
     );
 
-    // Two rows in different provenance sources: the count is exact, two
+    // note: Two rows in different provenance sources: the count is exact, two
     // consecutive reads agree, and the filter resolution is part of the
     // digest's input.
     t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "honest row a").await;
@@ -1030,7 +1031,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
         "the filter resolution is part of the digest: {full} vs {filtered}"
     );
 
-    // A basis-affecting edit moves the digest; nothing is pinned, so the
+    // note: A basis-affecting edit moves the digest; nothing is pinned, so the
     // recomputed staleness stays honestly false.
     let (record_id, revision) = t3_records(&provider, &admin).await.remove(0);
     let edited = served(
@@ -1056,7 +1057,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
     );
     assert_eq!(after_edit["stale"], json!(false), "{after_edit}");
 
-    // The pinned half (Task 6): pin this basis, then move it — the envelope
+    // note: The pinned half (Task 6): pin this basis, then move it — the envelope
     // and the state read report the recomputed staleness honestly; the stored
     // write-time cache is never consulted.
     let pin_digest = expect_state_digest(&after_edit, "the pin source");
@@ -1105,7 +1106,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
     );
 }
 
-/// C-071: the listing contract — an empty page names no end-of-results
+/// note: C-071: the listing contract — an empty page names no end-of-results
 /// cursor, the limit bound is honored, the cursor is opaque and bound to the
 /// op that minted it, and a foreign or malformed cursor answers
 /// `CURSOR_INVALID` (terminal). The terminal-receipt half: a committed
@@ -1121,7 +1122,7 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
     let (admin, grantee) = t3_setup(&provider).await;
     grant_subject_all_reflect(&provider, &admin).await;
 
-    // Empty listing: no rows, no cursor, and the limit bound is honored.
+    // note: Empty listing: no rows, no cursor, and the limit bound is honored.
     let page = t3_list(&provider, &grantee, None, Some(1)).await;
     assert_eq!(page["reflections"], json!([]), "{page}");
     assert!(
@@ -1129,7 +1130,7 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
         "an empty page is the end of results: {page}"
     );
 
-    // A cursor minted by another op is foreign here: cursors are opaque and
+    // note: A cursor minted by another op is foreign here: cursors are opaque and
     // bound to the query that minted them (MEM-R026). Two record rows let the
     // record listing mint a real continuation cursor.
     t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "listed row a").await;
@@ -1152,7 +1153,7 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
         .as_str()
         .expect("a two-row subject pages, so the record listing mints a cursor");
 
-    // The reflection listing under a foreign cursor is refused
+    // note: The reflection listing under a foreign cursor is refused
     // `CURSOR_INVALID` whether the text parses as a cursor or not: the
     // binding is by content.
     for cursor in ["not-a-cursor", foreign_cursor] {
@@ -1187,7 +1188,7 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
         );
     }
 
-    // The terminal-receipt half (Task 6): a committed generation's receipt
+    // note: The terminal-receipt half (Task 6): a committed generation's receipt
     // names its reflection and carries no envelope body; `receipts.get`
     // serves the same terminal receipt verbatim; two envelopes page under the
     // bound with an absent end-of-results cursor.
@@ -1266,7 +1267,7 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
     );
 }
 
-/// C-077: a tombstoned row leaves the authorized basis at read time — the
+/// note: C-077: a tombstoned row leaves the authorized basis at read time — the
 /// published count drops, the digest moves, and the same exclusion governs
 /// the record listing. The envelope-exclusion half: a reflection pinned over
 /// the subject's full record set is excluded from the listing once the pin's
@@ -1282,7 +1283,7 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
     grant_subject_all_reflect(&provider, &admin).await;
     let selection = json!({ "mode": "subject_all" });
 
-    // Seed the full basis (profile + two records), pin it, then tombstone one
+    // note: Seed the full basis (profile + two records), pin it, then tombstone one
     // record: the pin's only delta is that tombstone.
     author_required_profile(&provider, &admin).await;
     let record_a = t3_record(
@@ -1324,7 +1325,7 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
         "the pin carries the full source set: {pinned_page}"
     );
 
-    // Delete one basis record; the read recomputes the basis without it.
+    // note: Delete one basis record; the read recomputes the basis without it.
     let revision = t3_records(&provider, &admin)
         .await
         .iter()
@@ -1367,7 +1368,7 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
         "the tombstoned row is excluded: {listed:?}"
     );
 
-    // The envelope's pinned source set went tombstone-only: it leaves the
+    // note: The envelope's pinned source set went tombstone-only: it leaves the
     // listing and stops surfacing as the state's last reflection — the
     // deleted content must not leak through the derived envelope.
     let excluded = t3_list(&provider, &grantee, None, None).await;
@@ -1393,7 +1394,7 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
     );
 }
 
-/// C-070: a plain `reflect` grant carries the whole generation flow — the
+/// note: C-070: a plain `reflect` grant carries the whole generation flow — the
 /// pending receipt publishes before any generation runs (observable while the
 /// generation is parked: the receipt is pending and the listing is still
 /// empty), exactly one terminal outcome commits, the same key replays that
@@ -1411,7 +1412,7 @@ async fn c_070_reflect_grant_committed_and_pending_generation_local() {
     let space = provider.space_id().to_owned();
     let home_path = home.path().to_path_buf();
 
-    // The parked window: pending published, generation not run yet.
+    // note: The parked window: pending published, generation not run yet.
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Barrier::new(2));
     provider.park_next_generation(Arc::clone(&entered), Arc::clone(&release));
@@ -1446,7 +1447,7 @@ async fn c_070_reflect_grant_committed_and_pending_generation_local() {
     let receipt = served(generation, "the parked generation");
     assert_eq!(receipt["status"], json!("committed"), "{receipt}");
 
-    // Exactly one terminal outcome; the same key replays it verbatim.
+    // note: Exactly one terminal outcome; the same key replays it verbatim.
     let envelope_page = t3_list(&provider, &grantee, None, None).await;
     let envelopes = envelope_page["reflections"]
         .as_array()
@@ -1471,7 +1472,7 @@ async fn c_070_reflect_grant_committed_and_pending_generation_local() {
         "a replay never generates again"
     );
 
-    // Changed payload under the same key: a pre-effect conflict.
+    // note: Changed payload under the same key: a pre-effect conflict.
     expect_refusal(
         provider
             .generate_reflection(
@@ -1491,7 +1492,7 @@ async fn c_070_reflect_grant_committed_and_pending_generation_local() {
     );
 }
 
-/// C-072: the generated envelope carries the published §7.27 shape — the
+/// note: C-072: the generated envelope carries the published §7.27 shape — the
 /// pinned selection verbatim (absent optionals never null-substituted), the
 /// pinned basis matching the generating state's digest, a markdown body, the
 /// generator's policy version, the cost, and honest `stale: false`; the
@@ -1580,7 +1581,7 @@ async fn c_072_generated_envelope_shape_local() {
     assert_eq!(envelope["schema_version"], json!(1), "{page}");
     assert_eq!(envelope["stale"], json!(false), "{page}");
 
-    // The pin never silently rewrites: a later basis-affecting edit moves the
+    // note: The pin never silently rewrites: a later basis-affecting edit moves the
     // state digest, and the envelope still carries the basis it was generated
     // over — honestly stale, never rewritten.
     let (record_id, revision) = t3_records(&provider, &admin).await.remove(0);
@@ -1628,7 +1629,7 @@ async fn c_072_generated_envelope_shape_local() {
     );
 }
 
-/// C-078: a generation failure is honest and never charges — the one-shot
+/// note: C-078: a generation failure is honest and never charges — the one-shot
 /// fault commits a `failed` receipt (retryable `INTERNAL_ERROR`, "interrupted
 /// before any effect", no result, no cost) that both the call and
 /// `receipts.get` report; the same key replays the recorded failure; a fresh
@@ -1655,7 +1656,7 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
         failed.message.contains("interrupted before any effect"),
         "the refusal reports the honest interruption: {failed:?}"
     );
-    // The durable rows name the failed receipt; the receipt channel serves it.
+    // note: The durable rows name the failed receipt; the receipt channel serves it.
     let space = provider.space_id().to_owned();
     let rows = durable_generation_receipts(home.path(), &space).await;
     let receipt_id = rows
@@ -1685,7 +1686,7 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
         "a failed receipt carries no result and no cost: {stored}"
     );
 
-    // The same key replays the recorded failure — never a re-run.
+    // note: The same key replays the recorded failure — never a re-run.
     let replayed = expect_refusal(
         t3_generate(&provider, &grantee, &digest, "t4-c078-failed").await,
         SpokeRejectCode::InternalError,
@@ -1703,7 +1704,7 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
         "the failed generation wrote no effect: {page}"
     );
 
-    // A fresh key: the fault is consumed, exactly one clean generation commits.
+    // note: A fresh key: the fault is consumed, exactly one clean generation commits.
     let committed = served(
         t3_generate(&provider, &grantee, &digest, "t4-c078-fresh").await,
         "the fresh generation",
@@ -1734,7 +1735,7 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_local() {
     );
 }
 
-/// C-079: the sufficiency verdict is the provider's own policy, reported by
+/// note: C-079: the sufficiency verdict is the provider's own policy, reported by
 /// `state` and enforced by `generate` — an empty basis refuses
 /// `PROFILE_INCOMPLETE` (the required kind is missing), an authored profile
 /// alone stays `INSUFFICIENT_DATA`, and records arriving flip the verdict to
@@ -1749,7 +1750,7 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
     grant_subject_all_reflect(&provider, &admin).await;
     let selection = json!({ "mode": "subject_all" });
 
-    // 1. Empty basis: verdict insufficient, required kind missing; generate
+    // note: 1. Empty basis: verdict insufficient, required kind missing; generate
     //    refuses `PROFILE_INCOMPLETE` naming the missing kinds.
     let empty = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(empty["data_sufficiency"], json!("insufficient"), "{empty}");
@@ -1774,7 +1775,7 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
         "the refusal names the missing kinds: {missing:?}"
     );
 
-    // 2. Authored profile, zero records: the verdict reads the records, so
+    // note: 2. Authored profile, zero records: the verdict reads the records, so
     //    generation refuses `INSUFFICIENT_DATA`.
     author_required_profile(&provider, &admin).await;
     let profiled = t3_state(&provider, &admin, selection.clone(), None).await;
@@ -1796,7 +1797,7 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
         "the profile-only generation",
     );
 
-    // 3. Records arrive: sufficient, and the same flow commits.
+    // note: 3. Records arrive: sufficient, and the same flow commits.
     t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "policy row a").await;
     t3_record(&provider, &admin, T3_CONTEXT_B, T3_SOURCE_B, "policy row b").await;
     let full = t3_state(&provider, &admin, selection, None).await;
@@ -1810,7 +1811,7 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
     assert_eq!(receipt["status"], json!("committed"), "{receipt}");
 }
 
-/// C-015 (reflection half): the long-running generation publishes its pending
+/// note: C-015 (reflection half): the long-running generation publishes its pending
 /// receipt before any effect — `memory.receipts.get` serves the §7.0.3 poll
 /// answer (pending, no result, no terminal stamp) while the operation runs,
 /// and the same receipt resolves to the committed terminal outcome afterwards.
@@ -1875,7 +1876,7 @@ async fn c_015_pending_receipt_long_running_operation_local() {
     );
 }
 
-/// C-090: the `reflect` capability rides the existing grant surface with no
+/// note: C-090: the `reflect` capability rides the existing grant surface with no
 /// new DTO — minted through the unchanged issuance path, listed with its
 /// coverage, serving inside its reach (`selected_contexts`), refusing outside
 /// it (`shared_only` without shared access), revocable through the unchanged
@@ -1888,7 +1889,7 @@ async fn c_090_reflection_grant_surfaces_local() {
         .expect("open the local provider");
     let (admin, grantee) = t3_setup(&provider).await;
 
-    // Minted through the unchanged non-amplification path.
+    // note: Minted through the unchanged non-amplification path.
     let receipt = served(
         provider
             .grant(
@@ -1909,7 +1910,7 @@ async fn c_090_reflection_grant_surfaces_local() {
     assert_eq!(receipt["status"], json!("committed"), "{receipt}");
     assert_eq!(receipt["op"], json!("memory.grants.grant"), "{receipt}");
 
-    // Listed with its coverage through the unchanged grants listing.
+    // note: Listed with its coverage through the unchanged grants listing.
     let grants = served(
         provider
             .list_grants(&admin, dto(json!({ "space_id": provider.space_id() })))
@@ -1927,7 +1928,7 @@ async fn c_090_reflection_grant_surfaces_local() {
     assert_eq!(listed["context_ids"], json!([T3_CONTEXT_A]), "{listed}");
     assert_eq!(listed["shared_access"], json!(false), "{listed}");
 
-    // Inside the reach: the covered selection serves.
+    // note: Inside the reach: the covered selection serves.
     let covered = t3_state(
         &provider,
         &grantee,
@@ -1942,7 +1943,7 @@ async fn c_090_reflection_grant_surfaces_local() {
     );
     expect_state_digest(&covered, "the covered read");
 
-    // Outside the reach: `shared_only` under a restricted grant without
+    // note: Outside the reach: `shared_only` under a restricted grant without
     // shared access is the coverage refusal, terminal.
     expect_refusal(
         provider
@@ -1960,7 +1961,7 @@ async fn c_090_reflection_grant_surfaces_local() {
         "shared_only under a restricted grant",
     );
 
-    // Revocable through the unchanged revocation: coverage is gone.
+    // note: Revocable through the unchanged revocation: coverage is gone.
     let revoked = served(
         provider
             .revoke_grant(
@@ -1992,7 +1993,7 @@ async fn c_090_reflection_grant_surfaces_local() {
         "the revoked selection",
     );
 
-    // The unrestricted `admin` grant keeps implying `reflect`.
+    // note: The unrestricted `admin` grant keeps implying `reflect`.
     let implied = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
     assert!(
         implied["state_digest"].is_string(),
@@ -2000,7 +2001,7 @@ async fn c_090_reflection_grant_surfaces_local() {
     );
 }
 
-/// C-100 (reflection walk): every refusal class the reflection family answers
+/// note: C-100 (reflection walk): every refusal class the reflection family answers
 /// carries its published envelope — the terminal classes
 /// (`NOT_AUTHORIZED`, `INVALID_INPUT`, `PROFILE_INCOMPLETE`,
 /// `REVISION_CONFLICT`, `IDEMPOTENCY_CONFLICT`, `SUBJECT_FENCED`,
@@ -2018,7 +2019,7 @@ async fn c_100_reflection_error_classes_local() {
     let space = provider.space_id().to_owned();
     let home_path = home.path().to_path_buf();
 
-    // 1. `NOT_AUTHORIZED` (terminal): no covering grant.
+    // note: 1. `NOT_AUTHORIZED` (terminal): no covering grant.
     expect_refusal(
         provider
             .get_reflection_state(
@@ -2035,7 +2036,7 @@ async fn c_100_reflection_error_classes_local() {
         "the ungranted state read",
     );
 
-    // 2. `INVALID_INPUT` (terminal): a present cognition filter is refused
+    // note: 2. `INVALID_INPUT` (terminal): a present cognition filter is refused
     //    outright — the honest D9 refusal, never a widened selection.
     let cognition = expect_refusal(
         provider
@@ -2062,7 +2063,7 @@ async fn c_100_reflection_error_classes_local() {
         "the refusal names the filter: {cognition:?}"
     );
 
-    // 3. Coverage, then the empty-basis `PROFILE_INCOMPLETE` (terminal).
+    // note: 3. Coverage, then the empty-basis `PROFILE_INCOMPLETE` (terminal).
     grant_subject_all_reflect(&provider, &admin).await;
     let empty_digest = expect_state_digest(
         &t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await,
@@ -2075,7 +2076,7 @@ async fn c_100_reflection_error_classes_local() {
         "the empty-basis generation",
     );
 
-    // 4. Seeded basis: `REVISION_CONFLICT` (terminal) names the current
+    // note: 4. Seeded basis: `REVISION_CONFLICT` (terminal) names the current
     //    digest; the committed generation replays; a changed payload under the
     //    same key is `IDEMPOTENCY_CONFLICT` (terminal).
     let digest = sufficient_basis(&provider, &admin).await;
@@ -2122,7 +2123,7 @@ async fn c_100_reflection_error_classes_local() {
         "the changed-payload replay",
     );
 
-    // 5. `SUBJECT_FENCED` (terminal): a fresh generation on a fenced subject.
+    // note: 5. `SUBJECT_FENCED` (terminal): a fresh generation on a fenced subject.
     let fenced = served(
         provider
             .fence_subject(
@@ -2172,7 +2173,7 @@ async fn c_100_reflection_error_classes_local() {
     );
     assert_eq!(unfenced["status"], json!("committed"), "{unfenced}");
 
-    // 6. `INSUFFICIENT_DATA` (terminal) on a second subject: authored profile,
+    // note: 6. `INSUFFICIENT_DATA` (terminal) on a second subject: authored profile,
     //    zero records — the records-only verdict.
     let empty_subject = "sbj_c100_empty";
     served(
@@ -2234,7 +2235,7 @@ async fn c_100_reflection_error_classes_local() {
         "the recordless generation",
     );
 
-    // 7. `SPACE_FROZEN` (terminal): generate is outside the §8.2 allowlist,
+    // note: 7. `SPACE_FROZEN` (terminal): generate is outside the §8.2 allowlist,
     //    while the reads stay served through the freeze.
     served(
         provider
@@ -2327,7 +2328,7 @@ async fn c_100_reflection_error_classes_local() {
     );
     assert_eq!(unfrozen["status"], json!("committed"), "{unfrozen}");
 
-    // 8. Pre-effect retryable `INTERNAL_ERROR`: the interrupted generation
+    // note: 8. Pre-effect retryable `INTERNAL_ERROR`: the interrupted generation
     //    commits an honest failed receipt with no cost.
     provider.inject_generation_fault();
     let interrupted = expect_refusal(
@@ -2368,7 +2369,7 @@ async fn c_100_reflection_error_classes_local() {
         "no cost on failure: {failed}"
     );
 
-    // 9. `uncertain`: a same-key replay under a pending generation answers
+    // note: 9. `uncertain`: a same-key replay under a pending generation answers
     //    `OUTCOME_UNCERTAIN` until the terminal outcome commits.
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Barrier::new(2));
@@ -2409,9 +2410,9 @@ async fn c_100_reflection_error_classes_local() {
     assert_eq!(settled["status"], json!("committed"), "{settled}");
 }
 
-// ── Fix round: blocking-warning regressions (qc-consolidated B1–B4) ──────
+// note: ── Fix round: blocking-warning regressions (qc-consolidated B1–B4) ──────
 
-/// One `subject_all` generate payload with a provenance filter pinned.
+/// note: One `subject_all` generate payload with a provenance filter pinned.
 fn generate_payload_filtered(space: &str, digest: &str, key: &str, filter: &[&str]) -> Value {
     json!({
         "space_id": space,
@@ -2423,7 +2424,7 @@ fn generate_payload_filtered(space: &str, digest: &str, key: &str, filter: &[&st
     })
 }
 
-/// The reflection listing body for one request (filter/cursor/limit shape).
+/// note: The reflection listing body for one request (filter/cursor/limit shape).
 async fn t3_list_request(
     provider: &LocalMemoryProvider,
     caller: &schemas::Principal,
@@ -2435,7 +2436,7 @@ async fn t3_list_request(
     )
 }
 
-/// The one unsettled journal row's (`receipt_id`, first file target path), read
+/// note: The one unsettled journal row's (`receipt_id`, first file target path), read
 /// read-only from the provider's own state database — the durable-row
 /// observation channel, not a provider reimplementation.
 async fn unsettled_journal_target(user_home: &std::path::Path, space: &str) -> (String, String) {
@@ -2466,7 +2467,7 @@ async fn unsettled_journal_target(user_home: &std::path::Path, space: &str) -> (
     (receipt_id, path)
 }
 
-/// The state of one journal row, read read-only from the provider's own
+/// note: The state of one journal row, read read-only from the provider's own
 /// state database.
 async fn journal_state(user_home: &std::path::Path, space: &str, receipt_id: &str) -> String {
     let db = nexus_home_layout::workspace_state_db_path(user_home, ADMIN, "default");
@@ -2487,7 +2488,7 @@ async fn journal_state(user_home: &std::path::Path, space: &str, receipt_id: &st
     state
 }
 
-/// B1: verdicts belong to each row's own pinned basis, not to a sibling row's.
+/// note: B1: verdicts belong to each row's own pinned basis, not to a sibling row's.
 /// R1 and R2 share the selection/filter pin, but R2 pins a moved basis: R2
 /// answers fresh and R1 stale under the same pin, and the C-077 exclusion
 /// stays per-row — tombstoning R2's added record leaves R2 tombstone-only
@@ -2502,7 +2503,7 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
     grant_subject_all_reflect(&provider, &admin).await;
     let selection = json!({ "mode": "subject_all" });
 
-    // R1 pins the two-record basis.
+    // note: R1 pins the two-record basis.
     let digest_one = sufficient_basis(&provider, &admin).await;
     let first = served(
         t3_generate(&provider, &grantee, &digest_one, "qc-b1-r1").await,
@@ -2513,7 +2514,7 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
         .as_str()
         .expect("reflection id");
 
-    // The basis moves; R2 pins the moved basis under the same pin.
+    // note: The basis moves; R2 pins the moved basis under the same pin.
     let added = t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "qc-b1 row c").await;
     let digest_two = expect_state_digest(
         &t3_state(&provider, &admin, selection.clone(), None).await,
@@ -2529,7 +2530,7 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
         .as_str()
         .expect("reflection id");
 
-    // Newest-first listing: each envelope carries its own verdict.
+    // note: Newest-first listing: each envelope carries its own verdict.
     let page = t3_list(&provider, &grantee, None, None).await;
     let rows = page["reflections"].as_array().expect("envelope rows");
     assert_eq!(rows.len(), 2, "both envelopes list: {page}");
@@ -2546,7 +2547,7 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
         "R1 pins the superseded basis: {page}"
     );
 
-    // Exclusion stays per-row: tombstone the record R2 added. R2's pin
+    // note: Exclusion stays per-row: tombstone the record R2 added. R2's pin
     // becomes tombstone-only (excluded); R1's pin is whole again (fresh),
     // so the listing keeps exactly R1 and the state names R1 last.
     let revision = t3_records(&provider, &admin)
@@ -2587,7 +2588,7 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
     assert_eq!(state["stale"], json!(false), "{state}");
 }
 
-/// B2: the unsettled journal tuple reaches every consumer in one order. A
+/// note: B2: the unsettled journal tuple reaches every consumer in one order. A
 /// pending journal intent temporarily withholds its subject — the reads stay
 /// admitted and serve empty honestly; once the same intent is quarantined
 /// through the provider's own recovery (foreign bytes at the owed file
@@ -2605,7 +2606,7 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
     let selection = json!({ "mode": "subject_all" });
     let space = provider.space_id().to_owned();
 
-    // One committed envelope exists before the recovery window opens.
+    // note: One committed envelope exists before the recovery window opens.
     let digest = sufficient_basis(&provider, &admin).await;
     let pin = served(
         t3_generate(&provider, &grantee, &digest, "qc-b2-pin").await,
@@ -2613,7 +2614,7 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
     );
     assert_eq!(pin["status"], json!("committed"), "{pin}");
 
-    // A crash after the journal COMMIT: the record's SQL effect is durable,
+    // note: A crash after the journal COMMIT: the record's SQL effect is durable,
     // its file effect is owed, and the caller learns OUTCOME_UNCERTAIN.
     provider.inject_commit_fault(true);
     expect_refusal(
@@ -2636,7 +2637,7 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
         "the lost record commit",
     );
 
-    // Pending intent: the subject is withheld silently — every ordinary read
+    // note: Pending intent: the subject is withheld silently — every ordinary read
     // serves empty and stays admitted; the committed envelope does not leak.
     let listed = served(
         provider
@@ -2661,7 +2662,7 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
     let page = t3_list(&provider, &grantee, None, None).await;
     assert_eq!(page["reflections"], json!([]), "{page}");
 
-    // Durable window: exactly one unsettled journal row, still pending.
+    // note: Durable window: exactly one unsettled journal row, still pending.
     let (receipt_id, path) = unsettled_journal_target(home.path(), &space).await;
     assert_eq!(
         journal_state(home.path(), &space, &receipt_id).await,
@@ -2669,7 +2670,7 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
         "the recovering intent is pending"
     );
 
-    // The provider's own recovery quarantines the intent once the owed file
+    // note: The provider's own recovery quarantines the intent once the owed file
     // target holds bytes this intent did not produce: reopen with foreign
     // bytes at the target path (relative to the provider's `memory-store`
     // file root).
@@ -2689,7 +2690,7 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
         "the bounded pass quarantined the foreign target"
     );
 
-    // Terminal: the same reads now answer the refusal and name the subject.
+    // note: Terminal: the same reads now answer the refusal and name the subject.
     let records = expect_refusal(
         provider
             .list_records(
@@ -2744,7 +2745,7 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
     );
 }
 
-/// B3: an authorized same-key replay outranks the §8.2 freeze gate. A
+/// note: B3: an authorized same-key replay outranks the §8.2 freeze gate. A
 /// committed generation whose response was lost is recoverable through the
 /// identical retry while the space is frozen; a fresh key still answers
 /// `SPACE_FROZEN`. The facade checked freeze before the store's replay probe,
@@ -2766,14 +2767,14 @@ async fn qc_b3_committed_generation_replays_while_frozen_local() {
         .as_i64()
         .expect("space revision");
 
-    // The generation commits; its response is the caller's only copy.
+    // note: The generation commits; its response is the caller's only copy.
     let first = served(
         t3_generate(&provider, &grantee, &digest, "qc-b3-commit").await,
         "the committed generation",
     );
     assert_eq!(first["status"], json!("committed"), "{first}");
 
-    // Freeze, then recover the committed outcome through the same key.
+    // note: Freeze, then recover the committed outcome through the same key.
     served(
         provider
             .freeze_space(
@@ -2802,7 +2803,7 @@ async fn qc_b3_committed_generation_replays_while_frozen_local() {
         "a replay never generates again: {replay_page}"
     );
 
-    // Fresh work during the freeze is still refused.
+    // note: Fresh work during the freeze is still refused.
     expect_refusal(
         t3_generate(&provider, &grantee, &digest, "qc-b3-fresh").await,
         SpokeRejectCode::SpaceFrozen,
@@ -2810,7 +2811,7 @@ async fn qc_b3_committed_generation_replays_while_frozen_local() {
         "the fresh generation while frozen",
     );
 
-    // Unfrozen, the same fresh key runs exactly one new generation.
+    // note: Unfrozen, the same fresh key runs exactly one new generation.
     served(
         provider
             .unfreeze_space(
@@ -2836,7 +2837,7 @@ async fn qc_b3_committed_generation_replays_while_frozen_local() {
     );
 }
 
-/// B4: a filtered list/state returns only the envelopes pinned to the
+/// note: B4: a filtered list/state returns only the envelopes pinned to the
 /// requested provenance, and the state's last-reflection pick honors the same
 /// filter. Two distinct pins under one selection are listed and read through
 /// each pin's filter and without one.
@@ -2849,7 +2850,7 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
     let (admin, grantee) = t3_setup(&provider).await;
     grant_subject_all_reflect(&provider, &admin).await;
 
-    // One record per provenance source; each generation pins its own filter.
+    // note: One record per provenance source; each generation pins its own filter.
     author_required_profile(&provider, &admin).await;
     t3_record(
         &provider,
@@ -2922,7 +2923,7 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
         .as_str()
         .expect("reflection id");
 
-    // Unfiltered: both envelopes list.
+    // note: Unfiltered: both envelopes list.
     let unfiltered = t3_list(&provider, &grantee, None, None).await;
     let rows = unfiltered["reflections"].as_array().expect("rows");
     assert_eq!(
@@ -2931,7 +2932,7 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
         "both pins list without a filter: {unfiltered}"
     );
 
-    // Filtered list: only the envelope pinned to the requested provenance.
+    // note: Filtered list: only the envelope pinned to the requested provenance.
     let listed_a = t3_list_request(
         &provider,
         &grantee,
@@ -2971,7 +2972,7 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
         "{listed_b}"
     );
 
-    // Filtered state: the last-reflection pick honors the same filter, and
+    // note: Filtered state: the last-reflection pick honors the same filter, and
     // the reported staleness is that envelope's own verdict.
     let state_a = t3_state(
         &provider,
@@ -3000,9 +3001,9 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
     );
 }
 
-// ── Inspector round 2: reopen recovery vs a live generation ─────────────
+// note: ── Inspector round 2: reopen recovery vs a live generation ─────────────
 
-/// Inspector round 2 (should-fix): a reopen recovery must not terminalize a
+/// note: Inspector round 2 (should-fix): a reopen recovery must not terminalize a
 /// generation another process is executing. Process A parks between its two
 /// transactions; process B opens the same workspace (its recovery pass runs
 /// against A's pending receipt); A's terminal commit must still land — the
@@ -3020,7 +3021,7 @@ async fn c_r2_recovery_skips_a_live_generation_lease_local() {
     let admin = principal(ADMIN);
     let space = provider.space_id().to_owned();
 
-    // A generable basis: one authored profile and one record.
+    // note: A generable basis: one authored profile and one record.
     served(
         provider
             .ensure_subject(
@@ -3080,7 +3081,7 @@ async fn c_r2_recovery_skips_a_live_generation_lease_local() {
         "the state",
     );
 
-    // Park process A between its pending commit and its terminal commit.
+    // note: Park process A between its pending commit and its terminal commit.
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Barrier::new(2));
     provider.park_next_generation(Arc::clone(&entered), Arc::clone(&release));
@@ -3096,7 +3097,7 @@ async fn c_r2_recovery_skips_a_live_generation_lease_local() {
     );
     let window = async {
         entered.notified().await;
-        // Process B opens the same workspace; its reopen recovery pass runs
+        // note: Process B opens the same workspace; its reopen recovery pass runs
         // here, against A's published pending receipt. The live lease must
         // survive it untouched and pending.
         let other = LocalMemoryProvider::open(home_path.clone(), ADMIN, "default")
@@ -3120,7 +3121,7 @@ async fn c_r2_recovery_skips_a_live_generation_lease_local() {
         "process A's terminal commit landed with no lease-lost refusal: {settled}"
     );
 
-    // The envelope landed with it and the receipt recorded the outcome.
+    // note: The envelope landed with it and the receipt recorded the outcome.
     let listed = served(
         provider
             .list_reflections(
@@ -3146,9 +3147,9 @@ async fn c_r2_recovery_skips_a_live_generation_lease_local() {
     );
 }
 
-// ── Inspector round 2: one snapshot per `memory.reflections.state` ──────
+// note: ── Inspector round 2: one snapshot per `memory.reflections.state` ──────
 
-/// Inspector round 2 (may-fix): the state body derives every member from ONE
+/// note: Inspector round 2 (may-fix): the state body derives every member from ONE
 /// store snapshot — the basis digest and the newest-visible pick can never
 /// disagree about which basis the caller is looking at. The joint invariant
 /// the old two-read composition could break: after a basis-affecting write,
@@ -3164,7 +3165,7 @@ async fn c_r2_state_serves_one_snapshot_local() {
     let (admin, _) = t3_setup(&provider).await;
     grant_subject_all_reflect(&provider, &admin).await;
 
-    // R1 pins the pre-write digest.
+    // note: R1 pins the pre-write digest.
     let pinned = sufficient_basis(&provider, &admin).await;
     let generated = served(
         t3_generate(&provider, &admin, &pinned, "r2-pin").await,
@@ -3176,7 +3177,7 @@ async fn c_r2_state_serves_one_snapshot_local() {
         .expect("the committed reflection id")
         .to_owned();
 
-    // No basis move: the digest the newest envelope pins IS the published
+    // note: No basis move: the digest the newest envelope pins IS the published
     // digest, so `stale` is false — both members from one snapshot.
     let before = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
     assert_eq!(before["state_digest"], json!(pinned), "{before}");
@@ -3187,7 +3188,7 @@ async fn c_r2_state_serves_one_snapshot_local() {
         "{before}"
     );
 
-    // A basis-affecting write: the same response must carry the moved digest
+    // note: A basis-affecting write: the same response must carry the moved digest
     // AND the staleness verdict of an envelope pinning the older one.
     t3_record(
         &provider,
@@ -3214,7 +3215,7 @@ async fn c_r2_state_serves_one_snapshot_local() {
         Some(&json!(pinned_id)),
         "{after}"
     );
-    // The joint invariant, stated over the pair the response published.
+    // note: The joint invariant, stated over the pair the response published.
     assert_eq!(
         after["stale"],
         json!(moved != pinned),
@@ -3222,9 +3223,9 @@ async fn c_r2_state_serves_one_snapshot_local() {
     );
 }
 
-// ── Inspector round 2: refusals name the actually rejected field ────────
+// note: ── Inspector round 2: refusals name the actually rejected field ────────
 
-/// Inspector round 2 (may-fix): each reflection entry point publishes the
+/// note: Inspector round 2 (may-fix): each reflection entry point publishes the
 /// request member its published validator (or shape gate) actually refused in
 /// `details.field` — never a hardcoded `"selection"`. Per entry point: an
 /// over-bound list `limit` names `limit` (agreeing with `details.limit`); a
@@ -3249,7 +3250,7 @@ async fn c_r2_reflections_name_the_refused_field_local() {
             .map(str::to_owned)
     };
 
-    // list: over-bound limit → `limit`.
+    // note: list: over-bound limit → `limit`.
     let refused = expect_refusal(
         provider
             .list_reflections(
@@ -3276,7 +3277,7 @@ async fn c_r2_reflections_name_the_refused_field_local() {
         "the refusal names the limit field: {refused:?}"
     );
 
-    // state: an empty selected-contexts selection → `selection`.
+    // note: state: an empty selected-contexts selection → `selection`.
     let refused = expect_refusal(
         provider
             .get_reflection_state(
@@ -3298,7 +3299,7 @@ async fn c_r2_reflections_name_the_refused_field_local() {
         "{refused:?}"
     );
 
-    // list: the same selection shape → `selection`.
+    // note: list: the same selection shape → `selection`.
     let refused = expect_refusal(
         provider
             .list_reflections(
@@ -3320,7 +3321,7 @@ async fn c_r2_reflections_name_the_refused_field_local() {
         "{refused:?}"
     );
 
-    // generate: the same selection shape → `selection`.
+    // note: generate: the same selection shape → `selection`.
     let refused = expect_refusal(
         provider
             .generate_reflection(
@@ -3344,7 +3345,7 @@ async fn c_r2_reflections_name_the_refused_field_local() {
         "{refused:?}"
     );
 
-    // generate: a malformed `expected_state_digest` never reaches the
+    // note: generate: a malformed `expected_state_digest` never reaches the
     // provider — the wire schema enforces its 64-hex pattern at
     // deserialization, exactly like `idempotency_key`'s 1–128 shape; the
     // provider-side `is_state_digest` gate that names

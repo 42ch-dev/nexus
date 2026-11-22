@@ -20,8 +20,9 @@
 //!
 //! C-090's reflection/export surfaces and C-096's successful capability
 //! remainders stay N4-R/N4-T.
+// why: each scenario names the MEM rule it proves; a new scenario adds its rule here first.
 
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per row
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per row
 
 mod support;
 
@@ -69,7 +70,7 @@ async fn pending_candidates(actor: &Actor<'_>) -> Vec<String> {
     )
 }
 
-/// One durable observed row by its label (`record:<id>`, `candidate:<id>`, …).
+/// note: One durable observed row by its label (`record:<id>`, `candidate:<id>`, …).
 fn observed<'a>(state: &'a DurableState, label: &str) -> &'a [(String, String)] {
     state
         .rows
@@ -80,7 +81,7 @@ fn observed<'a>(state: &'a DurableState, label: &str) -> &'a [(String, String)] 
         .as_slice()
 }
 
-/// One column of an observed row, as the database reported it.
+/// note: One column of an observed row, as the database reported it.
 fn column<'a>(row: &'a [(String, String)], name: &str) -> &'a str {
     row.iter()
         .find(|(column, _)| column == name)
@@ -89,7 +90,7 @@ fn column<'a>(row: &'a [(String, String)], name: &str) -> &'a str {
         .as_str()
 }
 
-/// The receipt row's `result_json` column, parsed as the provider's own JSON:
+/// note: The receipt row's `result_json` column, parsed as the provider's own JSON:
 /// the durable result is compared as the actual structure, never by substring.
 fn parsed_result_json(row: &[(String, String)]) -> Value {
     let raw = column(row, "result_json");
@@ -136,7 +137,7 @@ fn assert_payload_secrecy(receipt: &Value) {
     );
 }
 
-/// The protocol receipt tuple of one committed mutation (§6.10): identity, op,
+/// note: The protocol receipt tuple of one committed mutation (§6.10): identity, op,
 /// requester, a content-free result and the schema's digest shape.
 fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_eq!(body["status"], json!("committed"), "{body}");
@@ -155,7 +156,7 @@ fn assert_receipt_tuple(body: &Value, op: &str, requester: &str) {
     assert_payload_secrecy(body);
 }
 
-/// One record update with owned inputs, so it can be a runner-owned task.
+/// note: One record update with owned inputs, so it can be a runner-owned task.
 async fn update_with(
     client: Arc<RemoteAdapter>,
     principal: Principal,
@@ -191,10 +192,10 @@ async fn candidate_after(actor: &Actor<'_>, key: &str, scope: &Value) -> String 
 }
 
 // ---------------------------------------------------------------------------
-// J. Grants and concurrency
+// note: J. Grants and concurrency
 // ---------------------------------------------------------------------------
 
-/// C-090: every base surface — by-id records and candidates, receipts, profiles,
+/// note: C-090: every base surface — by-id records and candidates, receipts, profiles,
 /// reads and recall plus their counts/selection facets — enforces one grant's
 /// scope; out-of-scope probes are indistinguishable from absence and change
 /// nothing durable.
@@ -269,7 +270,7 @@ async fn grant_scope_covers_base_surfaces(
     let before = resources.observe(observer).await;
     let captures_before = resources.receipt_ids_for(observer, "memory.capture").await;
 
-    // 1. Independent same-capability reads: each context succeeds.
+    // note: 1. Independent same-capability reads: each context succeeds.
     assert_eq!(
         peer.get_record(&r_a).await["record"]["content"]["text"],
         json!(TEXT)
@@ -279,7 +280,7 @@ async fn grant_scope_covers_base_surfaces(
         json!(TEXT)
     );
 
-    // 2. The combined selection needs ONE grant covering both contexts.
+    // note: 2. The combined selection needs ONE grant covering both contexts.
     let union = peer
         .list_records(json!({
             "subject_id": SUBJECT,
@@ -337,7 +338,7 @@ async fn grant_scope_covers_base_surfaces(
         "shared visibility needs the shared_access facet"
     );
 
-    // 3. Real uncovered targets: shared (no shared_access), ungranted context,
+    // note: 3. Real uncovered targets: shared (no shared_access), ungranted context,
     //    and an absent id all answer the same NOT_FOUND class.
     for record in [&r_shared, &r_out] {
         let refused = peer.get_record(record).await;
@@ -348,7 +349,7 @@ async fn grant_scope_covers_base_surfaces(
         "NOT_FOUND"
     );
 
-    // 4. Candidate surface.
+    // note: 4. Candidate surface.
     assert_eq!(pending_candidates(&peer).await, vec![c_a.clone()]);
     assert_eq!(
         peer.get_candidate(&c_a).await["candidate"]["candidate_id"],
@@ -356,7 +357,7 @@ async fn grant_scope_covers_base_surfaces(
     );
     assert_eq!(error_code(&peer.get_candidate(&c_b).await), "NOT_FOUND");
 
-    // 5. Selection counts: one per independently covered context.
+    // note: 5. Selection counts: one per independently covered context.
     for (context, expected) in [(CONTEXT, &r_a), (OTHER_CONTEXT, &r_b)] {
         let page = peer
             .list_records(json!({
@@ -377,7 +378,7 @@ async fn grant_scope_covers_base_surfaces(
         assert_eq!(recalled["records"][0]["record_id"], json!(expected));
     }
 
-    // 6. Profile documents are subject-level shared reads.
+    // note: 6. Profile documents are subject-level shared reads.
     assert_eq!(
         error_code(&peer.get_profile(json!({ "subject_id": SUBJECT })).await),
         "NOT_AUTHORIZED"
@@ -387,7 +388,7 @@ async fn grant_scope_covers_base_surfaces(
         json!([])
     );
 
-    // 7. Capture surface: covered commits; ungranted and shared are refused.
+    // note: 7. Capture surface: covered commits; ungranted and shared are refused.
     let refused_capture = peer
         .capture(capture_body(
             "k-c090-outside",
@@ -401,7 +402,7 @@ async fn grant_scope_covers_base_surfaces(
         .await;
     assert_eq!(error_code(&refused_shared), "NOT_AUTHORIZED");
 
-    // 8. Durable no-effect: no capture receipt, no changed seeded row and no
+    // note: 8. Durable no-effect: no capture receipt, no changed seeded row and no
     //    new visible candidate from the denied probes.
     let after = resources.observe(observer).await;
     assert_eq!(
@@ -420,7 +421,7 @@ async fn grant_scope_covers_base_surfaces(
         .await
         .expect("the denied-probe observer closes");
 
-    // 9. Allowed capture in A: bind the result candidate to its durable row and
+    // note: 9. Allowed capture in A: bind the result candidate to its durable row and
     //    the receipt tuple before any later baseline.
     let allowed = peer
         .capture(capture_body(
@@ -467,7 +468,7 @@ async fn grant_scope_covers_base_surfaces(
         .await
         .expect("the effect observer closes");
 
-    // 10. Receipt surface: the holder reads its own; another principal's or
+    // note: 10. Receipt surface: the holder reads its own; another principal's or
     //     out-of-coverage receipt is refused with no receipt disclosure.
     let own = peer.get_receipt(&receipt).await;
     assert_eq!(own["receipt"]["receipt_id"], json!(receipt));
@@ -499,7 +500,7 @@ async fn grant_scope_covers_base_surfaces(
         json!(foreign_receipt)
     );
 
-    // 11. No retained record was replaced or mutated by any probe.
+    // note: 11. No retained record was replaced or mutated by any probe.
     let final_observer = resources
         .open_observer(
             matrix,
@@ -522,7 +523,7 @@ async fn grant_scope_covers_base_surfaces(
         .expect("the final observer closes");
 }
 
-/// C-091: revoking a grant takes effect at the admission boundary. An operation
+/// note: C-091: revoking a grant takes effect at the admission boundary. An operation
 /// that already passed admission runs to its durable candidate/receipt while the
 /// revoke commits; subsequent operations are refused and persist nothing.
 async fn revoke_applies_at_admission_boundary(
@@ -575,7 +576,7 @@ async fn revoke_applies_at_admission_boundary(
             revoke
         }
         Kind::Remote => {
-            // The fixture's existing handler-entry arm, now also consulted by
+            // note: The fixture's existing handler-entry arm, now also consulted by
             // `revoke_grant` after authenticated typed admission and before its
             // writer transaction: a real arrival, not a spawn proxy.
             let mut arrival = matrix.park_next_target("memory.grants.revoke");
@@ -608,7 +609,7 @@ async fn revoke_applies_at_admission_boundary(
     let admitted_candidate = support::candidate_ids(&admitted)[0].clone();
     assert_receipt_tuple(&admitted, "memory.capture", peer_id.as_str());
 
-    // The admitted effect is the actual durable candidate, bound before any
+    // note: The admitted effect is the actual durable candidate, bound before any
     // later baseline can mask a missing effect.
     let effect = resources
         .open_observer(
@@ -658,7 +659,7 @@ async fn revoke_applies_at_admission_boundary(
     assert_eq!(stored["receipt"]["receipt_id"], json!(admitted_receipt));
     assert_eq!(stored["receipt"]["status"], json!("committed"));
 
-    // Subsequent admissions see the revocation: typed refusal, no new effect.
+    // note: Subsequent admissions see the revocation: typed refusal, no new effect.
     let window = resources
         .open_observer(matrix, SUBJECT, &[], None, None, None)
         .await;
@@ -702,7 +703,7 @@ async fn revoke_applies_at_admission_boundary(
         .expect("the refusal observer closes");
 }
 
-/// One revoke with owned inputs so it can be a runner-owned task.
+/// note: One revoke with owned inputs so it can be a runner-owned task.
 async fn revoke_from(
     client: Arc<RemoteAdapter>,
     principal: Principal,
@@ -725,7 +726,7 @@ async fn revoke_from(
     )
 }
 
-/// C-092: two independent authenticated clients update one record from the same
+/// note: C-092: two independent authenticated clients update one record from the same
 /// CAS revision with complete, distinguishable content. Exactly one commits; the
 /// other is `REVISION_CONFLICT`, and the final record is the winner's complete
 /// write with every baseline field intact — never a merge or lost update.
@@ -802,7 +803,7 @@ async fn concurrent_record_update_has_one_winner(
             "idempotency_key": "k-c092-peer",
         }),
     ));
-    // Both owned tasks are joined before either result is asserted.
+    // note: Both owned tasks are joined before either result is asserted.
     let admin_outcome = tasks.join(admin_update, "the admin update").await;
     let peer_outcome = tasks.join(peer_update, "the peer update").await;
     let admin_result = admin_outcome.expect("the admin update settles");
@@ -852,7 +853,7 @@ async fn concurrent_record_update_has_one_winner(
     );
 }
 
-/// C-093: a revocation or a subject fence concurrent with a write has exactly
+/// note: C-093: a revocation or a subject fence concurrent with a write has exactly
 /// one outcome decided by admission order, and the receipt/durable state agrees
 /// with it. Revoke-first/fence-first admit the control first; write-first holds
 /// the admitted write and proves the control reached the provider boundary
@@ -878,7 +879,7 @@ async fn revoke_or_fence_race_has_one_outcome(
         .expect("grant id")
         .to_owned();
 
-    // (a) Revoke admitted first.
+    // note: (a) Revoke admitted first.
     let mut write_hold = matrix.park_next_admission();
     let write = tasks.spawn(support::capture_with(
         matrix.peer_client(),
@@ -918,7 +919,7 @@ async fn revoke_or_fence_race_has_one_outcome(
         .await
         .expect("the revoke-first observer closes");
 
-    // (b) Fence admitted first.
+    // note: (b) Fence admitted first.
     let regranted = admin
         .grant(json!({
             "subject_id": SUBJECT,
@@ -974,7 +975,7 @@ async fn revoke_or_fence_race_has_one_outcome(
         .await
         .expect("the fence-first observer closes");
 
-    // (c) Write admitted first, control arriving while it is held.
+    // note: (c) Write admitted first, control arriving while it is held.
     let unfenced = admin
         .fence_subject(
             SUBJECT,
@@ -1110,7 +1111,7 @@ async fn revoke_or_fence_race_has_one_outcome(
         .expect("the post-race observer closes");
 }
 
-/// One subject fence with owned inputs, so it can be a runner-owned task.
+/// note: One subject fence with owned inputs, so it can be a runner-owned task.
 async fn fence_from(
     client: Arc<RemoteAdapter>,
     principal: Principal,
@@ -1135,7 +1136,7 @@ async fn fence_from(
     )
 }
 
-/// C-095: a scoped admin cannot amplify its own coverage. The context-superset
+/// note: C-095: a scoped admin cannot amplify its own coverage. The context-superset
 /// and shared-access probes carry the SAME valid earlier expiry as the
 /// legitimate positive; the longer-expiry probe is isolated. Refusals leave the
 /// full effective grant set unchanged.
@@ -1259,7 +1260,7 @@ async fn scoped_admin_cannot_amplify_grant(
     );
 }
 
-/// C-096: a fresh provider's operator provisioning creates the initial space and
+/// note: C-096: a fresh provider's operator provisioning creates the initial space and
 /// administrator without any protocol grant cycle, and both are discoverable
 /// through `memory.describe` / `memory.spaces.list`. No protocol space-creation
 /// op exists.
@@ -1299,7 +1300,7 @@ async fn operator_bootstrap_is_callable_and_visible(
         "the operator admin grant is visible: {grants}"
     );
 
-    // No protocol v1 space-creation op was invented; the raw session is
+    // note: No protocol v1 space-creation op was invented; the raw session is
     // runner-owned and closed by the same settle path that owns the matrix.
     let raw = resources.open_raw_admin(matrix).await;
     let invented = resources
@@ -1327,7 +1328,7 @@ async fn operator_bootstrap_is_callable_and_visible(
     );
 }
 
-/// C-096 (`_local` only): the real operator `CoreService` open provisions the
+/// note: C-096 (`_local` only): the real operator `CoreService` open provisions the
 /// initial space and admin grant; its close must report a confirmed cleanup.
 /// The served-surface half runs on a fresh local matrix.
 async fn local_operator_bootstrap_through_core() {
@@ -1372,7 +1373,7 @@ async fn local_operator_bootstrap_through_core() {
         let space_id = provider.space_id().to_owned();
         assert!(!space_id.is_empty(), "Core provisioning created the space");
         let described = support::wire(&provider.describe(&operator, dto(json!({}))).await);
-        // The Core open pins the real local provider, which serves the
+        // note: The Core open pins the real local provider, which serves the
         // reflection family (N4-R), so the honest advertisement names both.
         assert_eq!(
             described["capabilities"],
@@ -1433,7 +1434,7 @@ async fn local_operator_bootstrap_through_core() {
     }
 }
 
-/// The served-surface half of C-096 on a fresh local matrix.
+/// note: The served-surface half of C-096 on a fresh local matrix.
 async fn local_served_surface_refusal(
     matrix: &Matrix,
     resources: &mut OwnedResources,

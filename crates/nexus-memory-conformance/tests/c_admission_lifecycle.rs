@@ -14,6 +14,7 @@
 //! Wire-only observations (an op with no dispatch row, an unnegotiated family, a
 //! session that never negotiated the memory capability) go through a real
 //! signed raw session, because the typed client cannot express those shapes.
+// why: the split-row accounting above decides which matrix row a new selector belongs to.
 
 mod support;
 
@@ -27,7 +28,7 @@ use support::{
     OTHER_SUBJECT, SUBJECT, TEXT,
 };
 
-/// The pending candidate ids a real listing page names.
+/// note: The pending candidate ids a real listing page names.
 fn pending_ids(page: &Value) -> Vec<String> {
     page["candidates"]
         .as_array()
@@ -42,7 +43,7 @@ fn pending_ids(page: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Wait, bounded, for the pending rows this scenario has not seen yet — the
+/// note: Wait, bounded, for the pending rows this scenario has not seen yet — the
 /// actual effect an operation produced, not a client-side claim.
 async fn new_pending(matrix: &Matrix, before: &[String]) -> Vec<String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -62,7 +63,7 @@ async fn new_pending(matrix: &Matrix, before: &[String]) -> Vec<String> {
     }
 }
 
-/// The documented terminal outcomes of the ORIGINAL operation when its
+/// note: The documented terminal outcomes of the ORIGINAL operation when its
 /// controller is gone: a commit, the protocol's uncertain outcome, or the
 /// client's own bounded invoke timeout (the SDK reports that as an internal
 /// timeout error because the caller stopped waiting, not because the effect
@@ -90,7 +91,7 @@ async fn pending_now(matrix: &Matrix) -> Vec<String> {
     )
 }
 
-/// Wait, bounded, until the local provider reports that the competing mutation
+/// note: Wait, bounded, until the local provider reports that the competing mutation
 /// entered its write-admission machinery. The provider's own counter acknowledges
 /// the provider entry; it is not an OS/SQLite lock-wait claim and not elapsed
 /// client time.
@@ -133,14 +134,14 @@ fn candidate_ids(body: &Value) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
-// A. Capability admission and discovery
+// note: A. Capability admission and discovery
 // ---------------------------------------------------------------------------
 
-/// C-001: the provider describes exactly the surface it serves.
+/// note: C-001: the provider describes exactly the surface it serves.
 async fn describe_contract(matrix: Matrix) {
     let body = matrix.admin().describe().await;
     assert_eq!(body["memory_protocol_version"], json!(1));
-    // Both providers genuinely serve the reflection family (N4-R) on the
+    // note: Both providers genuinely serve the reflection family (N4-R) on the
     // advertised matrix; the unadvertised shape is exercised by C-003/C-073.
     assert_eq!(
         body["capabilities"],
@@ -197,7 +198,7 @@ async fn c_001_describe_contract_remote() {
     describe_contract(Matrix::remote().await).await;
 }
 
-/// C-002: known operations fail closed and an op with no dispatch row is
+/// note: C-002: known operations fail closed and an op with no dispatch row is
 /// refused; a session that never negotiated the capability is denied before any
 /// handler runs; neither refusal reaches an effect.
 async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
@@ -205,18 +206,18 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
     let admin = matrix.admin();
     let peer = matrix.peer();
 
-    // A known op whose grant is absent refuses; it never answers a success.
+    // note: A known op whose grant is absent refuses; it never answers a success.
     let denied = peer
         .capture(capture_body("k-c002-denied", TEXT, &shared_scope()))
         .await;
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED", "{denied}");
     assert_eq!(retry_class(&denied), "terminal");
 
-    // A known op with a stale revision refuses too.
+    // note: A known op with a stale revision refuses too.
     let stale = admin.freeze_space("k-c002-stale", 9).await;
     assert_eq!(error_code(&stale), "REVISION_CONFLICT", "{stale}");
 
-    // A signed session whose hello never advertised `spoke-memory`: the Connect
+    // note: A signed session whose hello never advertised `spoke-memory`: the Connect
     // dispatch gate denies known memory ops with `capability_missing` before any
     // handler or payload decode runs (protocol §13).
     let mut capabilityless = matrix.raw_admin_without_memory_capability().await;
@@ -237,7 +238,7 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
         .await
         .expect("the raw session settles");
 
-    // An op name with no dispatch row is not silently served.
+    // note: An op name with no dispatch row is not silently served.
     let mut raw = matrix.raw_admin().await;
     let unknown = raw.invoke("memory.not_an_op", &json!({})).await;
     assert_eq!(
@@ -247,7 +248,7 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
     );
     raw.close().await.expect("the raw session settles");
 
-    // None of the refusals created work.
+    // note: None of the refusals created work.
     assert!(
         candidate_ids(&candidates(&admin).await).is_empty(),
         "a refused capture or denied session leaves no candidate"
@@ -285,7 +286,7 @@ async fn c_002_known_and_unknown_ops_fail_closed_remote() {
     known_and_unknown_ops_fail_closed(Matrix::remote().await).await;
 }
 
-/// C-003: reflection requires its sub-capability across state/list/generate; the
+/// note: C-003: reflection requires its sub-capability across state/list/generate; the
 /// unnegotiated family is answered `capability_missing` at the dispatch gate.
 async fn reflection_requires_subcapability(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
@@ -330,7 +331,7 @@ async fn reflection_requires_subcapability(matrix: Matrix) {
 
 #[tokio::test]
 async fn c_003_reflection_requires_subcapability_local() {
-    // N4-R: the served local provider advertises the reflection family, so
+    // note: N4-R: the served local provider advertises the reflection family, so
     // C-003's continuity row runs on the deliberately-unadvertised shape —
     // `describe` omits the flag there and the dispatch gate keeps refusing it.
     reflection_requires_subcapability(Matrix::local_unadvertised().await).await;
@@ -338,13 +339,13 @@ async fn c_003_reflection_requires_subcapability_local() {
 
 #[tokio::test]
 async fn c_003_reflection_requires_subcapability_remote() {
-    // The continuity shape: the deliberately-unadvertised fixture serves the
+    // note: The continuity shape: the deliberately-unadvertised fixture serves the
     // same operations, so the family's `capability_missing` is the real
     // dispatch denial over Connect negotiation, not a served-but-pinned gap.
     reflection_requires_subcapability(Matrix::remote_unadvertised().await).await;
 }
 
-/// C-004: transfer requires its sub-capability across every export/import
+/// note: C-004: transfer requires its sub-capability across every export/import
 /// operation it names.
 async fn transfer_requires_subcapability(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
@@ -385,7 +386,7 @@ async fn c_004_transfer_requires_subcapability_remote() {
     transfer_requires_subcapability(Matrix::remote().await).await;
 }
 
-/// C-005: `memory.describe` carries capability facts only, never a space
+/// note: C-005: `memory.describe` carries capability facts only, never a space
 /// catalogue; the catalogue itself pages under the advertised bound.
 async fn describe_has_no_space_catalogue(matrix: Matrix) {
     let body = matrix.admin().describe().await;
@@ -399,7 +400,7 @@ async fn describe_has_no_space_catalogue(matrix: Matrix) {
         "capability facts only, exactly the served families: {body}"
     );
 
-    // The catalogue is a bounded page: a page never exceeds the requested limit
+    // note: The catalogue is a bounded page: a page never exceeds the requested limit
     // and reports its end instead of growing without bound.
     let bounded = matrix.admin().list_spaces_page(1).await;
     let rows = bounded["spaces"].as_array().expect("space rows");
@@ -426,10 +427,10 @@ async fn c_005_describe_has_no_space_catalogue_remote() {
 }
 
 // ---------------------------------------------------------------------------
-// B. Space and subject lifecycle fencing
+// note: B. Space and subject lifecycle fencing
 // ---------------------------------------------------------------------------
 
-/// C-010: the space identity and its authority generation are stable across a
+/// note: C-010: the space identity and its authority generation are stable across a
 /// write and across a restart.
 async fn space_identity_and_generation_are_stable(matrix: Matrix) {
     let identity = {
@@ -485,7 +486,7 @@ async fn c_010_space_identity_and_generation_are_stable_remote() {
     space_identity_and_generation_are_stable(Matrix::remote().await).await;
 }
 
-/// C-011 (N3 + N4): the base-operation freeze allowlist. The N4-T
+/// note: C-011 (N3 + N4): the base-operation freeze allowlist. The N4-T
 /// export/import allowlist success remainder is deliberately not asserted.
 async fn freeze_allowlist_base_operations(matrix: Matrix) {
     bootstrap(&matrix, &["capture"]).await;
@@ -504,7 +505,7 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
     assert_eq!(result(&frozen)["status"], "frozen");
     assert_eq!(result(&frozen)["revision"], json!(2));
 
-    // Outside the §8.2 allowlist: fresh writes refuse and commit nothing.
+    // note: Outside the §8.2 allowlist: fresh writes refuse and commit nothing.
     let capture = admin
         .capture(capture_body("k-c011-capture", TEXT, &shared_scope()))
         .await;
@@ -540,7 +541,7 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
         "no frozen-space write left a candidate"
     );
 
-    // Inside the allowlist: reads, revoke and unfreeze stay admissible.
+    // note: Inside the allowlist: reads, revoke and unfreeze stay admissible.
     let spaces = admin.list_spaces().await;
     assert_eq!(spaces["spaces"][0]["status"], "frozen");
     let subject = admin.get_subject(SUBJECT).await;
@@ -556,7 +557,7 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
     assert_eq!(result(&unfrozen)["status"], "active");
     assert_eq!(result(&unfrozen)["revision"], json!(3));
 
-    // After unfreeze exactly the fresh write commits — no ghost write appears
+    // note: After unfreeze exactly the fresh write commits — no ghost write appears
     // later from the frozen period.
     let after = admin
         .capture(capture_body("k-c011-after", TEXT, &shared_scope()))
@@ -587,7 +588,7 @@ async fn c_011_freeze_allowlist_base_operations_remote() {
     freeze_allowlist_base_operations(Matrix::remote().await).await;
 }
 
-/// C-012: a write racing the freeze transition has exactly one admission
+/// note: C-012: a write racing the freeze transition has exactly one admission
 /// outcome, established by the provider's own causal boundary.
 ///
 /// - Local: the parked capture holds the writer lock. The provider's own
@@ -606,12 +607,12 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         .grant(grant_body("admin", &peer_id, "k-c012-admin"))
         .await;
     assert!(is_committed(&granted), "{granted}");
-    // Control lifecycle (local test seam): the space is still active here.
+    // note: Control lifecycle (local test seam): the space is still active here.
     if matrix.kind() == Kind::Local {
         admission_control_is_token_owned(&matrix).await;
     }
 
-    // Candidate count before the race (the local control regression above may
+    // note: Candidate count before the race (the local control regression above may
     // have committed its own probe captures).
     let before = candidate_ids(&candidates(&matrix.admin()).await).len();
     let space_id = matrix.space_id().to_owned();
@@ -629,7 +630,7 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         .await
         .expect("the capture reached its provider point");
 
-    // The baseline is taken BEFORE the freeze is scheduled, so the observed
+    // note: The baseline is taken BEFORE the freeze is scheduled, so the observed
     // delta is exactly that request's own provider entries.
     let baseline = matrix.write_admission_count();
     let freeze_task = tokio::spawn(support::freeze_with(
@@ -642,7 +643,7 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
 
     let capture_outcome = match matrix.kind() {
         Kind::Local => {
-            // The freeze contributes one provider entry (its write-admission
+            // note: The freeze contributes one provider entry (its write-admission
             // machinery; the freeze path does not publish) and is then blocked on
             // the writer lock held by the capture. That arrival is acknowledged by
             // the provider's own counter, not inferred from a client timeout.
@@ -663,7 +664,7 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
             outcome
         }
         Kind::Remote => {
-            // The admission pause is before the writer transaction: the freeze
+            // note: The admission pause is before the writer transaction: the freeze
             // commits first, and that is observed before the capture is resumed.
             let frozen = freeze_task.await.expect("the freeze request completes");
             assert_eq!(
@@ -708,28 +709,28 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
     matrix.shutdown().await;
 }
 
-/// C-012 control lifecycle (local test seam only): dropping an arm before the
+/// note: C-012 control lifecycle (local test seam only): dropping an arm before the
 /// provider takes it disarms only that arm, and an older handle can never clear
 /// a newer arm. Asserted inside the existing C-012 selector, not a new one.
 async fn admission_control_is_token_owned(matrix: &Matrix) {
-    // Drop before take and replacement arms are token-owned.
+    // note: Drop before take and replacement arms are token-owned.
     stale_and_replaced_arms_do_not_park_writes(matrix).await;
 
-    // Retained handle: an observation timeout and an unpolled cancelled future
+    // note: Retained handle: an observation timeout and an unpolled cancelled future
     // both disarm their own token while the handle stays alive.
     timed_out_and_cancelled_observations_disarm_at_call(matrix).await;
 
-    // Controller LOSS after the provider took the arm: the same key must return
+    // note: Controller LOSS after the provider took the arm: the same key must return
     // that same effect, never a fresh second one.
     controller_loss_keeps_one_effect(matrix, "k-c012-loss").await;
 
-    // Controller RETAINED past the provider's own bound (expiry, not loss).
+    // note: Controller RETAINED past the provider's own bound (expiry, not loss).
     if matrix.kind() == Kind::Local {
         provider_expiry_keeps_one_effect(matrix, "k-c012-expiry").await;
     }
 }
 
-/// Drop-before-take and replacement arms are token-owned: a later write is
+/// note: Drop-before-take and replacement arms are token-owned: a later write is
 /// admitted without pausing, and a stale handle never clears the newer arm.
 async fn stale_and_replaced_arms_do_not_park_writes(matrix: &Matrix) {
     let stale = matrix.park_next_admission();
@@ -744,7 +745,7 @@ async fn stale_and_replaced_arms_do_not_park_writes(matrix: &Matrix) {
     .expect("no stale admission arm parks a later write");
     assert!(is_committed(&after_drop), "{after_drop}");
 
-    // Re-arm: arm A, replace it with arm B, then drop A's handle. A's stale token
+    // note: Re-arm: arm A, replace it with arm B, then drop A's handle. A's stale token
     // must not clear B, and the next write must pause at B.
     let first = matrix.park_next_admission();
     let mut second = matrix.park_next_admission();
@@ -767,10 +768,10 @@ async fn stale_and_replaced_arms_do_not_park_writes(matrix: &Matrix) {
     );
 }
 
-/// A retained handle whose observation times out or whose unpolled future is
+/// note: A retained handle whose observation times out or whose unpolled future is
 /// cancelled disarms its own token at the call, so the next write is admitted.
 async fn timed_out_and_cancelled_observations_disarm_at_call(matrix: &Matrix) {
-    // Retained handle, observation timeout. The handle stays ALIVE across the
+    // note: Retained handle, observation timeout. The handle stays ALIVE across the
     // next real write: if the observation did not disarm at its own timeout, the
     // write would park on the live arm until the provider's bound (a 2 s guard
     // fails), so a prompt admission is causal evidence of the call-time guard.
@@ -796,7 +797,7 @@ async fn timed_out_and_cancelled_observations_disarm_at_call(matrix: &Matrix) {
         drop(observation);
     }
 
-    // Retained handle, unpolled observation cancelled: ownership is established
+    // note: Retained handle, unpolled observation cancelled: ownership is established
     // at the call, so dropping the unpolled future disarms its own token. The
     // handle stays alive across the real write; dropping it first would hide a
     // missing call-time guard behind the handle's own `Drop`.
@@ -818,7 +819,7 @@ async fn timed_out_and_cancelled_observations_disarm_at_call(matrix: &Matrix) {
     drop(observation);
 }
 
-/// The controller is really dropped after the take; the original operation
+/// note: The controller is really dropped after the take; the original operation
 /// terminates boundedly, observes its effect, and the same key replays it.
 async fn controller_loss_keeps_one_effect(matrix: &Matrix, key: &str) {
     let before = pending_now(matrix).await;
@@ -884,7 +885,7 @@ async fn controller_loss_keeps_one_effect(matrix: &Matrix, key: &str) {
     );
 }
 
-/// The controller is retained past the provider's own bound (expiry, not loss):
+/// note: The controller is retained past the provider's own bound (expiry, not loss):
 /// the original terminates boundedly, its effect is observed first, and a late
 /// release is bounded.
 async fn provider_expiry_keeps_one_effect(matrix: &Matrix, key: &str) {
@@ -964,7 +965,7 @@ async fn c_012_write_racing_freeze_has_one_admission_outcome_remote() {
     write_racing_freeze_has_one_admission_outcome(Matrix::remote().await).await;
 }
 
-/// C-013: a subject fence is enforced for a different authenticated client.
+/// note: C-013: a subject fence is enforced for a different authenticated client.
 async fn subject_fence_applies_across_clients(matrix: Matrix) {
     bootstrap(&matrix, &["capture"]).await;
     let admin = matrix.admin();
@@ -999,7 +1000,7 @@ async fn subject_fence_applies_across_clients(matrix: Matrix) {
         "the fenced write left no candidate"
     );
 
-    // The fence is subject-scoped: a sibling subject still admits the write.
+    // note: The fence is subject-scoped: a sibling subject still admits the write.
     let sibling = peer.ensure_subject(OTHER_SUBJECT).await;
     assert_eq!(result(&sibling)["created"], json!(true));
     matrix.shutdown().await;
@@ -1015,7 +1016,7 @@ async fn c_013_subject_fence_applies_across_clients_remote() {
     subject_fence_applies_across_clients(Matrix::remote().await).await;
 }
 
-/// C-014: the reversible fence itself survives a restart, retained reads keep
+/// note: C-014: the reversible fence itself survives a restart, retained reads keep
 /// working under it, unfence restores writability, and the terminal archive is
 /// additional evidence.
 async fn reversible_archive_fence_survives_restart(matrix: Matrix) {
@@ -1045,7 +1046,7 @@ async fn reversible_archive_fence_survives_restart(matrix: Matrix) {
         .await;
     assert_eq!(result(&fenced)["status"], "fenced");
 
-    // The fence itself survives the restart.
+    // note: The fence itself survives the restart.
     let matrix = matrix.restart().await;
     let admin = matrix.admin();
     let read = admin.get_subject(SUBJECT).await;
@@ -1056,7 +1057,7 @@ async fn reversible_archive_fence_survives_restart(matrix: Matrix) {
     );
     assert_eq!(read["subject"]["revision"], json!(2));
 
-    // Retained reads keep working while fenced, writes are refused.
+    // note: Retained reads keep working while fenced, writes are refused.
     let retained = admin.get_record(&record_id).await;
     assert_eq!(
         retained["record"]["record_id"],
@@ -1079,7 +1080,7 @@ async fn reversible_archive_fence_survives_restart(matrix: Matrix) {
         .await;
     assert_eq!(error_code(&denied), "SUBJECT_FENCED", "{denied}");
 
-    // Unfence after the restart restores writability.
+    // note: Unfence after the restart restores writability.
     let unfenced = admin
         .fence_subject(
             SUBJECT,
@@ -1098,11 +1099,11 @@ async fn reversible_archive_fence_survives_restart(matrix: Matrix) {
         "unfence restores the write: {restored}"
     );
 
-    // Additional evidence: the terminal archive is durable too.
+    // note: Additional evidence: the terminal archive is durable too.
     archived_subject_is_terminal_after_restart(matrix).await;
 }
 
-/// The terminal archive survives a further restart and a resurrect is the
+/// note: The terminal archive survives a further restart and a resurrect is the
 /// retained invalid transition.
 async fn archived_subject_is_terminal_after_restart(matrix: Matrix) {
     let matrix = matrix.restart().await;
@@ -1144,7 +1145,7 @@ async fn c_014_reversible_archive_fence_survives_restart_remote() {
     reversible_archive_fence_survives_restart(Matrix::remote().await).await;
 }
 
-/// C-016: a context fence does not collateral-fence a sibling context or the
+/// note: C-016: a context fence does not collateral-fence a sibling context or the
 /// shared placement, and it is enforced for a second independent client.
 async fn context_fence_does_not_collateral_fence(matrix: Matrix) {
     bootstrap(&matrix, &["capture"]).await;
@@ -1162,7 +1163,7 @@ async fn context_fence_does_not_collateral_fence(matrix: Matrix) {
     assert_eq!(result(&fenced)["status"], "active");
     assert_eq!(result(&fenced)["fenced_contexts"], json!([CONTEXT]));
 
-    // The second authenticated client performs every write below.
+    // note: The second authenticated client performs every write below.
     let denied = peer
         .capture(capture_body(
             "k-c016-blocked",
@@ -1226,7 +1227,7 @@ async fn c_016_context_fence_does_not_collateral_fence_remote() {
     context_fence_does_not_collateral_fence(Matrix::remote().await).await;
 }
 
-/// C-017: the actual fence/unfence transitions and the stale in-flight write,
+/// note: C-017: the actual fence/unfence transitions and the stale in-flight write,
 /// each ordered by a provider-side admission acknowledgment.
 ///
 /// In every phase the first request is genuinely held at the provider's
@@ -1243,20 +1244,20 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
     assert!(is_committed(&granted), "{granted}");
     let space_id = matrix.space_id().to_owned();
 
-    // Phase 1 (additional): the same-revision fence/fence race.
+    // note: Phase 1 (additional): the same-revision fence/fence race.
     same_revision_fences_commit_exactly_one(&matrix, &space_id).await;
 
-    // Phase 2 (required): concurrent unfence at the current revision and a STALE
+    // note: Phase 2 (required): concurrent unfence at the current revision and a STALE
     // fence, with the unfence held at the admission boundary first.
     unfence_races_a_stale_fence(&matrix, &space_id).await;
 
-    // Phase 3 (required): a write in flight at the provider admission boundary
+    // note: Phase 3 (required): a write in flight at the provider admission boundary
     // when the fence commits is refused with no effect.
     in_flight_write_is_refused_after_the_fence_commits(&matrix, &space_id).await;
     matrix.shutdown().await;
 }
 
-/// Phase 1: the same-revision fence/fence race commits exactly one transition
+/// note: Phase 1: the same-revision fence/fence race commits exactly one transition
 /// and writes no context fence.
 async fn same_revision_fences_commit_exactly_one(matrix: &Matrix, space_id: &str) {
     let mut arrival = match matrix.kind() {
@@ -1313,7 +1314,7 @@ async fn same_revision_fences_commit_exactly_one(matrix: &Matrix, space_id: &str
     );
 }
 
-/// Phase 2: the current-revision unfence commits and the stale fence loses
+/// note: Phase 2: the current-revision unfence commits and the stale fence loses
 /// deterministically.
 async fn unfence_races_a_stale_fence(matrix: &Matrix, space_id: &str) {
     let mut arrival = match matrix.kind() {
@@ -1366,11 +1367,11 @@ async fn unfence_races_a_stale_fence(matrix: &Matrix, space_id: &str) {
     assert_eq!(read["subject"]["revision"], json!(3));
 }
 
-/// Phase 3: a write in flight at the provider admission boundary when the fence
+/// note: Phase 3: a write in flight at the provider admission boundary when the fence
 /// commits is refused with no effect.
 async fn in_flight_write_is_refused_after_the_fence_commits(matrix: &Matrix, space_id: &str) {
     let before = candidate_ids(&candidates(&matrix.admin()).await).len();
-    // Both providers park the write at their capture admission point.
+    // note: Both providers park the write at their capture admission point.
     let mut arrival = matrix.park_next_admission();
     let write = tokio::spawn(support::capture_with(
         matrix.admin_client(),

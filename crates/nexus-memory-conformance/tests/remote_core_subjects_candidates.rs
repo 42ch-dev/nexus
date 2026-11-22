@@ -66,8 +66,9 @@
 //! (a swallowed refusal would still produce one). The in-memory agent adapter
 //! exists only so that production path needs no process, model or network; the
 //! memory port itself is always the real signed provider.
+// why: the proven/cannot-prove list above bounds what a selector may assert, and grows with it.
 
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per test
 
 mod support;
 
@@ -132,44 +133,44 @@ use spoke_operations::{MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 
 use support::dto;
 
-/// The host's Connect identity (the provider side of the signed session).
+/// note: The host's Connect identity (the provider side of the signed session).
 const HOST_SEED: [u8; 32] = [0x42; 32];
-/// The dialing client's Connect identity; the credential file holds this seed.
+/// note: The dialing client's Connect identity; the credential file holds this seed.
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
-/// The one capability both ends negotiate: the fixture serves no other family.
+/// note: The one capability both ends negotiate: the fixture serves no other family.
 const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 const WORKSPACE: &str = "default";
 const CREDENTIAL_ID: &str = "cred-r2-subjects";
 const BOUND: Duration = Duration::from_secs(5);
-// Core opens its local database admission before dialing, outside the protocol deadline.
+// note: Core opens its local database admission before dialing, outside the protocol deadline.
 const SETUP_BOUND: Duration = Duration::from_secs(30);
-/// A digest the deterministic classifier drops: shorter than its 50-character
+/// note: A digest the deterministic classifier drops: shorter than its 50-character
 /// minimum, so the drain issues a legitimate `drop` decision.
 const DROP_DIGEST: &str = "short note";
 
-/// Bytes of the file that occupies a bearer's long-term discovery *directory*.
+/// note: Bytes of the file that occupies a bearer's long-term discovery *directory*.
 ///
 /// `memory_io::list_memories` calls `fs::read_dir` on that directory and only
 /// treats `NotFound` as honest-empty, so a regular file there makes every real
 /// discovery attempt fail loudly — the trap the lifecycle below must not trip.
 const LEGACY_DIR_TRAP_BYTES: &[u8] = b"r2-legacy-long-term-dir-trap";
 
-/// A high-signal digest the deterministic classifier promotes for `brainstorm`.
+/// note: A high-signal digest the deterministic classifier promotes for `brainstorm`.
 const PROMOTE_DIGEST: &str =
     "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
-/// The fixture's own `max_content_bytes` is 65536 and it measures the whole
+/// note: The fixture's own `max_content_bytes` is 65536 and it measures the whole
 /// serialized `content`; a digest at Core's own 64 KiB field bound passes client
 /// validation and still exceeds the provider's payload bound.
 const OVER_LIMIT_DIGEST_BYTES: usize = 64 * 1024;
 
-/// A schema-valid but foreign dismissal-receipt candidate id carrying a peer
+/// note: A schema-valid but foreign dismissal-receipt candidate id carrying a peer
 /// sentinel. The response schema types the id as a nonempty string, not a
 /// patterned id, so only binding the receipt to its request rejects it
 /// (I-000303).
 const FORGED_RECEIPT_CANDIDATE: &str = "cand_forged\nMARKER-I303 token=abc";
 
 // ---------------------------------------------------------------------------
-// Signed loopback provider
+// note: Signed loopback provider
 // ---------------------------------------------------------------------------
 
 fn manifest(host_id: &str) -> HostCapabilityManifest {
@@ -202,7 +203,7 @@ fn hex(bytes: &[u8]) -> String {
     text
 }
 
-/// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
+/// note: Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
 /// the signed responder's transport.
 async fn start_listener(
     memory_service: Arc<dyn RemoteMemoryService>,
@@ -232,7 +233,7 @@ async fn start_listener(
     (addr, task)
 }
 
-/// Await one responder task without letting a fixture bug hang the suite.
+/// note: Await one responder task without letting a fixture bug hang the suite.
 async fn responder_of(
     task: tokio::task::JoinHandle<Arc<ConnectResponder>>,
 ) -> Arc<ConnectResponder> {
@@ -243,10 +244,10 @@ async fn responder_of(
 }
 
 // ---------------------------------------------------------------------------
-// The disposable home, the selection and the open
+// note: The disposable home, the selection and the open
 // ---------------------------------------------------------------------------
 
-/// One disposable user home, bootstrapped through the real public home
+/// note: One disposable user home, bootstrapped through the real public home
 /// contract: a registered Creator, a selected workspace (which materializes the
 /// state DB and the workspace `creators` row the FK prechecks rely on) and the
 /// operator-provisioned credential for the dialing seed.
@@ -291,7 +292,7 @@ impl Env {
         env
     }
 
-    /// Write the operator-provisioned credential for the dialing seed at
+    /// note: Write the operator-provisioned credential for the dialing seed at
     /// mode `0600`.
     fn write_credential(&self) {
         let dir = self.user_home.join(".nexus42").join("memory-credentials");
@@ -313,14 +314,14 @@ impl Env {
         }
     }
 
-    /// The local provider's private file root: its absence is the observable
+    /// note: The local provider's private file root: its absence is the observable
     /// that no local provider was constructed.
     fn local_provider_store(&self) -> PathBuf {
         nexus_home_layout::operational_workspace_dir(&self.user_home, &self.creator_id, WORKSPACE)
             .join("memory-store")
     }
 
-    /// The Creator bearer's real long-term discovery directory: exactly what
+    /// note: The Creator bearer's real long-term discovery directory: exactly what
     /// `MemoryBearerRef::Creator::long_term_memory_dir` resolves
     /// (`<nexus root>/creators/<creator>/memory/long-term`), which
     /// `memory_io::list_memories` reads with `fs::read_dir`.
@@ -332,7 +333,7 @@ impl Env {
             .join("long-term")
     }
 
-    /// The Character bearer's real long-term discovery directory, exactly what
+    /// note: The Character bearer's real long-term discovery directory, exactly what
     /// `MemoryBearerRef::Character::long_term_memory_dir` resolves.
     fn character_long_term_dir(&self, character_id: &str) -> PathBuf {
         nexus_home_layout::character_long_term_memory_dir(
@@ -355,7 +356,7 @@ impl Env {
     }
 }
 
-/// The durable, independent provider this suite serves, plus the exact
+/// note: The durable, independent provider this suite serves, plus the exact
 /// peer→principal admission the operator provisioned for the dialing seed.
 struct Provider {
     _home: TempDir,
@@ -394,13 +395,13 @@ impl Provider {
         self.inner.faults().clone()
     }
 
-    /// Serve one signed session over a fresh loopback listener.
+    /// note: Serve one signed session over a fresh loopback listener.
     async fn serve(&self) -> (SocketAddr, tokio::task::JoinHandle<Arc<ConnectResponder>>) {
         self.serve_service(self.inner.server(self.directory.admission()))
             .await
     }
 
-    /// Serve one signed session for an explicitly supplied memory service.
+    /// note: Serve one signed session for an explicitly supplied memory service.
     ///
     /// The suite's only use is the test-only `SubjectGetProbe` decorator, which
     /// forwards every ordinary request to this provider's real assembled service
@@ -428,7 +429,7 @@ impl Provider {
         })
     }
 
-    /// Open Core against this provider and return it with the responder task
+    /// note: Open Core against this provider and return it with the responder task
     /// that served the session.
     async fn open_core(
         &self,
@@ -438,7 +439,7 @@ impl Provider {
             .await
     }
 
-    /// [`Self::open_core`] over an explicitly supplied memory service (the
+    /// note: [`Self::open_core`] over an explicitly supplied memory service (the
     /// test-only `SubjectGetProbe` decorator).
     async fn open_core_serving(
         &self,
@@ -452,7 +453,7 @@ impl Provider {
         (core, task)
     }
 
-    /// The provider's own database, read directly: the durable effects are
+    /// note: The provider's own database, read directly: the durable effects are
     /// asserted there instead of through the port under test.
     async fn pool(&self) -> SqlitePool {
         SqlitePool::connect_with(
@@ -464,7 +465,7 @@ impl Provider {
         .expect("open the fixture database")
     }
 
-    /// The operator principal the authenticated peer maps to, as the memory
+    /// note: The operator principal the authenticated peer maps to, as the memory
     /// port's own request carrier: the fixture authorizes the request's
     /// principal id against the operator grant.
     fn memory_principal() -> MemoryPrincipal {
@@ -475,7 +476,7 @@ impl Provider {
         .expect("valid memory principal")
     }
 
-    /// Dial the SDK `RemoteAdapter` over its own signed loopback session.
+    /// note: Dial the SDK `RemoteAdapter` over its own signed loopback session.
     ///
     /// This is the SDK's own client (the pattern the conformance loopback uses),
     /// not Core: it addresses the provider operations Core's surface does not
@@ -511,7 +512,7 @@ impl Provider {
         (adapter, task)
     }
 
-    /// Run the provider's own retention pass beyond BOTH windows: the keyed
+    /// note: Run the provider's own retention pass beyond BOTH windows: the keyed
     /// receipt body window and the dedup tombstone window that follows it.
     ///
     /// This is the existing public operator (`FixtureMemoryProvider::sweep_retained`),
@@ -531,7 +532,7 @@ impl Provider {
 }
 
 // ---------------------------------------------------------------------------
-// Nexus-side observation helpers
+// note: Nexus-side observation helpers
 // ---------------------------------------------------------------------------
 
 async fn core_db(env: &Env) -> SqlitePool {
@@ -557,7 +558,7 @@ async fn scalar(pool: &SqlitePool, sql: &str) -> i64 {
         .get::<i64, _>(0)
 }
 
-/// The binding's still-open D18 wire admissions.
+/// note: The binding's still-open D18 wire admissions.
 async fn admission_count(pool: &SqlitePool, binding_id: &str) -> i64 {
     count(
         pool,
@@ -567,7 +568,7 @@ async fn admission_count(pool: &SqlitePool, binding_id: &str) -> i64 {
     .await
 }
 
-/// The binding's recorded known provider-object facts as `(kind, id, state)`.
+/// note: The binding's recorded known provider-object facts as `(kind, id, state)`.
 async fn object_facts(pool: &SqlitePool, binding_id: &str) -> Vec<(String, String, String)> {
     sqlx::query(
         "SELECT object_kind, object_id, state FROM remote_binding_memory_objects \
@@ -588,7 +589,7 @@ async fn object_facts(pool: &SqlitePool, binding_id: &str) -> Vec<(String, Strin
     .collect()
 }
 
-/// Assert the authoritative removal gate refuses this binding for remote
+/// note: Assert the authoritative removal gate refuses this binding for remote
 /// memory, and that the refusal mutated nothing.
 async fn assert_remote_memory_holds(
     core: &CoreService,
@@ -607,7 +608,7 @@ async fn assert_remote_memory_holds(
 }
 
 // ---------------------------------------------------------------------------
-// Provider-side observation helpers
+// note: Provider-side observation helpers
 // ---------------------------------------------------------------------------
 
 async fn provider_candidate(
@@ -630,7 +631,7 @@ async fn provider_candidate(
     })
 }
 
-/// The subject's candidate rows as `(status, visibility, context, kind)`.
+/// note: The subject's candidate rows as `(status, visibility, context, kind)`.
 async fn provider_candidates(
     pool: &SqlitePool,
     subject_id: &str,
@@ -655,7 +656,7 @@ async fn provider_candidates(
     .collect()
 }
 
-/// The single candidate a capture receipt named, read off the provider.
+/// note: The single candidate a capture receipt named, read off the provider.
 async fn only_candidate_id(pool: &SqlitePool, subject_id: &str) -> String {
     let rows = sqlx::query("SELECT candidate_id, status FROM candidates WHERE subject_id = ?")
         .bind(subject_id)
@@ -699,7 +700,7 @@ async fn provider_receipts(pool: &SqlitePool, op: &str) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// Fixture setup through the real public Core actor surface
+// note: Fixture setup through the real public Core actor surface
 // ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &Principal, title: &str) -> String {
@@ -783,7 +784,7 @@ async fn capture(
     .map(|_| ())
 }
 
-/// The standard refusal every memory call under the pinned binding carries.
+/// note: The standard refusal every memory call under the pinned binding carries.
 fn provider_refusal(error: &CoreError) -> (&str, &str, MemoryProviderRefusal, Option<&str>) {
     match error {
         CoreError::MemoryProviderRefused {
@@ -798,7 +799,7 @@ fn provider_refusal(error: &CoreError) -> (&str, &str, MemoryProviderRefusal, Op
 }
 
 // ---------------------------------------------------------------------------
-// Subjects, capture and candidate reads
+// note: Subjects, capture and candidate reads
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -808,7 +809,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     let (core, responder) = provider.open_core(&env).await;
     let principal = core.active_principal().await.expect("active principal");
 
-    // A real owned World, Character and a second binding: the actor surface
+    // note: A real owned World, Character and a second binding: the actor surface
     // itself is Nexus-side and unrelated to the pinned memory provider.
     let world_a = create_world(&core, &principal, "R2 World A").await;
     let world_b = create_world(&core, &principal, "R2 World B").await;
@@ -818,7 +819,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     let world_c = create_world(&core, &principal, "R2 World C").await;
     let binding_c = add_binding(&core, &principal, &character_id, &world_c).await;
 
-    // I215: arm the legacy-read traps BEFORE the first remote operation and keep
+    // note: I215: arm the legacy-read traps BEFORE the first remote operation and keep
     // them armed for the whole lifecycle below.
     //
     // - The legacy Creator queue, the legacy Character queue and the legacy
@@ -844,7 +845,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         .await
         .expect("withhold a legacy memory table from the whole lifecycle");
     }
-    // The file trap matches the REAL discovery: `list_memories` does
+    // note: The file trap matches the REAL discovery: `list_memories` does
     // `fs::read_dir(<long-term>)` and skips non-file *entries*, so a directory
     // named like a memory file proves nothing. Occupying the long-term
     // discovery DIRECTORY itself with a regular file makes `read_dir` fail with
@@ -857,7 +858,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         fs::write(dir, LEGACY_DIR_TRAP_BYTES).expect("the long-term discovery dir becomes a file");
     }
 
-    // Two captures: one shared Character scope, one binding-local.
+    // note: Two captures: one shared Character scope, one binding-local.
     capture(&core, &principal, &character_id, None, "pend_shared")
         .await
         .expect("shared capture");
@@ -870,7 +871,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     )
     .await
     .expect("binding-local capture");
-    // A second active binding of the same Character owns its own scope.
+    // note: A second active binding of the same Character owns its own scope.
     capture(
         &core,
         &principal,
@@ -881,7 +882,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     .await
     .expect("binding-local capture on the second binding");
 
-    // The provider is the independent durable owner of the effects: both
+    // note: The provider is the independent durable owner of the effects: both
     // candidates, their placements, the receipts and the ensured subject.
     let pool = provider.pool().await;
     let subject_id = legacy::character_subject_id(&character_id);
@@ -936,7 +937,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     .get::<String, _>("candidate_id");
     pool.close().await;
 
-    // Candidate list: the retained scope split is served from the provider.
+    // note: Candidate list: the retained scope split is served from the provider.
     let shared = core
         .list_character_pending_reviews(&principal, character_id.clone(), None, 50, 0)
         .await
@@ -984,7 +985,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         1
     );
 
-    // Candidate get + dismissal: the retained miss is not-found and the
+    // note: Candidate get + dismissal: the retained miss is not-found and the
     // provider's row is consumed exactly once.
     core.delete_character_pending_review(
         &principal,
@@ -1021,7 +1022,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         "a dismissed row leaves the shared queue"
     );
 
-    // Two callers dismissing the same row at once: the provider's dedup key
+    // note: Two callers dismissing the same row at once: the provider's dedup key
     // makes the second a replay of the first, so both may answer the retained
     // success — but there is exactly ONE durable dismissal receipt and ONE
     // consumption, never a second effect.
@@ -1075,7 +1076,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     );
     pool.close().await;
 
-    // Review: the drain consumes the binding-local candidate and writes its
+    // note: Review: the drain consumes the binding-local candidate and writes its
     // `fact` fragment on the provider, in the binding's own placement.
     let reviewed = core
         .review_character_memory(
@@ -1125,7 +1126,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     );
     pool.close().await;
 
-    // Two DIFFERENT standard mutations racing on one opaque candidate: the
+    // note: Two DIFFERENT standard mutations racing on one opaque candidate: the
     // provider's revision check admits exactly one consumption, so one of the
     // two callers observes the other's committed effect instead of a second
     // write. Which caller wins is a race; the invariant is one receipt.
@@ -1185,7 +1186,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     );
     pool.close().await;
 
-    // The Creator arm shares the same pinned provider and its own subject.
+    // note: The Creator arm shares the same pinned provider and its own subject.
     core.create_pending_review(
         &principal,
         dto::<CreatePendingReviewRequest>(json!({
@@ -1223,7 +1224,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     );
     pool.close().await;
 
-    // A remote Creator miss must come from the provider alone: the local legacy
+    // note: A remote Creator miss must come from the provider alone: the local legacy
     // queue and its cross-Creator ownership re-read (the retained 403) are
     // local-only paths. With the queue withheld for the whole lifecycle, an
     // actual legacy read anywhere above — or here — fails loudly, so the
@@ -1279,7 +1280,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         !env.local_provider_store().exists(),
         "a remote binding never constructs the local provider"
     );
-    // The discovery traps, read back after the whole lifecycle: both bearer
+    // note: The discovery traps, read back after the whole lifecycle: both bearer
     // long-term paths are still the pre-existing regular file, and the real
     // discovery call (`fs::read_dir`, exactly what `list_memories` performs)
     // still fails with a non-`NotFound` error. Any accidental legacy file
@@ -1302,7 +1303,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         );
     }
 
-    // I211: the subject *read* itself, over the SDK's own signed session. The
+    // note: I211: the subject *read* itself, over the SDK's own signed session. The
     // durable row asserted above is the effect of `ensure_subject`; this call is
     // the `memory.subjects.get` Core's adapter issues, observed at the protocol
     // boundary, and it can fail on a wrong response or a wrong subject.
@@ -1332,7 +1333,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         .as_u64()
         .expect("the subject revision");
 
-    // A subject this provider never saw answers the protocol's definite absence.
+    // note: A subject this provider never saw answers the protocol's definite absence.
     match adapter
         .get_subject(
             &memory_principal,
@@ -1347,7 +1348,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         SpokeResult::Ok(body) => panic!("an unknown subject is not served: {body:?}"),
     }
 
-    // Archive the provider subject through the real admin operation, then read
+    // note: Archive the provider subject through the real admin operation, then read
     // the archived state back through the same get.
     match adapter
         .fence_subject(
@@ -1385,7 +1386,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
         "the archived lifecycle is what Core's subject_archived read sees"
     );
 
-    // Core meets the same archived subject: the next binding-local capture is
+    // note: Core meets the same archived subject: the next binding-local capture is
     // refused by the provider lifecycle gate with the definite class, and no
     // admission or candidate fact survives it.
     let refused = capture(
@@ -1401,7 +1402,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
     assert_eq!(refusal_code, "SUBJECT_FENCED");
     assert_eq!(retry_class, "terminal");
     assert_eq!(family, MemoryProviderRefusal::Conflict);
-    // Scoped to THIS binding: the archived attempt's definite refusal settles
+    // note: Scoped to THIS binding: the archived attempt's definite refusal settles
     // its own admission. Other bindings may legitimately retain conservative
     // attempts (the concurrent dismiss/review race above keeps the losing
     // review's admission, which the shared no-effect policy does not retire).
@@ -1427,7 +1428,7 @@ async fn subject_capture_and_candidate_reads_run_on_the_remote_provider() {
 }
 
 // ---------------------------------------------------------------------------
-// The D18 removal gate and its settlements
+// note: The D18 removal gate and its settlements
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1448,7 +1449,7 @@ async fn binding_removal_follows_known_remote_dependencies() {
     let no_effect = add_binding(&core, &principal, &character_id, &worlds[3]).await;
     let replayed = add_binding(&core, &principal, &character_id, &worlds[4]).await;
 
-    // (1) A committed binding-local capture is a known live dependency: the
+    // note: (1) A committed binding-local capture is a known live dependency: the
     // authoritative removal gate refuses until it is actually disposed.
     capture(
         &core,
@@ -1477,7 +1478,7 @@ async fn binding_removal_follows_known_remote_dependencies() {
     nexus.close().await;
     assert_remote_memory_holds(&core, &principal, &character_id, &dismissed).await;
 
-    // Disposing it (the standard dismissal acknowledgement) closes the known
+    // note: Disposing it (the standard dismissal acknowledgement) closes the known
     // dependency, and the same removal then succeeds.
     core.delete_character_pending_review(
         &principal,
@@ -1501,7 +1502,7 @@ async fn binding_removal_follows_known_remote_dependencies() {
         .await
         .expect("a disposed candidate no longer holds the binding");
 
-    // (2) A review binds the record it created: the record reference is a live
+    // note: (2) A review binds the record it created: the record reference is a live
     // dependency until the record leaves this binding's placement.
     capture(
         &core,
@@ -1569,7 +1570,7 @@ async fn binding_removal_follows_known_remote_dependencies() {
         .await
         .expect("a promoted record no longer holds the binding");
 
-    // (3) A refusal that proves this attempt had no effect settles its
+    // note: (3) A refusal that proves this attempt had no effect settles its
     // admission: the definite answer keeps the binding removable.
     let over_limit = "x".repeat(OVER_LIMIT_DIGEST_BYTES);
     let refused = core
@@ -1610,7 +1611,7 @@ async fn binding_removal_follows_known_remote_dependencies() {
         .await
         .expect("a settled no-effect attempt leaves the binding removable");
 
-    // (4) A replayed receipt cannot revive a terminal fact: the same-key
+    // note: (4) A replayed receipt cannot revive a terminal fact: the same-key
     // capture answers the original receipt, whose publication is a stale
     // `live` snapshot of the already-released candidate.
     let (addr, task) = provider.serve().await;
@@ -1671,7 +1672,7 @@ async fn binding_removal_follows_known_remote_dependencies() {
     );
     responder_of(task).await;
 
-    // The keeper binding is the last one standing; nothing above touched it.
+    // note: The keeper binding is the last one standing; nothing above touched it.
     core.remove_binding(&principal, character_id.clone(), keeper.clone())
         .await
         .expect_err("the last active binding still refuses removal");
@@ -1686,7 +1687,7 @@ async fn binding_removal_follows_known_remote_dependencies() {
 }
 
 // ---------------------------------------------------------------------------
-// Provenance refusals
+// note: Provenance refusals
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1702,14 +1703,14 @@ async fn provenance_refusals_write_no_remote_effect() {
         create_character(&core, &principal, "R2 Prov Ada", &world_a).await;
     let (other_character, other_binding, other_revision) =
         create_character(&core, &principal, "R2 Prov Bea", &world_b).await;
-    // The gate below needs a second active binding: the last one is its own
+    // note: The gate below needs a second active binding: the last one is its own
     // retained 409, which would hide the remote-memory answer.
     let world_c = create_world(&core, &principal, "R2 Prov C").await;
     add_binding(&core, &principal, &character_id, &world_c).await;
 
     let pool = provider.pool().await;
 
-    // A foreign subject's own queue row: the other Character captures through
+    // note: A foreign subject's own queue row: the other Character captures through
     // its own real binding, so the provider holds a pending candidate under a
     // subject this bearer does not own.
     capture(
@@ -1730,7 +1731,7 @@ async fn provenance_refusals_write_no_remote_effect() {
         .get::<String, _>("candidate_id");
     let before = scalar(&pool, "SELECT COUNT(*) FROM candidates").await;
 
-    // Dismissing another subject's retained pending identity is the retained
+    // note: Dismissing another subject's retained pending identity is the retained
     // not-found and mutates nothing: the provider authorizes the candidate op by
     // space-wide grant coverage, so the subject/identity match is the only
     // thing keeping one bearer off another's row.
@@ -1752,7 +1753,7 @@ async fn provenance_refusals_write_no_remote_effect() {
         "the foreign subject's candidate stays pending and unmutated"
     );
 
-    // A missing binding: the proven provenance refusal precedes the provider.
+    // note: A missing binding: the proven provenance refusal precedes the provider.
     let missing = core
         .capture_character_pending_review(
             &principal,
@@ -1770,7 +1771,7 @@ async fn provenance_refusals_write_no_remote_effect() {
         "the retained provenance answer: {missing:?}"
     );
 
-    // A binding of another Character: foreign provenance is the same refusal.
+    // note: A binding of another Character: foreign provenance is the same refusal.
     let foreign = core
         .capture_character_pending_review(
             &principal,
@@ -1788,7 +1789,7 @@ async fn provenance_refusals_write_no_remote_effect() {
         "the retained provenance answer: {foreign:?}"
     );
 
-    // An inactive bearer: the archived Character is refused at its activity
+    // note: An inactive bearer: the archived Character is refused at its activity
     // lease, before any provenance check or provider write.
     core.transition_character(
         &principal,
@@ -1817,7 +1818,7 @@ async fn provenance_refusals_write_no_remote_effect() {
         "the retained inactive answer: {inactive:?}"
     );
 
-    // None of the three refusals wrote anything: no provider candidate, no
+    // note: None of the three refusals wrote anything: no provider candidate, no
     // admission, no known-object fact, and the live binding is untouched.
     assert_eq!(
         scalar(&pool, "SELECT COUNT(*) FROM candidates").await,
@@ -1846,7 +1847,7 @@ async fn provenance_refusals_write_no_remote_effect() {
     );
     nexus.close().await;
 
-    // The refused binding is still a valid, active, removable-only-by-policy
+    // note: The refused binding is still a valid, active, removable-only-by-policy
     // binding: capture succeeds once its provenance is real.
     capture(
         &core,
@@ -1869,7 +1870,7 @@ async fn provenance_refusals_write_no_remote_effect() {
 }
 
 // ---------------------------------------------------------------------------
-// Uncertain and abandoned admissions
+// note: Uncertain and abandoned admissions
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1889,7 +1890,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     let abandoned = add_binding(&core, &principal, &character_id, &worlds[2]).await;
     let subject_id = legacy::character_subject_id(&character_id);
 
-    // A provider-committed capture whose response is lost: the caller learns
+    // note: A provider-committed capture whose response is lost: the caller learns
     // only that the outcome is unknown, and the attempt's admission stays.
     provider
         .faults()
@@ -1921,7 +1922,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     nexus.close().await;
     assert_remote_memory_holds(&core, &principal, &character_id, &uncertain).await;
 
-    // The admission is durable across a real close and reopen, and the later
+    // note: The admission is durable across a real close and reopen, and the later
     // same-key success — which does publish the original receipt — never
     // clears it.
     assert!(
@@ -1932,7 +1933,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     let (reopened, reopened_responder) = provider.open_core(&env).await;
     let reopened_principal = reopened.active_principal().await.expect("principal");
     assert_remote_memory_holds(&reopened, &reopened_principal, &character_id, &uncertain).await;
-    // The acknowledgement lands BEFORE any result publication: the lost capture
+    // note: The acknowledgement lands BEFORE any result publication: the lost capture
     // committed at the provider but never published locally, so this dismissal
     // is the FIRST fact ever recorded for that candidate — and it is terminal.
     let pending = reopened
@@ -1976,7 +1977,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     );
     nexus.close().await;
 
-    // The later same-key success publishes the original receipt for the SAME
+    // note: The later same-key success publishes the original receipt for the SAME
     // candidate: that stale `live` snapshot can neither revive nor erase the
     // terminal acknowledgement, and the older unknown admission still blocks.
     capture(
@@ -2006,7 +2007,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     nexus.close().await;
     assert_remote_memory_holds(&reopened, &reopened_principal, &character_id, &uncertain).await;
 
-    // I212: the same key is FREE again after BOTH retention windows. The
+    // note: I212: the same key is FREE again after BOTH retention windows. The
     // provider's own public retention operator runs past the receipt-body
     // window and the dedup tombstone window, so the identical Core capture can
     // no longer replay the old receipt: it commits a genuinely new effect.
@@ -2103,7 +2104,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     );
     nexus.close().await;
 
-    // Disposing the new known dependency does not free the older unknown one.
+    // note: Disposing the new known dependency does not free the older unknown one.
     reopened
         .delete_character_pending_review(
             &reopened_principal,
@@ -2128,7 +2129,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     nexus.close().await;
     assert_remote_memory_holds(&reopened, &reopened_principal, &character_id, &uncertain).await;
 
-    // Caller loss mid-flight: the committed effect's response is withheld, the
+    // note: Caller loss mid-flight: the committed effect's response is withheld, the
     // calling task is abandoned, and the admission survives that loss.
     // A generous hold bound: the in-flight assertions below run BEFORE the
     // caller is abandoned, so the provider must stay parked across them.
@@ -2154,7 +2155,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
         .await
         .expect("the provider committed and withheld the response");
 
-    // I214: the caller has not been abandoned yet. The attempt's durable
+    // note: I214: the caller has not been abandoned yet. The attempt's durable
     // admission was committed before the RPC and the provider has already
     // committed the effect, so the authoritative removal must refuse right now,
     // with the binding and its admission unchanged.
@@ -2210,7 +2211,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     nexus.close().await;
     assert_remote_memory_holds(&final_open, &final_principal, &character_id, &uncertain).await;
 
-    // Protection is per binding, not a shared counter: this binding has no
+    // note: Protection is per binding, not a shared counter: this binding has no
     // remote dependency and removes even while another holds an unknown
     // admission, and that removal clears nothing of the other binding's facts.
     final_open
@@ -2237,7 +2238,7 @@ async fn uncertain_and_abandoned_capture_admissions_survive_reopen() {
     );
 }
 
-/// Prove the provider really serves one candidate at the exact addressed id,
+/// note: Prove the provider really serves one candidate at the exact addressed id,
 /// through the SDK's own signed session: the fact the fetch under test reads.
 async fn assert_served_at(
     adapter: &RemoteAdapter,
@@ -2267,10 +2268,10 @@ async fn assert_served_at(
 }
 
 // ---------------------------------------------------------------------------
-// The fetched shaped-id identity guards
+// note: The fetched shaped-id identity guards
 // ---------------------------------------------------------------------------
 
-/// A candidate that really exists at the deterministic bridge id Nexus derives
+/// note: A candidate that really exists at the deterministic bridge id Nexus derives
 /// from a retained pending id, but whose subject or retained identity is not the
 /// requested one: the real public dismissal fetches it and refuses before the
 /// provider CAS. The matching control goes through the same branch and the real
@@ -2291,7 +2292,7 @@ async fn shaped_candidate_identity_guards_precede_the_provider_cas() {
     let subject_id = legacy::character_subject_id(&character_id);
     let other_subject = legacy::character_subject_id(&other_character);
 
-    // The SDK session is only the address proof: it serves the staged row at
+    // note: The SDK session is only the address proof: it serves the staged row at
     // exactly the id the public dismissal derives and looks up.
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
@@ -2299,7 +2300,7 @@ async fn shaped_candidate_identity_guards_precede_the_provider_cas() {
     let dismissals_before = provider_receipts(&baseline, "memory.candidates.dismiss").await;
     baseline.close().await;
 
-    // (a) The addressed candidate exists, but under ANOTHER Character's subject.
+    // note: (a) The addressed candidate exists, but under ANOTHER Character's subject.
     let foreign_pending = "pend_guard_foreign";
     let foreign_id = legacy::character_pending_review_candidate_id(foreign_pending);
     provider
@@ -2339,7 +2340,7 @@ async fn shaped_candidate_identity_guards_precede_the_provider_cas() {
     );
     pool.close().await;
 
-    // (b) The addressed candidate belongs to THIS subject, but its retained
+    // note: (b) The addressed candidate belongs to THIS subject, but its retained
     // pending identity is a different row: still the same pre-CAS refusal.
     let wrong_pending = "pend_guard_wrong";
     let stored_pending = "pend_guard_other";
@@ -2401,7 +2402,7 @@ async fn shaped_candidate_identity_guards_precede_the_provider_cas() {
     );
     pool.close().await;
 
-    // (c) Positive control: the subject and the retained identity both match,
+    // note: (c) Positive control: the subject and the retained identity both match,
     // so the SAME lookup branch reaches the real provider CAS and consumes it.
     let ok_pending = "pend_guard_ok";
     let ok_id = legacy::character_pending_review_candidate_id(ok_pending);
@@ -2457,12 +2458,12 @@ async fn shaped_candidate_identity_guards_precede_the_provider_cas() {
 }
 
 // ---------------------------------------------------------------------------
-// The admitted Host composition: the real `subject_archived`/`family` consumer
+// note: The admitted Host composition: the real `subject_archived`/`family` consumer
 // ---------------------------------------------------------------------------
 
 const FIXTURE_PROVIDER: &str = "r2-mind-fixture";
 
-/// Deterministic in-memory provider adapter: no process, no model, no network.
+/// note: Deterministic in-memory provider adapter: no process, no model, no network.
 ///
 /// It exists only so the production admitted Host path is runnable here (the
 /// memory port itself stays the real signed provider). Its `execute` records the
@@ -2553,7 +2554,7 @@ impl ProviderAdapter for MindFixtureAdapter {
     }
 }
 
-/// The Host authority's composed provider port. The Character prompt path never
+/// note: The Host authority's composed provider port. The Character prompt path never
 /// calls it (the adapter above is the effect boundary for that), so it answers
 /// honestly and is never exercised.
 struct QuietPort;
@@ -2586,7 +2587,7 @@ impl ProviderPort for QuietPort {
     }
 }
 
-/// I-000282: observes the outgoing `memory.candidates.list` request bodies so
+/// note: I-000282: observes the outgoing `memory.candidates.list` request bodies so
 /// a test can pin the exact page bound the Core read path negotiated.
 struct CandidateListProbe {
     inner: Arc<dyn RemoteMemoryService>,
@@ -2621,7 +2622,7 @@ impl RemoteMemoryService for CandidateListProbe {
     }
 }
 
-/// I-000282: the Core read path takes the page bound the provider advertises
+/// note: I-000282: the Core read path takes the page bound the provider advertises
 /// in `memory.describe` — the fixture advertises 25, narrower than the local
 /// default — so every outgoing candidate page request carries `limit: 25`.
 /// The decorator observes the real signed request body; a client that assumed
@@ -2637,7 +2638,7 @@ async fn remote_candidate_pages_carry_the_negotiated_limit() {
     let (core, responder) = provider.open_core_serving(&env, service).await;
     let principal = core.active_principal().await.expect("active principal");
 
-    // Two pending candidates exercise the read; the assertion is on the
+    // note: Two pending candidates exercise the read; the assertion is on the
     // outgoing request bound, not on how many rows fit in one page.
     for pending_id in ["pend_bound_a", "pend_bound_b"] {
         core.create_pending_review(
@@ -2681,7 +2682,7 @@ async fn remote_candidate_pages_carry_the_negotiated_limit() {
     );
 }
 
-/// Test-only decorator over the REAL fixture memory service.
+/// note: Test-only decorator over the REAL fixture memory service.
 ///
 /// It forwards every ordinary request unchanged to the assembled fixture service
 /// and only observes — or refuses — `memory.subjects.get` for one selected
@@ -2710,7 +2711,7 @@ impl SubjectGetProbe {
         }
     }
 
-    /// Watch exactly this subject's `memory.subjects.get` calls.
+    /// note: Watch exactly this subject's `memory.subjects.get` calls.
     fn watch(&self, subject_id: &str) {
         *self.subject.lock().expect("watched subject") = Some(subject_id.to_string());
     }
@@ -2745,7 +2746,7 @@ impl RemoteMemoryService for SubjectGetProbe {
     }
 }
 
-/// The production admitted Host path builds the Character prompt through
+/// note: The production admitted Host path builds the Character prompt through
 /// `CoreCharacterMind`, whose `family` read calls the provider's `get_subject`
 /// and only then lists the records. These cases prove that dependence
 /// operationally on an ACTIVE subject: the get is observed on the real service,
@@ -2768,7 +2769,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
         create_character(&core, &principal, "R2 Host Ada", &world).await;
     let subject_id = legacy::character_subject_id(&character_id);
 
-    // One binding-local fact on the real provider: the memory the projection
+    // note: One binding-local fact on the real provider: the memory the projection
     // must serve into the Host prompt.
     capture(
         &core,
@@ -2788,7 +2789,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
     .expect("review the binding-local fact");
     probe.watch(&subject_id);
 
-    // Deterministic local agent host: no process, no model, no network.
+    // note: Deterministic local agent host: no process, no model, no network.
     let manager = Arc::new(HostManager::new());
     let adapter = Arc::new(MindFixtureAdapter::default());
     manager
@@ -2801,7 +2802,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
             },
         )
         .await;
-    // The Host's workspace boundary must contain both the Nexus home and the
+    // note: The Host's workspace boundary must contain both the Nexus home and the
     // admitted Character creative root this open pinned, so it is the user
     // home — the root the production native boot hands the manager.
     let workspace_root = env.user_home.clone();
@@ -2849,7 +2850,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
         }))
     };
 
-    // (a) The active subject: the Host execution really performs the subject get
+    // note: (a) The active subject: the Host execution really performs the subject get
     // and serves the provider's binding-local fact into the prompt.
     handle
         .execute(&principal, session.session_id.clone(), prompt())
@@ -2867,7 +2868,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
         prompts[0]
     );
 
-    // (b) A selected get refusal on the ACTIVE subject aborts the execution
+    // note: (b) A selected get refusal on the ACTIVE subject aborts the execution
     // before any prompt: a bypass (no get) or a swallowed refusal would still
     // produce a prompt and fail here.
     probe.set_refusal(true);
@@ -2890,7 +2891,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
         "a refused projection hands the provider no prompt"
     );
 
-    // (c) Control: the same session runs again once the get answers, so the
+    // note: (c) Control: the same session runs again once the get answers, so the
     // stop in (b) was the refusal itself, not a broken session.
     probe.set_refusal(false);
     handle
@@ -2903,7 +2904,7 @@ async fn host_mind_projection_reads_the_remote_subject() {
         "the same session serves the prompt once the get is answered"
     );
 
-    // (d) Narrower archived evidence: the provider subject really is archived
+    // note: (d) Narrower archived evidence: the provider subject really is archived
     // (SDK get), and the writable projection meets that lifecycle at
     // `ensure_subject` and fails closed — no prompt is assembled.
     let (sdk, sdk_responder) = provider.sdk_session().await;
@@ -2984,10 +2985,10 @@ async fn host_mind_projection_reads_the_remote_subject() {
 }
 
 // ---------------------------------------------------------------------------
-// Review entry: an externally captured candidate must not lose protection
+// note: Review entry: an externally captured candidate must not lose protection
 // ---------------------------------------------------------------------------
 
-/// The pending candidate one external capture commits: its identity and the
+/// note: The pending candidate one external capture commits: its identity and the
 /// payload the capture carries.
 struct ExternalCandidate<'a> {
     pending_id: &'a str,
@@ -2995,7 +2996,7 @@ struct ExternalCandidate<'a> {
     task_kind: &'a str,
 }
 
-/// One genuinely external signed capture of a binding-local, legacy-shaped
+/// note: One genuinely external signed capture of a binding-local, legacy-shaped
 /// pending candidate over the real provider protocol (never through Core's own
 /// capture arm). Returns the committed candidate id.
 async fn external_capture(
@@ -3043,7 +3044,7 @@ async fn external_capture(
         .to_string()
 }
 
-/// Test-only decorator over the REAL fixture service.
+/// note: Test-only decorator over the REAL fixture service.
 ///
 /// It forwards every request unchanged and, for `memory.candidates.review` on
 /// one watched candidate, first delegates the real call — so the provider really
@@ -3062,16 +3063,16 @@ const FORGED_SPACE_MARKER: &str = "R2-PRIVATE-MARKER";
 
 #[derive(Clone)]
 enum ReviewMangle {
-    /// `outcome = fragmented` with no record ids at all.
+    /// note: `outcome = fragmented` with no record ids at all.
     EmptyIds,
-    /// A `fragmented`/`promoted` result reported as `dropped`.
+    /// note: A `fragmented`/`promoted` result reported as `dropped`.
     DropOutcome,
-    /// A record id that is the empty string.
+    /// note: A record id that is the empty string.
     EmptyIdString,
-    /// An actually observed earlier review receipt, replayed after this review
+    /// note: An actually observed earlier review receipt, replayed after this review
     /// really committed: same outcome/count, but its own (older) key.
     StaleReceipt(Value),
-    /// The current receipt with a foreign space echoed.
+    /// note: The current receipt with a foreign space echoed.
     ForeignSpace,
 }
 
@@ -3102,7 +3103,7 @@ impl ReviewLossProbe {
         *self.mangle.lock().expect("mangle mode") = mode;
     }
 
-    /// The last real committed review receipt this decorator observed.
+    /// note: The last real committed review receipt this decorator observed.
     fn captured(&self) -> Option<Value> {
         self.captured.lock().expect("captured receipt").clone()
     }
@@ -3119,7 +3120,7 @@ impl ReviewLossProbe {
         self.committed_losses.load(Ordering::SeqCst)
     }
 
-    /// True once the forged-space reply actually crossed the real service.
+    /// note: True once the forged-space reply actually crossed the real service.
     fn foreign_space_delivered(&self) -> bool {
         self.foreign_space_delivered.load(Ordering::SeqCst)
     }
@@ -3164,7 +3165,7 @@ impl RemoteMemoryService for ReviewLossProbe {
     }
 }
 
-/// A genuinely independent signed capture writes a binding-local, legacy-shaped
+/// note: A genuinely independent signed capture writes a binding-local, legacy-shaped
 /// pending candidate; Core's own capture arm is never involved, so Nexus holds
 /// no admission and no candidate fact for it. The REAL public review drain then
 /// consumes it. A reply lost after the provider committed must not leave the
@@ -3186,19 +3187,19 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         create_character(&core, &principal, "R2 Review Ada", &world).await;
     let keeper_world = create_world(&core, &principal, "R2 Review Keeper World").await;
     let keeper = add_binding(&core, &principal, &character, &keeper_world).await;
-    // A third active binding keeps the retained-last-binding rule out of the
+    // note: A third active binding keeps the retained-last-binding rule out of the
     // way once the keeper is removed, so the final refusal is the remote-memory
     // gate itself.
     let spare_world = create_world(&core, &principal, "R2 Review Spare World").await;
     let _spare = add_binding(&core, &principal, &character, &spare_world).await;
     let subject = legacy::character_subject_id(&character);
 
-    // The external signed writer: the same authenticated peer, but capturing
+    // note: The external signed writer: the same authenticated peer, but capturing
     // directly over the protocol instead of through Core's capture arm.
     let (external, external_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
 
-    // Core's writable adapter ensures the Character's provider subject; the
+    // note: Core's writable adapter ensures the Character's provider subject; the
     // external writer then only supplies the candidate, never the subject.
     assert_eq!(
         core.count_character_pending_reviews(
@@ -3212,7 +3213,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         0
     );
 
-    // (1) The external candidate carries NO Nexus-side admission or fact.
+    // note: (1) The external candidate carries NO Nexus-side admission or fact.
     let candidate = external_capture(
         &external,
         &memory_principal,
@@ -3238,11 +3239,11 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
     );
     nexus.close().await;
 
-    // (2) Core's real public drain consumes it, and the reply is lost AFTER the
+    // note: (2) Core's real public drain consumes it, and the reply is lost AFTER the
     // provider committed: the caller sees the uncertain refusal.
     probe.watch(&candidate);
     probe.lose_replies(true);
-    // The drain reports its bounded batch (a per-row settlement failure is a
+    // note: The drain reports its bounded batch (a per-row settlement failure is a
     // warned row, not a batch error), so the protection state below is what
     // decides whether this attempt was safely accounted for.
     let response = core
@@ -3264,7 +3265,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         "the loss followed a real commit"
     );
 
-    // The provider really holds the consumed candidate and the binding record.
+    // note: The provider really holds the consumed candidate and the binding record.
     let pool = provider.pool().await;
     assert_eq!(
         sqlx::query("SELECT status FROM candidates WHERE candidate_id = ?")
@@ -3289,7 +3290,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
     );
     pool.close().await;
 
-    // (3) The uncertain attempt keeps the binding unremovable.
+    // note: (3) The uncertain attempt keeps the binding unremovable.
     assert_remote_memory_holds(&core, &principal, &character, &protective).await;
     let nexus = core_db(&env).await;
     assert_eq!(
@@ -3299,7 +3300,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
     );
     nexus.close().await;
 
-    // (4) An older unknown attempt survives a later successful review: the new
+    // note: (4) An older unknown attempt survives a later successful review: the new
     // attempt settles and retires only itself.
     probe.lose_replies(false);
     let second = external_capture(
@@ -3332,7 +3333,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
     nexus.close().await;
     assert_remote_memory_holds(&core, &principal, &character, &protective).await;
 
-    // (5) Normal control: an external candidate reviewed with a served reply
+    // note: (5) Normal control: an external candidate reviewed with a served reply
     // settles, and disposal of its record releases the binding.
     let control_candidate = external_capture(
         &external,
@@ -3382,7 +3383,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
         .await
         .expect("a settled, fully disposed binding still removes");
 
-    // The protective binding keeps its older unknown attempt.
+    // note: The protective binding keeps its older unknown attempt.
     assert_remote_memory_holds(&core, &principal, &character, &protective).await;
 
     external.close();
@@ -3394,7 +3395,7 @@ async fn external_capture_review_settlement_keeps_binding_protection() {
     responder_of(responder).await;
 }
 
-/// A committed review response can be SDK-schema-valid and still contradict the
+/// note: A committed review response can be SDK-schema-valid and still contradict the
 /// decision Core issued: no record ids, fewer ids than issued fragments, an
 /// empty id, or a `dropped` outcome for a fragment decision. Treating such a
 /// receipt as complete consumes the candidate, retires the attempt and leaves
@@ -3471,7 +3472,7 @@ async fn malformed_review_receipt_keeps_binding_protection() {
             "the drain consumed the externally captured candidate"
         );
 
-        // The provider really committed: the candidate is consumed and a
+        // note: The provider really committed: the candidate is consumed and a
         // binding-scoped record exists, whatever the returned receipt claims.
         let pool = provider.pool().await;
         assert_eq!(
@@ -3511,7 +3512,7 @@ async fn malformed_review_receipt_keeps_binding_protection() {
         nexus.close().await;
     }
 
-    // A legitimate drop names no records: it must still settle, so the rule is
+    // note: A legitimate drop names no records: it must still settle, so the rule is
     // decision-consistency rather than a blanket non-empty requirement.
     let drop_candidate = external_capture(
         &external,
@@ -3563,7 +3564,7 @@ async fn malformed_review_receipt_keeps_binding_protection() {
     responder_of(responder).await;
 }
 
-/// A committed review can answer with an **actually observed older receipt**:
+/// note: A committed review can answer with an **actually observed older receipt**:
 /// same outcome and count, but that receipt's own key and (optionally) space.
 /// The decision checks alone accept it, the monotone facts cannot revive the old
 /// record (already released), and the new attempt's only admission would be
@@ -3611,7 +3612,7 @@ async fn stale_review_receipt_keeps_binding_protection() {
         .await
     };
 
-    // (1) A genuinely observed older receipt A, whose record is then released
+    // note: (1) A genuinely observed older receipt A, whose record is then released
     // through the normal disposal path.
     let old_candidate = external_capture(
         &external,
@@ -3664,7 +3665,7 @@ async fn stale_review_receipt_keeps_binding_protection() {
     );
     nexus.close().await;
 
-    // (2) The new external candidate really commits, and the reply is the OLD
+    // note: (2) The new external candidate really commits, and the reply is the OLD
     // receipt: same outcome/count, different key.
     let new_candidate = external_capture(
         &external,
@@ -3726,7 +3727,7 @@ async fn stale_review_receipt_keeps_binding_protection() {
     );
     nexus.close().await;
 
-    // (3) A different validation branch: the current receipt echoes another
+    // note: (3) A different validation branch: the current receipt echoes another
     // space. It is refused for its own reason, with the attempt retained.
     let foreign_candidate = external_capture(
         &external,
@@ -3775,7 +3776,7 @@ async fn stale_review_receipt_keeps_binding_protection() {
         "the refusal must not echo the forged space: {refused}"
     );
 
-    // (4) Positive control: a matching receipt settles, and normal disposal
+    // note: (4) Positive control: a matching receipt settles, and normal disposal
     // releases the binding.
     let control_candidate = external_capture(
         &external,
@@ -3842,7 +3843,7 @@ async fn stale_review_receipt_keeps_binding_protection() {
 }
 
 // ---------------------------------------------------------------------------
-// Static, content-free error contracts
+// note: Static, content-free error contracts
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -3856,11 +3857,11 @@ async fn remote_refusals_stay_static_without_peer_text() {
     let (character_id, binding_id, _) =
         create_character(&core, &principal, "R2 Refusal Ada", &world).await;
 
-    // A peer-supplied secret planted in the request must never come back: the
+    // note: A peer-supplied secret planted in the request must never come back: the
     // provider's own message text (its bound, its wording) and the request's
     // content are both absent from every rendered form of the refusal.
     let secret = "r2-secret-sentinel-0f1e2d3c";
-    // Core's own field bound is exactly 64 KiB, so the digest stays legal while
+    // note: Core's own field bound is exactly 64 KiB, so the digest stays legal while
     // the serialized `content` the provider measures no longer is.
     let over_limit = format!(
         "{secret}{}",
@@ -3898,7 +3899,7 @@ async fn remote_refusals_stay_static_without_peer_text() {
         );
     }
 
-    // A local-only extension keeps its own retained contract on a remote
+    // note: A local-only extension keeps its own retained contract on a remote
     // binding: the structured `not_supported` refusal_code, not a peer-echoing error.
     let migration = core
         .migrate_legacy_content(&principal)
@@ -3921,10 +3922,10 @@ async fn remote_refusals_stay_static_without_peer_text() {
 }
 
 // ---------------------------------------------------------------------------
-// I-000303: a committed dismissal receipt only proves ITS OWN request
+// note: I-000303: a committed dismissal receipt only proves ITS OWN request
 // ---------------------------------------------------------------------------
 
-/// Test-only decorator over the REAL fixture memory service.
+/// note: Test-only decorator over the REAL fixture memory service.
 ///
 /// It forwards every ordinary request unchanged to the assembled fixture and
 /// rewrites exactly one committed `memory.candidates.dismiss` answer into a
@@ -3947,12 +3948,12 @@ impl DismissReceiptProbe {
         }
     }
 
-    /// Rewrite the NEXT committed dismissal receipt to name `candidate`.
+    /// note: Rewrite the NEXT committed dismissal receipt to name `candidate`.
     fn forge_next(&self, candidate: &str) {
         *self.forge.lock().expect("forged candidate") = Some(candidate.to_string());
     }
 
-    /// How many committed dismissal answers the fixture actually rewrote.
+    /// note: How many committed dismissal answers the fixture actually rewrote.
     fn forged_count(&self) -> usize {
         self.forged.load(Ordering::SeqCst)
     }
@@ -3971,13 +3972,13 @@ impl RemoteMemoryService for DismissReceiptProbe {
         let SpokeResult::Ok(mut body) = answer else {
             return answer;
         };
-        // Only a committed receipt carries `result`; a refusal stays a refusal.
+        // note: Only a committed receipt carries `result`; a refusal stays a refusal.
         if body.get("status").and_then(Value::as_str) != Some("committed")
             || body.pointer("/result/candidate_id").is_none()
         {
             return SpokeResult::Ok(body);
         }
-        // The response schema types most fields as nonempty strings, not as
+        // note: The response schema types most fields as nonempty strings, not as
         // patterned ids, so this stays a schema-valid receipt.
         body["result"]["candidate_id"] = json!(candidate);
         self.forged.fetch_add(1, Ordering::SeqCst);
@@ -3985,7 +3986,7 @@ impl RemoteMemoryService for DismissReceiptProbe {
     }
 }
 
-/// I-000303 (consumer): the nonlocal dismissal sender must bind the committed
+/// note: I-000303 (consumer): the nonlocal dismissal sender must bind the committed
 /// receipt to the request that issued it BEFORE it releases the binding
 /// dependency. A schema-valid receipt for another candidate must refuse the
 /// dismissal, echo no peer bytes, leave the issued candidate's persisted
@@ -4014,7 +4015,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
     let legal = add_binding(&core, &principal, &character_id, &worlds[2]).await;
     let uncertain = add_binding(&core, &principal, &character_id, &worlds[3]).await;
 
-    // (1) A genuinely live binding-local candidate: the committed capture
+    // note: (1) A genuinely live binding-local candidate: the committed capture
     // published the one persisted dependency fact the removal gate counts.
     capture(
         &core,
@@ -4034,7 +4035,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
     nexus.close().await;
     assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
 
-    // (2) The provider answers with a schema-valid receipt for another
+    // note: (2) The provider answers with a schema-valid receipt for another
     // candidate. The dismissal fails, and nothing peer-authored reaches the
     // caller.
     probe.forge_next(FORGED_RECEIPT_CANDIDATE);
@@ -4070,7 +4071,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
         "peer newline must not escape the refusal: {rendered:?}"
     );
 
-    // The refused dismissal wrote no `released` fact: the persisted dependency
+    // note: The refused dismissal wrote no `released` fact: the persisted dependency
     // is still the live candidate the capture published.
     let nexus = core_db(&env).await;
     assert_eq!(
@@ -4081,7 +4082,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
     nexus.close().await;
     assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
 
-    // The peer really committed the dismissal; only the receipt binding is
+    // note: The peer really committed the dismissal; only the receipt binding is
     // what kept the dependency live.
     let pool = provider.pool().await;
     assert_eq!(
@@ -4093,7 +4094,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
     );
     pool.close().await;
 
-    // (3) The retained no-effect answer is unchanged: the consumed candidate is
+    // note: (3) The retained no-effect answer is unchanged: the consumed candidate is
     // no longer queued, so the repeat is the retained absence, and the live
     // dependency and the removal gate are untouched.
     let replay = core
@@ -4117,7 +4118,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
     nexus.close().await;
     assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
 
-    // (4) A matching legal receipt releases exactly its own dependency: one of
+    // note: (4) A matching legal receipt releases exactly its own dependency: one of
     // two live candidates, leaving the unrelated one protected.
     capture(
         &core,
@@ -4196,7 +4197,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
         .await
         .expect("a fully released binding is removable");
 
-    // (5) An unknown admission is a dependency of its own: a capture whose
+    // note: (5) An unknown admission is a dependency of its own: a capture whose
     // answer was lost keeps it protected while the other bindings settle.
     provider
         .faults()
@@ -4225,7 +4226,7 @@ async fn foreign_dismissal_receipt_cannot_release_a_remote_binding_dependency() 
     );
     nexus.close().await;
     assert_remote_memory_holds(&core, &principal, &character_id, &uncertain).await;
-    // The binding whose receipt was foreign is still protected as well: the
+    // note: The binding whose receipt was foreign is still protected as well: the
     // legal dismissal of another binding never cleared it.
     assert_remote_memory_holds(&core, &principal, &character_id, &mismatched).await;
 

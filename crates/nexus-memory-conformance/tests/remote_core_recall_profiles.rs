@@ -59,8 +59,9 @@
 //! provider's own rows are the observable substitute: their `space_id`,
 //! `subject_id`, revisions and receipts are written from that pinned tuple by
 //! the product code.
+// why: the proven/cannot-prove list above bounds what a selector may assert, and grows with it.
 
-#![allow(clippy::too_many_lines)] // one end-to-end scenario per test
+#![allow(clippy::too_many_lines)] // why: one end-to-end scenario per test
 
 mod support;
 
@@ -118,41 +119,41 @@ use tokio::net::TcpListener;
 
 use support::dto;
 
-/// The host's Connect identity (the provider side of the signed session).
+/// note: The host's Connect identity (the provider side of the signed session).
 const HOST_SEED: [u8; 32] = [0x42; 32];
-/// The dialing client's Connect identity; the credential file holds this seed.
+/// note: The dialing client's Connect identity; the credential file holds this seed.
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
-/// The one capability both ends negotiate: the fixture serves no other family.
+/// note: The one capability both ends negotiate: the fixture serves no other family.
 const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 const WORKSPACE: &str = "default";
 const CREDENTIAL_ID: &str = "cred-r4-profiles";
 const BOUND: Duration = Duration::from_secs(5);
-/// Bytes of the file that occupies a bearer's long-term discovery *directory*.
+/// note: Bytes of the file that occupies a bearer's long-term discovery *directory*.
 ///
 /// `memory_io::list_memories` calls `fs::read_dir` on that directory and only
 /// treats `NotFound` as honest-empty, so a regular file there makes every real
 /// discovery attempt fail loudly — the trap the lifecycle below must not trip.
 const LEGACY_DIR_TRAP_BYTES: &[u8] = b"r4-legacy-long-term-dir-trap";
-/// The legacy memory surfaces withheld from the disposable state DB.
+/// note: The legacy memory surfaces withheld from the disposable state DB.
 const LEGACY_MEMORY_TABLES: [&str; 3] = [
     "memory_pending_review",
     "character_memory_pending_review",
     "character_memory_fragments",
 ];
 const TRAP_SUFFIX: &str = "_r4_trap";
-/// The authored Character SOUL document the projection must serve.
+/// note: The authored Character SOUL document the projection must serve.
 const SOUL_BODY: &str = "## Identity\nR4 keeps the northern passes and the winter granary.";
-/// The one authored edit the revision-checked profile write applies.
+/// note: The one authored edit the revision-checked profile write applies.
 const EDITED_SOUL_BODY: &str = "## Identity\nR4 keeps four passes after the winter treaty.";
-/// A distinctive request body that a refusal must never echo.
+/// note: A distinctive request body that a refusal must never echo.
 const REQUEST_SENTINEL_BODY: &str =
     "r4-request-secret-sentinel: the northern gate word must never travel back.";
-/// The peer-controlled message/details sentinel a real refusal is rewritten with.
+/// note: The peer-controlled message/details sentinel a real refusal is rewritten with.
 const PEER_SENTINEL: &str = "r4-peer-secret-sentinel";
-/// A high-signal digest the deterministic classifier promotes for `brainstorm`.
+/// note: A high-signal digest the deterministic classifier promotes for `brainstorm`.
 const PROMOTE_DIGEST: &str =
     "The chapter pivots from betrayal to alliance, with causal consequences for three factions.";
-/// The recall corpus: every seeded record carries a known text and placement, so
+/// note: The recall corpus: every seeded record carries a known text and placement, so
 /// each selection is compared against these independently captured facts.
 const RECALL_ONE: &str = "The northern alliance holds three passes.";
 const RECALL_TWO: &str = "The southern alliance holds a shared granary.";
@@ -160,29 +161,29 @@ const RECALL_CONTEXT: &str = "The binding-local alliance note about the eastern 
 const RECALL_CONTEXT_ID: &str = "awb_r4_recall_context";
 const RECALL_OTHER: &str = "The watchtower alliance note about the western road.";
 const RECALL_OTHER_CONTEXT_ID: &str = "awb_r4_recall_other";
-/// A record under a second subject: excluded from every subject-scoped recall.
+/// note: A record under a second subject: excluded from every subject-scoped recall.
 const EXCLUDED_SUBJECT: &str = "sub_r4_recall_excluded";
 const EXCLUDED_TEXT: &str = "The excluded alliance note under another subject.";
-/// A second, differently scoped signed client (its own Ed25519 identity/hello).
+/// note: A second, differently scoped signed client (its own Ed25519 identity/hello).
 const SCOPED_SEED: [u8; 32] = [0x5b; 32];
-/// The fresh subject the UTF-8 byte-budget boundary reads.
+/// note: The fresh subject the UTF-8 byte-budget boundary reads.
 const BYTE_SUBJECT: &str = "sub_r4_byte_budget";
-/// The byte budget that fits the multibyte item whole and defers the long one.
+/// note: The byte budget that fits the multibyte item whole and defers the long one.
 const BYTE_BUDGET: u64 = 512;
-/// A multibyte (UTF-8) body that fits inside `BYTE_BUDGET` whole.
+/// note: A multibyte (UTF-8) body that fits inside `BYTE_BUDGET` whole.
 const SMALL_UTF8: &str = "密码：cipher 北方的关隘在雪后仍然通行。";
-/// A fresh subject whose second record discriminates serialized UTF-8 bytes
+/// note: A fresh subject whose second record discriminates serialized UTF-8 bytes
 /// from Unicode scalar characters under the same budget.
 const BYTE_CHAR_SUBJECT: &str = "sub_r4_byte_char_budget";
-/// The fitting item of the discriminating case (its query hit ranks it first).
+/// note: The fitting item of the discriminating case (its query hit ranks it first).
 const FIT_UTF8: &str = "cipher 关隘。";
-/// The discarding item: 200 CJK scalars (600 UTF-8 bytes), so its character
+/// note: The discarding item: 200 CJK scalars (600 UTF-8 bytes), so its character
 /// count is inside `BYTE_BUDGET` while its serialized bytes are far outside it.
 const OVER_CHAR_UNDER_CHARS: usize = 200;
 const FIXTURE_PROVIDER: &str = "r4-mind-fixture";
 
 // ---------------------------------------------------------------------------
-// Signed loopback provider
+// note: Signed loopback provider
 // ---------------------------------------------------------------------------
 
 fn manifest(host_id: &str) -> HostCapabilityManifest {
@@ -215,7 +216,7 @@ fn hex(bytes: &[u8]) -> String {
     text
 }
 
-/// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
+/// note: Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
 /// the signed responder's transport.
 async fn start_listener(
     memory_service: Arc<dyn RemoteMemoryService>,
@@ -245,7 +246,7 @@ async fn start_listener(
     (addr, task)
 }
 
-/// Await one responder task without letting a fixture bug hang the suite.
+/// note: Await one responder task without letting a fixture bug hang the suite.
 async fn responder_of(
     task: tokio::task::JoinHandle<Arc<ConnectResponder>>,
 ) -> Arc<ConnectResponder> {
@@ -256,10 +257,10 @@ async fn responder_of(
 }
 
 // ---------------------------------------------------------------------------
-// The disposable home, the selection and the open
+// note: The disposable home, the selection and the open
 // ---------------------------------------------------------------------------
 
-/// One disposable user home, bootstrapped through the real public home
+/// note: One disposable user home, bootstrapped through the real public home
 /// contract: a registered Creator, a selected workspace (which materializes the
 /// state DB and the workspace `creators` row the FK prechecks rely on) and the
 /// operator-provisioned credential for the dialing seed.
@@ -304,7 +305,7 @@ impl Env {
         env
     }
 
-    /// Write the operator-provisioned credential for the dialing seed at
+    /// note: Write the operator-provisioned credential for the dialing seed at
     /// mode `0600`.
     fn write_credential(&self) {
         let dir = self.user_home.join(".nexus42").join("memory-credentials");
@@ -326,14 +327,14 @@ impl Env {
         }
     }
 
-    /// The local provider's private file root: its absence is the observable
+    /// note: The local provider's private file root: its absence is the observable
     /// that no local provider was constructed.
     fn local_provider_store(&self) -> PathBuf {
         nexus_home_layout::operational_workspace_dir(&self.user_home, &self.creator_id, WORKSPACE)
             .join("memory-store")
     }
 
-    /// The Creator bearer's real long-term discovery directory: exactly what
+    /// note: The Creator bearer's real long-term discovery directory: exactly what
     /// `MemoryBearerRef::Creator::long_term_memory_dir` resolves
     /// (`<nexus root>/creators/<creator>/memory/long-term`), which
     /// `memory_io::list_memories` reads with `fs::read_dir`.
@@ -345,7 +346,7 @@ impl Env {
             .join("long-term")
     }
 
-    /// The Character bearer's real long-term discovery directory, exactly what
+    /// note: The Character bearer's real long-term discovery directory, exactly what
     /// `MemoryBearerRef::Character::long_term_memory_dir` resolves.
     fn character_long_term_dir(&self, character_id: &str) -> PathBuf {
         nexus_home_layout::character_long_term_memory_dir(
@@ -368,7 +369,7 @@ impl Env {
     }
 }
 
-/// The durable, independent provider this suite serves, plus the exact
+/// note: The durable, independent provider this suite serves, plus the exact
 /// peer→principal admission the operator provisioned for the dialing seed.
 struct Provider {
     _home: TempDir,
@@ -376,7 +377,7 @@ struct Provider {
     inner: Arc<FixtureMemoryProvider>,
     directory: Arc<PeerDirectory>,
     space_id: String,
-    /// The second signed client's peer id and its own provisioned principal, so
+    /// note: The second signed client's peer id and its own provisioned principal, so
     /// a scoped grant can be issued for it and its own signed session admitted.
     scoped_peer: String,
     scoped_principal: String,
@@ -415,7 +416,7 @@ impl Provider {
         }
     }
 
-    /// Serve one signed session for an explicitly supplied memory service: the
+    /// note: Serve one signed session for an explicitly supplied memory service: the
     /// suite's test-only observation decorator, which forwards every request
     /// unchanged to this provider's real assembled service.
     async fn serve_service(
@@ -451,7 +452,7 @@ impl Provider {
         })
     }
 
-    /// Open Core against this provider and return it with the responder task
+    /// note: Open Core against this provider and return it with the responder task
     /// that served the session.
     async fn open_core(
         &self,
@@ -460,7 +461,7 @@ impl Provider {
         self.open_core_as(env, CoreAccess::EngineOwner).await
     }
 
-    /// [`Self::open_core`] at an explicit core access level: the read-only open
+    /// note: [`Self::open_core`] at an explicit core access level: the read-only open
     /// serves the same pinned provider, so its writer refusal is the real
     /// `memory_writer_binding` gate rather than a missing provider.
     async fn open_core_as(
@@ -472,7 +473,7 @@ impl Provider {
             .await
     }
 
-    /// [`Self::open_core`] over an explicitly supplied memory service (the
+    /// note: [`Self::open_core`] over an explicitly supplied memory service (the
     /// test-only observation decorator).
     async fn open_core_serving(
         &self,
@@ -487,7 +488,7 @@ impl Provider {
         (core, task)
     }
 
-    /// The provider's own database, read directly: the durable effects are
+    /// note: The provider's own database, read directly: the durable effects are
     /// asserted there instead of through the port under test.
     async fn pool(&self) -> SqlitePool {
         SqlitePool::connect_with(
@@ -499,7 +500,7 @@ impl Provider {
         .expect("open the fixture database")
     }
 
-    /// The operator principal the authenticated peer maps to, as the memory
+    /// note: The operator principal the authenticated peer maps to, as the memory
     /// port's own request carrier: the fixture authorizes the request's
     /// principal id against the operator grant.
     fn memory_principal() -> MemoryPrincipal {
@@ -510,7 +511,7 @@ impl Provider {
         .expect("valid memory principal")
     }
 
-    /// The second signed client's principal, as its own request carrier.
+    /// note: The second signed client's principal, as its own request carrier.
     fn scoped_memory_principal(&self) -> MemoryPrincipal {
         serde_json::from_value(json!({
             "principal_id": self.scoped_principal,
@@ -519,7 +520,7 @@ impl Provider {
         .expect("valid scoped memory principal")
     }
 
-    /// Dial the SDK `RemoteAdapter` over its own signed loopback session.
+    /// note: Dial the SDK `RemoteAdapter` over its own signed loopback session.
     ///
     /// This is the SDK's own client (the pattern the conformance loopback uses),
     /// not Core: it addresses the provider operation Core's surface does not
@@ -534,7 +535,7 @@ impl Provider {
         self.sdk_session_as(CLIENT_SEED, "r4-profiles-client").await
     }
 
-    /// A signed SDK session for `seed`'s own identity, on a listener that admits
+    /// note: A signed SDK session for `seed`'s own identity, on a listener that admits
     /// exactly that peer: the second client's authority is its authenticated
     /// hello, never a request field.
     async fn sdk_session_as(
@@ -556,7 +557,7 @@ impl Provider {
         (adapter, task)
     }
 
-    /// Dial one real signed SDK session to `addr` as `seed`'s identity.
+    /// note: Dial one real signed SDK session to `addr` as `seed`'s identity.
     async fn dial_as(
         &self,
         addr: SocketAddr,
@@ -588,10 +589,10 @@ impl Provider {
 }
 
 // ---------------------------------------------------------------------------
-// The observation decorator over the real assembled service
+// note: The observation decorator over the real assembled service
 // ---------------------------------------------------------------------------
 
-/// Test-only decorator over the REAL fixture memory service.
+/// note: Test-only decorator over the REAL fixture memory service.
 ///
 /// It forwards every request unchanged to the assembled fixture service and
 /// only counts the operations under test: `memory.profile.update`, and the
@@ -625,13 +626,13 @@ impl ServiceProbe {
         }
     }
 
-    /// Rewrite the next real refusal's peer-controlled message/details with
+    /// note: Rewrite the next real refusal's peer-controlled message/details with
     /// this sentinel; `None` disarms.
     fn arm_refusal_sentinel(&self, sentinel: Option<&str>) {
         *self.refusal_sentinel.lock().expect("refusal sentinel") = sentinel.map(str::to_string);
     }
 
-    /// Count only reads addressed to this subject.
+    /// note: Count only reads addressed to this subject.
     fn watch(&self, subject_id: &str) {
         *self.watched_subject.lock().expect("watched subject") = Some(subject_id.to_string());
     }
@@ -695,7 +696,7 @@ impl RemoteMemoryService for ServiceProbe {
 }
 
 // ---------------------------------------------------------------------------
-// Nexus-side observation helpers
+// note: Nexus-side observation helpers
 // ---------------------------------------------------------------------------
 
 async fn core_db(env: &Env) -> SqlitePool {
@@ -722,10 +723,10 @@ async fn scalar(pool: &SqlitePool, sql: &str) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy no-read traps
+// note: Legacy no-read traps
 // ---------------------------------------------------------------------------
 
-/// Withhold every legacy memory surface for the exercised interval (armed
+/// note: Withhold every legacy memory surface for the exercised interval (armed
 /// after the initial Core open and restored before close) and occupy the real
 /// long-term discovery paths with a pre-existing regular file.
 ///
@@ -764,7 +765,7 @@ async fn restore_legacy_tables(trap: &SqlitePool) {
     trap.close().await;
 }
 
-/// Read the traps back after the lifecycle: each path is still the regular file
+/// note: Read the traps back after the lifecycle: each path is still the regular file
 /// it was, and the real discovery call (`fs::read_dir`, exactly what
 /// `list_memories` performs) still fails with a non-`NotFound` error. A caller
 /// that propagates that error cannot have read the directory; a swallowed error
@@ -789,7 +790,7 @@ fn assert_legacy_dir_traps(dirs: &[PathBuf]) {
     }
 }
 
-/// The local provider, the local journals and the SOUL-narrative cache stayed
+/// note: The local provider, the local journals and the SOUL-narrative cache stayed
 /// untouched: no legacy row, no local provider row, no local provider file
 /// root (which is also where the local file journal lives) and no SOUL-narrative
 /// / soul-invalidation row.
@@ -828,10 +829,10 @@ async fn assert_no_local_memory(env: &Env) {
 }
 
 // ---------------------------------------------------------------------------
-// Provider-side observation helpers
+// note: Provider-side observation helpers
 // ---------------------------------------------------------------------------
 
-/// The provider's stored `personality` document for one subject:
+/// note: The provider's stored `personality` document for one subject:
 /// `(space_id, body, revision)`.
 async fn provider_personality(
     pool: &SqlitePool,
@@ -854,7 +855,7 @@ async fn provider_personality(
     ))
 }
 
-/// The provider's stored records for one subject as
+/// note: The provider's stored records for one subject as
 /// `(kind, visibility, context_id)`.
 async fn provider_records(
     pool: &SqlitePool,
@@ -889,7 +890,7 @@ async fn provider_receipts(pool: &SqlitePool, op: &str) -> i64 {
 }
 
 // ---------------------------------------------------------------------------
-// Fixture setup through the real public Core actor surface
+// note: Fixture setup through the real public Core actor surface
 // ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &Principal, title: &str) -> String {
@@ -942,7 +943,7 @@ async fn capture(
     .map(|_| ())
 }
 
-/// The classified refusal every remote profile/recall call carries, without the
+/// note: The classified refusal every remote profile/recall call carries, without the
 /// peer's message: `(code, retry_class, family, wire_code, conflict_code)`.
 fn classified_refusal(
     error: &CoreError,
@@ -971,7 +972,7 @@ fn classified_refusal(
     }
 }
 
-/// One record's `(id, placement, exact text)` as the wire renders it.
+/// note: One record's `(id, placement, exact text)` as the wire renders it.
 fn record_triple(record: &Value) -> (String, Value, String) {
     (
         record["record_id"].as_str().expect("record id").to_string(),
@@ -983,7 +984,7 @@ fn record_triple(record: &Value) -> (String, Value, String) {
     )
 }
 
-/// The exact triples a recall response served, sorted by id.
+/// note: The exact triples a recall response served, sorted by id.
 fn response_triples(response: &Value) -> Vec<(String, Value, String)> {
     let mut triples: Vec<(String, Value, String)> = response["records"]
         .as_array()
@@ -995,13 +996,13 @@ fn response_triples(response: &Value) -> Vec<(String, Value, String)> {
     triples
 }
 
-/// Sort independently captured triples by id for set comparison.
+/// note: Sort independently captured triples by id for set comparison.
 fn sorted_triples(mut triples: Vec<(String, Value, String)>) -> Vec<(String, Value, String)> {
     triples.sort_by(|left, right| left.0.cmp(&right.0));
     triples
 }
 
-/// One served recall body as JSON.
+/// note: One served recall body as JSON.
 async fn recall_ok(
     adapter: &RemoteAdapter,
     principal: &MemoryPrincipal,
@@ -1013,7 +1014,7 @@ async fn recall_ok(
     }
 }
 
-/// One recall refusal.
+/// note: One recall refusal.
 async fn recall_reject(
     adapter: &RemoteAdapter,
     principal: &MemoryPrincipal,
@@ -1026,7 +1027,7 @@ async fn recall_reject(
 }
 
 // ---------------------------------------------------------------------------
-// Profile get/update on the remote provider
+// note: Profile get/update on the remote provider
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1042,11 +1043,11 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     let principal = core.active_principal().await.expect("active principal");
     let subject_id = legacy::creator_subject_id(&env.creator_id);
 
-    // The traps are armed after the initial Core open and stay armed for the
+    // note: The traps are armed after the initial Core open and stay armed for the
     // exercised interval below.
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
-    // GET: an absent authored document is the honest-empty answer, served by the
+    // note: GET: an absent authored document is the honest-empty answer, served by the
     // provider's `memory.profile.get` in the pinned space.
     assert!(
         core.get_creator_soul(&principal)
@@ -1056,7 +1057,7 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
         "no authored SOUL document yet"
     );
 
-    // CREATE: the create-only profile write (`expected_revision: null`).
+    // note: CREATE: the create-only profile write (`expected_revision: null`).
     core.set_creator_soul(&principal, SOUL_BODY, None)
         .await
         .expect("create the Creator SOUL document");
@@ -1073,7 +1074,7 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
         "one profile write reached the provider"
     );
 
-    // The durable effect is the provider's own row in the pinned space.
+    // note: The durable effect is the provider's own row in the pinned space.
     let pool = provider.pool().await;
     let (space_id, body, revision) = provider_personality(&pool, &subject_id)
         .await
@@ -1083,7 +1084,7 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     assert_eq!(revision, 1);
     pool.close().await;
 
-    // A caller that read another revision keeps the retained conflict class and
+    // note: A caller that read another revision keeps the retained conflict class and
     // writes nothing. The refusal is the provider's real one; only its
     // peer-controlled message/details are rewritten an untrusted peer could do
     // the same. Neither the distinctive request body nor the peer text may
@@ -1130,7 +1131,7 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     );
     pool.close().await;
 
-    // The revision-checked write on the served revision commits.
+    // note: The revision-checked write on the served revision commits.
     core.set_creator_soul(&principal, EDITED_SOUL_BODY, Some(1))
         .await
         .expect("replace the Creator SOUL document at its revision");
@@ -1150,7 +1151,7 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     assert_eq!(revision, 2);
     pool.close().await;
 
-    // A read-only core keeps serving the profile read and refuses the write
+    // note: A read-only core keeps serving the profile read and refuses the write
     // before any provider call. Its own signed connection is served through the
     // SAME observation decorator, so the counter around the refused call proves
     // that the actual read-only session sent nothing.
@@ -1223,10 +1224,10 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
 }
 
 // ---------------------------------------------------------------------------
-// Bounded recall selection, budget and cursor (SDK-only proof)
+// note: Bounded recall selection, budget and cursor (SDK-only proof)
 // ---------------------------------------------------------------------------
 
-/// `memory.recall` has no Core product caller on this slice: the Character mind
+/// note: `memory.recall` has no Core product caller on this slice: the Character mind
 /// projection reads kind-filtered `memory.records.list` instead of ranking every
 /// kind through recall. The operation is therefore exercised over the SDK's own
 /// signed session against the same durable provider and the same pinned space
@@ -1242,7 +1243,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
 
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
-    // Two shared records through the real product path (which also ensures the
+    // note: Two shared records through the real product path (which also ensures the
     // provider subject), then one binding-local record through the SDK session.
     assert!(core
         .create_creator_memory(&principal, "r4-recall-one", "story_summary", RECALL_ONE)
@@ -1255,7 +1256,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
 
-    // Independently captured facts for every seeded record: id, placement and
+    // note: Independently captured facts for every seeded record: id, placement and
     // exact text. Recall is compared against THESE, never against another
     // recall response.
     let shared_one = core
@@ -1302,7 +1303,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         RECALL_CONTEXT.to_string(),
     );
 
-    // A second, differently placed record under the same subject: admitted by
+    // note: A second, differently placed record under the same subject: admitted by
     // `subject_all`, excluded by the selected-context view.
     let other_record = match adapter
         .create_record(
@@ -1331,7 +1332,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         RECALL_OTHER.to_string(),
     );
 
-    // A record under a DIFFERENT subject: excluded from every subject-scoped
+    // note: A record under a DIFFERENT subject: excluded from every subject-scoped
     // selection, so a subject mix-up cannot pass the set comparison.
     match adapter
         .ensure_subject(
@@ -1406,7 +1407,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         )
     };
 
-    // SELECTION: every selection's exact (id, placement, text) triples must equal
+    // note: SELECTION: every selection's exact (id, placement, text) triples must equal
     // the independently captured facts; missing, substituted or extra records
     // fail even when the count matches.
     let all = recall_ok(
@@ -1485,7 +1486,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "the combined selection is exactly shared plus the selected context"
     );
 
-    // BUDGET + CURSOR: one item per page over the four subject records until the
+    // note: BUDGET + CURSOR: one item per page over the four subject records until the
     // authorized set is exhausted; the concatenation must equal the independently
     // captured subject triples, not another recall response.
     let page_size = json!({ "max_items": 1 });
@@ -1526,7 +1527,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "the pages partition exactly the independently captured subject set"
     );
 
-    // BYTE BUDGET: a fresh subject with exactly two records. The multibyte item
+    // note: BYTE BUDGET: a fresh subject with exactly two records. The multibyte item
     // carries the query hit and fits whole; the long item is deferred, then
     // surfaced whole as the named overflow on the resumed page. Both bodies are
     // compared to their independently seeded originals, so a truncated or empty
@@ -1580,7 +1581,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         .as_str()
         .expect("the small record id")
         .to_string();
-    // A long multibyte body far beyond the byte budget.
+    // note: A long multibyte body far beyond the byte budget.
     let large_text = format!("档案：{}", "北方的关隘在雪后仍然通行，".repeat(120));
     assert!(
         large_text.len() > usize::try_from(BYTE_BUDGET).expect("the budget fits usize"),
@@ -1652,7 +1653,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     assert_eq!(second_page["truncated"], json!(false));
     assert_eq!(second_page["next_cursor"], Value::Null);
 
-    // BYTE vs CHARACTER BUDGET (discriminating): a fresh subject with a fitting
+    // note: BYTE vs CHARACTER BUDGET (discriminating): a fresh subject with a fitting
     // multibyte item and an item whose standard serialized UTF-8 form exceeds
     // the whole budget while its Unicode scalar count does not. A provider that
     // budgeted characters would serve both on the first page; the real byte
@@ -1683,7 +1684,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         .to_string();
     let over_char_under = "关".repeat(OVER_CHAR_UNDER_CHARS);
     let budget = usize::try_from(BYTE_BUDGET).expect("the budget fits usize");
-    // Independent inequalities from the bounded known input: the body is inside
+    // note: Independent inequalities from the bounded known input: the body is inside
     // the WHOLE budget by Unicode scalar count, but its standard serialized
     // UTF-8 form (and even its bare text bytes) are outside it. The fitting item
     // consumes a positive amount, so no byte-accounting page can admit this body
@@ -1773,7 +1774,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     assert_eq!(chars_second["truncated"], json!(false));
     assert_eq!(chars_second["next_cursor"], Value::Null);
 
-    // CURSOR BINDING: the cursor continues only the ranking it was minted under.
+    // note: CURSOR BINDING: the cursor continues only the ranking it was minted under.
     let first_page = match adapter
         .recall(
             &memory_principal,
@@ -1808,7 +1809,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         SpokeResult::Reject(reject) => assert_eq!(reject.code, SpokeRejectCode::CursorInvalid),
         SpokeResult::Ok(body) => panic!("a cursor from another query is refused: {body:?}"),
     }
-    // A committed provider write advances the snapshot the cursor is bound to.
+    // note: A committed provider write advances the snapshot the cursor is bound to.
     match adapter
         .create_record(
             &memory_principal,
@@ -1843,7 +1844,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
             panic!("a cursor from before the write is refused: {body:?}")
         }
     }
-    // AUTHORIZED IDENTITY PARTITION: a second, differently scoped signed client.
+    // note: AUTHORIZED IDENTITY PARTITION: a second, differently scoped signed client.
     // The admin issues it a subject-scoped, context-restricted `recall` grant;
     // its own signed session must see exactly the granted context and must be
     // denied every wider selection. The SDK ignores the client principal
@@ -1931,7 +1932,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         .await;
         assert_eq!(reject.code, SpokeRejectCode::NotAuthorized, "{why}");
     }
-    // A different subject is outside the grant's subject scope.
+    // note: A different subject is outside the grant's subject scope.
     let mut other_subject = json!({
         "space_id": provider.space_id,
         "subject_id": EXCLUDED_SUBJECT,
@@ -1955,7 +1956,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "another subject is outside the grant's subject scope"
     );
 
-    // The claimed client principal is not authority: the same scoped session
+    // note: The claimed client principal is not authority: the same scoped session
     // claiming the admin principal still sees only its granted context.
     let claimed_admin = recall_ok(
         &scoped,
@@ -1985,7 +1986,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "the scoped effects travelled the scoped peer's own signed session"
     );
 
-    // A space this provider does not serve is its definite absence: the pinned
+    // note: A space this provider does not serve is its definite absence: the pinned
     // space is the provider's own, never a local default that would answer here.
     match adapter
         .recall(
@@ -2006,7 +2007,7 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     adapter.close();
     responder_of(sdk_responder).await;
 
-    // Every durable record carries the provider's own space, and the recall
+    // note: Every durable record carries the provider's own space, and the recall
     // itself wrote nothing.
     let pool = provider.pool().await;
     let spaces: Vec<String> = sqlx::query("SELECT DISTINCT space_id FROM records")
@@ -2055,10 +2056,10 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
 }
 
 // ---------------------------------------------------------------------------
-// The admitted Host Character mind projection
+// note: The admitted Host Character mind projection
 // ---------------------------------------------------------------------------
 
-/// Deterministic in-memory provider adapter: no process, no model, no network.
+/// note: Deterministic in-memory provider adapter: no process, no model, no network.
 ///
 /// It exists only so the production admitted Host path is runnable here (the
 /// memory port itself stays the real signed provider). Its `execute` records the
@@ -2149,7 +2150,7 @@ impl ProviderAdapter for MindFixtureAdapter {
     }
 }
 
-/// The Host authority's composed provider port. The Character prompt path never
+/// note: The Host authority's composed provider port. The Character prompt path never
 /// calls it (the adapter above is the effect boundary for that), so it answers
 /// honestly and is never exercised.
 struct QuietPort;
@@ -2182,7 +2183,7 @@ impl ProviderPort for QuietPort {
     }
 }
 
-/// The production admitted Host composition assembles the Character prompt
+/// note: The production admitted Host composition assembles the Character prompt
 /// through `CoreCharacterMind`, which reads the Character subject's
 /// `personality` profile with `memory.profile.get` and the two memory families
 /// with kind-filtered `memory.records.list`, both on the real signed provider in
@@ -2208,7 +2209,7 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     let subject_id = legacy::character_subject_id(&character_id);
     let (trap, dirs) = arm_legacy_traps(&env, Some(&character_id)).await;
 
-    // One binding-local memory through the real public review path: the
+    // note: One binding-local memory through the real public review path: the
     // provider's binding-local fragment `fact` record the projection must
     // serve. This write also ensures the Character provider subject.
     capture(
@@ -2228,7 +2229,7 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     .await
     .expect("review the binding-local digest");
 
-    // The Character's authored SOUL document through the SDK's own signed
+    // note: The Character's authored SOUL document through the SDK's own signed
     // session: a real provider profile object, never a local file.
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
@@ -2254,7 +2255,7 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
 
     probe.watch(&subject_id);
 
-    // Deterministic local agent host: no process, no model, no network.
+    // note: Deterministic local agent host: no process, no model, no network.
     let manager = Arc::new(HostManager::new());
     let mind_adapter = Arc::new(MindFixtureAdapter::default());
     manager
@@ -2267,7 +2268,7 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
             },
         )
         .await;
-    // The Host's workspace boundary must contain both the Nexus home and the
+    // note: The Host's workspace boundary must contain both the Nexus home and the
     // admitted Character creative root this open pinned, so it is the user
     // home — the root the production native boot hands the manager.
     let workspace_root = env.user_home.clone();
@@ -2308,7 +2309,7 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
         .await
         .expect("the admitted Character host session is created");
 
-    // The counters are subject-scoped totals that already include session
+    // note: The counters are subject-scoped totals that already include session
     // creation; only the delta across this execution is attributed to it.
     let profile_gets_before = probe.profile_gets();
     let record_lists_before = probe.record_lists();
@@ -2345,7 +2346,7 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
         prompts[0]
     );
 
-    // The provider's own durable objects are the profile and the promoted
+    // note: The provider's own durable objects are the profile and the promoted
     // record; nothing of either came from a local file or the local provider.
     let pool = provider.pool().await;
     let (space_id, body, revision) = provider_personality(&pool, &subject_id)

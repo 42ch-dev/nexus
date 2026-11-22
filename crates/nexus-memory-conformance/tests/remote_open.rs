@@ -34,6 +34,7 @@
 //! client_identity)` tuple back. The open's own checks are what the code and
 //! the L2 review inspect; the behavioural facts above are what is observable
 //! here, and the pinned generation's use lands in the R2/R4 namespace evidence.
+// why: the cannot-prove list above is why the tuple is read back from the namespace columns.
 
 mod support;
 
@@ -85,30 +86,30 @@ use spoke_operations::{MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult};
 
 use support::{dto, MemoryOnlyHost};
 
-/// The host's Connect identity (the provider side of the signed session).
+/// note: The host's Connect identity (the provider side of the signed session).
 const HOST_SEED: [u8; 32] = [0x42; 32];
-/// The dialing client's Connect identity. Its credential file holds exactly
+/// note: The dialing client's Connect identity. Its credential file holds exactly
 /// this seed, so the public peer id the signed hello presents is derivable.
 const CLIENT_SEED: [u8; 32] = [0x31; 32];
-/// The one capability both ends negotiate: the fixture serves no other family.
+/// note: The one capability both ends negotiate: the fixture serves no other family.
 const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 const CREATOR: &str = "ctr_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WORKSPACE: &str = "default";
 const CREDENTIAL_ID: &str = "cred-remote-open";
-/// Bound on transport setup and teardown observation. Generous because the
+/// why: Bound on transport setup and teardown observation. Generous because the
 /// suite runs several signed loopback sessions in parallel on a loaded host;
 /// every wait is still bounded.
 const SETUP_BOUND: Duration = Duration::from_secs(30);
 
 // ---------------------------------------------------------------------------
-// Signed loopback provider
+// note: Signed loopback provider
 // ---------------------------------------------------------------------------
 
 fn manifest(host_id: &str) -> HostCapabilityManifest {
     manifest_with(host_id, &MEMORY_CAPABILITIES)
 }
 
-/// A host that serves no memory family: its signed hello declares nothing this
+/// note: A host that serves no memory family: its signed hello declares nothing this
 /// client can negotiate.
 fn manifest_without_memory(host_id: &str) -> HostCapabilityManifest {
     manifest_with(host_id, &[])
@@ -144,7 +145,7 @@ fn hex(bytes: &[u8]) -> String {
     text
 }
 
-/// Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
+/// note: Bind a real `127.0.0.1:0` listener whose first accepted WebSocket becomes
 /// the signed responder's transport. `memory_service` is the served memory face
 /// (the assembled fixture, or that fixture behind a test admission hold). Dial
 /// the returned address, then await the handle for the responder that served
@@ -165,7 +166,7 @@ async fn start_listener(
     .await
 }
 
-/// The same listener for the exact trusted dialer table the responder admits.
+/// note: The same listener for the exact trusted dialer table the responder admits.
 async fn start_listener_for(
     memory_service: Arc<dyn RemoteMemoryService>,
     host_manifest: HostCapabilityManifest,
@@ -177,7 +178,7 @@ async fn start_listener_for(
     (addr, task)
 }
 
-/// The same listener plus a control channel for the accepted TCP socket.
+/// note: The same listener plus a control channel for the accepted TCP socket.
 ///
 /// `shutdown` on the received clone tears the connection down abruptly, with no
 /// WebSocket close frame, so a signed consumer observes a real broken
@@ -218,7 +219,7 @@ async fn start_listener_with_control(
 }
 
 // ---------------------------------------------------------------------------
-// The disposable user home and the remote selection
+// note: The disposable user home and the remote selection
 // ---------------------------------------------------------------------------
 
 struct Env {
@@ -252,7 +253,7 @@ impl Env {
         }
     }
 
-    /// The same disposable home bootstrapped through the real public home
+    /// note: The same disposable home bootstrapped through the real public home
     /// contract: a registered Creator and a selected workspace, so the actor
     /// surface (`create_world`/`create_character`/`add_binding`) is usable.
     async fn boot(display_name: &str) -> Self {
@@ -286,12 +287,12 @@ impl Env {
         }
     }
 
-    /// Write the operator-provisioned credential for `seed` at mode `0600`.
+    /// note: Write the operator-provisioned credential for `seed` at mode `0600`.
     fn write_credential(&self, seed: &[u8; 32]) {
         self.write_credential_named(CREDENTIAL_ID, seed, None);
     }
 
-    /// Write a credential whose `capability_token` is the given proof object
+    /// note: Write a credential whose `capability_token` is the given proof object
     /// (or `null`), so the load boundary sees the exact published shape.
     fn write_credential_with_token(&self, seed: &[u8; 32], token: Option<&Value>) {
         self.write_credential_named(CREDENTIAL_ID, seed, token);
@@ -318,19 +319,19 @@ impl Env {
         }
     }
 
-    /// The workspace state database this open resolves.
+    /// note: The workspace state database this open resolves.
     fn state_db(&self) -> PathBuf {
         nexus_home_layout::workspace_state_db_path(&self.user_home, &self.creator_id, WORKSPACE)
     }
 
-    /// The local provider's private file root for this workspace. Its absence
+    /// note: The local provider's private file root for this workspace. Its absence
     /// is the observable that no local provider was constructed.
     fn local_provider_store(&self) -> PathBuf {
         nexus_home_layout::operational_workspace_dir(&self.user_home, &self.creator_id, WORKSPACE)
             .join("memory-store")
     }
 
-    /// The legacy bearer file the remote refusal must not touch.
+    /// note: The legacy bearer file the remote refusal must not touch.
     fn legacy_bearer(&self) -> PathBuf {
         self.user_home
             .join(".nexus42")
@@ -364,7 +365,7 @@ fn selection(
     )
 }
 
-/// The same selection with an explicit credential file and client allowlist,
+/// note: The same selection with an explicit credential file and client allowlist,
 /// for the refusal boundaries (wrong pinned host key, unlisted host).
 fn selection_for(
     space_id: &str,
@@ -393,7 +394,7 @@ fn coded(error: &CoreError) -> &str {
     }
 }
 
-/// Await one responder task without letting a fixture bug hang the suite.
+/// note: Await one responder task without letting a fixture bug hang the suite.
 async fn responder_of(
     task: tokio::task::JoinHandle<Arc<ConnectResponder>>,
 ) -> Arc<ConnectResponder> {
@@ -404,15 +405,15 @@ async fn responder_of(
 }
 
 // ---------------------------------------------------------------------------
-// The durable provider fixture every signed session is served from
+// note: The durable provider fixture every signed session is served from
 // ---------------------------------------------------------------------------
 
-/// The durable provider fixture one scenario is served from: the provider's own
+/// note: The durable provider fixture one scenario is served from: the provider's own
 /// database, the one served space with its authority, the dialer identity the
 /// signed session is admitted as, and the operator-provisioned principal that
 /// dialer maps to.
 struct Fixture {
-    /// Keeps the provider database file alive for the whole scenario.
+    /// note: Keeps the provider database file alive for the whole scenario.
     provider_home: TempDir,
     provider: Arc<FixtureMemoryProvider>,
     directory: Arc<PeerDirectory>,
@@ -426,12 +427,12 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// The fixture admitting the `CLIENT_SEED` dialer.
+    /// note: The fixture admitting the `CLIENT_SEED` dialer.
     async fn new() -> Self {
         Self::for_seed(&CLIENT_SEED).await
     }
 
-    /// The same fixture admitting the public identity derived from `seed`: the
+    /// note: The same fixture admitting the public identity derived from `seed`: the
     /// operator provisions exactly that peer's principal, so a session it signs
     /// is admitted, and the credential file the home holds carries that seed.
     async fn for_seed(seed: &[u8; 32]) -> Self {
@@ -463,12 +464,12 @@ impl Fixture {
         }
     }
 
-    /// A pool on this fixture's own provider database.
+    /// note: A pool on this fixture's own provider database.
     async fn pool(&self) -> SqlitePool {
         provider_pool(&self.provider_home).await
     }
 
-    /// One listener serving this fixture's durable service under `host_manifest`
+    /// note: One listener serving this fixture's durable service under `host_manifest`
     /// and admitting exactly the fixture's own dialer.
     async fn listener(
         &self,
@@ -484,12 +485,12 @@ impl Fixture {
         .await
     }
 
-    /// The served space's own authoritative manifest.
+    /// note: The served space's own authoritative manifest.
     fn served_manifest(&self) -> HostCapabilityManifest {
         manifest(&self.authority_host_id)
     }
 
-    /// The same fixture whose admission table additionally admits `seed`'s peer
+    /// note: The same fixture whose admission table additionally admits `seed`'s peer
     /// under its own principal, which is not operator-provisioned.
     fn admitting(mut self, seed: &[u8; 32]) -> Self {
         let peer = peer_id(seed);
@@ -501,7 +502,7 @@ impl Fixture {
         self
     }
 
-    /// One listener serving this fixture's durable service and admitting
+    /// note: One listener serving this fixture's durable service and admitting
     /// `seed`'s peer instead of the fixture's own dialer.
     async fn listener_for(
         &self,
@@ -518,17 +519,17 @@ impl Fixture {
         .await
     }
 
-    /// The selection an admitted open dials for `space_id`.
+    /// note: The selection an admitted open dials for `space_id`.
     fn selection(&self, space_id: &str, addr: SocketAddr) -> MemoryProviderSelection {
         selection(space_id, addr, &self.host_pubkey)
     }
 }
 
 // ---------------------------------------------------------------------------
-// The pinning test
+// note: The pinning test
 // ---------------------------------------------------------------------------
 
-/// A credential the loader cannot read fails the whole open before any socket is
+/// note: A credential the loader cannot read fails the whole open before any socket is
 /// dialed: the static category is returned and no local provider appears.
 async fn assert_credential_refusal(env: &Env, host_pubkey: &[u8; 32]) {
     let dead_endpoint: SocketAddr = "127.0.0.1:9".parse().expect("dead endpoint");
@@ -547,7 +548,7 @@ async fn assert_credential_refusal(env: &Env, host_pubkey: &[u8; 32]) {
     );
 }
 
-/// One refused open against a freshly served listener: the signed session is
+/// note: One refused open against a freshly served listener: the signed session is
 /// established, the open fails with its static class, the host session closes,
 /// and no local provider appears.
 async fn assert_refused_open(
@@ -572,7 +573,7 @@ async fn assert_refused_open(
     );
 }
 
-/// The served selection opens against the served space, and the binding really
+/// note: The served selection opens against the served space, and the binding really
 /// serves the provider: the host authenticated the loaded credential's public
 /// peer identity, its session reached Established, and no local provider was
 /// constructed.
@@ -598,7 +599,7 @@ async fn assert_served_open(fixture: &Fixture, env: &Env) -> (CoreService, Arc<C
     (core, responder)
 }
 
-/// Legacy migration is a local-only operation: the nonlocal binding refuses with
+/// note: Legacy migration is a local-only operation: the nonlocal binding refuses with
 /// the structured code and leaves the seeded legacy bearer byte-identical.
 async fn assert_local_migration_refused(core: &CoreService, principal: &CorePrincipal, env: &Env) {
     let refusal = core
@@ -621,7 +622,7 @@ async fn assert_local_migration_refused(core: &CoreService, principal: &CorePrin
     );
 }
 
-/// The owned close releases the binding: the closed open serves no memory and a
+/// note: The owned close releases the binding: the closed open serves no memory and a
 /// repeated close is idempotent.
 async fn assert_close_releases(core: &CoreService, principal: &CorePrincipal) {
     assert!(
@@ -642,7 +643,7 @@ async fn assert_close_releases(core: &CoreService, principal: &CorePrincipal) {
 async fn remote_open_pins_space_and_authority() {
     let fixture = Fixture::new().await;
 
-    // A credential failure fails the whole open before any socket is dialed:
+    // note: A credential failure fails the whole open before any socket is dialed:
     // the static category is returned and no local provider appears.
     let uncredentialed = Env::new();
     assert_credential_refusal(&uncredentialed, &fixture.host_pubkey).await;
@@ -653,7 +654,7 @@ async fn remote_open_pins_space_and_authority() {
     fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy bearer dir");
     fs::write(&legacy, b"# legacy long-term memory\n").expect("seed the legacy bearer");
 
-    // A space the provider does not serve: the signed session opens, the exact
+    // note: A space the provider does not serve: the signed session opens, the exact
     // space is absent from discovery, and the open fails instead of taking the
     // provider's advertised space.
     assert_refused_open(
@@ -666,7 +667,7 @@ async fn remote_open_pins_space_and_authority() {
     )
     .await;
 
-    // The host does not negotiate the memory family at all.
+    // note: The host does not negotiate the memory family at all.
     assert_refused_open(
         &fixture,
         &env,
@@ -677,7 +678,7 @@ async fn remote_open_pins_space_and_authority() {
     )
     .await;
 
-    // The space is discovered, but its authority is not the authenticated host.
+    // note: The space is discovered, but its authority is not the authenticated host.
     assert_refused_open(
         &fixture,
         &env,
@@ -688,7 +689,7 @@ async fn remote_open_pins_space_and_authority() {
     )
     .await;
 
-    // The exact space on its authenticated authority opens, and the binding
+    // note: The exact space on its authenticated authority opens, and the binding
     // serves the provider. A real product read then runs through the pinned
     // binding: opening the Creator memory adapter ensures the subject and lists
     // candidates in the pinned space over the signed session (the fixture
@@ -704,17 +705,17 @@ async fn remote_open_pins_space_and_authority() {
         "the fixture holds no pending candidates"
     );
 
-    // Legacy migration stays local-only, and the owned close releases the
+    // note: Legacy migration stays local-only, and the owned close releases the
     // binding.
     assert_local_migration_refused(&core, &principal, &env).await;
     assert_close_releases(&core, &principal).await;
 }
 
 // ---------------------------------------------------------------------------
-// Cancellation of an open at its established-session admission
+// note: Cancellation of an open at its established-session admission
 // ---------------------------------------------------------------------------
 
-/// Test-only admission hold in front of the real assembled fixture service.
+/// note: Test-only admission hold in front of the real assembled fixture service.
 ///
 /// It parks the first `memory.describe` invoke after the signed session is
 /// already established — exactly the await the owning review names — and then
@@ -737,7 +738,7 @@ impl RemoteMemoryService for AdmissionHold {
     }
 }
 
-/// Open one remote selection from a home the caller keeps alive, so the future
+/// note: Open one remote selection from a home the caller keeps alive, so the future
 /// can be spawned and then cancelled.
 fn open_owned(
     user_home: PathBuf,
@@ -750,7 +751,7 @@ fn open_owned(
     })
 }
 
-/// Wait until the host reports the abandoned session closed.
+/// note: Wait until the host reports the abandoned session closed.
 async fn wait_for_closed(responder: &Arc<ConnectResponder>) {
     tokio::time::timeout(SETUP_BOUND, async {
         loop {
@@ -764,7 +765,7 @@ async fn wait_for_closed(responder: &Arc<ConnectResponder>) {
     .expect("the host observed the abandoned established session closing");
 }
 
-/// Cancelling an open while its established-session admission is pending must
+/// note: Cancelling an open while its established-session admission is pending must
 /// close exactly that session: the abandoned peer observes its session closing,
 /// and a second, delivered open against the same provider keeps serving.
 #[tokio::test]
@@ -788,7 +789,7 @@ async fn cancelled_open_closes_only_its_own_established_session() {
         .expect("operator provisions the admin grant");
     let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
 
-    // The abandoned open is held inside its established-session admission; the
+    // note: The abandoned open is held inside its established-session admission; the
     // generous serve budget keeps the held call pending instead of timing out.
     let reached = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
@@ -797,7 +798,7 @@ async fn cancelled_open_closes_only_its_own_established_session() {
         reached: Arc::clone(&reached),
         release: Arc::clone(&release),
     });
-    // A separate open is delivered first, so it is already Established while
+    // note: A separate open is delivered first, so it is already Established while
     // the measured open is pending.
     let delivered_home = Env::new();
     delivered_home.write_credential(&CLIENT_SEED);
@@ -835,7 +836,7 @@ async fn cancelled_open_closes_only_its_own_established_session() {
         .await
         .expect("the abandoned open reached the established-session admission");
 
-    // Cancel exactly at the held admission and observe the real peer closing
+    // note: Cancel exactly at the held admission and observe the real peer closing
     // the established session it owns. The abort happens immediately after the
     // hold is reached: the SDK's own invoke budget is shorter than this test's
     // setup work, so the measured open must not wait behind another open.
@@ -851,7 +852,7 @@ async fn cancelled_open_closes_only_its_own_established_session() {
     wait_for_closed(&abandoned_responder).await;
     release.notify_waiters();
 
-    // The delivered open is untouched: its own session is still established and
+    // note: The delivered open is untouched: its own session is still established and
     // its pinned binding still serves the provider's space.
     let delivered_responder = responder_of(delivered_host).await;
     assert_eq!(
@@ -874,7 +875,7 @@ async fn cancelled_open_closes_only_its_own_established_session() {
     );
 }
 
-/// Dropping the last open without an explicit close still ends its session.
+/// note: Dropping the last open without an explicit close still ends its session.
 ///
 /// The SDK's receive task keeps its own `Arc` on the adapter, so only the
 /// binding's own cleanup can release a *delivered* remote session. A core that
@@ -916,14 +917,14 @@ async fn dropping_the_open_closes_its_established_session() {
         .await
         .expect("the exact selection opens against the served space");
 
-    // The delivered binding really serves the provider over the signed
+    // note: The delivered binding really serves the provider over the signed
     // session, so the drop below releases a live one.
     let principal = core.active_principal().await.expect("active principal");
     core.count_pending_reviews(&principal)
         .await
         .expect("the pinned remote binding serves the memory family");
 
-    // No explicit close: dropping the last handle is the only thing that can
+    // note: No explicit close: dropping the last handle is the only thing that can
     // end this session.
     drop(core);
     let responder = responder_of(host).await;
@@ -931,22 +932,22 @@ async fn dropping_the_open_closes_its_established_session() {
 }
 
 // ---------------------------------------------------------------------------
-// Authenticated admission: refusals, reconnect replay and credential redaction
+// note: Authenticated admission: refusals, reconnect replay and credential redaction
 // ---------------------------------------------------------------------------
 
-/// A second Connect identity whose memory authority is exactly the one scoped
+/// note: A second Connect identity whose memory authority is exactly the one scoped
 /// grant the admin issues it.
 const SCOPED_SEED: [u8; 32] = [0x52; 32];
-/// A third seed, used only as an untrusted peer id/key.
+/// note: A third seed, used only as an untrusted peer id/key.
 const OTHER_SEED: [u8; 32] = [0x63; 32];
-/// The capability proof issuer's Connect identity in the token scenarios.
+/// note: The capability proof issuer's Connect identity in the token scenarios.
 const ISSUER_SEED: [u8; 32] = [0x77; 32];
-/// Distinct sentinels for the credential-redaction scenario: the credential seed
+/// note: Distinct sentinels for the credential-redaction scenario: the credential seed
 /// itself and the token's signature material. Both are unique text no incidental
 /// value can reproduce.
 const SEED_SENTINEL: [u8; 32] = [0xA7; 32];
 const SIGNATURE_SENTINEL: &str = "sig-sentinel-0f3c9a-never-public";
-/// The sentinel a corrupt stored document carries: it must never appear on the
+/// note: The sentinel a corrupt stored document carries: it must never appear on the
 /// wire.
 const WIRE_CANARY: &str = "NEXUS-CANARY-3f9a";
 const SCOPED_CREDENTIAL_ID: &str = "cred-remote-scoped";
@@ -976,7 +977,7 @@ fn principal_label(principal_id: &str) -> Principal {
     dto(json!({ "principal_id": principal_id, "extensions": {} }))
 }
 
-/// The hello manifest the product's remote dial sends: the one family it is a
+/// note: The hello manifest the product's remote dial sends: the one family it is a
 /// client of and no served op.
 fn client_manifest(peer: &str) -> HostCapabilityManifest {
     serde_json::from_value(json!({
@@ -990,7 +991,7 @@ fn client_manifest(peer: &str) -> HostCapabilityManifest {
     .expect("valid client manifest")
 }
 
-/// A signed SDK session on the product WS transport, admitted by the same
+/// note: A signed SDK session on the product WS transport, admitted by the same
 /// responder a Core open dials. The product open itself only ever issues its
 /// own admission ops; this is the SDK client for the boundaries it never
 /// constructs (the optional families, the admin's grant).
@@ -1018,7 +1019,7 @@ async fn dial_adapter(addr: SocketAddr, seed: [u8; 32]) -> Arc<RemoteAdapter> {
         .expect("the signed dial is admitted")
 }
 
-/// Issue one grant through the admin's own signed session. The fixture's
+/// note: Issue one grant through the admin's own signed session. The fixture's
 /// non-amplification rule decides whether the issuance is admissible.
 async fn issue_grant(adapter: &RemoteAdapter, admin_principal: &str, body: Value) {
     match adapter
@@ -1043,7 +1044,7 @@ async fn provider_pool(fixture_home: &TempDir) -> SqlitePool {
         .expect("open the fixture provider database")
 }
 
-/// The workspace state database the product Core writes: where the D18
+/// note: The workspace state database the product Core writes: where the D18
 /// namespace facts derived from the actual pinned binding live.
 async fn core_db(env: &Env) -> SqlitePool {
     SqlitePool::connect_with(SqliteConnectOptions::new().filename(env.state_db()))
@@ -1060,7 +1061,7 @@ async fn provider_receipts(pool: &SqlitePool, op: &str) -> i64 {
         .get(0)
 }
 
-/// Every provider candidate as `(candidate_id, status)`.
+/// note: Every provider candidate as `(candidate_id, status)`.
 async fn provider_candidates(pool: &SqlitePool) -> Vec<(String, String)> {
     sqlx::query("SELECT candidate_id, status FROM candidates ORDER BY candidate_id")
         .fetch_all(pool)
@@ -1079,7 +1080,7 @@ async fn provider_generation(pool: &SqlitePool) -> i64 {
         .get(0)
 }
 
-/// The provider's durable receipt and candidate bodies as searchable text: the
+/// note: The provider's durable receipt and candidate bodies as searchable text: the
 /// real sink a credential sentinel must never reach.
 async fn provider_body_text(pool: &SqlitePool) -> String {
     let rows: Vec<String> = sqlx::query(
@@ -1098,7 +1099,7 @@ async fn provider_body_text(pool: &SqlitePool) -> String {
     rows.join("\n")
 }
 
-/// A structurally valid capability proof whose claims already expired. The
+/// note: A structurally valid capability proof whose claims already expired. The
 /// credential contract (§3.1) declares structural validation only, so Nexus
 /// accepts the shape and the host verifies the token.
 fn expired_token(iss: &str, aud: &str) -> Value {
@@ -1122,7 +1123,7 @@ fn now_seconds() -> u64 {
         .as_secs()
 }
 
-/// Issue one real capability proof through the pinned SDK's own issuer.
+/// note: Issue one real capability proof through the pinned SDK's own issuer.
 fn capability_proof_at(
     issuer_seed: &[u8; 32],
     subject: &str,
@@ -1146,7 +1147,7 @@ fn capability_proof_at(
     .expect("the SDK issues the proof")
 }
 
-/// One committed provider receipt, read from the independent fixture's own row.
+/// note: One committed provider receipt, read from the independent fixture's own row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ProviderReceipt {
     receipt_id: String,
@@ -1189,7 +1190,7 @@ fn receipt_candidate_ids(receipt: &ProviderReceipt) -> Vec<String> {
         .collect()
 }
 
-/// The provider's complete relevant effect set as stable text rows.
+/// note: The provider's complete relevant effect set as stable text rows.
 ///
 /// Not a count: an insertion, removal or content/revision change in receipts,
 /// candidates or records changes the snapshot. Schema knowledge stays here in
@@ -1233,11 +1234,11 @@ async fn provider_effect_snapshot(pool: &SqlitePool) -> Vec<String> {
     rows
 }
 
-/// The binding's still-open D18 wire admissions, one tuple of the identity keys
+/// note: The binding's still-open D18 wire admissions, one tuple of the identity keys
 /// the actual pinned Core binding produced.
 type BindingAdmissions = Vec<(String, String, String, String, String, String, String)>;
 
-/// The binding's D18 object facts: the eight identity keys plus the monotone
+/// note: The binding's D18 object facts: the eight identity keys plus the monotone
 /// state.
 type BindingFacts = Vec<(
     String,
@@ -1276,7 +1277,7 @@ async fn binding_admissions(pool: &SqlitePool, binding_id: &str) -> BindingAdmis
     .collect()
 }
 
-/// The same admissions read from the workspace state database this home owns.
+/// note: The same admissions read from the workspace state database this home owns.
 async fn binding_admissions_now(env: &Env, binding_id: &str) -> BindingAdmissions {
     let pool = core_db(env).await;
     let admissions = binding_admissions(&pool, binding_id).await;
@@ -1284,7 +1285,7 @@ async fn binding_admissions_now(env: &Env, binding_id: &str) -> BindingAdmission
     admissions
 }
 
-/// The binding's D18 object facts, written from the actual pinned binding.
+/// note: The binding's D18 object facts, written from the actual pinned binding.
 async fn binding_object_facts(pool: &SqlitePool, binding_id: &str) -> BindingFacts {
     sqlx::query(
         "SELECT authority_host_id, authority_generation, space_id, client_identity, \
@@ -1312,7 +1313,7 @@ async fn binding_object_facts(pool: &SqlitePool, binding_id: &str) -> BindingFac
     .collect()
 }
 
-/// The same object facts read from the workspace state database this home owns.
+/// note: The same object facts read from the workspace state database this home owns.
 async fn binding_facts_now(env: &Env, binding_id: &str) -> BindingFacts {
     let pool = core_db(env).await;
     let facts = binding_object_facts(&pool, binding_id).await;
@@ -1324,7 +1325,7 @@ fn response_json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).expect("the SDK response serializes")
 }
 
-/// Test-only observation of the responder-side transport.
+/// note: Test-only observation of the responder-side transport.
 ///
 /// Every received byte sequence is passed through **unmodified** to the product
 /// `WsTransport`; this wrapper only reads an invoke envelope's `op`,
@@ -1402,14 +1403,14 @@ impl EnvelopeObserver {
         if state.pending.is_none() && !state.poisoned {
             state.pending = Some(observed);
         } else {
-            // Two invokes overlapped (or this session was already poisoned):
+            // note: Two invokes overlapped (or this session was already poisoned):
             // keep neither observation and stay poisoned forever.
             state.pending = None;
             state.poisoned = true;
         }
     }
 
-    /// Atomically consume the single outstanding observation.
+    /// note: Atomically consume the single outstanding observation.
     ///
     /// An empty slot or a poisoned session poisons it permanently: the caller can
     /// never clear the poison by retrying, and a later observation cannot revive
@@ -1448,7 +1449,7 @@ impl Transport for EnvelopeObserver {
     }
 }
 
-/// The test-host token admission, over the **actually received** proof.
+/// note: The test-host token admission, over the **actually received** proof.
 ///
 /// The proof is taken from the envelope the SDK just received (never from test
 /// setup), the op is the dispatched operation, the peer is the
@@ -1510,7 +1511,7 @@ impl RemoteMemoryService for TokenGate {
     }
 }
 
-/// Serve the token-gated fixture over one loopback listener whose transport is
+/// note: Serve the token-gated fixture over one loopback listener whose transport is
 /// observed. Every admission decision uses the proof carried by the invocation
 /// the SDK actually received.
 async fn start_listener_token_gated(
@@ -1570,7 +1571,7 @@ async fn start_listener_token_gated(
 }
 
 // ---------------------------------------------------------------------------
-// Real product actor fixture (owned World, Character and active binding)
+// note: Real product actor fixture (owned World, Character and active binding)
 // ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &CorePrincipal, title: &str) -> String {
@@ -1614,7 +1615,7 @@ fn character_capture_request(binding_id: Option<&str>, pending_id: &str, digest:
     request
 }
 
-/// A legitimate reopen on the same home after one failed-open stage.
+/// note: A legitimate reopen on the same home after one failed-open stage.
 ///
 /// The stage's failure must have released exactly the guards that open took:
 /// this open has to acquire fresh, serve, and close with the host observing its
@@ -1632,7 +1633,7 @@ async fn assert_home_reopens(fixture: &Fixture, env: &Env) {
     wait_for_closed(&responder).await;
 }
 
-/// Settle one listener the client refused.
+/// note: Settle one listener the client refused.
 ///
 /// The listener returns as soon as `connect_responder` spawns its own runner,
 /// so a COMPLETED listener is not a closed session: its responder is closed and
@@ -1661,7 +1662,7 @@ async fn settle_listener(mut task: tokio::task::JoinHandle<Arc<ConnectResponder>
     }
 }
 
-/// The refused-admission run: the shared fixture, its provider pool and the
+/// note: The refused-admission run: the shared fixture, its provider pool and the
 /// provider effect set every refused stage must leave untouched.
 struct Admission {
     fixture: Fixture,
@@ -1669,22 +1670,22 @@ struct Admission {
     effects_before: Vec<String>,
 }
 
-/// The dialer identity one stage's listener admits, when it is not the
+/// note: The dialer identity one stage's listener admits, when it is not the
 /// fixture's own dialer.
 struct Admitted {
     peer: String,
     pubkey: [u8; 32],
 }
 
-/// How the host side of a refused stage must settle.
+/// note: How the host side of a refused stage must settle.
 enum Settle {
-    /// The handshake never established, so the listener returns on its own.
+    /// note: The handshake never established, so the listener returns on its own.
     Handshake,
-    /// The signed session established, and the refused open closed it.
+    /// note: The signed session established, and the refused open closed it.
     Established,
 }
 
-/// What one refused stage must produce.
+/// note: What one refused stage must produce.
 struct Refusal {
     code: &'static str,
     settle: Settle,
@@ -1703,7 +1704,7 @@ impl Admission {
         }
     }
 
-    /// The fixture's own admitted dialer.
+    /// note: The fixture's own admitted dialer.
     fn dialer(&self) -> Admitted {
         Admitted {
             peer: self.fixture.client_peer.clone(),
@@ -1719,7 +1720,7 @@ impl Admission {
         );
     }
 
-    /// A stage whose open is refused before any socket is dialed.
+    /// note: A stage whose open is refused before any socket is dialed.
     async fn pre_dial(&self, env: &Env, expected_code: &str, context: &str) {
         let dead_endpoint: SocketAddr = "127.0.0.1:9".parse().expect("dead endpoint");
         let error = open(
@@ -1738,7 +1739,7 @@ impl Admission {
         );
     }
 
-    /// One refused stage against a freshly admitted listener: its static class,
+    /// note: One refused stage against a freshly admitted listener: its static class,
     /// the settled host session, the untouched effect set and the legitimate
     /// reopen of the same home.
     async fn stage(
@@ -1778,7 +1779,7 @@ impl Admission {
     }
 }
 
-/// Stages 1 and 2: a capability token that is not the published proof shape, and
+/// note: Stages 1 and 2: a capability token that is not the published proof shape, and
 /// an unreachable endpoint. Both refuse before the dial, each on its own home,
 /// which then reopens legitimately. (§3.1 is structural validation, so a
 /// well-formed proof — even an expired one — never produces a local credential
@@ -1806,7 +1807,7 @@ async fn pre_dial_stages(run: &Admission) {
     assert_home_reopens(&run.fixture, &unreachable).await;
 }
 
-/// Stages 3-5: the client's pinned host key is not the host's, the pinned host is
+/// note: Stages 3-5: the client's pinned host key is not the host's, the pinned host is
 /// not on the allowlist, and the dialer's own key is not trusted by the host. All
 /// three fail the handshake, so none reaches an established session.
 async fn handshake_stages(run: &Admission, env: &Env) {
@@ -1815,7 +1816,7 @@ async fn handshake_stages(run: &Admission, env: &Env) {
     let host_pubkey = run.fixture.host_pubkey;
     let wrong_host = pubkey(&OTHER_SEED);
 
-    // The client's pinned host key is not the host's.
+    // note: The client's pinned host key is not the host's.
     run.stage(
         env,
         run.dialer(),
@@ -1837,7 +1838,7 @@ async fn handshake_stages(run: &Admission, env: &Env) {
     )
     .await;
 
-    // The host's key is pinned but it is not on the allowlist.
+    // note: The host's key is pinned but it is not on the allowlist.
     run.stage(
         env,
         run.dialer(),
@@ -1859,7 +1860,7 @@ async fn handshake_stages(run: &Admission, env: &Env) {
     )
     .await;
 
-    // The dialer's own key is not trusted by the host.
+    // note: The dialer's own key is not trusted by the host.
     run.stage(
         env,
         Admitted {
@@ -1885,13 +1886,13 @@ async fn handshake_stages(run: &Admission, env: &Env) {
     .await;
 }
 
-/// Stages 6-8: `spoke-memory` is the required umbrella family, the configured
+/// note: Stages 6-8: `spoke-memory` is the required umbrella family, the configured
 /// space must be served, and its authority must be the authenticated host. Each
 /// establishes a signed session that the refusing open then closes.
 async fn discovery_stages(run: &Admission, env: &Env) {
     let served = &run.fixture.served_space;
 
-    // A host declaring only the sub-families negotiates nothing this client
+    // note: A host declaring only the sub-families negotiates nothing this client
     // speaks.
     run.stage(
         env,
@@ -1909,7 +1910,7 @@ async fn discovery_stages(run: &Admission, env: &Env) {
     )
     .await;
 
-    // The configured space is not served.
+    // note: The configured space is not served.
     run.stage(
         env,
         run.dialer(),
@@ -1926,7 +1927,7 @@ async fn discovery_stages(run: &Admission, env: &Env) {
     )
     .await;
 
-    // The discovered space's authority is not the authenticated host.
+    // note: The discovered space's authority is not the authenticated host.
     run.stage(
         env,
         run.dialer(),
@@ -1941,7 +1942,7 @@ async fn discovery_stages(run: &Admission, env: &Env) {
     .await;
 }
 
-/// The client-side admission boundaries, stage by stage: a credential that is
+/// note: The client-side admission boundaries, stage by stage: a credential that is
 /// not the published proof shape, an unreachable endpoint, an unpinned or
 /// unlisted host, an untrusted dialer, a host without the umbrella family, an
 /// unserved space and a non-authoritative space. Each fails the whole open with
@@ -1965,7 +1966,7 @@ async fn connect_admission_refuses_untrusted_credentials_keys_and_families() {
     run.pool.close().await;
 }
 
-/// The optional reflection and transfer families are neither negotiated nor
+/// note: The optional reflection and transfer families are neither negotiated nor
 /// served: a real signed session gets the explicit, classified refusal, and the
 /// provider commits nothing for it. N4 success remains deferred.
 #[tokio::test]
@@ -2065,7 +2066,7 @@ async fn unavailable_reflection_and_transfer_ops_refuse_explicitly_on_the_signed
     pool.close().await;
 }
 
-/// The product session of the loss scenario: its binding-scoped capture is what
+/// note: The product session of the loss scenario: its binding-scoped capture is what
 /// pins the D18 fact from the actual binding.
 struct ProductSession {
     core: CoreService,
@@ -2078,7 +2079,7 @@ struct ProductSession {
     facts_before: BindingFacts,
 }
 
-/// The signed consumer's own session and the original capture it committed.
+/// note: The signed consumer's own session and the original capture it committed.
 struct ConsumerSession {
     adapter: Arc<RemoteAdapter>,
     responder: Arc<ConnectResponder>,
@@ -2089,7 +2090,7 @@ struct ConsumerSession {
     candidates: Value,
 }
 
-/// One transport-loss scenario: both live bindings, the evidence the reconnect
+/// note: One transport-loss scenario: both live bindings, the evidence the reconnect
 /// must reproduce, and the fixture they are served from.
 struct Loss {
     fixture: Fixture,
@@ -2102,7 +2103,7 @@ struct Loss {
     admissions_before: BindingAdmissions,
 }
 
-/// The one live candidate fact carries the pin the actual binding produced.
+/// note: The one live candidate fact carries the pin the actual binding produced.
 fn assert_pinned_facts(
     facts: &BindingFacts,
     fixture: &Fixture,
@@ -2128,7 +2129,7 @@ fn assert_pinned_facts(
     assert_eq!(facts[0].8, "live", "the committed candidate is live");
 }
 
-/// The product Core session, with a control clone of its accepted socket, and a
+/// note: The product Core session, with a control clone of its accepted socket, and a
 /// real owned World/Character/binding: the binding-scoped capture's D18 fact is
 /// written from the actual pinned binding.
 async fn product_session(fixture: &Fixture, env: &Env) -> ProductSession {
@@ -2181,7 +2182,7 @@ async fn product_session(fixture: &Fixture, env: &Env) -> ProductSession {
     }
 }
 
-/// The signed consumer's own session and its original capture of the same
+/// note: The signed consumer's own session and its original capture of the same
 /// Character subject.
 async fn consumer_session(fixture: &Fixture, character_id: &str) -> ConsumerSession {
     let (addr, task, control) = start_listener_with_control(
@@ -2224,7 +2225,7 @@ async fn consumer_session(fixture: &Fixture, character_id: &str) -> ConsumerSess
     }
 }
 
-/// The signed consumer's same-key replay and `receipts.get`, each answered with
+/// note: The signed consumer's same-key replay and `receipts.get`, each answered with
 /// the ORIGINAL receipt tuple and the ORIGINAL candidate.
 async fn assert_signed_replay(fixture: &Fixture, consumer: &ConsumerSession) {
     let (addr, task) = fixture.listener(fixture.served_manifest()).await;
@@ -2273,7 +2274,7 @@ async fn assert_signed_replay(fixture: &Fixture, consumer: &ConsumerSession) {
 }
 
 impl Loss {
-    /// Tear the provider's accepted sockets down under the still-open client
+    /// note: Tear the provider's accepted sockets down under the still-open client
     /// bindings. The test never calls a client close here, so both live bindings
     /// have to observe a broken transport instead of a graceful shutdown.
     async fn break_the_transport(&self) {
@@ -2348,7 +2349,7 @@ impl Loss {
         self.consumer.adapter.close();
     }
 
-    /// Reconnect with the SAME persisted seed — same peer, same generation — and
+    /// note: Reconnect with the SAME persisted seed — same peer, same generation — and
     /// replay both paths: the product binding-scoped capture and the signed
     /// consumer's same-key capture, which must answer with the ORIGINAL receipt
     /// tuple and candidate.
@@ -2372,7 +2373,7 @@ impl Loss {
             "the same authority generation is served by the reconnect"
         );
 
-        // Product path (complementary): the same binding-scoped capture replays.
+        // note: Product path (complementary): the same binding-scoped capture replays.
         let reopened_principal = reopened.active_principal().await.expect("principal");
         reopened
             .capture_character_pending_review(
@@ -2383,11 +2384,11 @@ impl Loss {
             .await
             .expect("the product replay is answered");
 
-        // Signed consumer path: the same-key replay returns the ORIGINAL receipt
+        // note: Signed consumer path: the same-key replay returns the ORIGINAL receipt
         // and the ORIGINAL candidate, and `receipts.get` serves the same tuple.
         assert_signed_replay(&self.fixture, &self.consumer).await;
 
-        // Neither path committed a second effect, and the client pin stayed the
+        // note: Neither path committed a second effect, and the client pin stayed the
         // same namespace across the reconnect.
         assert_eq!(
             provider_effect_snapshot(&self.pool).await,
@@ -2414,7 +2415,7 @@ impl Loss {
     }
 }
 
-/// An UNEXPECTED transport loss (the provider's socket is torn down under a
+/// note: An UNEXPECTED transport loss (the provider's socket is torn down under a
 /// live, open Core binding — the client never asked to close), then a reconnect
 /// with the SAME persisted seed.
 ///
@@ -2435,7 +2436,7 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     let product = product_session(&fixture, &env).await;
     let consumer = consumer_session(&fixture, &product.character_id).await;
 
-    // The provider's complete effect set and the client-pin namespace.
+    // note: The provider's complete effect set and the client-pin namespace.
     let effects_before = provider_effect_snapshot(&pool).await;
     assert_eq!(
         committed_receipts(&pool, "memory.capture").await.len(),
@@ -2462,7 +2463,7 @@ async fn unexpected_transport_loss_and_signed_replay_keep_the_original_receipt()
     loss.reconnect_and_replay().await;
 }
 
-/// The stable identity of one receipt body: id, idempotency key, payload
+/// note: The stable identity of one receipt body: id, idempotency key, payload
 /// digest, requester and the candidate ids it names.
 fn receipt_tuple(receipt: &Value) -> (String, String, String, String) {
     (
@@ -2485,10 +2486,10 @@ fn receipt_tuple(receipt: &Value) -> (String, String, String, String) {
     )
 }
 
-/// The admin's signed session and the scoped identity's own binding, plus the
+/// note: The admin's signed session and the scoped identity's own binding, plus the
 /// provider state every grant decision is measured against.
 struct Grants {
-    /// Keeps the provider database alive for the whole scenario.
+    /// note: Keeps the provider database alive for the whole scenario.
     _provider_home: TempDir,
     env: Env,
     pool: SqlitePool,
@@ -2503,7 +2504,7 @@ struct Grants {
 }
 
 impl Grants {
-    /// The admin's own signed session — a grant is what makes the space visible
+    /// note: The admin's own signed session — a grant is what makes the space visible
     /// at all, so the scoped identity cannot even complete admission before it
     /// holds one — and, after that first read grant, the scoped identity's own
     /// binding.
@@ -2531,7 +2532,7 @@ impl Grants {
         )
         .await;
 
-        // Admission is per authenticated peer, and its grant state decides every
+        // note: Admission is per authenticated peer, and its grant state decides every
         // operation.
         let (addr, task) = fixture
             .listener_for(&SCOPED_SEED, fixture.served_manifest())
@@ -2574,7 +2575,7 @@ impl Grants {
         }
     }
 
-    /// The read-only grant never becomes capture: the provider answers with its
+    /// note: The read-only grant never becomes capture: the provider answers with its
     /// own typed refusal and commits nothing.
     async fn assert_read_only_refuses_capture(&self) {
         let effects_before = provider_effect_snapshot(&self.pool).await;
@@ -2603,7 +2604,7 @@ impl Grants {
         );
     }
 
-    /// The capture-only grant admits exactly one capture: one candidate and one
+    /// note: The capture-only grant admits exactly one capture: one candidate and one
     /// receipt, whose requester is the authenticated scoped principal.
     async fn capture_once(&self) {
         let captured = self
@@ -2635,7 +2636,7 @@ impl Grants {
         );
     }
 
-    /// Review is outside the grant: the dismissal is refused by the provider and
+    /// note: Review is outside the grant: the dismissal is refused by the provider and
     /// the candidate stays pending with no receipt of its own.
     ///
     /// The FIRST denied attempt is a warm-up that materializes the adapter's own
@@ -2679,7 +2680,7 @@ impl Grants {
         );
     }
 
-    /// A payload creator is not the requester: the product refuses the foreign
+    /// note: A payload creator is not the requester: the product refuses the foreign
     /// creator before any wire attempt, and nothing changes on the provider.
     async fn assert_payload_identity_is_not_authority(&self) {
         let before = provider_effect_snapshot(&self.pool).await;
@@ -2715,7 +2716,7 @@ impl Grants {
     }
 }
 
-/// A scoped grant cannot be amplified by the client, and neither the payload's
+/// note: A scoped grant cannot be amplified by the client, and neither the payload's
 /// creator nor a session label is authority: every refusal leaves the provider's
 /// receipts and candidates exactly as they were.
 #[tokio::test]
@@ -2723,7 +2724,7 @@ async fn scoped_grants_and_payload_identity_cannot_be_amplified() {
     let grants = Grants::open().await;
     grants.assert_read_only_refuses_capture().await;
 
-    // The admin adds the one capture-only space grant over the same session; no
+    // note: The admin adds the one capture-only space grant over the same session; no
     // review capability travels with it.
     issue_grant(
         &grants.admin,
@@ -2743,7 +2744,7 @@ async fn scoped_grants_and_payload_identity_cannot_be_amplified() {
     grants.close().await;
 }
 
-/// The real public credential value, loaded through the public API: its `Debug`
+/// note: The real public credential value, loaded through the public API: its `Debug`
 /// must expose neither secret. This is the actual secret-bearing value, not a
 /// stand-in selection.
 fn assert_credential_debug_is_clean(env: &Env, seed_text: &str, signature: &str) {
@@ -2754,7 +2755,7 @@ fn assert_credential_debug_is_clean(env: &Env, seed_text: &str, signature: &str)
     assert!(!debug.contains(signature));
 }
 
-/// A real signed refusal *after* the credential was loaded and the signed session
+/// note: A real signed refusal *after* the credential was loaded and the signed session
 /// established: the discovered space is not authoritative on this authenticated
 /// host, and the classified error carries no credential material either way it is
 /// rendered.
@@ -2779,7 +2780,7 @@ async fn assert_signed_refusal_is_clean(
     wait_for_closed(&responder).await;
 }
 
-/// The real configuration writer persists the remote selection (the real reader
+/// note: The real configuration writer persists the remote selection (the real reader
 /// loads it in the next check) without either secret.
 fn assert_persisted_selection_is_clean(
     fixture: &Fixture,
@@ -2806,7 +2807,7 @@ fn assert_persisted_selection_is_clean(
     assert!(!persisted.contains(signature));
 }
 
-/// The admitted session really captures, so the provider's receipt and candidate
+/// note: The admitted session really captures, so the provider's receipt and candidate
 /// bodies, the complete public receipt read back over the same authenticated
 /// identity's signed session, and the workspace state database are all
 /// meaningful sinks for both sentinels.
@@ -2883,7 +2884,7 @@ async fn assert_provider_sinks_are_clean(
     wait_for_closed(&consumer_responder).await;
 }
 
-/// The credential seed and the capability proof never reach a public surface:
+/// note: The credential seed and the capability proof never reach a public surface:
 /// the persisted configuration the real writer produced and the real reader
 /// consumed, a real signed authority refusal, a complete public receipt read
 /// back over the signed session, and the provider's durable bodies are all
@@ -2911,7 +2912,7 @@ async fn credential_sentinels_never_reach_config_errors_or_receipts() {
     pool.close().await;
 }
 
-/// One token-gated listener serving the fixture's durable service: every
+/// note: One token-gated listener serving the fixture's durable service: every
 /// admission decision uses the proof carried by the invocation the SDK actually
 /// received, verified against `trusted_issuer` for this host.
 async fn token_gated_listener(
@@ -2929,7 +2930,7 @@ async fn token_gated_listener(
     .await
 }
 
-/// The host verifier refuses one invalid proof: the whole open fails with the
+/// note: The host verifier refuses one invalid proof: the whole open fails with the
 /// static classification, the client error carries no peer text, the host
 /// session closes, and the provider's effect set is untouched.
 async fn assert_proof_refused(
@@ -2964,7 +2965,7 @@ async fn assert_proof_refused(
     assert!(!env.local_provider_store().exists());
 }
 
-/// Positive control on the SAME home: the valid proof opens and the signed
+/// note: Positive control on the SAME home: the valid proof opens and the signed
 /// session closes its own admission.
 async fn assert_valid_proof_opens(
     fixture: &Fixture,
@@ -2986,7 +2987,7 @@ async fn assert_valid_proof_opens(
     wait_for_closed(&responder).await;
 }
 
-/// The verifier must see the ACTUAL forwarded proof: an authenticated session
+/// note: The verifier must see the ACTUAL forwarded proof: an authenticated session
 /// that carries none is refused, so removing or changing client proof forwarding
 /// cannot leave this scenario green.
 async fn assert_no_token_refused(
@@ -3021,7 +3022,7 @@ async fn assert_no_token_refused(
     wait_for_closed(&responder).await;
 }
 
-/// The valid proof also admits a real mutation, so "positive" is a served
+/// note: The valid proof also admits a real mutation, so "positive" is a served
 /// operation rather than a no-throw open.
 async fn assert_valid_proof_captures(
     fixture: &Fixture,
@@ -3046,7 +3047,7 @@ async fn assert_valid_proof_captures(
     wait_for_closed(&responder).await;
 }
 
-/// The pinned SDK's own capability-token authority: a minimal test-host
+/// note: The pinned SDK's own capability-token authority: a minimal test-host
 /// admission decorator verifies the exact proof the credential carries with
 /// `spoke_connect::core::verify_capability_token` (real JCS/Ed25519, trusted
 /// issuer, session subject, audience and expiry) against the SDK-authenticated
@@ -3071,7 +3072,7 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         now + 600,
         now,
     );
-    // Expired but otherwise validly signed: issued at epoch 0 with a 1000s exp,
+    // note: Expired but otherwise validly signed: issued at epoch 0 with a 1000s exp,
     // so issuance succeeded and only the verifier's clock check rejects it.
     let expired = capability_proof_at(
         &ISSUER_SEED,
@@ -3080,7 +3081,7 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         1_000,
         0,
     );
-    // Valid signature, wrong session subject.
+    // note: Valid signature, wrong session subject.
     let wrong_subject = capability_proof_at(
         &ISSUER_SEED,
         &other_peer,
@@ -3088,7 +3089,7 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         now + 600,
         now,
     );
-    // Valid signature, wrong verifying node.
+    // note: Valid signature, wrong verifying node.
     let wrong_audience = capability_proof_at(
         &ISSUER_SEED,
         &fixture.client_peer,
@@ -3096,7 +3097,7 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         now + 600,
         now,
     );
-    // Valid signature from an issuer this host does not trust.
+    // note: Valid signature from an issuer this host does not trust.
     let untrusted_issuer = capability_proof_at(
         &OTHER_SEED,
         &fixture.client_peer,
@@ -3104,7 +3105,7 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         now + 600,
         now,
     );
-    // Valid signature over different claims than the ones presented.
+    // note: Valid signature over different claims than the ones presented.
     let mut forged = valid.clone();
     forged.claims.capabilities.push("admin".to_string());
 
@@ -3117,7 +3118,7 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
     ];
     let valid_json = serde_json::to_value(&valid).expect("the proof serializes");
     for (name, proof) in &cases {
-        // The credential carries the real proof; the host gate verifies exactly
+        // note: The credential carries the real proof; the host gate verifies exactly
         // that proof against the authenticated peer it is handed.
         let env = Env::new();
         let proof_json = serde_json::to_value(proof).expect("the proof serializes");
@@ -3131,7 +3132,7 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
     pool.close().await;
 }
 
-/// One observed invoke envelope: the test host's view of a received request.
+/// note: One observed invoke envelope: the test host's view of a received request.
 fn observed_envelope(op: &str, nonce: &str, payload: &Value, auth: &Value) -> Value {
     json!({
         "op": op,
@@ -3142,14 +3143,14 @@ fn observed_envelope(op: &str, nonce: &str, payload: &Value, auth: &Value) -> Va
     })
 }
 
-/// The proofs and payload the observer scenario drives.
+/// note: The proofs and payload the observer scenario drives.
 struct SeamCase {
     payload: Value,
     expired: Value,
     valid: Value,
 }
 
-/// A directly exercised observer/gate pair over one loopback transport pair,
+/// note: A directly exercised observer/gate pair over one loopback transport pair,
 /// trusting the proof issuer. This is the test host's own observation seam, not
 /// SDK-authenticated wire evidence.
 struct Seam {
@@ -3158,7 +3159,7 @@ struct Seam {
 }
 
 impl Seam {
-    /// The seam in front of `fixture`'s durable service.
+    /// note: The seam in front of `fixture`'s durable service.
     fn new(fixture: &Fixture) -> Self {
         let loopback = loopback_transport_pair();
         let observer = Arc::new(EnvelopeObserver::new(
@@ -3181,7 +3182,7 @@ impl Seam {
     }
 }
 
-/// Two observations with the same op/payload but different proofs irreversibly
+/// note: Two observations with the same op/payload but different proofs irreversibly
 /// poison the seam: the first admission denies, no later consume can reach the
 /// real fixture, and a third observation cannot revive it.
 async fn assert_overlap_poisons_the_seam(
@@ -3191,7 +3192,7 @@ async fn assert_overlap_poisons_the_seam(
     case: &SeamCase,
 ) {
     let seam = Seam::new(fixture);
-    // The defect under test left the VALID observation behind after the first
+    // note: The defect under test left the VALID observation behind after the first
     // refusal, so a later admission could consume it.
     seam.record(
         "memory.capture",
@@ -3214,7 +3215,7 @@ async fn assert_overlap_poisons_the_seam(
             SpokeResult::Ok(_) => panic!("attempt {attempt} reached the provider"),
         }
     }
-    // A later observation cannot revive the poisoned session.
+    // note: A later observation cannot revive the poisoned session.
     seam.record("memory.capture", "req_third", &case.payload, &case.valid);
     match seam
         .gate
@@ -3231,7 +3232,7 @@ async fn assert_overlap_poisons_the_seam(
     );
 }
 
-/// A FRESH observer/session still serves one sequential valid invocation, and the
+/// note: A FRESH observer/session still serves one sequential valid invocation, and the
 /// effect the poisoned path did not produce is observable.
 async fn assert_fresh_seam_serves_one_invocation(
     fixture: &Fixture,
@@ -3282,7 +3283,7 @@ async fn assert_fresh_seam_serves_one_invocation(
     );
 }
 
-/// Two DIRECTLY EXERCISED observer events with the same op/payload but different
+/// note: Two DIRECTLY EXERCISED observer events with the same op/payload but different
 /// proofs must irreversibly poison the seam: the first admission denies, and no
 /// later consume or third observation can ever reach the real fixture — while a
 /// fresh observer/session still admits one sequential valid invocation whose
@@ -3330,10 +3331,10 @@ async fn overlapping_observations_poison_the_seam_without_provider_effect() {
 }
 
 // ---------------------------------------------------------------------------
-// Shared product WS transport close ownership (I-000259)
+// note: Shared product WS transport close ownership (I-000259)
 // ---------------------------------------------------------------------------
 
-/// Dial the product transport to a raw peer address.
+/// note: Dial the product transport to a raw peer address.
 async fn raw_ws_transport(addr: SocketAddr) -> Arc<dyn Transport> {
     let (ws, _response) = tokio::time::timeout(
         SETUP_BOUND,
@@ -3345,7 +3346,7 @@ async fn raw_ws_transport(addr: SocketAddr) -> Arc<dyn Transport> {
     Arc::new(WsTransport::new(ws))
 }
 
-/// A peer that completes the WS upgrade and then never reads a frame, so the
+/// note: A peer that completes the WS upgrade and then never reads a frame, so the
 /// transport's write path really parks on native backpressure (no sleep or
 /// is-finished proxy). After the test has closed the transport it reads the
 /// buffered frames to the end and reports whether the stream really ended.
@@ -3365,7 +3366,7 @@ async fn non_reading_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle
             .await
             .expect("the upgrade is bounded")
             .expect("websocket upgrade");
-        // Stay non-reading until the transport has closed.
+        // note: Stay non-reading until the transport has closed.
         peer_probe.notified().await;
         tokio::time::timeout(SETUP_BOUND, async move {
             loop {
@@ -3381,7 +3382,7 @@ async fn non_reading_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle
     (addr, probe, peer)
 }
 
-/// A peer that echoes every binary envelope back, used as an unrelated positive
+/// note: A peer that echoes every binary envelope back, used as an unrelated positive
 /// session while the stalled one is torn down.
 async fn echo_peer() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -3408,7 +3409,7 @@ async fn echo_peer() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     (addr, peer_task)
 }
 
-/// The shared product `WsTransport` must not report close as done while a send
+/// note: The shared product `WsTransport` must not report close as done while a send
 /// is parked on a non-reading peer: the close signal reaches the parked send,
 /// both concurrent closers settle with the same truthful outcome, the send
 /// terminates, and dropping the halves really ends the peer's stream. An
@@ -3425,7 +3426,7 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
     .expect("dial the silent peer");
     let transport: Arc<dyn Transport> = Arc::new(WsTransport::new(ws));
 
-    // Far more than any loopback socket buffer, so the write is really parked.
+    // note: Far more than any loopback socket buffer, so the write is really parked.
     let payload = vec![0x5a_u8; 8 * 1024 * 1024];
     let mut sending = transport.send(&payload);
     assert!(
@@ -3435,14 +3436,14 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "the send must be parked on the non-reading peer before close"
     );
 
-    // Close from separate tasks, like the SDK spawns its transport close, while
+    // note: Close from separate tasks, like the SDK spawns its transport close, while
     // the caller still awaits the parked send.
     let closer = Arc::clone(&transport);
     let first_close = tokio::spawn(async move { closer.close().await });
     let closer = Arc::clone(&transport);
     let second_close = tokio::spawn(async move { closer.close().await });
 
-    // The parked send terminates instead of pinning the sink half forever.
+    // note: The parked send terminates instead of pinning the sink half forever.
     let settled = tokio::time::timeout(Duration::from_secs(5), sending)
         .await
         .expect("the parked send must settle after close");
@@ -3452,7 +3453,7 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "a send cancelled by close reports Closed, never success"
     );
 
-    // Both concurrent closers settle, and neither reports close-start as a
+    // note: Both concurrent closers settle, and neither reports close-start as a
     // completed clean close: the close frame cannot flush to a peer that
     // stopped reading, so the terminal error is surfaced.
     let first = tokio::time::timeout(SETUP_BOUND, first_close)
@@ -3477,7 +3478,7 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "a repeated close keeps the settled outcome"
     );
 
-    // The physical halves really went away: the peer drains and sees the stream
+    // note: The physical halves really went away: the peer drains and sees the stream
     // end instead of the socket staying open.
     probe.notify_one();
     assert!(
@@ -3488,7 +3489,7 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "dropping both halves must end the peer's stream"
     );
 
-    // An unrelated session keeps an idle receive, a normal roundtrip and a
+    // note: An unrelated session keeps an idle receive, a normal roundtrip and a
     // normal close while/after the stalled one is torn down.
     let (echo_addr, echo_peer) = echo_peer().await;
     let (ws, _response) = tokio::time::timeout(
@@ -3526,13 +3527,13 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         .expect("the echo peer task must not panic");
 }
 
-/// Cancelling the SOLE raw close must not abandon the physical disposal, and the
+/// note: Cancelling the SOLE raw close must not abandon the physical disposal, and the
 /// result a later caller sees must be the real one — never a success cached for
 /// an interrupted flush. Two real windows are covered: the closer waiting for
 /// the half a parked send still holds, and the closer inside a stalled flush.
 #[tokio::test]
 async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() {
-    // ── Window 1: the sole closer is cancelled while it waits for the sink
+    // note: ── Window 1: the sole closer is cancelled while it waits for the sink
     // half that the parked send still owns. ──
     let (addr, probe, peer) = non_reading_peer().await;
     let (ws, _response) = tokio::time::timeout(
@@ -3559,7 +3560,7 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         "the sole close must be waiting for the half the parked send owns"
     );
     drop(closer);
-    // The close signal wakes the parked send; its caller then abandons it. Both
+    // note: The close signal wakes the parked send; its caller then abandons it. Both
     // halves are still the transport's to release, and no second close runs.
     drop(sending);
     probe.notify_one();
@@ -3570,7 +3571,7 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
             .expect("the peer task must not panic"),
         "cancelling the sole close must not strand the socket halves"
     );
-    // The later caller settles with the real outcome for this ordering: the
+    // note: The later caller settles with the real outcome for this ordering: the
     // peer started draining, so the disposal's flush completes. What matters is
     // that it waits for the settled result instead of reporting an early flag.
     let late = tokio::time::timeout(SETUP_BOUND, transport.close())
@@ -3581,7 +3582,7 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         "the later caller sees the settled disposition, got {late:?}"
     );
 
-    // ── Window 2: the sole closer is cancelled inside a stalled flush. ──
+    // note: ── Window 2: the sole closer is cancelled inside a stalled flush. ──
     let (addr, probe, peer) = non_reading_peer().await;
     let (ws, _response) = tokio::time::timeout(
         SETUP_BOUND,
@@ -3602,7 +3603,7 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         let transport = Arc::clone(&transport);
         async move { transport.close().await }
     });
-    // The close signal releases the parked send, so the closer can take both
+    // note: The close signal releases the parked send, so the closer can take both
     // halves and start the flush, which cannot finish (8 MiB queued, peer not
     // reading).
     assert_eq!(
@@ -3614,7 +3615,7 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
     tokio::time::sleep(Duration::from_millis(150)).await;
     closer.abort();
     let _ = closer.await;
-    // The peer stays non-reading, so the disposal's flush cannot complete: the
+    // note: The peer stays non-reading, so the disposal's flush cannot complete: the
     // later caller must see that real terminal error, not a cached success for
     // the interrupted caller.
     let late = tokio::time::timeout(SETUP_BOUND, transport.close())
@@ -3625,7 +3626,7 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         matches!(late, TransportError::Io(_)),
         "an interrupted flush is never cached as success, got {late:?}"
     );
-    // Only now drain the peer, which observes the physical release the
+    // note: Only now drain the peer, which observes the physical release the
     // cancelled closer's teardown already performed.
     probe.notify_one();
     assert!(
@@ -3637,7 +3638,7 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
     );
 }
 
-/// A public `send` future that was polled Pending and then RETAINED (never
+/// note: A public `send` future that was polled Pending and then RETAINED (never
 /// repolled, never dropped) must not block the close: the physical teardown has
 /// to settle and the same peer must observe the end while that future is still
 /// held. A running ticker proves the runtime is not starved.
@@ -3661,7 +3662,7 @@ async fn retained_pending_send_does_not_block_the_close() {
         "the send must be parked on the non-reading peer before close"
     );
 
-    // A second same-direction send really queues behind the retained holder
+    // note: A second same-direction send really queues behind the retained holder
     // before the close.
     let queued = tokio::spawn({
         let transport = Arc::clone(&transport);
@@ -3684,7 +3685,7 @@ async fn retained_pending_send_does_not_block_the_close() {
         }
     });
 
-    // The runtime keeps making progress while the send stays unpolled.
+    // note: The runtime keeps making progress while the send stays unpolled.
     tokio::time::timeout(Duration::from_secs(2), async {
         while ticks.load(std::sync::atomic::Ordering::SeqCst) < 3 {
             tokio::time::sleep(Duration::from_millis(2)).await;
@@ -3694,7 +3695,7 @@ async fn retained_pending_send_does_not_block_the_close() {
     .expect("the unpolled send must not starve the runtime");
     let ticks_before_close = ticks.load(std::sync::atomic::Ordering::SeqCst);
 
-    // The retained send is never polled or dropped from here on.
+    // note: The retained send is never polled or dropped from here on.
     let closer = tokio::spawn({
         let transport = Arc::clone(&transport);
         async move { transport.close().await }
@@ -3708,7 +3709,7 @@ async fn retained_pending_send_does_not_block_the_close() {
         "a non-reading peer leaves a real terminal close error, got {report:?}"
     );
 
-    // The already-queued send and a NEW post-close send both observe Closed
+    // note: The already-queued send and a NEW post-close send both observe Closed
     // BEFORE the retained holder is released — not a timeout.
     let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
         .await
@@ -3733,7 +3734,7 @@ async fn retained_pending_send_does_not_block_the_close() {
     );
     let _ = ticks_before_close;
 
-    // The peer observes the physical end BEFORE the retained future is dropped.
+    // note: The peer observes the physical end BEFORE the retained future is dropped.
     probe.notify_one();
     assert!(
         tokio::time::timeout(Duration::from_secs(5), peer)
@@ -3747,7 +3748,7 @@ async fn retained_pending_send_does_not_block_the_close() {
     let _ = ticker.await;
 }
 
-/// The same invariant for a public `recv` future polled Pending and retained.
+/// note: The same invariant for a public `recv` future polled Pending and retained.
 #[tokio::test]
 async fn retained_pending_recv_does_not_block_the_close() {
     let (addr, probe, peer) = non_reading_peer().await;
@@ -3767,7 +3768,7 @@ async fn retained_pending_recv_does_not_block_the_close() {
         "the recv must be parked before close"
     );
 
-    // A second same-direction receive really queues behind the retained holder
+    // note: A second same-direction receive really queues behind the retained holder
     // before the close.
     let queued = tokio::spawn({
         let transport = Arc::clone(&transport);
@@ -3790,7 +3791,7 @@ async fn retained_pending_recv_does_not_block_the_close() {
         }
     });
 
-    // The runtime keeps making progress while the recv stays unpolled.
+    // note: The runtime keeps making progress while the recv stays unpolled.
     tokio::time::timeout(Duration::from_secs(2), async {
         while ticks.load(std::sync::atomic::Ordering::SeqCst) < 3 {
             tokio::time::sleep(Duration::from_millis(2)).await;
@@ -3813,7 +3814,7 @@ async fn retained_pending_recv_does_not_block_the_close() {
         "an idle close flushes cleanly, got {report:?}"
     );
 
-    // The already-queued receive and a NEW post-close receive both observe
+    // note: The already-queued receive and a NEW post-close receive both observe
     // Closed BEFORE the retained holder is released — not a timeout.
     let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
         .await
@@ -3851,7 +3852,7 @@ async fn retained_pending_recv_does_not_block_the_close() {
     let _ = ticker.await;
 }
 
-/// A peer that, after `probe`, drains every inbound envelope and records the
+/// note: A peer that, after `probe`, drains every inbound envelope and records the
 /// first byte of each Binary message, returning that wire order at stream end.
 async fn draining_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
@@ -3879,7 +3880,7 @@ async fn draining_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<Ve
     (addr, probe, peer)
 }
 
-/// A peer that, after `probe`, sends two binary frames and then waits for the
+/// note: A peer that, after `probe`, sends two binary frames and then waits for the
 /// connection to end.
 async fn two_frame_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
@@ -3909,7 +3910,7 @@ async fn two_frame_peer() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHandle<(
     (addr, probe, peer)
 }
 
-/// Real socket READINESS without any close must not evict a queued send: the
+/// note: Real socket READINESS without any close must not evict a queued send: the
 /// first operation stays Pending/retained, the second is queued, and draining
 /// the peer (ordinary write readiness) must leave it queued until the first
 /// completes, then it must really succeed in wire order.
@@ -3931,7 +3932,7 @@ async fn live_write_readiness_does_not_close_a_queued_send() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(!queued.is_finished(), "the second send is queued");
-    // Ordinary socket write readiness: the peer starts draining. No close.
+    // note: Ordinary socket write readiness: the peer starts draining. No close.
     probe.notify_one();
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
@@ -3964,7 +3965,7 @@ async fn live_write_readiness_does_not_close_a_queued_send() {
     );
 }
 
-/// The same for real socket READ readiness: a queued receive must not be
+/// note: The same for real socket READ readiness: a queued receive must not be
 /// evicted as Closed when the peer's frame wakes the shared notifier; the first
 /// receive returns frame one and the queued one frame two, in order.
 #[tokio::test]
@@ -3984,7 +3985,7 @@ async fn live_read_readiness_does_not_close_a_queued_recv() {
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(!queued.is_finished(), "the second recv is queued");
-    // Ordinary socket read readiness: the peer sends its first frame. No close.
+    // note: Ordinary socket read readiness: the peer sends its first frame. No close.
     probe.notify_one();
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(
@@ -4013,10 +4014,10 @@ async fn live_read_readiness_does_not_close_a_queued_recv() {
 }
 
 // ---------------------------------------------------------------------------
-// The provider's advertised page bound and request-bound receipt identity
+// note: The provider's advertised page bound and request-bound receipt identity
 // ---------------------------------------------------------------------------
 
-/// A provider that advertises a narrower page bound than the adapter's former
+/// note: A provider that advertises a narrower page bound than the adapter's former
 /// constant still serves a whole Core read: the pending page requests, and the
 /// count walks them, at the limit this open negotiated with this provider.
 ///
@@ -4058,7 +4059,7 @@ async fn a_narrower_provider_page_bound_still_serves_the_whole_core_read() {
         .await
         .expect("the exact selection opens against the served space");
     let principal = core.active_principal().await.expect("active principal");
-    // The adapter's own open provisions the subject this bearer speaks for, so
+    // note: The adapter's own open provisions the subject this bearer speaks for, so
     // the first read is the empty queue.
     assert_eq!(
         core.count_pending_reviews(&principal)
@@ -4068,7 +4069,7 @@ async fn a_narrower_provider_page_bound_still_serves_the_whole_core_read() {
         0,
     );
 
-    // More pending candidates than the advertised bound: one page cannot hold
+    // note: More pending candidates than the advertised bound: one page cannot hold
     // them, so a read that kept a hard-coded larger limit would be refused.
     let subject_id = legacy::creator_subject_id(&home.creator_id);
     let bound = nexus_memory_conformance::MAX_PAGE_SIZE.get();
@@ -4097,7 +4098,7 @@ async fn a_narrower_provider_page_bound_still_serves_the_whole_core_read() {
     settle_listener(host).await;
 }
 
-/// Rewrites the committed receipt one provider returns, so the Core can be shown
+/// note: Rewrites the committed receipt one provider returns, so the Core can be shown
 /// a schema-valid answer that belongs to another request. It changes no durable
 /// state and every other answer passes through untouched.
 struct MismatchedReceipt {
@@ -4122,7 +4123,7 @@ impl RemoteMemoryService for MismatchedReceipt {
     }
 }
 
-/// A schema-valid capture receipt that does not answer this request must not
+/// note: A schema-valid capture receipt that does not answer this request must not
 /// publish its objects nor retire this attempt's protective admission: the
 /// mismatch stays a static fail-closed error, and the binding therefore cannot
 /// be removed while it still owns remote memory.
@@ -4168,7 +4169,7 @@ async fn a_mismatched_capture_receipt_keeps_the_binding_protected() {
     let (character_id, binding_id, _) =
         create_character(&core, &principal, "Receipt Identity Ada", &world).await;
 
-    // The honest receipt first: this request's own candidate is published.
+    // note: The honest receipt first: this request's own candidate is published.
     core.capture_character_pending_review(
         &principal,
         character_id.clone(),
@@ -4185,7 +4186,7 @@ async fn a_mismatched_capture_receipt_keeps_the_binding_protected() {
     assert_eq!(honest.len(), 1, "one live candidate fact");
     assert_eq!(honest[0].8, "live", "the committed candidate is live");
 
-    // A receipt for another request: the mismatch fails closed, statically.
+    // note: A receipt for another request: the mismatch fails closed, statically.
     rewrite.store(true, Ordering::SeqCst);
     let error = core
         .capture_character_pending_review(
@@ -4224,7 +4225,7 @@ async fn a_mismatched_capture_receipt_keeps_the_binding_protected() {
     settle_listener(task).await;
 }
 
-/// Corrupt one stored document so the provider cannot decode it, then prove the
+/// note: Corrupt one stored document so the provider cannot decode it, then prove the
 /// signed client's refusal is a static `INTERNAL_ERROR` that carries no provider
 /// storage or decoder text.
 async fn assert_decoder_failure_is_opaque(
@@ -4273,7 +4274,7 @@ async fn assert_decoder_failure_is_opaque(
     }
 }
 
-/// A reachable decoder failure becomes a static wire refusal: the signed client
+/// note: A reachable decoder failure becomes a static wire refusal: the signed client
 /// sees `INTERNAL_ERROR` with no provider storage or decoder text, while a
 /// legitimate capture on the same subject still commits.
 #[tokio::test]
@@ -4310,13 +4311,13 @@ async fn a_malformed_stored_document_never_reaches_the_wire() {
         .await
         .expect("the exact selection opens");
     let principal = core.active_principal().await.expect("active principal");
-    // The adapter's own open provisions the subject this bearer speaks for.
+    // note: The adapter's own open provisions the subject this bearer speaks for.
     core.count_pending_reviews(&principal)
         .await
         .expect("the pinned binding serves the empty queue");
     let subject = legacy::creator_subject_id(&env.creator_id);
 
-    // The legitimate positive on that subject, over the same signed session.
+    // note: The legitimate positive on that subject, over the same signed session.
     let capture = |key: &str, text: &str| {
         dto::<MemoryCaptureRequest>(json!({
             "space_id": space.clone(),
@@ -4326,7 +4327,7 @@ async fn a_malformed_stored_document_never_reaches_the_wire() {
             "idempotency_key": key,
         }))
     };
-    // A signed session of its own: one listener admits one established session,
+    // note: A signed session of its own: one listener admits one established session,
     // so the consumer dials a second listener for the same provider/principal.
     let (consumer_addr, consumer_task) = start_listener(
         provider.server(directory.admission()),
@@ -4349,7 +4350,7 @@ async fn a_malformed_stored_document_never_reaches_the_wire() {
         SpokeResult::Reject(reject) => panic!("the honest capture commits: {reject:?}"),
     }
 
-    // A stored document the provider cannot decode, carrying a sentinel that
+    // note: A stored document the provider cannot decode, carrying a sentinel that
     // must never appear on the wire.
     assert_decoder_failure_is_opaque(
         &consumer,

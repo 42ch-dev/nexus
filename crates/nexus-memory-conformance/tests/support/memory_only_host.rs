@@ -9,6 +9,7 @@
 //! builds with default features, so this file lives outside `support/mod.rs`
 //! (whose WS-transport and Core imports need `dev-graph-memory-remote`). Both
 //! crate roots include it by path.
+// why: the supertrait forces the type to exist, so it refuses rather than fabricating data.
 
 use async_trait::async_trait;
 use spoke_operations::spoke_schemas::{
