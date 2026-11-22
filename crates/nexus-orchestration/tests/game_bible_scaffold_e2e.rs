@@ -10,17 +10,18 @@
 //!
 //! All tests use `tempfile::TempDir` for hermetic workspace and in-memory
 //! `SQLite` (via `nexus_local_db::init_engine_pool`) for DB operations.
+// note: the coverage bullets above name the three e2e guarantees under test.
 
 use sqlx::Row;
 
 use nexus_capability::builtins::GameBibleProjectScaffold;
 use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 
-// ---------------------------------------------------------------------------
+// note: -----------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Test executor: commits Work bytes at the target the production port builds
+/// note: Test executor: commits Work bytes at the target the production port builds
 /// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
 /// checks the core port performs.
 struct DirectWriteExecutor {
@@ -66,7 +67,7 @@ impl WorkspaceExecutor for DirectWriteExecutor {
     }
 }
 
-/// Scaffold over `<workspace_root>/Works` with the test executor attached.
+/// note: Scaffold over `<workspace_root>/Works` with the test executor attached.
 fn scaffold_at(
     pool: &sqlx::SqlitePool,
     workspace_root: &std::path::Path,
@@ -81,7 +82,7 @@ mod common;
 
 use common::test_pool;
 
-/// Insert a minimal Work row for testing.
+/// note: Insert a minimal Work row for testing.
 async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str, work_ref: &str) {
     // SAFETY: INSERT against works — runtime query.
     sqlx::query(
@@ -96,13 +97,13 @@ async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str, work_ref: &str
          'intake', 'pending', NULL, NULL, NULL, 0)",
     )
     .bind(work_id)
-    .bind(work_ref) // work_ref column value
+    .bind(work_ref)
     .execute(pool)
     .await
     .expect("insert test work");
 }
 
-/// Build scaffold input JSON.
+/// note: Build scaffold input JSON.
 fn scaffold_input(
     creator_id: &str,
     work_id: &str,
@@ -117,7 +118,7 @@ fn scaffold_input(
     })
 }
 
-// ---------------------------------------------------------------------------
+// note: -----------------------------------------------------------------------
 // T10 e2e tests
 // ---------------------------------------------------------------------------
 
@@ -135,7 +136,6 @@ async fn bootstrap_game_bible_creates_design_tree() {
     let input = scaffold_input("ctr_test", work_id, work_ref, "Test Game Bible");
     let output = cap.run(input).await.expect("scaffold should succeed");
 
-    // Verify output fields
     let scaffold_root = output["scaffold_root"].as_str().expect("scaffold_root");
     assert!(
         scaffold_root.contains(work_ref),
@@ -156,7 +156,6 @@ async fn bootstrap_game_bible_creates_design_tree() {
         .map(|v| v.as_str().unwrap())
         .collect();
 
-    // README + 12 Design templates = 13 files
     assert_eq!(
         files.len(),
         13,
@@ -164,20 +163,17 @@ async fn bootstrap_game_bible_creates_design_tree() {
         files.len()
     );
 
-    // Expect 5 directories: e2e-game-bible-scaffold, Design, Logs, Logs/design, Logs/review
     assert!(
         dirs.len() >= 4,
         "expected at least 4 dirs (work, Design, Logs, Logs/design, Logs/review), got {}: {dirs:?}",
         dirs.len()
     );
 
-    // Verify README.md exists in files list
     assert!(
         files.contains(&"README.md"),
         "README.md should be in files_created: {files:?}"
     );
 
-    // Verify all 12 Design template filenames
     let expected_design_files = [
         "Design/overview.md",
         "Design/pillars.md",
@@ -199,13 +195,11 @@ async fn bootstrap_game_bible_creates_design_tree() {
         );
     }
 
-    // Verify Logs design + review dirs exist
     let logs_design_found = dirs.iter().any(|d| d.contains("design"));
     let logs_review_found = dirs.iter().any(|d| d.contains("review"));
     assert!(logs_design_found, "Logs/design not found in dirs_created");
     assert!(logs_review_found, "Logs/review not found in dirs_created");
 
-    // Verify files exist on disk
     let work_dir = works_root.path().join("Works").join(work_ref);
     let readme_path = work_dir.join("README.md");
     assert!(readme_path.exists(), "README.md should exist on disk");
@@ -258,11 +252,9 @@ async fn bootstrap_game_bible_idempotent() {
 
     let input = scaffold_input("ctr_test", work_id, work_ref, "Idempotent Test");
 
-    // First run
     let output1 = cap.run(input.clone()).await.expect("first scaffold");
     let files1_count = output1["files_created"].as_array().unwrap().iter().count();
 
-    // Second run — should succeed (no overwrite, files already exist)
     let output2 = cap.run(input).await.expect("second scaffold (idempotent)");
     let _files2: Vec<String> = output2["files_created"]
         .as_array()
@@ -278,27 +270,24 @@ async fn bootstrap_game_bible_idempotent() {
         .map(|v| v.as_str().unwrap().to_string())
         .collect();
 
-    // On second run, dirs already exist so no new dirs_created.
+    // why: On second run, dirs already exist so no new dirs_created.
     assert!(
         dirs2.is_empty(),
         "dirs_created should be empty on second run (dirs exist), got: {dirs2:?}"
     );
 
-    // At minimum, verify second run succeeds and produces expected output structure
     assert_eq!(files1_count, 13, "first run: 13 files");
-    // Second run: files get overwritten (tokio::fs::write), so they appear again
+    // why: Second run: files get overwritten (tokio::fs::write), so they appear again
     // in files_created. The exact count may vary; this tests idempotent success.
     assert!(
         !output2["scaffold_root"].is_null(),
         "second run should return scaffold_root"
     );
 
-    // Verify files still exist on disk after second run
     let work_dir = works_root.path().join("Works").join(work_ref);
     assert!(work_dir.join("README.md").exists());
     assert!(work_dir.join("Design").join("overview.md").exists());
 
-    // Verify works row still correct
     let row = sqlx::query("SELECT work_profile FROM works WHERE work_id = ?")
         .bind(work_id)
         .fetch_one(&pool)
@@ -322,7 +311,6 @@ async fn game_bible_work_status_json() {
     let input = scaffold_input("ctr_test", work_id, work_ref, "Status Test");
     let output = cap.run(input).await.expect("scaffold should succeed");
 
-    // Verify output JSON is well-formed and contains expected keys
     assert!(output.is_object(), "output should be a JSON object");
     assert!(
         output["scaffold_root"].is_string(),
@@ -359,7 +347,6 @@ async fn game_bible_work_status_json() {
         "work_ref should be set after scaffold"
     );
 
-    // Verify file count is exactly 13 (README + 12 Design templates)
     let files: &Vec<serde_json::Value> = output["files_created"].as_array().unwrap();
     assert_eq!(
         files.len(),
@@ -391,12 +378,10 @@ async fn game_bible_scaffold_with_world_id() {
         .await
         .expect("scaffold with world_id should succeed");
 
-    // Verify file/dir creation still works
     assert_ne!(output["scaffold_root"].as_str().unwrap(), "");
     let files = output["files_created"].as_array().unwrap();
     assert_eq!(files.len(), 13, "13 files with optional world_id");
 
-    // Verify works row still updated
     let row = sqlx::query("SELECT work_profile FROM works WHERE work_id = ?")
         .bind(work_id)
         .fetch_one(&pool)

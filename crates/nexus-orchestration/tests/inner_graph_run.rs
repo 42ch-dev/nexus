@@ -5,13 +5,14 @@
 //! - Child session polls to completion
 //! - `output_binding` is read from child context and written to parent
 //! - `engine.spawn_child_session` + `engine.get_context` work on trait + impl
+// note: prompt execution is injected via a deterministic executor; no ACP worker.
 
 use nexus_capability::CapabilityRegistry;
 use nexus_orchestration::engine::StepOutcome;
 use nexus_orchestration::{GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
-/// Deterministic prompt executor for the P1 cutover (no echo/worker fallback):
+/// note: Deterministic prompt executor for the P1 cutover (no echo/worker fallback):
 /// returns text derived from the rendered prompt so node outputs are stable.
 struct EchoExecutor;
 
@@ -29,7 +30,7 @@ impl nexus_capability::PromptExecutor for EchoExecutor {
     }
 }
 
-/// Preset with one outer state A that enters an `inner_graph` `my_graph`.
+/// note: Preset with one outer state A that enters an `inner_graph` `my_graph`.
 /// The inner graph has three nodes: n1 -> n2 -> n3 (rule-only, no ACP).
 /// `output_binding`: n3.text
 const INNER_GRAPH_PRESET_YAML: &str = r#"
@@ -79,20 +80,19 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
         storage,
         nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(caps)),
     );
-    // P1 cutover: inner `acp_prompt` nodes require a prompt executor.
+    // why: P1 cutover, inner `acp_prompt` nodes require a prompt executor.
     engine.set_prompt_executor(
         Arc::new(EchoExecutor),
         Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     );
     let engine = Arc::new(engine);
 
-    // Use start_session_with_preset which wires engine + inner graphs.
+    // why: start_session_with_preset wires the engine and its inner graphs.
     let sid = engine
         .start_session_with_preset(&loaded)
         .await
         .expect("start_session_with_preset");
 
-    // Run steps until terminal or error (max 32 steps).
     let mut steps = 0;
     loop {
         let out = engine.run_step(&sid).await.expect("run_step");
@@ -101,14 +101,14 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
         match out {
             StepOutcome::Completed { .. } => break,
             StepOutcome::WaitingForInput { .. } => {
-                // Inner graphs shouldn't wait for input; resume.
+                // note: inner graphs shouldn't wait for input; resume anyway.
                 engine
                     .signal(&sid, nexus_orchestration::engine::EngineSignal::Resume)
                     .await
                     .expect("signal resume");
             }
             StepOutcome::Paused { .. } => {
-                // Resume paused sessions (shouldn't happen for rule-only inner graphs).
+                // note: shouldn't happen for rule-only inner graphs; resume if it does.
                 engine
                     .signal(&sid, nexus_orchestration::engine::EngineSignal::Resume)
                     .await
@@ -122,31 +122,28 @@ async fn inner_graph_runs_to_completion_and_exports_output() {
         );
     }
 
-    // Verify completion.
     let final_status = engine.get_status(&sid).await.expect("get_status");
     assert!(
         final_status.is_completed(),
         "preset should be completed: {final_status:?}"
     );
 
-    // Verify output was exported from inner graph.
     let ctx = engine.get_context(&sid).await.expect("get_context");
     let exported: String = ctx.get("state.A.output").unwrap_or_default();
     assert!(
         !exported.is_empty(),
         "state.A.output should be populated from inner graph output_binding"
     );
-    // The InnerGraphNodeTask stub produces "inner_node:<id>:stub_output",
-    // so n3.text would be stored as nodes.n3.text.
-    // The output_binding is "n3.text", and InnerGraphTask reads both
-    // "n3.text" and "nodes.n3.text" from the child context.
+    // note: the output_binding is "n3.text"; InnerGraphTask reads both
+    // "n3.text" and "nodes.n3.text" from the child context, so it resolves
+    // against the per-node key the task writes.
     assert!(
         exported.contains("n3"),
         "exported output should reference n3: {exported}"
     );
 }
 
-/// Test that `spawn_child_session` and `get_context` work via the trait.
+/// note: Test that `spawn_child_session` and `get_context` work via the trait.
 #[tokio::test]
 async fn spawn_child_and_get_context() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
@@ -157,8 +154,7 @@ async fn spawn_child_and_get_context() {
         )),
     ));
 
-    // Create a simple inner graph.
-    // A1: the node resolves its cancellation token from this map.
+    // why: A1: the node resolves its cancellation token from this map.
     let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
     let inner = graph_flow::GraphBuilder::new("test_child")
         .add_task(std::sync::Arc::new(
@@ -180,14 +176,13 @@ async fn spawn_child_and_get_context() {
         .await
         .expect("spawn_child_session");
 
-    // A1: prompt consumers resolve their coordinator cancellation token from
+    // why: A1: prompt consumers resolve their coordinator cancellation token from
     // the shared per-run map and fail closed when none is registered.
     session_cancels.write().expect("session_cancels").insert(
         child_sid.0.clone(),
         tokio_util::sync::CancellationToken::new(),
     );
 
-    // Run the child to completion.
     for _ in 0..8 {
         let out = engine.run_step(&child_sid).await.expect("run_step child");
         if matches!(out, StepOutcome::Completed { .. }) {
@@ -195,7 +190,6 @@ async fn spawn_child_and_get_context() {
         }
     }
 
-    // Get child context.
     let child_ctx = engine.get_context(&child_sid).await.expect("get_context");
     let output: String = child_ctx.get("nodes.x.output").unwrap_or_default();
     assert!(

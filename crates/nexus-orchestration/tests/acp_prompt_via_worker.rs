@@ -4,13 +4,14 @@
 //! Uses a mock `PromptExecutor` returning a deterministic non-echo
 //! transformation, proving the task records the agent output — never the
 //! prompt echo.
+// why: guards the A1 no-echo/no-worker-fallback contract at the integration seam.
 
 use graph_flow::Task;
 use nexus_capability::ToolPolicy;
 use nexus_capability::{CapabilityError, PromptExecutor, PromptRequest, PromptResult};
 use nexus_orchestration::tasks::AcpPromptTask;
 
-/// Mock executor returning a deterministic non-echo transformation.
+/// note: Mock executor returning a deterministic non-echo transformation.
 struct MockExecutor;
 
 #[async_trait::async_trait]
@@ -32,7 +33,7 @@ fn empty_session_cancels() -> std::sync::Arc<
 
 #[tokio::test]
 async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
-    // `new_for_test` defaults the session id to "default" and constructs an
+    // why: `new_for_test` defaults the session id to "default" and constructs an
     // empty cancellation map; register the run's coordinator token so the
     // task's fail-closed token resolution succeeds (production registers at
     // run admission).
@@ -57,7 +58,6 @@ async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
     ctx.set("core_context.version", "0").unwrap();
     let result = task.run(ctx.clone()).await.unwrap();
 
-    // The executor returns the non-echo transformation as full_text.
     assert_eq!(
         result.response.as_deref().unwrap_or(""),
         "transformed:hello 0",
@@ -65,14 +65,13 @@ async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
         result.response
     );
 
-    // Output should be stored at state.state-1.output.
     let stored: String = ctx.get("state.state-1.output").unwrap();
     assert_eq!(stored, "transformed:hello 0");
 }
 
 #[tokio::test]
 async fn acp_prompt_task_no_executor_refuses() {
-    // No executor — must refuse with a typed failure, never a placeholder
+    // why: no executor must refuse with a typed failure, never a placeholder
     // success (A1: no echo/worker fallback).
     let task = AcpPromptTask::new(
         None,
@@ -94,7 +93,7 @@ async fn acp_prompt_task_no_executor_refuses() {
     );
 }
 
-/// Test that the ACP prompt and judge capabilities are registered.
+/// note: Test that the ACP prompt and judge capabilities are registered.
 #[test]
 fn acp_capabilities_registered() {
     let reg = nexus_capability::CapabilityRegistry::with_builtins();
@@ -108,7 +107,7 @@ fn acp_capabilities_registered() {
     );
 }
 
-/// Test that the preset loader accepts acp.prompt and judge.llm in `requires_capabilities`.
+/// note: Test that the preset loader accepts acp.prompt and judge.llm in `requires_capabilities`.
 #[test]
 fn preset_with_acp_capabilities_validates() {
     let yaml = r#"

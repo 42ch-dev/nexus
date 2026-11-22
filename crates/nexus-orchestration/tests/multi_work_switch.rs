@@ -4,6 +4,7 @@
 //! - TC1: completion ceremony writes lock and updates columns
 //! - TC2: other work continues after one is completed
 //! - TC3: auto-chain tick skips completion-locked works
+// note: one hermetic in-memory DB per test via `common::test_pool`.
 
 #![allow(clippy::unwrap_used)]
 
@@ -14,7 +15,7 @@ use nexus_orchestration::completion_lock;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
-/// Test executor: commits Work bytes at the target the production port builds
+/// note: Test executor: commits Work bytes at the target the production port builds
 /// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
 /// checks the core port performs.
 struct DirectWriteExecutor;
@@ -54,7 +55,7 @@ impl WorkspaceExecutor for DirectWriteExecutor {
     }
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// note: ─── Helpers ─────────────────────────────────────────────────────────
 
 fn test_work(work_id: &str, chapter: i32, total: i32) -> WorkRecord {
     WorkRecord {
@@ -100,7 +101,7 @@ async fn seed_work(pool: &SqlitePool, work: &WorkRecord) {
     works::create_work(pool, work).await.unwrap();
 }
 
-// ─── TC1: Completion ceremony writes lock + updates pool ────────────────
+// note: ─── TC1: Completion ceremony writes lock + updates pool ───────────
 
 #[tokio::test]
 async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
@@ -108,11 +109,11 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
     let tmp = TempDir::new().unwrap();
     let workspace_dir = tmp.path();
 
-    // Seed a completed-persist work (all chapters finalized)
+    // note: Seed a completed-persist work (all chapters finalized)
     let work = test_work("wrk_novel_a", 3, 3);
     seed_work(&pool, &work).await;
 
-    // Step 1: mark_work_completed updates DB columns
+    // note: Step 1: mark_work_completed updates DB columns
     let updated = mark_work_completed(&pool, "ctr_test", "wrk_novel_a")
         .await
         .unwrap();
@@ -125,7 +126,7 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
     assert!(updated.completion_locked_at.is_some());
     assert!(updated.driver_schedule_id.is_none());
 
-    // Step 2: write_completion_lock_for_work writes the file
+    // note: Step 2: write_completion_lock_for_work writes the file
     // Create the Works/<work_ref>/ directory first (normally done by daemon)
     let work_dir = workspace_dir.join("Works").join("test-wrk_novel_a");
     std::fs::create_dir_all(&work_dir).unwrap();
@@ -147,7 +148,6 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
     assert_eq!(lock.work_id, "wrk_novel_a");
     assert_eq!(lock.reason, "completion");
 
-    // Verify DB state: re-read from DB
     let from_db = works::get_work(&pool, "ctr_test", "wrk_novel_a")
         .await
         .unwrap()
@@ -156,14 +156,14 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
     assert!(from_db.completion_locked_at.is_some());
 }
 
-// ─── TC2: Other work continues after completion ────────────────────────
+// note: ─── TC2: Other work continues after completion ────────────────────
 
 #[tokio::test]
-#[allow(clippy::similar_names)] // work_a_db / work_b_db are intentionally parallel test fixtures
+#[allow(clippy::similar_names)] // why: work_a_db / work_b_db are intentionally parallel test fixtures
 async fn test_other_work_continues_after_completion() {
     let (_dir, pool) = test_pool().await;
 
-    // Seed two works: novel A (completed) and novel B (still active)
+    // note: Seed two works: novel A (completed) and novel B (still active)
     let work_a = test_work("wrk_novel_a", 3, 3);
     let mut work_b = test_work("wrk_novel_b", 1, 5);
     work_b.current_stage = "produce".to_string();
@@ -171,12 +171,11 @@ async fn test_other_work_continues_after_completion() {
     seed_work(&pool, &work_a).await;
     seed_work(&pool, &work_b).await;
 
-    // Complete work A
     mark_work_completed(&pool, "ctr_test", "wrk_novel_a")
         .await
         .unwrap();
 
-    // Work B should still be active and unmodified
+    // invariant: Work B should still be active and unmodified
     let work_b_db = works::get_work(&pool, "ctr_test", "wrk_novel_b")
         .await
         .unwrap()
@@ -184,7 +183,6 @@ async fn test_other_work_continues_after_completion() {
     assert_eq!(work_b_db.status, "active");
     assert!(work_b_db.completion_locked_at.is_none());
 
-    // Verify work A is completed
     let work_a_db = works::get_work(&pool, "ctr_test", "wrk_novel_a")
         .await
         .unwrap()
@@ -193,17 +191,17 @@ async fn test_other_work_continues_after_completion() {
     assert!(work_a_db.completion_locked_at.is_some());
 }
 
-// ─── TC3: Auto-chain tick skips completion-locked works ─────────────────
+// note: ─── TC3: Auto-chain tick skips completion-locked works ─────────────
 
 #[tokio::test]
 async fn test_auto_chain_skips_completion_locked_work() {
     let (_dir, pool) = test_pool().await;
 
-    // Seed a completed work with a driver schedule still set
+    // note: Seed a completed work with a driver schedule still set
     let work = test_work("wrk_completed", 3, 3);
     seed_work(&pool, &work).await;
 
-    // Set a driver schedule to simulate an active auto-chain
+    // note: Set a driver schedule to simulate an active auto-chain
     nexus_orchestration::auto_chain::set_driver(
         &pool,
         "ctr_test",
@@ -214,26 +212,22 @@ async fn test_auto_chain_skips_completion_locked_work() {
     .await
     .unwrap();
 
-    // Complete the work (sets completion_locked_at)
     mark_work_completed(&pool, "ctr_test", "wrk_completed")
         .await
         .unwrap();
 
-    // Evaluate: auto-chain should NOT produce an action for this work
     let record = works::get_work(&pool, "ctr_test", "wrk_completed")
         .await
         .unwrap()
         .expect("work should exist");
 
-    // The supervisor tick would check completion_locked_at before evaluating.
+    // why: The supervisor tick would check completion_locked_at before evaluating.
     // Simulate that guard:
     if record.completion_locked_at.is_some() {
-        // This is the expected path — the work is skipped.
     } else {
         panic!("completion_locked_at should be set after mark_work_completed");
     }
 
-    // Also verify evaluate_next_step produces NoAction for completed work.
     let action = nexus_orchestration::auto_chain::evaluate_next_step(&record);
     assert!(
         matches!(action, ChainAction::NoAction),

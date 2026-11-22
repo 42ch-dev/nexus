@@ -23,13 +23,14 @@
 //! **Any new converge test in this file MUST use the `converge_arrive` helper
 //! (which delegates to `record_converge_arrival`). Do not add tests that
 //! manually write the converge-arrivals context key.**
+// note: converge gate tests exercise only the real runtime arrival path.
 
 use graph_flow::{Context, NextAction, Task};
 use nexus_orchestration::tasks::StateCompositeTask;
 use nexus_preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget};
 use std::collections::HashSet;
 
-/// Build a converge task with the given strategy and no exit condition.
+/// note: Build a converge task with the given strategy and no exit condition.
 fn make_converge_task(
     id: &str,
     strategy: ConvergeStrategy,
@@ -55,7 +56,7 @@ fn make_converge_task(
     .with_converge_predecessors(pred_set)
 }
 
-/// Convenience: record a converge arrival using the real runtime path.
+/// note: Convenience: record a converge arrival using the real runtime path.
 ///
 /// `source_id` identifies which predecessor is arriving (must match
 /// an entry in `converge_predecessors` for the gate to count it).
@@ -63,14 +64,13 @@ fn converge_arrive(ctx: &Context, target_id: &str, source_id: &str) {
     StateCompositeTask::record_converge_arrival(ctx, target_id, source_id).unwrap();
 }
 
-// ── wait_for_all tests ────────────────────────────────────────────────
+// note: ── wait_for_all tests ────────────────────────────────────────────────
 
 #[tokio::test]
 async fn converge_wait_for_all_two_way_both_arrive_advances() {
     let task = make_converge_task("merge_2", ConvergeStrategy::WaitForAll, &["a", "b"]);
     let ctx = Context::new();
 
-    // No arrivals → should wait.
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::WaitForInput),
@@ -78,7 +78,6 @@ async fn converge_wait_for_all_two_way_both_arrive_advances() {
         result.next_action
     );
 
-    // 1 of 2 arrivals (predecessor "a") → should still wait.
     converge_arrive(&ctx, "merge_2", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -87,7 +86,6 @@ async fn converge_wait_for_all_two_way_both_arrive_advances() {
         result.next_action
     );
 
-    // 2 of 2 arrivals (predecessor "b") → should advance.
     converge_arrive(&ctx, "merge_2", "b");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -102,26 +100,23 @@ async fn converge_wait_for_all_three_way_advances_when_all_arrive() {
     let task = make_converge_task("merge_3", ConvergeStrategy::WaitForAll, &["a", "b", "c"]);
     let ctx = Context::new();
 
-    // 2 of 3 → wait (sources "a" and "b").
     converge_arrive(&ctx, "merge_3", "a");
     converge_arrive(&ctx, "merge_3", "b");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::WaitForInput));
 
-    // 3 of 3 ("c") → advance.
     converge_arrive(&ctx, "merge_3", "c");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::Continue));
 }
 
-// ── first_completed tests ─────────────────────────────────────────────
+// note: ── first_completed tests ─────────────────────────────────────────────
 
 #[tokio::test]
 async fn converge_first_completed_advances_on_first_arrival() {
     let task = make_converge_task("merge_fc", ConvergeStrategy::FirstCompleted, &["a", "b"]);
     let ctx = Context::new();
 
-    // 1 arrival → should advance immediately.
     converge_arrive(&ctx, "merge_fc", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -136,7 +131,6 @@ async fn converge_first_completed_zero_arrivals_waits() {
     let task = make_converge_task("merge_fc2", ConvergeStrategy::FirstCompleted, &["a", "b"]);
     let ctx = Context::new();
 
-    // 0 arrivals → should wait.
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::WaitForInput),
@@ -145,14 +139,13 @@ async fn converge_first_completed_zero_arrivals_waits() {
     );
 }
 
-// ── any strategy tests ─────────────────────────────────────────────────
+// note: ── any strategy tests ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn converge_any_advances_on_first_arrival() {
     let task = make_converge_task("merge_any", ConvergeStrategy::Any, &["a", "b"]);
     let ctx = Context::new();
 
-    // 1 arrival → should advance.
     converge_arrive(&ctx, "merge_any", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -164,11 +157,10 @@ async fn converge_any_advances_on_first_arrival() {
 
 #[tokio::test]
 async fn converge_any_idempotent_second_run_resumes() {
-    // After converge gate passes, the resume path advances immediately.
+    // note: After converge gate passes, the resume path advances immediately.
     let task = make_converge_task("merge_idem", ConvergeStrategy::Any, &["a", "b"]);
     let ctx = Context::new();
 
-    // First pass: 1 arrival → advance.
     converge_arrive(&ctx, "merge_idem", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -177,8 +169,7 @@ async fn converge_any_idempotent_second_run_resumes() {
         result.next_action
     );
 
-    // Second pass (resumed via resume_key): advances immediately.
-    // The resume path skips the gate entirely.
+    // why: The resume path skips the gate entirely.
     ctx.set("_state_merge_idem_resumed", true).unwrap();
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -188,11 +179,11 @@ async fn converge_any_idempotent_second_run_resumes() {
     );
 }
 
-// ── C-NEW-001 dedup regression tests ───────────────────────────────────
+// note: ── C-NEW-001 dedup regression tests ───────────────────────────────────
 
 #[tokio::test]
 async fn converge_dedup_three_distinct_predecessors_all_recorded() {
-    // Regression test for C-NEW-001: three distinct predecessors arriving
+    // note: Regression test for C-NEW-001: three distinct predecessors arriving
     // in arbitrary order must all be recorded, so wait_for_all advances.
     let task = make_converge_task(
         "merge_dedup",
@@ -201,11 +192,10 @@ async fn converge_dedup_three_distinct_predecessors_all_recorded() {
     );
     let ctx = Context::new();
 
-    // Arrive in order: y, x, z (non-canonical order).
+    // why: Arrive in order: y, x, z (non-canonical order).
     converge_arrive(&ctx, "merge_dedup", "y");
     converge_arrive(&ctx, "merge_dedup", "x");
 
-    // 2 of 3 → still waiting.
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::WaitForInput),
@@ -213,7 +203,6 @@ async fn converge_dedup_three_distinct_predecessors_all_recorded() {
         result.next_action
     );
 
-    // Third distinct predecessor arrives.
     converge_arrive(&ctx, "merge_dedup", "z");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -225,13 +214,12 @@ async fn converge_dedup_three_distinct_predecessors_all_recorded() {
 
 #[tokio::test]
 async fn converge_dedup_same_source_twice_idempotent() {
-    // Regression test for C-NEW-001: a repeated arrival from the same
+    // invariant: Regression test for C-NEW-001: a repeated arrival from the same
     // source_id must be idempotent (not double-counted). Only when a
     // DIFFERENT predecessor arrives should the gate advance.
     let task = make_converge_task("merge_idem2", ConvergeStrategy::WaitForAll, &["a", "b"]);
     let ctx = Context::new();
 
-    // Predecessor "a" arrives.
     converge_arrive(&ctx, "merge_idem2", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -240,7 +228,6 @@ async fn converge_dedup_same_source_twice_idempotent() {
         result.next_action
     );
 
-    // Predecessor "a" arrives AGAIN → idempotent no-op, still 1/2.
     converge_arrive(&ctx, "merge_idem2", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -249,7 +236,6 @@ async fn converge_dedup_same_source_twice_idempotent() {
         result.next_action
     );
 
-    // Predecessor "b" arrives → now 2/2 → advance.
     converge_arrive(&ctx, "merge_idem2", "b");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -259,15 +245,13 @@ async fn converge_dedup_same_source_twice_idempotent() {
     );
 }
 
-// ── Edge cases ─────────────────────────────────────────────────────────
+// note: ── Edge cases ─────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn converge_no_predecessors_skips_gate() {
-    // When a converge state has 0 predecessors, the gate is skipped.
     let task = make_converge_task("merge_orphan", ConvergeStrategy::WaitForAll, &[]);
     let ctx = Context::new();
 
-    // Should advance immediately (gate skipped).
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::Continue),
@@ -278,7 +262,6 @@ async fn converge_no_predecessors_skips_gate() {
 
 #[tokio::test]
 async fn converge_non_converge_state_skips_gate() {
-    // A state without converge config should not be affected.
     let task = StateCompositeTask::from_manifest(&nexus_preset::manifest::StateDefinition {
         id: "normal_state".to_string(),
         description: None,

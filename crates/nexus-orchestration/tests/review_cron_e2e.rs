@@ -36,13 +36,13 @@ const CREATOR: &str = "ctr_review_cron_e2e";
 const WORLD: &str = "wld_review_cron_e2e";
 const WORK_REF: &str = "review-cron-e2e";
 
-// ── Test helpers (mirrors review_time_extraction.rs + cron_supervisor.rs) ────
+// note: ── Test helpers (mirrors review_time_extraction.rs + cron_supervisor.rs) ─
 
 mod common;
 
 use common::test_pool;
 
-/// Seed a minimal `narrative_worlds` row (and FK creator) so the work's
+/// note: Seed a minimal `narrative_worlds` row (and FK creator) so the work's
 /// `world_id` FK holds. Reuses the shared seed helper.
 async fn seed_world(pool: &SqlitePool) {
     nexus_local_db::kb_store::seed::world(
@@ -57,7 +57,7 @@ async fn seed_world(pool: &SqlitePool) {
     .await;
 }
 
-/// A healthy novel Work with a world and a current chapter (> 0) so the
+/// note: A healthy novel Work with a world and a current chapter (> 0) so the
 /// T-B P1 extraction hook has prose to scan.
 fn novel_work(work_id: &str, chapter: i32) -> WorkRecord {
     WorkRecord {
@@ -95,7 +95,7 @@ fn novel_work(work_id: &str, chapter: i32) -> WorkRecord {
     }
 }
 
-/// Write a chapter body file under a temp workspace dir and return the dir +
+/// note: Write a chapter body file under a temp workspace dir and return the dir +
 /// the relative body path (stored in `work_chapters.body_path`).
 fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir().unwrap();
@@ -106,7 +106,7 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
     (dir, body_rel)
 }
 
-/// Seed a `work_chapters` row pointing at a body file (mirrors
+/// note: Seed a `work_chapters` row pointing at a body file (mirrors
 /// `review_time_extraction.rs::seed_chapter_with_body`).
 async fn seed_chapter_with_body(
     pool: &SqlitePool,
@@ -133,9 +133,9 @@ async fn seed_chapter_with_body(
     .unwrap();
 }
 
-// ── The chain: cron fire → enqueue → terminal → T-B P1 hook ─────────────────
+// note: ── The chain: cron fire → enqueue → terminal → T-B P1 hook ─────────
 
-/// End-to-end: the per-Work `review` cron role fires on its spec default
+/// note: End-to-end: the per-Work `review` cron role fires on its spec default
 /// (`0,30 * * * *`), enqueues a `novel-review-master` schedule, and — once that
 /// schedule reaches a terminal state — the T-B P1 review-time KB-extraction
 /// hook fires on it and inserts pending KB candidates from the chapter prose.
@@ -153,7 +153,7 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
     let work = novel_work("wrk_e2e", 3);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Configure the review role on the Work (spec §2.1 shape) via the DAO,
+    // note: configures the review role on the Work (spec §2.1 shape) via the DAO,
     // mirroring what `creator works cron set --review ...` writes.
     let schedule_json = serde_json::json!({
         "tz": "UTC",
@@ -169,13 +169,12 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
         .await
         .unwrap();
 
-    // Write a chapter body with a recognizable character name so the heuristic
-    // has prose to extract from when the hook fires.
+    // note: a recognizable character name gives the heuristic prose to extract.
     let (ws_dir, body_rel) =
         write_workspace_with_chapter("Lin Xia walked into the tavern. Marcus waved at Lin Xia.");
     seed_chapter_with_body(&pool, "wrk_e2e", 3, &body_rel).await;
 
-    // ── Step 1: cron evaluator fires the review role at a matching minute. ──
+    // note: ── Step 1: cron evaluator fires the review role at a matching minute. ─
     // 14:00 UTC matches the `:00` slot of `0,30 * * * *`.
     let fire_time = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 14, 0, 0).unwrap();
     let summary =
@@ -185,7 +184,6 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
         "review role should fire at :00: {summary:?}"
     );
 
-    // The enqueued schedule is a `novel-review-master` run with cron provenance.
     let (schedule_id, preset_id, label): (String, String, String) = sqlx::query_as(
         "SELECT schedule_id, preset_id, label FROM creator_schedules \
          WHERE work_id = 'wrk_e2e' AND preset_id = 'novel-review-master'",
@@ -200,7 +198,7 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
         "cron-fired review schedule must use the CRON prefix (got {schedule_id})"
     );
 
-    // ── Step 2: simulate the executor completing the review-master run. ──────
+    // note: ── Step 2: simulate the executor completing the review-master run. ──
     // The real supervisor fires the T-B P1 hook in `on_schedule_terminal`; the
     // hook itself only needs the schedule row + work + chapter body, so we
     // transition the schedule to terminal and invoke the hook directly (the
@@ -232,7 +230,7 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
     .await
     .unwrap();
 
-    // ── Step 3: the T-B P1 extraction hook fires on the completed schedule. ─
+    // note: ── Step 3: the T-B P1 extraction hook fires on the completed schedule. ─
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
         &schedule_id,
@@ -246,8 +244,8 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
         "T-B P1 hook should extract ≥1 candidate from the review-cron-launched schedule"
     );
 
-    // The candidate ("Lin Xia") lands in `kb_extract_jobs` as a pending row for
-    // the work's world — ready for `creator world kb adopt`.
+    // note: the candidate lands in `kb_extract_jobs` as a pending row for the
+    // work's world — ready for `creator world kb adopt`.
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     assert!(!pending.is_empty(), "pending KB candidates should exist");
     let names: Vec<String> = pending
@@ -260,7 +258,7 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
     );
 }
 
-/// Negative leg: when no Work has a review role configured, the cron sweep
+/// note: Negative leg: when no Work has a review role configured, the cron sweep
 /// enqueues no `novel-review-master` schedule (acceptance §4 — graceful skip,
 /// "no work = no schedule").
 #[tokio::test]
@@ -270,7 +268,7 @@ async fn review_cron_no_review_role_enqueues_nothing() {
     let work = novel_work("wrk_e2e_none", 1);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Two-role blob (no `review` key) — review deserialises to `None`.
+    // note: two-role blob (no `review` key) — review deserialises to `None`.
     let schedule_json = serde_json::json!({
         "tz": "UTC",
         "roles": {

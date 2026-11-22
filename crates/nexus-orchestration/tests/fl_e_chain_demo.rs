@@ -3,12 +3,13 @@
 //! Validates the full stage advance chain: intake → research → produce → review → persist.
 //! Covers the chain-level happy path, --force overrides, and preset input resolution.
 //! The stage-gate matrix (rejection codes and messages) is owned by `stage_gates::tests`.
+// note: no mocks; the real `check_stage_advance` / `preset_for_stage` are exercised.
 
 use nexus_contracts::local::orchestration::FL_E_STAGES;
 use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
 use nexus_orchestration::stage_gates::{build_preset_input, preset_for_stage, WorkFields};
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// note: ── Helpers ────────────────────────────────────────────────────────
 
 fn work_state(stage: &str, status: &str, intake: &str) -> WorkStageState {
     WorkStageState {
@@ -39,16 +40,13 @@ fn demo_work_fields(stage: &str) -> WorkFields {
     }
 }
 
-// ── Case 1: Full happy-path chain ────────────────────────────────────────────
+// note: ── Case 1: Full happy-path chain ──────────────────────────────────
 
 #[test]
 fn fl_e_chain_happy_path_all_stages_advance() {
-    // Start at intake with complete intake
     let mut current = work_state("intake", "complete", "complete");
 
-    // Advance through each stage after intake
     for &target in FL_E_STAGES.iter().skip(1) {
-        // Gate check should pass
         assert!(
             check_stage_advance(&current, target, false).is_ok(),
             "Advance from '{}' to '{}' should succeed",
@@ -56,11 +54,9 @@ fn fl_e_chain_happy_path_all_stages_advance() {
             target,
         );
 
-        // Preset resolution should work
         let _preset =
             preset_for_stage(target).unwrap_or_else(|| panic!("No preset for stage '{target}'"));
 
-        // Preset input should contain Work fields
         let fields = demo_work_fields(target);
         let input = build_preset_input(&fields);
         assert!(
@@ -68,15 +64,13 @@ fn fl_e_chain_happy_path_all_stages_advance() {
             "preset input for '{target}' must have work_id"
         );
 
-        // Simulate stage completion
         current = work_state(target, "complete", "complete");
     }
 
-    // Final: all 5 stages should be valid
     assert_eq!(FL_E_STAGES.len(), 5);
 }
 
-// ── Case 2: --force bypasses all gates ──────────────────────────────────────
+// note: ── Case 2: --force bypasses all gates ────────────────────────────
 
 #[test]
 fn fl_e_chain_force_allows_backwards() {
@@ -96,18 +90,16 @@ fn fl_e_chain_force_allows_incomplete_current() {
     );
 }
 
-// ── Case 3: Preset input chain correctness ──────────────────────────────────
+// note: ── Case 3: Preset input chain correctness ────────────────────────
 
 #[test]
 fn fl_e_chain_preset_input_fields_propagate_across_stages() {
     let fields = demo_work_fields("research");
     let input = build_preset_input(&fields);
 
-    // All stages get work_id + fl_e_stage
     assert_eq!(input["work_id"], "wrk_demo_e2e");
     assert_eq!(input["fl_e_stage"], "research");
 
-    // creative_brief and inspiration_log are always available
     assert!(
         input["creative_brief"].as_str().unwrap().contains("sci-fi"),
         "creative_brief should contain the genre"
@@ -117,7 +109,7 @@ fn fl_e_chain_preset_input_fields_propagate_across_stages() {
     assert_eq!(log.as_array().map(Vec::len), Some(1));
 }
 
-// ── Case 4: End-to-end stage → preset → input resolution ────────────────────
+// note: ── Case 4: End-to-end stage → preset → input resolution ──────────
 
 #[test]
 fn fl_e_chain_e2e_resolve_presets_and_inputs() {
@@ -137,7 +129,6 @@ fn fl_e_chain_e2e_resolve_presets_and_inputs() {
             "Stage '{stage}' should map to preset '{expected_preset}'"
         );
 
-        // Build preset input and verify all required fields are present
         let fields = demo_work_fields(stage);
         let input = build_preset_input(&fields);
         assert!(

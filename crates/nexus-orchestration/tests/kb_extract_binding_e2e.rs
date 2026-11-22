@@ -1,4 +1,5 @@
 //! Hermetic e2e test for V1.40 P3 kb-extract binding (T7).
+// note: no engine or worker is involved.
 //!
 //! Validates: persist schedule → extract → P2 chapter block sees new item.
 //! Uses in-memory stores for KB and `SQLite` for job lifecycle.
@@ -31,7 +32,7 @@ async fn test_persist_extract_chapter_block_e2e() {
     let chapter_num = 1;
     let work_entry_id = "kb_chapter_01";
 
-    // Step 1: Seed the world so FK constraints pass.
+    // why: seed the world so FK constraints pass.
     seed::world(
         &pool,
         world_id,
@@ -43,7 +44,6 @@ async fn test_persist_extract_chapter_block_e2e() {
     )
     .await;
 
-    // Step 2: Enqueue extract job with chapter artifact locator.
     let job = enqueue_extract_job_with_artifact(
         &pool,
         creator_id,
@@ -64,7 +64,7 @@ async fn test_persist_extract_chapter_block_e2e() {
     assert_eq!(job.profile_hint.as_deref(), Some("novel"));
     assert_eq!(job.work_id.as_deref(), Some(work_id));
 
-    // Step 3: Simulate the extract finalize step (what kb.extract_work does).
+    // note: Step 3 — simulate the extract finalize step (what kb.extract_work does).
     let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
     let body = KnowledgeEntryBody {
         summary: Some("Lin Xia is a brave warrior from the Neon City".to_string()),
@@ -93,7 +93,6 @@ async fn test_persist_extract_chapter_block_e2e() {
     assert!(result.entry_id.starts_with("kb_"));
     assert_eq!(result.owner, KnowledgeOwnerRef::world(world_id));
 
-    // Step 4: Verify the KB block is queryable via the store.
     let blocks = store.list_by_world(world_id).await.unwrap();
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0].canonical_name, "char_lin_xia");
@@ -103,7 +102,7 @@ async fn test_persist_extract_chapter_block_e2e() {
 
 #[tokio::test]
 async fn test_worldless_work_skips_world_promotion() {
-    // Legacy V1.39 worldless Works: world_id is None, no World KB promotion.
+    // note: Legacy V1.39 worldless Works — world_id is None, no World KB promotion.
     // This test verifies the enqueue still works (no FK violation) and
     // that prepare_extract uses Generic validation mode.
 
@@ -153,7 +152,6 @@ async fn test_extract_idempotent_job() {
     )
     .await;
 
-    // First enqueue
     let job1 = enqueue_extract_job_with_artifact(
         &pool,
         creator_id,
@@ -168,7 +166,7 @@ async fn test_extract_idempotent_job() {
     .await
     .unwrap();
 
-    // Second enqueue with same (creator, work_entry_id, world_id) → idempotent
+    // note: Second enqueue with same (creator, work_entry_id, world_id) → idempotent
     let job2 = enqueue_extract_job_with_artifact(
         &pool,
         creator_id,
@@ -188,11 +186,11 @@ async fn test_extract_idempotent_job() {
 
 #[tokio::test]
 async fn test_extract_novel_requires_novel_category() {
-    // v1.191 P1 T12: the mode requirement is enforced by prepare, before any
+    // why: v1.191 P1 T12 — the mode requirement is enforced by prepare, before any
     // id is allocated or any store is touched.
     let body = KnowledgeEntryBody {
         summary: Some("Test".to_string()),
-        attributes: Some(serde_json::json!({})), // missing novel_category
+        attributes: Some(serde_json::json!({})), // note: missing novel_category
         tags: None,
         ..Default::default()
     };

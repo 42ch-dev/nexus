@@ -6,6 +6,7 @@
 //! The IR is the sample's golden candidate IR rather than a copy: `import_preset_bundle` produces
 //! it from the shipped bundle and `crates/nexus-preset/tests/workflow_ir_round_trip.rs` fails when
 //! that file drifts from the adapter's output, so this target cannot walk a stale sample.
+// note: the sample is walked with the simulator only; no engine is constructed.
 
 use nexus_workflow_ir::WorkflowDocument;
 use nexus_workflow_simulate::simulate_document;
@@ -42,7 +43,7 @@ fn the_sample_trajectory_walks_the_declared_default_judge_branch() {
         nexus_contracts::SimulationTrajectoryEffectSummary::External
     );
 
-    // `ir_content_hash` is recomputed from the IR, never echoed from the document.
+    // invariant: `ir_content_hash` is recomputed from the IR, never echoed from the document.
     assert_eq!(trajectory.ir_content_hash.len(), 64);
     assert!(trajectory
         .ir_content_hash

@@ -15,9 +15,10 @@
 //!      upgrades cleanly (idempotent `run_migrations`).
 //!
 //! Run: `SQLX_OFFLINE=true cargo test -p nexus-orchestration --test workflow_run_state`
+// why: the tests use a real SQLite file because the restart and CAS behavior under test is the storage implementation, not a mock of it.
 
-#![allow(clippy::too_many_lines)] // deterministic run-state scenarios keep setup+assertions in one flow
-#![allow(clippy::significant_drop_tightening)] // tests read state snapshots; early-drop noise without contention value
+#![allow(clippy::too_many_lines)] // why: deterministic run-state scenarios keep setup+assertions in one flow
+#![allow(clippy::significant_drop_tightening)] // why: tests read state snapshots; early-drop noise without contention value
 
 use graph_flow::{Session, SessionStorage};
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument;
@@ -39,7 +40,7 @@ mod common;
 
 use common::arc_pool_file_first;
 
-/// Build a frozen v1 descriptor for tests.
+/// note: Build a frozen v1 descriptor for tests.
 fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
     let mut agent_bindings = HashMap::new();
     agent_bindings.insert(
@@ -71,7 +72,7 @@ fn test_descriptor(_session_id: &str) -> RunDescriptorV1 {
     }
 }
 
-/// Build a root session snapshot.
+/// note: Build a root session snapshot.
 fn root_session(session_id: &str, task: &str) -> Session {
     let s = Session::new_from_task(session_id.to_string(), task);
     s.context
@@ -80,7 +81,7 @@ fn root_session(session_id: &str, task: &str) -> Session {
     s
 }
 
-/// Build a child checkpoint.
+/// note: Build a child checkpoint.
 fn child_checkpoint(child_id: &str, task: &str) -> ChildCheckpoint {
     let s = Session::new_from_task(child_id.to_string(), task);
     s.context.set("_session_id", child_id.to_string()).unwrap();
@@ -93,9 +94,7 @@ fn child_checkpoint(child_id: &str, task: &str) -> ChildCheckpoint {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 1. Reopen truth
-// ---------------------------------------------------------------------------
+// note: 1. Reopen truth
 
 #[tokio::test]
 async fn terminal_status_survives_reopen_not_disguised_as_running() {
@@ -109,7 +108,6 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
         let pool = guarded.clone_pool();
         let storage = SqliteSessionStorage::new(Arc::new(pool));
 
-        // Start a v1 run.
         let root = root_session(&session_id.0, "task_a");
         let checkpoint = RunCheckpoint {
             root: &root,
@@ -125,7 +123,6 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
             .await
             .expect("start_run");
 
-        // Commit a terminal transition (completed).
         let root = root_session(&session_id.0, "task_z");
         let checkpoint = RunCheckpoint {
             root: &root,
@@ -141,7 +138,7 @@ async fn terminal_status_survives_reopen_not_disguised_as_running() {
             )
             .await
             .expect("commit completed");
-    } // pool drops — simulates daemon shutdown
+    } // why: pool drops — simulates daemon shutdown
 
     {
         let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -193,7 +190,6 @@ async fn wait_status_survives_reopen() {
             .await
             .expect("start_run");
 
-        // Commit a human-wait transition with a durable wait record.
         let wait_state = RunStateV1 {
             wait: Some(nexus_session_storage::run_state::WaitRecord {
                 wait_id: "wait-abc".to_string(),
@@ -245,9 +241,7 @@ async fn wait_status_survives_reopen() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 2. Stale-save / CAS races
-// ---------------------------------------------------------------------------
+// note: 2. Stale-save / CAS races
 
 #[tokio::test]
 async fn stale_graph_save_cannot_overwrite_terminal_status() {
@@ -255,7 +249,6 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-stale".to_string());
 
-    // Start a v1 run.
     let root = root_session(&session_id.0, "task_a");
     let checkpoint = RunCheckpoint {
         root: &root,
@@ -271,7 +264,6 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
         .await
         .expect("start_run");
 
-    // Commit a terminal transition.
     let root = root_session(&session_id.0, "task_z");
     let checkpoint = RunCheckpoint {
         root: &root,
@@ -288,8 +280,8 @@ async fn stale_graph_save_cannot_overwrite_terminal_status() {
         .await
         .expect("commit completed");
 
-    // A stale graph save (position-only) must NOT flip the row back to
-    // running or overwrite the terminal status. graph-flow 0.8 makes the
+    // invariant: a stale graph save (position-only) must NOT flip the row back
+    // to running or overwrite the terminal status. graph-flow 0.8 makes the
     // refusal honest: the save errors with SessionConflict instead of a
     // fake-success no-op.
     let stale = root_session(&session_id.0, "task_stale");
@@ -339,7 +331,6 @@ async fn commit_transition_with_wrong_revision_fails() {
         .await
         .expect("start_run");
 
-    // Commit with a stale expected revision (0 instead of 1).
     let root = root_session(&session_id.0, "task_b");
     let checkpoint = RunCheckpoint {
         root: &root,
@@ -369,7 +360,6 @@ async fn commit_transition_with_wrong_revision_fails() {
         other => panic!("expected RevisionMismatch, got {other:?}"),
     }
 
-    // The row must be unchanged (still running, revision 1).
     let record = storage
         .load_run(&session_id)
         .await
@@ -400,7 +390,6 @@ async fn commit_transition_after_terminal_fails() {
         .await
         .expect("start_run");
 
-    // Commit terminal.
     let root = root_session(&session_id.0, "task_z");
     let checkpoint = RunCheckpoint {
         root: &root,
@@ -417,7 +406,6 @@ async fn commit_transition_after_terminal_fails() {
         .await
         .expect("commit completed");
 
-    // A second transition (even with the correct revision) must be refused.
     let root = root_session(&session_id.0, "task_zz");
     let checkpoint = RunCheckpoint {
         root: &root,
@@ -440,9 +428,7 @@ async fn commit_transition_after_terminal_fails() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 3. Descriptor / child identity
-// ---------------------------------------------------------------------------
+// note: 3. Descriptor / child identity
 
 #[tokio::test]
 async fn descriptor_and_child_identity_preserved() {
@@ -462,7 +448,6 @@ async fn descriptor_and_child_identity_preserved() {
         .await
         .expect("start_run with child");
 
-    // Reopen and verify descriptor + child identity.
     let record = storage
         .load_run(&session_id)
         .await
@@ -489,7 +474,6 @@ async fn descriptor_and_child_identity_preserved() {
         }
     );
 
-    // Child checkpoint identity preserved in the DB.
     let child_row = storage
         .get("sess-child:child:1")
         .await
@@ -498,7 +482,7 @@ async fn descriptor_and_child_identity_preserved() {
     assert_eq!(child_row.current_task_id, "child_task");
 }
 
-/// The applied identity is frozen on the descriptor, and a run with no apply
+/// invariant: The applied identity is frozen on the descriptor, and a run with no apply
 /// keeps writing exactly the bytes it always did.
 #[test]
 fn descriptor_serializes_the_applied_identity_only_when_present() {
@@ -508,7 +492,7 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
         no_apply.get("applied").is_none(),
         "a no-apply descriptor must not gain a key: {no_apply}"
     );
-    // Byte-for-byte: the appended, skipped field must leave these bytes alone.
+    // invariant: Byte-for-byte: the appended, skipped field must leave these bytes alone.
     assert_eq!(
         serde_json::to_string(&no_apply_descriptor).expect("descriptor serializes"),
         concat!(
@@ -536,14 +520,14 @@ fn descriptor_serializes_the_applied_identity_only_when_present() {
     assert_eq!(back.applied, applied.applied);
 }
 
-/// The intake mode is frozen on the descriptor only when an admission recorded
+/// invariant: The intake mode is frozen on the descriptor only when an admission recorded
 /// one, the one remaining arm round-trips under its kebab-case spelling, and a
 /// legacy descriptor keeps its exact bytes.
 #[test]
 fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
     use nexus_home_layout::strategy_intake::StrategyIntakeMode;
 
-    // Legacy bytes: a descriptor without the field decodes as `None`, and the
+    // invariant: a descriptor without the field decodes as `None`, and the
     // skipped field leaves the serialized form byte-identical (same contract
     // as `applied` above).
     let legacy = test_descriptor("sess");
@@ -564,7 +548,7 @@ fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
         "a recorded mode must serialize a key: {value}"
     );
 
-    // The exact kebab-case spelling the config file and the descriptor share.
+    // invariant: The exact kebab-case spelling the config file and the descriptor share.
     let json = serde_json::to_string(&descriptor).expect("descriptor serializes");
     assert!(
         json.contains(r#""intake_mode":"ir-only""#),
@@ -572,14 +556,14 @@ fn descriptor_round_trips_intake_mode_and_legacy_bytes_hold() {
     );
 }
 
-/// A run admitted while `yaml-only` was live recorded that spelling on its
+/// why: A run admitted while `yaml-only` was live recorded that spelling on its
 /// descriptor. Recovery must refuse it by name — not as a bare unknown-variant
 /// parse error, and never as `IrOnly`: mapping it would silently switch the
 /// document source the run executes, which is the outcome the arm's removal
 /// refuses (I-000509).
 #[tokio::test]
 async fn recorded_retired_intake_mode_refuses_by_name() {
-    // A real recorded descriptor, respelled to the arm that was live when the
+    // note: A real recorded descriptor, respelled to the arm that was live when the
     // row was written.
     let mut recorded =
         serde_json::to_value(test_descriptor("sess")).expect("descriptor serializes");
@@ -597,7 +581,7 @@ async fn recorded_retired_intake_mode_refuses_by_name() {
         "the refusal names the recorded value: {message}"
     );
 
-    // The recovery read over a row carrying those bytes reports the same named
+    // why: The recovery read over a row carrying those bytes reports the same named
     // cause, not a JSON-corruption error: `load_run` is what a restart uses.
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
@@ -626,16 +610,14 @@ async fn recorded_retired_intake_mode_refuses_by_name() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 4. Unchanged legacy / corrupt evidence
-// ---------------------------------------------------------------------------
+// note: 4. Unchanged legacy / corrupt evidence
 
 #[tokio::test]
 async fn v0_legacy_rows_stay_legacy_unverified() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v0 row (execution_version defaults to 0) with a running status.
+    // note: Seed a v0 row (execution_version defaults to 0) with a running status.
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -664,7 +646,7 @@ async fn v0_legacy_rows_stay_legacy_unverified() {
         record.state.is_none(),
         "v0 rows carry no durable state (legacy/unverified)"
     );
-    // Status is diagnostic only for v0 — not reinterpreted.
+    // invariant: Status is diagnostic only for v0 — not reinterpreted.
     assert_eq!(record.status, SessionStatus::Running);
 }
 
@@ -673,7 +655,6 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v1 row with a corrupt run_state_json blob.
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -687,7 +668,7 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
     .await
     .expect("seed corrupt v1 row");
 
-    // load_run must surface the corruption as an error, not reinterpret it.
+    // invariant: load_run must surface the corruption as an error, not reinterpret it.
     let err = storage
         .load_run(&SessionId("sess-corrupt".to_string()))
         .await
@@ -698,7 +679,7 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
         "expected GraphFlow error for corrupt blob, got {err:?}"
     );
 
-    // The original blob bytes must be preserved (not rewritten).
+    // invariant: The original blob bytes must be preserved (not rewritten).
     let raw: Option<Vec<u8>> = sqlx::query_scalar(
         "SELECT run_state_json FROM orchestration_sessions WHERE session_id = 'sess-corrupt'",
     )
@@ -712,33 +693,29 @@ async fn corrupt_blobs_preserved_not_reinterpreted() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 5. Upgrade of an old migrated DB
-// ---------------------------------------------------------------------------
+// note: 5. Upgrade of an old migrated DB
 
 #[tokio::test]
 async fn old_migrated_db_upgrades_cleanly() {
-    // v1.191 P1 T17: the holder-registry cutover migration is runner-coupled by
-    // design — its preflight aborts any path that does not stage the digest
+    // why: v1.191 P1 T17 — the holder-registry cutover migration is runner-coupled by
+    // design: its preflight aborts any path that does not stage the digest
     // rows (`holders::stage_holder_digests_in_tx`), and the raw sqlx migrator
     // used for the "old" schema below has no such hook. A DB that predates the
     // cutover therefore predates this file too, and the guarded upgrade below
     // is what applies it (through the real runner).
     const RUNNER_CUTOVER_MIGRATION: &str = "20260918000001_holder_registry.sql";
 
-    // Build a DB with only the pre-v1.186 migrations (exclude the new
+    // why: Build a DB with only the pre-v1.186 migrations (exclude the new
     // workflow_execution_state migration), then run the full migration set
     // to verify the upgrade path is clean and idempotent.
     let db = tempfile::NamedTempFile::new().unwrap();
-    // Raw pool: the old schema must be built WITHOUT the writer protocol's
+    // why: Raw pool — the old schema must be built WITHOUT the writer protocol's
     // automatic migration pass, so the guarded upgrade below is what is
     // actually under test.
     let raw = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.path().display()))
         .await
         .expect("raw pool");
 
-    // Copy all migrations except the new one into a temp dir and apply them
-    // as the "old" schema.
     let old_migrations_dir = tempfile::tempdir().unwrap();
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../crates/nexus-local-db/migrations");
@@ -756,7 +733,7 @@ async fn old_migrated_db_upgrades_cleanly() {
         .expect("build old migrator");
     old_migrator.run(&raw).await.expect("apply old migrations");
 
-    // The new columns must NOT exist yet.
+    // invariant: The new columns must NOT exist yet.
     let has_new_col: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM pragma_table_info('orchestration_sessions')
          WHERE name = 'execution_version'",
@@ -767,7 +744,7 @@ async fn old_migrated_db_upgrades_cleanly() {
     assert_eq!(has_new_col, 0, "old DB must lack the new column");
     raw.close().await;
 
-    // Upgrade through the guarded writer-protocol path: the pending
+    // why: Upgrade through the guarded writer-protocol path — the pending
     // migration applies in migration mode, the protocol epoch activates,
     // and the admitted engine pool may then write the upgraded tables.
     let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -775,7 +752,6 @@ async fn old_migrated_db_upgrades_cleanly() {
         .expect("open pool");
     let pool = guarded.clone_pool();
 
-    // The new columns must now be present and usable.
     let storage = SqliteSessionStorage::new(Arc::new(pool));
     let session_id = SessionId("sess-upgrade".to_string());
     let root = root_session(&session_id.0, "task_a");
@@ -801,11 +777,9 @@ async fn old_migrated_db_upgrades_cleanly() {
     assert_eq!(record.status, SessionStatus::Running);
 }
 
-// ---------------------------------------------------------------------------
-// Fix round 1 (task review): regression tests for each fixed contract
-// ---------------------------------------------------------------------------
+// note: Fix round 1 (task review): regression tests for each fixed contract
 
-// Critical 1: paused transitions are persisted authoritatively.
+// invariant: Critical 1: paused transitions are persisted authoritatively.
 #[tokio::test]
 async fn paused_status_survives_reopen() {
     let db = tempfile::NamedTempFile::new().unwrap();
@@ -833,7 +807,6 @@ async fn paused_status_survives_reopen() {
             .await
             .expect("start_run");
 
-        // Commit a paused transition.
         let root = root_session(&session_id.0, "task_b");
         let checkpoint = RunCheckpoint {
             root: &root,
@@ -849,7 +822,7 @@ async fn paused_status_survives_reopen() {
             )
             .await
             .expect("commit paused");
-    } // pool drops — simulates daemon shutdown
+    } // why: pool drops — simulates daemon shutdown
 
     {
         let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -872,7 +845,7 @@ async fn paused_status_survives_reopen() {
     }
 }
 
-// Critical 2: engine normal start path creates a v1 run via start_run.
+// invariant: Critical 2: engine normal start path creates a v1 run via start_run.
 #[tokio::test]
 async fn engine_start_creates_v1_run() {
     let (_db, pool) = arc_pool_file_first().await;
@@ -904,7 +877,7 @@ async fn engine_start_creates_v1_run() {
         .expect("session id keeps the preset prefix");
     uuid::Uuid::parse_str(suffix).expect("root session id uses a collision-resistant UUID");
 
-    // The run must be a v1 authoritative record, not a bare save.
+    // invariant: The run must be a v1 authoritative record, not a bare save.
     let record = storage
         .load_run(&sid)
         .await
@@ -925,7 +898,7 @@ async fn engine_start_creates_v1_run() {
     );
 }
 
-// Critical 2: the trait-level session constructor also uses start_run when a
+// invariant: Critical 2: the trait-level session constructor also uses start_run when a
 // workflow store is configured; it must not leave a bare v0 storage row.
 #[tokio::test]
 async fn engine_new_session_creates_v1_run() {
@@ -954,7 +927,7 @@ async fn engine_new_session_creates_v1_run() {
     assert_eq!(descriptor.preset_id, "novel-writing");
 }
 
-// Critical 3: resume must be fenced against terminal states.
+// invariant: Critical 3: resume must be fenced against terminal states.
 #[tokio::test]
 async fn resume_after_terminal_is_refused() {
     let (_db, pool) = arc_pool_file_first().await;
@@ -981,7 +954,6 @@ async fn resume_after_terminal_is_refused() {
         .await
         .expect("start_session");
 
-    // Commit a terminal transition directly on the store.
     let root = root_session(&sid.0, "task_z");
     let checkpoint = RunCheckpoint {
         root: &root,
@@ -998,7 +970,6 @@ async fn resume_after_terminal_is_refused() {
         .await
         .expect("commit completed");
 
-    // Resume must be refused (terminal fence).
     let err = engine
         .signal(&sid, nexus_orchestration::engine::EngineSignal::Resume)
         .await
@@ -1011,7 +982,6 @@ async fn resume_after_terminal_is_refused() {
         "expected TerminalState, got {err:?}"
     );
 
-    // The persisted status must remain terminal.
     let record = storage
         .load_run(&sid)
         .await
@@ -1020,7 +990,7 @@ async fn resume_after_terminal_is_refused() {
     assert_eq!(record.status, SessionStatus::Completed);
 }
 
-// Critical 4: engine-path wait produces a durable wait token.
+// invariant: Critical 4: engine-path wait produces a durable wait token.
 #[tokio::test]
 async fn engine_wait_produces_durable_wait_token() {
     let (_db, pool) = arc_pool_file_first().await;
@@ -1047,7 +1017,6 @@ async fn engine_wait_produces_durable_wait_token() {
         .await
         .expect("start_session");
 
-    // Step once — the ManualWaitTask produces WaitingForInput.
     let outcome = engine.run_step(&sid).await.expect("run_step");
     assert!(
         matches!(
@@ -1057,7 +1026,7 @@ async fn engine_wait_produces_durable_wait_token() {
         "expected WaitingForInput, got {outcome:?}"
     );
 
-    // The engine path must have persisted a durable wait record with a token.
+    // invariant: The engine path must have persisted a durable wait record with a token.
     let record = storage
         .load_run(&sid)
         .await
@@ -1199,7 +1168,7 @@ async fn in_flight_marker_fences_control_signals_and_stale_transition() {
     );
 }
 
-// Important 1 + 2: child identity is reconstructible and revision-fenced.
+// invariant: Important 1 + 2: child identity is reconstructible and revision-fenced.
 #[tokio::test]
 async fn child_identity_and_revision_fence() {
     let (_db, pool) = arc_pool_file_first().await;
@@ -1231,7 +1200,7 @@ async fn child_identity_and_revision_fence() {
         "boot reconstruction lists parents only; child rows attach through their parent"
     );
 
-    // Child identity must be reconstructible (not "unknown"/"default").
+    // invariant: Child identity must be reconstructible (not "unknown"/"default").
     let child_record = storage
         .load_run(&SessionId("sess-child-fix:child:1".to_string()))
         .await
@@ -1269,7 +1238,7 @@ async fn child_identity_and_revision_fence() {
         "child must inherit the root source identity"
     );
 
-    // Child revision fence: a transition with a stale child revision must
+    // invariant: Child revision fence: a transition with a stale child revision must
     // not overwrite the child row.
     let root2 = root_session(&session_id.0, "parent_task2");
     let child2 = child_checkpoint("sess-child-fix:child:1", "child_task2");
@@ -1288,8 +1257,6 @@ async fn child_identity_and_revision_fence() {
         .await
         .expect("commit with child");
 
-    // The child row must have advanced its revision (fence passed with
-    // matching revision 0 → 1).
     let child_after = storage
         .load_run(&SessionId("sess-child-fix:child:1".to_string()))
         .await
@@ -1303,7 +1270,7 @@ async fn child_identity_and_revision_fence() {
     );
 }
 
-// Important 3: late graph saves are fenced against wait AND paused rows.
+// invariant: Important 3: late graph saves are fenced against wait AND paused rows.
 #[tokio::test]
 async fn stale_save_cannot_overwrite_wait_or_paused() {
     let (_db, pool) = arc_pool_file_first().await;
@@ -1345,7 +1312,7 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
             .await
             .expect("commit");
 
-        // A stale graph save must NOT flip the row back to running. Under
+        // invariant: A stale graph save must NOT flip the row back to running. Under
         // graph-flow 0.8 the protection is an honest SessionConflict, not a
         // silent no-op.
         let stale = root_session(&session_id.0, "task_stale");
@@ -1374,7 +1341,7 @@ async fn stale_save_cannot_overwrite_wait_or_paused() {
     }
 }
 
-// Important 4: commit_transition refuses every v0 row. A descriptor does not
+// why: Important 4: commit_transition refuses every v0 row. A descriptor does not
 // prove that the legacy row has a complete v1 state contract, so transition
 // cannot silently promote or otherwise mutate it (A2/A7).
 #[tokio::test]
@@ -1446,13 +1413,12 @@ async fn commit_transition_refuses_v0_rows_without_mutation() {
     }
 }
 
-// Important 5: unknown/corrupt v1 status is non-replayable, never Running.
+// invariant: Important 5: unknown/corrupt v1 status is non-replayable, never Running.
 #[tokio::test]
 async fn unknown_v1_status_is_non_replayable() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v1 row with an unknown status value.
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -1466,7 +1432,6 @@ async fn unknown_v1_status_is_non_replayable() {
     .await
     .expect("seed unknown-status v1 row");
 
-    // load_run must surface the unknown status as an error (non-replayable).
     let err = storage
         .load_run(&SessionId("sess-unknown-status".to_string()))
         .await
@@ -1477,13 +1442,12 @@ async fn unknown_v1_status_is_non_replayable() {
     );
 }
 
-// Important 5: a v1 row missing descriptor/state is non-replayable.
+// invariant: Important 5: a v1 row missing descriptor/state is non-replayable.
 #[tokio::test]
 async fn v1_row_missing_metadata_is_non_replayable() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v1 row with a missing run_descriptor_json.
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -1507,7 +1471,7 @@ async fn v1_row_missing_metadata_is_non_replayable() {
     );
 }
 
-// Important 7: WaitKind and PromptPhase encode as snake_case.
+// invariant: Important 7: WaitKind and PromptPhase encode as snake_case.
 #[test]
 fn wait_kind_and_prompt_phase_encode_snake_case() {
     let wait = nexus_session_storage::run_state::WaitRecord {
@@ -1551,13 +1515,12 @@ fn wait_kind_and_prompt_phase_encode_snake_case() {
     );
 }
 
-// Important 8: legacy no-launder — start_run refuses an existing v0 row.
+// invariant: Important 8: legacy no-launder — start_run refuses an existing v0 row.
 #[tokio::test]
 async fn start_run_refuses_existing_v0_row() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v0 row (legacy evidence).
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -1569,7 +1532,6 @@ async fn start_run_refuses_existing_v0_row() {
     .await
     .expect("seed v0 row");
 
-    // start_run must refuse to launder the existing v0 row in place.
     let root = root_session("sess-legacy", "task_new");
     let checkpoint = RunCheckpoint {
         root: &root,
@@ -1596,7 +1558,6 @@ async fn start_run_refuses_existing_v0_row() {
         other => panic!("expected RunAlreadyExists, got {other:?}"),
     }
 
-    // The legacy row must be untouched (still v0, still running diagnostic).
     let record = storage
         .load_run(&SessionId("sess-legacy".to_string()))
         .await
@@ -1606,7 +1567,7 @@ async fn start_run_refuses_existing_v0_row() {
     assert_eq!(record.status, SessionStatus::Running);
 }
 
-// Minor 1: start_run reports an accurate conflict for an already-v1 row.
+// invariant: Minor 1: start_run reports an accurate conflict for an already-v1 row.
 #[tokio::test]
 async fn start_run_reports_accurate_conflict_for_v1_row() {
     let (_db, pool) = arc_pool_file_first().await;
@@ -1628,7 +1589,7 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
         .await
         .expect("first start_run");
 
-    // A second start_run on the same id must report RunAlreadyExists with
+    // invariant: A second start_run on the same id must report RunAlreadyExists with
     // execution_version=1 (not a misleading TerminalState).
     let root = root_session(&session_id.0, "task_b");
     let checkpoint = RunCheckpoint {
@@ -1657,7 +1618,7 @@ async fn start_run_reports_accurate_conflict_for_v1_row() {
     }
 }
 
-// Minor 2: loader/engine integration — descriptor/source identity from an
+// why: Minor 2: loader/engine integration — descriptor/source identity from an
 // actual loaded preset (end-to-end, not structural only).
 #[tokio::test]
 async fn engine_start_with_loaded_preset_builds_source_identity() {
@@ -1674,8 +1635,6 @@ async fn engine_start_with_loaded_preset_builds_source_identity() {
         caps,
     );
 
-    // Load a real embedded preset (novel-writing) — exercises the actual
-    // loader + source identity construction.
     let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded = nexus_preset::load_embedded_preset("novel-writing", &registry)
         .expect("novel-writing preset loads");
@@ -1706,11 +1665,9 @@ async fn engine_start_with_loaded_preset_builds_source_identity() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Fix round 2 (task re-review): regression tests for each fixed contract
-// ---------------------------------------------------------------------------
+// note: Fix round 2 (task re-review): regression tests for each fixed contract
 
-// Important 1: a child CAS that matches zero rows (stale child revision)
+// invariant: Important 1: a child CAS that matches zero rows (stale child revision)
 // must roll back the root transition — never silently drop the child
 // checkpoint while the root commits.
 #[tokio::test]
@@ -1719,7 +1676,6 @@ async fn child_cas_stale_revision_rolls_back_root() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-stale".to_string());
 
-    // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
     let root = root_session(&session_id.0, "parent_task");
     let child = child_checkpoint("sess-child-stale:child:1", "child_task");
@@ -1732,8 +1688,8 @@ async fn child_cas_stale_revision_rolls_back_root() {
         .await
         .expect("start_run with child");
 
-    // Advance the child row to revision 1 (simulating a concurrent child
-    // transition that the root does not know about).
+    // why: advance the child row to revision 1, simulating a concurrent child
+    // transition that the root does not know about.
     sqlx::query(
         "UPDATE orchestration_sessions SET state_revision = 1
          WHERE session_id = 'sess-child-stale:child:1'",
@@ -1742,7 +1698,7 @@ async fn child_cas_stale_revision_rolls_back_root() {
     .await
     .expect("advance child revision");
 
-    // Commit a root transition with a child checkpoint still anchored at
+    // invariant: Commit a root transition with a child checkpoint still anchored at
     // revision 0 — the child CAS must fail and roll back the root.
     let root2 = root_session(&session_id.0, "parent_task2");
     let child2 = child_checkpoint("sess-child-stale:child:1", "child_task2");
@@ -1766,7 +1722,6 @@ async fn child_cas_stale_revision_rolls_back_root() {
         "expected RevisionMismatch for stale child, got {err:?}"
     );
 
-    // The root row must be unchanged (rollback): still revision 1, running.
     let root_after = storage
         .load_run(&session_id)
         .await
@@ -1778,7 +1733,6 @@ async fn child_cas_stale_revision_rolls_back_root() {
     );
     assert_eq!(root_after.status, SessionStatus::Running);
 
-    // The child row must be unchanged (still revision 1, not overwritten).
     let child_after = storage
         .load_run(&SessionId("sess-child-stale:child:1".to_string()))
         .await
@@ -1787,7 +1741,7 @@ async fn child_cas_stale_revision_rolls_back_root() {
     assert_eq!(child_after.state_revision, 1, "child row not overwritten");
 }
 
-// Unknown/corrupt child status must be a hard storage error before OCC
+// invariant: Unknown/corrupt child status must be a hard storage error before OCC
 // classification (never RevisionMismatch or a generic CAS failure).
 #[tokio::test]
 async fn child_cas_unknown_status_is_storage_error_even_with_revision_mismatch() {
@@ -1848,7 +1802,7 @@ async fn child_cas_unknown_status_is_storage_error_even_with_revision_mismatch()
     );
 }
 
-// Important 1: a child CAS that matches zero rows because the child is
+// invariant: Important 1: a child CAS that matches zero rows because the child is
 // already terminal must roll back the root transition with TerminalState.
 #[tokio::test]
 async fn child_cas_terminal_child_rolls_back_root() {
@@ -1856,7 +1810,6 @@ async fn child_cas_terminal_child_rolls_back_root() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-term".to_string());
 
-    // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
     let root = root_session(&session_id.0, "parent_task");
     let child = child_checkpoint("sess-child-term:child:1", "child_task");
@@ -1869,7 +1822,7 @@ async fn child_cas_terminal_child_rolls_back_root() {
         .await
         .expect("start_run with child");
 
-    // Mark the child terminal (completed) AND advance its revision to 1 —
+    // why: mark the child terminal (completed) AND advance its revision to 1 —
     // a late root transition anchored at the stale revision 0 must not
     // overwrite a terminal child that has moved on.
     sqlx::query(
@@ -1880,7 +1833,7 @@ async fn child_cas_terminal_child_rolls_back_root() {
     .await
     .expect("mark child terminal + advance revision");
 
-    // Commit a root transition with a child checkpoint anchored at revision
+    // invariant: Commit a root transition with a child checkpoint anchored at revision
     // 0 — the child CAS must fail (terminal at a stale revision) and roll
     // back the root.
     let root2 = root_session(&session_id.0, "parent_task2");
@@ -1905,7 +1858,6 @@ async fn child_cas_terminal_child_rolls_back_root() {
         "expected TerminalState for terminal child at stale revision, got {err:?}"
     );
 
-    // The root row must be unchanged (rollback).
     let root_after = storage
         .load_run(&session_id)
         .await
@@ -1917,7 +1869,6 @@ async fn child_cas_terminal_child_rolls_back_root() {
     );
     assert_eq!(root_after.status, SessionStatus::Running);
 
-    // The child row must remain terminal at revision 1.
     let child_after = storage
         .load_run(&SessionId("sess-child-term:child:1".to_string()))
         .await
@@ -1927,7 +1878,7 @@ async fn child_cas_terminal_child_rolls_back_root() {
     assert_eq!(child_after.state_revision, 1);
 }
 
-// Important 1: a child that is already terminal at the EXPECTED revision is
+// invariant: Important 1: a child that is already terminal at the EXPECTED revision is
 // confirmed by the parent's checkpoint (no overwrite needed) — the parent's
 // transition succeeds rather than failing the child CAS.
 #[tokio::test]
@@ -1936,7 +1887,6 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-term-confirm".to_string());
 
-    // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
     let root = root_session(&session_id.0, "parent_task");
     let child = child_checkpoint("sess-child-term-confirm:child:1", "child_task");
@@ -1949,7 +1899,7 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
         .await
         .expect("start_run with child");
 
-    // Mark the child terminal (completed) at the SAME revision 0 — the
+    // why: mark the child terminal (completed) at the SAME revision 0 — the
     // parent's checkpoint confirms the child's final state.
     sqlx::query(
         "UPDATE orchestration_sessions SET status = 'completed'
@@ -1959,7 +1909,7 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
     .await
     .expect("mark child terminal");
 
-    // Commit a root transition with a child checkpoint anchored at revision
+    // why: Commit a root transition with a child checkpoint anchored at revision
     // 0 AND carrying a matching terminal status (Completed) — the terminal
     // child at the expected revision is confirmed, so the root transition
     // succeeds (Important 6: confirmation requires a matching terminal
@@ -1984,7 +1934,6 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
 
     assert_eq!(record.state_revision, 2, "root transition advanced");
 
-    // The child row must remain terminal (not overwritten).
     let child_after = storage
         .load_run(&SessionId("sess-child-term-confirm:child:1".to_string()))
         .await
@@ -1994,7 +1943,7 @@ async fn child_cas_terminal_at_expected_revision_is_confirmed() {
     assert_eq!(child_after.state_revision, 0, "child row not overwritten");
 }
 
-// Important 2: the production child-session path (EngineProxy/GraphFlowEngine
+// invariant: Important 2: the production child-session path (EngineProxy/GraphFlowEngine
 // spawn_child_session) creates a v1 child run with inherited trusted root
 // identity, and run_step_internal persists the nested child checkpoint.
 #[tokio::test]
@@ -2012,7 +1961,6 @@ async fn engine_nested_child_creates_v1_run() {
         caps,
     );
 
-    // Start a parent session (v1 run).
     let graph = Arc::new(
         graph_flow::GraphBuilder::new("test-graph")
             .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
@@ -2024,7 +1972,6 @@ async fn engine_nested_child_creates_v1_run() {
         .await
         .expect("start parent session");
 
-    // Spawn a child session via the production path.
     let inner_graph = Arc::new(
         graph_flow::GraphBuilder::new("inner_graph")
             .add_task(Arc::new(
@@ -2043,7 +1990,6 @@ async fn engine_nested_child_creates_v1_run() {
         .await
         .expect("spawn child session");
 
-    // The child must be a v1 run with inherited trusted root identity.
     let child_record = storage
         .load_run(&child_sid)
         .await
@@ -2083,7 +2029,7 @@ async fn engine_nested_child_creates_v1_run() {
         "child must inherit the root source identity"
     );
 
-    // run_step on the parent must persist the nested child checkpoint
+    // invariant: run_step on the parent must persist the nested child checkpoint
     // atomically (the child row is reconstructible after restart).
     let outcome = engine.run_step(&parent_sid).await.expect("run_step parent");
     assert!(
@@ -2094,7 +2040,6 @@ async fn engine_nested_child_creates_v1_run() {
         "expected WaitingForInput, got {outcome:?}"
     );
 
-    // The child row must still be present and reconstructible.
     let child_after = storage
         .load_run(&child_sid)
         .await
@@ -2112,7 +2057,7 @@ async fn engine_nested_child_creates_v1_run() {
     );
 }
 
-// Important 3: a directory preset that shadows an embedded preset with the
+// invariant: Important 3: a directory preset that shadows an embedded preset with the
 // same id must resolve to the directory source identity and carry the real
 // directory preset version (A7 precedence: user → system → embedded).
 #[tokio::test]
@@ -2132,8 +2077,6 @@ async fn shadowed_directory_preset_resolves_directory_source_and_version() {
         caps,
     );
 
-    // Create a user directory preset that shadows the embedded novel-writing
-    // preset (same id, different version).
     let nexus_home = tempfile::tempdir().unwrap();
     let bundle_dir = nexus_home.path().join("presets").join("novel-writing");
     fs::create_dir_all(&bundle_dir).unwrap();
@@ -2157,7 +2100,6 @@ states:
     fs::write(bundle_dir.join("preset.yaml"), override_yaml).unwrap();
     engine.set_nexus_home(nexus_home.path().to_path_buf());
 
-    // Start a session for the shadowed preset id.
     let graph = Arc::new(
         graph_flow::GraphBuilder::new("test-graph")
             .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
@@ -2169,8 +2111,6 @@ states:
         .await
         .expect("start_session with shadowed preset");
 
-    // The descriptor must resolve to the DIRECTORY source (not embedded) and
-    // carry the real directory preset version (99, not 0 and not embedded).
     let record = storage
         .load_run(&sid)
         .await
@@ -2188,14 +2128,13 @@ states:
     );
 }
 
-// Important 4: a corrupt/ambiguous v0 status must remain distinct and
+// invariant: Important 4: a corrupt/ambiguous v0 status must remain distinct and
 // non-replayable — never silently reinterpreted as `running`.
 #[tokio::test]
 async fn unknown_v0_status_is_non_replayable() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v0 row with an unknown status value.
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -2207,8 +2146,6 @@ async fn unknown_v0_status_is_non_replayable() {
     .await
     .expect("seed v0 row with unknown status");
 
-    // load_run must surface the unknown v0 status as an error (non-replayable),
-    // not silently reinterpret it as Running.
     let err = storage
         .load_run(&SessionId("sess-v0-unknown".to_string()))
         .await
@@ -2218,7 +2155,6 @@ async fn unknown_v0_status_is_non_replayable() {
         "expected GraphFlow error for unknown v0 status, got {err:?}"
     );
 
-    // The row must be preserved (not rewritten).
     let raw: Option<String> = sqlx::query_scalar(
         "SELECT status FROM orchestration_sessions WHERE session_id = 'sess-v0-unknown'",
     )
@@ -2232,14 +2168,13 @@ async fn unknown_v0_status_is_non_replayable() {
     );
 }
 
-// Important 4: a negative/out-of-range integer revision on a v0 row must
+// invariant: Important 4: a negative/out-of-range integer revision on a v0 row must
 // remain non-replayable — never coerced to zero.
 #[tokio::test]
 async fn negative_v0_revision_is_non_replayable() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v0 row with a negative state_revision.
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -2253,8 +2188,6 @@ async fn negative_v0_revision_is_non_replayable() {
     .await
     .expect("seed v0 row with negative revision");
 
-    // load_run must surface the negative revision as an error (non-replayable),
-    // not coerce it to zero.
     let err = storage
         .load_run(&SessionId("sess-v0-negrev".to_string()))
         .await
@@ -2264,7 +2197,6 @@ async fn negative_v0_revision_is_non_replayable() {
         "expected GraphFlow error for negative revision, got {err:?}"
     );
 
-    // The row must be preserved (not rewritten).
     let raw: i64 = sqlx::query_scalar(
         "SELECT state_revision FROM orchestration_sessions WHERE session_id = 'sess-v0-negrev'",
     )
@@ -2274,11 +2206,9 @@ async fn negative_v0_revision_is_non_replayable() {
     assert_eq!(raw, -5, "row preserved verbatim");
 }
 
-// ---------------------------------------------------------------------------
-// Fix round 3 (task re-review): regression tests for each fixed contract
-// ---------------------------------------------------------------------------
+// note: Fix round 3 (task re-review): regression tests for each fixed contract
 
-/// A graph-flow task that completes immediately (returns `NextAction::End`).
+/// note: A graph-flow task that completes immediately (returns `NextAction::End`).
 struct EndTask;
 #[async_trait::async_trait]
 impl graph_flow::Task for EndTask {
@@ -2293,7 +2223,7 @@ impl graph_flow::Task for EndTask {
     }
 }
 
-/// A graph-flow task that advances to the next task and records a context
+/// note: A graph-flow task that advances to the next task and records a context
 /// marker (used to verify root position/context restoration on failure).
 struct ContinueTask;
 #[async_trait::async_trait]
@@ -2310,7 +2240,7 @@ impl graph_flow::Task for ContinueTask {
     }
 }
 
-/// Build a fresh engine over a temp SQLite pool (helper for round-3 tests).
+/// note: Build a fresh engine over a temp SQLite pool (helper for round-3 tests).
 fn fresh_engine(
     pool: Arc<sqlx::SqlitePool>,
 ) -> (
@@ -2331,7 +2261,7 @@ fn fresh_engine(
     (storage, engine)
 }
 
-/// A real graph-only save interleaved after an engine snapshot read.
+/// note: A real graph-only save interleaved after an engine snapshot read.
 struct GraphSaveAfterRead {
     inner: Arc<SqliteSessionStorage>,
     reads_until_save: std::sync::atomic::AtomicUsize,
@@ -2351,7 +2281,7 @@ impl SessionStorage for GraphSaveAfterRead {
             .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             == Ok(1)
         {
-            // A second load is essential: Session::clone shares its Context,
+            // why: A second load is essential — Session::clone shares its Context,
             // which would accidentally modify the engine's stale snapshot too.
             let winner = self
                 .inner
@@ -2373,7 +2303,7 @@ impl SessionStorage for GraphSaveAfterRead {
 async fn ordinary_cancel_rebases_graph_winners_at_intent_and_settlement() {
     use nexus_orchestration::engine::EngineSignal;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    // Distinct writes: fencing only cancel intent leaves terminal settlement vulnerable.
+    // why: Distinct writes — fencing only cancel intent leaves terminal settlement vulnerable.
     for (boundary, snapshot_read) in [("cancel intent", 2), ("cancel settlement", 3)] {
         let (_db, pool) = arc_pool_file_first().await;
         let storage = Arc::new(SqliteSessionStorage::new(pool));
@@ -2462,7 +2392,7 @@ async fn ordinary_pause_refuses_a_stale_graph_snapshot() {
     );
 }
 
-// Important 1: an InnerGraphTask child actually runs to completion, and the
+// invariant: Important 1: an InnerGraphTask child actually runs to completion, and the
 // parent's commit_transition succeeds (the child checkpoint revision is
 // synchronized from each child transition).
 #[tokio::test]
@@ -2470,7 +2400,6 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool);
 
-    // Build a child graph that completes in one step (EndTask).
     let inner_graph = Arc::new(
         graph_flow::GraphBuilder::new("inner_graph")
             .add_task(Arc::new(EndTask))
@@ -2478,8 +2407,6 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
             .expect("test graph"),
     );
 
-    // Build a parent graph whose start task is an InnerGraphTask that spawns
-    // the child and polls it to completion.
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
         inner_graph.clone(),
@@ -2501,11 +2428,8 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
         .await
         .expect("start parent session");
 
-    // Run the parent step — the InnerGraphTask spawns the child, polls it to
-    // completion, and the parent's commit_transition must succeed (the child
-    // checkpoint revision is synchronized).
     let outcome = engine.run_step(&parent_sid).await.expect("run_step parent");
-    // The parent graph has no outgoing edge from the InnerGraphTask, so it
+    // why: the parent graph has no outgoing edge from the InnerGraphTask, so it
     // returns Paused.
     assert!(
         matches!(
@@ -2515,7 +2439,6 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
         "expected Paused, got {outcome:?}"
     );
 
-    // The parent's commit_transition must have succeeded (revision advanced).
     let parent_record = storage
         .load_run(&parent_sid)
         .await
@@ -2526,7 +2449,6 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
         "in-flight marker and parent transition both advance the revision"
     );
 
-    // The child must be terminal (completed) and reconstructible.
     let children = storage
         .load_children(&parent_sid)
         .await
@@ -2558,7 +2480,7 @@ async fn engine_nested_child_runs_to_completion_then_parent_commits() {
     );
 }
 
-/// P3 T1 rereview-2 P1 (A7 rule 2): a parseable but tampered child
+/// invariant: P3 T1 rereview-2 P1 (A7 rule 2): a parseable but tampered child
 /// descriptor is non-replayable. Both hydration and the reattachment path
 /// must fail closed instead of attaching the row to the root-built graph or
 /// falling back to `spawn_child_session` (which would mint a fresh child id
@@ -2593,7 +2515,6 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
         .await
         .expect("start parent session");
 
-    // Spawn a live child through the production admission path (v1 row).
     let child_sid = engine
         .shared_state()
         .spawn_child_session_internal(nexus_orchestration::engine::ChildSessionParams {
@@ -2604,7 +2525,7 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
         .await
         .expect("spawn child");
 
-    // Tamper: the descriptor stays parseable, but the frozen identity no
+    // why: the descriptor stays parseable, but the frozen identity no
     // longer matches the trusted root.
     let descriptor: Vec<u8> = sqlx::query_scalar(
         "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
@@ -2624,7 +2545,7 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
         .await
         .expect("tamper child descriptor");
 
-    // Reattachment must fail closed — never `Ok(None)` (which the caller
+    // why: Reattachment must fail closed — never `Ok(None)` (which the caller
     // would treat as "no child" and spawn a fresh one).
     let err = engine
         .shared_state()
@@ -2636,7 +2557,6 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
         "attachment refusal must be non-replayable, got {err}"
     );
 
-    // Recovery hydration must also fail the owned closure.
     let err = engine
         .shared_state()
         .hydrate_children(&parent_sid)
@@ -2647,7 +2567,6 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
         "hydration refusal must be non-replayable, got {err}"
     );
 
-    // Tampering never mints a second child row.
     let children = storage
         .load_children(&parent_sid)
         .await
@@ -2659,7 +2578,7 @@ async fn tampered_child_descriptor_is_non_replayable_and_never_reattached() {
     );
 }
 
-/// P3 T1 rereview-3 P1 (A7 rule 2): a parseable child whose `graph_name`
+/// invariant: P3 T1 rereview-3 P1 (A7 rule 2): a parseable child whose `graph_name`
 /// names an inner graph the frozen preset does not define is non-replayable.
 /// Recovery must refuse to reconstruct the root instead of letting
 /// `InnerGraphTask` miss the reattachment lookup and spawn a fresh child.
@@ -2700,7 +2619,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
         .await
         .expect("spawn child");
 
-    // Tamper only the graph_name: descriptor identity still matches.
+    // why: Only the graph_name is tampered — descriptor identity still matches.
     let descriptor: Vec<u8> = sqlx::query_scalar(
         "SELECT run_descriptor_json FROM orchestration_sessions WHERE session_id = ?",
     )
@@ -2719,7 +2638,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
         .await
         .expect("tamper graph_name");
 
-    // Restart shape: a fresh engine over the same pool must refuse to
+    // why: Restart shape — a fresh engine over the same pool must refuse to
     // reconstruct the root runner over the tampered descendant.
     let (_storage_b, engine_b) = fresh_engine(pool.clone());
     let err = engine_b
@@ -2738,7 +2657,7 @@ async fn tampered_child_graph_name_is_non_replayable_on_recovery() {
     assert_eq!(children.len(), 1, "no replacement child may be minted");
 }
 
-/// P3 T1 rereview-3 P1 (A7 rule 2): a v1 child under a parent whose frozen
+/// invariant: P3 T1 rereview-3 P1 (A7 rule 2): a v1 child under a parent whose frozen
 /// descriptor is absent is non-replayable — the v0-parent skip must not
 /// exempt it from identity validation.
 #[tokio::test]
@@ -2778,8 +2697,8 @@ async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
         .await
         .expect("spawn child");
 
-    // Simulate a legacy-shaped parent (v0 execution version, no descriptor)
-    // owning a v1 child: the child's identity cannot be verified.
+    // why: Simulate a legacy-shaped parent (v0 execution version, no descriptor)
+    // owning a v1 child — the child's identity cannot be verified.
     sqlx::query(
         "UPDATE orchestration_sessions
          SET execution_version = 0, run_descriptor_json = NULL
@@ -2802,17 +2721,15 @@ async fn v1_child_under_parent_without_descriptor_is_non_replayable() {
     let _ = child_sid;
 }
 
-// ---------------------------------------------------------------------------
-// W1 (v1.215 P2 T2 fix wave): the root-context marker is the ONLY evidence
+// note: W1 (v1.215 P2 T2 fix wave): the root-context marker is the ONLY evidence
 // that tolerates a non-terminal inner-graph child the root has already moved
 // past (the bounded `InnerGraphTask` poller abandoned it). These scenarios
 // drive the EXISTING recovery entrypoint end to end: root state S enters inner
 // graph X, the root cursor has advanced past S, and a still-RUNNING child row
 // — admitted through the production spawn path — has a descriptor naming X.
 // Only the root's `_inner_child_session_<S>` record connects the two facts.
-// ---------------------------------------------------------------------------
 
-/// Seed that persisted shape. `marker_states` are the outer states whose
+/// note: Seed that persisted shape. `marker_states` are the outer states whose
 /// `_inner_child_session_<state>` records name the child; `child_inner_graph`
 /// is the inner graph the child's frozen descriptor names.
 async fn seed_abandoned_child_root(
@@ -2834,7 +2751,7 @@ async fn seed_abandoned_child_root(
             .build()
             .expect("test parent graph"),
     );
-    // `novel-project-init` defines three inner graphs, two of them entered by
+    // note: `novel-project-init` defines three inner graphs, two of them entered by
     // distinct states (`init_intro` → `intro_graph`, `collecting_details` →
     // `details_graph`), which the negative variants below rely on.
     let root_sid = engine
@@ -2873,7 +2790,7 @@ async fn seed_abandoned_child_root(
     (root_sid, child_sid)
 }
 
-/// The root moved past `init_intro` (which enters `intro_graph`) and its
+/// invariant: The root moved past `init_intro` (which enters `intro_graph`) and its
 /// record still names the abandoned child whose descriptor names
 /// `intro_graph`: recovery must accept the row, and must not mint a
 /// replacement child.
@@ -2901,14 +2818,14 @@ async fn recovery_child_marker_reattaches_abandoned_child_without_replacement() 
     );
 }
 
-/// The record's state resolves to a DIFFERENT legal inner graph than the
+/// invariant: The record's state resolves to a DIFFERENT legal inner graph than the
 /// child's descriptor names, so it is not evidence of this child's
 /// reattachment: recovery rejects it and mints no replacement.
 #[tokio::test]
 async fn recovery_child_marker_for_another_inner_graph_is_non_replayable() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
-    // `collecting_details` enters `details_graph`, not the child's
+    // note: `collecting_details` enters `details_graph`, not the child's
     // `intro_graph`.
     let (root_sid, _child_sid) = seed_abandoned_child_root(
         &pool,
@@ -2941,7 +2858,7 @@ async fn recovery_child_marker_for_another_inner_graph_is_non_replayable() {
     );
 }
 
-/// Two records name the SAME child but resolve to two different legal inner
+/// invariant: Two records name the SAME child but resolve to two different legal inner
 /// graphs, so the record set is ambiguous and counts as no evidence at all:
 /// recovery rejects it and mints no replacement.
 #[tokio::test]
@@ -2952,7 +2869,7 @@ async fn recovery_child_marker_conflict_is_non_replayable() {
         &pool,
         &storage,
         &engine,
-        &["init_intro", "collecting_details"], // intro_graph vs details_graph
+        &["init_intro", "collecting_details"], // note: intro_graph vs details_graph
         "intro_graph",
     )
     .await;
@@ -2979,7 +2896,7 @@ async fn recovery_child_marker_conflict_is_non_replayable() {
     );
 }
 
-// Important 1: a restarted parent hydrates its children map from persisted
+// invariant: Important 1: a restarted parent hydrates its children map from persisted
 // child rows so its next commit_transition submits the correct child revision.
 #[tokio::test]
 async fn restart_hydrates_child_checkpoints() {
@@ -3026,7 +2943,7 @@ async fn restart_hydrates_child_checkpoints() {
             .expect("load_children");
         assert_eq!(children.len(), 1);
         child_sid = children[0].session_id.clone();
-    } // pool drops — simulates daemon shutdown
+    } // why: pool drops — simulates daemon shutdown
 
     {
         let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -3035,7 +2952,6 @@ async fn restart_hydrates_child_checkpoints() {
         let pool = guarded.clone_pool();
         let (_storage, engine) = fresh_engine(Arc::new(pool));
 
-        // Recover the parent session — this must hydrate the children map.
         let summary = nexus_session_storage::SessionSummary {
             session_id: parent_sid.clone(),
             creator_id: String::new(),
@@ -3045,8 +2961,6 @@ async fn restart_hydrates_child_checkpoints() {
         };
         engine.recover_sessions(vec![summary]).await;
 
-        // The children map must be hydrated with the child at its current
-        // persisted revision.
         let shared = engine.shared_state();
         let children_map = shared.children.read().await;
         let parent_children = children_map
@@ -3066,7 +2980,7 @@ async fn restart_hydrates_child_checkpoints() {
     }
 }
 
-// Important 2: a failed child CAS (stale child revision) must not leave a
+// invariant: Important 2: a failed child CAS (stale child revision) must not leave a
 // partially advanced root checkpoint — current_task_id/context_json are
 // restored to their pre-step values.
 #[tokio::test]
@@ -3074,7 +2988,6 @@ async fn failed_child_cas_restores_root_position() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Build a parent graph: task "continue_task" → task "end_task".
     let parent_graph = Arc::new(
         graph_flow::GraphBuilder::new("parent_graph")
             .add_task(Arc::new(ContinueTask))
@@ -3089,8 +3002,6 @@ async fn failed_child_cas_restores_root_position() {
         .await
         .expect("start parent session");
 
-    // Manually insert a child checkpoint into the parent's children map at
-    // revision 1 (simulating a child the parent believes is at revision 1).
     let child_id = "parent:child:stale";
     let child_session = Session::new_from_task(child_id.to_string(), "child_task");
     let child_cp = ChildCheckpoint {
@@ -3107,8 +3018,8 @@ async fn failed_child_cas_restores_root_position() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
 
-    // Create the child row in DB at revision 1, then advance it to 2
-    // (simulating a concurrent child transition the parent does not know about).
+    // why: Create the child row at revision 1, then advance it to 2, simulating a
+    // concurrent child transition the parent does not know about.
     let child_descriptor = test_descriptor(&parent_sid.0);
     let child_root = root_session(child_id, "child_task");
     let child_checkpoint = RunCheckpoint {
@@ -3130,7 +3041,6 @@ async fn failed_child_cas_restores_root_position() {
         .await
         .expect("advance child revision");
 
-    // Capture the pre-step root position/context.
     let pre_step = storage
         .get(&parent_sid.0)
         .await
@@ -3139,9 +3049,6 @@ async fn failed_child_cas_restores_root_position() {
     let pre_task = pre_step.current_task_id.clone();
     let pre_ctx = serde_json::to_vec(&pre_step.context).expect("serialize pre-step context");
 
-    // Run the parent step — task "continue_task" runs, advances to
-    // "end_task", returns Paused. commit_transition fails (stale child
-    // revision), and the root must be restored to its pre-step position.
     let err = engine
         .run_step(&parent_sid)
         .await
@@ -3154,7 +3061,6 @@ async fn failed_child_cas_restores_root_position() {
         "expected RevisionMismatch, got {err:?}"
     );
 
-    // The root position/context must be restored to pre-step.
     let after = storage
         .get(&parent_sid.0)
         .await
@@ -3169,7 +3075,6 @@ async fn failed_child_cas_restores_root_position() {
         pre_ctx, after_ctx,
         "root context_json must not advance on failed child CAS"
     );
-    // The "advanced" marker set by ContinueTask must be gone (restored).
     let advanced: Option<bool> = after.context.get("advanced");
     assert_eq!(
         advanced, None,
@@ -3177,7 +3082,7 @@ async fn failed_child_cas_restores_root_position() {
     );
 }
 
-// Minor 1: child IDs are collision-resistant — two child admissions in the
+// invariant: Minor 1: child IDs are collision-resistant — two child admissions in the
 // same millisecond must not collide with start_run's existing-row rejection.
 #[tokio::test]
 async fn child_ids_are_collision_resistant() {
@@ -3195,7 +3100,6 @@ async fn child_ids_are_collision_resistant() {
         .await
         .expect("start parent session");
 
-    // Spawn two children rapidly (same millisecond) — their IDs must differ.
     let inner_graph = Arc::new(
         graph_flow::GraphBuilder::new("inner_graph")
             .add_task(Arc::new(EndTask))
@@ -3226,11 +3130,9 @@ async fn child_ids_are_collision_resistant() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Fix round 4 (task re-review): regression tests for each fixed contract
-// ---------------------------------------------------------------------------
+// note: Fix round 4 (task re-review): regression tests for each fixed contract
 
-/// A graph-flow task that sets the external-effect marker (Important 3) and
+/// note: A graph-flow task that sets the external-effect marker (Important 3) and
 /// advances to the next task. Simulates a step that may have performed an
 /// external effect before a failed commit.
 struct EffectTask;
@@ -3249,7 +3151,7 @@ impl graph_flow::Task for EffectTask {
     }
 }
 
-/// A graph-flow task that does NOT set the external-effect marker and advances
+/// note: A graph-flow task that does NOT set the external-effect marker and advances
 /// (deterministic step, Important 3).
 struct DeterministicContinueTask;
 #[async_trait::async_trait]
@@ -3266,7 +3168,7 @@ impl graph_flow::Task for DeterministicContinueTask {
     }
 }
 
-// Important 1: recovery propagates the error when load_children fails
+// invariant: Important 1: recovery propagates the error when load_children fails
 // (corrupt/unsupported child) — the parent is marked non-replayable, never
 // reconstructed over an incomplete children map, and no stale checkpoint
 // lingers.
@@ -3276,7 +3178,6 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
     let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-corrupt-child".to_string());
 
-    // Start a parent run.
     let descriptor = test_descriptor(&parent_sid.0);
     let root = root_session(&parent_sid.0, "parent_state");
     let checkpoint = RunCheckpoint {
@@ -3288,8 +3189,6 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
         .await
         .expect("start parent");
 
-    // Seed a child row whose run_descriptor_json is corrupt (invalid JSON).
-    // load_children must fail on it, and hydrate_children must propagate.
     let child_sid = "par-corrupt-child:child:1";
     sqlx::query(
         "INSERT INTO orchestration_sessions
@@ -3307,8 +3206,6 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
     .await
     .expect("seed corrupt child row");
 
-    // hydrate_children must return Err (corrupt child is non-replayable),
-    // not silently continue with an empty children map (Important 1).
     let err = engine
         .shared_state()
         .hydrate_children(&parent_sid)
@@ -3319,7 +3216,6 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
         "expected GraphFlow error for corrupt child, got {err:?}"
     );
 
-    // The children map must NOT be populated (no stale checkpoint).
     let shared = engine.shared_state();
     let map = shared.children.read().await;
     assert!(
@@ -3328,8 +3224,6 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
     );
     drop(map);
 
-    // Recovery must skip runner reconstruction for this parent (non-replayable)
-    // and there must be no runner.
     let summary = nexus_session_storage::SessionSummary {
         session_id: parent_sid.clone(),
         creator_id: String::new(),
@@ -3344,7 +3238,7 @@ async fn corrupt_child_is_non_replayable_during_recovery() {
     );
 }
 
-// Important 1: a child whose session snapshot is missing from storage is also
+// invariant: Important 1: a child whose session snapshot is missing from storage is also
 // non-replayable during recovery (hydrate_children propagates).
 #[tokio::test]
 async fn child_missing_session_snapshot_is_non_replayable() {
@@ -3363,7 +3257,7 @@ async fn child_missing_session_snapshot_is_non_replayable() {
         .await
         .expect("start parent");
 
-    // Seed a VALID child row but do NOT create its session row in storage.
+    // note: Seed a VALID child row but do NOT create its session row in storage.
     let child_sid = "par-missing-child:child:1";
     sqlx::query(
         "INSERT INTO orchestration_sessions
@@ -3386,7 +3280,6 @@ async fn child_missing_session_snapshot_is_non_replayable() {
     .await
     .expect("seed child row");
 
-    // hydrate_children must fail because the child's session row is missing.
     let err = engine
         .shared_state()
         .hydrate_children(&parent_sid)
@@ -3398,7 +3291,7 @@ async fn child_missing_session_snapshot_is_non_replayable() {
     );
 }
 
-/// A graph-flow task that bumps the parent's root `state_revision` mid-step to
+/// note: A graph-flow task that bumps the parent's root `state_revision` mid-step to
 /// simulate a concurrent transition that wins before the outer
 /// `commit_transition` (used to prove the restore is revision-fenced).
 struct ConcurrentBumpRootTask {
@@ -3429,7 +3322,7 @@ impl graph_flow::Task for ConcurrentBumpRootTask {
     }
 }
 
-// Important 2: failed-child-CAS restore is revision-fenced — a concurrent
+// invariant: Important 2: failed-child-CAS restore is revision-fenced — a concurrent
 // root transition (revision advanced mid-step) is never overwritten by the
 // older pre-step position.
 #[tokio::test]
@@ -3437,7 +3330,6 @@ async fn failed_cas_restore_is_revision_fenced() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Parent graph: concurrent-bump → deterministic-continue → end.
     let parent_graph = Arc::new(
         graph_flow::GraphBuilder::new("parent_graph")
             .add_task(Arc::new(ConcurrentBumpRootTask {
@@ -3456,8 +3348,6 @@ async fn failed_cas_restore_is_revision_fenced() {
         .await
         .expect("start parent");
 
-    // Insert a stale child checkpoint into the parent's children map at
-    // revision 1.
     let child_id = "parent:child:fence";
     let child_session = Session::new_from_task(child_id.to_string(), "child_task");
     let child_cp = ChildCheckpoint {
@@ -3474,7 +3364,7 @@ async fn failed_cas_restore_is_revision_fenced() {
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
 
-    // Create the child row, then advance the child revision to 2 so the
+    // why: Create the child row, then advance the child revision to 2 so the
     // child CAS fails (stale) below.
     let child_descriptor = test_descriptor(&parent_sid.0);
     let child_root = root_session(child_id, "child_task");
@@ -3496,8 +3386,8 @@ async fn failed_cas_restore_is_revision_fenced() {
         .await
         .expect("advance child revision");
 
-    // The engine step: it will first capture expected_revision = 1, run the
-    // concurrent-bump task which advances the root to revision 2, then run
+    // why: The engine step first captures expected_revision = 1, runs the
+    // concurrent-bump task which advances the root to revision 2, then runs
     // deterministic-continue, then commit_transition(expected=1) fails with
     // RevisionMismatch. The restore must be SKIPPED because the persisted
     // revision (2) no longer matches the expected (1) — proving the restore
@@ -3530,7 +3420,6 @@ async fn failed_cas_restore_is_revision_fenced() {
         )),
     );
 
-    // Capture the pre-step root position at the pre-step task.
     let pre_step_root = storage
         .get(&parent_sid.0)
         .await
@@ -3538,9 +3427,6 @@ async fn failed_cas_restore_is_revision_fenced() {
         .expect("root present");
     let pre_task = pre_step_root.current_task_id;
 
-    // Run the parent step. The concurrent bump advances the root revision, so
-    // the outer commit fails with RevisionMismatch AND, because the persisted
-    // revision no longer equals expected, the restore is skipped.
     let err = engine
         .run_step(&parent_sid)
         .await
@@ -3553,8 +3439,6 @@ async fn failed_cas_restore_is_revision_fenced() {
         "expected RevisionMismatch, got {err:?}"
     );
 
-    // The root must NOT be restored to the pre-step (old) position, proving
-    // the restore is revision-fenced.
     let after = storage
         .get(&parent_sid.0)
         .await
@@ -3575,7 +3459,7 @@ async fn failed_cas_restore_is_revision_fenced() {
     );
 }
 
-// Important 3: a failed post-effect commit persists an interrupted
+// invariant: Important 3: a failed post-effect commit persists an interrupted
 // disposition (never a blind rewind), and the interrupted write is itself
 // revision-fenced.
 #[tokio::test]
@@ -3583,8 +3467,6 @@ async fn post_effect_failure_persists_interrupted() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Parent graph whose start is an EffectTask (sets the external-effect
-    // marker) → end.
     let parent_graph = Arc::new(
         graph_flow::GraphBuilder::new("parent_graph")
             .add_task(Arc::new(EffectTask))
@@ -3598,7 +3480,6 @@ async fn post_effect_failure_persists_interrupted() {
         .await
         .expect("start parent");
 
-    // Stale child so the post-effect commit fails.
     let child_id = "parent:child:interrupt";
     let child_session = Session::new_from_task(child_id.to_string(), "child_task");
     let child_cp = ChildCheckpoint {
@@ -3641,9 +3522,6 @@ async fn post_effect_failure_persists_interrupted() {
         .expect("root present")
         .current_task_id;
 
-    // Run the parent step: EffectTask executes an external effect, then the
-    // commit fails. The engine must persist an interrupted disposition, NOT
-    // rewind to the pre-step boundary.
     let err = engine
         .run_step(&parent_sid)
         .await
@@ -3656,7 +3534,6 @@ async fn post_effect_failure_persists_interrupted() {
         "expected RevisionMismatch, got {err:?}"
     );
 
-    // The root must now be terminal Interrupted with an in-flight marker.
     let record = storage
         .load_run(&parent_sid)
         .await
@@ -3673,7 +3550,7 @@ async fn post_effect_failure_persists_interrupted() {
         "interrupted disposition must carry a step_in_flight marker"
     );
 
-    // The root must NOT be rewound to the pre-step boundary: the interrupted
+    // why: The root must NOT be rewound to the pre-step boundary — the interrupted
     // disposition keeps the post-step position (here "end_task"), not the
     // pre-step "effect_task" safe boundary (Import 3 — no rewind).
     let after = storage
@@ -3687,7 +3564,7 @@ async fn post_effect_failure_persists_interrupted() {
     );
 }
 
-// Important 4: a deterministic step (no external effect) with a failed commit
+// invariant: Important 4: a deterministic step (no external effect) with a failed commit
 // is CAS-fenced restored to the pre-step position (acceptable rewind).
 #[tokio::test]
 async fn deterministic_failure_restores_pre_step_position() {
@@ -3770,8 +3647,6 @@ async fn deterministic_failure_restores_pre_step_position() {
         "expected RevisionMismatch, got {err:?}"
     );
 
-    // Deterministic (no external effect): the root is restored to the
-    // pre-step position (root revision unchanged → CAS-fenced restore).
     let after = storage
         .get(&parent_sid.0)
         .await
@@ -3790,7 +3665,7 @@ async fn deterministic_failure_restores_pre_step_position() {
     );
 }
 
-// Important 4: a recovered parent drives its existing inner child — the
+// invariant: Important 4: a recovered parent drives its existing inner child — the
 // InnerGraphTask reattaches the persisted child (no duplicate row, cursor
 // intact) and resumes it to completion.
 #[tokio::test]
@@ -3831,7 +3706,7 @@ async fn recovered_parent_drives_existing_inner_child() {
             .await
             .expect("start parent");
 
-        // Spawn the child and leave it Running (non-terminal) so recovery can
+        // why: Spawn the child and leave it Running (non-terminal) so recovery can
         // attach it. Do NOT step it yet.
         let ig = Arc::new(
             graph_flow::GraphBuilder::new("ig")
@@ -3849,9 +3724,9 @@ async fn recovered_parent_drives_existing_inner_child() {
             .await
             .expect("spawn child");
 
-        // Leave the child Running (never stepped). The in-memory children map
+        // why: Leave the child Running (never stepped). The in-memory children map
         // holds it, but we discard the engine below (restart).
-    } // pool drops — simulates daemon shutdown
+    } // note: pool drops — simulates daemon shutdown
 
     {
         let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -3860,7 +3735,7 @@ async fn recovered_parent_drives_existing_inner_child() {
         let pool = guarded.clone_pool();
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
-        // Hydrate the children map from persisted child rows (the recovery
+        // why: Hydrate the children map from persisted child rows (the recovery
         // step that finding 4 relies on) for the Running parent.
         engine
             .shared_state()
@@ -3868,7 +3743,7 @@ async fn recovered_parent_drives_existing_inner_child() {
             .await
             .expect("hydrate children map");
 
-        // Install the parent's FlowRunner over the custom InnerGraphTask graph
+        // why: Install the parent's FlowRunner over the custom InnerGraphTask graph
         // (mirroring what a restarting daemon does for this supported parent).
         let inner_graph = Arc::new(
             graph_flow::GraphBuilder::new("ig")
@@ -3898,7 +3773,7 @@ async fn recovered_parent_drives_existing_inner_child() {
             )),
         );
 
-        // Run the parent step — the InnerGraphTask must REATTACH the existing
+        // invariant: Run the parent step — the InnerGraphTask must REATTACH the existing
         // Running child (not spawn a duplicate) and drive it to completion.
         let outcome = engine
             .run_step(&parent_sid)
@@ -3912,8 +3787,6 @@ async fn recovered_parent_drives_existing_inner_child() {
             "expected Paused, got {outcome:?}"
         );
 
-        // Exactly ONE child row must exist, and it must be the SAME child we
-        // spawned before restart (no duplicate row created).
         let children = storage
             .load_children(&parent_sid)
             .await
@@ -3931,7 +3804,7 @@ async fn recovered_parent_drives_existing_inner_child() {
     }
 }
 
-// Important 5: directory-preset frozen-source reconstruction — a run admitted
+// invariant: Important 5: directory-preset frozen-source reconstruction — a run admitted
 // from a directory preset reconstructs against the persisted root and version
 // (not the current embedded bytes), and a changed source is
 // reconstruction_unavailable (non-replayable).
@@ -3944,7 +3817,6 @@ async fn directory_preset_frozen_source_reconstruction() {
     let nexus_home_dir = tempfile::tempdir().unwrap();
     let bundle_dir = nexus_home_dir.path().join("presets").join("dir-preset");
 
-    // Build the directory preset bundle.
     fs::create_dir_all(&bundle_dir).unwrap();
     let initial_yaml = r#"
 preset:
@@ -3983,8 +3855,6 @@ states:
         );
         engine.set_nexus_home(nexus_home_dir.path().to_path_buf());
 
-        // Start a session for the directory preset — the descriptor freezes
-        // the Directory source + version 11.
         let graph = Arc::new(
             graph_flow::GraphBuilder::new("test-graph")
                 .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
@@ -4010,7 +3880,7 @@ states:
     }
 
     {
-        // Second engine: recover the parent. Frozen-source reconstruction must
+        // invariant: Second engine: recover the parent. Frozen-source reconstruction must
         // resolve the directory preset at the persisted root, verify the
         // hash/version, and reconstruct a runner.
         let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -4037,7 +3907,7 @@ states:
             status: SessionStatus::Paused,
             current_task_id: Some("a".to_string()),
         };
-        // Reset the runner map so reconstruction actually runs.
+        // why: Reset the runner map so reconstruction actually runs.
         engine.shared_state().runners.write().await.clear();
         engine.recover_sessions(vec![summary]).await;
 
@@ -4048,7 +3918,7 @@ states:
     }
 
     {
-        // Third engine: change the directory preset content (version bump)
+        // why: Third engine: change the directory preset content (version bump)
         // → the frozen source hash/version no longer matches → reconstruction
         // is unavailable (non-replayable), not a fallback to current bytes.
         let changed_yaml = initial_yaml.replace("version: 11", "version: 99");
@@ -4087,14 +3957,13 @@ states:
     }
 }
 
-// Important 6: a negative/unknown v1 state_revision is non-replayable —
+// invariant: Important 6: a negative/unknown v1 state_revision is non-replayable —
 // never silently coerced to zero.
 #[tokio::test]
 async fn negative_v1_revision_is_non_replayable() {
     let (_db, pool) = arc_pool_file_first().await;
     let storage = SqliteSessionStorage::new(pool.clone());
 
-    // Seed a v1 row with a negative state_revision.
     let descriptor = test_descriptor("sess-v1-negrev");
     let descriptor_bytes = serde_json::to_vec(&descriptor).expect("serialize descriptor");
     let state_bytes = serde_json::to_vec(&RunStateV1::default()).expect("serialize state");
@@ -4122,7 +3991,6 @@ async fn negative_v1_revision_is_non_replayable() {
         "expected GraphFlow error for negative v1 revision, got {err:?}"
     );
 
-    // The row must be preserved verbatim.
     let raw: i64 = sqlx::query_scalar(
         "SELECT state_revision FROM orchestration_sessions WHERE session_id = 'sess-v1-negrev'",
     )
@@ -4132,7 +4000,7 @@ async fn negative_v1_revision_is_non_replayable() {
     assert_eq!(raw, -9, "row preserved verbatim");
 }
 
-// Important 6: child terminal-at-expected CAS compares the submitted child
+// invariant: Important 6: child terminal-at-expected CAS compares the submitted child
 // checkpoint status — a stale Running checkpoint must NOT let a parent commit
 // Completed when the child is Failed/Cancelled at that revision.
 #[tokio::test]
@@ -4141,7 +4009,6 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-child-mismatch".to_string());
 
-    // Start a root run with a child at revision 0.
     let descriptor = test_descriptor(&session_id.0);
     let root = root_session(&session_id.0, "parent_task");
     let child = child_checkpoint("sess-child-mismatch:child:1", "child_task");
@@ -4154,7 +4021,7 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
         .await
         .expect("start_run with child");
 
-    // Mark the child FAILED at the SAME revision 0. The parent submits a
+    // why: Mark the child FAILED at the SAME revision 0. The parent submits a
     // Running checkpoint — confirmation must FAIL (mismatch), never let the
     // parent commit as if the child completed.
     sqlx::query(
@@ -4187,7 +4054,6 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
         "expected GraphFlow mismatch error, got {err:?}"
     );
 
-    // The parent must NOT have committed Completed (root unchanged).
     let root_after = storage
         .load_run(&session_id)
         .await
@@ -4198,10 +4064,10 @@ async fn child_terminal_status_mismatch_rejects_confirmation() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 5 (task re-review): regression tests for each fixed contract
+// note: Fix round 5 (task re-review): regression tests for each fixed contract
 // ---------------------------------------------------------------------------
 
-// Important 1: a persisted TERMINAL child for the current inner-graph
+// invariant: Important 1: a persisted TERMINAL child for the current inner-graph
 // position is reattached/consumed, never re-spawned — the parent does not
 // replay completed prompt/effect work and does not create a duplicate child.
 #[tokio::test]
@@ -4241,8 +4107,6 @@ async fn terminal_child_is_reattached_not_respawned() {
             .start_session("novel-writing", parent_graph)
             .await
             .expect("start parent");
-        // First run_step spawns the child AND drives it to completion
-        // (terminal child checkpoint persisted).
         engine
             .run_step(&parent_sid)
             .await
@@ -4254,8 +4118,8 @@ async fn terminal_child_is_reattached_not_respawned() {
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].status, SessionStatus::Completed);
         child_sid = children[0].session_id.clone();
-    } // pool drops — simulates a crash AFTER the child checkpoint is durable
-      // but BEFORE the parent commits past this inner graph.
+    } // note: pool drops — simulates a crash AFTER the child checkpoint is durable
+      // note: but BEFORE the parent commits past this inner graph.
 
     {
         let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -4264,14 +4128,13 @@ async fn terminal_child_is_reattached_not_respawned() {
         let pool = guarded.clone_pool();
         let (storage, engine) = fresh_engine(Arc::new(pool));
 
-        // Hydrate the children map (recovery) — the terminal child is present.
+        // why: Hydrate the children map (recovery) — the terminal child is present.
         engine
             .shared_state()
             .hydrate_children(&parent_sid)
             .await
             .expect("hydrate children map");
 
-        // Reconstruct the parent runner over the same InnerGraphTask graph.
         let inner_graph = Arc::new(
             graph_flow::GraphBuilder::new("ig")
                 .add_task(Arc::new(EndTask))
@@ -4300,14 +4163,13 @@ async fn terminal_child_is_reattached_not_respawned() {
             )),
         );
 
-        // Run the parent step: the InnerGraphTask must REATTACH the terminal
+        // invariant: Run the parent step: the InnerGraphTask must REATTACH the terminal
         // child (no duplicate spawn, no re-step) and complete.
         let _outcome = engine
             .run_step(&parent_sid)
             .await
             .expect("parent step over terminal reattached child");
 
-        // Exactly ONE child row — the original — no duplicate spawn.
         let children = storage
             .load_children(&parent_sid)
             .await
@@ -4322,7 +4184,7 @@ async fn terminal_child_is_reattached_not_respawned() {
             SessionStatus::Completed,
             "terminal child stays terminal"
         );
-        // Marker + terminal commit advanced the child twice; reattachment
+        // why: Marker + terminal commit advanced the child twice; reattachment
         // must not advance it again.
         assert_eq!(
             children[0].state_revision, 3,
@@ -4331,7 +4193,7 @@ async fn terminal_child_is_reattached_not_respawned() {
     }
 }
 
-// Important 1 + Minor 1: a child whose session snapshot cannot be read is
+// invariant: Important 1 + Minor 1: a child whose session snapshot cannot be read is
 // non-replayable AND the stale children-map entry is cleared on the error
 // (Minor 1: hydrate_children must not leave a stale checkpoint on error).
 #[tokio::test]
@@ -4340,7 +4202,7 @@ async fn missing_child_session_clears_stale_children_entry() {
     let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-missing-clear".to_string());
 
-    // Seed a parent run + a VALID child row but NO session row (missing
+    // why: Seed a parent run + a VALID child row but NO session row (missing
     // snapshot — the exact failing case from important/missing-child).
     let descriptor = test_descriptor(&parent_sid.0);
     let root = root_session(&parent_sid.0, "parent_state");
@@ -4371,7 +4233,7 @@ async fn missing_child_session_clears_stale_children_entry() {
     .await
     .expect("seed child row");
 
-    // Pre-populate a STALE children-map entry (as if a prior checkpoint
+    // why: Pre-populate a STALE children-map entry (as if a prior checkpoint
     // existed) so we can prove the error clears it (Minor 1).
     let stale_cp = ChildCheckpoint {
         session: Session::new_from_task(child_sid.to_string(), "child_task"),
@@ -4387,8 +4249,6 @@ async fn missing_child_session_clears_stale_children_entry() {
         .await
         .insert(parent_sid.0.clone(), vec![stale_cp]);
 
-    // hydrate_children must fail (missing session snapshot) AND clear the
-    // stale entry.
     let err = engine
         .shared_state()
         .hydrate_children(&parent_sid)
@@ -4407,7 +4267,7 @@ async fn missing_child_session_clears_stale_children_entry() {
     drop(map);
 }
 
-// Important 2: a parent inner-graph step that drives a child session (which may
+// invariant: Important 2: a parent inner-graph step that drives a child session (which may
 // run effects) propagates the child's external-effect marker to the parent, so
 // a subsequent parent commit failure is Interrupted — never deterministically
 // restored and replayed. We simulate by directly marking the parent context via
@@ -4417,7 +4277,6 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Parent graph whose start is an InnerGraphTask (drives a child end task).
     let child_graph = Arc::new(
         graph_flow::GraphBuilder::new("child_graph")
             .add_task(Arc::new(EndTask))
@@ -4442,14 +4301,14 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         .await
         .expect("start parent");
 
-    // Insert a stale child into the parent's children map so the parent
+    // why: Insert a stale child into the parent's children map so the parent
     // commit_transition fails (the child CAS is a stale revision), triggering
     // the classification path.
     let child_id = "parent:child:prop";
     let child_session = Session::new_from_task(child_id.to_string(), "child_task");
     let child_cp = ChildCheckpoint {
         session: child_session,
-        status: SessionStatus::Completed, // terminal at stale rev triggers...
+        status: SessionStatus::Completed, // note: terminal at stale rev triggers the mismatch path
         state: RunStateV1::default(),
         state_revision: 1,
         graph_name: Some("child_graph".to_string()),
@@ -4460,7 +4319,7 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         .write()
         .await
         .insert(parent_sid.0.clone(), vec![child_cp]);
-    // Seed the child row then advance it so the submitted (rev 1) stale.
+    // why: Seed the child row then advance it so the submitted (rev 1) stale.
     // The child descriptor must carry the REAL inherited identity (same
     // creator/preset/version/source as the parent, naming its parent and
     // inner graph) — a bare test descriptor is refused as non-replayable.
@@ -4497,7 +4356,7 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
         .await
         .expect("advance child revision");
 
-    // Run the parent step. Because the child's END task is a reattachable
+    // why: Run the parent step. Because the child's END task is a reattachable
     // terminal child? No — the child spawn path runs it. The InnerGraphTask
     // sets the parent effect marker; the parent commit fails on the stale
     // child, so the parent must be Interrupted, never rewound.
@@ -4525,7 +4384,7 @@ async fn child_effect_propagates_to_parent_interrupted_on_failed_commit() {
     );
 }
 
-// Important 3: the deterministic restore is ONE atomic revision-fenced storage
+// invariant: Important 3: the deterministic restore is ONE atomic revision-fenced storage
 // operation. Simulate the concurrent interleaving: a transition wins between
 // the check and the save — the restore must leave the newer row untouched.
 #[tokio::test]
@@ -4545,7 +4404,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
         .await
         .expect("start_run");
 
-    // Simulate a concurrent transition that advances revision 1 -> 2 with a
+    // why: Simulate a concurrent transition that advances revision 1 -> 2 with a
     // newer position before the restore runs.
     sqlx::query(
         "UPDATE orchestration_sessions SET state_revision = state_revision + 1,
@@ -4557,8 +4416,6 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
     .await
     .expect("concurrent bump to revision 2");
 
-    // The restore anchored at expected_revision = 1 must fail RevisionMismatch
-    // and leave the newer row (revision 2, newer task) untouched.
     let pre = root_session(&session_id.0, "pre_task");
     let err = storage
         .restore_pre_step(&session_id, 1, &pre)
@@ -4591,7 +4448,7 @@ async fn restore_pre_step_is_single_atomic_revision_fence() {
     );
 }
 
-// Important 4: load_run rejects corrupt execution_version — negative values
+// invariant: Important 4: load_run rejects corrupt execution_version — negative values
 // and forward versions (>=2) are non-replayable, not coerced to 0 or 1
 // (A7), and the row/blobs are preserved verbatim.
 #[tokio::test]
@@ -4600,7 +4457,6 @@ async fn negative_execution_version_is_non_replayable() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = "sess-neg-execver";
 
-    // Seed a v1 row with execution_version = -3.
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -4627,7 +4483,6 @@ async fn negative_execution_version_is_non_replayable() {
         "expected GraphFlow error, got {err:?}"
     );
 
-    // Row preserved verbatim (version still -3).
     let raw: i64 = sqlx::query_scalar(
         "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
     )
@@ -4644,7 +4499,6 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = "sess-fwd-execver";
 
-    // Seed a row with execution_version = 7 (forward version, no policy).
     sqlx::query(
         "INSERT INTO orchestration_sessions
             (session_id, creator_id, preset_id, preset_version, status,
@@ -4671,7 +4525,6 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
         "expected GraphFlow error, got {err:?}"
     );
 
-    // Row preserved verbatim.
     let raw: i64 = sqlx::query_scalar(
         "SELECT execution_version FROM orchestration_sessions WHERE session_id = ?",
     )
@@ -4682,7 +4535,7 @@ async fn unsupported_forward_execution_version_is_non_replayable() {
     assert_eq!(raw, 7, "row preserved verbatim");
 }
 
-// Important 5: the in-flight (step_in_flight) intent is persisted BEFORE an
+// invariant: Important 5: the in-flight (step_in_flight) intent is persisted BEFORE an
 // external effect (via mark_step_in_flight fenced to running + revision),
 // so a crash after an effect but before the result commit leaves an
 // interrupted (never replayable) run. We prove the durable row carries the
@@ -4693,7 +4546,6 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Parent graph: manual-wait start (Running) then end.
     let parent_graph = Arc::new(
         graph_flow::GraphBuilder::new("parent_graph")
             .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
@@ -4707,7 +4559,7 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
         .await
         .expect("start parent");
 
-    // Manually invoke the pre-effect mark path the engine uses before a step.
+    // why: Manually invoke the pre-effect mark path the engine uses before a step.
     let pre = storage
         .get(&parent_sid.0)
         .await
@@ -4720,7 +4572,7 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
     storage
         .mark_step_in_flight(
             &parent_sid,
-            1, // start_run wrote revision 1
+            1, // note: start_run wrote revision 1
             None,
             RunCheckpoint {
                 root: &pre,
@@ -4731,7 +4583,7 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
         .await
         .expect("mark_step_in_flight succeeds before the effect");
 
-    // The durable row must carry the in-flight marker with status still
+    // why: The durable row must carry the in-flight marker with status still
     // running and a newly advanced revision. The revision bump is the CAS
     // boundary that prevents a previously loaded signal from erasing the
     // marker.
@@ -4750,7 +4602,7 @@ async fn step_in_flight_persisted_before_effect_dispatch() {
     );
 }
 
-// Important 5 (crash-after-effect): when a pre-effect in-flight mark was
+// invariant: Important 5 (crash-after-effect): when a pre-effect in-flight mark was
 // written and the engine's step performs an effect then has its commit fail,
 // the row transitions to Interrupted (never replayable) — not left running.
 #[tokio::test]
@@ -4758,7 +4610,6 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Parent graph: EffectTask (external effect) → end.
     let parent_graph = Arc::new(
         graph_flow::GraphBuilder::new("parent_graph")
             .add_task(Arc::new(EffectTask))
@@ -4772,7 +4623,7 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
         .await
         .expect("start parent");
 
-    // Stale child so the post-effect commit fails — the row must go
+    // why: Stale child so the post-effect commit fails — the row must go
     // Interrupted (Important 5: never replayable), even though a pre-step
     // in-flight mark was written at the start of the step.
     let child_id = "parent:child:crash";
@@ -4810,7 +4661,7 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
         .await
         .expect("advance child revision");
 
-    // Run the parent step. The pre-step in-flight mark is written first, the
+    // why: Run the parent step. The pre-step in-flight mark is written first, the
     // EffectTask runs, then the commit fails on the stale child — the row must
     // be Interrupted, not left running/replayable.
     let _err = engine
@@ -4830,7 +4681,7 @@ async fn crash_after_effect_with_pre_step_mark_lands_interrupted() {
     );
 }
 
-// Minor 2: a prior step's external effect must not leak into a later step —
+// invariant: Minor 2: a prior step's external effect must not leak into a later step —
 // after a successful intermediate (Paused) effectful step, the marker is
 // cleared so a later deterministic commit failure is NOT over-classified
 // Interrupted.
@@ -4839,7 +4690,7 @@ async fn external_effect_marker_cleared_per_step() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Parent graph: effectful continue (EffectTask → Continue, sets marker) →
+    // invariant: Parent graph: effectful continue (EffectTask → Continue, sets marker) →
     // deterministic continue (DeterministicContinueTask) → end.
     // Step 1 must be a Running (Paused) boundary with the marker present for
     // the effect classification; then the marker is cleared before step 2.
@@ -4858,9 +4709,6 @@ async fn external_effect_marker_cleared_per_step() {
         .await
         .expect("start parent");
 
-    // Step 1 (EffectTask) → the post-step context still carries the marker
-    // during classification; after the committed Paused boundary the marker
-    // is cleared.
     let record1 = storage
         .load_run(&parent_sid)
         .await
@@ -4868,14 +4716,11 @@ async fn external_effect_marker_cleared_per_step() {
         .expect("parent present");
     assert_eq!(record1.state_revision, 1, "initial revision");
 
-    // Run the first step (EffectTask → Continue → Paused at deterministic_continue).
     engine
         .run_step(&parent_sid)
         .await
         .expect("first effectful running step");
 
-    // After the Paused boundary the persisted context must no longer carry the
-    // marker (Minor 2).
     let post = storage
         .get(&parent_sid.0)
         .await
@@ -4889,7 +4734,7 @@ async fn external_effect_marker_cleared_per_step() {
         "the external-effect marker must be cleared after a successful Paused step commit (Minor 2)"
     );
 
-    // Step 2 (DeterministicContinueTask → Paused at end). Give it a stale
+    // why: Step 2 (DeterministicContinueTask → Paused at end). Give it a stale
     // child so its commit fails. Because the marker was cleared, the step is
     // deterministic and the engine restores to the pre-step position (NOT
     // Interrupted) — proving no stale pseudo-state leaks in.
@@ -4928,7 +4773,6 @@ async fn external_effect_marker_cleared_per_step() {
         .await
         .expect("advance child revision");
 
-    // Capture the deterministic pre-step position.
     let deterministic_pre = storage
         .get(&parent_sid.0)
         .await
@@ -4948,8 +4792,6 @@ async fn external_effect_marker_cleared_per_step() {
         "expected RevisionMismatch, got {err:?}"
     );
 
-    // The row must NOT be Interrupted (the marker was cleared); it stays
-    // non-terminal and is deterministically restored to the pre-step position.
     let final_record = storage
         .load_run(&parent_sid)
         .await
@@ -4971,10 +4813,10 @@ async fn external_effect_marker_cleared_per_step() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 6 (task re-review): regression tests for each fixed contract
+// note: Fix round 6 (task re-review): regression tests for each fixed contract
 // ---------------------------------------------------------------------------
 
-/// A graph-flow task that records a context marker proving the task's `run`
+/// why: A graph-flow task that records a context marker proving the task's `run`
 /// was actually dispatched (used by the engine-path Minor 1 test to assert an
 /// effectful task never dispatches before `mark_step_in_flight` succeeds).
 struct MarkerEffectTask;
@@ -4984,7 +4826,7 @@ impl graph_flow::Task for MarkerEffectTask {
         "marker_effect_task"
     }
     async fn run(&self, ctx: graph_flow::Context) -> graph_flow::Result<graph_flow::TaskResult> {
-        // Set both the engine effect marker AND a test-only dispatch marker so
+        // why: Set both the engine effect marker AND a test-only dispatch marker so
         // the test can observe whether the task actually ran.
         ctx.set(nexus_orchestration::engine::EXTERNAL_EFFECT_MARKER, true)
             .unwrap();
@@ -4996,7 +4838,7 @@ impl graph_flow::Task for MarkerEffectTask {
     }
 }
 
-// Important 1: a legacy v0 child has no complete child descriptor/state
+// invariant: Important 1: a legacy v0 child has no complete child descriptor/state
 // contract. Recovery must reject the parent rather than omit or reinterpret
 // the child, while preserving the legacy evidence for inspection.
 #[tokio::test]
@@ -5054,7 +4896,7 @@ async fn v0_child_is_non_replayable_and_preserved() {
     assert_eq!(persisted, (0, 4, "running".to_string()));
 }
 
-// Important 1: `load_children` must reject a child whose `state_revision` is
+// invariant: Important 1: `load_children` must reject a child whose `state_revision` is
 // negative (corrupt) as non-replayable — never coerced to zero. The child row
 // and its blobs are preserved verbatim, exactly as `load_run` does for the
 // root row (round-2/4 contract extended to child rows).
@@ -5064,7 +4906,6 @@ async fn negative_child_revision_is_non_replayable() {
     let (storage, engine) = fresh_engine(pool.clone());
     let parent_sid = SessionId("par-neg-child-rev".to_string());
 
-    // Start a parent run.
     let descriptor = test_descriptor(&parent_sid.0);
     let root = root_session(&parent_sid.0, "parent_task");
     let checkpoint = RunCheckpoint {
@@ -5076,10 +4917,9 @@ async fn negative_child_revision_is_non_replayable() {
         .await
         .expect("start parent");
 
-    // Seed a v1 child row with state_revision = -4 (corrupt).
     let child_id = "par-neg-child-rev:child:1";
     let child_descriptor = test_descriptor(child_id);
-    // The child descriptor must name this parent so `load_children` finds it.
+    // why: The child descriptor must name this parent so `load_children` finds it.
     let mut child_descriptor = child_descriptor;
     child_descriptor.parent_session_id = Some(parent_sid.clone());
     child_descriptor.graph_name = Some("inner_graph".to_string());
@@ -5101,7 +4941,7 @@ async fn negative_child_revision_is_non_replayable() {
     .await
     .expect("seed negative-revision child row");
 
-    // `load_children` must treat the negative child revision as corrupt
+    // invariant: `load_children` must treat the negative child revision as corrupt
     // (non-replayable) rather than coerce it to zero and hydrate a valid
     // checkpoint.
     let err = storage
@@ -5113,7 +4953,6 @@ async fn negative_child_revision_is_non_replayable() {
         "expected GraphFlow error for negative child revision, got {err:?}"
     );
 
-    // The child row is preserved verbatim (state_revision still -4).
     let raw: i64 = sqlx::query_scalar(
         "SELECT state_revision FROM orchestration_sessions WHERE session_id = ?",
     )
@@ -5123,8 +4962,6 @@ async fn negative_child_revision_is_non_replayable() {
     .expect("read raw child state_revision");
     assert_eq!(raw, -4, "child row preserved verbatim");
 
-    // `hydrate_children` must also propagate the error (recovery refuses to
-    // reconstruct a parent over a corrupt child) — no stale checkpoint.
     let err = engine
         .shared_state()
         .hydrate_children(&parent_sid)
@@ -5142,7 +4979,7 @@ async fn negative_child_revision_is_non_replayable() {
     );
 }
 
-// Important 2: a stale `mark_step_in_flight` against a `waiting_for_input`
+// invariant: Important 2: a stale `mark_step_in_flight` against a `waiting_for_input`
 // row must NOT overwrite/clear the durable WaitRecord. The fence admits only
 // statuses that may actually be stepped (running/paused); waiting_for_input
 // (and unknown statuses) are excluded (A4 token retention).
@@ -5163,7 +5000,6 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
         .await
         .expect("start_run");
 
-    // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
     let wait_state = RunStateV1 {
         wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-mark-token".to_string(),
@@ -5190,7 +5026,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
         .await
         .expect("commit wait (revision 2)");
 
-    // A stale step invocation at expected_revision = 2 (matching, so the CAS
+    // invariant: A stale step invocation at expected_revision = 2 (matching, so the CAS
     // fence passes) but on a waiting_for_input row must be refused — never
     // overwrite the WaitRecord.
     let pre = root_session(&session_id.0, "stale_effect_start");
@@ -5201,7 +5037,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
     let _err = storage
         .mark_step_in_flight(
             &session_id,
-            2, // matches persisted revision
+            2, // note: matches persisted revision
             None,
             RunCheckpoint {
                 root: &pre,
@@ -5212,8 +5048,6 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
         .await
         .expect_err("mark_step_in_flight must refuse a human-wait row");
 
-    // The row stayed waiting_for_input; the WaitRecord (with its token) and
-    // revision must be untouched.
     let record = storage
         .load_run(&session_id)
         .await
@@ -5241,7 +5075,7 @@ async fn stale_mark_step_in_flight_against_waiting_row_leaves_wait_untouched() {
     );
 }
 
-// Important 2: a stale `restore_pre_step` against a `waiting_for_input` row
+// invariant: Important 2: a stale `restore_pre_step` against a `waiting_for_input` row
 // must NOT clear the durable WaitRecord. The fence admits only statuses that
 // may actually be stepped (running/paused); waiting_for_input is excluded
 // (A4 token retention until an authorized successful CAS).
@@ -5262,7 +5096,6 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
         .await
         .expect("start_run");
 
-    // Commit a human-wait transition with a durable WaitRecord (revision 1 → 2).
     let wait_state = RunStateV1 {
         wait: Some(nexus_session_storage::run_state::WaitRecord {
             wait_id: "wait-restore-token".to_string(),
@@ -5289,21 +5122,18 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
         .await
         .expect("commit wait (revision 2)");
 
-    // A stale restore anchored at the matching revision must be refused on a
+    // invariant: A stale restore anchored at the matching revision must be refused on a
     // waiting_for_input row — never clear its WaitRecord.
     let pre = root_session(&session_id.0, "pre_wait_boundary");
     let err = storage
         .restore_pre_step(&session_id, 2, &pre)
         .await
         .expect_err("restore_pre_step must refuse a human-wait row");
-    // Revision matches, so the refusal is TerminalState (waiting is excluded).
     assert!(
         matches!(err, EngineError::TerminalState(_)),
         "expected TerminalState for a waiting_for_input restore, got {err:?}"
     );
 
-    // The row stayed waiting_for_input; the WaitRecord (with its token) and
-    // the run_state_json (position) must be untouched.
     let record = storage
         .load_run(&session_id)
         .await
@@ -5329,7 +5159,7 @@ async fn stale_restore_pre_step_against_waiting_row_leaves_wait_untouched() {
     assert_eq!(wait.task_id, "wait_task");
 }
 
-// Minor 1 (engine path): the engine must NOT dispatch an effectful task
+// invariant: Minor 1 (engine path): the engine must NOT dispatch an effectful task
 // before `mark_step_in_flight` is persisted. When the pre-step row is in a
 // human-wait state (not re-steppable), the engine refuses the step before
 // `runner.run` executes the task — the effect task's `run` never fires.
@@ -5338,7 +5168,6 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
     let (_db, pool) = arc_pool_file_first().await;
     let (storage, engine) = fresh_engine(pool.clone());
 
-    // Parent graph: marker-effect task (external effect) → end.
     let parent_graph = Arc::new(
         graph_flow::GraphBuilder::new("parent_graph")
             .add_task(Arc::new(MarkerEffectTask))
@@ -5352,7 +5181,7 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         .await
         .expect("start parent");
 
-    // Manually put the parent into a human-wait state (durable WaitRecord,
+    // why: Manually put the parent into a human-wait state (durable WaitRecord,
     // revision 1 → 2). A waiting_for_input row must NEVER be re-stepped.
     let root = storage
         .get(&parent_sid.0)
@@ -5383,7 +5212,7 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         .await
         .expect("commit wait");
 
-    // The engine's run_step must fail BEFORE dispatching the effectful task:
+    // invariant: The engine's run_step must fail BEFORE dispatching the effectful task:
     // run_step_internal calls mark_step_in_flight, which is fenced to
     // running/paused and refuses the waiting row, so `runner.run` (which
     // fires MarkerEffectTask.run) is never reached.
@@ -5399,7 +5228,7 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         "expected TerminalState for stepping a waiting row, got {err:?}"
     );
 
-    // Prove the effect task did NOT dispatch: the "dispatched" marker and the
+    // invariant: Prove the effect task did NOT dispatch: the "dispatched" marker and the
     // external-effect marker must both be absent from the persisted context.
     let post = storage
         .get(&parent_sid.0)
@@ -5419,7 +5248,6 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
         "no external-effect marker — no effect task ran before the mark gate"
     );
 
-    // The durable WaitRecord and token survive untouched.
     let record = storage
         .load_run(&parent_sid)
         .await
@@ -5436,13 +5264,13 @@ async fn engine_effectful_task_does_not_dispatch_before_in_flight_mark() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 7 (writer × classifier contract, P0 Task 3 blocker): scheduler
+// note: Fix round 7 (writer × classifier contract, P0 Task 3 blocker): scheduler
 // converge/merge parks must persist the A2 shape — `paused` + join keys and
 // NO human-wait token — while genuine manual human waits keep persisting
 // `waiting_for_input` + a fresh A4 token.
 // ---------------------------------------------------------------------------
 
-/// A converge/merge parked-join run used to prove the engine writer's
+/// note: A converge/merge parked-join run used to prove the engine writer's
 /// durable output shape (A2: scheduler joins = paused + join keys, tokenless).
 /// `branch_b` is the hanging upstream (never walked, never arrives), so the
 /// join deterministically parks at 1/2 arrivals with a 300s deadline.
@@ -5477,7 +5305,7 @@ states:
 "#
 }
 
-// Writer shape (a): a real engine step that parks at a converge/merge join
+// invariant: Writer shape (a): a real engine step that parks at a converge/merge join
 // must persist `paused`, NO `WaitRecord`, and the exact current-task gate-park
 // marker alongside live join keys. The exact marker authorizes bounded
 // re-drive after restart without confusing manual waits that retain stale
@@ -5497,7 +5325,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
 
     let mut loaded = nexus_preset::load_preset_from_str(converge_preset_yaml(), &caps)
         .expect("converge preset loads");
-    // Raw-YAML loads carry no source identity (the loader cannot know the
+    // why: Raw-YAML loads carry no source identity (the loader cannot know the
     // origin); a v1 run requires one, so freeze the embedded identity over
     // the manifest exactly as `load_embedded_preset` does (A2/A7).
     loaded.source_identity = Some(
@@ -5508,7 +5336,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         )
         .expect("embedded source identity"),
     );
-    // That identity names no compiled-in bundle, so the embedded arm cannot
+    // why: That identity names no compiled-in bundle, so the embedded arm cannot
     // resolve a document for it: the fixture answers the document its own
     // manifest projects.
     engine.set_applied_document_source(Arc::new(ManifestDocumentSource {
@@ -5522,7 +5350,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         .await
         .expect("start converge run");
 
-    // Position the run exactly as the production park does before its next
+    // why: Position the run exactly as the production park does before its next
     // boot: `current_task_id = join` with one predecessor arrival already
     // recorded (`branch_a` walked in the prior process; `branch_b` is the
     // hanging upstream — never arrives). The wire (same YAML shape as the
@@ -5541,7 +5369,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         .unwrap();
     storage.save(session).await.expect("save parked position");
 
-    // One real engine step at the parked join → graph-flow `WaitForInput`;
+    // invariant: One real engine step at the parked join → graph-flow `WaitForInput`;
     // the store-wired engine must persist the SCHEDULER shape.
     let outcome = engine
         .run_step(&sid)
@@ -5571,7 +5399,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         "a scheduler join park must NOT carry a human-wait token (A2/A4)"
     );
 
-    // The join keys are live on the PERSISTED row (the bounded deadline
+    // why: The join keys are live on the PERSISTED row (the bounded deadline
     // re-check evidence — never a manual-wait token). Re-read the post-step
     // row: the pre-step snapshot predates `join_timeout_tick` writing the
     // wait-start key.
@@ -5596,7 +5424,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     );
     drop(context_value);
 
-    // Reopen the SAME DB file (daemon restart boundary) — the canonical A7
+    // invariant: Reopen the SAME DB file (daemon restart boundary) — the canonical A7
     // classifier must see the exact engine gate marker and classify the park
     // as a converge/merge chain, never a human wait.
     pool.close().await;
@@ -5631,7 +5459,7 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
     );
 }
 
-// Writer shape (b): a genuine manual human wait (ManualWaitTask →
+// invariant: Writer shape (b): a genuine manual human wait (ManualWaitTask →
 // `WaitForInput`, no live join keys) must STILL persist `waiting_for_input`
 // with a FRESH durable A4 token (one per arrival), retained byte-identical
 // across reopen until a successful CAS consumes it. The writer fix must not
@@ -5663,7 +5491,7 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         .await
         .expect("start_session");
 
-    // One step at the manual wait → WaitingForInput; the store-wired engine
+    // invariant: One step at the manual wait → WaitingForInput; the store-wired engine
     // must persist the HUMAN shape: waiting_for_input + fresh token.
     let outcome = engine.run_step(&sid).await.expect("run_step");
     assert!(
@@ -5698,7 +5526,7 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
     );
     let token = wait.wait_id.clone();
 
-    // Reopen the SAME DB file (daemon restart boundary): the token must
+    // invariant: Reopen the SAME DB file (daemon restart boundary): the token must
     // survive byte-identical (A4 retention until a successful CAS consumes
     // it) and the status must remain waiting_for_input.
     pool.close().await;
@@ -5724,8 +5552,6 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
         "the A4 wait token must be retained unchanged across reopen"
     );
 
-    // The canonical A7 classifier still sees the HUMAN wait (rule 4),
-    // never a scheduler join.
     let context = storage_b
         .get(&sid.0)
         .await
@@ -5750,12 +5576,12 @@ async fn engine_manual_wait_persists_waiting_for_input_fresh_retained_token() {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 4 — Critical 1: labeled/conditional-routed manual waits keep
+// note: Fix round 4 — Critical 1: labeled/conditional-routed manual waits keep
 // their fresh token even with stale/broad join keys (current-gate marker
 // is the ONLY authoritative scheduler-park evidence).
 // ---------------------------------------------------------------------------
 
-/// Judge executor returning a GO verdict whose reason contains the "go"
+/// why: Judge executor returning a GO verdict whose reason contains the "go"
 /// label (the `resolve_labeled_target` first-token match).
 struct GoJudgeProvider;
 
@@ -5773,7 +5599,7 @@ impl nexus_capability::PromptExecutor for GoJudgeProvider {
     }
 }
 
-/// Registry with the mock judge provider (deterministic labeled routing).
+/// note: Registry with the mock judge provider (deterministic labeled routing).
 ///
 /// A1: the `judge.llm` prompt consumer resolves the run's coordinator
 /// cancellation token from the SAME shared per-run map the engine registers
@@ -5799,7 +5625,7 @@ fn judge_registry_holder(
     ))
 }
 
-/// Round-4 Critical 1 (labeled route): a genuine manual wait REACHED VIA the
+/// why: Round-4 Critical 1 (labeled route): a genuine manual wait REACHED VIA the
 /// real labeled-routing task path (`resolve_labeled_target` on a judge GO
 /// writes `_merge_manual_state` + `_converge_arrivals_manual_state` for the
 /// routed target) plus seeded stale historical keys. The writer must NOT
@@ -5816,7 +5642,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     let storage = Arc::new(SqliteSessionStorage::new(pool.clone()));
     let storage_arc: Arc<dyn SessionStorage> = storage.clone();
     let workflow_store: Arc<dyn WorkflowStateStore> = storage.clone();
-    // A1: one SHARED per-run cancellation map. The registry's `judge.llm`
+    // why: A1: one SHARED per-run cancellation map. The registry's `judge.llm`
     // consumer resolves the run's coordinator token from this map; the
     // engine registers it at admission. Production (daemon boot) shares a
     // single map between the registry and the engine.
@@ -5828,14 +5654,14 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         workflow_store.clone(),
         judge_registry_holder(session_cancels.clone()),
     );
-    // Unify the engine's per-run map with the one the registry's judge
+    // why: Unify the engine's per-run map with the one the registry's judge
     // resolves from (the same contract daemon boot establishes).
     engine.set_prompt_executor(
         std::sync::Arc::new(GoJudgeProvider),
         session_cancels.clone(),
     );
 
-    // Hand-built graph over the REAL `StateCompositeTask` labeled-routing
+    // note: Hand-built graph over the REAL `StateCompositeTask` labeled-routing
     // path: start (llm_judge + Labeled next) → GoTo manual_state (Manual).
     let mk_state = |id: &str, exit_when: ExitWhen, next: Option<NextTarget>| {
         StateCompositeTask::from_manifest(&StateDefinition {
@@ -5884,7 +5710,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         .await
         .expect("start session");
 
-    // A prior (historical) cycle left stale broad join keys behind — the
+    // why: A prior (historical) cycle left stale broad join keys behind — the
     // failing fixture shape alongside the routing keys.
     {
         let session = storage
@@ -5903,7 +5729,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         storage.save(session).await.expect("save seeded session");
     }
 
-    // Step 1: judge GO routes via the "go" label (GoTo manual_state). The
+    // note: Step 1: judge GO routes via the "go" label (GoTo manual_state). The
     // routing writes `_merge_manual_state` / `_converge_arrivals_manual_state`.
     let outcome = engine.run_step(&sid).await.expect("judge step");
     assert!(
@@ -5914,7 +5740,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         "judge route is an inter-task boundary, got {outcome:?}"
     );
 
-    // Step 2: the manual wait state parks (WaitForInput). Its context now
+    // why: Step 2: the manual wait state parks (WaitForInput). Its context now
     // carries the routing-written broad keys + the stale historical pair —
     // the OLD writer misclassified this as a scheduler park.
     let outcome = engine.run_step(&sid).await.expect("manual wait step");
@@ -5946,7 +5772,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         "the wait token must be a fresh UUID"
     );
 
-    // The post-step context carries the routing-written BROAD join keys
+    // why: The post-step context carries the routing-written BROAD join keys
     // (`_merge_manual_state` / `_converge_arrivals_manual_state` — written
     // by labeled ROUTING for the routed target, no gate consumes them) plus
     // the stale historical pair: exactly the evidence that must never
@@ -5966,7 +5792,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
             && live.contains(&"_join_wait_start_other".to_string()),
         "labeled-routed manual wait carries live broad join keys (the failing shape): {live:?}"
     );
-    // ...but NO current-gate park marker for the manual state (the post-step
+    // why: ...but NO current-gate park marker for the manual state (the post-step
     // graph-flow cursor is at `manual_state` — WaitForInput stays there).
     assert!(
         !nexus_orchestration::resume_rules::gate_park_live(map, &persisted.current_task_id),
@@ -5975,7 +5801,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
         persisted.current_task_id
     );
 
-    // Reopen the SAME DB file: the canonical classifier must see HumanWait
+    // invariant: Reopen the SAME DB file: the canonical classifier must see HumanWait
     // (rule 4 — fresh token beats old join keys), never ConvergeMerge.
     pool.close().await;
     let guarded = nexus_local_db::init_engine_pool(db.path())
@@ -6018,7 +5844,7 @@ async fn engine_labeled_routed_manual_wait_keeps_token_despite_join_keys() {
     );
 }
 
-/// Round-4 Critical 1 (conditional route): the same contract via conditional
+/// why: Round-4 Critical 1 (conditional route): the same contract via conditional
 /// branch routing — `resolve_expression_target` writes
 /// `_converge_arrivals_manual_state` for the routed target; a stale
 /// `_merge_other` / `_join_wait_start_other` pair is pre-seeded as
@@ -6071,7 +5897,7 @@ states:
         )
         .expect("embedded source identity"),
     );
-    // That identity names no compiled-in bundle, so the embedded arm cannot
+    // why: That identity names no compiled-in bundle, so the embedded arm cannot
     // resolve a document for it: the fixture answers the document its own
     // manifest projects.
     engine.set_applied_document_source(Arc::new(ManifestDocumentSource {
@@ -6085,7 +5911,7 @@ states:
         .await
         .expect("start conditional run");
 
-    // Seed expression input + historical/broad join keys on the persisted
+    // why: Seed expression input + historical/broad join keys on the persisted
     // session before stepping (a prior cycle left them behind).
     {
         let session = storage
@@ -6105,7 +5931,7 @@ states:
         storage.save(session).await.expect("save seeded session");
     }
 
-    // Step 1: conditional branch matches → GoTo manual_state.
+    // note: Step 1: conditional branch matches → GoTo manual_state.
     let outcome = engine.run_step(&sid).await.expect("branch step");
     assert!(
         matches!(
@@ -6115,7 +5941,7 @@ states:
         "conditional route is an inter-task boundary, got {outcome:?}"
     );
 
-    // Step 2: the manual wait parks with routing + historical join keys live.
+    // why: Step 2: the manual wait parks with routing + historical join keys live.
     let outcome = engine.run_step(&sid).await.expect("manual wait step");
     assert!(
         matches!(
@@ -6142,7 +5968,6 @@ states:
         .expect("fresh A4 token");
     assert!(!wait.wait_id.is_empty(), "fresh UUID token");
 
-    // The routing + historical keys are live; no current-gate marker.
     let persisted = storage
         .get(&sid.0)
         .await
@@ -6162,7 +5987,6 @@ states:
         "no current-gate park marker for the manual state"
     );
 
-    // Reopen: HumanWait (rule 4 token beats join keys), token retained.
     pool.close().await;
     let guarded = nexus_local_db::init_engine_pool(db.path())
         .await
@@ -6205,7 +6029,7 @@ states:
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 4 — Critical 2: a nested inner-graph child human wait is
+// note: Fix round 4 — Critical 2: a nested inner-graph child human wait is
 // preserved and propagated (child WaitRecord/identity/token survive), the
 // parent/root wait names the exact waiting descendant, restart keeps the
 // nested token, and there is NO automatic child resume/replay.
@@ -6226,7 +6050,6 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         caps,
     );
 
-    // Child graph: a manual wait (human input required).
     let inner_graph = Arc::new(
         graph_flow::GraphBuilder::new("inner_graph")
             .add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask))
@@ -6234,7 +6057,6 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
             .expect("test graph"),
     );
 
-    // Parent graph: the inner-graph task polls the child.
     let inner_task = nexus_orchestration::tasks::InnerGraphTask::new(
         Arc::new(engine.clone()),
         inner_graph,
@@ -6254,7 +6076,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         .await
         .expect("start parent session");
 
-    // Parent step: the child parks at its manual wait. The parent must NOT
+    // why: Parent step: the child parks at its manual wait. The parent must NOT
     // auto-resume the child and must return WaitingForInput (never
     // Completed/Paused — the old InnerGraphTask auto-approval bypass).
     let outcome = engine.run_step(&parent_sid).await.expect("run_step parent");
@@ -6266,7 +6088,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "a child human wait must propagate to the parent as WaitingForInput, got {outcome:?}"
     );
 
-    // The child remains waiting with exactly one step marker, one wait
+    // why: The child remains waiting with exactly one step marker, one wait
     // transition, and one parent child-checkpoint confirmation after start:
     // start_run(1) → mark(2) → park(3) → parent confirmation(4). Any
     // automatic resume/replay would advance it again.
@@ -6295,7 +6117,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "child carries its own fresh A4 token"
     );
 
-    // The parent row: waiting_for_input with a fresh token naming the exact
+    // invariant: The parent row: waiting_for_input with a fresh token naming the exact
     // waiting child (A4 nested path — a parent token alone is insufficient;
     // the child cursor must be reconstructible).
     let parent_record = storage
@@ -6321,7 +6143,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "root WaitRecord must carry the waiting child's task cursor"
     );
 
-    // Reopen the SAME DB file (daemon restart): parent token + child
+    // invariant: Reopen the SAME DB file (daemon restart): parent token + child
     // identity/token survive; the row classifies HumanWait — never stepped
     // at boot.
     pool.close().await;
@@ -6376,7 +6198,7 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
         "the nested child wait token survives restart untouched (no consume, no clear)"
     );
 
-    // Recovery hydration must reattach the waiting child (not clear it),
+    // invariant: Recovery hydration must reattach the waiting child (not clear it),
     // and the canonical classifier must see a human wait so daemon boot
     // skips the nested wait (A7 rule 4, never auto-stepped).
     let storage_b_dyn: Arc<dyn SessionStorage> = storage_b.clone();
@@ -6440,10 +6262,10 @@ async fn engine_nested_child_manual_wait_persists_and_propagates_no_auto_resume(
     );
 }
 // ---------------------------------------------------------------------------
-// 6. graph-flow 0.8 graph-version OCC / clock / corruption (T1 review gaps)
+// note: 6. graph-flow 0.8 graph-version OCC / clock / corruption (T1 review gaps)
 // ---------------------------------------------------------------------------
 
-/// Read the durable `graph_version` straight from the row (test observation,
+/// note: Read the durable `graph_version` straight from the row (test observation,
 /// not a storage-API addition).
 async fn db_graph_version(pool: &sqlx::SqlitePool, session_id: &str) -> i64 {
     sqlx::query_scalar("SELECT graph_version FROM orchestration_sessions WHERE session_id = ?")
@@ -6453,7 +6275,7 @@ async fn db_graph_version(pool: &sqlx::SqlitePool, session_id: &str) -> i64 {
         .expect("graph_version row")
 }
 
-/// Force a corrupt/exhausted `graph_version` directly (fixture-only write).
+/// note: Force a corrupt/exhausted `graph_version` directly (fixture-only write).
 async fn force_db_graph_version(pool: &sqlx::SqlitePool, session_id: &str, version: i64) {
     sqlx::query("UPDATE orchestration_sessions SET graph_version = ? WHERE session_id = ?")
         .bind(version)
@@ -6463,7 +6285,7 @@ async fn force_db_graph_version(pool: &sqlx::SqlitePool, session_id: &str, versi
         .expect("force graph_version");
 }
 
-/// A corrupt/exhausted graph counter is a HARD storage error, never a
+/// invariant: A corrupt/exhausted graph counter is a HARD storage error, never a
 /// concurrency (revision/terminal/conflict) outcome.
 fn assert_hard_storage_error(err: &nexus_session_storage::StorageError, what: &str) {
     match err {
@@ -6473,7 +6295,7 @@ fn assert_hard_storage_error(err: &nexus_session_storage::StorageError, what: &s
     }
 }
 
-/// Review gap 1: two independently loaded snapshots at version N — the first
+/// invariant: Review gap 1: two independently loaded snapshots at version N — the first
 /// save wins, the loser receives `SessionConflict`, the winner's
 /// row/context/status/revision remain exact, and a reloaded snapshot at N+1
 /// saves successfully.
@@ -6498,7 +6320,6 @@ async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
         .expect("start_run");
     assert_eq!(db_graph_version(&pool, &session_id.0).await, 1);
 
-    // Two independent snapshots at version 1.
     let mut winner = storage
         .get(&session_id.0)
         .await
@@ -6512,13 +6333,11 @@ async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
     assert_eq!(winner.version, 1);
     assert_eq!(loser.version, 1);
 
-    // First writer wins.
     winner.current_task_id = "task_winner".to_string();
     winner.context.set("winner.marker", "won").unwrap();
     storage.save(winner).await.expect("first writer wins");
     assert_eq!(db_graph_version(&pool, &session_id.0).await, 2);
 
-    // Loser's save against the stale preimage conflicts.
     loser.current_task_id = "task_loser".to_string();
     let err = storage
         .save(loser)
@@ -6529,7 +6348,6 @@ async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
         "expected SessionConflict, got {err:?}"
     );
 
-    // Winner's cursor/context/version/revision remain exact.
     let row = storage
         .get(&session_id.0)
         .await
@@ -6552,7 +6370,6 @@ async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
     );
     assert_eq!(record.status, SessionStatus::Running);
 
-    // A snapshot reloaded at the persisted version saves successfully.
     let mut fresh = storage
         .get(&session_id.0)
         .await
@@ -6563,7 +6380,7 @@ async fn two_writer_graph_save_occ_loser_conflicts_and_winner_row_unchanged() {
     assert_eq!(db_graph_version(&pool, &session_id.0).await, 3);
 }
 
-/// Review gap 2: a negative or exhausted (`i64::MAX`) stored `graph_version`
+/// invariant: Review gap 2: a negative or exhausted (`i64::MAX`) stored `graph_version`
 /// is a hard storage error with NO write across `save` and every
 /// authoritative writer — never a revision/terminal/concurrency outcome.
 #[tokio::test]
@@ -6588,7 +6405,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .expect("start_run");
         force_db_graph_version(&pool, &session_id.0, corrupt).await;
 
-        // save: the corrupt counter is classified BEFORE any concurrency
+        // why: save: the corrupt counter is classified BEFORE any concurrency
         // outcome and nothing is written.
         let session = root_session(&session_id.0, "task_save_attempt");
         let err = storage.save(session).await.expect_err("save must refuse");
@@ -6598,7 +6415,6 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
         );
         assert_eq!(db_graph_version(&pool, &session_id.0).await, corrupt);
 
-        // commit_transition at the correct revision: hard storage error.
         let root = root_session(&session_id.0, "task_b");
         let err = storage
             .commit_transition(
@@ -6615,7 +6431,6 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .expect_err("commit_transition must refuse");
         assert_hard_storage_error(&err, "commit_transition");
 
-        // settle_cancelled at the correct revision: hard storage error.
         let root = root_session(&session_id.0, "task_b");
         let err = storage
             .settle_run(
@@ -6633,7 +6448,6 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .expect_err("settle_cancelled must refuse");
         assert_hard_storage_error(&err, "settle_cancelled");
 
-        // restore_pre_step at the correct revision: hard storage error.
         let pre = root_session(&session_id.0, "task_a");
         let err = storage
             .restore_pre_step(&session_id, 1, &pre)
@@ -6641,7 +6455,6 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .expect_err("restore_pre_step must refuse");
         assert_hard_storage_error(&err, "restore_pre_step");
 
-        // mark_step_in_flight at the correct revision: hard storage error.
         let root = root_session(&session_id.0, "task_a");
         let in_flight = RunStateV1 {
             step_in_flight: Some("task_a".to_string()),
@@ -6662,7 +6475,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
             .expect_err("mark_step_in_flight must refuse");
         assert_hard_storage_error(&err, "mark_step_in_flight");
 
-        // No writer mutated the row: corrupt version, revision, and status
+        // why: No writer mutated the row: corrupt version, revision, and status
         // are all exactly as seeded. The read-back is raw SQL — `load_run`
         // deliberately refuses this non-replayable row, so it cannot be the
         // evidence that nothing was written.
@@ -6679,7 +6492,7 @@ async fn negative_or_max_graph_version_is_hard_storage_error_across_writers() {
     }
 }
 
-/// Review gap 2 (child path): a corrupt/exhausted CHILD `graph_version` makes
+/// invariant: Review gap 2 (child path): a corrupt/exhausted CHILD `graph_version` makes
 /// the parent commit fail closed with a hard storage error and rolls the
 /// parent transition back atomically — never a partial parent advance.
 #[tokio::test]
@@ -6705,8 +6518,6 @@ async fn corrupt_child_graph_version_fails_parent_transition_closed() {
         .expect("start_run with child");
     assert_eq!(db_graph_version(&pool, child_id).await, 1);
 
-    // Corrupt the child's graph counter, then run the parent's next
-    // transition carrying the child at its correct revision.
     force_db_graph_version(&pool, child_id, i64::MAX).await;
     let root = root_session(&parent.0, "task_b");
     let mut carried = child_checkpoint(child_id, "child_task");
@@ -6727,8 +6538,6 @@ async fn corrupt_child_graph_version_fails_parent_transition_closed() {
         .expect_err("corrupt child counter must fail the parent transition");
     assert_hard_storage_error(&err, "commit_transition with corrupt child");
 
-    // Atomic rollback: the parent's revision/graph clock did not advance and
-    // the child's corrupt counter is untouched.
     let record = storage
         .load_run(&parent)
         .await
@@ -6742,7 +6551,7 @@ async fn corrupt_child_graph_version_fails_parent_transition_closed() {
     assert_eq!(db_graph_version(&pool, child_id).await, i64::MAX);
 }
 
-/// Review gap 3: the graph-version clock advances exactly once per
+/// invariant: Review gap 3: the graph-version clock advances exactly once per
 /// authoritative cursor/context write (`start_run` -> `mark_step_in_flight` ->
 /// runner save -> `commit_transition` -> `restore_pre_step` -> `settle_cancelled`)
 /// while durable prompt-attempt writes deliberately leave it unchanged.
@@ -6752,7 +6561,6 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
     let storage = SqliteSessionStorage::new(pool.clone());
     let session_id = SessionId("sess-graph-clock".to_string());
 
-    // start_run seeds graph_version = incoming version (0) + 1 = 1.
     let root = root_session(&session_id.0, "task_a");
     storage
         .start_run(
@@ -6772,7 +6580,6 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         "start_run seeds 1"
     );
 
-    // mark_step_in_flight: revision 1->2, graph clock 1->2.
     let pre = storage.get(&session_id.0).await.expect("get").expect("row");
     assert_eq!(pre.version, 1);
     let in_flight = RunStateV1 {
@@ -6798,7 +6605,6 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         "mark_step_in_flight advances"
     );
 
-    // The runner loads AFTER the mark, then its graph save advances 2->3.
     let mut loaded = storage.get(&session_id.0).await.expect("get").expect("row");
     assert_eq!(loaded.version, 2, "runner loads the post-mark version");
     loaded.current_task_id = "task_b".to_string();
@@ -6809,8 +6615,6 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         "runner save advances"
     );
 
-    // commit_transition anchored at the marker revision (2): revision 2->3,
-    // graph clock 3->4.
     let root = storage.get(&session_id.0).await.expect("get").expect("row");
     storage
         .commit_transition(
@@ -6831,7 +6635,7 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         "commit_transition advances"
     );
 
-    // Prompt-attempt writes are in-task metadata under the runner-owned
+    // invariant: Prompt-attempt writes are in-task metadata under the runner-owned
     // session: they must NOT advance the graph clock (brief 3.3).
     let attempt = nexus_session_storage::run_state::PromptAttempt {
         attempt_id: uuid::Uuid::new_v4().to_string(),
@@ -6860,7 +6664,7 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         "prompt-attempt clear must leave the graph clock unchanged"
     );
 
-    // restore_pre_step: fenced restoration advances the graph clock (4->5)
+    // invariant: restore_pre_step: fenced restoration advances the graph clock (4->5)
     // while the workflow revision intentionally stays fixed at 3.
     let pre_root = root_session(&session_id.0, "task_a");
     storage
@@ -6882,7 +6686,6 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
         "restore keeps the workflow revision"
     );
 
-    // settle_cancelled: revision 3->4, graph clock 5->6, status cancelled.
     let root = storage.get(&session_id.0).await.expect("get").expect("row");
     storage
         .settle_run(
@@ -6913,17 +6716,17 @@ async fn graph_version_clock_monotonic_across_writers_and_untouched_by_prompt_at
 }
 
 // ---------------------------------------------------------------------------
-// The YAML run seam freezes the apply it runs (P6, I-000443)
+// note: The YAML run seam freezes the apply it runs (P6, I-000443)
 // ---------------------------------------------------------------------------
 
-/// The applied fixture document's entry node — a node id no loaded bundle
+/// note: The applied fixture document's entry node — a node id no loaded bundle
 /// declares, so the run's persisted position names the graph that ran.
 const APPLIED_ENTRY_PROBE: &str = "applied_entry_probe";
-/// The applied fixture document's manual wait. Never reached here (no
+/// note: The applied fixture document's manual wait. Never reached here (no
 /// coordinator drives the entry), but it keeps the document runnable.
 const APPLIED_ONLY_PROBE: &str = "applied_only_probe";
 
-/// An applied document: entry → applied-only wait → done. It shares no node id
+/// note: An applied document: entry → applied-only wait → done. It shares no node id
 /// with the bundle the loaded preset carries, so a run started on it can only
 /// be positioned on `applied_entry_probe`.
 fn applied_probe_document(id: &str) -> WorkflowDocument {
@@ -6966,7 +6769,7 @@ fn applied_probe_document(id: &str) -> WorkflowDocument {
     .expect("the applied fixture document decodes")
 }
 
-/// An applied source answering for exactly one strategy id.
+/// note: An applied source answering for exactly one strategy id.
 struct FakeAppliedDocuments {
     preset_id: &'static str,
     identity: AppliedRunIdentity,
@@ -6987,7 +6790,7 @@ impl AppliedDocumentSource for FakeAppliedDocuments {
     }
 }
 
-/// A source answering the document its loaded preset's manifest projects.
+/// note: A source answering the document its loaded preset's manifest projects.
 ///
 /// Some fixtures freeze an embedded source identity over a raw-YAML manifest
 /// (the identity only exists to satisfy the v1 descriptor), and such a preset
@@ -7014,7 +6817,7 @@ impl AppliedDocumentSource for ManifestDocumentSource {
     }
 }
 
-/// Assert the entry admitted the applied graph and froze its identity.
+/// note: Assert the entry admitted the applied graph and froze its identity.
 async fn assert_applied_entry(
     storage: &Arc<SqliteSessionStorage>,
     sid: &SessionId,
@@ -7042,7 +6845,7 @@ async fn assert_applied_entry(
     );
 }
 
-/// Both preset trait entries resolve through the `AppliedDocumentSource`: they
+/// why: Both preset trait entries resolve through the `AppliedDocumentSource`: they
 /// persist the identity and select the applied graph.
 ///
 /// Mutation this fails on: either entry building the YAML graph unconditionally
@@ -7078,7 +6881,7 @@ async fn preset_entries_freeze_and_run_the_strategy_apply() {
     assert_applied_entry(&storage, &sid, &identity).await;
 }
 
-/// A restart during an applied run re-enters through the applied identity, not
+/// why: A restart during an applied run re-enters through the applied identity, not
 /// the strategy bundle: with the bundle deleted between admission and restart
 /// the run still recovers, because the graph it executes is the applied
 /// document.
@@ -7111,7 +6914,6 @@ async fn applied_run_recovers_after_its_bundle_is_deleted() {
         .expect("start_session_with_preset");
     assert_applied_entry(&storage, &sid, &identity).await;
 
-    // The bundle the strategy came from is gone; the applied document is not.
     std::fs::remove_dir_all(home.path().join("presets").join("applied-restart"))
         .expect("delete the strategy bundle");
 
@@ -7141,7 +6943,7 @@ async fn applied_run_recovers_after_its_bundle_is_deleted() {
     );
 }
 
-/// Write a minimal valid user bundle under `home` and resolve it, asserting the
+/// note: Write a minimal valid user bundle under `home` and resolve it, asserting the
 /// loader classified it as a directory source — the only source intake gates.
 fn user_bundle_preset(home: &std::path::Path, preset_id: &str) -> nexus_preset::LoadedPreset {
     let bundle = home.join("presets").join(preset_id);
@@ -7169,7 +6971,7 @@ fn user_bundle_preset(home: &std::path::Path, preset_id: &str) -> nexus_preset::
     loaded
 }
 
-/// Intake at the trait entry: a user bundle with no current apply refuses under
+/// why: Intake at the trait entry: a user bundle with no current apply refuses under
 /// the default `ir-only`, before any graph is built or any row is written.
 ///
 /// Mutation this fails on: dropping the `ir-only` no-apply arm from
@@ -7180,10 +6982,9 @@ async fn preset_entry_refuses_a_no_apply_user_bundle_under_ir_only() {
     let (_db, pool) = arc_pool_file_first().await;
     let (_, mut engine) = fresh_engine(pool.clone());
     let home = tempfile::tempdir().unwrap();
-    // No `[strategy_intake]` key at all: the documented default is `ir-only`.
+    // note: No `[strategy_intake]` key at all: the documented default is `ir-only`.
     let loaded = user_bundle_preset(home.path(), "ir-only-probe");
     engine.set_nexus_home(home.path().to_path_buf());
-    // An installed source that answers "no current apply" for this strategy.
     engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
         preset_id: "some-other-strategy",
         identity: AppliedRunIdentity {
@@ -7213,7 +7014,7 @@ async fn preset_entry_refuses_a_no_apply_user_bundle_under_ir_only() {
     assert_eq!(rows, 0, "the refusal must happen before a run row exists");
 }
 
-/// The intake key governs user bundles only: an embedded preset starts under a
+/// why: The intake key governs user bundles only: an embedded preset starts under a
 /// config value that would refuse a user bundle at the same entry, and records
 /// no intake mode.
 ///
@@ -7252,7 +7053,7 @@ async fn preset_entry_does_not_gate_an_embedded_preset() {
     );
 }
 
-/// An engine with no configured home has no operator key to read, so it takes
+/// why: An engine with no configured home has no operator key to read, so it takes
 /// the documented missing-file default instead of probing the process CWD.
 ///
 /// Mutation this fails on: passing `Path::new("")` for a missing home — the
@@ -7264,7 +7065,6 @@ async fn preset_entry_without_a_home_takes_ir_only() {
     let (_db, pool) = arc_pool_file_first().await;
     let (_, engine) = fresh_engine(pool);
     let home = tempfile::tempdir().unwrap();
-    // A config the home-less engine does not know about; it must not be read.
     std::fs::write(
         home.path().join("config.toml"),
         "[strategy_intake]\nmode = \"yaml-only\"\n",
@@ -7283,7 +7083,7 @@ async fn preset_entry_without_a_home_takes_ir_only() {
     );
 }
 
-/// Restart recovery over a trait-entry run: a successor apply is refused, the
+/// why: Restart recovery over a trait-entry run: a successor apply is refused, the
 /// admitted apply is rebuilt.
 ///
 /// The run was admitted through `start_session_with_preset`, so its descriptor
@@ -7320,7 +7120,6 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
         .await
         .expect("start_session_with_preset");
 
-    // ── Restart with a successor apply: the guard refuses, naming both. ──
     let (_, mut restarted) = fresh_engine(pool.clone());
     restarted.set_applied_document_source(Arc::new(FakeAppliedDocuments {
         preset_id: "novel-writing",
@@ -7342,7 +7141,6 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
     );
     assert_applied_entry(&storage, &sid, &admitted).await;
 
-    // ── Restart with the admitted apply still current: rebuild and drive. ──
     let (_, mut recovered) = fresh_engine(pool.clone());
     recovered.set_applied_document_source(Arc::new(FakeAppliedDocuments {
         preset_id: "novel-writing",
@@ -7369,7 +7167,7 @@ async fn preset_entry_recovery_refuses_a_successor_and_rebuilds_the_admitted_app
     );
 }
 
-/// An embedded preset admitted with NO configured applied source still executes
+/// why: An embedded preset admitted with NO configured applied source still executes
 /// its document: the entry resolves the preset's own compiled-in bundle under
 /// the compass D10 identity and freezes it on the descriptor.
 ///
@@ -7384,7 +7182,7 @@ async fn embedded_entry_freezes_the_d10_identity_without_a_configured_source() {
     let registry = nexus_capability::CapabilityRegistry::with_builtins();
     let loaded =
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
-    // Deliberately no `set_applied_document_source`: the compiled-in bytes are
+    // why: Deliberately no `set_applied_document_source`: the compiled-in bytes are
     // the document source an embedded preset never has to be handed.
 
     let sid = engine
@@ -7413,7 +7211,7 @@ async fn embedded_entry_freezes_the_d10_identity_without_a_configured_source() {
     );
 }
 
-/// Legacy (no-store) recovery rebuilds an embedded session from the applied
+/// why: Legacy (no-store) recovery rebuilds an embedded session from the applied
 /// document, not from the preset's manifest: the source answers with a document
 /// whose node ids the bundle never declares, and the recovered runner continues
 /// on them.
@@ -7431,7 +7229,7 @@ async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
         content_hash: "blake3:legacy".to_string(),
     };
     let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
-    // A no-store engine is the legacy recovery path's only caller.
+    // note: A no-store engine is the legacy recovery path's only caller.
     let mut admitted = nexus_orchestration::GraphFlowEngine::new_with_storage(
         storage.clone(),
         nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
@@ -7481,7 +7279,7 @@ async fn legacy_recovery_rebuilds_an_embedded_session_from_the_document() {
     );
 }
 
-/// A store-backed pre-upgrade row froze an embedded source but no applied
+/// why: A store-backed pre-upgrade row froze an embedded source but no applied
 /// identity (the field did not exist yet). A configured source that answers
 /// "no document" for it must leave the run non-replayable, not rebuild the
 /// YAML manifest: a run admitted after D10 executes its document, so the
@@ -7499,7 +7297,7 @@ async fn store_recovery_refuses_a_legacy_embedded_row_the_source_cannot_resolve(
         nexus_preset::load_embedded_preset("novel-writing", &registry).expect("preset loads");
     let session_id = SessionId("sess-legacy-embedded".to_string());
 
-    // Exactly the bytes a pre-upgrade admission wrote: the frozen embedded
+    // note: Exactly the bytes a pre-upgrade admission wrote: the frozen embedded
     // source identity and version, no `applied`, no `intake_mode`.
     let mut descriptor = test_descriptor(&session_id.0);
     descriptor.preset_id = loaded.id.clone();
@@ -7526,7 +7324,6 @@ async fn store_recovery_refuses_a_legacy_embedded_row_the_source_cannot_resolve(
         .await
         .expect("start_run");
 
-    // The installed source answers for a different strategy, i.e. `None` here.
     engine.set_applied_document_source(Arc::new(FakeAppliedDocuments {
         preset_id: "some-other-strategy",
         identity: AppliedRunIdentity {

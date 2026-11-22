@@ -4,6 +4,7 @@
 //! node's `default` edge — the one branch a reachability walk may follow out of an `llm_judge`
 //! node. The essay preset's package name is its declared id, so the projected document id resolves
 //! back to the bundle whose templates it names (I-000424).
+// note: the presets are imported from their embedded manifests, then simulated statically.
 
 use nexus_orchestration::preset_runtime::{validate_ir_buildability, IrTemplateSource};
 use nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
@@ -52,7 +53,7 @@ fn a_judged_preset_imports_its_branch_edges_and_walks_them() {
         );
     }
 
-    // The export half closes the round trip, so the builder still sees the same outer edge.
+    // why: The export half closes the round trip, so the builder still sees the same outer edge.
     validate_ir_buildability(&document, IrTemplateSource::Embedded)
         .expect("the judged preset still builds from its own bundle");
 
@@ -90,7 +91,7 @@ fn the_essay_preset_ids_round_trip_and_simulate() {
     );
     assert_eq!(trajectory.stubbed_judges, Vec::<String>::new());
 
-    // The bundle answers for the id the document projects; a manufactured id could not.
+    // why: The bundle answers for the id the document projects; a manufactured id could not.
     validate_ir_buildability(&document, IrTemplateSource::Embedded)
         .expect("the essay preset builds from its own bundle");
 }

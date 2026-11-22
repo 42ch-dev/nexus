@@ -18,11 +18,12 @@
 //! 4. Pre-populates context with expression-relevant values.
 //! 5. Runs the task and asserts `NextAction::GoTo(target)` matches the expected
 //!    branch or default.
+// note: branch expressions are evaluated against a plain `Context`, no engine run.
 
 use graph_flow::{Context, NextAction};
 use nexus_capability::CapabilityRegistry;
 
-/// Load a preset YAML, extract the start task, run it with the given context
+/// note: Load a preset YAML, extract the start task, run it with the given context
 /// values, and return the resulting `NextAction`.
 async fn run_expression_route(
     yaml: &str,
@@ -47,7 +48,7 @@ async fn run_expression_route(
     result.next_action
 }
 
-/// Helper: assert a `NextAction` is `GoTo` with the expected target.
+/// note: Helper: assert a `NextAction` is `GoTo` with the expected target.
 fn assert_goto(action: &NextAction, expected: &str) {
     match action {
         NextAction::GoTo(target) => assert!(
@@ -58,9 +59,9 @@ fn assert_goto(action: &NextAction, expected: &str) {
     }
 }
 
-// ── Test 1: numeric threshold branch matches ──────────────────────────
+// note: ── Test 1: numeric threshold branch matches ─────────────────────
 
-/// A preset with `branches` routing on a numeric threshold.
+/// note: A preset with `branches` routing on a numeric threshold.
 /// When `score > 80`, routes to `high_path`; otherwise falls to `default: standard_path`.
 const THRESHOLD_YAML: &str = r#"
 preset:
@@ -98,7 +99,7 @@ async fn expression_routes_to_high_path_when_score_above_threshold() {
     assert_goto(&action, "high_path");
 }
 
-// ── Test 2: no branch matches → default ───────────────────────────────
+// note: ── Test 2: no branch matches → default ──────────────────────────
 
 #[tokio::test]
 async fn expression_routes_to_default_when_no_branch_matches() {
@@ -106,9 +107,9 @@ async fn expression_routes_to_default_when_no_branch_matches() {
     assert_goto(&action, "standard_path");
 }
 
-// ── Test 3: string equality multi-branch ──────────────────────────────
+// note: ── Test 3: string equality multi-branch ─────────────────────────
 
-/// A preset with multiple string-equality branches.
+/// note: A preset with multiple string-equality branches.
 const STRING_MATCH_YAML: &str = r#"
 preset:
   id: expr-string-match
@@ -171,9 +172,9 @@ async fn expression_routes_to_default_for_unmatched_string() {
     assert_goto(&action, "unknown_path");
 }
 
-// ── Test 4: registry.refresh dependency → synthetic fallback ──────────
+// note: ── Test 4: registry.refresh dependency → synthetic fallback ─────
 
-/// A preset whose branch expression references `_context.registry_refresh.*`.
+/// note: A preset whose branch expression references `_context.registry_refresh.*`.
 /// Since the unwired test graph has no registry, `inject_registry_refresh_context`
 /// falls back to the synthetic output (`source: "synthetic"`), which the
 /// expression should match.
@@ -215,16 +216,16 @@ states:
 
 #[tokio::test]
 async fn expression_routes_to_synthetic_when_registry_unwired() {
-    // The unwired graph has self.registry = None, so
+    // note: the unwired graph has self.registry = None, so
     // inject_registry_refresh_context uses the synthetic fallback
     // (source = "synthetic"). The first branch should match.
     let action = run_expression_route(REGISTRY_DEP_YAML, &[]).await;
     assert_goto(&action, "synthetic_path");
 }
 
-// ── Test 5: compound boolean expression ───────────────────────────────
+// note: ── Test 5: compound boolean expression ──────────────────────────
 
-/// A preset with a compound `&&` expression requiring two conditions.
+/// note: A preset with a compound `&&` expression requiring two conditions.
 const COMPOUND_YAML: &str = r#"
 preset:
   id: expr-compound
@@ -276,8 +277,6 @@ async fn expression_compound_both_conditions_match_first_branch() {
 
 #[tokio::test]
 async fn expression_compound_partial_match_falls_to_second_branch() {
-    // score > 80 is true but status != 'active', so first branch fails.
-    // score > 60 is true, so second branch matches.
     let action = run_expression_route(
         COMPOUND_YAML,
         &[

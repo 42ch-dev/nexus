@@ -5,6 +5,7 @@
 //! that does not resolve from the embedded tree — would stop running where the YAML path
 //! used to. This is the route's buildability gate; it reads no twin and no filesystem copy
 //! of a preset.
+// note: the loop covers every embedded preset directory on disk.
 
 use std::path::Path;
 

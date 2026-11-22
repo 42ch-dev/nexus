@@ -5,6 +5,7 @@
 //! - ParallelWith(ids): admits only if ALL listed IDs are in the running set
 //! - `ParallelAny`: always admits (ACP serialization at dispatch site, not here)
 //! - Dependencies: `depends_on` must all be in Completed/Cancelled status
+// note: the admission predicate is pure; it reads sets, never the DB.
 
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 
 mod common;
 
-/// Helper: build a minimal [`Schedule`] for admission testing.
+/// note: Helper: build a minimal [`Schedule`] for admission testing.
 fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
     Schedule {
         id: ScheduleId(id.to_string()),
@@ -32,8 +33,8 @@ fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: None,
-        // Use the schedule ID as the label so each schedule has a unique
-        // identity for R2 duplicate detection (creator_id + preset_id + label).
+        // why: label must be unique per schedule; R2 duplicate detection keys
+        // on (creator_id, preset_id, label).
         label: Some(id.to_string()),
         created_at: String::new(),
         updated_at: String::new(),
@@ -41,7 +42,7 @@ fn sched(id: &str, c: ScheduleConcurrency, deps: Vec<&str>) -> Schedule {
     }
 }
 
-// ── Admission unit tests ───────────────────────────────────────────────
+// note: ── Admission unit tests ─────────────────────────────────────────
 
 #[test]
 fn serial_blocks_behind_any_running() {
@@ -66,7 +67,6 @@ fn parallel_with_admits_when_all_running_are_whitelisted() {
 
 #[test]
 fn parallel_with_blocks_when_running_not_in_whitelist() {
-    // 01A can only run with 01B, but 01C is running (not whitelisted)
     let pending = sched(
         "01A",
         ScheduleConcurrency::ParallelWith(ParallelWithIds {
@@ -82,14 +82,14 @@ fn parallel_with_blocks_when_running_not_in_whitelist() {
 fn parallel_any_always_admits_subject_to_worker_cap() {
     let pending = sched("01A", ScheduleConcurrency::ParallelAny, vec![]);
     let running = RunningSet::from(vec![sched("01B", ScheduleConcurrency::Serial, vec![])]);
-    assert!(admit(&pending, &running, &CompletedSet::empty())); // ACP-busy serialization is enforced at dispatch site, not here
+    assert!(admit(&pending, &running, &CompletedSet::empty())); // why: ACP-busy serialization is enforced at dispatch site, not here
 }
 
 #[test]
 fn dep_unsatisfied_blocks_start() {
     let pending = sched("01A", ScheduleConcurrency::Serial, vec!["01B"]);
-    let running = RunningSet::empty(); // 01B not completed → blocked
-    assert!(!admit(&pending, &running, &CompletedSet::empty())); // deps not satisfied
+    let running = RunningSet::empty();
+    assert!(!admit(&pending, &running, &CompletedSet::empty()));
 }
 
 #[test]
@@ -119,7 +119,6 @@ fn parallel_with_admits_when_nothing_running() {
         }),
         vec![],
     );
-    // Nothing running → admission passes (whitelist constraint is vacuously true)
     assert!(admit(
         &pending,
         &RunningSet::empty(),
@@ -129,20 +128,19 @@ fn parallel_with_admits_when_nothing_running() {
 
 #[test]
 fn dep_failed_blocks_start() {
-    // depends_on must be Completed or Cancelled; Failed does not satisfy.
+    // invariant: depends_on must be Completed or Cancelled; Failed does not satisfy.
     let pending = sched("01A", ScheduleConcurrency::Serial, vec!["01B"]);
     let running = RunningSet::empty();
-    let completed = CompletedSet::empty(); // 01B is Failed, not in completed set
+    let completed = CompletedSet::empty();
     assert!(!admit(&pending, &running, &completed));
 }
 
-// ── Integration test: two serial schedules hand-off ────────────────────
+// note: ── Integration test: two serial schedules hand-off ──────────────
 
 #[tokio::test]
 async fn two_serial_schedules_hand_off_after_first_completes() {
     let (_dir, supervisor) = test_supervisor_with_inmemory_db().await;
 
-    // Add two serial schedules for the same creator
     supervisor
         .insert_pending(sched("01A", ScheduleConcurrency::Serial, vec![]))
         .await
@@ -152,7 +150,6 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
         .await
         .unwrap();
 
-    // Tick: 01A should start, 01B stays Pending (serial blocks behind running)
     supervisor.tick().await.unwrap();
     assert_eq!(
         supervisor.status_of("01A").await.unwrap(),
@@ -163,21 +160,21 @@ async fn two_serial_schedules_hand_off_after_first_completes() {
         ScheduleStatus::Pending
     );
 
-    // Simulate 01A completing (no real session engine — direct status flip)
+    // why: no real session engine in this unit test — flip status directly.
     supervisor
         .on_schedule_terminal("01A", ScheduleStatus::Completed)
         .await
         .unwrap();
 
-    // After terminal callback: tick is triggered internally.
-    // 01B should now be Running since nothing else is.
+    // note: the terminal callback triggers a tick internally, so 01B starts
+    // without an explicit tick here.
     assert_eq!(
         supervisor.status_of("01B").await.unwrap(),
         ScheduleStatus::Running
     );
 }
 
-/// Helper: create a [`ScheduleSupervisor`] backed by a fresh temp `SQLite` DB
+/// note: Helper: create a [`ScheduleSupervisor`] backed by a fresh temp `SQLite` DB
 /// with the WS7 migration applied, plus the directory that owns it.
 async fn test_supervisor_with_inmemory_db() -> (tempfile::TempDir, Arc<ScheduleSupervisor>) {
     let (dir, pool) = common::test_pool().await;

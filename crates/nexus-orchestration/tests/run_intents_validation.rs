@@ -2,6 +2,7 @@
 //!
 //! Migrated from inline `#[cfg(test)]` in `validation.rs` to standalone
 //! integration test binary per T1 §7.5 contract.
+// note: diagnostics are filtered to `RunIntents` so unrelated warnings do not affect the counts.
 
 use nexus_capability::CapabilityRegistry;
 use nexus_preset::manifest::PresetManifest;
@@ -118,7 +119,7 @@ states:
     );
 }
 
-/// R-V133P1-05: creator preset claiming `system_maintenance` is an Error.
+/// note: R-V133P1-05: creator preset claiming `system_maintenance` is an Error.
 #[test]
 fn creator_preset_with_system_maintenance_is_error() {
     let yaml = r"
@@ -155,7 +156,7 @@ states:
     );
 }
 
-/// R-V133P1-05: system preset claiming `work_init` (creator-only) is an Error.
+/// note: R-V133P1-05: system preset claiming `work_init` (creator-only) is an Error.
 #[test]
 fn system_preset_with_creator_intent_is_error() {
     let yaml = r"
@@ -183,7 +184,7 @@ states:
         .iter()
         .filter(|d| d.category == DiagnosticCategory::RunIntents)
         .collect();
-    // Expect both: Error for cross-claim + Warning for missing system_maintenance
+    // note: Expect both: Error for cross-claim + Warning for missing system_maintenance
     assert!(
         !diags.is_empty(),
         "expected at least 1 RunIntents diagnostic: {diags:?}",

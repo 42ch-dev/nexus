@@ -18,6 +18,7 @@
 //! given environment, the test falls back to asserting graceful degradation
 //! (a `compute_error` timeline event is recorded instead of crashing the
 //! daemon — compass T4).
+// note: all DB state is in-memory via `common::test_pool`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -32,7 +33,7 @@ use nexus_local_db::narrative_write;
 use nexus_preset::load_embedded_preset;
 use serde_json::{json, Value};
 
-/// A runtime-deps registry with the EXPLICIT compute attachment (C3): the
+/// note: A runtime-deps registry with the EXPLICIT compute attachment (C3): the
 /// daemon-wide engine + warmed cache injected through
 /// `with_runtime_deps_and_wasm`. Plain registry constructors never build
 /// engines, so a test that drives the real executor attaches them here.
@@ -59,7 +60,7 @@ mod common;
 
 use common::test_pool;
 
-/// Seed a Creator through the production creation path, which also
+/// note: Seed a Creator through the production creation path, which also
 /// materializes its holder registry row in the same transaction.
 ///
 /// v1.191 P1 (R5): `narrative.compute` reads its input through the admitted
@@ -84,7 +85,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
     )
     .await
     .unwrap();
-    // create_world mints its own world_id; rewrite it to a known value so the
+    // why: create_world mints its own world_id; rewrite it to a known value so the
     // capability admission gate and KB queries can target it deterministically.
     sqlx::query("UPDATE narrative_worlds SET world_id = ? WHERE owner_creator_id = ?")
         .bind(world_id)
@@ -94,7 +95,7 @@ async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
         .unwrap();
 }
 
-/// Seed a computable character `KnowledgeEntryRecord` with the given combat attributes.
+/// note: Seed a computable character `KnowledgeEntryRecord` with the given combat attributes.
 async fn seed_character(
     pool: &sqlx::SqlitePool,
     world_id: &str,
@@ -132,7 +133,7 @@ async fn seed_character(
     kb
 }
 
-/// Count timeline event rows for a world.
+/// note: Count timeline event rows for a world.
 async fn timeline_event_count(pool: &sqlx::SqlitePool, world_id: &str) -> i64 {
     sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM narrative_timeline_events WHERE world_id = ?",
@@ -143,7 +144,7 @@ async fn timeline_event_count(pool: &sqlx::SqlitePool, world_id: &str) -> i64 {
     .unwrap()
 }
 
-/// Read back a character's `current_hp` from the KB store.
+/// note: Read back a character's `current_hp` from the KB store.
 async fn read_current_hp(pool: &sqlx::SqlitePool, key_block_id: &str) -> i64 {
     let kb_store = SqliteKbStore::new(pool.clone());
     let kb = kb_store.get_knowledge_entry(key_block_id).await.unwrap();
@@ -154,7 +155,7 @@ async fn read_current_hp(pool: &sqlx::SqlitePool, key_block_id: &str) -> i64 {
         .expect("current_hp is an integer")
 }
 
-/// The combat-engine preset must load and its declared capabilities must
+/// note: The combat-engine preset must load and its declared capabilities must
 /// resolve against the production registry shape (P-last T4 wiring check).
 #[tokio::test]
 async fn combat_engine_preset_loads_and_resolves_capabilities() {
@@ -162,7 +163,6 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
     let registry = CapabilityRegistry::with_builtins_and_pool(pool);
     let loaded = load_embedded_preset("combat-engine", &registry).expect("preset loads");
     assert_eq!(loaded.id, "combat-engine");
-    // requires_capabilities must include narrative.compute (V1.61 P3).
     assert!(
         loaded
             .manifest
@@ -172,7 +172,7 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
             .any(|c| c == "narrative.compute"),
         "combat-engine must require narrative.compute"
     );
-    // And the capability must be KNOWN to this registry — in the corrected
+    // why: And the capability must be KNOWN to this registry — in the corrected
     // C3 contract shape the executable lookup misses it (the plain builtin
     // registry attaches no engine binding), while the name stays reserved
     // and known metadata resolves without constructing an executor.
@@ -194,7 +194,7 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
     );
 }
 
-/// Full compute cycle: two computable characters → basic-combat module →
+/// note: Full compute cycle: two computable characters → basic-combat module →
 /// `state_delta` applied + timeline events + `battle_report`. Verifies side effects
 /// read back from the DB, not just the return value.
 #[tokio::test]
@@ -204,13 +204,12 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     seed_creator(&pool, "ctr_e2e").await;
     seed_world(&pool, "ctr_e2e", "wld_e2e").await;
 
-    // Hero: atk 20, def 5, hp 80. Villain: atk 10, def 0, hp 120.
+    // note: Hero: atk 20, def 5, hp 80. Villain: atk 10, def 0, hp 120.
     // basic-combat picks the first two character blocks → Hero attacks Villain.
     // damage = max(0, 20 − 0) = 20 → Villain hp 120 → 100. Hero unchanged.
     let hero = seed_character(&pool, "wld_e2e", "Hero", 20, 5, 80, 80).await;
     let villain = seed_character(&pool, "wld_e2e", "Villain", 10, 0, 120, 120).await;
 
-    // Sanity: the computable filter returns both characters.
     let kb_store = SqliteKbStore::new(pool.clone());
     let q = KbQuery::new("wld_e2e").with_computable(Some(true));
     let snapshot = kb_store.query(&q).await.unwrap();
@@ -237,7 +236,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     let output = match result {
         Ok(o) => o,
         Err(e) => {
-            // Graceful degradation: a module trap must NOT crash; instead a
+            // note: Graceful degradation: a module trap must NOT crash; instead a
             // compute_error timeline event is recorded (compass T4).
             let timeline = timeline_event_count(&pool, "wld_e2e").await;
             assert!(
@@ -248,7 +247,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         }
     };
 
-    // ── battle_report ──
+    // note: ── battle_report ──
     let report: &Value = output
         .get("battle_report")
         .expect("battle_report present in output");
@@ -257,7 +256,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         "typed battle_report must carry kind; module-specific fields are validated pre-deserialize"
     );
 
-    // Combat math is validated via applied state_delta side effects below.
+    // why: Combat math is validated via applied state_delta side effects below.
     assert_eq!(
         output["state_delta_applied"], 1,
         "exactly one state_delta (defender HP sub) expected"
@@ -273,7 +272,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         "attacker (Hero) HP must be unchanged by a single combat resolution"
     );
 
-    // ── timeline events ──
+    // note: ── timeline events ──
     assert_eq!(
         output["timeline_events_created"], 1,
         "basic-combat emits exactly one timeline event"
@@ -281,13 +280,13 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     let db_events = timeline_event_count(&pool, "wld_e2e").await;
     assert_eq!(db_events, 1, "timeline event must persist in the DB");
 
-    // ── new_key_blocks (basic-combat emits none) ──
+    // note: ── new_key_blocks (basic-combat emits none) ──
     assert_eq!(
         output["new_key_blocks_created"], 0,
         "basic-combat does not emit new key blocks"
     );
 
-    // ── H1 regression guard (R-V161P3-CORR-002): cross-world block injection
+    // note: ── H1 regression guard (R-V161P3-CORR-002): cross-world block injection
     // is rejected. Drive the capability with a module that emits a block for a
     // different world would require a hostile module; instead assert the guard
     // logic by checking the world_id re-assertion path is in place via the
@@ -295,7 +294,7 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     // any insert). A dedicated unit-level guard lives in narrative_compute.rs.
 }
 
-/// The capability must reject a missing world (admission gate) even when a
+/// note: The capability must reject a missing world (admission gate) even when a
 /// fully-wired registry + engine are available — guards the boot-time wiring.
 #[tokio::test]
 async fn narrative_compute_e2e_rejects_missing_world() {

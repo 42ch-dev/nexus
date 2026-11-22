@@ -1,4 +1,5 @@
 //! End-to-end tests for the `_system.maintenance` system preset.
+// note: exercises the real GraphFlowEngine; no capability stubs.
 //!
 //! Tests:
 //! - `system_preset_runs_to_terminal_state`: runs the preset graph to completion.
@@ -9,7 +10,7 @@ use nexus_capability::CapabilityRegistry;
 use nexus_orchestration::{system_preset, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
-/// Run the system preset graph and verify it reaches terminal state.
+/// note: Run the system preset graph and verify it reaches terminal state.
 #[tokio::test]
 async fn system_preset_runs_to_terminal_state() {
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
@@ -24,7 +25,7 @@ async fn system_preset_runs_to_terminal_state() {
         .await
         .expect("start_session");
 
-    // Step until Completed or a reasonable cap (4 tasks + 1 buffer).
+    // note: step until Completed or a reasonable cap (4 tasks + 1 buffer).
     for _ in 0..16 {
         let outcome = engine.run_step(&sid).await.expect("run_step");
         if let nexus_orchestration::engine::StepOutcome::Completed { .. } = outcome {
@@ -39,7 +40,7 @@ async fn system_preset_runs_to_terminal_state() {
     );
 }
 
-/// Run a step, drop the engine, create a fresh one, and verify session state.
+/// why: Run a step, drop the engine, create a fresh one, and verify session state.
 ///
 /// This uses `SqliteSessionStorage` (on-disk) to verify that session
 /// state survives engine restart. After a step, the session's
@@ -47,11 +48,10 @@ async fn system_preset_runs_to_terminal_state() {
 /// can read the session back.
 #[tokio::test]
 async fn restart_durability_e2e() {
-    // Create a temp database.
     let db = tempfile::NamedTempFile::new().expect("tempfile");
     let db_path = db.path().to_path_buf();
 
-    // Phase 1: Create engine, start session, run one step.
+    // note: Phase 1 — create engine, start session, run one step.
     let sid = {
         let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
@@ -71,7 +71,6 @@ async fn restart_durability_e2e() {
             .await
             .expect("start_session");
 
-        // Run one step.
         let outcome = engine.run_step(&sid).await.expect("run_step");
         assert!(
             matches!(
@@ -84,9 +83,9 @@ async fn restart_durability_e2e() {
 
         sid
     };
-    // Phase 1 ends — pool drops, simulating daemon shutdown.
+    // why: Phase 1 ends — pool drops, simulating daemon shutdown.
 
-    // Phase 2: Create a fresh engine with a new pool over the same DB.
+    // note: Phase 2 — create a fresh engine with a new pool over the same DB.
     {
         let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
@@ -96,15 +95,12 @@ async fn restart_durability_e2e() {
             std::sync::Arc::new(pool),
         ));
 
-        // Verify the session is still in the storage.
         let session = storage
             .get(&sid.0)
             .await
             .expect("storage get")
             .expect("session should exist after restart");
 
-        // The session should have a valid current_task_id (not the initial
-        // empty value), proving that the step was persisted.
         assert!(
             !session.current_task_id.is_empty(),
             "session should have a current_task_id after a step, got: '{}'",

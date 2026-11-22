@@ -81,7 +81,7 @@ async fn seed_world(pool: &SqlitePool) {
 
 async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
-    // v1.191 P1 T13: the schedule's stored production run identity is what the
+    // why: v1.191 P1 T13: the schedule's stored production run identity is what the
     // review-time extraction is admitted under (`current_session_id` FK), so the
     // run row is seeded with it.
     let run_id = format!("run_{schedule_id}");
@@ -111,7 +111,7 @@ async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, wor
     )
     .bind(schedule_id)
     .bind(CREATOR)
-    // v1.191 P1 T13: the review-time extraction run is admitted under the
+    // why: v1.191 P1 T13: the review-time extraction run is admitted under the
     // schedule's stored production run identity; extraction refuses an empty
     // one instead of inventing a default session.
     .bind(&run_id)
@@ -158,7 +158,7 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
     (dir, body_rel.to_string())
 }
 
-/// Mock executor that returns a fixed LLM extraction payload with a non-character
+/// note: Mock executor that returns a fixed LLM extraction payload with a non-character
 /// `block_type` (scene/location) so the test proves the LLM pathway — not the
 /// `character`-defaulting heuristic — produced the candidate.
 struct MockLlmExtractWorker;
@@ -181,7 +181,7 @@ impl nexus_capability::PromptExecutor for MockLlmExtractWorker {
 }
 
 fn registry_with_mock_worker() -> CapabilityRegistry {
-    // A1: prompt consumers resolve their coordinator cancellation token from
+    // why: A1: prompt consumers resolve their coordinator cancellation token from
     // this map and fail closed when none is registered. v1.191 P1 T13: the
     // review-time hook now passes the schedule's stored production run
     // identity (`run_<schedule_id>`), so the fixture registers exactly those.
@@ -205,9 +205,9 @@ fn registry_with_mock_worker() -> CapabilityRegistry {
     CapabilityRegistry::with_runtime_deps(&deps)
 }
 
-// ── AC3: novel-review-master LLM pathway writes LLM-extracted payload ──────
+// note: ── AC3: novel-review-master LLM pathway writes LLM-extracted payload ─
 
-/// The headline E2E: review-time extraction via `nexus.llm.extract` produces
+/// note: The headline E2E: review-time extraction via `nexus.llm.extract` produces
 /// `kb_extract_jobs` rows whose `proposed_payload` JSON carries all four
 /// LLM-extracted keys AND whose dedicated `llm_confidence` / `llm_source_quote`
 /// columns are populated. The LLM returned a non-character `block_type`
@@ -241,13 +241,12 @@ async fn review_master_llm_path_writes_llm_payload() {
 
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
 
-    // Find the Azure Gate candidate (the non-character one — proves LLM pathway).
+    // note: the non-character `block_type` is what proves the LLM pathway ran.
     let azure = pending
         .iter()
         .find(|p| p.canonical_name_guess.as_deref() == Some("Azure Gate"))
         .unwrap_or_else(|| panic!("expected 'Azure Gate' candidate in {pending:?}"));
 
-    // Dedicated columns carry the LLM metadata.
     assert_eq!(azure.block_type_guess.as_deref(), Some("scene"));
     assert_eq!(azure.llm_confidence, Some(0.88));
     assert_eq!(
@@ -255,7 +254,6 @@ async fn review_master_llm_path_writes_llm_payload() {
         Some("the Azure Gate groaned open")
     );
 
-    // proposed_payload JSON carries all four LLM-extracted keys.
     let payload: serde_json::Value =
         serde_json::from_str(azure.proposed_payload.as_deref().unwrap_or("{}")).unwrap();
     assert_eq!(payload["block_type"], "scene", "payload block_type");
@@ -263,10 +261,8 @@ async fn review_master_llm_path_writes_llm_payload() {
     assert_eq!(payload["confidence"], 0.88);
     assert_eq!(payload["source_quote"], "the Azure Gate groaned open");
     assert_eq!(payload["tags"][1], "llm-extracted");
-    // novel_category derived from block_type=scene → location.
     assert_eq!(payload["attributes"]["novel_category"], "location");
 
-    // Lin Xia candidate carries the character block_type + its confidence.
     let lin = pending
         .iter()
         .find(|p| p.canonical_name_guess.as_deref() == Some("Lin Xia"))
@@ -275,9 +271,9 @@ async fn review_master_llm_path_writes_llm_payload() {
     assert_eq!(lin.llm_confidence, Some(0.95));
 }
 
-// ── Fallback: no registry → heuristic → LLM columns NULL ───────────────────
+// note: ── Fallback: no registry → heuristic → LLM columns NULL ───────────
 
-/// When no registry is threaded, the hook falls back to the V1.50 heuristic:
+/// note: When no registry is threaded, the hook falls back to the V1.50 heuristic:
 /// every candidate gets `block_type_guess='character'` and the LLM columns
 /// stay NULL. This preserves the V1.50 no-worker behavior.
 #[tokio::test]
@@ -291,7 +287,6 @@ async fn review_master_no_registry_falls_back_to_heuristic() {
     seed_chapter_with_body(&pool, "wrk_v151_fb", 1, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_v151_fb", "wrk_v151_fb").await;
 
-    // No registry → heuristic fallback.
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
         "sch_v151_fb",
@@ -307,7 +302,6 @@ async fn review_master_no_registry_falls_back_to_heuristic() {
         .iter()
         .find(|p| p.canonical_name_guess.as_deref() == Some("Lin Xia"))
         .unwrap();
-    // Heuristic defaults: character + NULL LLM columns.
     assert_eq!(lin.block_type_guess.as_deref(), Some("character"));
     assert_eq!(lin.llm_confidence, None, "heuristic → NULL llm_confidence");
     assert_eq!(
@@ -316,7 +310,7 @@ async fn review_master_no_registry_falls_back_to_heuristic() {
     );
 }
 
-// ── Idempotency: re-running the LLM pathway does not duplicate ─────────────
+// note: ── Idempotency: re-running the LLM pathway does not duplicate ─────
 
 #[tokio::test]
 async fn review_master_llm_path_is_idempotent() {
@@ -346,7 +340,7 @@ async fn review_master_llm_path_is_idempotent() {
     let after_first = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     let n_first = after_first.len();
 
-    // Second run — no duplicates (idempotency guard keyed on canonical_name).
+    // why: the idempotency guard is keyed on canonical_name, so a second run inserts 0.
     let count2 = quality_loop::extract_kb_candidates_for_review(
         &pool,
         "sch_v151_idem",

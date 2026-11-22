@@ -34,7 +34,7 @@ async fn restart_resume_smoke() {
         let storage = SqliteSessionStorage::new(std::sync::Arc::new(pool));
         let session = Session::new_from_task("sess-restart".into(), "dummy-task");
         storage.save(session).await.unwrap();
-    } // pool drops — simulates daemon shutdown
+    } // why: pool drops — simulates daemon shutdown
     {
         let guarded = nexus_local_db::init_engine_pool(db.path())
             .await

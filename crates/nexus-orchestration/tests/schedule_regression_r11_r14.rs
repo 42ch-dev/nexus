@@ -4,6 +4,7 @@
 //! R12: mid-execution edit stability (edit creates v1; running state finishes on v0)
 //! R13: preset `context_update` hook regression
 //! R14: dependency chain auto-advance (A completes → B auto-starts)
+// note: gate for the core-context versioning contract, one test per R-number above.
 
 use nexus_contracts::local::schedule::{
     CoreContextAuthor, CoreContextPayload, CoreContextVersion, DerivationStep, EditOp, Schedule,
@@ -13,7 +14,7 @@ use nexus_orchestration::schedule::derivation::CoreContextManager;
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use std::sync::Arc;
 
-// ---------------------------------------------------------------------------
+// note: -----------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -41,7 +42,7 @@ fn make_schedule(
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
         scheduled_at: None,
-        // Use schedule ID as label to avoid R2 duplicate detection collisions
+        // why: Use schedule ID as label to avoid R2 duplicate detection collisions
         label: Some(id.to_string()),
         created_at: String::new(),
         updated_at: String::new(),
@@ -49,7 +50,7 @@ fn make_schedule(
     }
 }
 
-// ---------------------------------------------------------------------------
+// note: -----------------------------------------------------------------------
 // R11: add → inspect roundtrip (v0 equals seed)
 // ---------------------------------------------------------------------------
 
@@ -62,7 +63,6 @@ async fn r11_schedule_add_inspect_roundtrip() {
     let sid = "R11-A";
     let seed = "topic=bees vibe=literary";
 
-    // Insert schedule
     let schedule = make_schedule(
         sid,
         "creator-1",
@@ -73,7 +73,6 @@ async fn r11_schedule_add_inspect_roundtrip() {
     );
     sup.insert_pending(schedule).await.unwrap();
 
-    // Seed core_context v0
     let record = mgr
         .apply_seed(
             &ScheduleId(sid.to_string()),
@@ -87,7 +86,6 @@ async fn r11_schedule_add_inspect_roundtrip() {
 
     assert_eq!(record.version, CoreContextVersion(0));
 
-    // Inspect: v0 should match seed
     let snapshot = mgr
         .current_snapshot(&ScheduleId(sid.to_string()))
         .await
@@ -99,11 +97,10 @@ async fn r11_schedule_add_inspect_roundtrip() {
         CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 
-    // Status should be pending
     assert_eq!(sup.status_of(sid).await.unwrap(), ScheduleStatus::Pending);
 }
 
-// ---------------------------------------------------------------------------
+// note: -----------------------------------------------------------------------
 // R12: mid-execution edit stability
 // ---------------------------------------------------------------------------
 
@@ -116,7 +113,6 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     let sid = "R12-A";
     let seed = "initial context for state 1";
 
-    // Insert and seed
     let schedule = make_schedule(
         sid,
         "creator-1",
@@ -127,7 +123,6 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     );
     sup.insert_pending(schedule).await.unwrap();
 
-    // Set to Running (simulate engine has started)
     let now = chrono::Utc::now().timestamp();
     // SAFETY: test-only — DML helper for test state setup.
     sqlx::query(
@@ -139,7 +134,6 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     .await
     .unwrap();
 
-    // Seed v0
     mgr.apply_seed(
         &ScheduleId(sid.to_string()),
         seed,
@@ -148,7 +142,6 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     .await
     .unwrap();
 
-    // Verify v0 content
     let v0 = mgr
         .read(&ScheduleId(sid.to_string()), CoreContextVersion(0))
         .await
@@ -158,7 +151,6 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
         CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 
-    // Simulate mid-execution edit: user appends while running
     let edit_text = "\n[user addition during execution]";
     let v1 = mgr
         .apply_user_edit(
@@ -173,7 +165,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
 
     assert_eq!(v1.version, CoreContextVersion(1), "edit should create v1");
 
-    // v0 should still be readable (running state finishes on v0)
+    // invariant: v0 should still be readable (running state finishes on v0)
     let v0_still = mgr
         .read(&ScheduleId(sid.to_string()), CoreContextVersion(0))
         .await
@@ -183,7 +175,6 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
         CoreContextPayload::Struct { .. } => panic!("expected text payload"),
     }
 
-    // v1 should have the appended content (next state reads v1)
     let v1_content = mgr
         .read(&ScheduleId(sid.to_string()), CoreContextVersion(1))
         .await
@@ -197,7 +188,7 @@ async fn r12_mid_execution_edit_does_not_disturb_running_state() {
     }
 }
 
-// ---------------------------------------------------------------------------
+// note: -----------------------------------------------------------------------
 // R13: preset context_update hook regression
 // ---------------------------------------------------------------------------
 
@@ -209,7 +200,6 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
 
     let sid = "R13-A";
 
-    // Insert and seed
     let schedule = make_schedule(
         sid,
         "creator-1",
@@ -220,7 +210,6 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
     );
     sup.insert_pending(schedule).await.unwrap();
 
-    // Seed v0
     mgr.apply_seed(
         &ScheduleId(sid.to_string()),
         "topic=bees",
@@ -229,7 +218,6 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
     .await
     .unwrap();
 
-    // Simulate outlining state exit → preset hook fires
     let hook_result = mgr
         .apply_preset_hook(
             &ScheduleId(sid.to_string()),
@@ -242,7 +230,6 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
         .await
         .unwrap();
 
-    // Verify the derivation step is PresetHook
     match &hook_result.derivation {
         DerivationStep::PresetHook {
             state_id,
@@ -254,7 +241,6 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
         other => panic!("expected PresetHook derivation, got: {other:?}"),
     }
 
-    // Verify the history contains the PresetHook entry
     let current = mgr
         .current_snapshot(&ScheduleId(sid.to_string()))
         .await
@@ -271,7 +257,7 @@ async fn r13_preset_hook_writes_preset_hook_derivation() {
     }
 }
 
-// ---------------------------------------------------------------------------
+// note: -----------------------------------------------------------------------
 // R14: dependency chain auto-advance
 // ---------------------------------------------------------------------------
 
@@ -284,7 +270,6 @@ async fn r14_dependency_chain_auto_advances() {
     let sid_a = "R14-A";
     let sid_b = "R14-B";
 
-    // Insert A (no deps)
     let schedule_a = make_schedule(
         sid_a,
         "creator-1",
@@ -295,7 +280,6 @@ async fn r14_dependency_chain_auto_advances() {
     );
     sup.insert_pending(schedule_a).await.unwrap();
 
-    // Insert B (depends on A)
     let schedule_b = make_schedule(
         sid_b,
         "creator-1",
@@ -306,7 +290,6 @@ async fn r14_dependency_chain_auto_advances() {
     );
     sup.insert_pending(schedule_b).await.unwrap();
 
-    // Seed both
     for sid in [sid_a, sid_b] {
         mgr.apply_seed(
             &ScheduleId(sid.to_string()),
@@ -317,7 +300,6 @@ async fn r14_dependency_chain_auto_advances() {
         .unwrap();
     }
 
-    // Tick: A should start (no deps, running set empty)
     sup.tick().await.unwrap();
     assert_eq!(sup.status_of(sid_a).await.unwrap(), ScheduleStatus::Running);
     assert_eq!(
@@ -326,7 +308,6 @@ async fn r14_dependency_chain_auto_advances() {
         "B should not start — depends on A"
     );
 
-    // Simulate A completing
     sup.on_schedule_terminal(sid_a, ScheduleStatus::Completed)
         .await
         .unwrap();
@@ -335,7 +316,6 @@ async fn r14_dependency_chain_auto_advances() {
         ScheduleStatus::Completed
     );
 
-    // After A completes, tick should auto-start B (deps satisfied)
     assert_eq!(
         sup.status_of(sid_b).await.unwrap(),
         ScheduleStatus::Running,

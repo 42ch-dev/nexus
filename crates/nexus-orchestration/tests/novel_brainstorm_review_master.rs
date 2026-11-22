@@ -1,4 +1,5 @@
 //! E2E smoke tests for novel-brainstorm and novel-review-master embedded presets (V1.39 P2).
+// note: assertions read the loaded manifest; no engine is driven.
 //!
 //! Validates that both presets load successfully and simulate a happy-path
 //! state advance to confirm the state machine wiring is correct.
@@ -7,7 +8,7 @@ use nexus_capability::CapabilityRegistry;
 use nexus_preset::load_embedded_preset;
 use nexus_preset::manifest;
 
-/// AC1: Both presets load via `load_embedded_preset` and pass validator.
+/// note: AC1: Both presets load via `load_embedded_preset` and pass validator.
 #[test]
 fn novel_brainstorm_loads_successfully() {
     let caps = CapabilityRegistry::with_builtins();
@@ -22,7 +23,7 @@ fn novel_review_master_loads_successfully() {
     assert_eq!(loaded.id, "novel-review-master");
 }
 
-/// AC2: novel-brainstorm consumes open findings in prompt context.
+/// note: AC2: novel-brainstorm consumes open findings in prompt context.
 /// Verify that the gather state's enter action references `open_findings` in its template vars.
 #[test]
 fn novel_brainstorm_gather_references_open_findings() {
@@ -36,7 +37,6 @@ fn novel_brainstorm_gather_references_open_findings() {
         .find(|s| s.id == "gather")
         .expect("gather state must exist");
 
-    // The enter action must inject a prompt that references open_findings
     let has_open_findings_var = gather.enter.iter().any(|action| {
         if let manifest::EnterAction::Capability {
             args: Some(args), ..
@@ -56,7 +56,7 @@ fn novel_brainstorm_gather_references_open_findings() {
     );
 }
 
-/// AC3: novel-review-master lists findings requiring approval; integrates with P1 API.
+/// note: AC3: novel-review-master lists findings requiring approval; integrates with P1 API.
 /// Verify the present state surfaces `open_findings` and the state machine
 /// has a structured `await_decision` state for recording decisions.
 #[test]
@@ -71,7 +71,6 @@ fn novel_review_master_present_references_open_findings() {
         .find(|s| s.id == "present")
         .expect("present state must exist");
 
-    // The enter action must inject a prompt that references open_findings
     let has_open_findings_var = present.enter.iter().any(|action| {
         if let manifest::EnterAction::Capability {
             args: Some(args), ..
@@ -90,7 +89,6 @@ fn novel_review_master_present_references_open_findings() {
         "present state enter action must reference open_findings in vars"
     );
 
-    // Verify await_decision state exists for recording human decisions
     let await_decision = loaded
         .manifest
         .states
@@ -104,13 +102,12 @@ fn novel_review_master_present_references_open_findings() {
     );
 }
 
-/// Happy path: brainstorm state machine flows gather → synthesize → done.
+/// note: Happy path: brainstorm state machine flows gather → synthesize → done.
 #[test]
 fn novel_brainstorm_happy_path_state_flow() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-brainstorm", &caps).unwrap();
 
-    // Verify the graph is wired: gather → synthesize → done
     let gather = loaded
         .manifest
         .states
@@ -143,13 +140,12 @@ fn novel_brainstorm_happy_path_state_flow() {
     assert!(done.next.is_none());
 }
 
-/// Happy path: review-master state machine flows present → `await_decision` → `sync_world_kb` → done.
+/// note: Happy path: review-master state machine flows present → `await_decision` → `sync_world_kb` → done.
 #[test]
 fn novel_review_master_happy_path_state_flow() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
-    // Verify the graph is wired: present → await_decision → sync_world_kb → done
     let present = loaded
         .manifest
         .states
@@ -193,13 +189,12 @@ fn novel_review_master_happy_path_state_flow() {
     assert!(done.next.is_none());
 }
 
-/// Verify brainstorm uses auto-chain compatible exit (`llm_judge`).
+/// note: Verify brainstorm uses auto-chain compatible exit (`llm_judge`).
 #[test]
 fn novel_brainstorm_auto_chain_compatible() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-brainstorm", &caps).unwrap();
 
-    // gather and synthesize both use llm_judge for auto-chain
     for state_id in &["gather", "synthesize"] {
         let state = loaded
             .manifest
@@ -214,13 +209,12 @@ fn novel_brainstorm_auto_chain_compatible() {
     }
 }
 
-/// Verify review-master uses manual exit (human-in-loop).
+/// note: Verify review-master uses manual exit (human-in-loop).
 #[test]
 fn novel_review_master_human_in_loop() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
-    // present and await_decision both use manual for human-in-loop
     for state_id in &["present", "await_decision"] {
         let state = loaded
             .manifest

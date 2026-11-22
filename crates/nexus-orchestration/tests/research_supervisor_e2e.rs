@@ -22,6 +22,7 @@
 //! ## Out of scope (tracked separately)
 //! - R-V139P5-S5: artifact E2E requiring an ACP mock — explicitly deferred.
 //! - Live preset state-machine execution (needs ACP/LLM).
+// note: Scope and out-of-scope above bound what this hermetic suite proves.
 
 use nexus_capability::CapabilityRegistry;
 use nexus_contracts::local::orchestration::preset::{ExitWhen, PresetKind, RunIntent};
@@ -35,7 +36,7 @@ use nexus_preset::load_embedded_preset;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-/// R-V146P3-QC1-S1: the `research` preset's `version` from
+/// note: R-V146P3-QC1-S1: the `research` preset's `version` from
 /// `embedded-presets/research/preset.yaml`. The seed SQL and the
 /// structural assertion previously hard-coded the literal `2` in two
 /// unrelated places, so a future version bump could update one and silently
@@ -43,13 +44,13 @@ use std::sync::Arc;
 /// supervisor loads). Pin both to this single named constant.
 const RESEARCH_PRESET_VERSION: u32 = 2;
 
-// ── Hermetic DB helpers (modeled on tests/auto_chain.rs) ─────────────────────
+// note: ── Hermetic DB helpers (modeled on tests/auto_chain.rs) ─────────────────────
 
 mod common;
 
 use common::test_pool;
 
-/// Build a Work record whose fields satisfy the research preset gates
+/// note: Build a Work record whose fields satisfy the research preset gates
 /// (`intake_status == complete`, `work_ref` required) and carry a creative
 /// brief the preset input contract consumes.
 fn research_ready_work(work_id: &str, work_ref: &str) -> WorkRecord {
@@ -90,12 +91,12 @@ fn research_ready_work(work_id: &str, work_ref: &str) -> WorkRecord {
     }
 }
 
-/// Seed a Work row.
+/// note: Seed a Work row.
 async fn seed_work(pool: &SqlitePool, work: &WorkRecord) {
     works::create_work(pool, work).await.unwrap();
 }
 
-/// Insert a research schedule row directly (bypasses `insert_pending`
+/// why: Insert a research schedule row directly (bypasses `insert_pending`
 /// validation so the test controls `work_id` + status precisely).
 ///
 /// Mirrors `insert_driver_schedule` in `tests/auto_chain.rs`, pinned to the
@@ -121,7 +122,7 @@ struct ResearchScheduleFixture {
 }
 
 impl ResearchScheduleFixture {
-    /// Insert the research schedule row as a genuine `driven_v1` row under the
+    /// why: Insert the research schedule row as a genuine `driven_v1` row under the
     /// V1.186 execution-policy contract — the same shape the internal
     /// insertion paths persist (see `auto_chain::enqueue_descriptor_json`):
     /// `execution_policy='driven_v1'`, a frozen `RunDescriptorV1` stamped with
@@ -131,7 +132,7 @@ impl ResearchScheduleFixture {
     async fn insert(self, pool: &SqlitePool) {
         let now = chrono::Utc::now().timestamp();
 
-        // N-5/N-15: freeze the ACTUAL structured input the stage builder would
+        // why: N-5/N-15: freeze the ACTUAL structured input the stage builder would
         // seed for this research schedule (work_id, fl_e_stage, creative_brief,
         // inspiration_log, work_ref, …) — never an empty map. Built via
         // `build_schedule_for_stage` so the frozen input matches the canonical
@@ -142,7 +143,7 @@ impl ResearchScheduleFixture {
                 .and_then(|req| req.input)
                 .and_then(|v| v.as_object().cloned())
                 .unwrap_or_default();
-        // N-7: resolve and stamp the REAL content-addressed source identity
+        // why: N-7: resolve and stamp the REAL content-addressed source identity
         // (manifest + referenced template bytes) — never a zero placeholder.
         let source = nexus_preset::embedded_source_identity("research")
             .expect("research preset must carry an embedded source identity");
@@ -163,7 +164,7 @@ impl ResearchScheduleFixture {
         let descriptor_bytes =
             serde_json::to_vec(&descriptor).expect("research fixture descriptor must serialize");
 
-        // C-2/N-3: the schedule row and its durable version-0 core-context
+        // invariant: C-2/N-3: the schedule row and its durable version-0 core-context
         // record commit in ONE transaction.
         let mut tx = nexus_local_db::begin_immediate(pool)
             .await
@@ -193,7 +194,7 @@ impl ResearchScheduleFixture {
         .await
         .unwrap_or_else(|e| panic!("ResearchScheduleFixture::insert failed: {e}"));
 
-        // N-3: the row is not admissible until its version-0 core-context
+        // invariant: N-3: the row is not admissible until its version-0 core-context
         // record is durable (the row's `current_core_context_version` stays 0).
         let seed_text = serde_json::to_string(&input).unwrap_or_default();
         auto_chain::seed_core_context_version(&mut tx, self.schedule_id, &seed_text)
@@ -206,7 +207,7 @@ impl ResearchScheduleFixture {
     }
 }
 
-/// Read a schedule row's status straight from the DB.
+/// why: Read a schedule row's status straight from the DB.
 ///
 /// R-V146P3-QC3-S2: replaced `fetch_one(...).unwrap()` with a
 /// `fetch_optional` + explicit `match` so both failure modes (DB error,
@@ -216,7 +217,7 @@ impl ResearchScheduleFixture {
 /// because every caller is an `assert_eq!` comparing to an expected
 /// literal status.
 async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> String {
-    // SAFETY: test-only scalar lookup.
+    // safety: test-only scalar lookup.
     let row: Option<(String,)> =
         sqlx::query_as("SELECT status FROM creator_schedules WHERE schedule_id = ?")
             .bind(schedule_id)
@@ -232,7 +233,7 @@ async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> String {
     }
 }
 
-/// Build the `WorkFields` used to construct a research stage schedule request.
+/// note: Build the `WorkFields` used to construct a research stage schedule request.
 fn research_work_fields(work_id: &str, work_ref: &str) -> WorkFields {
     WorkFields {
         work_id: work_id.to_string(),
@@ -254,9 +255,9 @@ fn research_work_fields(work_id: &str, work_ref: &str) -> WorkFields {
     }
 }
 
-// ── T1: research preset loads hermetically + structure validates ────────────
+// note: ── T1: research preset loads hermetically + structure validates ────────────
 
-/// The embedded `research` preset must load against the builtin capability
+/// note: The embedded `research` preset must load against the builtin capability
 /// registry and expose the documented state machine + gate contract.
 ///
 /// This is the hermetic entry check: no network, no ACP — the loader only
@@ -266,7 +267,7 @@ async fn research_preset_loads_and_structurally_valid() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("research", &caps).expect("research preset must load");
 
-    // Header contract.
+    // note: Header contract.
     assert_eq!(loaded.id, "research", "preset id");
     assert_eq!(
         loaded.version, RESEARCH_PRESET_VERSION,
@@ -278,11 +279,11 @@ async fn research_preset_loads_and_structurally_valid() {
         "research is a creator-facing preset",
     );
 
-    // Initial → terminal wiring.
+    // note: Initial → terminal wiring.
     assert_eq!(loaded.manifest.preset.initial, "scanning", "initial state");
     assert_eq!(loaded.manifest.preset.terminal, "done", "terminal state");
 
-    // Capabilities required by the research workflow are all registered.
+    // note: Capabilities required by the research workflow are all registered.
     let required = &loaded.manifest.preset.requires_capabilities;
     assert!(
         required.contains(&"creator.inject_prompt".to_string()),
@@ -297,7 +298,7 @@ async fn research_preset_loads_and_structurally_valid() {
         "research requires judge.llm (scanning + synthesizing llm_judge exits)",
     );
 
-    // Run intents (drive daemon context-assembly strategy).
+    // note: Run intents (drive daemon context-assembly strategy).
     let intents = &loaded.manifest.preset.run_intents;
     assert!(
         intents.contains(&RunIntent::KnowledgeIngest),
@@ -308,7 +309,7 @@ async fn research_preset_loads_and_structurally_valid() {
         "research declares work_continue intent",
     );
 
-    // State machine: scanning → extracting → synthesizing → done.
+    // note: State machine: scanning → extracting → synthesizing → done.
     let state_ids: Vec<&str> = loaded
         .manifest
         .states
@@ -321,7 +322,7 @@ async fn research_preset_loads_and_structurally_valid() {
         "research state machine must be the documented 4-state chain",
     );
 
-    // Exit-when contract: llm_judge bookends the workflow (scanning + synthesizing),
+    // note: Exit-when contract: llm_judge bookends the workflow (scanning + synthesizing),
     // graph_complete gates the inner extraction graph. This is the contract the
     // hermetic lifecycle test below stubs at its boundary.
     let scanning = &loaded.manifest.states[0];
@@ -341,7 +342,7 @@ async fn research_preset_loads_and_structurally_valid() {
     );
     assert!(loaded.manifest.states[3].terminal, "done is terminal");
 
-    // Preset gates — evaluated at enqueue time; the test Work below satisfies them.
+    // note: Preset gates — evaluated at enqueue time; the test Work below satisfies them.
     // Asserted via typed pattern matching on the generated `Gate` / `GateOp` wire
     // types (Debug formatting is not a stable contract; see qc3 W-1). The two
     // semantic checks below must hold:
@@ -374,9 +375,9 @@ async fn research_preset_loads_and_structurally_valid() {
     assert!(has_work_ref_required, "research gate: work_ref required");
 }
 
-// ── T1: research schedule request + preset input contract ───────────────────
+// note: ── T1: research schedule request + preset input contract ───────────────────
 
-/// `build_schedule_for_stage("research", …)` produces the canonical schedule
+/// note: `build_schedule_for_stage("research", …)` produces the canonical schedule
 /// request. The preset-input seed carries the Work fields the research
 /// prompts consume via `{{preset.input.*}}`.
 ///
@@ -392,7 +393,7 @@ async fn research_schedule_request_preset_input_contract() {
     let req = build_schedule_for_stage("research", "ctr_research_e2e", &fields)
         .expect("research stage must map to a preset");
 
-    // Preset + label contract (must match auto_chain enqueue_auto_chain_schedule).
+    // note: Preset + label contract (must match auto_chain enqueue_auto_chain_schedule).
     assert_eq!(req.preset_id, "research", "preset_id");
     assert_eq!(
         req.label.as_deref(),
@@ -400,7 +401,7 @@ async fn research_schedule_request_preset_input_contract() {
         "schedule label",
     );
 
-    // Preset input seed (consumed via {{preset.input.*}} template vars).
+    // note: Preset input seed (consumed via {{preset.input.*}} template vars).
     let input = req
         .input
         .as_ref()
@@ -420,7 +421,7 @@ async fn research_schedule_request_preset_input_contract() {
         "inspiration_log seeded",
     );
 
-    // `references_dir` / `output_dir` are runtime-resolved from the Work
+    // why: `references_dir` / `output_dir` are runtime-resolved from the Work
     // workspace, so their VALUES are NOT seeded here (the schedule-row seed
     // leaves them empty). N-10/N-14: `build_preset_input` guarantees every key
     // a preset references is present — strict-mode template rendering fails on
@@ -436,9 +437,9 @@ async fn research_schedule_request_preset_input_contract() {
     assert_eq!(input["output_dir"], "", "output_dir seeded empty");
 }
 
-// ── T2: supervisor tick drives research schedule boot → running ─────────────
+// note: ── T2: supervisor tick drives research schedule boot → running ─────────────
 
-/// Boot admission: a pending research schedule is admitted by `tick()` and
+/// note: Boot admission: a pending research schedule is admitted by `tick()` and
 /// transitions to `running`. No live ACP is invoked — `tick()` only touches
 /// the DB and the admission gate (pure function over running/completed sets).
 #[tokio::test]
@@ -446,11 +447,10 @@ async fn research_supervisor_tick_admits_pending_schedule() {
     let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
-    // Work satisfies the research gates (intake complete, work_ref set).
+    // note: Work satisfies the research gates (intake complete, work_ref set).
     let work = research_ready_work("wrk_boot", "boot-survey");
     seed_work(&pool, &work).await;
 
-    // Pending research schedule wired to the work via work_id.
     ResearchScheduleFixture {
         schedule_id: "sch_research_boot_001",
         creator_id: "ctr_research_e2e",
@@ -465,7 +465,7 @@ async fn research_supervisor_tick_admits_pending_schedule() {
         "precondition: schedule starts pending",
     );
 
-    // Boot admission.
+    // note: Boot admission.
     sup.tick()
         .await
         .expect("tick must admit the research schedule");
@@ -482,9 +482,9 @@ async fn research_supervisor_tick_admits_pending_schedule() {
     );
 }
 
-// ── T2: headline E2E — boot → tick → (stubbed synthesizing) → terminal done ─
+// note: ── T2: headline E2E — boot → tick → (stubbed synthesizing) → terminal done ─
 
-/// Headline hermetic E2E: the supervisor drives a research schedule row from
+/// note: Headline hermetic E2E: the supervisor drives a research schedule row from
 /// boot admission all the way to terminal `done`, **without** live ACP.
 ///
 /// In a live system the flow after `tick()` admits the schedule is:
@@ -505,7 +505,7 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
     let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
-    // Seed a research-ready Work and wire the schedule as its driver so the
+    // why: Seed a research-ready Work and wire the schedule as its driver so the
     // terminal hook exercises the real `find_work_for_driver` path.
     let mut work = research_ready_work("wrk_e2e", "e2e-survey");
     work.current_stage = "research".to_string();
@@ -530,7 +530,7 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
     .await
     .unwrap();
 
-    // ── Boot: tick admits the pending research schedule. ───────────────────
+    // note: ── Boot: tick admits the pending research schedule. ───────────────────
     sup.tick().await.expect("boot tick admits research");
     assert_eq!(
         schedule_status(&pool, "sch_research_e2e_001").await,
@@ -538,7 +538,7 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
         "boot: research schedule is running",
     );
 
-    // ── Stubbed preset execution boundary ──────────────────────────────────
+    // note: ── Stubbed preset execution boundary ──────────────────────────────────
     // Live engine would drive scanning → extracting → synthesizing here,
     // gated by llm_judge. We skip straight to the terminal hook the daemon
     // invokes once the synthesizing llm_judge returns GO. No ACP is called.
@@ -546,7 +546,7 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
         .await
         .expect("terminal transition to Completed must succeed");
 
-    // ── Terminal: schedule row reached `done`. ─────────────────────────────
+    // note: ── Terminal: schedule row reached `done`. ─────────────────────────────
     assert_eq!(
         schedule_status(&pool, "sch_research_e2e_001").await,
         "completed",
@@ -558,7 +558,7 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
         "supervisor reports the research schedule as Completed",
     );
 
-    // The terminated row carries a `terminated_at` timestamp — proves the
+    // why: The terminated row carries a `terminated_at` timestamp — proves the
     // terminal path ran the full UPDATE, not just a status flag flip.
     let terminated_at: Option<i64> =
         sqlx::query_scalar("SELECT terminated_at FROM creator_schedules WHERE schedule_id = ?")
@@ -572,9 +572,9 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
     );
 }
 
-// ── T2: boot resume path (daemon restart recovery for research) ─────────────
+// note: ── T2: boot resume path (daemon restart recovery for research) ─────────────
 
-/// Boot resume path: a research schedule that was `running` when the daemon
+/// note: Boot resume path: a research schedule that was `running` when the daemon
 /// crashed is recovered as `paused` on boot, then smart-resumed back to
 /// `running` once the gates still pass. This is the second leg of
 /// R-V139P5-S1 ("boot resume paths").
@@ -586,7 +586,7 @@ async fn research_schedule_boot_resume_running_to_paused_to_resumed() {
     let work = research_ready_work("wrk_resume", "resume-survey");
     seed_work(&pool, &work).await;
 
-    // Simulate a pre-crash state: the research schedule was mid-flight.
+    // note: Simulate a pre-crash state: the research schedule was mid-flight.
     ResearchScheduleFixture {
         schedule_id: "sch_research_resume_001",
         creator_id: "ctr_research_e2e",
@@ -601,7 +601,7 @@ async fn research_schedule_boot_resume_running_to_paused_to_resumed() {
         "precondition: schedule was running before the crash",
     );
 
-    // ── Daemon boot: running → paused. ─────────────────────────────────────
+    // note: ── Daemon boot: running → paused. ─────────────────────────────────────
     let paused_count = sup
         .resume_running_as_paused("daemon_restart_research_e2e")
         .await
@@ -616,14 +616,14 @@ async fn research_schedule_boot_resume_running_to_paused_to_resumed() {
         "boot recovery: research schedule is paused",
     );
 
-    // Idempotent: a second boot-recovery pass is a no-op.
+    // note: Idempotent: a second boot-recovery pass is a no-op.
     let again = sup
         .resume_running_as_paused("daemon_restart_research_e2e")
         .await
         .unwrap();
     assert_eq!(again, 0, "second boot-recovery pass finds nothing to pause");
 
-    // ── Smart resume: paused → running (gates still satisfied). ────────────
+    // note: ── Smart resume: paused → running (gates still satisfied). ────────────
     let new_status = sup
         .resume_schedule("sch_research_resume_001")
         .await

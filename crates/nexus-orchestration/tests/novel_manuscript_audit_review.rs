@@ -1,4 +1,5 @@
 //! Hermetic tests for novel-manuscript-audit-review embedded preset (V1.44 P0 fix, DF-69).
+// note: the preset is loaded and its manifest inspected; no engine runs.
 //!
 //! Validates:
 //! 1. Preset loads via `load_embedded_preset` and passes validation.
@@ -33,7 +34,6 @@ fn review_preset_has_required_capabilities() {
             .any(|c| c == "creator.inject_prompt"),
         "review preset must require creator.inject_prompt"
     );
-    // Review preset should NOT require kb.extract_work
     assert!(
         !loaded
             .manifest

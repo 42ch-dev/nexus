@@ -6,6 +6,8 @@
 //! - Orphan label detection (validator catches at load time)
 //! - All embedded presets still parse (regression)
 //! - No-match does NOT stall the session (deterministic fail)
+// note: labeled edges are `next` entries with label/target pairs; the loader
+// validates targets before the engine ever runs.
 
 use graph_flow::SessionStorage;
 use nexus_capability::CapabilityRegistry;
@@ -16,9 +18,9 @@ fn test_capability_registry() -> CapabilityRegistry {
     CapabilityRegistry::with_builtins()
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────
+// note: ── Helpers ───────────────────────────────────────────────────────
 
-/// Build a minimal preset YAML with N-way labeled next edges.
+/// note: Build a minimal preset YAML with N-way labeled next edges.
 fn labeled_preset_yaml(labels: &[(&str, &str)]) -> String {
     let edges: Vec<String> = labels
         .iter()
@@ -59,7 +61,7 @@ states:
     )
 }
 
-/// Build a preset YAML with hybrid `GoNogo` + Labeled states.
+/// note: Build a preset YAML with hybrid `GoNogo` + Labeled states.
 fn hybrid_preset_yaml() -> String {
     r#"
 preset:
@@ -114,10 +116,8 @@ states:
     .to_string()
 }
 
-/// Build a preset YAML with an orphan label (label referenced in next but not producible).
+/// note: Build a preset YAML with an orphan label (label referenced in next but not producible).
 fn orphan_label_preset_yaml() -> String {
-    // Deliberate: `missing_target` label does not correspond to any state.
-    // The label "phantom" is valid (references `done`) but the state `missing_target` doesn't exist.
     r#"
 preset:
   id: test-orphan
@@ -144,9 +144,9 @@ states:
     .to_string()
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────
+// note: ── Tests ─────────────────────────────────────────────────────────
 
-/// Full preset with 3-way labeled edges loads and passes validation.
+/// note: Full preset with 3-way labeled edges loads and passes validation.
 #[test]
 fn labeled_preset_loads_and_validates() {
     let yaml = labeled_preset_yaml(&[("good", "good_branch"), ("retry", "retry_branch")]);
@@ -164,7 +164,7 @@ fn labeled_preset_loads_and_validates() {
     );
 }
 
-/// Hybrid `GoNogo` + Labeled state preset loads and validates.
+/// note: Hybrid `GoNogo` + Labeled state preset loads and validates.
 #[test]
 fn hybrid_gonogo_labeled_preset_loads_and_validates() {
     let yaml = hybrid_preset_yaml();
@@ -182,12 +182,12 @@ fn hybrid_gonogo_labeled_preset_loads_and_validates() {
     );
 }
 
-/// Orphan label detection: validator catches missing target state at load time.
+/// note: Orphan label detection: validator catches missing target state at load time.
 #[test]
 fn orphan_label_detected_at_validation_time() {
     let yaml = orphan_label_preset_yaml();
     let caps = test_capability_registry();
-    // The loader itself should catch unknown state references in `next`.
+    // note: the loader itself catches unknown state references in `next`.
     let err = nexus_preset::load_preset_from_str(&yaml, &caps).unwrap_err();
     assert!(
         err.problems()
@@ -198,7 +198,7 @@ fn orphan_label_detected_at_validation_time() {
     );
 }
 
-/// Regression: all embedded presets still parse and pass validation.
+/// note: Regression: all embedded presets still parse and pass validation.
 #[test]
 fn all_embedded_presets_still_parse_regression() {
     let caps = test_capability_registry();
@@ -216,12 +216,12 @@ fn all_embedded_presets_still_parse_regression() {
                     nexus_preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
                 for d in &result.diagnostics {
                     if d.severity == nexus_preset::validation::DiagnosticSeverity::Error {
-                        // Known false positive: capability arg drift for creator.inject_prompt.
+                        // why: known false positive, capability arg drift for creator.inject_prompt.
                         if d.category
                             == nexus_preset::validation::DiagnosticCategory::CapabilityArgDrift
                             && d.message.contains("capability 'creator.inject_prompt'")
                         {
-                            continue; // known false positive, not a regression
+                            continue; // why: known false positive, not a regression
                         }
                         failures.push(format!(
                             "preset '{preset_id}': semantic error at {}: {}",
@@ -242,7 +242,7 @@ fn all_embedded_presets_still_parse_regression() {
     );
 }
 
-/// No-match does NOT stall: engine returns error on Labeled no-match.
+/// note: No-match does NOT stall: engine returns error on Labeled no-match.
 #[tokio::test]
 async fn labeled_no_match_does_not_stall_session() {
     let yaml = labeled_preset_yaml(&[("outline", "good_branch")]);
@@ -261,7 +261,7 @@ async fn labeled_no_match_does_not_stall_session() {
         .await
         .expect("start_session_with_preset");
 
-    // Set judge context to produce output that won't match any label.
+    // note: judge context uses the preset default label names, so nothing matches.
     if let Some(session) = storage.get(&sid.0).await.expect("get session") {
         session
             .context
@@ -271,7 +271,6 @@ async fn labeled_no_match_does_not_stall_session() {
         storage.save(session).await.expect("save session");
     }
 
-    // Run until error or iteration cap.
     let mut errored = false;
     for _ in 0..8 {
         match engine.run_step(&sid).await {

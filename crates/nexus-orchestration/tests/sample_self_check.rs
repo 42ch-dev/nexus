@@ -32,6 +32,7 @@
 //! The bundles live at the repo root; this crate resolves them via
 //! `CARGO_MANIFEST_DIR` so the test passes regardless of the invoking working
 //! directory.
+// note: The module summary above enumerates the invariants this suite locks down.
 
 use nexus_capability::CapabilityRegistry;
 use nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument;
@@ -43,7 +44,7 @@ use nexus_preset::{
 };
 use serde_yaml::Value;
 
-/// Repo-root-relative path to the bundled game-narrative sample.
+/// note: Repo-root-relative path to the bundled game-narrative sample.
 fn sample_bundle_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../strategy-samples/game-narrative")
 }
@@ -53,7 +54,7 @@ fn repo_root() -> std::path::PathBuf {
 }
 
 #[test]
-// Long integration test; splitting would obscure the end-to-end scenario
+// why: Long integration test; splitting would obscure the end-to-end scenario
 #[allow(clippy::too_many_lines)]
 fn game_narrative_sample_validates_clean() {
     let caps = CapabilityRegistry::with_builtins();
@@ -64,12 +65,11 @@ fn game_narrative_sample_validates_clean() {
         bundle_root.display()
     );
 
-    // Real validator core: loader (structural + A3 path/assets) first...
     let loaded = load_preset(&bundle_root, &caps)
         .unwrap_or_else(|e| panic!("sample must load cleanly: {e:?}"));
     assert_eq!(loaded.id, "game-narrative");
 
-    // ...then the shared semantic surface + explicit A3 surfaces, asserting
+    // note: ...then the shared semantic surface + explicit A3 surfaces, asserting
     // zero error AND zero warning diagnostics.
     let semantic = validate_preset_semantic(&loaded.manifest, &caps);
     let assets = validate_assets_in_bundle(&loaded.manifest, &bundle_root);
@@ -86,7 +86,7 @@ fn game_narrative_sample_validates_clean() {
         );
     }
 
-    // Pin the scheduled-lane shape (P3 QC fix wave W1): scan+judge state
+    // why: Pin the scheduled-lane shape (P3 QC fix wave W1): scan+judge state
     // BEFORE extraction, then a separate extract state — the embedded
     // `research` scanning -> extracting pattern.
     let states = &loaded.manifest.states;
@@ -116,7 +116,7 @@ fn game_narrative_sample_validates_clean() {
         other => panic!("routing must use branches next, got: {other:?}"),
     }
 
-    // Scan state: cheap inventory capability + judge, NO extraction here.
+    // note: Scan state: cheap inventory capability + judge, NO extraction here.
     let scheduled_sweep = states
         .iter()
         .find(|s| s.id == "scheduled_sweep")
@@ -153,7 +153,7 @@ fn game_narrative_sample_validates_clean() {
         "GO must advance to the separate extract state"
     );
 
-    // Extract state: the inner graph runs extraction ONLY, after the judge.
+    // note: Extract state: the inner graph runs extraction ONLY, after the judge.
     let sweep_extract = states
         .iter()
         .find(|s| s.id == "sweep_extract")
@@ -171,7 +171,7 @@ fn game_narrative_sample_validates_clean() {
         Some(NextTarget::Linear("done".to_string()))
     );
 
-    // The sweep graph must be extraction-only: no inventory node inside it
+    // invariant: The sweep graph must be extraction-only: no inventory node inside it
     // (the scan/judge lives in the scheduled_sweep state).
     let sweep_graph = &loaded.manifest.inner_graphs.as_ref().unwrap()["sweep_graph"];
     assert!(
@@ -200,7 +200,7 @@ fn game_narrative_sample_validates_clean() {
 
 #[test]
 fn dotted_preset_input_key_is_unreachable_in_expressions() {
-    // The context map is flat (`build_context_json` merges literal keys such
+    // why: The context map is flat (`build_context_json` merges literal keys such
     // as "preset.input.mode"), but the grammar resolves `_context.a.b.c` by
     // walking nested objects — a literal dotted key is unreachable, so the
     // expression evaluates false even when the key is present.
@@ -213,7 +213,7 @@ fn dotted_preset_input_key_is_unreachable_in_expressions() {
          (this is why the sample routes lanes via _judge_result)"
     );
 
-    // The judge-written discriminator is the supported path: true when the
+    // note: The judge-written discriminator is the supported path: true when the
     // llm_judge exit wrote true, false when absent (fail-closed default).
     let judge_true = serde_json::json!({ "_judge_result": true });
     let judge_absent = serde_json::json!({});
@@ -226,26 +226,26 @@ fn dotted_preset_input_key_is_unreachable_in_expressions() {
     );
 }
 
-// ---------------------------------------------------------------------------
+// note: ---------------------------------------------------------------------------
 // `preset.yaml` <-> `WorkflowDocument` round trip (IR-primary authoring gate)
 // ---------------------------------------------------------------------------
 
-/// One difference between a committed `preset.yaml` and its re-export. Both lists are the
+/// note: One difference between a committed `preset.yaml` and its re-export. Both lists are the
 /// exporter's contract and are published for sample authors in `strategy-samples/README.md` §6.
 #[derive(Debug)]
 struct Normalisation {
-    /// The shape a hand-written `preset.yaml` may use.
+    /// note: The shape a hand-written `preset.yaml` may use.
     input: &'static str,
-    /// The shape `export_preset` writes for that input.
+    /// note: The shape `export_preset` writes for that input.
     output: &'static str,
-    /// `true` when the two spellings mean different manifests: that is a blocking finding, never
+    /// note: `true` when the two spellings mean different manifests: that is a blocking finding, never
     /// a normalisation. Every entry in both lists is `false`.
     semantic: bool,
-    /// Where the rewrite comes from, so the entry can be re-derived from the code.
+    /// note: Where the rewrite comes from, so the entry can be re-derived from the code.
     source: &'static str,
 }
 
-/// Differences that live only in the bytes: the round-trip compares `serde_yaml::Value`s, so they
+/// note: Differences that live only in the bytes: the round-trip compares `serde_yaml::Value`s, so they
 /// cannot appear in its verdict.
 const BYTE_NORMALISATIONS: &[Normalisation] = &[
     Normalisation {
@@ -274,7 +274,7 @@ const BYTE_NORMALISATIONS: &[Normalisation] = &[
     },
 ];
 
-/// Differences the export makes to the value: a manifest using the `input` spelling does not
+/// note: Differences the export makes to the value: a manifest using the `input` spelling does not
 /// round-trip, so the committed YAML must use the `output` spelling. None of the three bundles
 /// below uses one — the test would report its YAML path.
 const VALUE_REWRITES: &[Normalisation] = &[
@@ -305,7 +305,7 @@ const VALUE_REWRITES: &[Normalisation] = &[
     },
 ];
 
-/// Join one YAML path segment onto `path`.
+/// note: Join one YAML path segment onto `path`.
 fn field_path(path: &str, segment: &str) -> String {
     if path.is_empty() {
         segment.to_string()
@@ -314,7 +314,7 @@ fn field_path(path: &str, segment: &str) -> String {
     }
 }
 
-/// First YAML path at which the two values disagree (e.g. `states[2].next.default`).
+/// note: First YAML path at which the two values disagree (e.g. `states[2].next.default`).
 fn first_divergence(path: &str, committed: &Value, exported: &Value) -> Option<String> {
     match (committed, exported) {
         (Value::Mapping(left), Value::Mapping(right)) => {
@@ -357,7 +357,7 @@ fn first_divergence(path: &str, committed: &Value, exported: &Value) -> Option<S
     }
 }
 
-/// Round-trip one committed bundle: `preset.yaml` -> `WorkflowDocument` -> `preset.yaml`.
+/// note: Round-trip one committed bundle: `preset.yaml` -> `WorkflowDocument` -> `preset.yaml`.
 fn assert_bundle_round_trips(bundle: &str) {
     let root = repo_root().join(bundle);
     let yaml = std::fs::read_to_string(root.join("preset.yaml"))
@@ -402,7 +402,7 @@ fn first_workflow_committed_yaml_round_trips() {
     assert_bundle_round_trips("examples/first-workflow");
 }
 
-/// Load one hand-edited `workflow.json`, check that `assets[]` declares exactly the templates the
+/// note: Load one hand-edited `workflow.json`, check that `assets[]` declares exactly the templates the
 /// carriers reference and that each `id` names the file it hashes, refuses any asset path that
 /// leaves the bundle, hashes each of them over the bytes it names, then assert the manifest it
 /// exports is the committed `preset.yaml`, byte for byte.
@@ -440,7 +440,7 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     );
 
     for asset in &document.assets {
-        // The carrier references an asset by this same string, and `import_preset_bundle`
+        // why: The carrier references an asset by this same string, and `import_preset_bundle`
         // registers every asset as `id == path`: an id that names a different file than `path`
         // keeps the name set above intact and still hashes a template no carrier uses.
         assert_eq!(
@@ -449,7 +449,7 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
              `{}`) — re-import the bundle instead of editing `path` alone",
             asset.id, asset.path
         );
-        // `assets[].path` is document-controlled and this loop is the only reader of it, so the
+        // safety: `assets[].path` is document-controlled and this loop is the only reader of it, so the
         // loader's path-safety predicate (the one `validate_path_safety` applies to carrier
         // references) runs here: an escaping path is refused, not hashed.
         nexus_preset::loader::assert_template_file_safe(&asset.path).unwrap_or_else(|reason| {
@@ -470,7 +470,7 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
         );
     }
 
-    // The committed bytes must be exactly what `nexus42 preset export <dir>` writes —
+    // why: The committed bytes must be exactly what `nexus42 preset export <dir>` writes —
     // not merely the same values — so a hand edit or a formatting drift reds here.
     let exported = export_preset(&document)
         .unwrap_or_else(|error| panic!("export {bundle}/workflow.json: {error}"));
@@ -489,7 +489,7 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     }
 }
 
-/// Diagnostic for a byte divergence: the first value-level divergence, when the YAML values
+/// note: Diagnostic for a byte divergence: the first value-level divergence, when the YAML values
 /// disagree at all. A pure formatting drift has no value divergence, so this is empty.
 fn value_divergence_detail(bundle: &str, exported: &PresetManifest, committed: &[u8]) -> String {
     let committed_yaml = String::from_utf8_lossy(committed);
@@ -512,14 +512,14 @@ fn react_trpg_turn_workflow_json_exports_the_committed_yaml() {
     assert_workflow_json_exports_committed_yaml("strategy-samples/react-trpg-turn");
 }
 
-/// One authored lane prose block: the outer state that carries it and a phrase only that block
+/// note: One authored lane prose block: the outer state that carries it and a phrase only that block
 /// contains, so a projection that drops it is visible.
 type LaneProse = (&'static str, &'static str);
 
-/// One sample's lane prose: the sample's bundle path and its per-state blocks.
+/// note: One sample's lane prose: the sample's bundle path and its per-state blocks.
 type SampleLaneProse = (&'static str, &'static [LaneProse]);
 
-/// The lane prose each sample authors in its outer-state `ui.description`, with a per-state
+/// note: The lane prose each sample authors in its outer-state `ui.description`, with a per-state
 /// sentinel. Generated YAML cannot carry a comment (`serde_yaml` writes values only), so this
 /// field is the carrier an export can project.
 const SAMPLE_LANE_PROSE: &[SampleLaneProse] = &[
@@ -543,7 +543,7 @@ const SAMPLE_LANE_PROSE: &[SampleLaneProse] = &[
     ),
 ];
 
-/// Load one sample's authoring source, the hand-edited `workflow.json`.
+/// note: Load one sample's authoring source, the hand-edited `workflow.json`.
 fn load_sample_document(bundle: &str) -> WorkflowDocument {
     let json = std::fs::read_to_string(repo_root().join(bundle).join("workflow.json"))
         .unwrap_or_else(|error| panic!("read {bundle}/workflow.json: {error}"));
@@ -552,7 +552,7 @@ fn load_sample_document(bundle: &str) -> WorkflowDocument {
     })
 }
 
-/// The `ui.description` a document's node carries, or `""` when it has none.
+/// note: The `ui.description` a document's node carries, or `""` when it has none.
 fn node_description(document: &WorkflowDocument, id: &str) -> String {
     let node = document
         .nodes
@@ -565,7 +565,7 @@ fn node_description(document: &WorkflowDocument, id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Acceptance 1: the lane prose lives on the carrier, and exporting the document twice puts it in
+/// note: Acceptance 1: the lane prose lives on the carrier, and exporting the document twice puts it in
 /// both outputs. Clearing one carrier makes its prose disappear from the export, so the exporter
 /// reads the field rather than replaying a copy of the prose.
 #[test]
@@ -621,7 +621,7 @@ fn sample_lane_prose_survives_a_second_export() {
     }
 }
 
-/// Acceptance 2: `import_preset_bundle` reads each state's description back into the same outer
+/// note: Acceptance 2: `import_preset_bundle` reads each state's description back into the same outer
 /// state's `ui.description`, so a manifest that arrives from a partner round-trips its prose.
 #[test]
 fn sample_lane_prose_imports_back_into_ui_description() {
@@ -656,7 +656,7 @@ fn sample_lane_prose_imports_back_into_ui_description() {
     }
 }
 
-/// A manifest whose `a` state is spelled by `a_state`, with `header_extra` spliced into the
+/// note: A manifest whose `a` state is spelled by `a_state`, with `header_extra` spliced into the
 /// preset header, and whose graph is otherwise fixed.
 fn probe_manifest_with(header_extra: &str, a_state: &str) -> String {
     format!(
@@ -666,12 +666,12 @@ fn probe_manifest_with(header_extra: &str, a_state: &str) -> String {
     )
 }
 
-/// A manifest whose `a` state is spelled by `a_state` and whose graph is otherwise fixed.
+/// note: A manifest whose `a` state is spelled by `a_state` and whose graph is otherwise fixed.
 fn probe_manifest(a_state: &str) -> String {
     probe_manifest_with("  requires_capabilities: [acp.prompt]\n", a_state)
 }
 
-/// Export a whole probe manifest through the IR. Probes take the no-filesystem import, so a probe
+/// note: Export a whole probe manifest through the IR. Probes take the no-filesystem import, so a probe
 /// may name a template that does not exist.
 fn probe_export_manifest(yaml: &str) -> Value {
     let manifest: PresetManifest = serde_yaml::from_str(yaml).expect("probe parses");
@@ -680,12 +680,12 @@ fn probe_export_manifest(yaml: &str) -> Value {
         .expect("probe export serialises")
 }
 
-/// Export a probe manifest whose `a` state is spelled by `a_state`.
+/// note: Export a probe manifest whose `a` state is spelled by `a_state`.
 fn probe_export(a_state: &str) -> Value {
     probe_export_manifest(&probe_manifest(a_state))
 }
 
-/// Every defaulted field [`VALUE_REWRITES`] names is written out by the export, on each carrier it
+/// note: Every defaulted field [`VALUE_REWRITES`] names is written out by the export, on each carrier it
 /// sits on: a hand-written manifest that leaves the field out still exports the canonical value.
 #[test]
 fn defaulted_fields_are_written_out() {
@@ -715,7 +715,7 @@ fn defaulted_fields_are_written_out() {
     );
 }
 
-/// Both lists are data, so their own invariant is checked: every entry is cosmetic, and every
+/// note: Both lists are data, so their own invariant is checked: every entry is cosmetic, and every
 /// entry names two different shapes with a source. A `semantic: true` entry means this plan must
 /// stop.
 #[test]
@@ -731,15 +731,15 @@ fn every_documented_normalisation_is_cosmetic() {
     }
 }
 
-/// The shape rewrites on the list still happen exactly where the list says — including the one
+/// note: The shape rewrites on the list still happen exactly where the list says — including the one
 /// that does rewrite the bytes (I-000476) and the spellings the three bundles use.
 #[test]
 fn documented_shape_rewrites_and_stable_shapes_hold() {
-    // Both samples' spelling: a judged state's bare `next` survives unchanged.
+    // note: Both samples' spelling: a judged state's bare `next` survives unchanged.
     let bare = probe_export("    exit_when: {kind: llm_judge}\n    next: b\n");
     assert_eq!(bare["states"][0]["next"], Value::String("b".to_string()));
 
-    // I-000476: a judged zero-rule branch may export as that same bare `next` today, or keep its
+    // why: I-000476: a judged zero-rule branch may export as that same bare `next` today, or keep its
     // `branches` shape once the exporter can tell the two apart. Either spelling must still point
     // at `b`: the assertion is the target, not the collapsed form, so the fix keeps it green while
     // a retargeted edge still fails.
@@ -752,7 +752,7 @@ fn documented_shape_rewrites_and_stable_shapes_hold() {
         "a judged state's zero-rule branch must still target `b`, whatever spelling it exports"
     );
 
-    // `examples/first-workflow` relies on this: a non-judged zero-rule branch keeps its shape.
+    // why: `examples/first-workflow` relies on this: a non-judged zero-rule branch keeps its shape.
     let kept = probe_export("    next: {branches: [], default: b}\n");
     assert_eq!(
         kept["states"][0]["next"]["branches"],
@@ -763,12 +763,12 @@ fn documented_shape_rewrites_and_stable_shapes_hold() {
         Value::String("b".to_string())
     );
 
-    // An explicit default is dropped from the export (`enter: []`, `terminal: false`).
+    // note: An explicit default is dropped from the export (`enter: []`, `terminal: false`).
     let explicit = probe_export("    enter: []\n    terminal: false\n    next: b\n");
     assert_eq!(explicit["states"][0].get("enter"), None);
     assert_eq!(explicit["states"][0].get("terminal"), None);
 
-    // The legacy `kind: conditional` spelling is rewritten to the `branches` form.
+    // note: The legacy `kind: conditional` spelling is rewritten to the `branches` form.
     let legacy = probe_export("    next: {kind: conditional, rules: [], default: b}\n");
     assert_eq!(
         legacy["states"][0]["next"]["branches"],

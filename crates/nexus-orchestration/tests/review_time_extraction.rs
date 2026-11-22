@@ -63,7 +63,7 @@ mod common;
 
 use common::test_pool;
 
-/// Seed a minimal `narrative_worlds` row (and FK creator) so the work's
+/// note: Seed a minimal `narrative_worlds` row (and FK creator) so the work's
 /// `world_id` FK holds. Reuses the shared seed helper.
 async fn seed_world(pool: &SqlitePool) {
     nexus_local_db::kb_store::seed::world(
@@ -78,10 +78,10 @@ async fn seed_world(pool: &SqlitePool) {
     .await;
 }
 
-/// Seed a `creator_schedules` row for a `novel-review-master` run.
+/// note: Seed a `creator_schedules` row for a `novel-review-master` run.
 async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
-    // v1.191 P1 T13: the schedule's stored production run identity is what the
+    // note: v1.191 P1 T13: the schedule's stored production run identity is what the
     // review-time extraction is admitted under (`current_session_id` FK), so the
     // run row is seeded with it.
     let run_id = format!("run_{schedule_id}");
@@ -111,7 +111,7 @@ async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, wor
     )
     .bind(schedule_id)
     .bind(CREATOR)
-    // v1.191 P1 T13: the review-time extraction run is admitted under the
+    // note: v1.191 P1 T13: the review-time extraction run is admitted under the
     // schedule's stored production run identity; extraction refuses an empty
     // one instead of inventing a default session.
     .bind(&run_id)
@@ -124,14 +124,14 @@ async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, wor
     .unwrap();
 }
 
-/// Seed a `work_chapters` row pointing at a body file written under `ws_dir`.
+/// note: Seed a `work_chapters` row pointing at a body file written under `ws_dir`.
 async fn seed_chapter_with_body(
     pool: &SqlitePool,
     work_id: &str,
     chapter: i32,
     body_rel_path: &str,
 ) {
-    // `work_chapters.created_at`/`updated_at` are declared INTEGER but seeded
+    // why: `work_chapters.created_at`/`updated_at` are declared INTEGER but seeded
     // with ISO-8601 strings in production (SQLite type affinity stores them as
     // TEXT); match that so the DAO's String decode succeeds.
     let now = "2026-06-18T10:00:00Z";
@@ -153,7 +153,7 @@ async fn seed_chapter_with_body(
     .unwrap();
 }
 
-/// Write a chapter body file under `ws_dir` and return the workspace dir.
+/// note: Write a chapter body file under `ws_dir` and return the workspace dir.
 fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) {
     let dir = tempfile::tempdir().unwrap();
     let body_rel = "Works/extract-test/Stories/ch03-ch03.md";
@@ -163,7 +163,7 @@ fn write_workspace_with_chapter(body_text: &str) -> (tempfile::TempDir, String) 
     (dir, body_rel.to_string())
 }
 
-// ── AC2: review-time extraction fires on novel-review-master completion ─────
+// note: ── AC2: review-time extraction fires on novel-review-master completion ─────
 
 #[tokio::test]
 async fn ac2_extraction_inserts_pending_candidates() {
@@ -183,7 +183,6 @@ async fn ac2_extraction_inserts_pending_candidates() {
             .await
             .unwrap();
 
-    // "Lin Xia" and "Marcus" should be extracted.
     assert!(count >= 1, "expected ≥1 candidate, got {count}");
 
     let pending = list_pending_for_world(&pool, WORLD, None).await.unwrap();
@@ -198,7 +197,7 @@ async fn ac2_extraction_inserts_pending_candidates() {
     );
 }
 
-// ── AC6: idempotency — re-running does not duplicate ─────────────────────────
+// note: ── AC6: idempotency — re-running does not duplicate ─────────────────────────
 
 #[tokio::test]
 async fn ac6_rerun_does_not_duplicate_pending() {
@@ -213,7 +212,6 @@ async fn ac6_rerun_does_not_duplicate_pending() {
     seed_chapter_with_body(&pool, "wrk_ac6", 1, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_ac6", "wrk_ac6").await;
 
-    // First run.
     let count1 =
         quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac6", Some(ws_dir.path()), None)
             .await
@@ -223,7 +221,7 @@ async fn ac6_rerun_does_not_duplicate_pending() {
     let after_first = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     let n_first = after_first.len();
 
-    // Second run on the same schedule (simulates re-fire) — no duplicates.
+    // why: Second run on the same schedule (simulates re-fire) — no duplicates.
     let count2 =
         quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac6", Some(ws_dir.path()), None)
             .await
@@ -238,7 +236,7 @@ async fn ac6_rerun_does_not_duplicate_pending() {
     );
 }
 
-// ── Non-review-master schedules are a no-op ─────────────────────────────────
+// note: ── Non-review-master schedules are a no-op ─────────────────────────────────
 
 #[test]
 fn pure_heuristic_extracts_character_names() {
@@ -265,7 +263,6 @@ async fn non_review_master_schedule_is_noop() {
     let work = novel_work("wrk_noop", 1);
     works::create_work(&pool, &work).await.unwrap();
 
-    // Insert a non-review-master schedule.
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
         r"INSERT INTO creator_schedules
@@ -298,7 +295,7 @@ async fn non_review_master_schedule_is_noop() {
     assert_eq!(count, 0, "non-review-master schedule must be a no-op");
 }
 
-// ── Missing workspace_dir is a safe no-op ───────────────────────────────────
+// note: ── Missing workspace_dir is a safe no-op ───────────────────────────────────
 
 #[tokio::test]
 async fn missing_workspace_dir_is_noop() {
@@ -315,17 +312,17 @@ async fn missing_workspace_dir_is_noop() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// v1.191 P1 T13 — the review-time caller runs through the adapter wrapper
+// note: v1.191 P1 T13 — the review-time caller runs through the adapter wrapper
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// An executor that reports the run identity it was invoked with and answers a
+/// note: An executor that reports the run identity it was invoked with and answers a
 /// fixed extraction payload.
 struct MockReviewExtract {
     response: String,
     run_id: std::sync::Mutex<String>,
-    /// When set, the executor never answers (a cancelled run).
+    /// note: When set, the executor never answers (a cancelled run).
     pending: bool,
-    /// When set, the executor fails (an extractor failure).
+    /// note: When set, the executor fails (an extractor failure).
     failing: bool,
 }
 
@@ -352,7 +349,7 @@ impl nexus_capability::PromptExecutor for MockReviewExtract {
     }
 }
 
-/// A registry whose `nexus.llm.extract` runs on the mock executor, with the
+/// note: A registry whose `nexus.llm.extract` runs on the mock executor, with the
 /// review hook's stored run identity (`run_<schedule_id>`) registered as a
 /// cancellable run.
 fn review_registry(
@@ -384,13 +381,13 @@ async fn pending_rows(
 async fn relationship_rows(
     pool: &SqlitePool,
 ) -> Vec<nexus_local_db::kb_relationships::KbRelationshipRow> {
-    // `include_suggested` keeps the extraction suggestions visible.
+    // note: `include_suggested` keeps the extraction suggestions visible.
     nexus_local_db::kb_relationships::list_relationships_for_world(pool, WORLD, true, 100)
         .await
         .unwrap()
 }
 
-/// The headline T13 case: the review hook extracts through the real caller
+/// note: The headline T13 case: the review hook extracts through the real caller
 /// path (hook → `nexus.llm.extract` → adapter wrapper → `orchestrate_extract`),
 /// persists the model's candidates as pending rows and its relationship
 /// candidates as suggestions against the entities that exist.
@@ -406,7 +403,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
     seed_chapter_with_body(&pool, "wrk_t13_ok", 3, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_t13_ok", "wrk_t13_ok").await;
 
-    // The relationship endpoints must already exist as KB rows (the
+    // why: The relationship endpoints must already exist as KB rows (the
     // entity-existence prerequisite).
     nexus_local_db::kb_store::seed::knowledge_entry(
         &pool,
@@ -454,7 +451,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
     .unwrap();
     assert_eq!(inserted, 2, "both LLM candidates are persisted as pending");
 
-    // The model ran on the real production run identity, not an empty session.
+    // why: The model ran on the real production run identity, not an empty session.
     assert_eq!(
         executor.run_id.lock().expect("run id lock").as_str(),
         "run_sch_t13_ok"
@@ -467,7 +464,6 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
         .collect();
     assert!(names.contains(&"Lin Xia"), "rows: {names:?}");
     assert!(names.contains(&"Azure Gate"), "rows: {names:?}");
-    // Candidate ids are retained and the LLM metadata rode along.
     assert!(pending.iter().all(|c| !c.job_id.is_empty()));
     let lin_xia = pending
         .iter()
@@ -479,7 +475,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
         Some("Lin Xia drew her blade.")
     );
 
-    // The relationship sidecar survived SPOKE's KE-only success arm and was
+    // why: The relationship sidecar survived SPOKE's KE-only success arm and was
     // resolved against exactly those entities.
     let relationships = relationship_rows(&pool).await;
     assert_eq!(relationships.len(), 1, "one suggestion: {relationships:?}");
@@ -489,7 +485,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
     assert_ne!(relationships[0].relationship_id, "");
 }
 
-/// A schedule with no stored run identity extracts nothing: no empty/default
+/// note: A schedule with no stored run identity extracts nothing: no empty/default
 /// session is invented, and neither candidates nor relationships are written.
 #[tokio::test]
 async fn v1191_extract_review_hook_without_a_run_identity_writes_nothing() {
@@ -533,7 +529,7 @@ async fn v1191_extract_review_hook_without_a_run_identity_writes_nothing() {
     );
 }
 
-/// An incomplete/invalid model terminal is not a worker outage: it writes
+/// note: An incomplete/invalid model terminal is not a worker outage: it writes
 /// nothing and never becomes heuristic persistence.
 #[tokio::test]
 async fn v1191_extract_review_hook_invalid_terminal_writes_nothing() {
@@ -570,7 +566,7 @@ async fn v1191_extract_review_hook_invalid_terminal_writes_nothing() {
     assert!(relationship_rows(&pool).await.is_empty());
 }
 
-/// A stale target (the Work's World is no longer owned by the stored Creator)
+/// note: A stale target (the Work's World is no longer owned by the stored Creator)
 /// refuses before the model runs.
 #[tokio::test]
 async fn v1191_extract_review_hook_stale_target_writes_nothing() {
@@ -581,7 +577,7 @@ async fn v1191_extract_review_hook_stale_target_writes_nothing() {
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia was here.");
     seed_chapter_with_body(&pool, "wrk_t13_stale", 1, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_t13_stale", "wrk_t13_stale").await;
-    // The stored World is now owned by a different creator (the FK target is
+    // why: The stored World is now owned by a different creator (the FK target is
     // seeded first), so the hook's stored-state recheck must refuse.
     let other_world = "wld_t13_other";
     nexus_local_db::kb_store::seed::world(
@@ -627,7 +623,7 @@ async fn v1191_extract_review_hook_stale_target_writes_nothing() {
     );
 }
 
-/// Cancellation before commit: dropping the hook future mid-run writes neither
+/// note: Cancellation before commit: dropping the hook future mid-run writes neither
 /// candidates nor relationships.
 #[tokio::test]
 async fn v1191_extract_review_hook_cancelled_run_writes_nothing() {
@@ -674,7 +670,7 @@ async fn v1191_extract_review_hook_cancelled_run_writes_nothing() {
     );
 }
 
-/// An extractor failure (the host prompt worker errors) is a failed extraction
+/// note: An extractor failure (the host prompt worker errors) is a failed extraction
 /// run, not a worker outage: it writes nothing and never becomes heuristic
 /// persistence (v1.191 P1 T13 review I2).
 #[tokio::test]
@@ -718,7 +714,7 @@ async fn v1191_extract_review_hook_extractor_failure_writes_nothing() {
     assert!(relationship_rows(&pool).await.is_empty());
 }
 
-/// A model citation the admitted chapter does not contain is dropped instead of
+/// note: A model citation the admitted chapter does not contain is dropped instead of
 /// being persisted as provenance (v1.191 P1 T13 review I1).
 #[tokio::test]
 async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
@@ -726,7 +722,7 @@ async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
     seed_world(&pool).await;
     let work = novel_work("wrk_t13_quote", 1);
     works::create_work(&pool, &work).await.unwrap();
-    // The chapter never says "Lin Xia drew her blade.".
+    // note: The chapter never says "Lin Xia drew her blade.".
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia walked into the tavern.");
     seed_chapter_with_body(&pool, "wrk_t13_quote", 1, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_t13_quote", "wrk_t13_quote").await;
@@ -790,7 +786,7 @@ async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
     );
 }
 
-/// Post-callback cancellation: the model has already answered (the protocol
+/// note: Post-callback cancellation: the model has already answered (the protocol
 /// accepted the run) and the finalize transaction can never commit. Dropping the
 /// hook future must leave zero candidate and zero relationship writes — the
 /// callers' single transaction is what makes that true (v1.191 P1 T13 review C1).
@@ -833,7 +829,7 @@ async fn v1191_extract_review_hook_post_callback_cancel_writes_nothing() {
     });
     let registry = review_registry("sch_t13_late", executor.clone());
 
-    // Hold the write lock so the finalize transaction cannot commit, then drop
+    // why: Hold the write lock so the finalize transaction cannot commit, then drop
     // the hook future on the timeout — after the model has answered.
     let mut blocker = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query("UPDATE kb_extract_jobs SET status = status WHERE creator_id = ?")

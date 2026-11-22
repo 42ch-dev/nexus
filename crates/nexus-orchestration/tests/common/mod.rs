@@ -1,4 +1,5 @@
 //! Shared bootstrap for `nexus-orchestration` integration tests.
+// note: db_path is a file path; each caller chooses the temp owner shape.
 //!
 //! One pool initialisation, reached through the tuple shapes each suite binds.
 //! The tuple order is the order that suite bound its owner and pool; `(Arc,
@@ -6,7 +7,7 @@
 //! thin wrapper. Only the owner differs where a suite re-opens the DB by path:
 //! the run-state suite needs a named temp *file*, the rest a temp *dir*.
 
-#![allow(dead_code)] // one binary per test file; each uses a subset
+#![allow(dead_code)] // why: one binary per test file; each uses a subset
 
 use std::path::Path;
 use std::sync::Arc;
@@ -14,13 +15,13 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 use tempfile::{NamedTempFile, TempDir};
 
-/// A fresh workspace DB and the temp dir that owns its file.
+/// note: A fresh workspace DB and the temp dir that owns its file.
 struct TestDb {
     dir: TempDir,
     pool: SqlitePool,
 }
 
-/// The one initialisation both owner shapes share: open the engine pool over
+/// note: The one initialisation both owner shapes share: open the engine pool over
 /// `db_path` and drop the writer guard.
 async fn engine_pool(db_path: &Path) -> SqlitePool {
     nexus_local_db::init_engine_pool(db_path)
@@ -29,20 +30,20 @@ async fn engine_pool(db_path: &Path) -> SqlitePool {
         .clone_pool()
 }
 
-/// A temp dir with `state.db` inside it, migrated and open.
+/// note: A temp dir with `state.db` inside it, migrated and open.
 async fn initialised() -> TestDb {
     let dir = tempfile::tempdir().unwrap();
     let pool = engine_pool(&dir.path().join("state.db")).await;
     TestDb { dir, pool }
 }
 
-/// `(TempDir, SqlitePool)` — the plain shape; bind `(_dir, pool)`.
+/// note: `(TempDir, SqlitePool)` — the plain shape; bind `(_dir, pool)`.
 pub async fn test_pool() -> (TempDir, SqlitePool) {
     let TestDb { dir, pool } = initialised().await;
     (dir, pool)
 }
 
-/// `(TempDir, Arc<SqlitePool>)` — the same pair with the directory first, for
+/// note: `(TempDir, Arc<SqlitePool>)` — the same pair with the directory first, for
 /// suites that bind `(_dir, pool)` and hand the pool to a supervisor as an
 /// `Arc`.
 pub async fn arc_pool_dir_first() -> (TempDir, Arc<SqlitePool>) {
@@ -50,7 +51,7 @@ pub async fn arc_pool_dir_first() -> (TempDir, Arc<SqlitePool>) {
     (dir, Arc::new(pool))
 }
 
-/// `(NamedTempFile, Arc<SqlitePool>)` — the run-state suite re-opens the DB by
+/// note: `(NamedTempFile, Arc<SqlitePool>)` — the run-state suite re-opens the DB by
 /// `db.path()`, so this shape owns a named temp file instead of a dir; that
 /// owner choice is the only step it does not share. The owner is the first
 /// element so the pool, declared second, drops first.
