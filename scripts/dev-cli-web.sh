@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Local dev shortcut: standalone TS service + Web dev server.
+# Local dev shortcut: standalone TS service + Web dev server, upgrade: none - permanent entrypoint.
 #
 #   pnpm dev
 #
-# 1. Requires an already-built native artifact (packages/nexus-native-<platform>/
+# 1. Requires an already-built native artifact (packages/nexus-native/
 #    native/nexus_core_node.node). A missing/incompatible artifact fails fast
 #    with `pnpm dev:backend:refresh` — ordinary startup never runs Cargo.
 # 2. Ensures the standalone TS service (apps/nexus-service) is running on the
