@@ -686,11 +686,7 @@ mod tests {
     // `world_id` before calling, and the builder's signature already requires
     // `world_id: String`, not `Option<String>`.
     #[tokio::test]
-    async fn legacy_worldless_caller_skips_block() {
-        // note: intentionally unconditional — this pins a caller-level convention,
-        // not runtime behavior. There is nothing to assert because the contract
-        // lives in the signature.
-    }
+    async fn legacy_worldless_caller_skips_block() {}
 
     // invariant: AC6 (v1.191 P1 T11) — the snapshot is the whole input. The builder
     // performs no World query of its own, so an unknown World is just an empty
