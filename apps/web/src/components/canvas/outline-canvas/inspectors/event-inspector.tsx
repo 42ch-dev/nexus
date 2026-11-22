@@ -1,5 +1,5 @@
 /**
- * Outline canvas — event/timeline inspector (V1.73 B5 split,
+ * note: Outline canvas — event/timeline inspector (V1.73 B5 split,
  * `R-V172P0-QC1-002`; V1.108 P0 T4 foreshadow authoring — FB-C1-005;
  * V1.200 DR-26 cross-surface World-event binding authoring).
  *
@@ -27,13 +27,13 @@ interface TimelinePanelProps {
   selectedChapterId: number | null;
   baseRevision: number;
   /**
-   * Dispatch a `timeline.patch_event` write. `onSuccess` fires only after the
+   * note: dispatch a `timeline.patch_event` write. `onSuccess` fires only after the
    * write lands, so the bind drafts below are cleared on success alone
    * (V1.200 DR-26 round 2 — a 409/422 refusal keeps the typed draft).
    */
   onPatchTimeline: (request: TimelinePatchEventRequest, onSuccess?: () => void) => void;
   /**
-   * The Work's bound World id (`Work.world_id`, V1.200 DR-26). Absent → the
+   * note: the Work's bound World id (`Work.world_id`, V1.200 DR-26). Absent → the
    * World-event binding control renders **disabled, never hidden**: the core
    * refuses both `bind_world_event` and `unbind_world_event` without a bound
    * World, so the affordance stays visible and carries the refusal reason.
@@ -41,20 +41,20 @@ interface TimelinePanelProps {
   boundWorldId?: string;
 }
 
-/** One selectable World KB `block_type=event` entity of the bound World. */
+/** note: one selectable World KB `block_type=event` entity of the bound World. */
 interface WorldEventOption {
   id: string;
   name: string;
 }
 
 /**
- * The two controls that author a World-event binding draft (V1.200 DR-26): the
+ * note: the two controls that author a World-event binding draft (V1.200 DR-26): the
  * picker's selection and the manual World-event-ID field.
  */
 type WorldEventDraftControl = 'picker' | 'manual';
 
 /**
- * Project the bound World's KB graph into picker options (V1.200 DR-26).
+ * note: project the bound World's KB graph into picker options (V1.200 DR-26).
  *
  * Reuses the existing single graph source (`useWorldKbGraph` →
  * `WorldKbGraphResponse.entities[]`, V1.73) — the same read the World Timeline
@@ -102,13 +102,13 @@ function TimelinePanelView({
   const { t } = useTranslation('canvas');
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
-  // Per-source-event selected foreshadow target id (FB-C1-005 link control).
+  // note: per-source-event selected foreshadow target id (FB-C1-005 link control).
   const [linkTargetByEvent, setLinkTargetByEvent] = useState<Record<string, string>>({});
-  // Per-event selected World-event target id (V1.200 DR-26 bind control).
+  // note: per-event selected World-event target id (V1.200 DR-26 bind control).
   const [worldEventTargetByEvent, setWorldEventTargetByEvent] = useState<Record<string, string>>({});
   const [manualWorldEventByEvent, setManualWorldEventByEvent] = useState<Record<string, string>>({});
 
-  // V1.201 002/R4 — one draft generation per (control, event). The value alone
+  // note: V1.201 002/R4 — one draft generation per (control, event). The value alone
   // is not a draft tag: a manual `A → B → A` retype reads as untouched, and a
   // picker draft can equal an independently typed manual one. Every draft
   // mutation bumps its generation, so a resolving bind can tell whether the
@@ -118,7 +118,7 @@ function TimelinePanelView({
     manual: {},
   });
 
-  // V1.201 002/FX-B — a bind is issued against one draft *and* one bound World,
+  // invariant: V1.201 002/FX-B — a bind is issued against one draft *and* one bound World,
   // and the Work can be re-bound to another World while the write is in flight.
   // The drafts survive that transition (R3), so the completion of a former
   // World's bind must not consume a draft now shown under the newly bound
@@ -137,7 +137,7 @@ function TimelinePanelView({
         byEvent[eventId] += 1;
       }
     }
-    // A picker selection names an entity of one specific World, so it cannot
+    // why: a picker selection names an entity of one specific World, so it cannot
     // carry into the newly bound World (the picker no longer offers it and
     // Bind has no valid referent). The manual field is free-form World-event
     // ID text, not World data, so its draft is preserved.
@@ -159,7 +159,7 @@ function TimelinePanelView({
     draftSetters[control]((prev) => ({ ...prev, [eventId]: value }));
   }
 
-  // Foreshadow edges grouped by source event for quick lookup per row.
+  // note: foreshadow edges grouped by source event for quick lookup per row.
   const outgoingForeshadows = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const link of outline.foreshadows) {
@@ -178,7 +178,7 @@ function TimelinePanelView({
     return map;
   }, [outline.timeline_events]);
 
-  // Bound referent → display name, so a binding renders its World event's
+  // note: bound referent → display name, so a binding renders its World event's
   // canonical name when the (possibly capped) graph read carries it and falls
   // back to the raw `key_block_id` otherwise.
   const worldEventNameById = useMemo(() => {
@@ -236,7 +236,7 @@ function TimelinePanelView({
   ) {
     const trimmedId = worldEventId.trim();
     if (!trimmedId) return;
-    // V1.201 002/R4 — a bind is issued against exactly one control's draft, so
+    // note: V1.201 002/R4 — a bind is issued against exactly one control's draft, so
     // the request tag is that control's draft generation. The write is still
     // cleared only once it lands (the success-only pattern the scene/beat
     // drafts use); a typed 422/409 refusal keeps the draft for retry, and the
@@ -250,7 +250,7 @@ function TimelinePanelView({
         event_id: eventId,
         world_event_id: trimmedId,
       },
-      // V1.201 002/R4 — release exactly the draft this bind was issued
+      // note: V1.201 002/R4 — release exactly the draft this bind was issued
       // against: the originating control, and only while its generation is
       // unchanged (a re-typed draft is a newer generation and survives). The
       // other control's draft was never part of this request, so an unrelated

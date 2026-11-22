@@ -1,5 +1,5 @@
 /**
- * Regression coverage for R-V165-QC3-VIRT (B6): chapter table virtualization.
+ * note: Regression coverage for R-V165-QC3-VIRT (B6): chapter table virtualization.
  *
  * The outline structure inspector renders large chapter lists through
  * `react-window` FixedSizeList so only the visible viewport is mounted.
@@ -96,7 +96,7 @@ describe('OutlineStructurePanel virtualization (R-V165-QC3-VIRT B6)', () => {
     );
 
     const buttons = screen.queryAllByRole('button', { name: /Chapter \d+/ });
-    // The list is 384px tall with 48px rows, so at most ~10 rows (+ overscan)
+    // note: the list is 384px tall with 48px rows, so at most ~10 rows (+ overscan)
     // should be mounted rather than all 120.
     expect(buttons.length).toBeGreaterThan(0);
     expect(buttons.length).toBeLessThan(120);

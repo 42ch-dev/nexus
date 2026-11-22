@@ -1,5 +1,5 @@
 /**
- * The Canvas's non-graph presentations (D16), all resolved from one
+ * note: The Canvas's non-graph presentations (D16), all resolved from one
  * `getStrategyApplied` read:
  *
  *   (a) never applied, never approved → Compose is the only action;
@@ -18,9 +18,9 @@ export type AppliedStateKind = 'never-applied' | 'approved-unapplied' | 'unreada
 
 export interface StrategyAppliedStateProps {
   state: AppliedStateKind;
-  /** (c) only: the refusal's own sentence, naming what no longer verifies. */
+  /** note: (c) only: the refusal's own sentence, naming what no longer verifies. */
   reason?: string;
-  /** (b) only: the refusal the last apply returned, rendered verbatim. */
+  /** note: (b) only: the refusal the last apply returned, rendered verbatim. */
   refusal?: string | null;
   onOpenCompose?: () => void;
   onApplyLatest?: () => void;
@@ -36,7 +36,7 @@ export function StrategyAppliedState({
   onRecheck,
 }: StrategyAppliedStateProps) {
   const { t } = useTranslation('canvas');
-  // Literal keys keep the catalogue greppable from the state itself.
+  // note: literal keys keep the catalogue greppable from the state itself.
   const titles: Record<AppliedStateKind, string> = {
     'never-applied': 'strategy.applied.neverApplied.title',
     'approved-unapplied': 'strategy.applied.approvedUnapplied.title',
@@ -77,7 +77,7 @@ export function StrategyAppliedState({
             {t('strategy.applied.approvedUnapplied.applyLatest')}
           </Button>
         ) : null}
-        {/* (c): re-reading is honest recovery and mutates nothing; import and
+        {/* note: (c): re-reading is honest recovery and mutates nothing; import and
             apply are what this state must not offer. */}
         {state === 'unreadable' && onRecheck ? (
           <Button variant="secondary" onClick={onRecheck}>

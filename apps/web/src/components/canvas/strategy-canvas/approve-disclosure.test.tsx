@@ -1,5 +1,5 @@
 /**
- * Approve disclosure — the five required limit elements, each asserted on its
+ * note: Approve disclosure — the five required limit elements, each asserted on its
  * own (`.mstar/research/p2-simulator-limits.md` §3; compass D5).
  *
  * A bare "simulated" badge satisfies none of these: every assertion reads a
@@ -154,7 +154,7 @@ describe('ApproveDisclosure — approval readiness', () => {
     const onRun = vi.fn();
     renderDisclosure({ status: 'stale', onRun });
 
-    // `stale` is the product's own stale state; the banner belongs to it.
+    // note: `stale` is the product's own stale state; the banner belongs to it.
     expect(screen.getByTestId('approve-stale')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Run simulation' }));
     expect(onRun).toHaveBeenCalledTimes(1);
@@ -165,7 +165,7 @@ describe('ApproveDisclosure — approval readiness', () => {
 
     expect(approveButton()).toBeDisabled();
     expect(screen.getByTestId('approve-unavailable')).toHaveTextContent('I-000415');
-    // The disclosure itself still works: the limit is visible without approval.
+    // note: the disclosure itself still works — the limit is visible without approval.
     expect(screen.getByTestId('approve-simulation-level')).toBeInTheDocument();
   });
 

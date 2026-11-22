@@ -1,5 +1,5 @@
 /**
- * BeatInspector — read-only Beat detail panel (V1.109 C2 T3; FB-C2-002).
+ * note: BeatInspector — read-only Beat detail panel (V1.109 C2 T3; FB-C2-002).
  *
  * The inspector is read-only (no write wire — `wire_contracts_changed: false`).
  * These tests pin the locked Voice & Content strings: heading **Beat**,

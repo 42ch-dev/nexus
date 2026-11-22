@@ -1,5 +1,5 @@
 /**
- * Strategy-canvas layout pieces — header (title + revision + alt view toggle +
+ * note: Strategy-canvas layout pieces — header (title + revision + alt view toggle +
  * live-session banner) and footer (idea input + steering artifacts).
  *
  * Extracted so the orchestrator stays under the 200-line limit
@@ -29,19 +29,19 @@ export function CanvasHeader({
   showAlt: boolean;
   setShowAlt: (v: boolean) => void;
   /**
-   * Simulate entry point: resolves the open strategy's IR (a supplied
+   * note: simulate entry point: resolves the open strategy's IR (a supplied
    * candidate, or the installed preset read) and opens the disclosure that
    * renders the simulation limit.
    */
   onSimulate?: () => void;
   /**
-   * Compose path (flag on): the header shows the `Staging` badge and an
+   * note: compose path (flag on): the header shows the `Staging` badge and an
    * **Add pattern…** entry point that opens the pattern picker (nest).
    */
   staging?: boolean;
   onAddPattern?: () => void;
   /**
-   * Read-only applied view, Compose flag off: the one authoring entry out of
+   * note: read-only applied view, Compose flag off: the one authoring entry out of
    * this state. Compose opens on the strategy's candidate document, so the
    * hint under the header says what that entry does and does not continue.
    */

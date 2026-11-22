@@ -1,5 +1,5 @@
 /**
- * Apply wiring for the compose path (v241 P3.5 T2).
+ * note: Apply wiring for the compose path (v241 P3.5 T2).
  *
  * `POST /v1/daemon/strategies/{id}/apply` installs one already-approved
  * snapshot as the strategy's running identity. The body names the approval by
@@ -47,7 +47,7 @@ export function useApplyStrategy(presetId: string) {
           approval_content_hash: approval.content_hash,
         });
         setState({ kind: 'applied', applied });
-        // The status read is the badge's source; an apply supersedes it.
+        // note: the status read is the badge's source; an apply supersedes it.
         void queryClient.invalidateQueries({ queryKey: queryKeys.strategies.applied(presetId) });
         return applied;
       } catch (error) {

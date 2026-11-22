@@ -1,5 +1,5 @@
 /**
- * Orchestrator-level state hook for the Strategy canvas.
+ * note: Orchestrator-level state hook for the Strategy canvas.
  *
  * The Canvas renders a workflow IR document (the applied one, or the candidate
  * being composed) — never YAML. The hook owns the shared edit form, the active
@@ -21,7 +21,7 @@ import {
 import type { EditForm, Section } from '../state-machine';
 
 export function useStrategyCanvas(presetId: string, document: WorkflowDocument | null) {
-  // The editing surface's flat state view of the rendered document. No YAML
+  // note: the editing surface's flat state view of the rendered document. No YAML
   // is parsed on this path.
   const parsed = useMemo(() => (document ? parsedPresetFromIr(document) : undefined), [document]);
   const revision = document?.revision ?? 0;

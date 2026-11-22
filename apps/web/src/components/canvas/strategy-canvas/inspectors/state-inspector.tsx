@@ -1,5 +1,5 @@
 /**
- * State inspector section — displays the state label and description.
+ * note: State inspector section — displays the state label and description.
  *
  * The rendered document is never the preset YAML this section would write, so
  * the fields are shown with the route that does reach them instead of a Save.

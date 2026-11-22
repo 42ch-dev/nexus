@@ -1,5 +1,5 @@
 /**
- * Compose-path state for the Strategy canvas (v239-p3-canvas-compose-ui T3/T3b/T4).
+ * note: Compose-path state for the Strategy canvas (v239-p3-canvas-compose-ui T3/T3b/T4).
  *
  * The canvas holds the candidate document in hand: seeded from the canonical
  * candidate read (`GET /strategies/{id}/candidate`, the stored row or the
@@ -30,14 +30,14 @@ import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError, type NexusClient } from '@/lib/nexus';
 
 export interface ComposeConflict {
-  /** The daemon's message: "Candidate changed before this edit. Reload revision N and reapply the change." */
+  /** note: the daemon's message: "Candidate changed before this edit. Reload revision N and reapply the change." */
   message: string;
   baseRevision: number;
   currentRevision: number;
 }
 
 export interface ComposeRefusal {
-  /** Named refusal family (`nest_cycle`, `package_unavailable`, the slot refusals, …). */
+  /** note: named refusal family (`nest_cycle`, `package_unavailable`, the slot refusals, …). */
   reason: string;
   message: string;
   details: Record<string, unknown>;
@@ -51,7 +51,7 @@ export interface UnboundSlot {
 }
 
 export interface NestTarget {
-  /** Existing node the new slot hangs off; the interaction wires the connecting edge. */
+  /** note: existing node the new slot hangs off; the interaction wires the connecting edge. */
   attachNodeId: string;
   package: { id: string; version: string };
 }
@@ -62,7 +62,7 @@ interface CommittedCandidate {
 }
 
 /**
- * Spatial chrome the canvas authors around the committed candidate. Graph
+ * note: spatial chrome the canvas authors around the committed candidate. Graph
  * structure (nodes, edges, nests) is the daemon's alone.
  */
 interface ComposeChrome {
@@ -84,7 +84,7 @@ function dropChromeFor(
   };
 }
 
-/** `nest` needs fresh ids; suffix until the id is free in the candidate. */
+/** note: `nest` needs fresh ids; suffix until the id is free in the candidate. */
 function freshId(base: string, taken: (id: string) => boolean): string {
   let id = base;
   let n = 2;
@@ -96,15 +96,15 @@ function freshId(base: string, taken: (id: string) => boolean): string {
 }
 
 /**
- * How many listing pages the walk reads before giving up.
+ * note: how many listing pages the walk reads before giving up.
  *
- * shortcut: 20 pages is the whole registry for any plausible package count; raise it
- * if a real registry outgrows 20 listing pages.
+ * shortcut: 20 pages is the whole registry for any plausible package count;
+ * upgrade: raise it if a real registry outgrows 20 listing pages.
  */
 const MAX_PATTERN_PAGES = 20;
 
 /**
- * The listing is cursor-paged, and both compose gates (the picker and the
+ * note: the listing is cursor-paged, and both compose gates (the picker and the
  * unbound-slot check) need every package, so follow `next_cursor` until the
  * service says there is no more. A walk that cannot finish — the cap or a failed
  * page — is a query error the surface shows, never a short list it presents as
@@ -117,7 +117,7 @@ async function listAllPatterns(client: NexusClient): Promise<ListPatternsRespons
     const response = await client.listPatterns(cursor === undefined ? undefined : { cursor });
     items.push(...response.items);
     const next = response.pagination.next_cursor;
-    // A repeated cursor cannot make progress; stop instead of paging forever.
+    // why: a repeated cursor cannot make progress; stop instead of paging forever.
     if (!response.pagination.has_more || next === undefined || next === cursor) {
       return { items, pagination: { limit: response.pagination.limit, has_more: false } };
     }
@@ -138,7 +138,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     staleTime: 30_000,
   });
 
-  // The canonical candidate: the stored row, or the revision-0 import projection
+  // note: the canonical candidate — the stored row, or the revision-0 import projection
   // for a strategy that has never been composed. Committed compose responses
   // replace it.
   const seedQuery = useQuery({
@@ -159,7 +159,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
 
   const committedDocument = committed?.document ?? seedQuery.data ?? null;
 
-  /** The candidate the daemon holds, verbatim: the canvas adds no graph structure. */
+  /** note: the candidate the daemon holds, verbatim: the canvas adds no graph structure. */
   const workingDocument = committedDocument;
 
   const revision = committedDocument?.revision ?? 0;
@@ -195,7 +195,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
         setRefusal(null);
         return response;
       } catch (error) {
-        // A rejected op leaves the working document unchanged — no auto-retry.
+        // invariant: a rejected op leaves the working document unchanged — no auto-retry.
         if (error instanceof NexusClientError && error.code === 'strategy_candidate_conflict') {
           const details = (error.details ?? {}) as { current_revision?: number };
           setConflict({
@@ -220,14 +220,14 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
   );
 
   /**
-   * T4 recovery — reload the canonical candidate at the revision the daemon
+   * note: T4 recovery — reload the canonical candidate at the revision the daemon
    * holds and drop the stale conflict, so the user reapplies the op against
    * current bytes instead of the revision they no longer have.
    */
   const reload = useCallback(async () => {
     try {
       const document = await client.getStrategyCandidate(presetId);
-      // A compose that committed while this read was in flight already holds the
+      // why: a compose that committed while this read was in flight already holds the
       // newer bytes; installing the older response would seed a fresh 409.
       setCommitted((prev) =>
         prev && prev.document.revision > document.revision
@@ -237,7 +237,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
       setConflict(null);
       setRefusal(null);
     } catch (error) {
-      // The recovery read failed: keep the conflict and the held document, and
+      // note: the recovery read failed — keep the conflict and the held document, and
       // name the failure in the dialog instead of rejecting into a void click.
       setRefusal({
         reason: 'reload_failed',
@@ -248,7 +248,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
   }, [client, presetId]);
 
   /**
-   * T3b — nest a pattern under `attachNodeId`. The daemon commits the slot, the
+   * note: T3b — nest a pattern under `attachNodeId`. The daemon commits the slot, the
    * region and the connecting edge (`attach_to`), so the committed candidate is
    * what Simulate walks; only the spatial grouping is canvas chrome.
    */
@@ -277,7 +277,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
       });
       setChrome((prev) => ({
         ...prev,
-        // Nesting into an expanded slot is spatial chrome (the wire records no
+        // note: nesting into an expanded slot is spatial chrome (the wire records no
         // graph position for a nested region).
         containment: attachToSlot
           ? { ...prev.containment, [slotNodeId]: attachNodeId }
@@ -333,7 +333,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     }));
   }, []);
 
-  /** Required slots with no binding — the approve gate names them per pattern. */
+  /** note: required slots with no binding — the approve gate names them per pattern. */
   const unboundSlots = useMemo<UnboundSlot[]>(() => {
     if (!workingDocument) return [];
     const summaries = patternsQuery.data?.items ?? [];
@@ -342,7 +342,7 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
       if (node.kind !== 'pattern_slot') continue;
       const pinned = (entry: ListPatternsResponse['items'][number]) =>
         entry.id === node.pattern?.registry_id && entry.version === node.pattern?.version;
-      // Two directories can declare one pin. The available one wins whatever the listing order,
+      // note: two directories can declare one pin. The available one wins whatever the listing order,
       // mirroring the daemon's package index, so a broken duplicate cannot hide a readable package.
       const summary =
         summaries.find((entry) => entry.available && pinned(entry)) ??

@@ -1,5 +1,5 @@
 /**
- * Outline canvas — conflict dialog (V1.73 B5 split, `R-V172P0-QC1-002`).
+ * note: Outline canvas — conflict dialog (V1.73 B5 split, `R-V172P0-QC1-002`).
  *
  * Thin wrapper that composes the shared `OutlineConflictModal` shell with the
  * outline-specific field projection (`changedFieldsOf`). Extracted from the
@@ -18,9 +18,9 @@ interface OutlineConflictDialogProps {
 }
 
 /**
- * Renders the conflict modal when `conflict` is present, otherwise renders
- * nothing. The changed-field list is projected from the captured pending
- * patch so the modal copy stays field-specific.
+ * note: renders the conflict modal when `conflict` is present, otherwise
+ * renders nothing. The changed-field list is projected from the captured
+ * pending patch so the modal copy stays field-specific.
  */
 export function OutlineConflictDialog({
   conflict,

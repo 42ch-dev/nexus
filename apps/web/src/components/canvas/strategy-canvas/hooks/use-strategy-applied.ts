@@ -1,5 +1,5 @@
 /**
- * Live apply-state read for the compose path (v241 P3.5 T3).
+ * note: Live apply-state read for the compose path (v241 P3.5 T3).
  *
  * `GET /v1/daemon/strategies/{id}/applied` returns the current apply row plus
  * the newest approval. The surface compares the two `approval_id`s — never

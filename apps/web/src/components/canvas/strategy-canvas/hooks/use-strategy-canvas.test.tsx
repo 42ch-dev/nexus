@@ -1,5 +1,5 @@
 /**
- * `useStrategyCanvas` presents the rendered IR document to the flat edit form
+ * note: `useStrategyCanvas` presents the rendered IR document to the flat edit form
  * and owns the active inspector section.
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ vi.mock('@/lib/canvas/use-strategy-data', () => ({
   useDerivedCreatorId: () => 'creator-1',
 }));
 
-/** The document the Canvas hands the hook: two states at revision 1. */
+/** note: the document the Canvas hands the hook — two states at revision 1. */
 const DOCUMENT: WorkflowDocument = {
   ir_version: 0,
   id: 'preset-1',

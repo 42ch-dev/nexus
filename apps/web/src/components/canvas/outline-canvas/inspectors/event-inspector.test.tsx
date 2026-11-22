@@ -1,5 +1,5 @@
 /**
- * Event inspector — foreshadow authoring controls (FB-C1-005, V1.108 P0 T4)
+ * note: Event inspector — foreshadow authoring controls (FB-C1-005, V1.108 P0 T4)
  * and World-event binding authoring (V1.200 DR-26).
  *
  * Verifies the Link Foreshadow / Unlink Foreshadow controls fire the correct
@@ -17,10 +17,6 @@ import { TimelinePanel } from '@/components/canvas/outline-canvas/inspectors/eve
 
 import type { TimelinePatchEventRequest, WorkOutline } from '@42ch/nexus-contracts';
 
-// ---------------------------------------------------------------------------
-// Mocks — the bound World's KB graph read (V1.200 DR-26 bind picker).
-// ---------------------------------------------------------------------------
-
 const worldKbMock = vi.hoisted(() => {
   const graph = {
     entities: [
@@ -32,7 +28,7 @@ const worldKbMock = vi.hoisted(() => {
         status: 'confirmed',
         version: 1,
       },
-      // Non-event entities must never appear as binding targets.
+      // invariant: non-event entities must never appear as binding targets.
       {
         key_block_id: 'kb-chr-1',
         world_id: 'world-9',
@@ -45,7 +41,7 @@ const worldKbMock = vi.hoisted(() => {
     source_anchors: [],
     relationships: [],
   };
-  // A second bound World, so a `boundWorldId` transition is observable in the
+  // note: a second bound World, so a `boundWorldId` transition is observable in the
   // picker's options (V1.201 002/R3 rebinding assertion).
   const secondWorldGraph = {
     entities: [
@@ -69,7 +65,7 @@ const worldKbMock = vi.hoisted(() => {
 });
 
 vi.mock('@/lib/canvas/use-world-kb-data', () => ({
-  // Mirrors the real hook's contract: the read is gated on the id, so an
+  // note: mirrors the real hook's contract — the read is gated on the id, so an
   // unbound panel resolves to no data instead of a stale World's graph.
   useWorldKbGraph: (worldId?: string) => ({
     data: worldId ? worldKbMock.graphs[worldId] : undefined,
@@ -77,10 +73,6 @@ vi.mock('@/lib/canvas/use-world-kb-data', () => ({
     isError: false,
   }),
 }));
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 
 function makeOutline(overrides: Partial<WorkOutline> = {}): WorkOutline {
   return {
@@ -129,7 +121,7 @@ function renderTimeline(
 }
 
 /**
- * Canonical result of a successful binding write as the daemon's outline read
+ * note: canonical result of a successful binding write as the daemon's outline read
  * returns it: the event's `world_event_id` carrier is now present (bind) or
  * gone (unbind). Every other operation leaves the read unchanged, so this
  * models only the transition the case under test declares.
@@ -160,7 +152,7 @@ function applyCanonicalBinding(
 }
 
 /**
- * Render the inspector against a **refetched** canonical outline.
+ * note: render the inspector against a **refetched** canonical outline.
  *
  * `usePatchTimelineEvent`'s success invalidates the outline read
  * (`use-outline-data.ts`), so the Outline canvas hands the inspector the
@@ -192,7 +184,7 @@ function renderTimelineRefetching(initialOutline: WorkOutline, boundWorldId?: st
 }
 
 /**
- * Render the inspector with a controllable `boundWorldId`, mirroring the
+ * note: render the inspector with a controllable `boundWorldId`, mirroring the
  * Outline canvas handoff (`boundWorldId={work.data?.world_id ?? undefined}`):
  * the Work read can resolve **after** the first paint, and a Work can be
  * re-bound to another World under the mounted panel. The V1.201 002/R3 cases
@@ -216,19 +208,13 @@ function renderTimelineWithBoundWorld(
   return { onPatch, setBoundWorldId };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('TimelinePanel — foreshadow link control (FB-C1-005)', () => {
   it('shows a Link Foreshadow selector for each event when other events exist', () => {
     renderTimeline(makeOutline());
 
-    // Each event row should have a "Link foreshadow to…" option.
     const selectors = screen.getAllByLabelText(/Foreshadow target for/);
     expect(selectors).toHaveLength(2);
 
-    // The locked button copy must be present.
     expect(screen.getAllByRole('button', { name: 'Link' })).toHaveLength(2);
   });
 
@@ -236,7 +222,6 @@ describe('TimelinePanel — foreshadow link control (FB-C1-005)', () => {
     const user = userEvent.setup();
     const onPatch = renderTimeline(makeOutline());
 
-    // Select the target in the first event's dropdown.
     const selectors = screen.getAllByLabelText(/Foreshadow target for/);
     await user.selectOptions(selectors[0], 'evt_b');
 
@@ -279,7 +264,6 @@ describe('TimelinePanel — foreshadow unlink control (FB-C1-005)', () => {
       }),
     );
 
-    // The foreshadow chip should show the target event title.
     expect(screen.getByText(/Foreshadows The payoff/)).toBeInTheDocument();
   });
 
@@ -304,7 +288,7 @@ describe('TimelinePanel — foreshadow unlink control (FB-C1-005)', () => {
   });
 
   it('excludes already-linked targets from the link dropdown', () => {
-    // Three events: evt_a already foreshadows evt_b; evt_c should still be
+    // note: three events — evt_a already foreshadows evt_b; evt_c should still be
     // available but evt_b must be excluded from evt_a's dropdown.
     renderTimeline(
       makeOutline({
@@ -352,17 +336,17 @@ describe('TimelinePanel — existing behavior regression', () => {
   });
 });
 
-// I-QC1-004 — the attach_event_to_chapter op must send `target_chapter_id`
+// note: I-QC1-004 — the attach_event_to_chapter op must send `target_chapter_id`
 // (not `realizes_chapter_id`), matching the daemon/schema contract. The daemon
 // handler returns `missing_target_chapter_id` if the field is absent.
 describe('TimelinePanel — attach event to chapter (I-QC1-004)', () => {
   it('fires attach_event_to_chapter with target_chapter_id, not realizes_chapter_id', async () => {
     const user = userEvent.setup();
-    // selectedChapterId = 5; evt_a already realizes chapter 1, so the attach
+    // note: selectedChapterId = 5; evt_a already realizes chapter 1, so the attach
     // button should be visible for evt_a.
     const onPatch = renderTimeline(makeOutline(), vi.fn(), 5);
 
-    // Both events show an attach button (neither realizes chapter 5). Click
+    // note: both events show an attach button (neither realizes chapter 5). Click
     // evt_a's button to verify the payload field name.
     const attachBtns = screen.getAllByRole('button', {
       name: /Attach event to chapter 5/i,
@@ -374,13 +358,13 @@ describe('TimelinePanel — attach event to chapter (I-QC1-004)', () => {
     const call = onPatch.mock.calls[0][0] as TimelinePatchEventRequest;
     expect(call.operation).toBe('attach_event_to_chapter');
     expect(call.target_chapter_id).toBe(5);
-    // realizes_chapter_id must NOT be set on the attach op — it's only valid
+    // invariant: realizes_chapter_id must NOT be set on the attach op — it's only valid
     // for add_event. The daemon ignores it and returns missing_target_chapter_id.
     expect(call.realizes_chapter_id).toBeUndefined();
   });
 });
 
-// V1.200 DR-26 — the Outline inspector authors the cross-surface binding
+// note: V1.200 DR-26 — the Outline inspector authors the cross-surface binding
 // through the existing `timeline.patch_event` boundary. The control renders
 // disabled rather than hidden when no World is bound (the core refuses both
 // operations without a bound World, mirroring Task 2's typed refusal).
@@ -392,7 +376,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     const optionValues = within(picker)
       .getAllByRole('option')
       .map((option) => (option as HTMLOptionElement).value);
-    // Placeholder + the single `block_type=event` entity; `kb-chr-1` is not a
+    // note: placeholder + the single `block_type=event` entity; `kb-chr-1` is not a
     // valid referent and must not be offered.
     expect(optionValues).toEqual(['', 'kb-evt-1']);
     expect(
@@ -437,19 +421,19 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
 
     expect(onPatch).toHaveBeenCalledTimes(1);
-    // The refusal path never invokes the callback the panel handed in — the
+    // note: the refusal path never invokes the callback the panel handed in — the
     // typed ID survives so the author can retry without re-typing.
     const refused = screen.getByLabelText('World event ID for Plant the seed');
     expect(refused).toHaveValue('kb-outside-picker');
     expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).not.toBeDisabled();
 
-    // The write landing is what releases the draft.
+    // note: the write landing is what releases the draft.
     act(() => successCallbacks[0]());
     expect(refused).toHaveValue('');
     expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).toBeDisabled();
   });
 
-  // V1.201 002/R4 — an in-flight bind resolves only the draft it was issued
+  // note: V1.201 002/R4 — an in-flight bind resolves only the draft it was issued
   // against. Clearing by event id alone let a slow write erase an ID the
   // author entered while it was still in flight.
   it('keeps a manual ID edited while the bind is in flight (002/R4)', async () => {
@@ -469,18 +453,18 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
     expect(onPatch).toHaveBeenCalledTimes(1);
 
-    // The write is still in flight; the author lands a newer ID in the field.
+    // note: the write is still in flight; the author lands a newer ID in the field.
     const field = screen.getByLabelText('World event ID for Plant the seed');
     await user.clear(field);
     await user.type(field, 'kb-newer-id');
 
-    // Resolving the stale bind must not clobber the newer draft.
+    // note: resolving the stale bind must not clobber the newer draft.
     act(() => successCallbacks[0]());
     expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-newer-id');
     expect(screen.getAllByRole('button', { name: 'Add ID' })[0]).not.toBeDisabled();
   });
 
-  // V1.201 002/R4 fix round — the value is not the draft tag. A draft re-typed
+  // note: V1.201 002/R4 fix round — the value is not the draft tag. A draft re-typed
   // back to the issued ID during the flight is a newer draft: equality with the
   // issued `world_event_id` used to clear it.
   it('keeps a manual ID retyped to the issued value while the bind is in flight (002/R4)', async () => {
@@ -498,7 +482,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
     expect(onPatch).toHaveBeenCalledTimes(1);
 
-    // The write is still in flight; the author edits away from the issued ID
+    // note: the write is still in flight; the author edits away from the issued ID
     // and back to it, so the live value equals the one the bind was issued for.
     await user.clear(field);
     await user.type(field, 'kb-other-id');
@@ -511,7 +495,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     );
   });
 
-  // V1.201 002/R4 fix round — each control owns its own draft. The same ID in
+  // note: V1.201 002/R4 fix round — each control owns its own draft. The same ID in
   // the manual field is not the picker draft the bind was issued against, so a
   // picker bind's resolution must leave the independently authored entry alone.
   it('keeps a manual ID entered during an in-flight picker bind of the same ID (002/R4)', async () => {
@@ -529,18 +513,18 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
     expect(onPatch).toHaveBeenCalledTimes(1);
 
-    // The write is still in flight; the author independently enters the same
+    // note: the write is still in flight; the author independently enters the same
     // World event ID in the manual field.
     await user.type(screen.getByLabelText('World event ID for Plant the seed'), 'kb-evt-1');
 
     act(() => successCallbacks[0]());
-    // The manual draft survives; only the picker draft the bind was issued
+    // note: the manual draft survives; only the picker draft the bind was issued
     // against is released.
     expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-evt-1');
     expect(screen.getByLabelText('World event for Plant the seed')).toHaveValue('');
   });
 
-  // V1.201 002/R4 fix round 2 — the release is scoped to the issuing control.
+  // note: V1.201 002/R4 fix round 2 — the release is scoped to the issuing control.
   // A draft that already sat in the *other* control is not part of this
   // request; the picker bind's success must leave the pre-existing manual
   // draft alone (it is not a draft authored during the flight).
@@ -554,7 +538,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     );
     renderTimeline(makeOutline(), onPatch, null, 'world-9');
 
-    // Both controls hold a draft before the request is issued.
+    // note: both controls hold a draft before the request is issued.
     await user.selectOptions(
       screen.getByLabelText('World event for Plant the seed'),
       'kb-evt-1',
@@ -568,9 +552,9 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(onPatch).toHaveBeenCalledTimes(1);
 
     act(() => successCallbacks[0]());
-    // The picker draft the bind was issued against is released…
+    // note: the picker draft the bind was issued against is released…
     expect(screen.getByLabelText('World event for Plant the seed')).toHaveValue('');
-    // …while the pre-existing manual draft survives untouched.
+    // note: …while the pre-existing manual draft survives untouched.
     expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue(
       'kb-manual-id',
     );
@@ -591,7 +575,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     await user.click(screen.getAllByRole('button', { name: 'Bind' })[0]);
 
     expect(onPatch).toHaveBeenCalledTimes(1);
-    // The refusal path never invokes the callback: the picked World event
+    // note: the refusal path never invokes the callback — the picked World event
     // survives the refused write.
     expect(picker).toHaveValue('kb-evt-1');
 
@@ -601,7 +585,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
 
   it('fires bind_world_event and renders the refetched canonical binding (projected referent + Unbind)', async () => {
     const user = userEvent.setup();
-    // Initial canonical read: evt_a carries no binding yet.
+    // note: initial canonical read — evt_a carries no binding yet.
     const onPatch = renderTimelineRefetching(makeOutline(), 'world-9');
 
     await user.selectOptions(screen.getByLabelText('World event for Plant the seed'), 'kb-evt-1');
@@ -613,13 +597,12 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(call.event_id).toBe('evt_a');
     expect(call.world_event_id).toBe('kb-evt-1');
 
-    // After the mutation resolves and the outline read is refetched, the
+    // note: after the mutation resolves and the outline read is refetched, the
     // canonical `world_event_id` drives the UI: the bound referent is projected
     // and the row offers Unbind instead of the picker + Bind.
     expect(screen.getByText('World event: Coronation')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unbind' })).toBeInTheDocument();
     expect(screen.queryByLabelText('World event for Plant the seed')).not.toBeInTheDocument();
-    // The unbound second event keeps its picker + Bind.
     expect(screen.getByLabelText('World event for The payoff')).toBeInTheDocument();
   });
 
@@ -648,7 +631,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
       'world-9',
     );
 
-    // The stored `world_event_id` (refetched canonical read) renders the bound
+    // note: the stored `world_event_id` (refetched canonical read) renders the bound
     // World event's canonical name, and the unbound row keeps its picker.
     expect(screen.getByText('World event: Coronation')).toBeInTheDocument();
     expect(screen.getByLabelText('World event for The payoff')).toBeInTheDocument();
@@ -660,7 +643,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
     expect(call.operation).toBe('unbind_world_event');
     expect(call.event_id).toBe('evt_a');
 
-    // After the mutation resolves and the outline read is refetched without the
+    // note: after the mutation resolves and the outline read is refetched without the
     // carrier, the row falls back to the event-only picker + Bind.
     expect(screen.queryByText('World event: Coronation')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Unbind' })).not.toBeInTheDocument();
@@ -671,7 +654,6 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
   it('disables — never hides — the binding control when the Work has no bound World', () => {
     renderTimeline(makeOutline());
 
-    // The control is present (not hidden) with the refusal reason visible.
     expect(screen.getByText('Bind a World to this Work to bind World events.')).toBeInTheDocument();
     expect(screen.getByLabelText('World event for Plant the seed')).toBeDisabled();
 
@@ -683,7 +665,7 @@ describe('TimelinePanel — World-event binding authoring (V1.200 DR-26)', () =>
   });
 });
 
-// V1.201 002/R3 — the inspector keeps its component identity across a
+// note: V1.201 002/R3 — the inspector keeps its component identity across a
 // `boundWorldId` transition. Splitting the entry on the id's truthiness made
 // React swap the child component type when the Work's World resolved after
 // first paint, remounting the view and discarding the drafts the author had
@@ -693,7 +675,7 @@ describe('TimelinePanel — bound World transition lifecycle (V1.201 002/R3)', (
     const user = userEvent.setup();
     const { setBoundWorldId } = renderTimelineWithBoundWorld(makeOutline());
 
-    // First paint, no Work-resolved World yet: the control is present but
+    // note: first paint, no Work-resolved World yet — the control is present but
     // disabled, and no World's entities are offered (the read is gated on the id).
     const pickerBeforeBind = screen.getByLabelText('World event for Plant the seed');
     expect(pickerBeforeBind).toBeDisabled();
@@ -703,7 +685,7 @@ describe('TimelinePanel — bound World transition lifecycle (V1.201 002/R3)', (
         .map((option) => (option as HTMLOptionElement).value),
     ).toEqual(['']);
 
-    // The author drafts while the Work read is still in flight.
+    // note: the author drafts while the Work read is still in flight.
     await user.type(screen.getByPlaceholderText('Event title…'), 'Draft beat');
     await user.type(screen.getByPlaceholderText('Description (optional)…'), 'Draft note');
     await user.selectOptions(
@@ -711,18 +693,17 @@ describe('TimelinePanel — bound World transition lifecycle (V1.201 002/R3)', (
       'evt_b',
     );
 
-    // DOM identity captured before the transition: a remount installs new nodes.
+    // note: DOM identity captured before the transition — a remount installs new nodes.
     const addButton = screen.getByRole('button', { name: /^Add$/i });
 
     setBoundWorldId('world-9');
 
-    // One view instance across the transition — drafts are not discarded.
     expect(screen.getByRole('button', { name: /^Add$/i })).toBe(addButton);
     expect(screen.getByPlaceholderText('Event title…')).toHaveValue('Draft beat');
     expect(screen.getByPlaceholderText('Description (optional)…')).toHaveValue('Draft note');
     expect(screen.getByLabelText('Foreshadow target for Plant the seed')).toHaveValue('evt_b');
 
-    // The panel is rebound to the new World: the control is live and offers
+    // note: the panel is rebound to the new World — the control is live and offers
     // exactly that World's event entities.
     const pickerAfterBind = screen.getByLabelText('World event for Plant the seed');
     expect(pickerAfterBind).not.toBeDisabled();
@@ -744,9 +725,9 @@ describe('TimelinePanel — bound World transition lifecycle (V1.201 002/R3)', (
 
     setBoundWorldId('world-11');
 
-    // The draft is local state, not World data: rebinding must not clear it.
+    // note: the draft is local state, not World data — rebinding must not clear it.
     expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
-    // The picker now offers the newly bound World's entities only.
+    // note: the picker now offers the newly bound World's entities only.
     const picker = screen.getByLabelText('World event for Plant the seed');
     expect(
       within(picker)
@@ -757,7 +738,7 @@ describe('TimelinePanel — bound World transition lifecycle (V1.201 002/R3)', (
   });
 });
 
-// V1.201 002/FX-B — a bind is issued against one bound World *and* one draft.
+// note: V1.201 002/FX-B — a bind is issued against one bound World *and* one draft.
 // The Work can be re-bound while the write is in flight, and the drafts
 // survive that transition (R3), so the completion of a former World's bind
 // must not consume a draft now shown under the newly bound World; a picker
@@ -779,7 +760,7 @@ describe('TimelinePanel — bound World rebind race (V1.201 002/FX-B)', () => {
 
     setBoundWorldId('world-11');
 
-    // The picker no longer offers `kb-evt-1`, so the stored selection is not
+    // note: the picker no longer offers `kb-evt-1`, so the stored selection is not
     // actionable: it resets to the placeholder and Bind is inert again.
     const picker = screen.getByLabelText('World event for Plant the seed');
     expect(picker).toHaveValue('');
@@ -789,7 +770,7 @@ describe('TimelinePanel — bound World rebind race (V1.201 002/FX-B)', () => {
         .map((option) => (option as HTMLOptionElement).value),
     ).toEqual(['', 'kb-evt-7']);
     expect(screen.getAllByRole('button', { name: 'Bind' })[0]).toBeDisabled();
-    // The unrelated manual draft is local, World-agnostic text and survives.
+    // note: the unrelated manual draft is local, World-agnostic text and survives.
     expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
   });
 
@@ -810,12 +791,12 @@ describe('TimelinePanel — bound World rebind race (V1.201 002/FX-B)', () => {
     await user.click(screen.getAllByRole('button', { name: 'Add ID' })[0]);
     expect(onPatch).toHaveBeenCalledTimes(1);
 
-    // The Work is re-bound while the write is in flight. The draft survives
+    // note: the Work is re-bound while the write is in flight. The draft survives
     // the transition, so it is now the draft shown under the new World.
     setBoundWorldId('world-11');
     expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
 
-    // The former World's bind landing must not consume it.
+    // note: the former World's bind landing must not consume it.
     act(() => successCallbacks[0]());
     expect(screen.getByLabelText('World event ID for Plant the seed')).toHaveValue('kb-manual-id');
   });
@@ -838,7 +819,7 @@ describe('TimelinePanel — bound World rebind race (V1.201 002/FX-B)', () => {
     expect(onPatch).toHaveBeenCalledTimes(1);
 
     setBoundWorldId('world-11');
-    // The former World's selection is dropped; the author picks a target valid
+    // note: the former World's selection is dropped; the author picks a target valid
     // in the newly bound World while the old write is still in flight.
     await user.selectOptions(
       screen.getByLabelText('World event for Plant the seed'),

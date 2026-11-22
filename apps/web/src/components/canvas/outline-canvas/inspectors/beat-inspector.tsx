@@ -1,5 +1,5 @@
 /**
- * Outline canvas — Beat inspector (V1.109 C2 T3; FB-C2-002).
+ * note: Outline canvas — Beat inspector (V1.109 C2 T3; FB-C2-002).
  *
  * Read-only Beat detail panel. The outline wire model carries no beat data
  * today (`wire_contracts_changed: false`), so there is no write wire — the
@@ -26,9 +26,9 @@ export interface BeatInspectorBeat {
 }
 
 export interface BeatInspectorProps {
-  /** Selected Beat data, or `null` when no Beat is selected. */
+  /** note: selected Beat data, or `null` when no Beat is selected. */
   beat: BeatInspectorBeat | null;
-  /** Display title of the parent scene (for the *Part of* helper). */
+  /** note: display title of the parent scene (for the *Part of* helper). */
   parentSceneTitle: string | null;
 }
 

@@ -1,5 +1,5 @@
 /**
- * Static-simulation overlay — predicted waits and collapsed judge branches are
+ * note: Static-simulation overlay — predicted waits and collapsed judge branches are
  * visible on the canvas nodes, not only inside the Approve modal.
  */
 import { screen } from '@testing-library/react';

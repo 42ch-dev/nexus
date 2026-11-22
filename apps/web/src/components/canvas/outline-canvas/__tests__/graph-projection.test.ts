@@ -1,5 +1,5 @@
 /**
- * Unit tests for the outline-canvas pure projection helpers (V1.73 B5).
+ * note: Unit tests for the outline-canvas pure projection helpers (V1.73 B5).
  *
  * These cover the logic extracted from the original monolith so the projection
  * rules (unassigned bucket, display-title fallback, conflict field projection)
@@ -119,7 +119,7 @@ describe('changedFieldsOf', () => {
     ).toEqual(['remove_event']);
   });
 
-  // I-QC1-003 — the additive `unlink_foreshadow` op must surface its changed
+  // note: I-QC1-003 — the additive `unlink_foreshadow` op must surface its changed
   // field in the conflict modal so stale unlink patches are labeled correctly.
   it('projects unlink_foreshadow as a changed field (I-QC1-003)', () => {
     expect(
@@ -161,7 +161,7 @@ describe('changedFieldsOf', () => {
     ).toEqual([]);
   });
 
-  // V1.75 A3/A8 — content edits must surface in the conflict modal with the
+  // note: V1.75 A3/A8 — content edits must surface in the conflict modal with the
   // content-specific field label so prose edits are not mislabeled as metadata.
   it('projects a chapter content edit as chapter_outline_content (V1.75 A3)', () => {
     expect(

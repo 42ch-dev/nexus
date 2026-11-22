@@ -1,5 +1,5 @@
 /**
- * Outline canvas adapter — projection equivalence tests (V1.115 P0 T1a).
+ * note: Outline canvas adapter — projection equivalence tests (V1.115 P0 T1a).
  *
  * Verifies that `adapter.projectGraph(graph)` produces identical nodes, edges,
  * and `parentId` nesting to the existing `projectOutlineGraph` function. The
@@ -18,10 +18,6 @@ import { createOutlineCanvasAdapter, type OutlineCanvasAdapterContext } from '..
 import type { OutlineSurfaceGraph } from '../outline-canvas-adapter';
 import { projectOutlineGraph, chapterNodeId, sceneNodeId, beatNodeId } from '../rf-projection';
 import type { SceneBeatFixturePayload, SceneFixture, BeatFixture } from '../graph-projection';
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 
 function chapter(partial: Partial<ChapterSummary> = {}): ChapterSummary {
   return {
@@ -91,10 +87,6 @@ function makeAdapter(ctx?: Partial<OutlineCanvasAdapterContext>) {
   return createOutlineCanvasAdapter(ctxRef);
 }
 
-// ---------------------------------------------------------------------------
-// Adapter shape
-// ---------------------------------------------------------------------------
-
 describe('OutlineCanvasAdapter — shape', () => {
   it('declares surfaceKind "outline"', () => {
     const adapter = makeAdapter();
@@ -103,7 +95,7 @@ describe('OutlineCanvasAdapter — shape', () => {
 
   it('omits dagre layoutOptions (compound-graph ranker bug — projected positions used directly)', () => {
     const adapter = makeAdapter();
-    // V1.115 T1b: layoutOptions removed because @dagrejs/dagre@3.0.0 crashes
+    // why: V1.115 T1b — layoutOptions removed because @dagrejs/dagre@3.0.0 crashes
     // when an edge targets a node that has children via setParent (the Outline
     // projection creates volume→chapter edges where chapter nodes have scene/
     // beat children). The projection's built-in grid layout supplies positions.
@@ -125,10 +117,6 @@ describe('OutlineCanvasAdapter — shape', () => {
     expect(adapter.adaptConflict?.(new Error('409'))).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Projection equivalence — AC-P0-1
-// ---------------------------------------------------------------------------
 
 describe('OutlineCanvasAdapter.projectGraph — projection equivalence', () => {
   it('produces identical nodes + edges to projectOutlineGraph', () => {
@@ -185,13 +173,11 @@ describe('OutlineCanvasAdapter.projectGraph — projection equivalence', () => {
     const direct = projectOutlineGraph(o, chapters, fixture, TRANSLATE_FALLBACK);
     const viaAdapter = adapter.projectGraph(graph);
 
-    // Same parentId nesting — Scene→Chapter, Beat→Scene.
     const directParentIds = new Map(direct.nodes.map((n) => [n.id, n.parentId]));
     for (const node of viaAdapter.nodes) {
       expect(node.parentId).toBe(directParentIds.get(node.id));
     }
 
-    // Spot-check the nesting structure.
     const adapterScene = viaAdapter.nodes.find((n) => n.id === sceneNodeId('s1'));
     expect(adapterScene?.parentId).toBe(chapterNodeId(1));
     expect(adapterScene?.extent).toBe('parent');
@@ -234,7 +220,7 @@ describe('OutlineCanvasAdapter.projectGraph — projection equivalence', () => {
   });
 
   it('reads translateFallback from the context ref at projection time', () => {
-    // The adapter must read `translateFallback` from ctxRef.current on each
+    // why: the adapter must read `translateFallback` from ctxRef.current on each
     // projectGraph call, not capture it at creation time.
     const ctx = makeCtx();
     ctx.translateFallback = (c) => `Kapitel ${c}`;
@@ -258,10 +244,6 @@ describe('OutlineCanvasAdapter.projectGraph — projection equivalence', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// summarizeGraph
-// ---------------------------------------------------------------------------
-
 describe('OutlineCanvasAdapter.summarizeGraph', () => {
   it('delegates to outlineGraphSummary with the graph payload', () => {
     const o = outline({
@@ -279,7 +261,7 @@ describe('OutlineCanvasAdapter.summarizeGraph', () => {
   });
 
   it('reports not-loaded when outline is absent in the payload', () => {
-    // outlineGraphSummary handles undefined outline; but the adapter's TGraph
+    // note: outlineGraphSummary handles undefined outline; but the adapter's TGraph
     // requires a concrete outline. The orchestrator (T1b) is responsible for
     // not calling summarizeGraph before data is loaded (isLoading gate).
     // This test documents the contract: summarizeGraph receives a loaded graph.

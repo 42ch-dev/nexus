@@ -1,5 +1,5 @@
 /**
- * Outline canvas — chapter inspector (V1.73 B5 split, `R-V172P0-QC1-002`;
+ * note: Outline canvas — chapter inspector (V1.73 B5 split, `R-V172P0-QC1-002`;
  * V1.75 A3 mounts the outline-content editor below the metadata fields).
  *
  * Edits chapter outline metadata (title/slug/status/planned words/volume) via
@@ -33,11 +33,11 @@ interface ChapterInspectorProps {
   baseRevision: number;
   onPatchChapter: (chapter: number, request: OutlinePatchChapterRequest) => void;
   onMove: (chapterId: number, volumeId: number) => void;
-  /** True while a chapter patch mutation is in flight (metadata or content). */
+  /** note: true while a chapter patch mutation is in flight (metadata or content). */
   patchIsPending: boolean;
-  /** True while the orchestrator has a 409 conflict modal open for this chapter. */
+  /** note: true while the orchestrator has a 409 conflict modal open for this chapter. */
   isConflicting: boolean;
-  /** Monotonic counter the orchestrator bumps to request an editor reset after
+  /** note: monotonic counter the orchestrator bumps to request an editor reset after
    * a refetch (e.g. following conflict resolution). */
   contentVersion: number;
 }
@@ -61,7 +61,6 @@ export function ChapterInspector({
   const [planned, setPlanned] = useState('');
   const [volume, setVolume] = useState('');
 
-  // Reset local form when selection changes.
   useEffect(() => {
     if (!chapter) return;
     setTitle(titles?.[String(chapter.chapter)] ?? chapter.title ?? '');

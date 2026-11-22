@@ -1,5 +1,5 @@
 /**
- * Outline canvas — pure React Flow graph projection (V1.108 P0).
+ * note: Outline canvas — pure React Flow graph projection (V1.108 P0).
  *
  * Converts the canonical {@link WorkOutline} + {@link ChapterSummary}[] read
  * models into React Flow `Node[]` / `Edge[]` arrays with a **deterministic
@@ -36,18 +36,14 @@ import type {
   SceneFixture,
 } from './graph-projection';
 
-// Re-export the Scene/Beat status union so node-component and projection
+// note: re-export the Scene/Beat status union so node-component and projection
 // consumers import it from one barrel (the projection SSOT). The canonical
 // definition lives in `graph-projection.ts` (lowest-level shared module).
 export type { OutlineSceneStatus } from './graph-projection';
 
-// ---------------------------------------------------------------------------
-// Node data payloads (UI-only; wire DTOs in @42ch/nexus-contracts remain SSOT)
-// ---------------------------------------------------------------------------
-
 /** React Flow node data for a Volume lane node. */
 export interface OutlineVolumeNodeData {
-  /** React Flow requires an index signature on node data. */
+  /** note: React Flow requires an index signature on node data. */
   [key: string]: unknown;
   workId: string;
   volumeId: number;
@@ -57,11 +53,11 @@ export interface OutlineVolumeNodeData {
 
 /** React Flow node data for a Chapter card node. */
 export interface OutlineChapterNodeData {
-  /** React Flow requires an index signature on node data. */
+  /** note: React Flow requires an index signature on node data. */
   [key: string]: unknown;
   workId: string;
   chapterId: number;
-  /** `null` when the chapter is unassigned (no volume claims it). */
+  /** note: `null` when the chapter is unassigned (no volume claims it). */
   volumeId: number | null;
   title: string;
   slug: string | null;
@@ -72,13 +68,13 @@ export interface OutlineChapterNodeData {
 
 /** React Flow node data for a Timeline Event lane node. */
 export interface OutlineTimelineEventNodeData {
-  /** React Flow requires an index signature on node data. */
+  /** note: React Flow requires an index signature on node data. */
   [key: string]: unknown;
   workId: string;
   eventId: string;
   title: string;
   description: string | null;
-  /** Chapter this event realizes, if any. */
+  /** note: chapter this event realizes, if any. */
   realizesChapterId: number | null;
 }
 
@@ -91,15 +87,15 @@ export interface OutlineTimelineEventNodeData {
  * (architect-locked §5.2 Q1).
  */
 export interface OutlineSceneNodeData {
-  /** React Flow requires an index signature on node data. */
+  /** note: React Flow requires an index signature on node data. */
   [key: string]: unknown;
   workId: string;
   sceneId: string;
-  /** Owning chapter id — drives `parentId = chapter:<chapterId>`. */
+  /** note: owning chapter id — drives `parentId = chapter:<chapterId>`. */
   chapterId: number;
-  /** Scene title; `null`/empty → **Untitled Scene** fallback (Voice & Content). */
+  /** note: scene title; `null`/empty → **Untitled Scene** fallback (Voice & Content). */
   title: string | null;
-  /** Scene status; `null` when not yet set → no status chip rendered. */
+  /** note: scene status; `null` when not yet set → no status chip rendered. */
   status: OutlineSceneStatus | null;
 }
 
@@ -111,42 +107,34 @@ export interface OutlineSceneNodeData {
  * per §5.2 Q2.
  */
 export interface OutlineBeatNodeData {
-  /** React Flow requires an index signature on node data. */
+  /** note: React Flow requires an index signature on node data. */
   [key: string]: unknown;
   workId: string;
   beatId: string;
-  /** Owning scene id — drives `parentId = scene:<sceneId>`. */
+  /** note: owning scene id — drives `parentId = scene:<sceneId>`. */
   sceneId: string;
-  /** Beat title; `null`/empty → **Untitled Beat** fallback (Voice & Content). */
+  /** note: beat title; `null`/empty → **Untitled Beat** fallback (Voice & Content). */
   title: string | null;
-  /** Beat status; `null` when not yet set. */
+  /** note: beat status; `null` when not yet set. */
   status: OutlineSceneStatus | null;
 }
 
 /** Edge data payload for outline structural / temporal edges. */
 export interface OutlineEdgeData {
-  /** React Flow requires an index signature on edge data. */
+  /** note: React Flow requires an index signature on edge data. */
   [key: string]: unknown;
   relation: 'contains' | 'realizes_event' | 'foreshadows';
 }
-
-// ---------------------------------------------------------------------------
-// Layout constants — deterministic lane/layered grid (World KB pattern)
-// ---------------------------------------------------------------------------
 
 const ORIGIN_X = 40;
 const ORIGIN_Y = 40;
 const LANE_X = 320;
 const ROW_Y = 120;
 
-/** Column offset per lane kind (volumes → chapters → timeline). */
+/** note: column offset per lane kind (volumes → chapters → timeline). */
 const VOLUME_LANE = 0;
 const CHAPTER_LANE = 1;
 const TIMELINE_LANE = 2;
-
-// ---------------------------------------------------------------------------
-// Stable node ids (prefixed by kind so they never collide)
-// ---------------------------------------------------------------------------
 
 export function volumeNodeId(volumeId: number): string {
   return `volume:${volumeId}`;
@@ -164,17 +152,13 @@ export function beatNodeId(beatId: string): string {
   return `beat:${beatId}`;
 }
 
-// ---------------------------------------------------------------------------
-// Projection: outline + chapters → { nodes, edges }
-// ---------------------------------------------------------------------------
-
 export interface OutlineGraphProjection {
   nodes: Node[];
   edges: Edge[];
 }
 
 /**
- * Project a full outline into React Flow nodes + edges.
+ * note: project a full outline into React Flow nodes + edges.
  *
  * Deterministic: the same `(outline, chapters, fixture?)` tuple always yields
  * identical node positions, ids, and edge sets. Inputs are never mutated.
@@ -199,7 +183,7 @@ export function projectOutlineGraph(
 
   const allNodes = [...volumeNodes, ...chapterNodes, ...eventNodes];
 
-  // V1.109 C2 — Scene/Beat child nodes (fixture-driven). Scenes are children
+  // note: Scene/Beat child nodes (V1.109 C2 — fixture-driven). Scenes are children
   // of Chapter parents; Beats are children of Scene parents. Orphans (scene
   // whose chapter is absent, beat whose scene is absent) are filtered so the
   // projection never emits a `parentId` pointing at a non-existent node.
@@ -212,7 +196,7 @@ export function projectOutlineGraph(
 
   const allEdges = [...containsEdges, ...realizesEdges, ...foreshadowEdges];
 
-  // I-QC1-002 — filter out dangling edges whose source or target node does not
+  // invariant: filter out dangling edges whose source or target node does not
   // exist. Chapter data is paginated (20/page) and the orchestrator auto-fetches
   // remaining pages, but this guard ensures the projection never emits a
   // dangling edge if a chapter referenced by the outline is absent from the
@@ -224,10 +208,6 @@ export function projectOutlineGraph(
 
   return { nodes: allNodesWithSceneBeat, edges };
 }
-
-// ---------------------------------------------------------------------------
-// Node layout
-// ---------------------------------------------------------------------------
 
 /** Volume lane nodes — one per volume, stacked top-to-bottom. */
 export function layoutVolumeNodes(outline: WorkOutline): Node<OutlineVolumeNodeData>[] {
@@ -264,7 +244,6 @@ export function layoutChapterNodes(
   const assignedIds = new Set<number>();
   const ordered: { chapter: ChapterSummary; volumeId: number | null }[] = [];
 
-  // Assigned chapters in volume-declaration order.
   for (const volume of outline.volumes) {
     for (const chapterId of volume.chapter_ids) {
       const c = chapterById.get(chapterId);
@@ -275,8 +254,8 @@ export function layoutChapterNodes(
     }
   }
 
-  // Unassigned chapters (sorted by chapter number for stability).
-  // Copy before sort — never mutate the caller's array (purity contract).
+  // note: unassigned chapters, sorted by chapter number for stability; copy
+  // before sort — never mutate the caller's array (purity contract).
   for (const c of [...chapters].sort((a, b) => a.chapter - b.chapter)) {
     if (!assignedIds.has(c.chapter)) {
       ordered.push({ chapter: c, volumeId: null });
@@ -326,24 +305,20 @@ export function layoutTimelineEventNodes(outline: WorkOutline): Node<OutlineTime
   });
 }
 
-// ---------------------------------------------------------------------------
-// Scene/Beat child-node layout (V1.109 C2 — fixture-driven)
-// ---------------------------------------------------------------------------
-//
-// Child nodes use React Flow `parentId` + `extent: "parent"`, so their
+// note: child nodes use React Flow `parentId` + `extent: "parent"`, so their
 // `position` is **relative to the parent node's top-left**, not the canvas
 // origin. Scenes stack vertically inside their Chapter parent; Beats stack
 // vertically inside their Scene parent. The exact offsets are a pragmatic
 // deterministic grid — the layout engine (dagre/elk) is deferred.
 
-/** Relative offset from the parent's top-left where the first child starts. */
+/** note: relative offset from the parent's top-left where the first child starts. */
 const CHILD_ORIGIN_X = 8;
 const CHILD_ORIGIN_Y = 40;
-/** Vertical stride between stacked children inside the same parent. */
+/** note: vertical stride between stacked children inside the same parent. */
 const CHILD_ROW_Y = 56;
 
 /**
- * Scene nodes — children of Chapter parents. Scenes whose `chapterId` is not
+ * note: Scene nodes — children of Chapter parents. Scenes whose `chapterId` is not
  * in `chapterIds` (chapter not loaded / doesn't exist) are skipped so the
  * projection never emits a dangling `parentId`.
  */
@@ -354,7 +329,7 @@ export function layoutSceneNodes(
 ): Node<OutlineSceneNodeData>[] {
   if (!fixture || fixture.scenes.length === 0) return [];
 
-  // Group scenes by chapter so children of the same parent stack together,
+  // note: group scenes by chapter so children of the same parent stack together,
   // then assign per-parent child indices for the vertical offset.
   const perChapter = new Map<number, SceneFixture[]>();
   for (const scene of fixture.scenes) {
@@ -436,10 +411,6 @@ export function layoutBeatNodes(
   return nodes;
 }
 
-// ---------------------------------------------------------------------------
-// Edge derivation
-// ---------------------------------------------------------------------------
-
 /** Volume → Chapter containment edges (from `outline.volumes[].chapter_ids`). */
 export function deriveContainsEdges(outline: WorkOutline): Edge<OutlineEdgeData>[] {
   const edges: Edge<OutlineEdgeData>[] = [];
@@ -485,7 +456,7 @@ export function deriveForeshadowEdges(outline: WorkOutline): Edge<OutlineEdgeDat
       target: eventNodeId(link.target_event_id),
       type: 'straight',
       data,
-      // Foreshadow edges consume the canvas-outline-foreshadow-edge token
+      // note: foreshadow edges consume the canvas-outline-foreshadow-edge token
       // (FB-C1-006). Not selectable in the T1 minimum; focusable for a11y.
       selectable: false,
       focusable: true,
@@ -494,12 +465,8 @@ export function deriveForeshadowEdges(outline: WorkOutline): Edge<OutlineEdgeDat
   });
 }
 
-// ---------------------------------------------------------------------------
-// Selection resolution (graph click → inspector entity)
-// ---------------------------------------------------------------------------
-
 /**
- * Resolve the selected chapter id from React Flow node selection state.
+ * note: resolve the selected chapter id from React Flow node selection state.
  *
  * When a user clicks a graph node, React Flow sets `n.selected = true` on the
  * clicked node and clears other selections via `onNodesChange`. This helper
@@ -564,12 +531,8 @@ export function selectedBeatIdFromNodes(nodes: Node[]): string | null {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// SR summary helper
-// ---------------------------------------------------------------------------
-
 /**
- * Human-readable graph summary for the canvas screen-reader region.
+ * note: human-readable graph summary for the canvas screen-reader region.
  * Mirrors the World KB `graphSummary` helper.
  */
 export function outlineGraphSummary(

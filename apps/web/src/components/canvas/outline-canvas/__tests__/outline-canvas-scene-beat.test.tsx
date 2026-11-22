@@ -1,5 +1,5 @@
 /**
- * Outline canvas — Scene/Beat inspector selection wiring (V1.109 C2 T4;
+ * note: Outline canvas — Scene/Beat inspector selection wiring (V1.109 C2 T4;
  * FB-C2-002; V1.115 P0 T1b migrated to useCanvasSurface).
  *
  * The RF graph (CanvasShell) is mocked out in this file, so graph-click
@@ -19,10 +19,6 @@ import type { Node } from '@xyflow/react';
 
 import { renderInApp } from '@/test/test-providers';
 import { OutlineCanvas } from '@/components/canvas/outline-canvas';
-
-// ---------------------------------------------------------------------------
-// Mocks — minimal stubs. useCanvasSurface is mocked so we control selection.
-// ---------------------------------------------------------------------------
 
 vi.mock('@/components/canvas/canvas-shell', () => ({
   CanvasShell: ({ children }: { children?: React.ReactNode }) => (
@@ -77,14 +73,14 @@ vi.mock('@/lib/nexus/query-keys', () => ({
   queryKeys: {
     chapters: { outlines: () => ['chapters', 'outlines'], detail: () => ['chapters', 'detail'], lists: () => ['chapters', 'lists'], list: () => ['chapters', 'list'] },
     outline: { detail: () => ['outline', 'detail'] },
-    // The event inspector's World-event picker composes its World KB read key
+    // note: the event inspector's World-event picker composes its World KB read key
     // at render even when the Work is unbound (the query is disabled on the
     // id), so the stub must carry the family these surfaces reach for.
     worldKb: { graph: (worldId: string) => ['worldKb', 'graph', worldId] },
   },
 }));
 
-// Control what useCanvasSurface returns — this is the wiring-under-test.
+// note: control what useCanvasSurface returns — this is the wiring-under-test.
 // T1b ownership move: selection moved from useOutlineCanvasGraph's
 // selectedSceneId/selectedBeatId to useCanvasSurface's selectedNode, which the
 // orchestrator resolves via the rf-projection helpers.
@@ -114,10 +110,6 @@ vi.mock('@/components/canvas/use-canvas-surface', () => ({
   useCanvasSurface: () => surfaceMock,
 }));
 
-// ---------------------------------------------------------------------------
-// Fixture + helpers
-// ---------------------------------------------------------------------------
-
 const FIXTURE = {
   scenes: [
     { sceneId: 'scene-1', chapterId: 1, title: 'Opening Scene', status: 'drafted' as const },
@@ -140,10 +132,6 @@ function renderWithFixture() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', () => {
   it('renders the Scene inspector with resolved data + parent chapter helper when a scene is selected', () => {
     surfaceMock.selectedNode = {
@@ -157,14 +145,10 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
 
     renderWithFixture();
 
-    // Scene inspector heading + title.
     expect(screen.getByText('Scene').closest('[class*="card"]')).toBeInTheDocument();
     expect(screen.getByText('Opening Scene')).toBeInTheDocument();
-    // Parent chapter helper (Voice & Content lock).
     expect(screen.getByText('Part of Chapter One.')).toBeInTheDocument();
-    // Read-only banner.
     expect(screen.getByText('Scene details are view-only for now.')).toBeInTheDocument();
-    // Status field.
     expect(screen.getByText('Drafted')).toBeInTheDocument();
   });
 
@@ -182,7 +166,6 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
 
     expect(screen.getByText('Beat').closest('[class*="card"]')).toBeInTheDocument();
     expect(screen.getByText('Inciting Moment')).toBeInTheDocument();
-    // Parent scene helper — beat-1 belongs to scene-1 ("Opening Scene").
     expect(screen.getByText('Part of Opening Scene.')).toBeInTheDocument();
     expect(screen.getByText('Beat details are view-only for now.')).toBeInTheDocument();
   });
@@ -193,19 +176,16 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
 
     renderWithFixture();
 
-    // Chapter inspector empty-state prompt (no chapter selected).
     expect(screen.getByText('Select a chapter to inspect its outline metadata.')).toBeInTheDocument();
-    // No Scene/Beat inspector headings.
     expect(screen.queryByText('Scene')).not.toBeInTheDocument();
     expect(screen.queryByText('Beat')).not.toBeInTheDocument();
   });
 
-  // V1.115 Phase 5 Greptile fix — deselection (user clicks the canvas
+  // note: V1.115 Phase 5 Greptile fix — deselection (user clicks the canvas
   // background) must clear the derived chapter/scene/beat selections so the
   // inspector does not stay active for a stale/deselected node. Before the fix
   // the resolver returned early on null and left the previous selection intact.
   it('clears the Chapter inspector when the surface reports deselection after a selection', () => {
-    // 1. Select a chapter — the inspector mounts.
     surfaceMock.selectedNode = {
       id: 'chapter:1',
       type: 'outline-chapter',
@@ -221,7 +201,6 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
       screen.queryByText('Select a chapter to inspect its outline metadata.'),
     ).not.toBeInTheDocument();
 
-    // 2. Deselect — surface reports null (user clicked canvas background).
     surfaceMock.selectedNode = null;
     surfaceMock.selectedNodeId = null;
     rerender(
@@ -230,15 +209,13 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
       </QueryClientProvider>,
     );
 
-    // 3. The inspector must clear — empty-state prompt reappears, no stale
-    //    Chapter Inspector heading.
     expect(
       screen.getByText('Select a chapter to inspect its outline metadata.'),
     ).toBeInTheDocument();
     expect(screen.queryByText('Chapter Inspector')).not.toBeInTheDocument();
   });
 
-  // V1.115 P1 T5 (R-V1109-P0-QC3-W002) — `beatParentSceneTitle` must use a
+  // note: V1.115 P1 T5 (R-V1109-P0-QC3-W002) — `beatParentSceneTitle` must use a
   // memoized Map lookup, not `Array.find()` per render. Correctness is covered
   // by the beat-selection test above; this case guards the memo contract:
   // stable across re-renders with the same scenes, and rebuilt when scenes
@@ -256,7 +233,7 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     const { rerender } = renderWithFixture();
     expect(screen.getByText('Part of Opening Scene.')).toBeInTheDocument();
 
-    // Re-render with the same fixture reference — the memoized scene-title Map
+    // note: re-render with the same fixture reference — the memoized scene-title Map
     // is reused; the parent scene helper remains correct.
     rerender(
       <QueryClientProvider client={queryClient}>
@@ -265,7 +242,7 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     );
     expect(screen.getByText('Part of Opening Scene.')).toBeInTheDocument();
 
-    // Re-render with a fixture whose scene-1 title changed — the memo must
+    // note: re-render with a fixture whose scene-1 title changed — the memo must
     // rebuild (dep = fixture.scenes) and surface the new title. A stale `[]`
     // dep would keep showing "Opening Scene".
     const renamedFixture = {

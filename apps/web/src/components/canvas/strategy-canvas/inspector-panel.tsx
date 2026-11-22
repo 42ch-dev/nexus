@@ -1,5 +1,5 @@
 /**
- * Inspector panel — the aside that hosts the three per-section inspectors.
+ * note: Inspector panel — the aside that hosts the three per-section inspectors.
  *
  * Renders the selected-node header, the edit/read-only toggle, and the
  * state/transition/prompt sections. The shell is kept here so the orchestrator

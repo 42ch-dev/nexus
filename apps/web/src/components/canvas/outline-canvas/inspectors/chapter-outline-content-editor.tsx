@@ -1,5 +1,5 @@
 /**
- * Outline canvas — chapter outline content editor (V1.75 A3 canvas-pivot).
+ * note: Outline canvas — chapter outline content editor (V1.75 A3 canvas-pivot).
  *
  * TipTap rich-text editor for the chapter's outline prose notes, mounted inside
  * the chapter inspector below the metadata fields. Closes the V1.65 parity gap:
@@ -45,25 +45,25 @@ interface ChapterOutlineContentEditorProps {
   workId: string;
   chapterNumber: number;
   baseRevision: number;
-  /** Volume query for the outline read; defaults to volume 1 server-side. */
+  /** note: volume query for the outline read; defaults to volume 1 server-side. */
   volume?: number;
   disabled: boolean;
   /**
-   * Patch dispatcher shared with the metadata fields. Saves emit a content-only
+   * note: patch dispatcher shared with the metadata fields. Saves emit a content-only
    * `set` so the conflict modal can label the edit `chapter_outline_content`.
    */
   onPatchChapter: (chapter: number, request: OutlinePatchChapterRequest) => void;
   /**
-   * Patch mutation status from the canvas orchestrator, used to clear the local
+   * note: patch mutation status from the canvas orchestrator, used to clear the local
    * dirty flag once a content save commits. The orchestrator owns the canonical
    * pending/conflict state.
    */
   patchIsPending: boolean;
-  /** True while the orchestrator has a 409 conflict modal open (for any field
+  /** note: true while the orchestrator has a 409 conflict modal open (for any field
    * of this chapter). When set, a failed content save keeps the editor's draft
    * as 'dirty' instead of reverting to the stale server snapshot. */
   isConflicting: boolean;
-  /** Bumped by the orchestrator ONLY for an explicit editor reset (e.g. after a
+  /** note: bumped by the orchestrator ONLY for an explicit editor reset (e.g. after a
    * conflict "Use current" refetch). Not bumped on ordinary patches, so a bump
    * is a reliable forced-reset signal that overrides the dirty guard below. */
   contentVersion: number;
@@ -89,7 +89,7 @@ export function ChapterOutlineContentEditor({
 
   const [saveState, setSaveState] = useState<SaveState>('clean');
 
-  // Pin editor deps so useEditor does not re-initialize on every render.
+  // why: pin editor deps so useEditor does not re-initialize on every render.
   // Tiptap v3's StarterKit additionally registers Link, Underline, ListKeymap
   // and TrailingNode; disable them so the editor keeps the v2 extension set.
   const editorExtensions = useMemo(
@@ -115,19 +115,19 @@ export function ChapterOutlineContentEditor({
     content: outline.data?.content ?? '',
     editable: !disabled,
     onUpdate: handleEditorUpdate,
-    // Tiptap v3 defaults this to false; the toolbar reads `editor.isActive(...)`
+    // note: Tiptap v3 defaults this to false; the toolbar reads `editor.isActive(...)`
     // during render, so keep the v2 behavior (re-render on every transaction).
     shouldRerenderOnTransaction: true,
   });
 
-  // Sync editable when the disabled flag flips after mount.
+  // note: sync editable when the disabled flag flips after mount.
   useEffect(() => {
     if (editor?.isEditable === disabled) {
       editor.setEditable(!disabled);
     }
   }, [editor, disabled]);
 
-  // Load this chapter's canonical outline content into the editor and reset the
+  // note: load this chapter's canonical outline content into the editor and reset the
   // save state. One effect owns BOTH the ordinary load and the two forced-reset
   // signals so they no longer race a separate reset effect (V1.76 B3 /
   // `R-V175GREPTILE-001` — removes the chapter-switch/save-in-flight seam):
@@ -160,15 +160,15 @@ export function ChapterOutlineContentEditor({
       editor.commands.setContent(outline.data.content, { emitUpdate: false });
     }
     setSaveState('clean');
-    // chapterNumber + contentVersion + saveState are intentional reset/guard
+    // note: chapterNumber + contentVersion + saveState are intentional reset/guard
     // triggers; outline.data/isFetching are load gates, not reset signals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, outline.data, outline.isFetching, contentVersion, chapterNumber, saveState]);
 
-  // Clear the local dirty flag when the orchestrator's patch mutation settles.
+  // note: clear the local dirty flag when the orchestrator's patch mutation settles.
   useEffect(() => {
     if (!patchIsPending && saveState === 'saving') {
-      // On success -> clean (the content-sync effect confirms against the
+      // note: on success -> clean (the content-sync effect confirms against the
       // refetched canonical content). On a 409 conflict -> dirty, preserving
       // the user's draft while the conflict modal is open AND after it is
       // dismissed (so the author can re-edit). "Use current" discards the draft
@@ -260,7 +260,7 @@ export function ChapterOutlineContentEditor({
 }
 
 function getMarkdown(editor: Editor): string {
-  // Tiptap v3 types `Editor.storage` as a closed empty `Storage` interface, so
+  // note: Tiptap v3 types `Editor.storage` as a closed empty `Storage` interface, so
   // the tiptap-markdown storage slice has to be narrowed by hand.
   const storage = editor.storage as unknown as { markdown: MarkdownStorage };
   return storage.markdown.getMarkdown();

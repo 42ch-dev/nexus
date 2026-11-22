@@ -1,5 +1,5 @@
 /**
- * Compose conflict dialog (v239-p3-canvas-compose-ui T4) — a stale
+ * note: Compose conflict dialog (v239-p3-canvas-compose-ui T4) — a stale
  * `base_revision` is the typed 409 `strategy_candidate_conflict`. The rendered
  * graph is unchanged and nothing auto-retries. Reload reads the canonical
  * candidate at the revision the daemon holds, so the user reapplies the op

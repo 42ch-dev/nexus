@@ -1,5 +1,5 @@
 /**
- * Approve disclosure — the simulation limit, rendered where approval happens
+ * note: Approve disclosure — the simulation limit, rendered where approval happens
  * (`.mstar/research/p2-simulator-limits.md` §3, five required elements).
  *
  * The modal is disclosure-first: the trajectory's `simulation_level`,
@@ -28,10 +28,10 @@ import type { ApplyRenderState } from './hooks/use-apply-strategy';
 export interface ApproveDisclosureProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Authoritative surface state: `'stale'` alone renders the stale banner. */
+  /** note: authoritative surface state: `'stale'` alone renders the stale banner. */
   status: SimulationStatus;
   /**
-   * The finer staleness fact `status` cannot carry: a stale snapshot whose
+   * note: the finer staleness fact `status` cannot carry: a stale snapshot whose
    * replacement walk reports `running` (or whose re-read reports `failed`)
    * still has to show the banner. Optional — a caller that passes only
    * `status` is complete, and the banner follows `status === 'stale'`.
@@ -40,62 +40,62 @@ export interface ApproveDisclosureProps {
   trajectory: SimulationTrajectory | null;
   error: unknown;
   /**
-   * The approval write path. Absent in builds that do not wire it (tracked as
+   * note: the approval write path. Absent in builds that do not wire it (tracked as
    * I-000415): Approve then renders disabled with the reason, never as a
    * clickable no-op. Only the compose path supplies this (T6); the flag-off
    * surface keeps the disabled disclosure.
    */
   onApprove?: () => void;
   /**
-   * Compose-path approve outcome: the frozen snapshot, or a named refusal.
+   * note: compose-path approve outcome: the frozen snapshot, or a named refusal.
    * Absent until the wired handler ran. The approval summary states that
    * approval freezes a candidate and does not publish, apply or execute.
    */
   approval?: ApproveRenderState | null;
   /**
-   * Compose-path gate that disables Approve with its named reason even when a
+   * note: compose-path gate that disables Approve with its named reason even when a
    * current successful trajectory exists — an unbound required slot. Absent
    * off the compose path.
    */
   gateReason?: string | null;
   /**
-   * The apply write path: apply installs the chosen approval as the running
+   * note: the apply write path: apply installs the chosen approval as the running
    * identity. It is aimed at a listed approval, never at whatever the dialog
    * happens to hold — that is how a superseded approval stays reachable.
    * Absent → no Apply control.
    */
   onApply?: (approval: StrategyApprovals['items'][number]) => void;
   /**
-   * Every approval of this strategy, newest first (the status read's total
+   * note: every approval of this strategy, newest first (the status read's total
    * order). The status read alone carries only the newest approval, so a
    * rollback target exists only here. Absent or empty → no Apply control.
    */
   approvals?: StrategyApprovals['items'] | null;
   /**
-   * The `approval_id` Apply is aimed at. Unset → the newest listed approval,
+   * note: the `approval_id` Apply is aimed at. Unset → the newest listed approval,
    * which is the happy path after an approve.
    */
   applyTargetId?: string | null;
-  /** Aim Apply at another listed approval (the rollback target). */
+  /** note: aim Apply at another listed approval (the rollback target). */
   onSelectApplyTarget?: (approvalId: string) => void;
-  /** The approvals read failed; its message replaces a silently missing Apply control. */
+  /** note: the approvals read failed; its message replaces a silently missing Apply control. */
   approvalsError?: string | null;
   /**
-   * Compose-path apply outcome: the appended apply row, or the refusal's own
+   * note: compose-path apply outcome: the appended apply row, or the refusal's own
    * typed code. Absent until the wired handler ran.
    */
   application?: ApplyRenderState | null;
-  /** Re-run the static walk for the current candidate (the stale/failed recovery). */
+  /** note: re-run the static walk for the current candidate (the stale/failed recovery). */
   onRun?: () => void;
   /**
-   * Live apply-state read (compose path): which approval is running and the
+   * note: live apply-state read (compose path): which approval is running and the
    * newest approval, to badge a live apply that is not the newest. Absent →
    * no live block and no badge. The badge compares `approval_id`s only.
    */
   appliedStatus?: StrategyAppliedStatus | null;
-  /** The live read has not returned its first row yet (no `appliedStatus` data). */
+  /** note: the live read has not returned its first row yet (no `appliedStatus` data). */
   appliedStatusPending?: boolean;
-  /** The live read failed; its message names the failure instead of a silent "no apply". */
+  /** note: the live read failed; its message names the failure instead of a silent "no apply". */
   appliedStatusError?: string | null;
 }
 
@@ -121,10 +121,10 @@ export function ApproveDisclosure({
   appliedStatusError = null,
 }: ApproveDisclosureProps) {
   const { t } = useTranslation('canvas');
-  // `status` owns the banner; `isStale` only re-adds it while a newer fact
+  // note: `status` owns the banner; `isStale` only re-adds it while a newer fact
   // (`running`, `failed`) outranks staleness in `status`.
   const showStale = status === 'stale' || isStale;
-  // Apply is aimed at a listed approval, defaulting to the newest. A stale
+  // note: Apply is aimed at a listed approval, defaulting to the newest. A stale
   // selection (an approval a refetch no longer returns) falls back to newest.
   const applyTarget =
     approvals?.find((candidate) => candidate.approval_id === applyTargetId) ??
@@ -132,7 +132,7 @@ export function ApproveDisclosure({
     null;
   const liveApprovalId = appliedStatus?.current_apply?.approval_id ?? null;
   const newestApprovalId = appliedStatus?.newest_approval?.approval_id ?? null;
-  // Three cases, `approval_id`s only (D11). Aimed at the live approval → the
+  // note: three cases, `approval_id`s only (D11). Aimed at the live approval → the
   // apply is an `already_applied` refusal, not a rollback. Aimed at the newest
   // → applying moves forward, so the "newer approval available" badge stands
   // alone. Aimed at anything else → applying it moves production back.
@@ -305,7 +305,7 @@ export function ApproveDisclosure({
                 appliedAt: appliedStatus.current_apply.applied_at,
               })}
             </p>
-            {/* D9: informational, never a warning; it blocks neither apply nor
+            {/* note: D9: informational, never a warning; it blocks neither apply nor
                 rollback and disappears when the live approval is the newest. */}
             {appliedStatus.newest_approval &&
             appliedStatus.newest_approval.approval_id !==
@@ -396,7 +396,7 @@ export function ApproveDisclosure({
             >
               {t('strategy.apply.action')}
             </button>
-            {/* Rollback is this same control aimed at another listed approval:
+            {/* note: rollback is this same control aimed at another listed approval:
                 history is append-only, so the copy never implies deletion. The
                 note appears only when the target is neither the live apply nor
                 the newest approval — only then does applying move production
@@ -486,7 +486,7 @@ export function ApproveDisclosure({
   );
 }
 
-/** A throw of any shape still names its cause instead of rendering an empty message. */
+/** note: a throw of any shape still names its cause instead of rendering an empty message. */
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
@@ -494,14 +494,14 @@ function errorMessage(error: unknown): string {
     try {
       return JSON.stringify(error);
     } catch {
-      // Cyclic or BigInt-bearing error object: naming it is better than blank.
+      // note: cyclic or BigInt-bearing error object: naming it is better than blank.
       return 'unserializable error';
     }
   }
   return String(error);
 }
 
-/** `simulation_level` → copy. Unknown levels are surfaced as unsupported, never assumed. */
+/** note: `simulation_level` → copy. Unknown levels are surfaced as unsupported, never assumed. */
 const LEVEL_COPY: Record<string, string> = {
   reachability: 'strategy.approve.level.reachability',
 };

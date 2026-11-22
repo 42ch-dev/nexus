@@ -1,5 +1,5 @@
 /**
- * Static-simulation overlay for the Strategy canvas.
+ * note: Static-simulation overlay for the Strategy canvas.
  *
  * The trajectory names node ids, which are the preset state ids on this
  * surface. Predicted waits and collapsed judge branches are attached to the
@@ -18,7 +18,7 @@ export function applyTrajectoryOverlay(
 ): Node<StrategyNodeData>[] {
   if (!trajectory) return nodes;
 
-  // Only a `manual` wait names a node id; a `signal` subject is a signal name,
+  // why: only a `manual` wait names a node id; a `signal` subject is a signal name,
   // so a signal colliding with a state id must not attach to that node.
   const waitByNode = new Map<string, 'manual'>();
   for (const wait of trajectory.predicted_waits) {

@@ -1,5 +1,5 @@
 /**
- * Strategy canvas adapter — IR projection (v239-p3-canvas-compose-ui T3b/T5).
+ * note: Strategy canvas adapter — IR projection (v239-p3-canvas-compose-ui T3b/T5).
  *
  * The payload carries the document only; the adapter projects it from IR and a
  * trajectory that names a wired slot marks the slot node simulated. There is
@@ -63,7 +63,7 @@ describe('createStrategyCanvasAdapter — compose branch', () => {
     const slot = nodes.find((node) => node.id === 'collect-sources');
     expect(slot?.type).toBe('strategy-pattern-slot');
     expect(slot?.data.simulated).toBe(true);
-    // A node the walk did not visit stays unmarked.
+    // note: a node the walk did not visit stays unmarked.
     expect(nodes.find((node) => node.id === 'pause')?.data.simulated).toBeUndefined();
   });
 

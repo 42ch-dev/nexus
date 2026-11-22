@@ -1,5 +1,5 @@
 /**
- * Outline alternate view — non-spatial companion to the spatial graph
+ * note: Outline alternate view — non-spatial companion to the spatial graph
  * (FB-C1-004, V1.108 P0 T3; V1.109 C2 T3 — Scene/Beat nested rows FB-C2-003;
  * V1.115 T1 — client-side sort controls R-V1108P0QC1-M001).
  *
@@ -42,7 +42,7 @@ export interface OutlineAltViewProps {
   outline: WorkOutline;
   chapters: ChapterSummary[];
   /**
-   * Optional Scene/Beat fixture (V1.109 C2 — FB-C2-003). When provided, Scene
+   * note: optional Scene/Beat fixture (V1.109 C2 — FB-C2-003). When provided, Scene
    * rows nest under their parent chapter and Beat rows nest under their parent
    * scene. Empty/undefined on real Works — chapters then render with zero
    * scene/beat children (honest empty chrome).
@@ -50,7 +50,7 @@ export interface OutlineAltViewProps {
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
-// V1.115 T1 — client-side sort state. Ephemeral: lives in useState and resets
+// note: client-side sort state. Ephemeral: lives in useState and resets
 // on every mount (never persisted). Lists are small and un-paginated.
 type ChapterSortKey = 'volume' | 'number';
 type SortDir = 'asc' | 'desc';
@@ -62,9 +62,9 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
   for (const c of chapters) chapterById.set(c.chapter, c);
   const unassigned = unassignedChaptersOf(outline, chapters);
 
-  // V1.109 C2 T3 — index scenes by chapter and beats by scene so the nested
-  // rows render in O(chapters + scenes + beats) without re-scanning the
-  // fixture per row. Empty when no fixture is provided (real Works).
+  // why: index scenes by chapter and beats by scene so the nested rows render in
+  // O(chapters + scenes + beats) without re-scanning the fixture per row.
+  // Empty when no fixture is provided (real Works).
   const hasSceneBeatFixture = sceneBeatFixture !== undefined;
   const scenesByChapter = new Map<number, SceneBeatFixturePayload['scenes']>();
   const beatsByScene = new Map<string, SceneBeatFixturePayload['beats']>();
@@ -81,16 +81,16 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
     }
   }
 
-  // V1.115 T1 — chapter sort state (ephemeral). Default volume-asc reproduces
-  // the historical grouped rendering exactly.
+  // note: chapter sort state (ephemeral). Default volume-asc reproduces the
+  // historical grouped rendering exactly.
   const [chapterSortKey, setChapterSortKey] = useState<ChapterSortKey>('volume');
   const [chapterSortDir, setChapterSortDir] = useState<SortDir>('asc');
-  // V1.115 T1 — timeline sort state. Only one sortable column (event time);
+  // note: timeline sort state. Only one sortable column (event time);
   // ascending is the declared timeline order.
   const [eventSortDir, setEventSortDir] = useState<SortDir>('asc');
 
-  // Volume label per chapter — used to show volume membership inline when the
-  // chapter list is flattened by the Number sort.
+  // note: volume label per chapter — used to show volume membership inline when
+  // the chapter list is flattened by the Number sort.
   const volumeLabelByChapter = new Map<number, string>();
   for (const v of outline.volumes) {
     const label = v.label.trim() || t('chapter.volume', { volume: v.volume_id });
@@ -99,7 +99,7 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
 
   const isFlatNumber = chapterSortKey === 'number';
 
-  // Volume-grouped path: reorder only the named-volume groups + unassigned
+  // note: volume-grouped path — reorder only the named-volume groups + unassigned
   // bucket. Chapter order WITHIN a volume stays the declared order (sorting by
   // volume is about group order, not intra-group order). Copies are taken so
   // the outline prop is never mutated.
@@ -109,15 +109,15 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
       : outline.volumes;
   const unassignedInOrder = chapterSortDir === 'desc' ? [...unassigned].reverse() : unassigned;
 
-  // Number path: flatten every chapter (assigned + unassigned) into one list
-  // sorted numerically. Volume membership is rendered inline per row.
+  // note: number path — flatten every chapter (assigned + unassigned) into one
+  // list sorted numerically. Volume membership is rendered inline per row.
   const flatChapters = isFlatNumber
     ? chapters
         .slice()
         .sort((a, b) => (chapterSortDir === 'asc' ? a.chapter - b.chapter : b.chapter - a.chapter))
     : [];
 
-  // Timeline events — array order is the timeline sequence. Desc reverses it.
+  // note: timeline events — array order is the timeline sequence. Desc reverses it.
   const eventsInOrder =
     eventSortDir === 'desc' ? [...outline.timeline_events].reverse() : outline.timeline_events;
 
@@ -133,7 +133,6 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
     setEventSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
   }
 
-  // i18n sort fragments
   const dirAscWord = t('outlineAltView.sort.dirAsc');
   const dirDescWord = t('outlineAltView.sort.dirDesc');
   const colNumber = t('outlineAltView.sort.columnNumber');
@@ -148,7 +147,6 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
       aria-label={t('outlineAltView.ariaLabel')}
       className="grid gap-4 lg:grid-cols-2"
     >
-      {/* Chapter list grouped by volume */}
       <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-heading-16 font-heading text-gray-1000">{t('outlineAltView.chaptersTitle')}</h3>
@@ -276,7 +274,6 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
         )}
       </div>
 
-      {/* Timeline events list */}
       <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-heading-16 font-heading text-gray-1000">{t('outlineAltView.timelineTitle')}</h3>
@@ -329,10 +326,6 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
   );
 }
 
-// ---------------------------------------------------------------------------
-// V1.115 T1 — Sort header button (R-V1108P0QC1-M001)
-// ---------------------------------------------------------------------------
-
 interface SortButtonProps {
   label: string;
   active: boolean;
@@ -372,21 +365,17 @@ function sortButtonAria(
   return t('outlineAltView.sort.activeHint', { column: label, dir: dirWord, next: nextWord });
 }
 
-// ---------------------------------------------------------------------------
-// V1.109 C2 T3 — Chapter row + nested Scene/Beat rows (FB-C2-003)
-// ---------------------------------------------------------------------------
-
 interface ChapterRowProps {
   chapter: ChapterSummary;
   index: number;
   title: string;
   /**
-   * V1.115 T1 — inline volume label shown when the chapter list is flattened
-   * by the Number sort (so volume membership is not lost). Omitted in the
-   * grouped view, where volume is already the group header.
+   * note: inline volume label shown when the chapter list is flattened by the
+   * Number sort (so volume membership is not lost). Omitted in the grouped
+   * view, where volume is already the group header.
    */
   volumeLabel?: string;
-  /** True when a scene/beat fixture is active (gates the empty-under-chapter helper). */
+  /** note: true when a scene/beat fixture is active (gates the empty-under-chapter helper). */
   hasSceneBeatFixture: boolean;
   scenesByChapter: Map<number, SceneBeatFixturePayload['scenes']>;
   beatsByScene: Map<string, SceneBeatFixturePayload['beats']>;
@@ -457,7 +446,7 @@ function ChapterRow({
           })}
         </ol>
       ) : hasSceneBeatFixture ? (
-        // Only show the empty-under-chapter helper when the fixture is active.
+        // note: only show the empty-under-chapter helper when the fixture is active.
         // On real Works (no fixture), chapters render cleanly without the
         // helper — honest empty chrome (no invented scene structure).
         <p className="ml-8 text-copy-13 text-gray-700">{t('outlineAltView.noScenes')}</p>

@@ -1,5 +1,5 @@
 /**
- * Compose interactions (v239-p3-canvas-compose-ui T3, T3b, T4) at the hook
+ * note: Compose interactions (v239-p3-canvas-compose-ui T3, T3b, T4) at the hook
  * level over msw: every op sends the last-read `base_revision`; `nest` sends
  * its attach target and the daemon writes the connecting edge, so the canvas
  * adds no edge of its own (T3b); a 409/422 leaves the working document
@@ -45,7 +45,7 @@ const PATTERN_ITEMS = [
   },
 ];
 
-/** Seed document plus the slot and connecting edge the nest op commits. */
+/** note: seed document plus the slot and connecting edge the nest op commits. */
 function nestedDocument(revision: number, bind: Record<string, unknown> = {}): WorkflowDocument {
   return {
     ...SEED,
@@ -101,7 +101,7 @@ function renderCompose() {
 }
 
 afterEach(() => {
-  // msw resets handlers between tests via setup.ts.
+  // note: msw resets handlers between tests via setup.ts.
 });
 
 describe('useStrategyCompose', () => {
@@ -150,7 +150,7 @@ describe('useStrategyCompose', () => {
         pages += 1;
         return HttpResponse.json({
           items: PATTERN_ITEMS,
-          // One page more than the cap allows: the walk must refuse, not return a short list.
+          // note: one page more than the cap allows — the walk must refuse, not return a short list.
           pagination: { limit: 1, has_more: pages < 25, next_cursor: `page-${pages}` },
         });
       }),
@@ -165,7 +165,7 @@ describe('useStrategyCompose', () => {
   });
 
   it('resolves a pinned slot from the available duplicate, not the first listing entry', async () => {
-    // Two directories declare one pin: the first is unreadable for the reader, so it declares no
+    // note: two directories declare one pin — the first is unreadable for the reader, so it declares no
     // slots. Reading its empty declaration would hide the required slot the pin really has.
     const brokenDuplicate = {
       ...PATTERN_ITEMS[0],
@@ -229,7 +229,7 @@ describe('useStrategyCompose', () => {
       await result.current.nestPattern({ attachNodeId: 'draft', package: { id: 'prompt-step', version: '1.0.0' } });
     });
 
-    // The op guarded the last-read revision (0) and named the new slot node.
+    // note: the op guarded the last-read revision (0) and named the new slot node.
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toMatchObject({
       base_revision: 0,
@@ -243,7 +243,7 @@ describe('useStrategyCompose', () => {
       },
     });
 
-    // The daemon wrote the connecting edge on the committed document, and the
+    // note: the daemon wrote the connecting edge on the committed document, and the
     // canvas added no second one of its own.
     const committed = result.current.workingDocument!;
     const slot = committed.nodes.find((node) => node.id === 'prompt-step-slot');
@@ -304,7 +304,7 @@ describe('useStrategyCompose', () => {
       http.get(PATTERNS_PATH, () =>
         HttpResponse.json({ items: PATTERN_ITEMS, pagination: { limit: 100, has_more: false } }),
       ),
-      // The daemon moved on: the reload reads the candidate at revision 1.
+      // note: the daemon moved on — the reload reads the candidate at revision 1.
       http.get(CANDIDATE_PATH, () => {
         candidateReads += 1;
         return HttpResponse.json(candidateReads === 1 ? SEED : nestedDocument(1));
@@ -349,7 +349,7 @@ describe('useStrategyCompose', () => {
     });
     expect(result.current.workingDocument).toBe(before);
 
-    // The recovery reads the canonical candidate at the revision the daemon holds and drops the
+    // note: the recovery reads the canonical candidate at the revision the daemon holds and drops the
     // conflict, so the next op is applied against those bytes.
     await act(async () => {
       await result.current.reload();
@@ -396,7 +396,7 @@ describe('useStrategyCompose', () => {
       ).rejects.toThrow();
     });
 
-    // The failing GET is reported in the dialog, not rejected into the void.
+    // note: the failing GET is reported in the dialog, not rejected into the void.
     await act(async () => {
       await result.current.reload();
     });
@@ -509,7 +509,7 @@ describe('useStrategyCompose', () => {
     const { result } = renderCompose();
     await waitFor(() => expect(result.current.workingDocument?.id).toBe(STRATEGY_ID));
 
-    // The canvas renders the expanded parent, which emits the nested slot as its child.
+    // note: the canvas renders the expanded parent, which emits the nested slot as its child.
     const graph = buildStrategyGraphFromIr(result.current.workingDocument!, {
       expandedSlots: new Set(['prompt-step-slot']),
       patterns,
@@ -519,7 +519,7 @@ describe('useStrategyCompose', () => {
     expect(nested?.parentId).toBe('prompt-step-slot');
     expect(nested?.data.nestId).toBe('judge-region');
 
-    // Selecting it reaches the slot inspector, which binds through the hook.
+    // note: selecting it reaches the slot inspector, which binds through the hook.
     renderInApp(
       <SlotInspector
         node={nested!.data}
@@ -559,7 +559,7 @@ describe('useStrategyCompose', () => {
       http.get(CANDIDATE_PATH, async () => {
         candidateReads += 1;
         if (candidateReads === 1) return HttpResponse.json(SEED);
-        // The recovery read answers with revision 1 after a newer compose landed.
+        // note: the recovery read answers with revision 1 after a newer compose landed.
         await staleRead;
         return HttpResponse.json(nestedDocument(1));
       }),
@@ -576,7 +576,7 @@ describe('useStrategyCompose', () => {
     const { result } = renderCompose();
     await waitFor(() => expect(result.current.workingDocument?.id).toBe(STRATEGY_ID));
 
-    // A compose commits while the recovery GET is still in flight.
+    // note: a compose commits while the recovery GET is still in flight.
     let reloaded: Promise<void> = Promise.resolve();
     await act(async () => {
       reloaded = result.current.reload();
@@ -593,7 +593,7 @@ describe('useStrategyCompose', () => {
       await reloaded;
     });
 
-    // Revision 1 never overwrites the revision-2 bytes the compose committed.
+    // note: revision 1 never overwrites the revision-2 bytes the compose committed.
     expect(result.current.workingDocument?.revision).toBe(2);
     expect(
       result.current.workingDocument?.nodes.find((node) => node.id === 'prompt-step-slot')?.bind

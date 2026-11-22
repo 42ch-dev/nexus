@@ -1,5 +1,5 @@
 /**
- * Chapter inspector — shared metadata field primitives (V1.76 B1 /
+ * note: Chapter inspector — shared metadata field primitives (V1.76 B1 /
  * `R-V175QC1-S001`).
  *
  * Extracted from `chapter-inspector.tsx` to keep that file ≤240 lines

@@ -1,5 +1,5 @@
 /**
- * Outline canvas — structure inspector (V1.73 B5 split, `R-V172P0-QC1-002`).
+ * note: Outline canvas — structure inspector (V1.73 B5 split, `R-V172P0-QC1-002`).
  *
  * Renders the Volumes & Chapters tree: the per-volume sections, the
  * "Unassigned" bucket, and the selectable chapter rows. Extracted from the

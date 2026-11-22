@@ -1,5 +1,5 @@
 /**
- * Approve wiring (v239-p3-canvas-compose-ui T6): what the approve response
+ * note: Approve wiring (v239-p3-canvas-compose-ui T6): what the approve response
  * renders — the frozen snapshot (approval id, exact pins, simulation
  * identity, candidate revision) and the no-publish statement — and the named
  * refusal copy for the cases that refuse. The flag-off surface passes none of
@@ -167,7 +167,7 @@ describe('ApproveDisclosure — apply on an approved snapshot (compose path)', (
   });
 
   it('renders the typed refusal code as the message, not a generic failure', () => {
-    // The refusal the daemon returns when the approval is already current.
+    // note: the refusal the daemon returns when the approval is already current.
     const error = new NexusClientError(409, 'invalid_input', 'approval apr_123 is already current', {
       code: 'apply_refused',
       reason: 'already_applied',
@@ -187,7 +187,7 @@ describe('ApproveDisclosure — apply on an approved snapshot (compose path)', (
   it('offers Apply only with a listed approval and passes that target through', () => {
     const onApply = vi.fn();
     renderDisclosure({ approval: { kind: 'approved', snapshot: snapshot() }, onApply });
-    // The frozen summary alone is not a target: the write path exists, the list does not.
+    // note: the frozen summary alone is not a target — the write path exists, the list does not.
     expect(screen.queryByRole('button', { name: 'Apply snapshot' })).toBeNull();
 
     cleanup();

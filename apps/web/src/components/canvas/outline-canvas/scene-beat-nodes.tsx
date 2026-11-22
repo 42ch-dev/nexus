@@ -1,5 +1,5 @@
 /**
- * Outline canvas Scene + Beat custom node types (V1.109 C2 — FB-C2-001).
+ * note: Outline canvas Scene + Beat custom node types (V1.109 C2 — FB-C2-001).
  *
  * These node kinds render scene-level and beat-level structure **inside**
  * Chapter parent nodes on the Outline spatial graph (FB-C2-000). They consume
@@ -30,7 +30,7 @@ import type {
 import { SCENE_STATUS_LABEL_KEYS } from './graph-projection';
 import { NodeChromeShell } from '../presentational/node-chrome-shell';
 
-// Re-export for type-only consumers that historically imported these from the
+// note: re-export for type-only consumers that historically imported these from the
 // node component module (T1 defined them here; T2 promoted the canonical
 // definitions to `rf-projection.ts` — the projection SSOT — so the data
 // payloads carry the identity fields `workId` / `sceneId` / `chapterId` /
@@ -40,10 +40,6 @@ export type {
   OutlineSceneNodeData,
   OutlineSceneStatus,
 } from './rf-projection';
-
-// ---------------------------------------------------------------------------
-// Status → token + label (canvas-outline-scene-status-* — DESIGN.md)
-// ---------------------------------------------------------------------------
 
 const SCENE_STATUS_TOKEN_VAR: Record<OutlineSceneStatus, string> = {
   drafted: '--color-canvas-outline-scene-status-drafted',
@@ -55,7 +51,7 @@ function sceneStatusColorVar(status: OutlineSceneStatus): string {
 }
 
 /**
- * AA text step per scene status (v1.183 P0 R-V1121P3T4-O001, AR-3) — same
+ * note: AA text step per scene status (v1.183 P0 R-V1121P3T4-O001, AR-3) — same
  * recipe as the chapter pill in outline-nodes.tsx: label-12 text on the 12%
  * status tint uses the hue's existing `-1000` step (drafted → blue-1000,
  * completed → green-1000; no new tokens).
@@ -69,11 +65,7 @@ function sceneStatusTextColorVar(status: OutlineSceneStatus): string {
   return `var(${SCENE_STATUS_TEXT_TOKEN_VAR[status]})`;
 }
 
-// ---------------------------------------------------------------------------
-// Scene node
-// ---------------------------------------------------------------------------
-
-/** Scene card node — title (**Untitled Scene** fallback) + status paint. */
+/** note: scene card node — title (**Untitled Scene** fallback) + status paint. */
 export const OutlineSceneNode = memo(function OutlineSceneNode({
   data,
   selected,
@@ -120,11 +112,7 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
   );
 });
 
-// ---------------------------------------------------------------------------
-// Beat node
-// ---------------------------------------------------------------------------
-
-/** Beat card node — title (**Untitled Beat** fallback). No status tier. */
+/** note: beat card node — title (**Untitled Beat** fallback). No status tier. */
 export const OutlineBeatNode = memo(function OutlineBeatNode({
   data,
   selected,

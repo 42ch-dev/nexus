@@ -1,12 +1,12 @@
 /**
- * SceneNode + BeatNode — rendering + DESIGN token consumption (V1.109 C2 T1;
+ * note: SceneNode + BeatNode — rendering + DESIGN token consumption (V1.109 C2 T1;
  * FB-C2-001).
  *
- * These components are new in T1 but are NOT wired into the projection yet
- * (Task 2 extends `rf-projection.ts` to emit them). These tests pin their
- * standalone rendering behavior: title + status from node data, Voice & Content
- * fallback labels (**Untitled Scene** / **Untitled Beat**), and consumption of
- * the `canvas-outline-scene-*` / `canvas-outline-beat-*` DESIGN tokens.
+ * These components are wired into the projection (`rf-projection.ts` emits
+ * them). These tests pin their standalone rendering behavior: title + status
+ * from node data, Voice & Content fallback labels (**Untitled Scene** /
+ * **Untitled Beat**), and consumption of the
+ * `canvas-outline-scene-*` / `canvas-outline-beat-*` DESIGN tokens.
  *
  * `@xyflow/react`'s `Handle` needs the RF internal store; we stub it so the
  * node body renders in isolation. `NodeProps` is passed through as-is.
@@ -17,7 +17,7 @@ import type { ReactNode } from 'react';
 
 import { renderInApp } from '@/test/test-providers';
 
-// Stub Handle so the node body renders without the RF store. `NodeProps` is
+// note: stub Handle so the node body renders without the RF store. `NodeProps` is
 // re-exported from the real module so the component's type imports resolve.
 vi.mock('@xyflow/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@xyflow/react')>();
@@ -37,10 +37,6 @@ import {
   type OutlineBeatNodeData,
 } from '../scene-beat-nodes';
 import { outlineNodeTypes } from '../outline-nodes';
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 
 function sceneProps(
   data: Partial<OutlineSceneNodeData>,
@@ -85,10 +81,6 @@ function beatProps(
   } as unknown as NodeProps;
 }
 
-// ---------------------------------------------------------------------------
-// SceneNode
-// ---------------------------------------------------------------------------
-
 describe('OutlineSceneNode', () => {
   it('renders the scene title from node data', () => {
     renderInApp(<OutlineSceneNode {...sceneProps({ title: 'The Arrival' })} />);
@@ -114,7 +106,7 @@ describe('OutlineSceneNode', () => {
     expect(container.textContent).toContain('Completed');
   });
 
-  // v1.183 P0 (R-V1121P3T4-O001, AR-3): label-12 chip text on the 12% status
+  // note: v1.183 P0 (R-V1121P3T4-O001, AR-3): label-12 chip text on the 12% status
   // tint must use the hue's `-1000` AA step, not the raw `*-700` status color
   // (fails AA on light tints). Same recipe as the chapter pill in
   // outline-nodes.tsx.
@@ -152,10 +144,6 @@ describe('OutlineSceneNode', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// BeatNode
-// ---------------------------------------------------------------------------
-
 describe('OutlineBeatNode', () => {
   it('renders the beat title from node data', () => {
     renderInApp(<OutlineBeatNode {...beatProps({ title: 'Turn: the call' })} />);
@@ -176,10 +164,6 @@ describe('OutlineBeatNode', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Registration
-// ---------------------------------------------------------------------------
-
 describe('outlineNodeTypes registration', () => {
   it('registers outline-scene and outline-beat in the node types map', () => {
     expect(outlineNodeTypes['outline-scene']).toBeDefined();
@@ -187,6 +171,6 @@ describe('outlineNodeTypes registration', () => {
   });
 });
 
-// Silence the unused-import lint for Handle/Position re-import (the mock above
+// note: silence the unused-import lint for Handle/Position re-import (the mock above
 // stubs Handle to null; Position is used in the fixture props).
 void Handle;

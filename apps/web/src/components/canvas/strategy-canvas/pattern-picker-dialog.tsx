@@ -1,5 +1,5 @@
 /**
- * Pattern picker — the nest entry point (v239-p3-canvas-compose-ui T3).
+ * note: Pattern picker — the nest entry point (v239-p3-canvas-compose-ui T3).
  * Lists the read-only pattern registry; the chosen package is nested at the
  * attach node and the interaction wires the connecting edge (T3b).
  */
@@ -14,7 +14,7 @@ export interface PatternPickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patterns: ListPatternsResponse['items'];
-  /** Why the listing could not be read; the picker says so instead of "no patterns". */
+  /** note: why the listing could not be read; the picker says so instead of "no patterns". */
   error?: string | null;
   attachNodeId: string;
   isComposing: boolean;
@@ -95,7 +95,7 @@ export function PatternPickerDialog({
                 package: { id: chosen.id, version: chosen.version },
               })
                 .then(() => onOpenChange(false))
-                // A refused nest is already presented by the hook's conflict/refusal
+                // note: a refused nest is already presented by the hook's conflict/refusal
                 // state; the picker only stays open for the retry.
                 .catch(() => {});
             }}

@@ -1,5 +1,5 @@
 /**
- * Strategy canvas state-machine helpers and shared UI pieces.
+ * note: Strategy canvas state-machine helpers and shared UI pieces.
  *
  * Contains graph/state projection helpers, the revision badge, validation
  * panel, steering artifacts list, and the edit-form shape used by the three

@@ -1,5 +1,5 @@
 /**
- * Outline canvas — Scene inspector (V1.109 C2 T3; FB-C2-002).
+ * note: Outline canvas — Scene inspector (V1.109 C2 T3; FB-C2-002).
  *
  * Read-only Scene detail panel. The outline wire model carries no scene data
  * today (`wire_contracts_changed: false`), so there is no write wire — the
@@ -26,9 +26,9 @@ export interface SceneInspectorScene {
 }
 
 export interface SceneInspectorProps {
-  /** Selected Scene data, or `null` when no Scene is selected. */
+  /** note: selected Scene data, or `null` when no Scene is selected. */
   scene: SceneInspectorScene | null;
-  /** Display title of the parent chapter (for the *Part of* helper). */
+  /** note: display title of the parent chapter (for the *Part of* helper). */
   parentChapterTitle: string | null;
 }
 

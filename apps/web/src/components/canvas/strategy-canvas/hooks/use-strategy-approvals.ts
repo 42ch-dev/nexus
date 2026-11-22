@@ -1,5 +1,5 @@
 /**
- * Approval-list read for the compose path (v241 P3.5 T4).
+ * note: Approval-list read for the compose path (v241 P3.5 T4).
  *
  * `GET /v1/daemon/strategies/{id}/approvals` returns every approval newest first — the same
  * total order the live status read uses for `newest_approval`. The status read alone reports

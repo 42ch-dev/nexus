@@ -33,26 +33,26 @@ export interface StrategySurfaceGraph {
   revision: number;
   activeSession: ActiveSession | null | undefined;
   /**
-   * Static trajectory of the open candidate, when a simulation has run. It is
+   * note: static trajectory of the open candidate, when a simulation has run. It is
    * part of the graph payload so a new trajectory re-projects the nodes.
    */
   trajectory: SimulationTrajectory | null;
   /**
-   * The document being rendered: the applied IR document the status read
+   * note: the document being rendered: the applied IR document the status read
    * returned, or the candidate the author is composing. Projected by
    * `buildStrategyGraphFromIr` — there is no YAML fallback.
    */
   document: WorkflowDocument;
-  /** Pattern registry listing; supplies declared slots for slot nodes. */
+  /** note: pattern registry listing; supplies declared slots for slot nodes. */
   patterns?: PatternSummary[];
-  /** Slot node ids the author expanded into groups. */
+  /** note: slot node ids the author expanded into groups. */
   expandedSlots?: ReadonlySet<string>;
-  /** Authored nest-into-slot containment chrome (child slot id → parent slot id). */
+  /** note: authored nest-into-slot containment chrome (child slot id → parent slot id). */
   containment?: ReadonlyMap<string, string>;
 }
 
 /**
- * Mutable context supplied by the orchestrator so the adapter can render
+ * note: mutable context supplied by the orchestrator so the adapter can render
  * inspectors / alt-view / conflict-modal without closing over stale values.
  *
  * All fields are read at render time from the ref; the adapter object itself is
@@ -67,12 +67,12 @@ export interface StrategyCanvasAdapterContext {
   selectedNode: Node<StrategyNodeData> | null;
   parsed: ParsedPreset | undefined;
   /**
-   * Projection byproduct — the adapter writes `danglingTargets` here after
+   * note: projection byproduct — the adapter writes `danglingTargets` here after
    * projecting; the orchestrator reads it for the ValidationPanel (V1.115 T2).
    */
   danglingTargets: string[];
   /**
-   * Compose-path (flag on) slot interactions. Absent when the flag is off, so
+   * note: compose-path (flag on) slot interactions. Absent when the flag is off, so
    * the slot inspector and expand toggle never render there.
    */
   compose?: {
@@ -82,14 +82,14 @@ export interface StrategyCanvasAdapterContext {
     onReplaceSubtree: (nestId: string, pkg: { id: string; version: string }) => Promise<void>;
     onUnnest: (nestId: string) => Promise<void>;
   };
-  /** Pattern registry listing for the slot inspector / projection (compose path). */
+  /** note: pattern registry listing for the slot inspector / projection (compose path). */
   patterns?: PatternSummary[];
 }
 
 export type StrategyCanvasAdapter = CanvasSurfaceAdapter<StrategySurfaceGraph, StrategyNodeData, StrategyEdgeData>;
 
 /**
- * Strategy canvas adapter — projects the workflow IR document into React Flow
+ * note: Strategy canvas adapter — projects the workflow IR document into React Flow
  * nodes/edges and renders surface-specific chrome (inspectors, alt-view, a11y
  * summary).
  *
@@ -111,7 +111,7 @@ export function createStrategyCanvasAdapter(
     layoutOptions: { direction: 'TB' },
 
     projectGraph(graph) {
-      // One projection, from IR, always. The Canvas has no YAML payload to fall
+      // note: one projection, from IR, always. The Canvas has no YAML payload to fall
       // back to (P6 condition 2).
       const projected = buildStrategyGraphFromIr(graph.document, {
         expandedSlots: graph.expandedSlots,
@@ -119,12 +119,12 @@ export function createStrategyCanvasAdapter(
         containment: graph.containment,
       });
 
-      // Surface the dangling-targets byproduct via ctxRef so the orchestrator
+      // note: surface the dangling-targets byproduct via ctxRef so the orchestrator
       // can feed the ValidationPanel without extending the projectGraph return
       // shape (adapter interface stability constraint).
       ctxRef.current.danglingTargets = projected.danglingTargets;
 
-      // Apply live session overlay — mark the current node with its session
+      // note: apply live session overlay — mark the current node with its session
       // status so strategy nodes can render the active indicator (previously
       // owned by useStrategyCanvas's node-state sync effect; moved here so the
       // adapter owns the full projection pipeline).
@@ -146,7 +146,7 @@ export function createStrategyCanvasAdapter(
         });
       }
 
-      // Simulation overlay (T3b/T5): the trajectory names the nodes the static
+      // note: simulation overlay (T3b/T5): the trajectory names the nodes the static
       // walk visited — a wired pattern slot is named, and the overlay says so
       // on the slot itself.
       if (graph.trajectory) {
@@ -158,7 +158,7 @@ export function createStrategyCanvasAdapter(
         );
       }
 
-      // Compose-path slot expand/collapse toggle, patched onto slot node data.
+      // note: compose-path slot expand/collapse toggle, patched onto slot node data.
       if (ctxRef.current.compose) {
         const toggle = ctxRef.current.compose.onToggleSlotExpanded;
         nodes = nodes.map((node) =>
@@ -176,7 +176,7 @@ export function createStrategyCanvasAdapter(
 
     renderInspector(_node) {
       const ctx = ctxRef.current;
-      // Compose path: a selected pattern slot renders the slot inspector
+      // note: compose path — a selected pattern slot renders the slot inspector
       // (bind / replace / unnest). Slot nodes have no PresetState, so this
       // branch precedes the YAML-state inspector entirely.
       const selectedNode = ctx.selectedNode;

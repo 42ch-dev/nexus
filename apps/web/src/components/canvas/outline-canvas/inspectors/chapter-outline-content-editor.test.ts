@@ -1,5 +1,5 @@
 /**
- * V1.75 A4 — outline content TipTap <-> markdown round-trip parity test.
+ * note: V1.75 A4 — outline content TipTap <-> markdown round-trip parity test.
  *
  * Proves the canvas inspector's rich-text capability matches the V1.65
  * chapter-page editor. Both use the SAME extensions (`StarterKit` +
@@ -17,7 +17,7 @@ import { Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown, type MarkdownStorage } from 'tiptap-markdown';
 
-// ProseMirror/TipTap read layout APIs that jsdom does not implement. Polyfill
+// note: ProseMirror/TipTap read layout APIs that jsdom does not implement. Polyfill
 // the minimal surface so a headless Editor can mount and serialize without a
 // real layout pass. (Same workaround class as the chapter-page test mock, but
 // here we exercise the REAL editor so the round-trip is actually proven.)
@@ -30,14 +30,14 @@ beforeAll(() => {
   if (!proto.getBoundingClientRect) {
     proto.getBoundingClientRect = (() => noopRect as DOMRect) as typeof proto.getBoundingClientRect;
   }
-  // Range is used by ProseMirror's text-offset resolution.
+  // note: Range is used by ProseMirror's text-offset resolution.
   const rangeProto = Range.prototype as unknown as { getClientRects?: unknown };
   rangeProto.getClientRects ??= () => [noopRect as DOMRect];
 });
 
 function makeEditor(initial: string): Editor {
   return new Editor({
-    // Mirror the component's extension set (v2 parity: Tiptap v3's StarterKit
+    // note: mirror the component's extension set (v2 parity: Tiptap v3's StarterKit
     // adds Link, Underline, ListKeymap and TrailingNode — disabled in both).
     extensions: [
       StarterKit.configure({
@@ -49,14 +49,14 @@ function makeEditor(initial: string): Editor {
       Markdown,
     ],
     content: initial,
-    // No DOM mount needed for serialization-only use.
+    // note: no DOM mount needed for serialization-only use.
     element: document.createElement('div'),
   });
 }
 
 function roundTrip(md: string): string {
   const editor = makeEditor(md);
-  // Tiptap v3 types `Editor.storage` as a closed empty `Storage` interface, so
+  // note: Tiptap v3 types `Editor.storage` as a closed empty `Storage` interface, so
   // the tiptap-markdown storage slice has to be narrowed by hand.
   const storage = editor.storage as unknown as { markdown: MarkdownStorage };
   const out = storage.markdown.getMarkdown();
@@ -80,7 +80,7 @@ describe('V1.75 A4 — TipTap <-> markdown round-trip (outline content parity)',
   });
 
   it('preserves a mixed markdown outline document (V1.65 parity sample)', () => {
-    // A realistic chapter outline combining every supported block type — the
+    // note: a realistic chapter outline combining every supported block type — the
     // same shape an author would draft in the retiring V1.65 editor.
     const md = [
       '# Chapter 3 — The Harbor',
@@ -100,7 +100,6 @@ describe('V1.75 A4 — TipTap <-> markdown round-trip (outline content parity)',
     ].join('\n');
 
     const out = roundTrip(md);
-    // Each block type survives the round-trip with its text content intact.
     expect(out).toMatch(/Chapter 3.*Harbor/);
     expect(out).toMatch(/Scene beats/);
     expect(out).toMatch(/Open on the harbor/);
@@ -113,7 +112,7 @@ describe('V1.75 A4 — TipTap <-> markdown round-trip (outline content parity)',
   });
 
   it('is stable across repeated round-trips (no drift)', () => {
-    // Two successive round-trips must converge: the second pass is byte-equal
+    // invariant: two successive round-trips must converge — the second pass is byte-equal
     // to the first. This guards against tiptap-markdown re-escaping or
     // re-formatting on each save (which would cause phantom dirty states).
     const md = '## Beats\n\n- one\n- two\n\n**bold** _italic_\n\n> quote\n';
