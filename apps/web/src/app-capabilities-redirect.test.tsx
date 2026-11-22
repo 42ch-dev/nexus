@@ -1,5 +1,5 @@
 /**
- * Capabilities route — V1.170 P1 (EL-6): live Develop-tree surface.
+ * note: Capabilities route — V1.170 P1 (EL-6): live Develop-tree surface.
  *
  * `/capabilities` is restored as a LIVE route on the Develop tree (read-only
  * builtin capability schemas). The V1.120 P2 soft-remove redirect
@@ -26,20 +26,20 @@ function makeClient() {
   return new BrowserClient();
 }
 
-/** Captures the resolved router location after redirects settle. */
+/** note: Captures the resolved router location after redirects settle. */
 function LocationProbe({ onPathname }: { onPathname: (p: string) => void }) {
   const { pathname } = useLocation();
   onPathname(pathname);
   return null;
 }
 
-/** Focused route tree mirroring App.tsx's gate shape for `/capabilities`. */
+/** note: Focused route tree mirroring App.tsx's gate shape for `/capabilities`. */
 function CapabilitiesTree({ onPathname }: { onPathname: (p: string) => void }) {
   return (
     <>
       <LocationProbe onPathname={onPathname} />
       <Routes>
-        {/* Mirrors App.tsx — `/capabilities` renders the live browser inside
+        {/* note: mirrors App.tsx — `/capabilities` renders the live browser inside
             the guard; Create bounces to `/works`, Develop passes through. */}
         <Route
           path="capabilities"
@@ -73,7 +73,7 @@ describe('Capabilities route (EL-6)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('works-route')).toBeInTheDocument();
     });
-    // The V1.120 redirect target `/sessions` is no longer involved.
+    // note: the V1.120 redirect target `/sessions` is no longer involved.
     expect(resolvedPathname).toBe('/works');
     expect(screen.queryByTestId('capabilities-route')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sessions-route')).not.toBeInTheDocument();

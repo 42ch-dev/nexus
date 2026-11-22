@@ -1,5 +1,5 @@
 /**
- * Consolidated msw handler registry for the Daemon API surface.
+ * note: Consolidated msw handler registry for the Daemon API surface.
  *
  * Per-test handlers still belong to the test that declares them (see
  * `useHandlers` in msw-server.ts). This module collects the **reusable**
@@ -30,7 +30,7 @@ export function errorEnvelope(status: number, error: ErrorResponse) {
   return HttpResponse.json({ success: false, error }, { status });
 }
 
-// ── Daemon health ────────────────────────────────────────────────────────────
+// note: ── Daemon health ─────────────────────────────────────────────────────
 
 /**
  * `GET /v1/daemon/runtime/health` → 200 `{ status, version }`.
@@ -48,7 +48,7 @@ export function healthOk(version = '0.1.0'): RequestHandler {
   );
 }
 
-// ── Works ────────────────────────────────────────────────────────────────────
+// note: ── Works ─────────────────────────────────────────────────────────────
 
 /**
  * Canonical `NarrativeWorldState` fixture — the read-model projection the
@@ -100,7 +100,7 @@ export function workDetail(workId: string, over: Record<string, unknown> = {}): 
 export function createWorkCreated(): RequestHandler {
   return http.post('/v1/daemon/works', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { title?: string };
-    // CreateWorkResponse is `{ work_id, status }`; `title` is echoed only for
+    // note: CreateWorkResponse is `{ work_id, status }`; `title` is echoed only for
     // the test's benefit via a separate field if needed by callers.
     return HttpResponse.json(
       { work_id: 'w-new', status: 'draft', _title: body.title ?? 'New Work' },
@@ -109,7 +109,7 @@ export function createWorkCreated(): RequestHandler {
   });
 }
 
-// ── Chapters ─────────────────────────────────────────────────────────────────
+// note: ── Chapters ──────────────────────────────────────────────────────────
 
 /** Canonical chapter summary fixture builders for P2 screen tests. */
 export function chapterSummary(

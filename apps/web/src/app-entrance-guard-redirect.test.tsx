@@ -1,5 +1,5 @@
 /**
- * Entrance guard redirects + entrance-aware index redirect (V1.170 P1 — AR-18/AR-19).
+ * note: Entrance guard redirects + entrance-aware index redirect (V1.170 P1 — AR-18/AR-19).
  *
  * Mirrors the `app-capabilities-redirect.test.tsx` precedent: a focused route
  * tree with the REAL `EntranceGuard` / `EntranceIndexRedirect` and marker
@@ -26,14 +26,14 @@ function makeClient() {
   return new BrowserClient();
 }
 
-/** Captures the resolved router location after redirects settle. */
+/** note: Captures the resolved router location after redirects settle. */
 function LocationProbe({ onPathname }: { onPathname: (p: string) => void }) {
   const { pathname } = useLocation();
   onPathname(pathname);
   return null;
 }
 
-/** Focused route tree using the real guard, mirroring App.tsx's gate shape. */
+/** note: Focused route tree using the real guard, mirroring App.tsx's gate shape. */
 function GuardTree({ onPathname }: { onPathname: (p: string) => void }) {
   return (
     <>
@@ -145,7 +145,7 @@ describe('EntranceGuard redirects (AR-19)', () => {
   });
 
   it('bounces Create on /schedule (V1.171 P2 — schedule CRUD stays develop-only; no creator chrome)', async () => {
-    // P2 PL-15/PL-8: the schedule operator surface stays hidden on the Create
+    // why: P2 PL-15/PL-8 the schedule operator surface stays hidden on the Create
     // entrance even though the page now carries create/edit/delete chrome —
     // the existing develop-only rule must keep bouncing it (AR-28).
     let resolvedPath = '';
@@ -188,7 +188,7 @@ describe('EntranceGuard redirects (AR-19)', () => {
   });
 
   it('passes Create through the strategy profile deep link (no bounce, no toast, no new guard)', async () => {
-    // V1.171 P1 (PL-13/AR-28): `/strategies/:presetId/profile` longest-prefix
+    // why: V1.171 P1 (PL-13/AR-28) — `/strategies/:presetId/profile` longest-prefix
     // matches the canvas rule (`/strategies/:presetId` develop-only +
     // allowDeepLink) — the profile view is not a new bounce surface.
     let resolvedPathname = '';
@@ -242,7 +242,7 @@ describe('EntranceGuard redirects (AR-19)', () => {
   });
 });
 
-/** Focused index-route tree using the real entrance-aware redirect. */
+/** note: Focused index-route tree using the real entrance-aware redirect. */
 function IndexTree({ onPathname }: { onPathname: (p: string) => void }) {
   return (
     <>
@@ -350,7 +350,7 @@ describe('resolveEntranceBounce (AR-19 classification)', () => {
   });
 });
 
-/** render helpers (wrap renderInApp with a client + guard tree). */
+/** note: render helpers (wrap renderInApp with a client + guard tree). */
 function renderGuardTree(
   initialRouterEntries: string[] = ['/strategies'],
   onPathname: (p: string) => void = () => {},

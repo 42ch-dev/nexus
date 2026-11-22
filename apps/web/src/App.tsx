@@ -35,14 +35,14 @@ import { WizardShell } from '@/components/onboarding/wizard-shell';
 import { EntrancePage } from '@/pages/entrance-page';
 import { LoadingState } from '@/components/ui/states';
 
-// Route-split: the Strategy canvas pulls in `@xyflow/react`, which is a
+// why: route-split — the Strategy canvas pulls in `@xyflow/react`, which is a
 // significant interactive dependency. Lazy-loading keeps it out of the Control
 // Room bootstrap chunk (canvas-strategy-surface.md Draft §3.1 bundle/perf).
 const StrategyDetailPage = lazy(() =>
   import('@/pages/strategy-page').then((m) => ({ default: m.StrategyPage })),
 );
 
-// Route-split: the per-preset profile drill-down (V1.171 P1 — PL-13) is a
+// why: route-split — the per-preset profile drill-down (V1.171 P1 — PL-13) is a
 // light read-only page (no `@xyflow/react`), sibling of the canvas route at
 // `/strategies/:presetId/profile`. Lazy-loaded for chunk symmetry with the
 // other route-split pages.
@@ -50,13 +50,13 @@ const PresetProfilePage = lazy(() =>
   import('@/pages/preset-profile-page').then((m) => ({ default: m.PresetProfilePage })),
 );
 
-// Route-split: the Outline canvas contains the outline/timeline interactive
+// why: route-split — the Outline canvas contains the outline/timeline interactive
 // surface and is not part of the Control Room bootstrap path.
 const OutlinePage = lazy(() =>
   import('@/pages/outline-page').then((m) => ({ default: m.OutlinePage })),
 );
 
-// Route-split: the Work Timeline canvas (V1.123 P2 T5) is a peer of Outline
+// why: route-split — the Work Timeline canvas (V1.123 P2 T5) is a peer of Outline
 // from the Work Canvas shell. Lazy-loaded alongside the other canvas routes so
 // React Flow stays out of the Control Room bootstrap chunk
 // (canvas-strategy-surface.md §3.1). Work entry stays Outline (V1.118
@@ -66,34 +66,34 @@ const WorkTimelinePage = lazy(() =>
   import('@/pages/work-timeline-page').then((m) => ({ default: m.WorkTimelinePage })),
 );
 
-// Route-split: the World KB canvas pulls in `@xyflow/react` and is lazy-loaded
+// why: route-split — the World KB canvas pulls in `@xyflow/react` and is lazy-loaded
 // alongside the other canvas routes (canvas-strategy-surface.md §3.1).
 const WorldKbPage = lazy(() =>
   import('@/pages/world-kb-page').then((m) => ({ default: m.WorldKbPage })),
 );
 
-// Route-split: the World app surface (v1219-world-module T1) owns
+// why: route-split — the World app surface (v1219-world-module T1) owns
 // `/worlds/:worldId` — a light header + layer tabs + era projection, no
 // `@xyflow/react` — so it lazy-loads outside the canvas chunk family.
 const WorldApp = lazy(() =>
   import('@/components/world/world-app').then((m) => ({ default: m.WorldApp })),
 );
 
-// V1.151 P1 (DF-76) — Assembly Inspector debug surface. A Control-Room-style
+// note: V1.151 P1 (DF-76) — Assembly Inspector debug surface. A Control-Room-style
 // read-only page (no `@xyflow/react`), sibling of outline/timeline/chapters
 // under the Work canvas shell.
 const WorkInspectorPage = lazy(() =>
   import('@/pages/work-inspector-page').then((m) => ({ default: m.WorkInspectorPage })),
 );
 
-// Route-split: the Timeline canvas (V1.122 P1 T3) is the default World entry.
+// why: route-split — the Timeline canvas (V1.122 P1 T3) is the default World entry.
 // Lazy-loaded alongside the other canvas routes so React Flow stays out of the
 // Control Room bootstrap chunk (canvas-strategy-surface.md §3.1).
 const TimelinePage = lazy(() =>
   import('@/pages/timeline-page').then((m) => ({ default: m.TimelinePage })),
 );
 
-// V1.166 P2 (DR-64 surfacing half) — World Findings is a light Control-Room
+// note: V1.166 P2 (DR-64 surfacing half) — World Findings is a light Control-Room
 // list page (no `@xyflow/react`), sibling of the world `timeline` / `kb`
 // routes (PD-2 locked placement). Lazy-loaded to keep the route-split
 // convention uniform.
@@ -101,10 +101,10 @@ const WorldFindingsPage = lazy(() =>
   import('@/pages/world-findings-page').then((m) => ({ default: m.WorldFindingsPage })),
 );
 
-// v1.219 T2 — the Develop hub and Capability browser are registry apps now
+// note: v1.219 T2 — the Develop hub and Capability browser are registry apps now
 // (developer rail); their lazy boundary lives in `lib/app-registry.ts`.
 
-// P4-T3 development-only RFT-M1 browser proof route. The dynamic import is
+// why: P4-T3 development-only RFT-M1 browser proof route. The dynamic import is
 // guarded by a compile-time `import.meta.env` check, so in a production build
 // (`DEV === false`) the branch folds to `null` and both this `import(...)` and
 // the proof page chunk are excluded from the production route bundle. The
@@ -121,13 +121,13 @@ const RftNativeProofPage =
 /**
  * App routes — Control Room + Setup shell.
  *
- * V1.105: outer {@link DaemonLaunchGate} waits for daemon Ready on every
+ * note: V1.105 — outer {@link DaemonLaunchGate} waits for daemon Ready on every
  * desktop launch; inner {@link SetupGate} routes by `setup_completed` only.
  * `/setup` and the main shell are siblings under the outer gate. `/strategy`
  * redirects to `/strategies` list + `/strategies/:presetId` detail.
  */
 /**
- * `/strategy` legacy redirect preserves query state (e.g. preset ID) rather
+ * why: `/strategy` legacy redirect preserves query state (e.g. preset ID) rather
  * than dropping the search string on the floor.
  */
 function StrategyRedirect() {
@@ -136,7 +136,7 @@ function StrategyRedirect() {
 }
 
 /**
- * Product routes render against the last safe non-settings location while the
+ * note: Product routes render against the last safe non-settings location while the
  * browser URL is `/settings/*` (modal-primary, V1.131 P2).
  */
 function AppRoutes() {
@@ -147,11 +147,11 @@ function AppRoutes() {
 
   return (
     <Routes location={routesLocation}>
-      {/* v1219-onboarding T1 — first-run wizard (identity step; agent/world
+      {/* note: v1219-onboarding T1 — first-run wizard (identity step; agent/world
           steps land in T2–T3). The route is always directly reachable: it is
           both the derived-gate destination and the re-run entry (compass D21). */}
       <Route path="setup" element={<WizardShell />} />
-      {/* V1.170 P1 (AR-16/AR-20) — entrance identity page. Standalone (sibling
+      {/* note: V1.170 P1 (AR-16/AR-20) — entrance identity page. Standalone (sibling
           of /setup, outside the gated tree): first-run land for unset browser
           installs + the footer switch control's destination. Only Continue
           persists. */}
@@ -160,30 +160,30 @@ function AppRoutes() {
         element={
           <SetupGate>
             <EntranceGuard>
-              {/* v1.219 T2 — the new app shell (topnav + dock rail) replaces
+              {/* note: v1.219 T2 — the new app shell (topnav + dock rail) replaces
                   the old RootLayout chrome; legacy pages keep their routes. */}
               <AppShell />
             </EntranceGuard>
           </SetupGate>
         }
       >
-        {/* V1.170 P1 (AR-18) — index redirect is entrance-aware: Create → /works,
+        {/* note: V1.170 P1 (AR-18) — index redirect is entrance-aware: Create → /works,
             Develop → /developer. `landRoute` is the single source. */}
         <Route index element={<EntranceIndexRedirect />} />
-        {/* V1.123 P3 Task 1 — global Timeline entry in primary nav.
+        {/* note: V1.123 P3 Task 1 — global Timeline entry in primary nav.
             Cross-World overview composed client-side; sibling of `/works`
             and `/worlds`. Per-World Timeline stays at
             `/worlds/:worldId/timeline` (V1.122 P1 T3 hero surface); Work
             Timeline stays at `/works/:workId/timeline` (V1.123 P2 T5). */}
         <Route path="timeline" element={<GlobalTimelinePage />} />
         <Route path="works" element={<AppModuleRoute appId="work" />} />
-        {/* Reserved works/<segment>: outranks works/:workId — see app-work-routes.test.tsx */}
+        {/* invariant: reserved works/<segment> outranks works/:workId — see app-work-routes.test.tsx */}
         <Route path="works/chapters" element={<ChaptersPage />} />
-        {/* v1.222 P1 T2 — Inspiration Pool. Creator-scoped (the four pool
+        {/* note: v1.222 P1 T2 — Inspiration Pool. Creator-scoped (the four pool
             payloads carry no `work_id`), so it is a static sibling of
             `works/chapters` outside `WorkShellLayout`; the static segment
             outranks `works/:workId`. Entry: the work rail link. */}
-        {/* Reserved works/<segment>: outranks works/:workId — see app-work-routes.test.tsx */}
+        {/* invariant: reserved works/<segment> outranks works/:workId — see app-work-routes.test.tsx */}
         <Route path="works/inspiration" element={<WorksInspirationPage />} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
           <Route index element={<Navigate to="outline" replace />} />
@@ -195,7 +195,7 @@ function AppRoutes() {
               </Suspense>
             }
           />
-          {/* V1.123 P2 T5 — Work Timeline peer surface. Sibling of `outline`;
+          {/* invariant: V1.123 P2 T5 — Work Timeline peer surface. Sibling of `outline`;
               index redirect above still points to `outline` so the Work entry
               default stays Outline (V1.118 regression preserved). */}
           <Route
@@ -208,7 +208,7 @@ function AppRoutes() {
           />
           <Route path="chapters" element={<ChaptersPage />} />
           <Route path="chapters/:chapter" element={<ChapterPage />} />
-          {/* V1.151 P1 (DF-76) — Assembly Inspector debug surface (read-only,
+          {/* note: V1.151 P1 (DF-76) — Assembly Inspector debug surface (read-only,
               moment-level; sibling of outline/timeline/chapters). */}
           <Route
             path="inspector"
@@ -223,7 +223,7 @@ function AppRoutes() {
           path="worlds"
           element={<AppModuleRoute appId="world" />}
         />
-        {/* v1219-world-module T1 — the World app surface owns `/worlds/:worldId`:
+        {/* note: v1219-world-module T1 — the World app surface owns `/worlds/:worldId`:
             header (name + 世界 · 时间线) + Brief/Narrative/Moment layer tabs on
             the `?layer=` convention. Brief is the default layer; the legacy
             canvas pages stay at `/worlds/:worldId/{timeline,kb,findings}`
@@ -253,7 +253,7 @@ function AppRoutes() {
               </Suspense>
             }
           />
-          {/* V1.166 P2 (DR-64 surfacing half) — World Findings peer surface.
+          {/* note: V1.166 P2 (DR-64 surfacing half) — World Findings peer surface.
               Sibling of `timeline` + `kb` at `/worlds/:worldId/findings`
               (PD-2 locked placement: Control Room list/sections, read-only).
               The index redirect stays Timeline — this is a peer, not the
@@ -267,14 +267,14 @@ function AppRoutes() {
             }
           />
         </Route>
-        {/* v1.201 P1 (compass D7) — the Sessions page is the observation
+        {/* note: v1.201 P1 (compass D7) — the Sessions page is the observation
             surface: a session row opens its run view at `/sessions/:sessionId`
             (read-only event stream; no run control). Sibling of the list, not
             a layout — mirrors the `worlds/:worldId` nesting. */}
         <Route path="sessions" element={<AppModuleRoute appId="session" />} />
         <Route path="sessions/:sessionId" element={<SessionRunViewPage />} />
         <Route path="schedule" element={<SchedulePage />} />
-        {/* V1.170 P1 (EL-6) — capability browser restored as a live Develop-tree
+        {/* note: V1.170 P1 (EL-6) — capability browser restored as a live Develop-tree
             surface (read-only builtin capability schemas from
             GET /v1/daemon/orchestration/capabilities). The V1.120 P2 soft-remove
             redirect is replaced by the entrance guard: Create bounces to
@@ -284,7 +284,7 @@ function AppRoutes() {
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<AppModuleRoute appId="memory" />} />
         <Route path="strategies" element={<AppModuleRoute appId="harness" />} />
-        {/* V1.171 P1 (PL-13/AR-28) — per-preset profile drill-down. Sibling of
+        {/* note: V1.171 P1 (PL-13/AR-28) — per-preset profile drill-down. Sibling of
             the canvas route: the canvas stays at `/strategies/:presetId`
             (PL-14 write-boundary preserved); the profile view lives at a
             trailing `/profile` segment (AR-20 literal-segment precedent).
@@ -311,11 +311,11 @@ function AppRoutes() {
           path="connect"
           element={<Navigate to="/settings/advanced#connection" replace />}
         />
-        {/* v1220 T1 — 操作台 (Hub): the developer-entrance land route
+        {/* note: v1220 T1 — 操作台 (Hub): the developer-entrance land route
             (`landRoute`). Read-only status aggregation over existing daemon
             endpoints; the lazy boundary lives in `lib/app-registry.ts`. */}
         <Route path="developer" element={<AppModuleRoute appId="hub" />} />
-        {/* v240-actor-web-surfaces T6 — 角色 (Characters): creator-facing
+        {/* note: v240-actor-web-surfaces T6 — 角色 (Characters): creator-facing
             character list/create/bind surface behind the developer rail. */}
         <Route path="characters" element={<AppModuleRoute appId="characters" />} />
         <Route path="*" element={<NotFoundPage />} />
@@ -325,7 +325,7 @@ function AppRoutes() {
 }
 
 /**
- * P4-T3 development-only proof shell. Renders the proof page directly — OUTSIDE
+ * note: P4-T3 development-only proof shell. Renders the proof page directly — OUTSIDE
  * `ActiveCreatorProvider`, `SetupCompletedProvider`, `DaemonLaunchGate`,
  * `SettingsModalProvider` and `EntranceProvider`, none of which the proof page
  * needs (it mounts its own real `BrowserClient` and the existing canvas). The
@@ -343,7 +343,7 @@ function RftNativeProofApp() {
 }
 
 /**
- * True when the current location is the development-only proof route.
+ * note: True when the current location is the development-only proof route.
  * `useLocation` requires a Router ancestor, so this is called from inside the
  * app's `BrowserRouter` (see `main.tsx`).
  */
@@ -353,7 +353,7 @@ function useIsRftNativeProofRoute(): boolean {
 }
 
 export function App() {
-  // The proof route must not be wrapped by the product gates. The hook is
+  // why: the proof route must not be wrapped by the product gates. The hook is
   // always called (stable hook order); the early return still leaves the outer
   // `BrowserRouter` (main.tsx) as the only Router, and this branch is `false` in
   // production (`RftNativeProofPage` is null).
@@ -365,7 +365,7 @@ export function App() {
     <ActiveCreatorProvider>
       <SetupCompletedProvider>
         <DaemonLaunchGate>
-          {/* V1.134 P0: gate creator probes until daemon ready — avoids
+          {/* why: V1.134 P0 — gate creator probes until daemon ready, avoiding
               pre-boot `/v1/daemon/creators*` traffic during dist-load startup. */}
           <DefaultProfileCoordinator />
           <ServiceStatusProvider>
@@ -374,7 +374,7 @@ export function App() {
                 <ServiceDegradedGate>
                   <AppRoutes />
                 </ServiceDegradedGate>
-                {/* Inside EntranceProvider so the modal rail can filter by the
+                {/* why: inside EntranceProvider so the modal rail can filter by the
                     resolved entrance (W-2). Rendered after AppRoutes — the
                     Dialog overlays the route tree either way. */}
                 <SettingsModalHost />

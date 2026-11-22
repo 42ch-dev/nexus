@@ -1,5 +1,5 @@
 /**
- * Vitest global setup — jest-dom matchers + msw server lifecycle.
+ * note: Vitest global setup — jest-dom matchers + msw server lifecycle.
  *
  * msw is the mock transport for BrowserClient fetch in component/integration
  * tests (R-V164-QC1-S1-P1 baseline). The server is started once, reset between
@@ -13,7 +13,7 @@ import { i18n } from '@/lib/i18n/config';
 import { server } from './msw-server';
 
 /**
- * `@xyflow/react` (mounted via `CanvasShell`) instantiates a `ResizeObserver`
+ * note: `@xyflow/react` (mounted via `CanvasShell`) instantiates a `ResizeObserver`
  * in its measurement effect; jsdom does not provide one. Install a no-op polyfill
  * once so any test that indirectly mounts the canvas (e.g. `outline-page.test.tsx`
  * mounting the real page) does not throw `ReferenceError: ResizeObserver is not
@@ -21,6 +21,8 @@ import { server } from './msw-server';
  * covers the indirect path. Guarded so a real (browser) implementation wins.
  */
 if (typeof globalThis.ResizeObserver === 'undefined') {
+  // note: the polyfill needs only the three methods CanvasShell's measurement
+  // effect calls; the rest of the constructor shape is deliberately minimal.
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   globalThis.ResizeObserver = class {
     observe(): void {}
@@ -30,7 +32,7 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 }
 
 /**
- * jsdom does not implement `window.matchMedia`, and Vitest 4's stricter
+ * note: jsdom does not implement `window.matchMedia`, and Vitest 4's stricter
  * `vi.spyOn` rejects spying on the undefined property the jsdom environment
  * leaves behind (theme/layout tests spy on it). Install a no-op polyfill once so
  * those spies work and guarded `window.matchMedia(...)` reads resolve to
@@ -55,7 +57,7 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 }
 
 /**
- * Node 24+ may install an experimental `localStorage` shim that is undefined
+ * note: Node 24+ may install an experimental `localStorage` shim that is undefined
  * unless `--localstorage-file` is set, which shadows jsdom's implementation.
  * ThemeProvider tests (and P2 logo wiring) need a working store.
  */
@@ -66,7 +68,7 @@ function ensureLocalStorage() {
     window.localStorage.removeItem('__nexus_test__');
     return;
   } catch {
-    // Fall through to a minimal in-memory polyfill.
+    // why: fall through to a minimal in-memory polyfill.
   }
 
   const store = new Map<string, string>();
@@ -93,7 +95,7 @@ function ensureLocalStorage() {
 
 ensureLocalStorage();
 
-// msw v3 renamed this option: `onUnhandledRequest` → `onUnhandledFrame`
+// note: msw v3 renamed this option: `onUnhandledRequest` → `onUnhandledFrame`
 // (SharedOptions in msw@3; the unhandled request is now surfaced as a frame).
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {

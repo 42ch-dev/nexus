@@ -14,7 +14,7 @@ import { NexusClientError } from '@/lib/nexus';
 import './index.css';
 
 /**
- * Query-error toast bridge: any query that fails (and is not handled locally)
+ * note: Query-error toast bridge: any query that fails (and is not handled locally)
  * surfaces a single toast parsed from the shared ErrorResponse. Mutations own
  * their own error callbacks (they invalidate caches + name the changed object),
  * so this default only catches read-path failures.
@@ -23,7 +23,7 @@ function useQueryErrorToast() {
   const { toast } = useToast();
   const { t } = useTranslation('common');
   return (error: unknown) => {
-    // A 401 is owned by the app-level recovery surface (access spec §6.1):
+    // why: a 401 is owned by the app-level recovery surface (access spec §6.1),
     // toasting it per query is the I-000059 toast storm.
     if (error instanceof NexusClientError && error.status === 401) return;
     const description =
@@ -39,7 +39,7 @@ function useQueryErrorToast() {
 function AppProviders({ children }: { children: React.ReactNode }) {
   const onError = useQueryErrorToast();
 
-  // The query-error bridge is re-created every render (it follows the active
+  // why: the query-error bridge is re-created every render (it follows the active
   // locale), so the ONE client below reads the latest one through this ref
   // instead of being rebuilt to capture it.
   const queryErrorHandlerRef = useRef(onError);
@@ -47,7 +47,7 @@ function AppProviders({ children }: { children: React.ReactNode }) {
     queryErrorHandlerRef.current = onError;
   });
 
-  // ONE QueryClient per app instance. Building it in the render body replaced
+  // why: ONE QueryClient per app instance. Building it in the render body replaced
   // it on every re-render of this provider — and this provider consumes
   // `useToast()`, whose context value changes on every toast, so any toast
   // swapped the client. A swapped client silently breaks every already-mounted
@@ -59,7 +59,7 @@ function AppProviders({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Local loopback daemon; keep refetch conservative and avoid noisy
+            // why: local loopback daemon; keep refetch conservative and avoid noisy
             // retries on a daemon that may legitimately be down during setup.
             retry: 1,
             refetchOnWindowFocus: false,
