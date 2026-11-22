@@ -411,7 +411,7 @@ impl KbStore for InMemoryKbStore {
         let created_at = kb.created_at.clone();
 
         {
-            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P1-S3
+            // why: WAIVER — pre-1.0 local-first; see V1.41 P-last residual R-V140P1-S3
             // — concurrent-uniqueness race: InMemoryKbStore check+insert is not
             // atomic under concurrent access; acceptable for single-user daemon.
             let mut blocks = self.write_blocks()?;
