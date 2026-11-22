@@ -17,7 +17,6 @@ import {
   type LogoVariantTheme,
 } from '@42ch/nexus-ui';
 
- * exactly as apps/web/src/components/brand/nexus-logo.tsx does. */
 import logoPrimarySrc from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 import logoPrimarySquareSrc from '@42ch/nexus-ui/assets/logos/logo-primary-square.svg';
 import logoWhiteBgSrc from '@42ch/nexus-ui/assets/logos/logo-white-bg.svg';
