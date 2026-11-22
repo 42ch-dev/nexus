@@ -1,4 +1,5 @@
 //! Cross-process writer protocol proof (architecture §4 / §12.1, proof-matrix DB-1/3/4).
+// note: the proof suite pins cross-process writer admission and refusal at the protocol seam.
 //!
 //! Real OS processes, deterministic file barriers, disposable databases. The
 //! parent process drives; children re-enter this test binary with
@@ -35,9 +36,9 @@ use sqlx::{Connection as _, SqliteConnection, SqlitePool};
 use tempfile::TempDir;
 
 const CHILD_ENV: &str = "NEXUS_WRITER_PROTOCOL_CHILD";
-/// DB-3 / proof-matrix §2: engine and migration acquisition must stay bounded.
+/// note: DB-3 / proof-matrix §2: engine and migration acquisition must stay bounded.
 const ACQUISITION_BOUND: Duration = Duration::from_secs(5);
-/// Tables owned by SQLite internals or by the migration runner itself.
+/// note: Tables owned by SQLite internals or by the migration runner itself.
 const UNGUARDED_TABLES: [&str; 2] = ["_sqlx_migrations", "sqlite_sequence"];
 
 fn exe() -> PathBuf {
@@ -78,7 +79,7 @@ fn spawn_child(mode: &str, db: &Path, extra: &[(&str, String)], err_path: &Path)
     cmd.spawn().expect("spawn child")
 }
 
-/// Reap a child, surfacing its captured stderr when it exited unsuccessfully.
+/// note: Reap a child, surfacing its captured stderr when it exited unsuccessfully.
 fn reap(child: &mut Child, err_path: &Path) {
     let status = child.wait().expect("child wait");
     if !status.success() {
@@ -87,7 +88,7 @@ fn reap(child: &mut Child, err_path: &Path) {
     }
 }
 
-/// Run one `migration_fence` / `engine_solo` child and return its outcome.
+/// note: Run one `migration_fence` / `engine_solo` child and return its outcome.
 fn child_outcome(dir: &Path, db: &Path, mode: &str, tag: &str) -> String {
     let out = dir.join(format!("{tag}_out"));
     let err = dir.join(format!("{tag}_err"));
@@ -101,7 +102,7 @@ fn child_outcome(dir: &Path, db: &Path, mode: &str, tag: &str) -> String {
     fs::read_to_string(out).expect("child outcome")
 }
 
-/// Run one engine-owner race round between two real processes.
+/// note: Run one engine-owner race round between two real processes.
 fn engine_race_round(dir: &Path, db: &Path, round: usize) {
     let mut outcomes = Vec::with_capacity(2);
     let mut children = Vec::with_capacity(2);
@@ -123,7 +124,7 @@ fn engine_race_round(dir: &Path, db: &Path, round: usize) {
         children.push((child, err));
         outcomes.push(out);
     }
-    // Both contenders have passed their own barrier before either acquires.
+    // note: Both contenders have passed their own barrier before either acquires.
     for index in 0..2 {
         wait_barrier(
             &dir.join(format!("r{round}_self{index}")),
@@ -164,7 +165,7 @@ async fn engine_epoch(db: &Path) -> i64 {
     row.0
 }
 
-/// Assert a connection cannot mutate a guarded table.
+/// note: Assert a connection cannot mutate a guarded table.
 ///
 /// Two fence mechanisms are both correct and both observed here (§4.2):
 /// - a connection without the protocol scalar functions is rejected by SQLite
@@ -184,7 +185,7 @@ async fn assert_fenced(pool: &SqlitePool, sql: &'static str) {
     );
 }
 
-/// Every persistent application table carries INSERT/UPDATE/DELETE guards.
+/// note: Every persistent application table carries INSERT/UPDATE/DELETE guards.
 async fn assert_trigger_coverage(pool: &SqlitePool) {
     let tables: Vec<(String,)> = sqlx::query_as(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -251,18 +252,18 @@ async fn writer_protocol() {
     pre_activation_state_preserved(dir.path()).await;
 }
 
-/// DB-4 (pre-migration fixture): a connection opened before the protocol
+/// note: DB-4 (pre-migration fixture): a connection opened before the protocol
 /// migration is fenced after activation.
 async fn pre_migration_fixture_fenced(dir: &Path) {
     let legacy_db = dir.join("legacy.db");
     let url = format!("sqlite://{}?mode=rwc", legacy_db.display());
     let legacy = SqlitePool::connect(&url).await.expect("legacy connect");
-    // Pre-migration schema bootstrap only (the workspace_meta table exists
+    // note: Pre-migration schema bootstrap only (the workspace_meta table exists
     // from the initial migration; run the full set, then insert).
     run_guarded_migrations(&legacy_db)
         .await
         .expect("activate protocol");
-    // Row committed by a pre-activation writer on the same file: emulate by
+    // note: Row committed by a pre-activation writer on the same file: emulate by
     // writing through a registered writer, then prove the *legacy* handle
     // (no protocol scalar functions) is fenced.
     let guard = acquire_writer_guard(&legacy_db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
@@ -283,7 +284,7 @@ async fn pre_migration_fixture_fenced(dir: &Path) {
     legacy.close().await;
 }
 
-/// Bootstrap the main database once and verify trigger coverage on a fresh
+/// note: Bootstrap the main database once and verify trigger coverage on a fresh
 /// schema.
 async fn bootstrap_main_database(db: &Path) {
     let bootstrap = init_pool(db).await.expect("init_pool");
@@ -294,7 +295,7 @@ async fn bootstrap_main_database(db: &Path) {
     pool.close().await;
 }
 
-/// DB-1: 100 barrier-synchronised engine-owner races. Exactly one winner per
+/// note: DB-1: 100 barrier-synchronised engine-owner races. Exactly one winner per
 /// round and exactly one engine-epoch advance per round (no lost/duplicated
 /// ownership), driven by two real OS processes.
 async fn engine_owner_races(dir: &Path, db: &Path) {
@@ -309,7 +310,7 @@ async fn engine_owner_races(dir: &Path, db: &Path) {
     }
 }
 
-/// Distinct entities: two direct writers both succeed with no engine running.
+/// note: Distinct entities: two direct writers both succeed with no engine running.
 async fn distinct_direct_writers_succeed(db: &Path) {
     for (key, value) in [("direct_a", "ok"), ("direct_b", "ok")] {
         let pool = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
@@ -325,7 +326,7 @@ async fn distinct_direct_writers_succeed(db: &Path) {
     }
 }
 
-/// Direct vs engine authorization on an engine-owned table: the direct
+/// note: Direct vs engine authorization on an engine-owned table: the direct
 /// writer is fenced, the engine owner writes successfully.
 async fn engine_owned_table_fences_direct(db: &Path) {
     let direct = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
@@ -350,7 +351,7 @@ async fn engine_owned_table_fences_direct(db: &Path) {
     release_retained_writer_guards(db);
 }
 
-/// §12.1 outbox via real application mutations (no engine owner): a
+/// note: §12.1 outbox via real application mutations (no engine owner): a
 /// rolled-back mutation emits nothing, committed mutations advance the
 /// sequence one-for-one, and bounded retention keeps the newest 4096 rows.
 async fn outbox_mutations_bounded(db: &Path) {
@@ -412,7 +413,7 @@ async fn outbox_mutations_bounded(db: &Path) {
     pool.close().await;
 }
 
-/// A workspace whose gate claims a protocol newer than this binary is
+/// note: A workspace whose gate claims a protocol newer than this binary is
 /// fail-closed (isolated DB; gate is guarded).
 async fn newer_protocol_refused(dir: &Path) {
     let proto_db = dir.join("proto_newer.db");
@@ -437,7 +438,7 @@ async fn newer_protocol_refused(dir: &Path) {
     );
 }
 
-/// A raw (unregistered) writer is fenced on the outbox too.
+/// note: A raw (unregistered) writer is fenced on the outbox too.
 async fn raw_writer_fenced_on_outbox(db: &Path) {
     let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
         .await
@@ -446,7 +447,7 @@ async fn raw_writer_fenced_on_outbox(db: &Path) {
     raw.close().await;
 }
 
-/// DB-3: engine ownership is fail-fast while an owner is live. A live owner
+/// note: DB-3: engine ownership is fail-fast while an owner is live. A live owner
 /// is never replaced, a refusal stays inside the acquisition bound, a
 /// refused acquisition does not advance the epoch, a child process cannot
 /// steal the lock, and the successor after the owner exits advances the
@@ -467,7 +468,7 @@ async fn engine_ownership_fail_fast(dir: &Path, db: &Path) {
         "engine acquisition must stay bounded, took {elapsed:?}"
     );
 
-    // In-process double acquisition is refused: this process already owns
+    // note: In-process double acquisition is refused: this process already owns
     // the engine lock, and engine ownership is not a stealable lease. (The
     // pool factories differ deliberately: a repeat request there resolves
     // to the one live owner instead of taking a second lock, which is what
@@ -485,7 +486,7 @@ async fn engine_ownership_fail_fast(dir: &Path, db: &Path) {
         "a refused acquisition must not advance the engine epoch"
     );
 
-    // Cross-process: a child cannot steal the live owner's engine either.
+    // note: Cross-process: a child cannot steal the live owner's engine either.
     let err_path = dir.join("err_owner");
     let owner_out = dir.join("owner_out");
     let mut child = spawn_child(
@@ -500,7 +501,7 @@ async fn engine_ownership_fail_fast(dir: &Path, db: &Path) {
         "busy"
     );
 
-    // Ownership transfer across restart: once the owner is gone the next
+    // note: Ownership transfer across restart: once the owner is gone the next
     // engine takes over and advances the epoch exactly once.
     drop(owner);
     let successor = acquire_writer_guard(db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine)
@@ -514,7 +515,7 @@ async fn engine_ownership_fail_fast(dir: &Path, db: &Path) {
     drop(successor);
 }
 
-/// A reopened raw legacy connection is still fenced on guarded tables.
+/// note: A reopened raw legacy connection is still fenced on guarded tables.
 async fn legacy_reopen_still_fenced(db: &Path) {
     let legacy = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
         .await
@@ -527,7 +528,7 @@ async fn legacy_reopen_still_fenced(db: &Path) {
     legacy.close().await;
 }
 
-/// Re-open preserves committed mutations exactly once.
+/// note: Re-open preserves committed mutations exactly once.
 async fn reopen_preserves_committed_mutations(db: &Path) {
     let pool = init_pool(db).await.expect("reopen");
     let rows: Vec<(String, String)> = sqlx::query_as(
@@ -551,7 +552,7 @@ async fn reopen_preserves_committed_mutations(db: &Path) {
     pool.close().await;
 }
 
-/// Revision bump: a legacy non-OCC write bumps `revision` exactly once; an
+/// note: Revision bump: a legacy non-OCC write bumps `revision` exactly once; an
 /// explicit CAS write is not doubled by the trigger.
 async fn revision_bump_not_doubled(dir: &Path) {
     let rev_db = dir.join("revision.db");
@@ -606,19 +607,19 @@ async fn revision_bump_not_doubled(dir: &Path) {
     release_retained_writer_guards(&rev_db);
 }
 
-/// Quiescence: a no-op run must not wait for a live cooperative pool, while
+/// note: Quiescence: a no-op run must not wait for a live cooperative pool, while
 /// a genuinely pending migration must wait until it closes.
 async fn init_pool_quiescence(dir: &Path) {
     let init_db = dir.join("init_pool_quiescence.db");
     let pool = init_pool(&init_db).await.expect("init_pool");
 
-    // Nothing pending: the schema is current, so the guarded path has no
+    // note: Nothing pending: the schema is current, so the guarded path has no
     // DDL to serialize and must return without waiting for the live pool.
     run_guarded_migrations(&init_db)
         .await
         .expect("a current schema must not wait for cooperative quiescence");
 
-    // A genuinely pending migration still waits for the pool to close.
+    // note: A genuinely pending migration still waits for the pool to close.
     make_migration_pending(&pool).await;
     let migrate_db = init_db.clone();
     let migrate = tokio::spawn(async move { run_guarded_migrations(&migrate_db).await });
@@ -635,7 +636,7 @@ async fn init_pool_quiescence(dir: &Path) {
         .expect("migration after init_pool pool closed");
 }
 
-/// A surviving `clone_pool` handle blocks a pending migration until closed.
+/// note: A surviving `clone_pool` handle blocks a pending migration until closed.
 async fn clone_pool_blocks_pending_migration(dir: &Path) {
     let quiet_db = dir.join("quiescence.db");
     let guarded = init_engine_pool(&quiet_db)
@@ -643,7 +644,7 @@ async fn clone_pool_blocks_pending_migration(dir: &Path) {
         .expect("engine guarded pool");
     let survivor = guarded.clone_pool();
     drop(guarded);
-    // Pending work is what makes the wait meaningful; a no-op run fast-paths.
+    // note: Pending work is what makes the wait meaningful; a no-op run fast-paths.
     make_migration_pending(&survivor).await;
     let migrate_db = quiet_db.clone();
     let migrate = tokio::spawn(async move { run_guarded_migrations(&migrate_db).await });
@@ -660,7 +661,7 @@ async fn clone_pool_blocks_pending_migration(dir: &Path) {
         .expect("migration after quiescence");
 }
 
-/// Retention: the newest outbox row survives a single >8MiB event (F-9).
+/// note: Retention: the newest outbox row survives a single >8MiB event (F-9).
 async fn retention_keeps_newest_row(dir: &Path) {
     let newest_db = dir.join("retention_newest_row.db");
     let pool = open_admitted_pool(&newest_db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
@@ -683,7 +684,7 @@ async fn retention_keeps_newest_row(dir: &Path) {
     release_retained_writer_guards(&newest_db);
 }
 
-/// Retention burst: row and byte bounds hold after rapid inserts.
+/// note: Retention burst: row and byte bounds hold after rapid inserts.
 async fn retention_bounds_hold_after_burst(dir: &Path) {
     let burst_db = dir.join("retention_burst.db");
     let pool = init_pool(&burst_db).await.expect("burst init");
@@ -708,7 +709,7 @@ async fn retention_bounds_hold_after_burst(dir: &Path) {
     release_retained_writer_guards(&burst_db);
 }
 
-/// The pre-activation row committed on the fixture database survived the
+/// note: The pre-activation row committed on the fixture database survived the
 /// whole suite.
 async fn pre_activation_state_preserved(dir: &Path) {
     let legacy_db = dir.join("legacy.db");
@@ -724,7 +725,7 @@ async fn pre_activation_state_preserved(dir: &Path) {
     pool.close().await;
 }
 
-/// Version of the newest migration whose script is safe to re-apply: the
+/// note: Version of the newest migration whose script is safe to re-apply: the
 /// JS-provider journal is `CREATE ... IF NOT EXISTS` throughout.
 ///
 /// The v1.191 holder cutover is deliberately **not** re-appliable — its
@@ -735,7 +736,7 @@ async fn pre_activation_state_preserved(dir: &Path) {
 /// which leaves the applied set genuinely incomplete.
 const IDEMPOTENT_MIGRATION_VERSION: i64 = 20_260_914_000_001;
 
-/// Force a genuinely pending migration by dropping the newest *idempotent*
+/// note: Force a genuinely pending migration by dropping the newest *idempotent*
 /// applied `_sqlx_migrations` row — the state a binary whose migration set is
 /// ahead of the file would find.
 async fn make_migration_pending(pool: &SqlitePool) {
@@ -748,7 +749,7 @@ async fn make_migration_pending(pool: &SqlitePool) {
     assert_eq!(dropped, 1, "the pinned migration must be applied");
 }
 
-/// v1.191 P1 T3: the two holder-cutover tables are writer-guarded like every
+/// note: v1.191 P1 T3: the two holder-cutover tables are writer-guarded like every
 /// other persistent application table, and a writer admitted *before* the
 /// cutover epoch is refused after the migration epoch advances.
 ///
@@ -768,14 +769,14 @@ async fn v1191_holder_writer() {
     assert_holder_tables_fenced_for_raw_writer(&db).await;
     assert_holder_tables_require_admission(&db).await;
     assert_holder_table_trigger_coverage(&db).await;
-    // The admission refusal is exercised last: it leaves a deliberately
+    // note: The admission refusal is exercised last: it leaves a deliberately
     // unknown applied migration in the workspace.
     assert_unknown_applied_migration_refused(&db).await;
 
     release_retained_writer_guards(&db);
 }
 
-/// Remote dependency metadata rejects every mutation from an unregistered writer.
+/// note: Remote dependency metadata rejects every mutation from an unregistered writer.
 #[tokio::test]
 async fn remote_dependency_tables_fence_raw_writers() {
     let dir = TempDir::new().expect("tempdir");
@@ -807,7 +808,7 @@ async fn remote_dependency_tables_fence_raw_writers() {
     raw.close().await;
 }
 
-/// Every mutation of the new tables is fenced on a handle that never received
+/// note: Every mutation of the new tables is fenced on a handle that never received
 /// the protocol scalars — the raw/pre-opened writer loophole.
 async fn assert_holder_tables_fenced_for_raw_writer(db: &Path) {
     let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
@@ -829,7 +830,7 @@ async fn assert_holder_tables_fenced_for_raw_writer(db: &Path) {
     raw.close().await;
 }
 
-/// A registered direct writer is admitted to both tables, and the admitted rows
+/// note: A registered direct writer is admitted to both tables, and the admitted rows
 /// read back.
 async fn assert_holder_tables_require_admission(db: &Path) {
     let direct = open_admitted_pool(db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
@@ -847,7 +848,7 @@ async fn assert_holder_tables_require_admission(db: &Path) {
     .execute(&direct)
     .await
     .expect("creator subject row");
-    // The quarantine container is a real stored World (FK), not a placeholder.
+    // note: The quarantine container is a real stored World (FK), not a placeholder.
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
@@ -896,7 +897,7 @@ async fn assert_holder_tables_require_admission(db: &Path) {
     direct.close().await;
 }
 
-/// Both tables carry INSERT/UPDATE/DELETE guards, so the generic coverage
+/// note: Both tables carry INSERT/UPDATE/DELETE guards, so the generic coverage
 /// assertion (every persistent application table) holds with them added.
 async fn assert_holder_table_trigger_coverage(db: &Path) {
     let pool = open_pool_read_only(db).await.expect("read-only pool");
@@ -919,7 +920,7 @@ async fn assert_holder_table_trigger_coverage(db: &Path) {
     pool.close().await;
 }
 
-/// A writer older than the cutover is refused by **strict migration
+/// note: A writer older than the cutover is refused by **strict migration
 /// admission**: when the workspace carries an applied migration the binary's
 /// source set does not know — exactly what the holder cutover looks like to a
 /// pre-v1.191 binary — the runner refuses instead of serving a partially
@@ -953,7 +954,7 @@ async fn assert_unknown_applied_migration_refused(db: &Path) {
     );
 }
 
-/// v1.189 P1 fix round 1 (proof-matrix DB-1): the guarded-migration fast path.
+/// note: v1.189 P1 fix round 1 (proof-matrix DB-1): the guarded-migration fast path.
 ///
 /// A workspace whose schema is already current has nothing for the exclusive
 /// migration lock to serialize, so a second in-process opener must not be
@@ -966,10 +967,10 @@ async fn guarded_migrations_fast_path() {
     let dir = TempDir::new().expect("tempdir");
     let db = dir.path().join("fast_path.db");
 
-    // A registered, live cooperative pool — the daemon's boot pool analogue.
+    // note: A registered, live cooperative pool — the daemon's boot pool analogue.
     let live = init_pool(&db).await.expect("init_pool");
 
-    // ── (1) current schema: no-op, and no quiescence wait ───────────────────
+    // note: ── (1) current schema: no-op, and no quiescence wait ───────────────────
     let started = Instant::now();
     run_guarded_migrations(&db)
         .await
@@ -980,7 +981,7 @@ async fn guarded_migrations_fast_path() {
         "fast path must not wait for quiescence; took {fast_path_elapsed:?}"
     );
 
-    // ── (2) pending migration: still quiescence-gated and bounded ───────────
+    // note: ── (2) pending migration: still quiescence-gated and bounded ───────────
     make_migration_pending(&live).await;
 
     let started = Instant::now();
@@ -1036,7 +1037,7 @@ async fn v1191_sqlite_writer() {
     release_retained_writer_guards(&db);
 }
 
-/// (1) Registration: the five scalars resolve on the handle the FFI entry
+/// note: (1) Registration: the five scalars resolve on the handle the FFI entry
 /// point locks and report the context the admission registered durably.
 /// Returns the live writer id for the reopen comparison.
 async fn assert_writer_registration(db: &Path) -> String {
@@ -1084,7 +1085,7 @@ async fn assert_writer_registration(db: &Path) -> String {
         ),
         "the connection-local context matches the registration row"
     );
-    // The function registry of THIS connection — the SQLx handle the FFI
+    // note: The function registry of THIS connection — the SQLx handle the FFI
     // entry point locked — carries exactly the five application functions.
     let mut functions: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM pragma_function_list WHERE name LIKE 'nexus_%' AND builtin = 0",
@@ -1112,7 +1113,7 @@ async fn assert_writer_registration(db: &Path) -> String {
     writer_id
 }
 
-/// (2) Refusal: a handle that never received the functions (the pre-opened /
+/// note: (2) Refusal: a handle that never received the functions (the pre-opened /
 /// raw writer loophole) is fenced by SQLite itself.
 async fn assert_unregistered_writer_refused(db: &Path) {
     let raw = SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
@@ -1136,7 +1137,7 @@ async fn assert_unregistered_writer_refused(db: &Path) {
     raw.close().await;
 }
 
-/// (3) Reopen: committed state survives and the reopened handle installs its
+/// note: (3) Reopen: committed state survives and the reopened handle installs its
 /// own connection-local context.
 async fn assert_reopen_carries_its_own_context(db: &Path, first_writer: &str) {
     release_retained_writer_guards(db);
@@ -1164,7 +1165,7 @@ async fn assert_reopen_carries_its_own_context(db: &Path, first_writer: &str) {
     reopened.close().await;
 }
 
-/// (4a) Replacement on a live connection: SQLite replaces all five
+/// note: (4a) Replacement on a live connection: SQLite replaces all five
 /// registrations, so the connection reports the replacement context and the
 /// registry still holds exactly five names — never ten. The exit is observed
 /// through values and the registry; the exact box arithmetic is asserted by
@@ -1209,7 +1210,7 @@ async fn assert_re_registration_replaces_live_userdata(db: &Path) {
     conn.close().await.expect("close the probe connection");
 }
 
-/// (4b) Exact ownership accounting, run in an isolated child process: every
+/// note: (4b) Exact ownership accounting, run in an isolated child process: every
 /// `sqlite3_create_function_v2` attempt must add exactly one userdata box, and
 /// every box must be destroyed exactly once — by connection teardown or by the
 /// replacement of a live registration. The counter is process-global, so a
@@ -1230,7 +1231,7 @@ fn assert_registration_ownership_isolated(dir: &Path, db: &Path) {
     reap(&mut child, &err_path);
 }
 
-/// Child entry point for [`assert_registration_ownership_isolated`].
+/// note: Child entry point for [`assert_registration_ownership_isolated`].
 #[cfg(debug_assertions)]
 async fn assert_registration_ownership(db: &Path) {
     let live = WriterConnectionContext::live_registration_count;
@@ -1287,7 +1288,7 @@ async fn assert_registration_ownership(db: &Path) {
     }
 }
 
-/// The connection-local context the FFI probe installs by hand.
+/// note: The connection-local context the FFI probe installs by hand.
 fn probe_context(
     writer_id: &str,
     mode: GuardWriterMode,
@@ -1303,7 +1304,7 @@ fn probe_context(
     }
 }
 
-/// Read the identity/mode/epoch scalars back from one probe connection.
+/// note: Read the identity/mode/epoch scalars back from one probe connection.
 async fn probe_scalars(conn: &mut SqliteConnection) -> (String, String, i64, Option<i64>) {
     sqlx::query_as(
         "SELECT nexus_writer_id(), nexus_writer_mode(), nexus_migration_epoch(), \
@@ -1314,7 +1315,7 @@ async fn probe_scalars(conn: &mut SqliteConnection) -> (String, String, i64, Opt
     .expect("probe scalars")
 }
 
-/// A genuine holder's final lifetime end — the local provider store dropping
+/// note: A genuine holder's final lifetime end — the local provider store dropping
 /// its own direct admission, a failed initialization — must give the OS
 /// admission back: a real second process can take the exclusive migration lock
 /// afterwards, which it cannot while any shared writer lock survives.
@@ -1331,10 +1332,10 @@ async fn dropped_guard_holders_release_the_migration_lock() {
     let direct = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
         .await
         .expect("direct holder");
-    // The provider store's shape: the handle's final lifetime end is a drop,
+    // note: The provider store's shape: the handle's final lifetime end is a drop,
     // with no explicit release call.
     drop(direct);
-    // The core's shape: an explicit release at a defined drain point, then the
+    // note: The core's shape: an explicit release at a defined drain point, then the
     // handle is given up.
     engine.pool().close().await;
     engine.release_retained_admission();
@@ -1356,7 +1357,7 @@ async fn dropped_guard_holders_release_the_migration_lock() {
     );
 }
 
-/// The documented raw-pool retention: an `open_admitted_pool` admission is
+/// note: The documented raw-pool retention: an `open_admitted_pool` admission is
 /// owned by this process until an explicit release, even after every pool and
 /// connection the caller held is really closed and dropped.
 #[tokio::test]
@@ -1396,7 +1397,7 @@ async fn raw_process_retention_holds_until_explicit_release() {
     );
 }
 
-/// A usable pool clone keeps the OS migration admission: a second process is
+/// note: A usable pool clone keeps the OS migration admission: a second process is
 /// refused while the clone can still run a query, and allowed once the pool is
 /// closed and the admission settled.
 #[tokio::test]
@@ -1412,7 +1413,7 @@ async fn usable_pool_clone_blocks_another_process_until_settled() {
     let survivor = guarded.clone_pool();
     drop(guarded);
 
-    // A real query proves the surviving clone is a usable writer.
+    // note: A real query proves the surviving clone is a usable writer.
     let (one,): (i64,) = sqlx::query_as("SELECT 1")
         .fetch_one(&survivor)
         .await
@@ -1454,7 +1455,7 @@ async fn usable_pool_clone_blocks_another_process_until_settled() {
     );
 }
 
-/// The original public raw close: a clone is closed while one of its
+/// note: The original public raw close: a clone is closed while one of its
 /// connections is still checked out and usable. Both the migration lock and the
 /// engine owner's exclusivity must stay held by that connection's own admission
 /// until SQLite really disposes it — then both release on their own, with no
@@ -1479,9 +1480,9 @@ async fn raw_clone_close_keeps_both_admissions_until_connection_disposed() {
         .expect("the clone's connection is usable");
     assert_eq!(one, 1);
 
-    // The public raw close starts here and waits for the checked-out connection.
+    // note: The public raw close starts here and waits for the checked-out connection.
     let closing = clone.close();
-    // Let any close-start settlement run before probing: the admission must
+    // note: Let any close-start settlement run before probing: the admission must
     // survive on the checked-out connection's own ownership, not on the
     // registry's timing.
     for _ in 0..64 {
@@ -1499,7 +1500,7 @@ async fn raw_clone_close_keeps_both_admissions_until_connection_disposed() {
         "nor may another process become the engine owner"
     );
 
-    // Real disposal of that connection.
+    // note: Real disposal of that connection.
     drop(checked_out);
     closing.await;
     drop(clone);
@@ -1516,7 +1517,7 @@ async fn raw_clone_close_keeps_both_admissions_until_connection_disposed() {
     );
 }
 
-/// F13: an OPEN pool keeps its published admission with ZERO current native
+/// note: F13: an OPEN pool keeps its published admission with ZERO current native
 /// connections. The last idle connection is really detached from the pool and
 /// disposed, so its userdata pin is gone; both OS locks must still be held by
 /// the pool itself, a reconnect must reuse the exact published identity through
@@ -1541,11 +1542,11 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
         probe_scalars(&mut conn).await.0
     };
     let clone = guarded.clone_pool();
-    // The original holder is gone: only the pool clone and its own admission
+    // note: The original holder is gone: only the pool clone and its own admission
     // remain.
     drop(guarded);
 
-    // Real eviction: detach the last connection from the pool, then dispose it
+    // note: Real eviction: detach the last connection from the pool, then dispose it
     // so SQLite drops that connection's userdata pin.
     // Drain every pooled connection this way: each one is detached from the
     // pool and then really disposed, so SQLite drops its userdata pin.
@@ -1576,7 +1577,7 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
         "and the engine ownership"
     );
 
-    // A reconnect is served under the SAME published admission.
+    // note: A reconnect is served under the SAME published admission.
     let mut reconnected = clone.acquire().await.expect("reconnect on the open pool");
     let (writer_id, mode, _, _) = probe_scalars(&mut reconnected).await;
     assert_eq!(
@@ -1586,7 +1587,7 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
     assert_eq!(mode, "engine");
     drop(reconnected);
 
-    // The existing in-process join path still resolves the published admission.
+    // note: The existing in-process join path still resolves the published admission.
     let joined = join_live_engine_pool(&db, GuardedPoolOptions::default())
         .await
         .expect("join lookup")
@@ -1598,11 +1599,11 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
         "a joining open reuses the published identity"
     );
     drop(joined_conn);
-    // Drain the independent joined pool's native pins before closing the original pool.
+    // note: Drain the independent joined pool's native pins before closing the original pool.
     joined.pool().close().await;
     drop(joined);
 
-    // Close-start retirement: the closed handle stays referenced below.
+    // note: Close-start retirement: the closed handle stays referenced below.
     clone.close().await;
     assert_eq!(
         child_outcome(
@@ -1622,7 +1623,7 @@ async fn open_pool_keeps_its_admission_with_zero_connections() {
     assert_eq!(clone.size(), 0, "the closed handle stays referenced");
 }
 
-/// F14: a raw pool that JOINS an ordinary open must promote the published
+/// note: F14: a raw pool that JOINS an ordinary open must promote the published
 /// admission to process retention — parking the claim alone would let the
 /// admission die with the ordinary holder.
 #[tokio::test]
@@ -1648,7 +1649,7 @@ async fn joined_raw_open_retains_the_published_admission() {
     raw.close().await;
     drop(raw);
 
-    // The ordinary holder ends: its pool closes and its own claim goes back.
+    // note: The ordinary holder ends: its pool closes and its own claim goes back.
     ordinary.pool().close().await;
     ordinary.release_retained_admission();
     drop(ordinary);
@@ -1670,7 +1671,7 @@ async fn joined_raw_open_retains_the_published_admission() {
     );
 }
 
-/// F14: retaining a guard NEVER installs an identity that is not the published
+/// note: F14: retaining a guard NEVER installs an identity that is not the published
 /// one. The caller's guard here is a stale identity whose entry was dropped
 /// while the guard stayed alive; the admission a later open published must stay
 /// authoritative, and the next join must carry that published writer id.
@@ -1686,7 +1687,7 @@ async fn raw_retention_keeps_the_published_identity() {
         .await
         .expect("migrated workspace");
 
-    // Identity A publishes itself, then its entry is dropped while the guard
+    // note: Identity A publishes itself, then its entry is dropped while the guard
     // itself is still alive.
     let stale = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
         .await
@@ -1700,7 +1701,7 @@ async fn raw_retention_keeps_the_published_identity() {
     };
     release_retained_writer_guards(&db);
 
-    // Identity B is published afterwards.
+    // note: Identity B is published afterwards.
     let published = init_guarded_pool(&db, BOOTSTRAP_CREATOR_ID)
         .await
         .expect("published holder");
@@ -1717,7 +1718,7 @@ async fn raw_retention_keeps_the_published_identity() {
         "precondition: two different identities exist for this path"
     );
 
-    // The caller hands over the STALE guard: retention must keep B.
+    // note: The caller hands over the STALE guard: retention must keep B.
     retain_writer_guard(&stale);
 
     let joined = acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Direct)
@@ -1766,7 +1767,7 @@ async fn child_main() {
             let outcome =
                 match acquire_writer_guard(&db, BOOTSTRAP_CREATOR_ID, WriterMode::Engine).await {
                     Ok(guard) => {
-                        // Hold ownership across the peer's attempt so the loser
+                        // note: Hold ownership across the peer's attempt so the loser
                         // observes a live owner rather than a released lock.
                         std::thread::sleep(Duration::from_millis(50));
                         drop(guard);
