@@ -40,7 +40,7 @@ fn json_out(out: &Output) -> Value {
     serde_json::from_str(&stdout(out)).unwrap_or_else(|_| panic!("json: {}", stdout(out)))
 }
 
-/// note: >= 50 chars with research task kind → FragmentOnly.
+/// note: `>=` 50 chars with research task kind → FragmentOnly.
 fn fragment_digest(marker: &str) -> String {
     format!("{marker} — researched background detail for texture and continuity.")
 }
