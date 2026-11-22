@@ -1,5 +1,5 @@
 /**
- * Timeline inspector — inline title/body editor for a selected Timeline node
+ * note: Timeline inspector — inline title/body editor for a selected Timeline node
  * (V1.122 P1 T4) + cross-surface navigation affordance (V1.123 P3 Task 4).
  *
  * Edits a World-scoped KeyBlock entity via the orchestrator's `onPatchEntity`
@@ -47,28 +47,28 @@ import type {
 import { extractTimelineConflict, mapTimelineValidationEntry } from './timeline-canvas-adapter';
 import type { TimelineNodeData } from './timeline-canvas-adapter';
 
-/** Editable form derived from a selected Timeline node's backing projection. */
+/** note: editable form derived from a selected Timeline node's backing projection. */
 interface TimelineEditForm {
   title: string;
-  bodyText: string; // JSON-serialised body (free-form Record<string, unknown>)
+  bodyText: string; // note: JSON-serialised body (free-form Record<string, unknown>)
   /**
-   * v1.203 P2 O3 — `modules.observation.observers` as entry-id strings in
+   * note: v1.203 P2 O3 — `modules.observation.observers` as entry-id strings in
    * author order. Graph-resolved names render beside the id; ids absent from
    * the loaded graph stay raw (PD-18 — no new fan-out fetch).
    */
   observers: string[];
   /**
-   * PD-9 explicit empty claim (C3 fix): true only when the author
+   * note: PD-9 explicit empty claim (C3 fix): true only when the author
    * deliberately claimed "no observers" (Clear / claim checkbox) —
    * distinct from an untouched unrecorded seed, which keeps the key
    * omitted. Submitting with this flag writes `observers: []`, including
    * on the first save from a previously unrecorded event.
    */
   observersClaimNone: boolean;
-  /** `modules.observation.access` as JSON text ('' = omit / clear). */
+  /** note: `modules.observation.access` as JSON text ('' = omit / clear). */
   accessText: string;
   /**
-   * C1 fix — raw-JSON fallback mode: non-null when the stored observation
+   * note: C1 fix — raw-JSON fallback mode: non-null when the stored observation
    * member has a shape the structured editor cannot represent verbatim
    * (non-object module, non-array / mixed-type observers, non-object
    * access). Holds the JSON text of the COMPLETE stored value; untouched
@@ -78,7 +78,7 @@ interface TimelineEditForm {
 }
 
 /**
- * Stored `modules.observation` member EXACTLY as it rides the projection
+ * note: stored `modules.observation` member EXACTLY as it rides the projection
  * (`{ present: false }` when the key is absent). The dirty check compares
  * against this raw member — never a coerced copy — so untouched unusual
  * seeds can never go dirty through normalization (C1).
@@ -103,7 +103,7 @@ function storedObservation(data: TimelineNodeData): {
 }
 
 /**
- * C1 — whether the structured editor can represent the stored observation
+ * note: C1 — whether the structured editor can represent the stored observation
  * member VERBATIM: a plain object whose `observers` (when present) is a
  * string array and whose `access` (when present) is a plain object. Any
  * other stored shape (non-object module, non-array / mixed-type observers,
@@ -143,7 +143,7 @@ function formFromNode(data: TimelineNodeData): TimelineEditForm {
       observers: [],
       observersClaimNone: false,
       accessText: '',
-      // Raw-JSON fallback (C1): seed with the COMPLETE stored value so an
+      // why: raw-JSON fallback (C1) seeds with the COMPLETE stored value so an
       // untouched unusual seed is not dirty; the author edits it as JSON.
       observationRawText: present ? JSON.stringify(value, null, 2) : null,
     };
@@ -153,7 +153,7 @@ function formFromNode(data: TimelineNodeData): TimelineEditForm {
   return {
     title: data.canonical_name ?? '',
     bodyText: data.body ? JSON.stringify(data.body, null, 2) : '',
-    // Stored string ids seed VERBATIM — no trim/coercion — so a
+    // why: stored string ids seed VERBATIM — no trim/coercion — so a
     // whitespace-containing stored id (legal under the frozen string-array
     // contract) is not rewritten by an unrelated save (C1).
     observers: Array.isArray(storedObservers)
@@ -169,7 +169,7 @@ function formFromNode(data: TimelineNodeData): TimelineEditForm {
 }
 
 /**
- * Build the complete first-level `modules.observation` value for the
+ * note: build the complete first-level `modules.observation` value for the
  * whole-value upsert (AR-4/PD-12). Two modes:
  *
  * Raw fallback (C1) — `form.observationRawText !== null` when the stored
@@ -209,7 +209,7 @@ function buildObservationValue(
       }
       return { value: parsed as Record<string, unknown>, errors };
     } catch {
-      // Keep the raw text in the built value so the exact dirty check
+      // why: keep the raw text in the built value so the exact dirty check
       // still sees the edit (mirrors the access invalid-JSON handling).
       return {
         value: { raw: rawText },
@@ -244,11 +244,11 @@ function buildObservationValue(
   return { value, errors };
 }
 
-/** Exact dirty check against the raw stored member (no coercion — C1). */
+/** note: exact dirty check against the raw stored member (no coercion — C1). */
 function observationDirty(form: TimelineEditForm, data: TimelineNodeData): boolean {
   const { present, value } = storedObservation(data);
   const storedRaw = present ? value : {};
-  // Raw fallback mode: compare the edited TEXT to the seeded text. An
+  // why: raw fallback mode compares the edited TEXT to the seeded text. An
   // untouched seed (even a non-object module, whose parse can never yield
   // the stored value) is NOT dirty, so an unrelated title-only save is
   // never blocked and never rewrites modules. Editing marks dirty; the
@@ -266,7 +266,7 @@ function observationDirty(form: TimelineEditForm, data: TimelineNodeData): boole
   return JSON.stringify(built.value) !== JSON.stringify(storedRaw);
 }
 
-/** Which form fields differ from the node's canonical projection. */
+/** note: which form fields differ from the node's canonical projection. */
 function computeDirty(
   form: TimelineEditForm,
   data: TimelineNodeData,
@@ -275,7 +275,7 @@ function computeDirty(
   if (form.title !== (data.canonical_name ?? '')) dirty.push('title');
   const canonBody = data.body ? JSON.stringify(data.body, null, 2) : '';
   if (form.bodyText !== canonBody) dirty.push('body');
-  // C2 — the observation module axis is event-only (mirrors the JSX gate):
+  // invariant: the observation module axis is event-only (mirrors the JSX gate) —
   // context nodes never report or emit `modules`, no matter what unusual
   // stored observation shape rides the projection.
   if (data.layoutHint === 'event' && observationDirty(form, data)) dirty.push('modules');
@@ -283,7 +283,7 @@ function computeDirty(
 }
 
 /**
- * Resolve observer entry_ids → canonical names using ONLY entities already
+ * note: resolve observer entry_ids → canonical names using ONLY entities already
  * in the loaded graph (`ctx.nodes` — the projected `surface.nodes` the
  * orchestrator supplies, each carrying `key_block_id` + `canonical_name`).
  * PD-18: no new fan-out fetch solely for this panel — ids without a name in
@@ -321,17 +321,18 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
   const [rawObserver, setRawObserver] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Reseed the form when the selected node changes.
   useEffect(() => {
     setForm(formFromNode(data));
     setValidationErrors([]);
     setFieldErrors({});
     setIsSubmitting(false);
-    // Greptile P2 fix: the raw-observer input is per-event transient state —
+    // why: Greptile P2 fix — the raw-observer input is per-event transient state;
     // reseeding the form for a different event must not leave an unfinished
     // id typed for the previous event (pressing Add would otherwise apply
     // event A's id to event B).
     setRawObserver('');
+    // note: reseed on identity/version only; deep data changes must not
+    // clobber an in-progress edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.key_block_id, data.version]);
 
@@ -339,7 +340,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
   const blockTypeLabel =
     BLOCK_TYPE_LABELS[data.block_type as BlockType] ?? data.block_type;
 
-  // V1.164 P3 Task 4 — observation modules ride on the event's KB projection
+  // why: V1.164 P3 Task 4 — observation modules ride on the event's KB projection
   // (`data.modules`, additive Task 1 wire field; TimelineNodeData extends
   // WorldKbEntityProjection). Null / non-object guards keep the read safe on
   // every wire state; `observers` stays `undefined` (→ no line) unless a
@@ -354,7 +355,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
       ? (observation as Record<string, unknown>).observers
       : undefined;
 
-  // v1.203 P2 O3 — observer picker options come from entities ALREADY in the
+  // why: v1.203 P2 O3 — observer picker options come from entities ALREADY in the
   // loaded graph (PD-18 — no new fan-out fetch), holder-capable kinds only
   // (the observation carrier is a holder/character axis, V1.164 PD-8/PD-12);
   // the observed event itself is excluded. Selected ids absent from the
@@ -377,7 +378,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
       const selected = prev.observers.includes(id);
       return {
         ...prev,
-        // Selecting a concrete observer supersedes a "no observers" claim.
+        // why: selecting a concrete observer supersedes a "no observers" claim.
         observersClaimNone: selected ? prev.observersClaimNone : false,
         observers: selected
           ? prev.observers.filter((observer) => observer !== id)
@@ -404,10 +405,10 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
 
     const patch: TimelineEntityPatch = {};
     if (dirty.includes('title')) patch.title = form.title.trim();
-    // C2 — defense in depth: module patch construction is event-only even
+    // invariant: defense in depth — module patch construction is event-only even
     // if a caller ever passes a dirty list computed without the gate.
     if (data.layoutHint === 'event' && dirty.includes('modules')) {
-      // v1.203 P2 O3 — whole-first-level-value upsert of
+      // why: v1.203 P2 O3 — whole-first-level-value upsert of
       // `modules.observation` (AR-4/PD-12). Only this dialect is authored
       // from the Timeline surface; the daemon's first-level merge preserves
       // sibling dialects. `audience` governance is never emitted here.
@@ -429,7 +430,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
     if (dirty.includes('body')) {
       try {
         if (!form.bodyText.trim()) {
-          // Empty body is a no-op for the wire DTO; skip rather than emit
+          // why: empty body is a no-op for the wire DTO; skip rather than emit
           // `undefined` so the patch is well-formed.
         } else {
           const parsed: unknown = JSON.parse(form.bodyText);
@@ -450,14 +451,14 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
 
     const onPatch = ctx.onPatchEntity;
     if (typeof onPatch !== 'function') {
-      // No write hook wired (e.g. read-only test mounts). Render the form
+      // why: no write hook wired (e.g. read-only test mounts). Render the form
       // but do not attempt the write — surfaces the inspector chrome without
       // a phantom mutation.
       return;
     }
 
     setIsSubmitting(true);
-    // The orchestrator's mutation owns the actual `worldKbPatchEntity` call,
+    // note: the orchestrator's mutation owns the actual `worldKbPatchEntity` call,
     // invalidation, conflict hand-off, and refetch. The inspector only
     // forwards the structured patch + dirty fields, and awaits the returned
     // promise so `isSubmitting` clears on EVERY outcome — success AND error
@@ -467,7 +468,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
     try {
       await onPatch(node, patch, dirty);
     } catch (err) {
-      // The orchestrator's mutation `onError` already surfaces the section
+      // why: the orchestrator's mutation `onError` already surfaces the section
       // banner (conflict modal / validation list / toast UX). The inspector
       // additionally maps daemon 422 entries carrying the frozen prefix
       // grammar onto the offending observation form fields (write contract
@@ -500,6 +501,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
       <div className="flex items-center justify-between gap-2">
         <h3
           className="text-heading-16 font-heading text-gray-1000"
+          // note: data-testid is this field's test contract.
           // eslint-disable-next-line react/forbid-dom-props
           data-testid="timeline-inspector-title"
         >
@@ -513,7 +515,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
         {t('timeline.inspector.description')}
       </p>
 
-      {/* V1.164 P3 Task 4 — read-only observers metadata line (PD-9 / PD-18).
+      {/* note: V1.164 P3 Task 4 — read-only observers metadata line (PD-9 / PD-18).
           `modules.observation.observers` rides on the event's KB projection
           (TimelineNodeData extends WorldKbEntityProjection; the daemon ships
           `modules` verbatim). Absent `modules` / `modules.observation` =
@@ -543,7 +545,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
         </p>
       ) : null}
 
-      {/* v1.203 P2 O3 — Observation edit affordance (write contract O3).
+      {/* why: v1.203 P2 O3 — Observation edit affordance (write contract O3).
           Event nodes only (`layoutHint === 'event'` — the existing read-path
           gate mirrors the O1/O2 holder-gate discipline); context nodes never
           surface it. Whole-first-level-value upsert of
@@ -558,7 +560,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
             {t('timeline.inspector.observation.title')}
           </h4>
 
-          {/* C1 — raw-JSON fallback: the stored observation member has a
+          {/* why: C1 — raw-JSON fallback, the stored observation member has a
               shape the structured editor cannot represent verbatim. The
               complete stored value seeds the textarea untouched (not dirty);
               the author edits it as JSON, and the write requires a valid
@@ -637,7 +639,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
                 {fieldErrors['observation.observers']}
               </p>
             ) : null}
-            {/* C3 — explicit PD-9 empty claim: distinct from an untouched
+            {/* why: C3 — explicit PD-9 empty claim, distinct from an untouched
                 unrecorded seed (key stays omitted). Clear records the
                 author's deliberate "no observers" claim, so `observers: []`
                 can be submitted even on the first save from a previously
@@ -743,7 +745,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
           value={blockTypeLabel}
           readOnly
           aria-readonly
-          // The Timeline surface does not change entity block_type (that's
+          // why: the Timeline surface does not change entity block_type (that's
           // a World KB promotion operation). The field renders read-only so
           // the author sees the entity kind on this surface without being
           // invited to mutate it from here.
@@ -777,7 +779,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
         </ul>
       ) : null}
 
-      {/* V1.123 P3 Task 4 — cross-surface navigation affordance.
+      {/* why: V1.123 P3 Task 4 — cross-surface navigation affordance.
           Reserved for event nodes (`layoutHint === 'event'`) — the
           cross-surface binding axis is World-event ↔ Work-event only;
           context entities (characters, locations) do not surface this CTA
@@ -788,13 +790,13 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
         <button
           type="button"
           data-testid="timeline-view-in-work-timeline"
-          // QC1 W-001 (fix wave) — `data-work-id` must match the Work the
+          // invariant: QC1 W-001 (fix wave) — `data-work-id` must match the Work the
           // click ACTUALLY navigates to: the PD-7 winner when an event-level
           // bind exists, else the V1.123 surface-level fallback. In
           // multi-Work Worlds the two can differ — the DOM contract follows
           // the navigation target, not the surface fallback.
           data-work-id={ctx.boundWorkEventWorkId ?? ctx.boundWorkId}
-          // V1.163 P1 Task 2 — when the selected World event has an
+          // note: V1.163 P1 Task 2 — when the selected World event has an
           // event-level bind (`boundWorkEventId`), the CTA target deep-links
           // to the specific Work outline event
           // (`?layer=narrative&event=<id>`); absent → the V1.123 surface-level

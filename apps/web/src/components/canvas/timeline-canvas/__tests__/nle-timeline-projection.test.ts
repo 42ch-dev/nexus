@@ -1,5 +1,5 @@
 /**
- * NLE Timeline projection — unit tests (V1.128 P1 T3).
+ * note: NLE Timeline projection — unit tests (V1.128 P1 T3).
  */
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
@@ -57,9 +57,9 @@ describe('projectWorldTimelineNodesToNleTracks', () => {
   });
 
   it('maps World Moment scenes and beats to separate tracks (V1.156 P5)', () => {
-    // The World Timeline reuses the Work Timeline Moment node types verbatim
-    // (`work-timeline-moment-scene` / `work-timeline-moment-beat`), so the
-    // World-Moment band mirrors the Work-Moment Scenes/Beats tracks instead
+    // why: The World Timeline reuses the Work Timeline Moment node types
+    // verbatim (`work-timeline-moment-scene` / `work-timeline-moment-beat`), so
+    // the World-Moment band mirrors the Work-Moment Scenes/Beats tracks instead
     // of producing zero tracks (the pre-fix Narrative fallthrough).
     const nodes = [
       node('sc-1', 'work-timeline-moment-scene', 40, 0, { label: 'Opening Scene' }),
@@ -75,7 +75,7 @@ describe('projectWorldTimelineNodesToNleTracks', () => {
 
 describe('projectWorkTimelineNodesToNleTracks', () => {
   it('maps Work-Brief era nodes to Brief + Undated tracks (V1.156 P2 T2)', () => {
-    // Work-Brief projects the World Timeline Brief nodes verbatim
+    // why: Work-Brief projects the World Timeline Brief nodes verbatim
     // (`timeline-brief-era`) — the band must mirror the World Timeline
     // Brief tracks (dated eras on the when-axis + undated cluster).
     const nodes = [

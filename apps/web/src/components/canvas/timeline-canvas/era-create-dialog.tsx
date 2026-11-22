@@ -76,12 +76,12 @@ export interface EraCreateDialogProps {
   onOpenChange: (open: boolean) => void;
   worldId: string;
   /**
-   * Existing era entities for the optional parent picker
+   * note: existing era entities for the optional parent picker
    * (`{ entity_id, canonical_name }` pairs).
    */
   existingEras: { entity_id: string; canonical_name: string }[];
   /**
-   * Fired with the new era's `key_block_id` once the entity create commits
+   * note: fired with the new era's `key_block_id` once the entity create commits
    * — including when the optional parent-relationship create fails (the
    * dialog closes and this fires so the graph refetches and shows the new
    * era; the failed link is surfaced via a warning toast). The mutation
@@ -92,7 +92,7 @@ export interface EraCreateDialogProps {
 }
 
 /**
- * Recommended era taxonomy values (spec §3.3.3 V1.159 amendment). Freeform
+ * note: recommended era taxonomy values (spec §3.3.3 V1.159 amendment). Freeform
  * strings — the daemon enforces no enum; unknown values render with the
  * default band color.
  */
@@ -104,11 +104,11 @@ const RECOMMENDED_ERA_TYPES = [
   'sub-age',
 ] as const;
 
-/** Sentinel `<option>` value for the freeform era-type input. */
+/** note: sentinel `<option>` value for the freeform era-type input. */
 const CUSTOM_ERA_TYPE = '__custom__';
 
 /**
- * Mint a fresh World KB entity id. Mirrors the pack-import convention
+ * note: mint a fresh World KB entity id. Mirrors the pack-import convention
  * (`kb_<uuid-without-dashes>`) so the daemon's id shape stays consistent
  * across client surfaces.
  */
@@ -133,7 +133,7 @@ export function EraCreateDialog({
   const [customEraType, setCustomEraType] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // Parent picker state — a lightweight searchable combobox (input +
+  // note: parent picker state — a lightweight searchable combobox (input +
   // filtered listbox; mirrors the command-palette APG pattern).
   const [parentQuery, setParentQuery] = useState('');
   const [parentId, setParentId] = useState<string | null>(null);
@@ -141,7 +141,6 @@ export function EraCreateDialog({
   const [parentActiveIndex, setParentActiveIndex] = useState(0);
   const parentInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset the form each time the dialog opens.
   useEffect(() => {
     if (open) {
       setName('');
@@ -239,7 +238,7 @@ export function EraCreateDialog({
             },
           });
         } catch {
-          // The era entity is committed — one submit = one era. Do NOT keep
+          // why: the era entity is committed — one submit = one era. Do NOT keep
           // the dialog open for retry (a retry mints a fresh entity id →
           // duplicate era): fall through to close + `onSuccess` so the graph
           // refetches and shows the new era, and surface the missing parent
@@ -267,12 +266,12 @@ export function EraCreateDialog({
             : t('timeline.eraCreateDialog.validationError'),
         );
       } else if (isWorldKbConflictError(err)) {
-        // 409: the minted entity id already exists (retry-safe create
+        // why: 409 — the minted entity id already exists (retry-safe create
         // convention) or a concurrent write won the row. Retry hint —
         // closing and submitting again mints a fresh id.
         setError(t('timeline.eraCreateDialog.conflictError'));
       } else {
-        // Non-409/422 failures are already surfaced by the hook's global
+        // why: non-409/422 failures are already surfaced by the hook's global
         // error toast; mirror a generic inline message so the dialog never
         // closes silently on failure.
         setError(t('timeline.eraCreateDialog.genericError'));
@@ -396,7 +395,7 @@ export function EraCreateDialog({
                       aria-selected={era.entity_id === parentId}
                       data-testid="era-create-parent-option"
                       onMouseDown={(e) => {
-                        // mousedown precedes blur — select before the input
+                        // why: mousedown precedes blur — select before the input
                         // loses focus so the listbox stays interactive.
                         e.preventDefault();
                         handleParentSelect(era.entity_id);
@@ -441,7 +440,7 @@ export function EraCreateDialog({
               type="submit"
               variant="primary"
               size="small"
-              // Disabled only while a mutation is in flight — an empty-name
+              // why: disabled only while a mutation is in flight — an empty-name
               // submit must stay clickable so the inline required-name error
               // surfaces (form validation lives in `handleSubmit`).
               disabled={submitting}
@@ -459,7 +458,7 @@ export function EraCreateDialog({
 }
 
 /**
- * Extract `validation_summary.errors[]` from a World KB 422 error. The
+ * note: extract `validation_summary.errors[]` from a World KB 422 error. The
  * daemon's `WorldKbValidationError` carries the array under
  * `details.validation_summary.errors`; defensive `in`/`typeof` narrowing
  * keeps the dialog honest if the details shape drifts (no unchecked casts).

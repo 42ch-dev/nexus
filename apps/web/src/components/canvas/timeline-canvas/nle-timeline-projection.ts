@@ -1,5 +1,5 @@
 /**
- * NLE Timeline projection — maps React Flow entity nodes to presentational
+ * note: NLE Timeline projection — maps React Flow entity nodes to presentational
  * multi-track lanes for the V1.128 App adoption overlay.
  *
  * App-local glue (not `@web-canvas/*`): reads RF node positions/types from the
@@ -19,7 +19,7 @@ const DEFAULT_CLIP_WIDTH_PX = 160;
 const CONTENT_PADDING_PX = 120;
 const MIN_CONTENT_WIDTH_PX = 800;
 
-/** World Timeline when-axis Y (dated entities). */
+/** note: World Timeline when-axis Y (dated entities). */
 const WORLD_WHEN_AXIS_Y = 0;
 
 type TrackRule = {
@@ -106,7 +106,7 @@ export function projectWorldTimelineNodesToNleTracks(
   }
 
   if (layer === 'moment') {
-    // V1.156 P5 — World-Moment NLE band. The World Timeline reuses the Work
+    // why: V1.156 P5 World-Moment NLE band. The World Timeline reuses the Work
     // Timeline Moment node types verbatim (`work-timeline-moment-scene` /
     // `work-timeline-moment-beat`), so the World-Moment band mirrors the
     // Work-Moment tracks (Scenes + Beats).

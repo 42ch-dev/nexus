@@ -1,5 +1,5 @@
 /**
- * NLE Timeline band overlay — thin App host for `@web-canvas/nle-timeline-chrome`.
+ * note: NLE Timeline band overlay — thin App host for `@web-canvas/nle-timeline-chrome`.
  *
  * Renders the presentational multi-track band centered over the existing React
  * Flow canvas. Pull-off affordances are intentionally omitted (Studio-only T2).
@@ -30,7 +30,7 @@ export function NleTimelineBandOverlay({
 }: NleTimelineBandOverlayProps) {
   const { tracks, contentWidthPx } = useMemo(() => {
     if (surface === 'work') {
-      // V1.156 P2 T2 — Work-Brief NLE band. Work-Brief projects the World
+      // why: V1.156 P2 T2 Work-Brief NLE band. Work-Brief projects the World
       // Timeline Brief nodes verbatim (`timeline-brief-era`), so the band
       // mirrors the World Timeline Brief tracks (dated / undated eras).
       if (activeLayer === 'brief') {
@@ -45,7 +45,7 @@ export function NleTimelineBandOverlay({
       return projectWorldTimelineNodesToNleTracks(nodes, 'brief');
     }
     if (activeLayer === 'moment') {
-      // V1.156 P5 — World-Moment NLE band. The World Timeline reuses the Work
+      // why: V1.156 P5 World-Moment NLE band. The World Timeline reuses the Work
       // Timeline Moment node types verbatim, so the World-Moment band
       // projects Scenes/Beats tracks instead of falling through to the
       // Narrative projection (which yields zero tracks for Moment nodes).
@@ -63,7 +63,7 @@ export function NleTimelineBandOverlay({
       className="pointer-events-none absolute inset-x-0 top-1/2 z-[5] -translate-y-1/2 px-4"
       data-testid="nle-timeline-band-overlay"
     >
-      {/* Display-only in App: keep pointer-events-none so RF pan/zoom/select
+      {/* why: display-only in App; keep pointer-events-none so RF pan/zoom/select
           reach nodes under the centered band. Horizontal scrub stays Studio. */}
       <div className="pointer-events-none mx-auto max-w-full">
         <NleTimelineChrome

@@ -40,8 +40,6 @@ import {
   type TimelineNodeData,
 } from '../timeline-canvas-adapter';
 
-// ─── Fixture builders ──────────────────────────────────────────────────────
-
 function entity(
   overrides: Partial<WorldKbEntityProjection> &
     Pick<WorldKbEntityProjection, 'key_block_id' | 'block_type' | 'canonical_name'>,
@@ -69,8 +67,6 @@ function makeMockClient() {
 
 const ORDERING_DISCLAIMER =
   'Ordering inferred from available event data; not a canonical chronology.';
-
-// ─── renderAltView — sortable entity table companion ────────────────────────
 
 describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', () => {
   it('renders a sortable table of Timeline events + KeyBlocks from the adapter context', () => {
@@ -118,21 +114,19 @@ describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', (
 
     const { container } = renderInApp(<>{adapter.renderAltView!()}</>);
 
-    // Section landmark with an accessible label — screen readers can navigate
-    // to the alt-view by name (canvas-strategy-surface.md §4.4 a11y).
+    // why: Section landmark with an accessible label — screen readers can
+    // navigate to the alt-view by name (canvas-strategy-surface.md §4.4 a11y).
     const section = container.querySelector('section[aria-label]');
     expect(section).not.toBeNull();
 
-    // Both entities render by their canonical name (event + context entity).
     expect(screen.getByText('Coronation')).toBeInTheDocument();
     expect(screen.getByText('Aria')).toBeInTheDocument();
 
-    // The block-type column surfaces the kind (mirrors the World KB entity
-    // table `blockType` column — canvas-strategy-surface.md §4.4 parity).
+    // note: The block-type column surfaces the kind (mirrors the World KB
+    // entity table `blockType` column — canvas-strategy-surface.md §4.4 parity).
     expect(screen.getByText('Event')).toBeInTheDocument();
     expect(screen.getByText('Character')).toBeInTheDocument();
 
-    // Sortable column headers are present (at least the Title column).
     const columnHeaders = container.querySelectorAll('th[scope="col"]');
     expect(columnHeaders.length).toBeGreaterThanOrEqual(3);
   });
@@ -170,7 +164,7 @@ describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', (
       current: {
         worldId: 'world-7',
         client: makeMockClient(),
-        // intentionally pre-sorted Z → A; the table default sort is
+        // why: intentionally pre-sorted Z → A; the table default sort is
         // `title asc`, so the initial render re-orders to A → Z.
         nodes: [a, b],
         selectedNodeId: null,
@@ -184,19 +178,15 @@ describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', (
     const rows = () => container.querySelectorAll('tbody tr[tabindex]');
     expect(rows().length).toBe(2);
 
-    // Default sort is Title ascending — Alpha Event sorts before Zeta Event
-    // regardless of the input order.
     expect(rows()[0]).toHaveTextContent('Alpha Event');
     expect(rows()[1]).toHaveTextContent('Zeta Event');
 
-    // Click the Title column header button — toggles to descending sort.
     const titleHeader = getByRole('columnheader', { name: /Title/i });
     const titleButton = titleHeader.querySelector('button')!;
     fireEvent.click(titleButton);
     expect(rows()[0]).toHaveTextContent('Zeta Event');
     expect(rows()[1]).toHaveTextContent('Alpha Event');
 
-    // Click again — toggles back to ascending.
     fireEvent.click(titleButton);
     expect(rows()[0]).toHaveTextContent('Alpha Event');
     expect(rows()[1]).toHaveTextContent('Zeta Event');
@@ -234,9 +224,9 @@ describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', (
     fireEvent.click(row);
 
     expect(onSelectNode).toHaveBeenCalledTimes(1);
-    // The selection callback receives the node id (the orchestrator selects
-    // the matching React Flow node → opens the inspector that routes the
-    // patch through `worldKbPatchEntity`).
+    // note: The selection callback receives the node id (the orchestrator
+    // selects the matching React Flow node → opens the inspector that routes
+    // the patch through `worldKbPatchEntity`).
     expect(onSelectNode).toHaveBeenCalledWith('entity:kb-event-1');
   });
 
@@ -268,9 +258,9 @@ describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', (
 
     renderInApp(<>{adapter.renderAltView!()}</>);
 
-    // The alt-view MUST NOT invoke any write method — it is a read-only
-    // companion that selects a node. The inspector (opened by selection)
-    // owns the kb.patch_entity write path.
+    // invariant: The alt-view MUST NOT invoke any write method — it is a
+    // read-only companion that selects a node. The inspector (opened by
+    // selection) owns the kb.patch_entity write path.
     expect(client.patchTimelineEvent).not.toHaveBeenCalled();
     expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
     expect(client.worldKbPatchRelationship).not.toHaveBeenCalled();
@@ -291,16 +281,13 @@ describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', (
 
     renderInApp(<>{adapter.renderAltView!()}</>);
 
-    // The honest empty-state copy is surfaced (canvas-strategy-surface.md
-    // §4.4 + timeline-canvas-architecture.md §7 honest empty-state). The
-    // i18n catalog ships "No Timeline entities yet." under
-    // `timeline.altView.empty`; match loosely so copy refinements don't
-    // break the a11y guarantee.
+    // note: The honest empty-state copy is surfaced (canvas-strategy-surface.md
+    // §4.4 + timeline-canvas-architecture.md §7 honest empty-state). The i18n
+    // catalog ships "No Timeline entities yet." under `timeline.altView.empty`;
+    // match loosely so copy refinements don't break the a11y guarantee.
     expect(screen.getByText(/no timeline entities|empty/i)).toBeInTheDocument();
   });
 });
-
-// ─── summarizeGraph — non-empty screen-reader live region ───────────────────
 
 describe('TimelineCanvasAdapter.summarizeGraph — a11y live region (re-verification)', () => {
   function emptyGraph(): WorldKbGraphResponse {
@@ -326,7 +313,6 @@ describe('TimelineCanvasAdapter.summarizeGraph — a11y live region (re-verifica
       current: { worldId: 'world-7' },
     });
     const graph: WorldKbGraphResponse = {
-      // One event WITH occurred_at + one event WITHOUT — partial signal.
       entities: [
         entity({
           key_block_id: 'kb-dated',

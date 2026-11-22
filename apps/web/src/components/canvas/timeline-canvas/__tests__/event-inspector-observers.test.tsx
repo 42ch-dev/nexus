@@ -2,7 +2,7 @@
  * Timeline Narrative event inspector — modules.observation.observers
  * read-only display (V1.164 P3 Task 4).
  *
- * Locks AC-V1164-13/15 + PD-9/PD-18 for the App event inspector: a
+ * note: Locks AC-V1164-13/15 + PD-9/PD-18 for the App event inspector: a
  * Narrative event with a populated `modules.observation.observers` bag
  * renders the "Observers:" metadata line. Observer entry_ids resolve to
  * canonical names ONLY when the name is already in the loaded graph
@@ -42,7 +42,7 @@ import {
 } from '../timeline-canvas-adapter';
 import { TimelineInspector } from '../timeline-inspector';
 
-// ─── Fixture builders (mirror timeline-write-boundary.test.tsx) ─────────────
+// note: Fixture builders mirror timeline-write-boundary.test.tsx.
 
 function entityEvent(
   overrides: Partial<WorldKbEntityProjection> = {},
@@ -76,7 +76,7 @@ function eventNode(
 }
 
 /**
- * Projected graph nodes carrying canonical names (the "already in the
+ * note: Projected graph nodes carrying canonical names (the "already in the
  * loaded graph" PD-18 resolution source — `ctxRef.current.nodes` mirrors
  * what the orchestrator supplies from `surface.nodes`).
  */
@@ -92,7 +92,9 @@ function graphNodesWith(names: Record<string, string>): Node<TimelineNodeData>[]
   }));
 }
 
-/** Event with recorded observation (mirrors the Task 2 fixture). */
+/**
+ * note: Event with recorded observation (mirrors the Task 2 fixture).
+ */
 const EVENT_WITH_OBSERVERS: Partial<TimelineNodeData> = {
   modules: {
     observation: {
@@ -103,7 +105,7 @@ const EVENT_WITH_OBSERVERS: Partial<TimelineNodeData> = {
 };
 
 /**
- * AC-V165-8 — the daemon wire shape after a T1 KB patch on a `block_type =
+ * note: AC-V165-8 — the daemon wire shape after a T1 KB patch on a `block_type =
  * event` entity: `GET /worlds/:id/kb/graph` returns `entities[].modules`
  * verbatim (mirrors T1's `patch_entity_observation_on_event_entity_
  * round_trip_on_graph_read` assertion shape). The observers are the KB
@@ -178,14 +180,14 @@ describe('TimelineInspector — modules.observation.observers line (V1.164 P3 Ta
     const line = screen.getByTestId('event-observers-line');
     expect(line).toBeInTheDocument();
     expect(within(line).getByText('Observers:')).toBeInTheDocument();
-    // PD-18 — names resolve to "name (id)" when the graph already has them.
+    // note: PD-18 — names resolve to "name (id)" when the graph already has them.
     expect(
       within(line).getByText('Char One (kb_char_1), Char Two (kb_char_2)'),
     ).toBeInTheDocument();
   });
 
   it('falls back to raw ids when observer names are NOT in the loaded graph (PD-18 — no new fetch)', () => {
-    // No `nodes` in the ctx (minimal mount) — the line still renders with
+    // why: No `nodes` in the ctx (minimal mount) — the line still renders with
     // the raw entry_ids.
     renderInspector({ node: eventNode({ ...EVENT_WITH_OBSERVERS }) });
 
@@ -271,8 +273,6 @@ describe('TimelineInspector — modules.observation.observers line (V1.164 P3 Ta
   });
 });
 
-// ─── AC-V165-8 E2E — observation→canvas via the KB patch carrier (T3) ───────
-
 describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch wire (T3)', () => {
   function project(graph: WorldKbGraphResponse) {
     const adapter = createTimelineCanvasAdapter({
@@ -284,7 +284,7 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
   it('renders the observers line from the post-patch graph wire (graph → projection → spread → inspector)', () => {
     const { nodes } = project(observedEventGraph());
 
-    // Chain link 1+2 — projectNarrativeLayer keeps block_type=event and
+    // why: Chain link 1+2 — projectNarrativeLayer keeps block_type=event and
     // entityToTimelineNodeData spreads `...entity`, so `modules` rides the
     // node data verbatim (the AR-7 referent: WorldKbEntityProjection.modules).
     const eventNode = nodes.find((n) => n.data.key_block_id === 'kb_event');
@@ -297,7 +297,7 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
       },
     });
 
-    // Chain link 3 — the inspector reads data.modules.observation.observers
+    // why: Chain link 3 — the inspector reads data.modules.observation.observers
     // (PD-18: ctx.nodes mirrors surface.nodes — the full projected graph).
     renderInspector({ node: eventNode!, ctxOverrides: { nodes } });
 
@@ -329,7 +329,7 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
     };
     const { nodes } = project(graph);
 
-    // The projection spreads modules onto every entity; only the event gate
+    // why: The projection spreads modules onto every entity; only the event gate
     // (layoutHint === 'event') surfaces the Observers line.
     const charNode = nodes.find((n) => n.data.key_block_id === 'kb_char_1');
     expect(charNode).toBeDefined();
@@ -344,8 +344,6 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
   });
 });
 
-// ─── v1.203 P2 T3 — O3: observation editing on the event inspector ──────────
-
 describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
   const CTX_NODES = graphNodesWith({ kb_char_1: 'Char One', kb_char_2: 'Char Two' });
 
@@ -357,9 +355,8 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
       ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
     });
 
-    // The edit affordance renders on event nodes even when nothing is stored.
     expect(screen.getByTestId('observation-section')).toBeInTheDocument();
-    // Save starts disabled — absent stays absent until the author edits.
+    // why: Save starts disabled — absent stays absent until the author edits.
     expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
 
     await user.click(screen.getByTestId('observation-observer-kb_char_1'));
@@ -377,7 +374,6 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
       modules: { observation: { observers: ['kb_char_1'], access: { read: true } } },
     });
     expect(dirtyArg).toContain('modules');
-    // The editing status line resolves the new `modules` field label.
     expect(screen.getByText(/Modules/)).toBeInTheDocument();
   });
 
@@ -394,7 +390,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
 
     expect(onPatchEntity).toHaveBeenCalledTimes(1);
     const [, patchArg] = onPatchEntity.mock.calls[0];
-    // Whole-first-level-value upsert: the untouched access object is carried
+    // why: Whole-first-level-value upsert: the untouched access object is carried
     // along with the edited observers list.
     expect(patchArg).toEqual({
       modules: {
@@ -416,7 +412,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
 
     expect(onPatchEntity).toHaveBeenCalledTimes(1);
     const [, patchArg] = onPatchEntity.mock.calls[0];
-    // `observers: []` is the meaningful "no observers" claim — NOT an omitted
+    // why: `observers: []` is the meaningful "no observers" claim — NOT an omitted
     // key (absent would read back as unrecorded).
     expect(patchArg.modules.observation.observers).toEqual([]);
     expect(patchArg.modules.observation.access).toEqual({ line_of_sight: true });
@@ -489,7 +485,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     await user.type(screen.getByTestId('observation-raw-input'), 'kb_char_9');
     await user.click(screen.getByTestId('observation-raw-add'));
 
-    // The raw id renders as an extra checked row it can later be removed from.
+    // note: The raw id renders as an extra checked row it can later be removed from.
     expect(screen.getByTestId('observation-observer-kb_char_9')).toBeChecked();
 
     await user.click(screen.getByTestId('timeline-inspector-save'));
@@ -521,11 +517,9 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     await user.click(screen.getByTestId('timeline-inspector-save'));
 
     expect(onPatchEntity).toHaveBeenCalledTimes(1);
-    // Known observation prefix → field-level message under the section.
     expect(screen.getByTestId('observation-section')).toHaveTextContent(
       'must be an array of non-empty entry ids',
     );
-    // Unrelated dialect prefix stays section-level, verbatim.
     expect(screen.getByTestId('timeline-inspector-validation-errors')).toHaveTextContent(
       'modules.mental.identity: must be an object',
     );
@@ -584,7 +578,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     expect(dirtyArg).not.toContain('modules');
   });
 
-  // ── Fix Round 1 (L2 review C1/C2/C3) ──────────────────────────────────────
+  // note: Fix Round 1 (L2 review C1/C2/C3).
 
   it('C1 — a whitespace-containing stored observer id seeds verbatim: untouched seed + title-only save sends only title', async () => {
     const user = userEvent.setup();
@@ -596,10 +590,10 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
       ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
     });
 
-    // The graph checkbox for the trimmed id is NOT selected — the stored
+    // why: The graph checkbox for the trimmed id is NOT selected — the stored
     // whitespace-containing id seeded verbatim, not coerced.
     expect(screen.getByTestId('observation-observer-kb_char_1')).not.toBeChecked();
-    // Seed normalization must NOT mark modules dirty.
+    // invariant: Seed normalization must NOT mark modules dirty.
     expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
 
     await user.type(screen.getByLabelText('Title'), '!');
@@ -620,7 +614,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
       ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
     });
 
-    // Raw fallback replaces the structured controls (C1 — no coercion).
+    // why: Raw fallback replaces the structured controls (C1 — no coercion).
     const raw = screen.getByTestId('observation-raw-json');
     expect(raw).toBeInTheDocument();
     expect((raw as HTMLTextAreaElement).value).toBe(
@@ -647,7 +641,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     });
 
     const raw = screen.getByTestId('observation-raw-json') as HTMLTextAreaElement;
-    // Editing the JSON (adding a member) writes the complete edited value —
+    // why: Editing the JSON (adding a member) writes the complete edited value —
     // unknown inner keys (PD-13) and the previously nonrepresentable
     // members round-trip through the author's text.
     fireEvent.change(raw, {
@@ -692,10 +686,8 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
       ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
     });
 
-    // The observation editor is hidden (existing JSX gate)…
     expect(screen.queryByTestId('observation-section')).not.toBeInTheDocument();
     expect(screen.queryByTestId('observation-raw-json')).not.toBeInTheDocument();
-    // …and the stored module does not make the form dirty (C2 dirty gate).
     expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
 
     await user.type(screen.getByLabelText('Title'), '!');
@@ -710,16 +702,15 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
   it('C3 — an explicit "no observers" claim from an unrecorded event submits observers: [] on the first save and reads back explicitly', async () => {
     const user = userEvent.setup();
     const onPatchEntity = vi.fn().mockResolvedValue(undefined);
-    // No observers member at all — previously unrecorded.
+    // note: No observers member at all — previously unrecorded.
     renderInspector({
       node: eventNode(),
       ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
     });
 
-    // Untouched unrecorded seed keeps omission (Save disabled, no modules).
+    // why: Untouched unrecorded seed keeps omission (Save disabled, no modules).
     expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
 
-    // The explicit claim checkbox is available even with an empty selection.
     await user.click(screen.getByTestId('observation-claim-none'));
     expect(screen.getByTestId('timeline-inspector-save')).toBeEnabled();
     await user.click(screen.getByTestId('timeline-inspector-save'));
@@ -728,7 +719,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     const [, patchArg] = onPatchEntity.mock.calls[0];
     expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
 
-    // Read-back (L2 cannot-verify item): the post-save projection with
+    // note: Read-back (L2 cannot-verify item): the post-save projection with
     // `observers: []` renders the explicit "No observers" claim line.
     const updated = eventNode({
       modules: { observation: { observers: [] } },
@@ -757,7 +748,7 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
 
     expect(onPatchEntity).toHaveBeenCalledTimes(1);
     const [, patchArg] = onPatchEntity.mock.calls[0];
-    // The deliberate clear is the PD-9 "no observers" claim — NOT omission.
+    // why: The deliberate clear is the PD-9 "no observers" claim — NOT omission.
     expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
   });
 });
@@ -794,13 +785,12 @@ describe('TimelineInspector — Greptile P2: raw observer input clears on event 
     };
     const { rerender } = render(tree(client, eventNode(), ctxRef));
 
-    // Type an id for event A without adding it.
     fireEvent.change(screen.getByTestId('observation-raw-input'), {
       target: { value: 'kb_char_9' },
     });
     expect(screen.getByTestId('observation-raw-input')).toHaveValue('kb_char_9');
 
-    // Switch to event B — the reseed effect must clear the per-event input.
+    // why: Switch to event B — the reseed effect must clear the per-event input.
     rerender(
       tree(
         client,
@@ -809,9 +799,7 @@ describe('TimelineInspector — Greptile P2: raw observer input clears on event 
       ),
     );
     expect(screen.getByTestId('observation-raw-input')).toHaveValue('');
-    // Add with the empty input is inert: no invented observer state.
     expect(screen.getByTestId('observation-raw-add')).toBeDisabled();
-    // The unfinished id typed for event A did not leak into event B's state.
     expect(screen.queryByTestId('observation-observer-kb_char_9')).not.toBeInTheDocument();
     expect(screen.queryByText('kb_char_9')).not.toBeInTheDocument();
   });

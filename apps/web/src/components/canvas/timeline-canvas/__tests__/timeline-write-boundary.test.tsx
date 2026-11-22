@@ -1,5 +1,5 @@
 /**
- * Timeline canvas write-boundary tests (V1.122 P1 T4).
+ * note: Timeline canvas write-boundary tests (V1.122 P1 T4).
  *
  * Asserts the architect-locked write boundary (§4) + conflict policy (§5):
  *
@@ -56,8 +56,6 @@ import {
 import { TimelineInspector } from '../timeline-inspector';
 import { TimelineCanvas } from '../timeline-canvas';
 
-// ─── Fixtures ───────────────────────────────────────────────────────────────
-
 function entityEvent(
   overrides: Partial<WorldKbEntityProjection> = {},
 ): WorldKbEntityProjection {
@@ -90,7 +88,7 @@ function eventNode(
 }
 
 function makeMockClient(): NexusClient {
-  // Every potentially-forbidden method is tracked so negative assertions
+  // why: every potentially-forbidden method is tracked so negative assertions
   // fail loudly if any Timeline code path accidentally wires them.
   return {
     getWorldKbGraph: vi.fn().mockResolvedValue({
@@ -111,8 +109,6 @@ function makeMockClient(): NexusClient {
     health: vi.fn().mockResolvedValue({ status: 'ok', version: 'test' }),
   } as unknown as NexusClient;
 }
-
-// ─── Inspector-level write wiring (positive + negative) ────────────────────
 
 function renderInspector({
   client,
@@ -154,8 +150,8 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
     expect(patch).toMatchObject({ title: 'Coronation of Aria' });
     expect(dirtyFields).toEqual(['title']);
 
-    // Negative assertions — the inspector never touches the client directly.
-    // The orchestrator's mutation hook is the only legitimate write path.
+    // why: the inspector never touches the client directly — the orchestrator's
+    // mutation hook is the only legitimate write path.
     expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
     expect(client.patchTimelineEvent).not.toHaveBeenCalled();
     expect(client.worldKbPatchRelationship).not.toHaveBeenCalled();
@@ -169,7 +165,7 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
     renderInspector({ client, ctxOverrides: { onPatchEntity } });
 
     const bodyTextarea = screen.getByLabelText('Body') as HTMLTextAreaElement;
-    // userEvent.type interprets `{` as a key descriptor; JSON inputs use
+    // why: userEvent.type interprets `{` as a key descriptor; JSON inputs use
     // fireEvent.change so the literal braces land in the textarea verbatim.
     fireEvent.change(bodyTextarea, {
       target: { value: '{"attributes":{"occurred_at":"1100-01-01T00:00:00Z"}}' },
@@ -219,8 +215,8 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
   it('does not invoke the client when onPatchEntity is unset (read-only mount)', async () => {
     const user = userEvent.setup();
     const client = makeMockClient();
-    // No onPatchEntity wired — the inspector should not throw + should not
-    // touch the client. (Defensive: read-only test mounts of the adapter.)
+    // why: no onPatchEntity wired — a read-only adapter mount must neither
+    // throw nor touch the client.
     renderInspector({ client });
 
     const titleInput = screen.getByDisplayValue('Coronation');
@@ -228,17 +224,16 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
     await user.type(titleInput, 'X');
     await user.click(screen.getByTestId('timeline-inspector-save'));
 
-    // The submit handler bails when no write callback is wired.
     expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
     expect(client.patchTimelineEvent).not.toHaveBeenCalled();
   });
 
   it('clears isSubmitting and re-enables Save when onPatchEntity rejects (PR #156 fix)', async () => {
-    // Regression: previously the inspector set `isSubmitting=true` and
-    // forwarded the patch via a fire-and-forget `onPatchEntity`. The flag
-    // was only cleared when the selected node's `version` changed — which
-    // never happens on error — leaving Save permanently disabled. The fix
-    // awaits the returned promise and resets the flag in `finally`.
+    // why: regression (PR #156) — the inspector used to set `isSubmitting=true`
+    // and forward the patch fire-and-forget; the flag was only cleared when the
+    // selected node's `version` changed, which never happens on error, leaving
+    // Save permanently disabled. The fix awaits the returned promise and resets
+    // the flag in `finally`.
     const user = userEvent.setup();
     const client = makeMockClient();
     const onPatchEntity = vi
@@ -257,32 +252,28 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
 
     await waitFor(() => expect(onPatchEntity).toHaveBeenCalledTimes(1));
 
-    // After the rejected promise settles, `isSubmitting` MUST reset so the
-    // author can retry. The form is still dirty (the edit is unsaved), so
-    // the only thing keeping Save disabled would be a stuck `isSubmitting`.
+    // invariant: after the rejected promise settles, `isSubmitting` MUST reset
+    // so the author can retry. The form is still dirty (the edit is unsaved),
+    // so only a stuck `isSubmitting` could keep Save disabled.
     await waitFor(() => {
       expect(saveButton).not.toBeDisabled();
     });
-    // The label reflects the submit flag too: once settled it reads "Save"
-    // again, not the in-flight "Saving…" label.
     expect(saveButton).toHaveTextContent('Save');
-    // Confirm a retry actually invokes the callback a second time — proves
-    // the flag did not wedge the form on the first failure.
+    // why: a second click proves the flag did not wedge the form on the first
+    // failure.
     await user.click(saveButton);
     await waitFor(() => expect(onPatchEntity).toHaveBeenCalledTimes(2));
   });
 });
 
-// ─── Orchestrator-level write path + conflict UX ────────────────────────────
-//
-// Mounts the full <TimelineCanvas> with a mocked graph so the orchestrator's
-// write wiring (handlePatchEntity → usePatchWorldKbEntity → client.worldKbPatchEntity)
-// is exercised end-to-end. The CanvasShell + useCanvasSurface are stubbed so
-// the inspector surfaces without React Flow selection (jsdom does not measure
-// RF nodes).
+// note: Orchestrator-level write path + conflict UX — mounts the full
+// <TimelineCanvas> with a mocked graph so `handlePatchEntity` →
+// `usePatchWorldKbEntity` → `client.worldKbPatchEntity` runs end-to-end.
+// CanvasShell + useCanvasSurface are stubbed so the inspector surfaces without
+// React Flow selection (jsdom does not measure RF nodes).
 
 vi.mock('@/components/canvas/canvas-shell', async () => {
-  // V1.123 P4 Task 3 — the real `CanvasShell` wraps children in a
+  // why: the real CanvasShell (V1.123 P4 Task 3) wraps children in a
   // `<ReactFlowProvider>`; the mock must do the same so the
   // `<SemanticZoomBridge>` child (which calls `useViewport()`) mounts
   // cleanly without throwing "ReactFlowProvider as an ancestor".
@@ -296,8 +287,9 @@ vi.mock('@/components/canvas/canvas-shell', async () => {
   };
 });
 
-// Stub the layout/canvas hook so the test does not depend on RF measurement.
-// Returning a minimal shape keeps the orchestrator's render branches intact.
+// why: stub the layout/canvas hook so the test does not depend on RF
+// measurement; returning a minimal shape keeps the orchestrator's render
+// branches intact.
 vi.mock('@/components/canvas/use-canvas-surface', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/canvas/use-canvas-surface')>();
   return {
@@ -329,8 +321,8 @@ vi.mock('@/components/canvas/use-canvas-surface', async (importOriginal) => {
 
 describe('TimelineCanvas orchestrator — write path + conflict UX (T4)', () => {
   beforeEach(() => {
-    // Provide a non-empty graph so the orchestrator renders the canvas branch
-    // (not the empty-state).
+    // why: a non-empty graph makes the orchestrator render the canvas branch
+    // rather than the empty-state.
     useHandlers(
       http.get('/v1/daemon/worlds/*/kb/graph', () =>
         HttpResponse.json({
@@ -350,15 +342,14 @@ describe('TimelineCanvas orchestrator — write path + conflict UX (T4)', () => 
     const client = makeMockClient();
     renderInApp(<TimelineCanvas worldId="world-7" />, { client });
 
-    // Give the graph query a chance to resolve.
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Mounting + reading the graph MUST NOT trigger any write endpoint. This
-    // is the negative-assertion contract: the Timeline surface's read path
-    // stays pure (no `patchTimelineEvent`, no `worldKbPatchRelationship`,
-    // no `worldKbPromoteCandidate`, no `worldKbPatchEntity`).
+    // invariant: mounting + reading the graph MUST NOT trigger any write
+    // endpoint — the Timeline surface's read path stays pure (no
+    // `patchTimelineEvent`, no `worldKbPatchRelationship`, no
+    // `worldKbPromoteCandidate`, no `worldKbPatchEntity`).
     expect(client.patchTimelineEvent).not.toHaveBeenCalled();
     expect(client.worldKbPatchRelationship).not.toHaveBeenCalled();
     expect(client.worldKbPromoteCandidate).not.toHaveBeenCalled();
@@ -374,7 +365,8 @@ describe('TimelineCanvas orchestrator — write path + conflict UX (T4)', () => 
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // No PUT to a file route (the architect-locked §2 raw-file invariant).
+    // why: the architect-locked §2 raw-file invariant forbids a PUT to any
+    // file route.
     const putCalls = fetchSpy.mock.calls.filter(
       ([, init]) => (init as RequestInit | undefined)?.method === 'PUT',
     );
@@ -398,23 +390,23 @@ describe('TimelineCanvas orchestrator — visible ordering-disclaimer notice (PR
   });
 
   it('renders the visible ordering-disclaimer when the graph has event entities', async () => {
-    // Default `makeMockClient().getWorldKbGraph` returns a single event
-    // entity (`entityEvent()`), so the notice must surface.
+    // note: the default `makeMockClient().getWorldKbGraph` returns a single
+    // event entity (`entityEvent()`), so the notice must surface.
     renderInApp(<TimelineCanvas worldId="world-7" />, { client: makeMockClient() });
 
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // The visible notice is present (sighted-user counterpart to the a11y
-    // `summarizeGraph` disclaimer). The i18n key resolves to the English
-    // catalog copy; assert the testid + a substring of the resolved copy.
+    // note: sighted-user counterpart to the a11y `summarizeGraph` disclaimer.
+    // The i18n key resolves to the English catalog copy; assert the testid +
+    // a substring of the resolved copy.
     const notice = await screen.findByTestId('timeline-ordering-disclaimer');
     expect(notice).toBeInTheDocument();
     expect(notice).toHaveTextContent(
       /inferred from available event data/i,
     );
-    // Non-modal semantics: the notice is informational, not an alert. SR
+    // why: non-modal semantics — the notice is informational, not an alert. SR
     // users get the disclaimer via the CanvasShell live region; this visible
     // notice uses `role="note"` (no aria-live) to avoid duplicate
     // announcements.
@@ -422,10 +414,10 @@ describe('TimelineCanvas orchestrator — visible ordering-disclaimer notice (PR
   });
 
   it('does NOT render the visible notice for a zero-event (context-only) graph', async () => {
-    // Override the mock client's graph resolver with a Context-only entity
-    // set — no `block_type=event`. There is no when-axis ordering to
-    // disclaim, so the notice must be absent (consistent with the a11y
-    // disclaimer condition in `summarizeTimelineGraph`).
+    // why: override the graph with a Context-only entity set (no
+    // `block_type=event`) — there is no when-axis ordering to disclaim, so the
+    // notice must be absent, matching the a11y disclaimer condition in
+    // `summarizeTimelineGraph`.
     const client = makeMockClient();
     (client.getWorldKbGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
       entities: [
@@ -445,13 +437,11 @@ describe('TimelineCanvas orchestrator — visible ordering-disclaimer notice (PR
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // The canvas branch renders (non-empty graph), but the notice is absent
-    // because no event entity is present.
     expect(screen.queryByTestId('timeline-ordering-disclaimer')).toBeNull();
   });
 
   it('does NOT render the visible notice for an empty graph (empty-state branch)', async () => {
-    // A zero-entity graph surfaces its own honest empty-state copy via
+    // why: a zero-entity graph surfaces its own honest empty-state copy via
     // <EmptyState> (§7); the a11y live region therefore does NOT carry the
     // ordering disclaimer, and neither does the visible notice.
     const client = makeMockClient();
@@ -470,8 +460,6 @@ describe('TimelineCanvas orchestrator — visible ordering-disclaimer notice (PR
     expect(screen.queryByTestId('timeline-ordering-disclaimer')).toBeNull();
   });
 });
-
-// ─── buildPatchEntityRequest — orchestrator write helper ────────────────────
 
 describe('buildPatchEntityRequest — V1.73 wire shape', () => {
   it('builds a patch-entity request carrying entity_id + expected_version + patch', async () => {
@@ -493,8 +481,6 @@ describe('buildPatchEntityRequest — V1.73 wire shape', () => {
     expect(request.patch.body).toBe(body);
   });
 });
-
-// ─── Conflict extraction (pure) ─────────────────────────────────────────────
 
 describe('extractTimelineConflict — V1.73 DTO reuse (T4)', () => {
   it('projects a 409 world_kb_conflict into a TimelineConflictInfo.conflict', () => {
@@ -575,7 +561,7 @@ describe('extractTimelineConflict — V1.73 DTO reuse (T4)', () => {
     const info = extractTimelineConflict(error);
     expect(info?.kind).toBe('conflict');
     if (info?.kind === 'conflict') {
-      // Defaults — no crash.
+      // why: `details` is missing, so assert the defaults — no crash.
       expect(info.currentVersion).toBe(0);
       expect(info.entityId).toBe('');
     }

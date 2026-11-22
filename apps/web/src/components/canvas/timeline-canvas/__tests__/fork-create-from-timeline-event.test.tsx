@@ -2,7 +2,7 @@
  * fork-create-from-timeline-event — V1.162 P2 T1 fork creation flow +
  * PD-6 post-create landing (World Timeline only).
  *
- * Coverage (the brief's three named tests):
+ * note: Coverage (the brief's three named tests):
  *   1. fork_create_from_timeline_event  — pick a fork point (compute node
  *      inspector affordance) → submit → 200 → the forked branch Timeline
  *      is the active view (branch context = new branch_id).
@@ -29,7 +29,7 @@ import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
 import { TimelineCanvas } from '../timeline-canvas';
 
-// ─── Wire fixtures (daemon contract shapes) ─────────────────────────────────
+// note: Wire fixtures mirror the daemon contract shapes.
 
 const KB_EVENT = {
   key_block_id: 'kb-coro',
@@ -83,7 +83,7 @@ const CREATE_FORK_RESPONSE = {
   created_at: '2026-08-12T00:00:00Z',
 };
 
-// ─── MSW handler set with a mutable per-branch event store ──────────────────
+// note: MSW handler set with a mutable per-branch event store.
 
 function forkJourney(over: { initialEvents?: unknown[] } = {}) {
   const state = {
@@ -92,12 +92,12 @@ function forkJourney(over: { initialEvents?: unknown[] } = {}) {
       [FORK_BRANCH_ID]: [] as unknown[],
     } as Record<string, unknown[]>,
     lastEventsUrl: null as string | null,
-    /** Events fetches that carried a `branch_id` query param. */
+    /** note: Events fetches that carried a `branch_id` query param. */
     branchFetchCount: 0,
     forkCalls: [] as Array<Record<string, unknown>>,
     forkStatus: 200 as number,
     forkErrorBody: null as JsonBodyType | null,
-    /** W-3 — artificial latency for the POST so a pending mutation is
+    /** note: W-3 — artificial latency for the POST so a pending mutation is
      * observable while the dialog stays open. */
     forkDelayMs: 0,
   };
@@ -119,7 +119,7 @@ function forkJourney(over: { initialEvents?: unknown[] } = {}) {
       return HttpResponse.json({ items, has_more: false });
     }),
     http.post('/v1/daemon/worlds/:worldId/forks', async ({ request }) => {
-      // Record the request BEFORE the artificial delay: the double-submit
+      // why: Record the request BEFORE the artificial delay: the double-submit
       // test needs the count visible while the mutation is still pending.
       // (Recording after `delay` would only observe resolved mutations —
       // the W-3 false-pass window.)
@@ -163,7 +163,7 @@ function renderForkApp(over: { initialEvents?: unknown[] } = {}) {
   return { ...result, state };
 }
 
-/** Select the compute node via the alt-view table → compute inspector opens. */
+/** note: Select the compute node via the alt-view table → compute inspector opens. */
 async function openComputeInspector(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: 'Show list view' }));
   const row = await screen.findByText('Aria strikes Brann');
@@ -181,15 +181,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
   it('fork_create_from_timeline_event — pick fork-point → submit → 200 → forked branch Timeline is the active view', async () => {
     const user = userEvent.setup();
     const { state } = renderForkApp();
 
-    // Pick the fork point: compute inspector → "Branch this world's
-    // timeline from here" → fork-create dialog.
     await openComputeInspector(user);
     await user.click(screen.getByTestId('compute-inspector-fork-here'));
     await screen.findByTestId('fork-create-submit');
@@ -197,12 +193,9 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
       'Aria strikes Brann',
     );
 
-    // Optional label, then submit.
     await user.type(screen.getByLabelText(/Branch label/i), 'Alternate ending');
     await user.click(screen.getByTestId('fork-create-submit'));
 
-    // Request shape: parent = the current branch context (root), fork point
-    // = the picked event, label forwarded.
     await waitFor(() => expect(state.forkCalls).toHaveLength(1));
     expect(state.forkCalls[0]).toEqual({
       parent_branch_id: ROOT_BRANCH_ID,
@@ -210,20 +203,19 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
       label: 'Alternate ending',
     });
 
-    // PD-6: the active branch context becomes the new branch — the events
+    // why: PD-6: the active branch context becomes the new branch — the events
     // query re-keys to the forked branch.
     await waitFor(() => {
       const url = new URL(state.lastEventsUrl!, 'http://localhost');
       expect(url.searchParams.get('branch_id')).toBe(FORK_BRANCH_ID);
     });
-    // The parent branch's compute row is gone — the view is the forked
+    // why: The parent branch's compute row is gone — the view is the forked
     // branch Timeline (KB graph remains; the fork branch has no compute
     // events yet). The alt-view table reflects the active branch's nodes.
     await waitFor(() =>
       expect(screen.queryByText('Aria strikes Brann')).not.toBeInTheDocument(),
     );
     expect(screen.getByText('The coronation')).toBeInTheDocument();
-    // Brief success notice (PD-6).
     expect(await screen.findByText('Branch created')).toBeInTheDocument();
   });
 
@@ -245,7 +237,7 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     await screen.findByTestId('fork-create-submit');
     await user.click(screen.getByTestId('fork-create-submit'));
 
-    // Inline 422 error; the dialog stays open (author can pick another
+    // note: Inline 422 error; the dialog stays open (author can pick another
     // fork point).
     await screen.findByTestId('fork-create-dialog-error');
     expect(screen.getByTestId('fork-create-dialog-error')).toHaveTextContent(
@@ -253,7 +245,7 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     );
     expect(screen.getByTestId('fork-create-submit')).toBeInTheDocument();
 
-    // No branch switch: every events fetch stayed on the root branch.
+    // note: No branch switch: every events fetch stayed on the root branch.
     await waitFor(() => expect(state.lastEventsUrl).not.toBeNull());
     expect(state.branchFetchCount).toBe(0);
     expect(
@@ -261,7 +253,7 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     ).toBeNull();
     expect(screen.queryByText('Branch created')).not.toBeInTheDocument();
 
-    // Closing the dialog leaves the parent Timeline intact — the compute
+    // why: Closing the dialog leaves the parent Timeline intact — the compute
     // row is still there (the alt-view table reflects the active branch's
     // nodes; the Radix dialog hid the background from the a11y tree).
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -277,9 +269,8 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     await screen.findByTestId('fork-create-submit');
     await user.click(screen.getByTestId('fork-create-submit'));
 
-    // The success notice appears…
     expect(await screen.findByText('Branch created')).toBeInTheDocument();
-    // …but is NOT the only outcome: the active view is the forked branch
+    // why: …but is NOT the only outcome: the active view is the forked branch
     // Timeline (branch context switched to the response branch_id — the
     // events query re-keyed). A toast-only-on-parent implementation fails
     // this assertion (lastEventsUrl would still carry no branch_id).
@@ -295,7 +286,7 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
   it('fork_create_rapid_double_submit_single_post — double submit fires exactly ONE POST (W-3)', async () => {
     const user = userEvent.setup();
     const { state } = renderForkApp();
-    // Keep the POST in flight so the mutation stays pending while the
+    // why: Keep the POST in flight so the mutation stays pending while the
     // dialog is open (the double-submit window the QC flagged).
     state.forkDelayMs = 100;
 
@@ -303,19 +294,19 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     await user.click(screen.getByTestId('compute-inspector-fork-here'));
     await screen.findByTestId('fork-create-submit');
 
-    // Submit once — the mutation is now pending: `forkCalls` is recorded
+    // why: Submit once — the mutation is now pending: `forkCalls` is recorded
     // before the MSW delay, so `waitFor` resolves WHILE the POST is still
     // in flight and the dialog is still open.
     const form = screen.getByTestId('fork-create-submit').closest('form')!;
     fireEvent.submit(form);
     await waitFor(() => expect(state.forkCalls).toHaveLength(1));
 
-    // A second submit attempt while pending — the implicit-Enter /
+    // why: A second submit attempt while pending — the implicit-Enter /
     // pre-render double-click vector that bypasses the disabled button.
     // The in-handler `isPending` guard must swallow it: exactly ONE POST
     // (duplicate fork branches are the W-3 bug).
     fireEvent.submit(form);
-    // Settle window > the 100 ms MSW delay: a buggy second POST would be
+    // why: Settle window > the 100 ms MSW delay: a buggy second POST would be
     // recorded (before its own delay) inside this window, so a missing
     // guard now fails the length-1 assertion.
     await new Promise((resolve) => {
@@ -323,12 +314,10 @@ describe('TimelineCanvas fork creation (V1.162 P2 T1)', () => {
     });
     expect(state.forkCalls).toHaveLength(1);
 
-    // The single POST carries the correct shape…
     expect(state.forkCalls[0]).toEqual({
       parent_branch_id: ROOT_BRANCH_ID,
       forked_from_event_id: 'evt_compute_1',
     });
-    // …and the flow still lands on the forked branch (PD-6).
     expect(await screen.findByText('Branch created')).toBeInTheDocument();
     await waitFor(() => {
       const url = new URL(state.lastEventsUrl!, 'http://localhost');

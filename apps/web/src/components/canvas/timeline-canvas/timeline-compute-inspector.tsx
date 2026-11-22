@@ -1,5 +1,5 @@
 /**
- * Timeline compute inspector — V1.147 P2 T3 (app wiring of the promoted
+ * note: Timeline compute inspector — V1.147 P2 T3 (app wiring of the promoted
  * `ComputeInspectorSections` primitive for a Narrative Compute result node).
  *
  * Renders the compute context the behavior spec §5 Inspector row locks:
@@ -66,8 +66,8 @@ export function TimelineComputeInspector({
   const ctx = ctxRef.current;
   const payload = node.data.compute;
 
-  // Params digest from the shared run-detail cache (see module doc). The
-  // hook must run unconditionally (hooks order); `useComputeRun` is
+  // invariant: params digest from the shared run-detail cache (see module
+  // doc); the hook must run unconditionally (hooks order); `useComputeRun` is
   // disabled for run-less (preset-path) nodes.
   const runDetail = useComputeRun(payload?.runId);
   const paramsDigest = useMemo(
@@ -75,7 +75,7 @@ export function TimelineComputeInspector({
     [runDetail.data],
   );
 
-  // No payload → nothing honest to render (defensive; the adapter only
+  // why: no payload → nothing honest to render (defensive; the adapter only
   // creates compute nodes with a payload).
   if (!payload) return null;
 
@@ -113,7 +113,7 @@ export function TimelineComputeInspector({
             : undefined
         }
       />
-      {/* V1.162 P2 T1 — fork-point affordance (World Timeline only). The
+      {/* why: V1.162 P2 T1 fork-point affordance (World Timeline only). The
           picked compute event is the fork point; the orchestrator opens the
           fork-create dialog (PD-6 landing). Hidden when no wiring (read-only
           test mounts). Copy follows the PD-5 lazy-branch model. */}

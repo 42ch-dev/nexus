@@ -1,5 +1,5 @@
 /**
- * Timeline Brief-era inspector — V1.123 P1 T4 (Brief-layer feel
+ * note: Timeline Brief-era inspector — V1.123 P1 T4 (Brief-layer feel
  * differentiation).
  *
  * Surfaces era markers (`eraId`, `startHint`, `endHint`, `worldSummary`)
@@ -87,17 +87,18 @@ export function TimelineBriefEraInspector({
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Reseed the form when the selected node changes.
   useEffect(() => {
     setForm(formFromNode(data));
     setValidationErrors([]);
     setIsSubmitting(false);
+    // note: reseed on identity/version only; deep data changes must not
+    // clobber an in-progress edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.key_block_id, data.version]);
 
   const dirty = computeDirty(form, data);
 
-  // Era marker fields are surfaced as honest read-only identity. Direct
+  // why: era marker fields are surfaced as honest read-only identity. Direct
   // editing of structured `attributes.*` is a P4 era-carrier task; P1
   // surfaces them so the author sees the era's identity at a glance. The
   // values come from the adapter's `extractEraAttributes` projection —
@@ -116,7 +117,7 @@ export function TimelineBriefEraInspector({
     if (dirty.includes('body')) {
       try {
         if (!form.bodyText.trim()) {
-          // Empty body is a no-op for the wire DTO; skip rather than emit
+          // why: empty body is a no-op for the wire DTO; skip rather than emit
           // `undefined` so the patch is well-formed.
         } else {
           const parsed: unknown = JSON.parse(form.bodyText);
@@ -137,7 +138,7 @@ export function TimelineBriefEraInspector({
 
     const onPatch = ctx.onPatchEntity;
     if (typeof onPatch !== 'function') {
-      // No write hook wired (e.g. read-only test mounts). Render the chrome
+      // why: no write hook wired (e.g. read-only test mounts). Render the chrome
       // but do not attempt the write — same guard as `TimelineInspector`.
       return;
     }
@@ -151,14 +152,14 @@ export function TimelineBriefEraInspector({
     try {
       await onPatch(node, patch, dirty);
     } catch {
-      // Orchestrator's mutation `onError` surfaces conflict / validation /
+      // why: orchestrator's mutation `onError` surfaces conflict / validation /
       // toast UX. Inspector only owns the local submit flag.
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  // The time-span label mirrors the Brief-era node card: prefer
+  // note: the time-span label mirrors the Brief-era node card: prefer
   // `start_hint → end_hint`; fall back to whichever hint exists; fall back
   // to the temporal-unknown label when neither is present.
   const span = (() => {
@@ -183,6 +184,7 @@ export function TimelineBriefEraInspector({
       <div className="flex items-center justify-between gap-2">
         <h3
           className="flex items-center gap-2 text-heading-16 font-heading text-gray-1000"
+          // note: data-testid is this field's test contract.
           // eslint-disable-next-line react/forbid-dom-props
           data-testid="timeline-brief-era-inspector-title"
         >
@@ -200,7 +202,7 @@ export function TimelineBriefEraInspector({
         {t('timeline.briefEraInspector.description')}
       </p>
 
-      {/* Era identity block — read-only marker fields surface the era's
+      {/* why: era identity block — read-only marker fields surface the era's
           identity prominently above the title editor. Per the Brief feel
           contract (layer-feel §2.2), these are the era's distinguishing
           fields; they read first. */}
@@ -215,6 +217,7 @@ export function TimelineBriefEraInspector({
             </span>
             <span
               className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-900 self-start"
+              // note: data-testid is this field's test contract.
               // eslint-disable-next-line react/forbid-dom-props
               data-testid="timeline-brief-era-inspector-era-id"
             >
@@ -229,6 +232,7 @@ export function TimelineBriefEraInspector({
           </span>
           <span
             className="rounded-pill border border-canvas-worldkb-accent/30 bg-canvas-worldkb-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-worldkb-accent self-start"
+            // note: data-testid is this field's test contract.
             // eslint-disable-next-line react/forbid-dom-props
             data-testid="timeline-brief-era-inspector-span"
           >
@@ -243,6 +247,7 @@ export function TimelineBriefEraInspector({
             </span>
             <p
               className="text-copy-13 text-gray-900"
+              // note: data-testid is this field's test contract.
               // eslint-disable-next-line react/forbid-dom-props
               data-testid="timeline-brief-era-inspector-world-summary"
             >
@@ -252,7 +257,7 @@ export function TimelineBriefEraInspector({
         ) : null}
       </div>
 
-      {/* Title editor — the era's canonical name. Routes through the same
+      {/* why: title editor — the era's canonical name. Routes through the same
           `kb.patch_entity` write path as the Narrative inspector. */}
       <div className="flex flex-col gap-1">
         <Label htmlFor="tl-brief-era-title">
@@ -265,7 +270,7 @@ export function TimelineBriefEraInspector({
         />
       </div>
 
-      {/* Body JSON editor — advanced editing of the full body (including
+      {/* why: body JSON editor — advanced editing of the full body (including
           `attributes.start_hint` etc.). The structured era marker fields
           above are read-only for P1; this editor is the escape hatch for
           authors who need direct body edits before the P4 era carrier. */}

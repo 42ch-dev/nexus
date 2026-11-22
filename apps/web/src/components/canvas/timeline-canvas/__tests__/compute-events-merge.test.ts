@@ -1,5 +1,5 @@
 /**
- * Timeline adapter — Narrative merge of compute-result log events (V1.147 P2
+ * note: Timeline adapter — Narrative merge of compute-result log events (V1.147 P2
  * T3). Verifies the plan Global Constraints merge discipline:
  *
  *   - Two event families coexist on the Narrative layer: author KB
@@ -35,8 +35,6 @@ import {
   type TimelineCanvasAdapterContext,
   type TimelineNodeData,
 } from '../timeline-canvas-adapter';
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function entity(
   overrides: Partial<WorldKbEntityProjection> &
@@ -93,8 +91,6 @@ function computeNodes(nodes: Node<TimelineNodeData>[]): Node<TimelineNodeData>[]
   return nodes.filter((n) => n.data.layoutHint === 'compute');
 }
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe('Narrative merge of compute_result events', () => {
   it('projects KB events and compute_result log events as distinct node families (no double-render)', () => {
     const graph = graphWith([
@@ -119,7 +115,7 @@ describe('Narrative merge of compute_result events', () => {
     expect(merged[0]?.id).toBe('compute:evt_compute_1');
     expect(merged[0]?.type).toBe('timeline-compute-result');
 
-    // Distinct families → no id collision, no duplicate rendering of the
+    // note: Distinct families → no id collision, no duplicate rendering of the
     // same story beat.
     const ids = nodes.map((n) => n.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -165,16 +161,15 @@ describe('Narrative merge of compute_result events', () => {
     expect(kb?.position.y).toBe(0);
 
     const dated = computeNodes(nodes).filter((n) => ['compute:evt_dated', 'compute:evt_dated_2'].includes(n.id));
-    // Dated compute events sit on the when-axis (Y=0), sorted among
-    // themselves by created_at (evt_dated_2 first), appended AFTER the KB
-    // dated block (X beyond the KB event).
+    // note: Dated compute events sit on the when-axis (Y=0), sorted among
+    // themselves by created_at (evt_dated_2 first), appended AFTER the KB dated
+    // block (X beyond the KB event).
     expect(dated.map((n) => n.id)).toEqual(['compute:evt_dated_2', 'compute:evt_dated']);
     for (const n of dated) {
       expect(n.position.y).toBe(0);
       expect(n.position.x).toBeGreaterThan(kb?.position.x ?? 0);
     }
 
-    // Undated compute events cluster in the temporal-unknown group.
     const undated = computeNodes(nodes).find((n) => n.id === 'compute:evt_undated');
     expect(undated?.position.y).toBe(220);
   });
@@ -191,23 +186,20 @@ describe('Narrative merge of compute_result events', () => {
       entity({ key_block_id: 'kb-undated-2', block_type: 'event', canonical_name: 'Mystery two' }),
     ]);
     const events = [
-      // All-compute-undated case: dated compute count (0) < KB undated count
-      // (2) — the exact overlap scenario the review flagged for the y=220
+      // note: All-compute-undated case — dated compute count (0) < KB undated
+      // count (2), the exact overlap scenario the review flagged for the y=220
       // temporal-unknown lane.
       computeEvent({ id: 'evt_undated_compute', created_at: 'not-a-date' }),
     ];
 
     const { nodes } = projectTimelineGraph(graph, 'narrative', events);
 
-    // Both event families on the Narrative layer share no identical
-    // coordinates (KB events + compute result nodes).
     const family = nodes.filter(
       (n) => n.type === 'timeline-event' || n.type === 'timeline-compute-result',
     );
     const coords = family.map((n) => `${n.position.x},${n.position.y}`);
     expect(new Set(coords).size).toBe(coords.length);
 
-    // The compute undated row sits PAST the KB undated cluster, not on it.
     const kbUndated = nodes.find((n) => n.id === 'entity:kb-undated-2');
     const computeUndated = nodes.find((n) => n.id === 'compute:evt_undated_compute');
     expect(computeUndated?.position.y).toBe(220);
@@ -233,8 +225,8 @@ describe('Narrative merge of compute_result events', () => {
     expect(payload.runId).toBe('run_9f3a2c');
     expect(payload.sourceKind).toBe('direct_invoke');
     expect(payload.reportDigest).toBe('Brann takes 6 damage and staggers back.');
-    // Affected entries resolve canonical names from the KB graph; unknown ids
-    // fall back to the id itself (honest).
+    // note: Affected entries resolve canonical names from the KB graph; unknown
+    // ids fall back to the id itself (honest).
     expect(payload.affectedEntries).toEqual([
       { id: 'char-aria', title: 'Aria' },
       { id: 'char-brann', title: 'Brann' },

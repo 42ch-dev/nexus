@@ -1,5 +1,5 @@
 /**
- * Timeline canvas adapter — V1.122 P1 T2 (projection) + T4 (write boundary)
+ * note: Timeline canvas adapter — V1.122 P1 T2 (projection) + T4 (write boundary)
  *  + V1.123 P1 T2 (Brief layer projection) + V1.156 P1 T1 (Moment layer
  *  projection).
  *
@@ -98,7 +98,7 @@ import { timelineNodeTypes } from './timeline-node-types';
 import { buildEraTree } from './brief-era-tree';
 import { BriefTimeBands } from './brief-time-bands';
 
-// ─── Public types (architect-locked §3.1 + V1.123 §2/§8) ────────────────────
+// note: public types architect-locked §3.1 + V1.123 §2/§8.
 
 /** Single graph source — no wrapper, no join. */
 export type TimelineGraph = WorldKbGraphResponse;
@@ -136,32 +136,32 @@ export type TimelineLayer = 'brief' | 'narrative' | 'moment';
  * against the KB graph at projection time.
  */
 export interface ComputeNodePayload {
-  /** Timeline event row id (`compute:<id>` node id prefix). */
+  /** note: timeline event row id (`compute:<id>` node id prefix). */
   eventId: string;
-  /** Module id from provenance (`extensions.compute.module_id`). */
+  /** note: module id from provenance (`extensions.compute.module_id`). */
   moduleId: string;
   /**
-   * Module version at invocation time.
+   * note: module version at invocation time.
    */
   moduleVersion: string;
   /**
-   * Module display name — resolved from the caller-supplied module registry
+   * note: module display name — resolved from the caller-supplied module registry
    * map at projection time (falls back to `moduleId` when the registry has
    * not loaded the module — honest for preset-path modules absent locally).
    */
   moduleName: string;
-  /** Run correlation id — direct lane only (absent for preset-path nodes). */
+  /** note: run correlation id — direct lane only (absent for preset-path nodes). */
   runId?: string;
   /**
-   * Provenance source kind — `direct_invoke` vs `preset` when stamped. The
+   * note: provenance source kind — `direct_invoke` vs `preset` when stamped. The
    * daemon stamps only these two today; unknown kinds resolve to
    * `undefined` (the UI falls back to the direct-lane label — `simplify:`
    * a new kind needs a catalog entry when one ships).
    */
   sourceKind?: 'direct_invoke' | 'preset';
-  /** Module event summary — the report digest (e.g. the damage line). */
+  /** note: module event summary — the report digest (e.g. the damage line). */
   reportDigest?: string;
-  /** Affected KnowledgeEntries resolved against the KB graph by id. */
+  /** note: affected KnowledgeEntries resolved against the KB graph by id. */
   affectedEntries: Array<{ id: string; title: string }>;
 }
 
@@ -196,17 +196,17 @@ export interface ComputeNodePayload {
  * `Node<TNodeData extends Record<string, unknown>>` constraint.
  */
 export interface TimelineNodeData extends WorldKbEntityProjection {
-  /** React Flow requires an index signature on node data. */
+  /** note: React Flow requires an index signature on node data. */
   [key: string]: unknown;
   /**
-   * Projection kind. `'event'` / `'context'` are the V1.122 Narrative
+   * note: projection kind. `'event'` / `'context'` are the V1.122 Narrative
    * partitions; `'brief'` is the V1.123 P1 T2 Brief-era partition; `'compute'`
    * is the V1.147 P2 machine-written compute-result partition (Narrative
    * only — the Brief layer never projects compute nodes).
    */
   layoutHint: 'event' | 'context' | 'brief' | 'compute';
   /**
-   * Free-form temporal signal extracted from `body.attributes.occurred_at`
+   * note: free-form temporal signal extracted from `body.attributes.occurred_at`
    * when it is a non-empty string. Undefined when not declared by the
    * KeyBlock body — the entity then clusters in the temporal-unknown group.
    * Narrative layer only (V1.122). Compute nodes carry the machine
@@ -214,21 +214,21 @@ export interface TimelineNodeData extends WorldKbEntityProjection {
    */
   occurredAtHint?: string;
   /**
-   * V1.123 P1 T2 Brief-era markers. Present only when `layoutHint === 'brief'`.
+   * note: V1.123 P1 T2 Brief-era markers. Present only when `layoutHint === 'brief'`.
    * Read from `body.attributes` per architect §2.3 + §8 (`era_id`,
    * `start_hint`, `end_hint`, `world_summary` — freeform). The Brief-era
    * node + Brief-era inspector (Task 4) consume these for the compact era
    * card chrome.
    */
   eraId?: string;
-  /** Era start hint (`body.attributes.start_hint`). Used for LR positioning. */
+  /** note: era start hint (`body.attributes.start_hint`). Used for LR positioning. */
   startHint?: string;
-  /** Era end hint (`body.attributes.end_hint`). Surfaces in the time-span label. */
+  /** note: era end hint (`body.attributes.end_hint`). Surfaces in the time-span label. */
   endHint?: string;
-  /** Optional world-shape summary line for the era card. */
+  /** note: optional world-shape summary line for the era card. */
   worldSummary?: string;
   /**
-   * V1.147 P2 T3 — compute payload for merged compute_result nodes. Present
+   * note: V1.147 P2 T3 — compute payload for merged compute_result nodes. Present
    * only when `layoutHint === 'compute'`. See {@link ComputeNodePayload}.
    */
   compute?: ComputeNodePayload;
@@ -236,8 +236,6 @@ export interface TimelineNodeData extends WorldKbEntityProjection {
 
 /** Verbatim reuse of the V1.74 World KB relationship edge payload. */
 export type TimelineEdgeData = WorldKbEdgeData;
-
-// ─── Adapter context ────────────────────────────────────────────────────────
 
 /**
  * Patchable fields on a `WorldKbEntityProjection` (V1.73 `WorldKbEntityPatch`).
@@ -262,7 +260,7 @@ export type TimelineEntityPatch = {
   aliases?: string[];
   block_type?: WorldKbEntityProjection['block_type'];
   /**
-   * v1.203 P2 O3 — whole-first-level-value module upsert (only the
+   * note: v1.203 P2 O3 — whole-first-level-value module upsert (only the
    * `observation` dialect is authored from this surface today; the value
    * replaces the complete stored `modules.observation`, sibling dialect keys
    * preserved by the daemon's first-level merge).
@@ -280,20 +278,20 @@ export type TimelineEntityPatch = {
 export type TimelineConflictInfo =
   | {
       kind: 'conflict';
-      /** Canonical version the daemon now holds (OCC). */
+      /** note: canonical version the daemon now holds (OCC). */
       currentVersion: number;
-      /** Entity id the patch targeted. */
+      /** note: entity id the patch targeted. */
       entityId: string;
-      /** Field path the daemon reports as conflicting (free-form). */
+      /** note: field path the daemon reports as conflicting (free-form). */
       conflictingPath: string;
-      /** The user's pending patch (kept so "Reapply" can re-submit). */
+      /** note: the user's pending patch (kept so "Reapply" can re-submit). */
       draftPatch: TimelineEntityPatch;
-      /** Fields the user touched (drives overlap detection in the modal). */
+      /** note: fields the user touched (drives overlap detection in the modal). */
       dirtyFields: TimelinePatchField[];
     }
   | {
       kind: 'validation';
-      /** Field-level validation messages from `validation_summary.errors[]`. */
+      /** note: field-level validation messages from `validation_summary.errors[]`. */
       errors: string[];
     };
 
@@ -321,7 +319,7 @@ export type TimelineConflictInfo =
 export interface TimelineCanvasAdapterContext {
   worldId: string;
   /**
-   * Optional client reference. T2 does NOT invoke any client method from
+   * note: optional client reference. T2 does NOT invoke any client method from
    * `projectGraph` / `summarizeGraph` (the projection is a pure function of
    * the graph). T4 routes writes through `onPatchEntity` (which the
    * orchestrator wires to `usePatchWorldKbEntity`) — the client object is
@@ -331,7 +329,7 @@ export interface TimelineCanvasAdapterContext {
    */
   client?: unknown;
   /**
-   * Write callback — routes a Timeline patch through
+   * note: write callback — routes a Timeline patch through
    * `NexusClient.worldKbPatchEntity` (V1.73) only. The orchestrator owns the
    * React Query mutation; the adapter calls this from the inspector's submit
    * handler. Undefined in T2 (projection-only) and in tests that don't wire
@@ -353,14 +351,14 @@ export interface TimelineCanvasAdapterContext {
     dirtyFields: TimelinePatchField[],
   ) => Promise<void> | void;
   /**
-   * Conflict hand-off — fired by the orchestrator's mutation `onError` when
+   * note: conflict hand-off — fired by the orchestrator's mutation `onError` when
    * the daemon returns 409 / 422. The orchestrator renders the
    * world-kb-flavored conflict modal from the structured info and refetches
    * the canonical graph. Undefined when no write hook is wired.
    */
   onConflict?: (info: TimelineConflictInfo) => void;
   /**
-   * Projected Timeline nodes (T5 — alt-view companion). The orchestrator
+   * note: projected Timeline nodes (T5 — alt-view companion). The orchestrator
    * supplies the post-projection, post-layout node array so the alt-view
    * table reads the same rows the canvas renders. Mirrors the V1.114 World
    * KB ctxRef pattern (`ctx.nodes`). Optional in T2/T4 tests that don't
@@ -368,13 +366,13 @@ export interface TimelineCanvasAdapterContext {
    */
   nodes?: Node<TimelineNodeData>[];
   /**
-   * Currently-selected node id (T5 — alt-view row highlight). The
+   * note: currently-selected node id (T5 — alt-view row highlight). The
    * orchestrator owns selection state (it surfaces from `useCanvasSurface`)
    * and passes the id through so the alt-view highlights the matching row.
    */
   selectedNodeId?: string | null;
   /**
-   * Selection hand-off (T5 — alt-view → inspector). Fires when the user
+   * note: selection hand-off (T5 — alt-view → inspector). Fires when the user
    * clicks / keyboard-activates an alt-view row. The orchestrator selects
    * the matching React Flow node so the inspector that owns the
    * `kb.patch_entity` write path opens. The alt-view performs NO writes
@@ -382,7 +380,7 @@ export interface TimelineCanvasAdapterContext {
    */
   onSelectNode?: (nodeId: string) => void;
   /**
-   * V1.123 P3 Task 4 — bound Work id (the Work that realizes this World).
+   * note: V1.123 P3 Task 4 — bound Work id (the Work that realizes this World).
    * When present, the World Timeline event inspector surfaces a "View in
    * Work Timeline" affordance that navigates to the realizing Work's
    * Timeline surface. Derived client-side by the orchestrator (uses
@@ -395,7 +393,7 @@ export interface TimelineCanvasAdapterContext {
    */
   boundWorkId?: string;
   /**
-   * V1.163 P1 Task 2 — bound Work EVENT id (event-level cross-surface
+   * note: V1.163 P1 Task 2 — bound Work EVENT id (event-level cross-surface
    * deep-link). When the SELECTED World Narrative event's `key_block_id`
    * matches a realizing Work outline `timeline_events[].world_event_id`,
    * this slot carries the matching outline `event_id` (PD-7 single
@@ -410,7 +408,7 @@ export interface TimelineCanvasAdapterContext {
    */
   boundWorkEventId?: string;
   /**
-   * V1.163 P1 QC fix-wave (QC1 W-001) — PD-7 winning WORK id for the
+   * note: V1.163 P1 QC fix-wave (QC1 W-001) — PD-7 winning WORK id for the
    * event-level deep-link. When `boundWorkEventId` is set, the CTA
    * navigates to THIS work (the PD-7 winner), which can differ from the
    * surface-level fallback `boundWorkId` in multi-Work Worlds. Exposed so
@@ -419,7 +417,7 @@ export interface TimelineCanvasAdapterContext {
    */
   boundWorkEventWorkId?: string;
   /**
-   * V1.123 P3 Task 4 — cross-surface navigation hand-off. Fires when the
+   * note: V1.123 P3 Task 4 — cross-surface navigation hand-off. Fires when the
    * user clicks "View in Work Timeline" on a World Timeline Narrative event.
    * The orchestrator navigates to `/works/:workId/timeline?layer=narrative`
    * (Moment layer one click away per plan §"Cross-surface navigation URL
@@ -427,7 +425,7 @@ export interface TimelineCanvasAdapterContext {
    */
   onViewInWorkTimeline?: () => void;
   /**
-   * V1.147 P2 T3 — Open Run hand-off from the compute node inspector.
+   * note: V1.147 P2 T3 — Open Run hand-off from the compute node inspector.
    * Fires with the full run id + module id when the author activates "Open
    * Run" on a Compute result node; the orchestrator navigates to
    * `/modules` run detail (deep link). Undefined when the compute
@@ -435,7 +433,7 @@ export interface TimelineCanvasAdapterContext {
    */
   onOpenRun?: (runId: string, moduleId: string) => void;
   /**
-   * V1.162 P2 T1 — fork-point hand-off from the compute node inspector.
+   * note: V1.162 P2 T1 — fork-point hand-off from the compute node inspector.
    * Fires with the compute event's timeline event id when the author
    * activates "Branch this world's timeline from here" on a Compute result
    * node. The orchestrator opens the fork-create dialog pre-seeded with
@@ -445,7 +443,7 @@ export interface TimelineCanvasAdapterContext {
    */
   onCreateFork?: (eventId: string) => void;
   /**
-   * V1.156 P1 T1 — bound Works' Scene/Beat fixture (Moment-on-World
+   * note: V1.156 P1 T1 — bound Works' Scene/Beat fixture (Moment-on-World
    * carrier). The `WorkOutline` wire exposes no scenes/beats today (the
    * Moment layer is a read/projection of Work-owned Moments into the World
    * Timeline — product semantics PD-3, NOT a World Moment authoring
@@ -469,7 +467,7 @@ export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
   TimelineEdgeData
 > & {
   /**
-   * V1.159 P1 T2 — Brief time-band rendering slot. Builds the era forest
+   * note: V1.159 P1 T2 — Brief time-band rendering slot. Builds the era forest
    * from the graph (`buildEraTree`, Task 1) and renders the vertical
    * time-band model (spec §3.3.3 V1.159 amendment) that supersedes the
    * V1.123 horizontal era sweep on the Brief layer. The returned panel is
@@ -481,10 +479,8 @@ export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
   renderBriefTimeBands?(graph: TimelineGraph): ReactNode;
 };
 
-// ─── Projection constants ───────────────────────────────────────────────────
-
 /**
- * Initial-position metrics. The adapter sets `layoutOptions.hasSuppliedPositions`
+ * note: initial-position metrics. The adapter sets `layoutOptions.hasSuppliedPositions`
  * (T4 — Batch 1 reviewer note), so `useAutoLayout` honors these positions on
  * first open and does NOT collapse the chronology onto dagre's generic graph
  * layout. The author can still trigger an explicit `relayout()` to re-run
@@ -509,7 +505,7 @@ const EVENT_STEP_X = 280;
 const CONTEXT_STEP_X = 220;
 
 /**
- * V1.156 P1 T1 — Moment layer vertical scene-stack metrics. Scenes stack
+ * note: V1.156 P1 T1 — Moment layer vertical scene-stack metrics. Scenes stack
  * top-to-bottom by chapter order; beats stack top-to-bottom inside each
  * scene. The X coordinate groups scenes by chapter region so the
  * chapter→scene→beat hierarchy reads spatially. IDENTICAL to the Work
@@ -528,7 +524,7 @@ const MOMENT_BEAT_STEP_Y = 44;
 const MOMENT_CHAPTER_STEP_X = 360;
 
 /**
- * V1.123 P1 T4 — per-layer dagre layout options.
+ * note: V1.123 P1 T4 — per-layer dagre layout options.
  *
  * `layer-feel-differentiation.md` §2.2 locks the Brief feel as a "horizontal
  * era sweep": wider inter-rank spacing (`rankSep`) makes the era sweep read
@@ -557,7 +553,7 @@ const NARRATIVE_LAYOUT_OPTIONS = {
   hasSuppliedPositions: true,
 };
 /**
- * V1.156 P1 T1 — Moment layer dagre options: vertical scene-stack (TB
+ * note: V1.156 P1 T1 — Moment layer dagre options: vertical scene-stack (TB
  * direction) with tighter rankSep / nodeSep so the chapter→scene→beat
  * hierarchy reads as a dense manuscript stack. Mirrors the Work Timeline
  * Moment layer options exactly (layer-feel §2.4). The
@@ -573,17 +569,17 @@ const MOMENT_LAYOUT_OPTIONS = {
 };
 
 const NODE_ID_PREFIX = 'entity:';
-/** V1.147 P2 T3 — compute log-event node id prefix (`compute:<event_id>`). */
+/** note: V1.147 P2 T3 — compute log-event node id prefix (`compute:<event_id>`). */
 const COMPUTE_NODE_ID_PREFIX = 'compute:';
 /**
- * V1.147 P2 T3 — synthetic `key_block_id` for compute nodes. Compute nodes
+ * note: V1.147 P2 T3 — synthetic `key_block_id` for compute nodes. Compute nodes
  * are NOT KB entities; the id is namespaced so it can never collide with a
  * real `entity:` node and never reaches the `kb.patch_entity` write path.
  */
 const COMPUTE_KEY_BLOCK_PREFIX = 'log:';
 
 /**
- * Map a World KB entity `key_block_id` to its React Flow node id
+ * note: map a World KB entity `key_block_id` to its React Flow node id
  * (`entity:<key_block_id>`). V1.163 P1 Task 2 — exported so the
  * orchestrator's inbound `?event=` focus selects the same node id the
  * Narrative projection emits (architect lock: referent = World KB entity
@@ -598,7 +594,7 @@ function computeNodeIdOf(eventId: string): string {
 }
 
 /**
- * V1.156 P1 T1 — Moment node id prefixes. Identical to the Work Timeline
+ * note: V1.156 P1 T1 — Moment node id prefixes. Identical to the Work Timeline
  * Moment layer prefixes (`wt-scene:` / `wt-beat:`) — the Moment nodes reuse
  * the Work Timeline node components + `WorkTimelineNodeData` carrier, so the
  * ids stay namespaced the same way (stable across refetches, no collision
@@ -616,7 +612,7 @@ function momentBeatNodeId(beatId: string): string {
 }
 
 /**
- * Extract the temporal signal from a KeyBlock body. Per the architect lock,
+ * note: extract the temporal signal from a KeyBlock body. Per the architect lock,
  * ONLY `body.attributes.occurred_at` (free-form string) is honored — never
  * `updated_at`, `canonical_name`, `version`, or `sequence_no`. Non-string
  * values and empty strings are treated as absent.
@@ -633,7 +629,7 @@ function occurredAtOf(entity: WorldKbEntityProjection): string | undefined {
 }
 
 /**
- * Extract V1.123 Brief-era markers from `body.attributes` per architect §2.3
+ * note: extract V1.123 Brief-era markers from `body.attributes` per architect §2.3
  * + §8 (`era_id`, `start_hint`, `end_hint`, `world_summary` — all freeform).
  * Non-string values and empty strings are treated as absent. Used by the
  * Brief projection to populate the era card + Brief-era inspector (Task 4).
@@ -663,7 +659,7 @@ function extractEraAttributes(entity: WorldKbEntityProjection): {
 }
 
 /**
- * Project the entities + relationships of a `WorldKbGraphResponse` onto
+ * note: project the entities + relationships of a `WorldKbGraphResponse` onto
  * Timeline nodes + edges for the given layer.
  *
  * V1.123 P1 T2 — the layer parameter selects the active projection:
@@ -720,7 +716,7 @@ export function projectTimelineGraph(
     return projectBriefLayer(graph);
   }
   if (layer === 'moment') {
-    // V1.156 P1 T1 — Moment nodes carry the reused `WorkTimelineNodeData`
+    // why: V1.156 P1 T1 — Moment nodes carry the reused `WorkTimelineNodeData`
     // carrier (`WorkTimelineNodeData` is structurally narrower than the
     // adapter's `TimelineNodeData` base). Cast is deliberate cross-surface
     // reuse — same carrier + same node components as the Work Timeline
@@ -779,7 +775,7 @@ export function projectBriefLayer(graph: TimelineGraph): {
     (e) => e.block_type === 'era',
   );
 
-  // Split eras by temporal signal; sort dated eras chronologically by
+  // why: split eras by temporal signal; sort dated eras chronologically by
   // `body.attributes.start_hint`. Mirrors the V1.122 dated/undated event
   // split so the Brief sweep reads as "earliest era on the left".
   const datedEras: Array<{
@@ -798,7 +794,7 @@ export function projectBriefLayer(graph: TimelineGraph): {
   datedEras.sort((a, b) => {
     if (a.startHint < b.startHint) return -1;
     if (a.startHint > b.startHint) return 1;
-    // Stable tiebreaker on key_block_id so identical start hints are
+    // why: stable tiebreaker on key_block_id so identical start hints are
     // deterministic across refetches.
     return a.entity.key_block_id.localeCompare(b.entity.key_block_id);
   });
@@ -814,7 +810,7 @@ export function projectBriefLayer(graph: TimelineGraph): {
     });
   });
 
-  // Undated eras cluster below the when-axis (temporal-unknown group),
+  // note: undated eras cluster below the when-axis (temporal-unknown group),
   // continuing the X spread from the rightmost dated era — same convention
   // as the V1.122 undated event cluster.
   const undatedOriginX = ORIGIN_X + datedEras.length * EVENT_STEP_X;
@@ -827,7 +823,7 @@ export function projectBriefLayer(graph: TimelineGraph): {
     });
   });
 
-  // V1.126 P1 — Brief directed axis spine (decoration-only, Y=0, appended
+  // note: V1.126 P1 — Brief directed axis spine (decoration-only, Y=0, appended
   // after entity nodes so existing tests that access nodes[0] pass unchanged).
   // Only added when at least one dated era exists (eras with start_hint).
   // If all eras are undated, omit the spine — no temporal axis to render.
@@ -856,7 +852,7 @@ export function projectBriefLayer(graph: TimelineGraph): {
     });
   }
 
-  // Brief layer: no relationship edges (architect §8 + layer-feel §2.2 —
+  // invariant: Brief layer has no relationship edges (architect §8 + layer-feel §2.2 —
   // minimal density, era sweep only). Edges belong to the Narrative layer.
   return { nodes, edges: [] };
 }
@@ -878,7 +874,7 @@ function eraEntityToTimelineNodeData(
 }
 
 /**
- * V1.122 Narrative projection — preserved verbatim for the Narrative layer,
+ * note: V1.122 Narrative projection — preserved verbatim for the Narrative layer,
  * with a single V1.123 additive change: era entities (`block_type='era'`)
  * are EXCLUDED from Context clusters per architect §5.2 (Context clusters =
  * entities.filter(e => !['event','era'].includes(e.block_type))). They are
@@ -905,13 +901,13 @@ function projectNarrativeLayer(
     if (e.block_type === 'event') {
       eventEntities.push(e);
     } else if (e.block_type !== 'era') {
-      // V1.123 architect §5.2: era entities are EXCLUDED from Context
+      // why: V1.123 architect §5.2 — era entities are EXCLUDED from Context
       // clusters on the Narrative layer — they are Brief-layer-only markers.
       contextEntities.push(e);
     }
   }
 
-  // Split events by temporal signal; sort dated events chronologically.
+  // note: split events by temporal signal; sort dated events chronologically.
   const datedEvents: Array<{ entity: WorldKbEntityProjection; occurredAt: string }> = [];
   const undatedEvents: WorldKbEntityProjection[] = [];
   for (const e of eventEntities) {
@@ -925,7 +921,7 @@ function projectNarrativeLayer(
   datedEvents.sort((a, b) => {
     if (a.occurredAt < b.occurredAt) return -1;
     if (a.occurredAt > b.occurredAt) return 1;
-    // Stable tiebreaker on key_block_id so identical timestamps are
+    // why: stable tiebreaker on key_block_id so identical timestamps are
     // deterministic across refetches.
     return a.entity.key_block_id.localeCompare(b.entity.key_block_id);
   });
@@ -941,7 +937,7 @@ function projectNarrativeLayer(
     });
   });
 
-  // Undated events cluster below the when-axis (temporal-unknown group).
+  // note: undated events cluster below the when-axis (temporal-unknown group).
   // Their X spread continues from the rightmost dated event so the cluster
   // reads as "and these happened, we don't know when."
   const undatedOriginX = ORIGIN_X + datedEvents.length * EVENT_STEP_X;
@@ -954,7 +950,7 @@ function projectNarrativeLayer(
     });
   });
 
-  // Context entities cluster above the when-axis (off-axis).
+  // note: context entities cluster above the when-axis (off-axis).
   contextEntities.forEach((entity, i) => {
     nodes.push({
       id: nodeIdOf(entity.key_block_id),
@@ -964,7 +960,7 @@ function projectNarrativeLayer(
     });
   });
 
-  // V1.147 P2 T3 — merge canon compute_result log events (machine-written
+  // why: V1.147 P2 T3 — merge canon compute_result log events (machine-written
   // family) after the authored KB block. Two event families coexist on the
   // Narrative when-axis: `entity:<kb_id>` (author KB `block_type=event`) and
   // `compute:<event_id>` (compute log events). The families are disjoint by
@@ -979,7 +975,7 @@ function projectNarrativeLayer(
   );
   nodes.push(...computeNodes);
 
-  // V1.126 P1 — Narrative directed axis spine (decoration-only, Y=0,
+  // note: V1.126 P1 — Narrative directed axis spine (decoration-only, Y=0,
   // appended after entity nodes so existing tests pass unchanged).
   // Only added when the layer has event data.
   if (datedEvents.length > 0) {
@@ -1018,10 +1014,8 @@ function entityToTimelineNodeData(
   };
 }
 
-// ─── Moment projection (V1.156 P1 T1) ───────────────────────────────────────
-
 /**
- * V1.156 P1 T1 — World Timeline Moment layer projection (architect
+ * note: V1.156 P1 T1 — World Timeline Moment layer projection (architect
  * `canvas-strategy-surface.md` §3.3.3 V1.156 amendment). Completes the
  * World Timeline 3-layer matrix (Brief + Narrative + Moment).
  *
@@ -1063,7 +1057,7 @@ function entityToTimelineNodeData(
  * `simplify:` deterministic vertical stack. P4 may swap in a richer
  * manuscript-aware layout (anchored scene-card grid) per layer-feel §9.
  */
-/** One vertical scene-stack region: a Work's chapters are Work-local. */
+/** note: one vertical scene-stack region — a Work's chapters are Work-local. */
 interface MomentChapterGroup {
   workId: string | undefined;
   chapterId: number;
@@ -1071,7 +1065,7 @@ interface MomentChapterGroup {
 }
 
 /**
- * Compact Work handles for a chapter's owner set, guaranteed pairwise
+ * note: compact Work handles for a chapter's owner set, guaranteed pairwise
  * distinct. Bound-Work ids are `wrk_<uuid>` (nexus-core `works.rs`) and the
  * spine segment is a 60–280px decoration strip, so the label only needs
  * enough of the id to tell two Works apart. Truncating each id independently
@@ -1088,7 +1082,7 @@ function disambiguatedWorkHandles(workIds: string[]): Map<string, string> {
       return new Map(workIds.map((id, i) => [id, candidates[i]]));
     }
   }
-  // Distinct ids always separate at full length when no shorter prefix does.
+  // invariant: distinct ids always separate at full length when no shorter prefix does.
   return new Map(workIds.map((id, i) => [id, bare[i]]));
 }
 
@@ -1100,13 +1094,13 @@ function projectMomentLayer(
   edges: Edge<TimelineEdgeData>[];
 } {
   if (!fixture || (fixture.scenes.length === 0 && fixture.beats.length === 0)) {
-    // Honest empty-state — T2 owns the visible copy. The adapter's
+    // note: honest empty-state — T2 owns the visible copy. The adapter's
     // contract is to emit zero nodes; the orchestrator renders the
     // empty-state panel when the active layer has no projectable data.
     return { nodes: [], edges: [] };
   }
 
-  // Group scenes by (Work, chapter). Chapter numbers are Work-local, so two
+  // why: group scenes by (Work, chapter). Chapter numbers are Work-local, so two
   // bound Works that each own a chapter 1 must not collapse into one chapter
   // region (V1.200 DR-26 provenance rule).
   const groupsByKey = new Map<string, MomentChapterGroup>();
@@ -1132,7 +1126,7 @@ function projectMomentLayer(
   const emittedSceneIds = new Set<string>();
   const nodes: Node<WorkTimelineNodeData>[] = [];
 
-  // Scene cards — vertical stack per (Work, chapter) region (X groups by
+  // note: scene cards — vertical stack per (Work, chapter) region (X groups by
   // region so the chapter→scene→beat hierarchy reads spatially).
   groups.forEach((group, groupIdx) => {
     const sortedScenes = [...group.scenes].sort((a, b) => a.sceneId.localeCompare(b.sceneId));
@@ -1160,7 +1154,7 @@ function projectMomentLayer(
     });
   });
 
-  // Beat pins — children of Scene cards conceptually; positioned in a
+  // note: beat pins — children of Scene cards conceptually; positioned in a
   // column next to / below their scene. Beats whose sceneId is absent
   // from the emitted scenes are dropped (mirrors V1.108 rf-projection
   // orphan guard).
@@ -1172,7 +1166,7 @@ function projectMomentLayer(
     else beatsByScene.set(beat.sceneId, [beat]);
   }
 
-  // Index scenes by id → position so beats can stack relative to their
+  // note: index scenes by id → position so beats can stack relative to their
   // scene's position.
   const scenePositionById = new Map<string, { x: number; y: number; chapterId: number }>();
   for (const node of nodes) {
@@ -1218,12 +1212,12 @@ function projectMomentLayer(
     });
   }
 
-  // V1.126 P1 — Moment directed axis spine (decoration-only, Y=0).
+  // note: V1.126 P1 — Moment directed axis spine (decoration-only, Y=0).
   // Density-encoded: segment length proportional to scene count per ND-A1.
   // Mirrors the Work Timeline Moment spine (same rhythm break from the
   // Brief+Narrative time-span convention).
   if (groups.length > 0) {
-    // Chapter numbers are Work-local, so a bare `Ch. N` label is ambiguous
+    // why: chapter numbers are Work-local, so a bare `Ch. N` label is ambiguous
     // whenever two bound Works own the same chapter — both segments rendered
     // an identical "Ch. 1" (qc2 F-7 / qc3 F-002). A chapter number shared by
     // more than one Work names its owner (handles unique across that
@@ -1270,16 +1264,14 @@ function projectMomentLayer(
     });
   }
 
-  // Moment layer: no explicit edges in V1.156 MVP. Beat succession within
+  // invariant: Moment layer has no explicit edges in V1.156 MVP. Beat succession within
   // scene is encoded spatially by the vertical stack (layer-feel §2.4).
   // `realizes_event` light links (beat → Narrative event) are P4 polish.
   return { nodes, edges: [] };
 }
 
-// ─── Compute-result merge (V1.147 P2 T3) ────────────────────────────────────
-
 /**
- * Narrow the daemon-stamped provenance namespace
+ * note: narrow the daemon-stamped provenance namespace
  * (`extensions.compute = { module_id, module_version, run_id, source_kind }`).
  * The T1 route parses `extensions_nexus_json`; P0 Accept stamps
  * `source_kind: "direct_invoke"` (preset-path stamping lands separately).
@@ -1383,7 +1375,7 @@ export function mergeComputeEvents(
   const mergeable = events.filter(isMergeableComputeEvent);
   if (mergeable.length === 0) return [];
 
-  // QC S-map: hoist the id → canonical_name map so `buildComputeNodePayload`
+  // why: QC S-map hoists the id → canonical_name map so `buildComputeNodePayload`
   // never rebuilds it per event (O(entities) once, then O(events) lookups).
   const graphById = new Map(
     (graph.entities ?? []).map((e) => [e.key_block_id, e.canonical_name]),
@@ -1418,7 +1410,7 @@ export function mergeComputeEvents(
     });
   });
 
-  // Undated compute rows cluster in the temporal-unknown group (y=220) AFTER
+  // why: undated compute rows cluster in the temporal-unknown group (y=220) AFTER
   // the KB undated cluster (review F2): `kbUndatedCount` shifts the X base so
   // the two families never stack on identical coordinates.
   const undatedOriginX =
@@ -1444,7 +1436,7 @@ function computeEventToTimelineNodeData(
 ): TimelineNodeData {
   const payload = buildComputeNodePayload(event, graphById, moduleNames);
   const data: TimelineNodeData = {
-    // Synthetic entity-projection fields (see TimelineNodeData docblock):
+    // note: synthetic entity-projection fields (see TimelineNodeData docblock) —
     // compute nodes are NOT KB entities; the write path never sees them.
     key_block_id: `${COMPUTE_KEY_BLOCK_PREFIX}${event.id}`,
     world_id: worldId,
@@ -1520,7 +1512,7 @@ const RELATIONSHIP_KIND_LABELS: Record<string, string> = {
 };
 
 /**
- * Edge label — core kind Title Cased, or the custom label verbatim. Mirrors
+ * note: edge label — core kind Title Cased, or the custom label verbatim. Mirrors
  * the World KB helper; inlined here so the Timeline adapter stays
  * dependency-free of the World KB relationship module (T2 ships no new
  * public dependency on a sibling surface — projection reuses DTOs only).
@@ -1530,13 +1522,11 @@ function relationshipLabel(rel: WorldKbRelationshipProjection): string {
   return RELATIONSHIP_KIND_LABELS[rel.relation_type] ?? rel.relation_type;
 }
 
-// ─── Honest summary (architect §7) ──────────────────────────────────────────
-
 const ORDERING_DISCLAIMER =
   'Ordering inferred from available event data; not a canonical chronology.';
 
 /**
- * Build the screen-reader live-region summary for the Timeline canvas.
+ * note: build the screen-reader live-region summary for the Timeline canvas.
  *
  * The disclaimer is present whenever event entities are rendered (i.e. when
  * the graph has any `block_type=event` entity), and is omitted only for
@@ -1589,7 +1579,7 @@ export function summarizeTimelineGraph(
       `${anchors.length} ${anchors.length === 1 ? 'source anchor' : 'source anchors'}`,
     );
   }
-  // V1.147 P2 T3 — merged compute family (machine-written log events).
+  // note: V1.147 P2 T3 — merged compute family (machine-written log events).
   const computeCount = (computeEvents ?? []).filter(isMergeableComputeEvent).length;
   if (computeCount > 0) {
     parts.push(
@@ -1597,7 +1587,7 @@ export function summarizeTimelineGraph(
     );
   }
 
-  // Time span — present only when at least one event carries occurred_at.
+  // note: time span — present only when at least one event carries occurred_at.
   // The span is the raw min/max of the hints; we do NOT claim a canonical
   // chronology (see the disclaimer).
   if (datedEvents.length > 0) {
@@ -1615,7 +1605,7 @@ export function summarizeTimelineGraph(
 
   let summary = `Timeline: ${parts.join(', ')}.`;
 
-  // Disclaimer — lexical string sorting is never canonical chronology. The
+  // why: lexical string sorting is never canonical chronology. The
   // adapter performs no date parsing in MVP, so every rendered event
   // ordering is inferred. The disclaimer is present whenever event entities
   // are rendered (block_type=event), and omitted only for zero-event graphs
@@ -1628,10 +1618,8 @@ export function summarizeTimelineGraph(
   return summary;
 }
 
-// ─── Stable factory ─────────────────────────────────────────────────────────
-
 /**
- * Build a stable Timeline canvas adapter that reads mutable values from the
+ * note: build a stable Timeline canvas adapter that reads mutable values from the
  * supplied context ref (V1.114 §3.3.1 "stable factory that reads from a
  * mutable `React.RefObject` context").
  *
@@ -1702,7 +1690,7 @@ export function createTimelineCanvasAdapter(
     surfaceKind: 'timeline',
     nodeTypes: {
       ...timelineNodeTypes,
-      // V1.156 P1 T1 — Moment layer reuses the Work Timeline Moment node
+      // why: V1.156 P1 T1 — Moment layer reuses the Work Timeline Moment node
       // components + `WorkTimelineNodeData` carrier (no new node component
       // family per V1.123 layer-feel §2.4). Only the two Moment types are
       // picked from the Work registry — the Work Narrative event node is NOT
@@ -1711,13 +1699,13 @@ export function createTimelineCanvasAdapter(
       'work-timeline-moment-scene': workTimelineNodeTypes['work-timeline-moment-scene'],
       'work-timeline-moment-beat': workTimelineNodeTypes['work-timeline-moment-beat'],
     },
-    // `edgeTypes` is intentionally undefined: V1.122 P1 T2 ships no bespoke
+    // note: `edgeTypes` is intentionally undefined — V1.122 P1 T2 ships no bespoke
     // edge components. The default React Flow renderer surfaces the label +
     // stroke styling emitted by `deriveTimelineEdges`; the architect lock
     // forbids ForeshadowEdge / RealizesEdge / ForkFromEdge (Work-outline
     // kinds).
     edgeTypes: undefined,
-    // V1.123 P1 T4 + V1.156 P1 T1 — layer-dependent dagre options. Brief
+    // note: V1.123 P1 T4 + V1.156 P1 T1 — layer-dependent dagre options. Brief
     // carries wider `rankSep` + smaller `nodeSep` than the V1.122 Narrative
     // default so an explicit `relayout()` produces the horizontal era sweep
     // feel (layer-feel §2.2); Moment prefers a vertical scene-stack (TB
@@ -1732,7 +1720,7 @@ export function createTimelineCanvasAdapter(
           : NARRATIVE_LAYOUT_OPTIONS,
 
     projectGraph(graph) {
-      // V1.123 P1 T2 — delegates to the active layer. Default `'narrative'`
+      // note: V1.123 P1 T2 — delegates to the active layer. Default `'narrative'`
       // for V1.122 backward compat (the V1.122 regression suite verifies
       // event timeline projection unchanged). Task 3 passes `'brief'` when
       // the World entry has era data; the canvas component rebuilds the
@@ -1762,14 +1750,14 @@ export function createTimelineCanvasAdapter(
         timelineEvents,
         computeModuleNames,
         sceneBeatFixture ?? ctxRef.current.sceneBeatFixture,
-        // V1.200 DR-26 — identify the World from the supplied `worldId`,
+        // why: V1.200 DR-26 — identify the World from the supplied `worldId`,
         // never from the first KB entity (empty KB graphs have none).
         ctxRef.current.worldId,
       );
     },
 
     adaptConflict(_error) {
-      // Orchestrator-owned — see `extractConflict` + module doc. Returning
+      // why: orchestrator-owned — see `extractConflict` + module doc. Returning
       // null is consistent with the V1.74 World KB adapter: the Strategy-
       // specific `ConflictModalProps` shape does not fit world-kb-flavored
       // conflicts, so the orchestrator renders `WorldKbEntityConflictModal`
@@ -1778,7 +1766,7 @@ export function createTimelineCanvasAdapter(
     },
 
     renderInspector(node) {
-      // V1.123 P1 T4 — Brief-era nodes dispatch to a dedicated Brief-era
+      // note: V1.123 P1 T4 — Brief-era nodes dispatch to a dedicated Brief-era
       // inspector that surfaces the era markers (`eraId`, `startHint`,
       // `endHint`, `worldSummary`) prominently. The generic Narrative
       // inspector (title + body JSON editor) remains the path for event
@@ -1789,14 +1777,14 @@ export function createTimelineCanvasAdapter(
       if (data.layoutHint === 'brief') {
         return <TimelineBriefEraInspector node={node} ctxRef={ctxRef} />;
       }
-      // V1.147 P2 T3 — compute nodes get the compute inspector (module +
+      // note: V1.147 P2 T3 — compute nodes get the compute inspector (module +
       // version + provenance + digests + Open Run). Compute nodes MUST NOT
       // reach the KB inspector: they are log events, not KB entities, and
       // the `kb.patch_entity` write path is KB-only.
       if (data.layoutHint === 'compute') {
         return <TimelineComputeInspector node={node} ctxRef={ctxRef} />;
       }
-      // V1.156 P1 fix-wave 1 (F1) — Moment scene/beat nodes carry the
+      // invariant: V1.156 P1 fix-wave 1 (F1) — Moment scene/beat nodes carry the
       // `WorkTimelineNodeData` carrier (`nodeKind: 'scene' | 'beat'`, no
       // `layoutHint`, no `key_block_id`). They MUST NOT reach the generic
       // KB `TimelineInspector` below: its Save fires `kb.patch_entity` from
@@ -1819,12 +1807,12 @@ export function createTimelineCanvasAdapter(
     },
 
     summarizeGraph(graph) {
-      // V1.147 P2 T3 — the a11y summary includes the merged compute family
+      // note: V1.147 P2 T3 — the a11y summary includes the merged compute family
       // count when events are present.
       return summarizeTimelineGraph(graph, timelineEvents);
      },
 
-    // V1.159 P1 T2 — Brief layer vertical time-band model (spec §3.3.3 V1.159
+    // note: V1.159 P1 T2 — Brief layer vertical time-band model (spec §3.3.3 V1.159
     // amendment). Builds the era forest from the SAME graph read the Brief
     // projection consumes (`entities[block_type=era]` + `relationships`
     // parent_era edges — Task 1) and renders `<BriefTimeBands />`, which
@@ -1847,10 +1835,8 @@ export function createTimelineCanvasAdapter(
   };
 }
 
-// ─── Alt-view wrapper (T5 — non-spatial sortable table) ─────────────────────
-
 /**
- * Adapter-driven alt view; reads the projected nodes + selection state from
+ * note: adapter-driven alt view; reads the projected nodes + selection state from
  * the orchestrator-owned ctxRef at render time. Mirrors the V1.114 World KB
  * `WorldKbAltViewWrapper` recipe.
  *
@@ -1866,7 +1852,7 @@ function TimelineAltViewWrapper({
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>;
 }) {
   const ctx = ctxRef.current;
-  // V1.156 P1 fix-wave 1 (F2) — the alt-view is an entity table
+  // why: V1.156 P1 fix-wave 1 (F2) — the alt-view is an entity table
   // (`canonical_name` / `block_type` / `occurred_at` / anchor count /
   // `updated_at` columns). Moment scene/beat nodes (the
   // `WorkTimelineNodeData` carrier) and the decoration spine carry none of
@@ -1887,10 +1873,8 @@ function TimelineAltViewWrapper({
   );
 }
 
-// ─── Conflict extraction (T4 — world-kb-flavored, reused DTOs) ──────────────
-
 /**
- * Parsed shape of the canonical `ErrorResponse.details` payload the daemon
+ * note: parsed shape of the canonical `ErrorResponse.details` payload the daemon
  * returns under `world_kb_conflict` (HTTP 409). Mirrors the V1.73 contract
  * reused verbatim (no Timeline-specific DTO).
  */
@@ -1902,7 +1886,7 @@ interface WorldKbConflictDetailsShape {
 }
 
 /**
- * Parsed shape of the canonical `ErrorResponse.details` payload the daemon
+ * note: parsed shape of the canonical `ErrorResponse.details` payload the daemon
  * returns under `world_kb_validation_failed` (HTTP 422).
  */
 interface WorldKbValidationDetailsShape {
@@ -1910,7 +1894,7 @@ interface WorldKbValidationDetailsShape {
 }
 
 /**
- * The two daemon error codes the Timeline surface recognises. Both are V1.73
+ * note: the two daemon error codes the Timeline surface recognises. Both are V1.73
  * reused verbatim — no new code is introduced.
  */
 type WorldKbErrorCode =
@@ -1924,7 +1908,7 @@ interface NexusClientErrorLike {
 }
 
 /**
- * Narrow an unknown error into a recognisable NexusClient error shape. Kept
+ * note: narrow an unknown error into a recognisable NexusClient error shape. Kept
  * loose (no `instanceof` coupling) so the extractor is pure and trivially
  * testable against plain object fixtures.
  */
@@ -1984,9 +1968,9 @@ export function mapTimelineValidationEntry(entry: string): {
 export function extractTimelineConflict(
   error: unknown,
   context?: {
-    /** The patch the user was attempting (kept so "Reapply" can re-submit). */
+    /** note: the patch the user was attempting (kept so "Reapply" can re-submit). */
     draftPatch?: TimelineEntityPatch;
-    /** Fields the user touched (drives overlap detection in the modal). */
+    /** note: fields the user touched (drives overlap detection in the modal). */
     dirtyFields?: TimelinePatchField[];
   },
 ): TimelineConflictInfo | null {

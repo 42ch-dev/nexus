@@ -49,13 +49,13 @@ export const PARENT_ERA_LABEL = 'parent_era';
  * renders compatibly — no validation enum).
  */
 export interface EraTreeNode {
-  /** The era KnowledgeEntry (`block_type === 'era'`). */
+  /** note: the era KnowledgeEntry (`block_type === 'era'`). */
   era: WorldKbEntityProjection;
-  /** Freeform era type from `body.attributes.era_type`; absent when missing/empty. */
+  /** note: freeform era type from `body.attributes.era_type`; absent when missing/empty. */
   era_type: string | undefined;
-  /** Sub-eras (finer taxons) nested under this era, in deterministic order. */
+  /** note: sub-eras (finer taxons) nested under this era, in deterministic order. */
   children: EraTreeNode[];
-  /** 0 = root; 1+ = nesting level under a root. */
+  /** note: 0 = root; 1+ = nesting level under a root. */
   depth: number;
 }
 
@@ -68,7 +68,7 @@ function isParentEraRelationship(
 }
 
 /**
- * Extract the freeform era type from `body.attributes.era_type`. Type
+ * note: extract the freeform era type from `body.attributes.era_type`. Type
  * narrowing mirrors `occurredAtOf` / `extractEraAttributes` in the Timeline
  * adapter — `body.attributes` is `unknown` until narrowed; non-string values
  * and empty strings are treated as absent.
@@ -96,14 +96,14 @@ export function buildEraTree(
   entities: WorldKbEntityProjection[],
   relationships: WorldKbRelationshipProjection[],
 ): EraTreeNode[] {
-  // Deterministic era set — stable iteration order across refetches.
+  // why: deterministic era set — stable iteration order across refetches.
   const eras = entities
     .filter((e) => e.block_type === 'era')
     .slice()
     .sort((a, b) => a.key_block_id.localeCompare(b.key_block_id));
   const eraById = new Map(eras.map((e) => [e.key_block_id, e]));
 
-  // Valid parent edges only: both endpoints must be era entities (architect
+  // invariant: valid parent edges only — both endpoints must be era entities (architect
   // Q3). Orphan edges (target missing from the set) are skipped silently.
   //
   // Multi-parent handling (Greptile P1): the Relation system is a general
@@ -134,7 +134,7 @@ export function buildEraTree(
   const tree: EraTreeNode[] = [];
   const reachable = new Set<string>();
 
-  // DFS with per-path visited set for cycle detection. A child can appear
+  // invariant: DFS with per-path visited set for cycle detection. A child can appear
   // under multiple parents (DAG); only true cycles (A→B→A) are cut.
   const visit = (id: string, depth: number, pathAncestors: Set<string>): EraTreeNode => {
     reachable.add(id);
@@ -147,7 +147,7 @@ export function buildEraTree(
     };
     for (const childId of childrenByParent.get(id) ?? []) {
       if (pathAncestors.has(childId)) {
-        // Back-edge (cycle A→B→A): cut the cycle, warn.
+        // note: the console warning is the cycle diagnostic (no logger here).
         // eslint-disable-next-line no-console
         console.warn(
           `[brief-era-tree] cycle detected: "${id}" -> "${childId}" — ` +
@@ -162,7 +162,6 @@ export function buildEraTree(
     return node;
   };
 
-  // Roots: eras with no parent_era edge targeting them.
   for (const era of eras) {
     if (!hasParent.has(era.key_block_id)) {
       const pathAncestors = new Set<string>();
@@ -171,8 +170,8 @@ export function buildEraTree(
     }
   }
 
-  // Cycle islands: eras unreachable from any root (pure cycle with no
-  // root entry) are placed as depth-0 roots so no era vanishes.
+  // why: cycle islands (eras unreachable from any root) are placed as
+  // depth-0 roots so no era vanishes.
   for (const era of eras) {
     if (!reachable.has(era.key_block_id)) {
       const pathAncestors = new Set<string>();

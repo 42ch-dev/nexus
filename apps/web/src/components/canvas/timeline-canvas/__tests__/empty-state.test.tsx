@@ -1,5 +1,5 @@
 /**
- * TimelineCanvas — V1.123 P1 T5 (honest empty-state per layer).
+ * note: TimelineCanvas — V1.123 P1 T5 (honest empty-state per layer).
  *
  * Verifies the per-layer empty-state contract locked by
  *   - `iterations/v1.123/specs/three-layer-architecture.md` §7 (honest
@@ -39,8 +39,6 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { TimelineCanvas } from '../timeline-canvas';
-
-// ─── Fixture builders ──────────────────────────────────────────────────────
 
 function entity(
   overrides: Partial<WorldKbEntityProjection> &
@@ -84,10 +82,10 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
-    // V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
-    // complete works enumeration) must RESOLVE: an unresolved / failed read is
-    // no longer rendered as "no bound Works". An empty page = this World has
-    // no bound Works.
+    // why: V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
+    // complete works enumeration) must RESOLVE; an unresolved / failed read is
+    // no longer rendered as "no bound Works", while an empty page means this
+    // World has no bound Works.
     listWorks: vi.fn().mockResolvedValue({
       items: [],
       pagination: { limit: 20, has_more: false },
@@ -96,18 +94,15 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
   } as unknown as NexusClient;
 }
 
-// ─── Honest empty-state per layer ──────────────────────────────────────────
-
 describe('TimelineCanvas — V1.122 global empty-state preserved (zero entities)', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
   it('renders the V1.122 global empty-state when the graph has zero entities', async () => {
-    // Plan Global Constraints: "Narrative empty (no events) → today's V1.122
-    // empty-state." This test guards the V1.122 regression: an empty graph
-    // still surfaces the canonical V1.122 copy family and does NOT surface
-    // the Brief-empty panel.
+    // why: plan Global Constraints — "Narrative empty (no events) → today's
+    // V1.122 empty-state." This test guards the V1.122 regression: an empty
+    // graph still surfaces the canonical V1.122 copy family.
     const graph: WorldKbGraphResponse = {
       entities: [],
       source_anchors: [],
@@ -121,12 +116,12 @@ describe('TimelineCanvas — V1.122 global empty-state preserved (zero entities)
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // V1.122 global empty-state copy surfaces verbatim.
     expect(screen.getByText('This World\'s timeline is empty')).toBeInTheDocument();
 
-    // The Brief-empty panel MUST NOT render on the global empty-state branch.
+    // invariant: the Brief-empty panel MUST NOT render on the global
+    // empty-state branch.
     expect(screen.queryByTestId('timeline-brief-empty-state')).toBeNull();
-    // The layer switcher is hidden (Batch A T3 — nothing to switch between).
+    // why: the layer switcher is hidden (Batch A T3 — nothing to switch between).
     expect(screen.queryByTestId('timeline-layer-tab-brief')).toBeNull();
   });
 });
@@ -137,10 +132,9 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
   });
 
   it('does not render the Brief-empty panel when the default layer is Narrative (no era data)', async () => {
-    // Plan Global Constraints + Batch A T3: World entry with no `block_type=era`
-    // entities defaults to Narrative. The Brief-empty panel only renders when
-    // the user has explicitly switched to Brief; the default Narrative view
-    // MUST NOT surface Brief-empty copy.
+    // why: plan Global Constraints + Batch A T3 — World entry with no
+    // `block_type=era` entities defaults to Narrative; the Brief-empty panel
+    // only renders after an explicit switch to Brief.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -161,15 +155,14 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Default = Narrative (no era data) → no Brief-empty panel.
     expect(screen.queryByTestId('timeline-brief-empty-state')).toBeNull();
   });
 
   it('renders the Brief-empty panel when the user switches to Brief with no era data', async () => {
-    // layer-feel §2.2 + §7 + plan Task 5: when the active layer is Brief AND
-    // the graph has zero `block_type=era` entities (but is not globally
-    // empty), the surface renders the Brief-empty panel with copy + a CTA
-    // to switch back to Narrative.
+    // why: layer-feel §2.2 + §7 + plan Task 5 — when the active layer is Brief
+    // AND the graph has zero `block_type=era` entities (but is not globally
+    // empty), the surface renders the Brief-empty panel with copy + a CTA to
+    // switch back to Narrative.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -190,27 +183,24 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Default = Narrative.
     expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
       'data-active-layer',
       'narrative',
     );
 
-    // Switch to Brief — graph has no era data, so Brief layer is empty.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
 
-    // Brief-empty panel renders with the i18n copy + a CTA.
     const briefEmpty = await screen.findByTestId('timeline-brief-empty-state');
     expect(briefEmpty).toBeInTheDocument();
-    // Title (layer-feel §7): "No era markers yet".
+    // note: title copy (layer-feel §7).
     expect(briefEmpty).toHaveTextContent('No era markers yet');
-    // CTA: "Switch to Narrative" — the actionable escape hatch.
+    // note: CTA copy — the actionable escape hatch.
     expect(briefEmpty).toHaveTextContent('Switch to Narrative');
   });
 
   it('clicking the Brief-empty CTA switches back to Narrative', async () => {
-    // layer-feel §2.2 empty + plan Task 5 Step 4: CTA button on the Brief-
-    // empty panel switches to Narrative. This is the escape hatch from a
+    // why: layer-feel §2.2 empty + plan Task 5 Step 4 — the CTA on the
+    // Brief-empty panel switches to Narrative, the escape hatch from a
     // Brief-empty world.
     const graph: WorldKbGraphResponse = {
       entities: [
@@ -232,12 +222,10 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Switch to Brief → Brief-empty panel renders.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     const cta = await screen.findByTestId('timeline-brief-empty-cta');
     expect(cta).toBeInTheDocument();
 
-    // Click the CTA → active layer flips back to Narrative.
     fireEvent.click(cta);
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -246,14 +234,13 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
       );
     });
 
-    // The Brief-empty panel is gone once Narrative is active.
     expect(screen.queryByTestId('timeline-brief-empty-state')).toBeNull();
   });
 
   it('does not render the Brief-empty panel when era data exists (Brief default)', async () => {
-    // Plan Global Constraints: "Brief default IF era data exists". When the
-    // World has era entities, Brief is the default layer and the canvas
-    // renders era marker nodes (not the Brief-empty panel).
+    // why: plan Global Constraints — "Brief default IF era data exists"; with
+    // era entities, Brief is the default layer and the canvas renders era
+    // marker nodes instead of the Brief-empty panel.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -272,14 +259,12 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Default = Brief (era data exists) → no empty-state panel.
     expect(screen.queryByTestId('timeline-brief-empty-state')).toBeNull();
-    // The V1.122 global empty-state is also absent (graph is not empty).
     expect(screen.queryByText('This World\'s timeline is empty')).toBeNull();
   });
 });
 
-// ─── V1.156 P1 T2 — World-Moment honest empty-state (PD-3) ─────────────────
+// note: V1.156 P1 T2 — World-Moment honest empty-state (PD-3).
 
 describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', () => {
   afterEach(() => {
@@ -287,9 +272,9 @@ describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', ()
   });
 
   it('does NOT render the Moment-empty panel on the default layer (Moment is never the default)', async () => {
-    // Spec §3.3.3: "Moment is never the default (read-only projection; one
-    // click away)." The panel only fires after an explicit switch to Moment
-    // — the default Brief/Narrative view MUST NOT surface Moment-empty copy.
+    // why: spec §3.3.3 — "Moment is never the default (read-only projection;
+    // one click away)." The panel only fires after an explicit switch to
+    // Moment.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -312,10 +297,10 @@ describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', ()
   });
 
   it('renders the Moment-empty panel when the user switches to Moment with no bound-Works fixture', async () => {
-    // Spec §3.3.3 empty-state honesty + PD-3: with no bound-Works scene/beat
-    // fixture the Moment projection emits zero nodes and the surface renders
-    // the honest panel — scenes come from bound Works' Outline data, not
-    // from World authoring.
+    // why: spec §3.3.3 empty-state honesty + PD-3 — with no bound-Works
+    // scene/beat fixture the Moment projection emits zero nodes, so the
+    // surface renders the honest panel: scenes come from bound Works' Outline
+    // data, not from World authoring.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -336,7 +321,6 @@ describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', ()
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Default = Narrative (no era data).
     expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
       'data-active-layer',
       'narrative',
@@ -346,17 +330,17 @@ describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', ()
 
     const momentEmpty = await screen.findByTestId('timeline-moment-empty-state');
     expect(momentEmpty).toBeInTheDocument();
-    // PD-3 honest copy: scenes come from bound Works' Outline data.
+    // note: PD-3 honest copy — scenes come from bound Works' Outline data.
     expect(momentEmpty).toHaveTextContent('bound Works');
     expect(momentEmpty).toHaveTextContent('Outline');
-    // The escape-hatch CTA back to Narrative (mirrors the Work Timeline +
+    // note: escape-hatch CTA back to Narrative (mirrors the Work Timeline +
     // Brief-empty patterns).
     expect(momentEmpty).toHaveTextContent('Switch to Narrative');
   });
 
   it('clicking the Moment-empty CTA switches back to Narrative (escape hatch)', async () => {
-    // Same escape-hatch contract as the Brief-empty panel: the CTA flips the
-    // active layer back to Narrative where events are visible.
+    // why: same escape-hatch contract as the Brief-empty panel — the CTA flips
+    // the active layer back to Narrative where events are visible.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -393,11 +377,10 @@ describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', ()
   });
 
   it('does NOT render the Moment-empty panel when a scene/beat fixture provides data', async () => {
-    // The `sceneBeatFixture` prop flows orchestrator → adapter context →
-    // Moment projection: with scenes present the projection emits nodes and
-    // the canvas renders — NOT the empty panel. (The adapter-level node
-    // emission itself is covered by T1's `moment-projection.test.tsx`; this
-    // pins the orchestrator wiring end-to-end.)
+    // why: `sceneBeatFixture` flows orchestrator → adapter context → Moment
+    // projection; with scenes present the projection emits nodes and the canvas
+    // renders instead of the empty panel. Node emission itself is covered by
+    // T1's `moment-projection.test.tsx`; this pins the orchestrator wiring.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -443,10 +426,10 @@ describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', ()
   });
 
   it('surfaces NO World-owned Moment authoring CTA (PD-3 — read/projection only)', async () => {
-    // PD-3 HARD: World Timeline Moment is a READ/projection layer — Moments
-    // remain Work-owned. The empty-state MUST NOT imply World-owned Moment
-    // authoring: the only actionable control is the "Switch to Narrative"
-    // escape hatch (no create-Moment CTA, no write flow).
+    // invariant: PD-3 — the World Timeline Moment layer is READ/projection
+    // only; Moments remain Work-owned. The empty-state MUST NOT imply
+    // World-owned Moment authoring: the only actionable control is the
+    // "Switch to Narrative" escape hatch (no create-Moment CTA, no write flow).
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({

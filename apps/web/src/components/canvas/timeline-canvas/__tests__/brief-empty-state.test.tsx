@@ -1,7 +1,7 @@
 /**
  * Brief empty-state + backward-compat — V1.159 P1 Task 4.
  *
- * Hardens the Brief layer against every era-shape edge case and pins the
+ * note: Hardens the Brief layer against every era-shape edge case and pins the
  * "新建 era" entry gating contract (V1.160 P1 T2 — F-001 / R-V1159P1-001
  * closed: the V1.160 P1 T1 backend create-on-absent path made `patch-entity`
  * create when the minted entity id is absent, so the create entry is LIVE
@@ -49,7 +49,7 @@ import { buildEraTree, type EraTreeNode } from '../brief-era-tree';
 import { BriefTimeBands } from '../brief-time-bands';
 import { TimelineCanvas } from '../timeline-canvas';
 
-// ─── Component fixture builders (mirror brief-time-bands.test.tsx) ─────────
+// note: Component fixture builders mirror brief-time-bands.test.tsx.
 
 function eraEntity(
   overrides: Partial<WorldKbEntityProjection> &
@@ -125,7 +125,7 @@ function bandOf(container: HTMLElement, eraId: string): HTMLElement {
   return el;
 }
 
-// ─── Canvas fixture builders (mirror empty-state.test.tsx) ─────────────────
+// note: Canvas fixture builders mirror empty-state.test.tsx.
 
 function entity(
   overrides: Partial<WorldKbEntityProjection> &
@@ -148,7 +148,7 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
-    // V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
+    // why: V1.200 DR-26 round 2 — the Moment layer's bound-Work source (the
     // complete works enumeration) must RESOLVE: an unresolved / failed read is
     // no longer rendered as "no bound Works". An empty page = this World has
     // no bound Works.
@@ -160,7 +160,7 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
   } as unknown as NexusClient;
 }
 
-/** Graph with events but ZERO `block_type=era` entities (Brief is empty). */
+/** note: Graph with events but ZERO `block_type=era` entities (Brief is empty). */
 function eventsOnlyGraph(): WorldKbGraphResponse {
   return {
     entities: [
@@ -176,7 +176,7 @@ function eventsOnlyGraph(): WorldKbGraphResponse {
   };
 }
 
-/** Graph with era data → Brief is the default layer. */
+/** note: Graph with era data → Brief is the default layer. */
 function eraGraph(): WorldKbGraphResponse {
   return {
     entities: [eraEntity({ key_block_id: 'kb-era-1', canonical_name: 'First Age' })],
@@ -185,15 +185,13 @@ function eraGraph(): WorldKbGraphResponse {
   };
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────
-
 describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
   it('empty_era_data_shows_v1_123_empty_state', async () => {
-    // No `block_type=era` entities → the V1.123 Brief empty-state panel
+    // note: No `block_type=era` entities → the V1.123 Brief empty-state panel
     // (title + Narrative CTA) renders when the user switches to Brief. The
     // "新建 era" create entry IS rendered on the empty panel (V1.160 P1 T2 —
     // F-001 / R-V1159P1-001 closed; the create-first-era path, T4 DoD).
@@ -205,20 +203,19 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Default = Narrative (no era data).
+    // why: Default = Narrative (no era data).
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
 
-    // V1.123 Brief empty-state panel with the locked copy + escape hatch.
+    // note: V1.123 Brief empty-state panel with the locked copy + escape hatch.
     const briefEmpty = await screen.findByTestId('timeline-brief-empty-state');
     expect(briefEmpty).toHaveTextContent('No era markers yet');
     expect(briefEmpty).toHaveTextContent('Switch to Narrative');
 
-    // The create entry is visible on the empty Brief panel (live gate).
     expect(screen.getByTestId('timeline-create-era-entry')).toBeInTheDocument();
   });
 
   it('flat_eras_render_as_depth_0_bands', () => {
-    // Untyped, unnested eras → every band sits at depth 0 with the default
+    // note: Untyped, unnested eras → every band sits at depth 0 with the default
     // Brief-accent color and NO type badge (V1.156 flat rendering
     // backward compatible — spec §3.3.3 "Unknown or absent era_type falls
     // back to the default Brief accent").
@@ -233,11 +230,9 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     const { container } = renderBands(tree);
 
     expect(screen.getAllByTestId('brief-time-band')).toHaveLength(2);
-    // Both are depth-0 roots; no nested levels anywhere.
     expect(container.querySelectorAll('[data-depth="0"]')).toHaveLength(2);
     expect(container.querySelectorAll('[data-depth="1"]')).toHaveLength(0);
-    // Default color on both; no type badges at all.
-    // `toHaveStyle` cannot see `var()` through jsdom's computed style (jsdom 31
+    // why: `toHaveStyle` cannot see `var()` through jsdom's computed style (jsdom 31
     // resolves it to transparent), so assert the declared inline value.
     expect(bandOf(container, 'kb-era-1').style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
     expect(bandOf(container, 'kb-era-2').style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
@@ -245,7 +240,7 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('mixed_typed_untyped_render_correctly', () => {
-    // Partial typing: the typed era gets its per-type color + verbatim
+    // note: Partial typing: the typed era gets its per-type color + verbatim
     // badge; the untyped era keeps the default color and no badge.
     const tree = buildEraTree(
       [
@@ -264,14 +259,13 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     const untypedBand = bandOf(container, 'kb-era-1');
     expect(untypedBand.style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
 
-    // Exactly one badge — only the typed era carries one.
     const badges = screen.getAllByTestId('brief-time-band-type-badge');
     expect(badges).toHaveLength(1);
     expect(badges[0]).toHaveTextContent('kingdom');
   });
 
   it('partial_nesting_orphans_and_nested', () => {
-    // Partial nesting: a nested branch (kingdom → age) alongside a flat
+    // note: Partial nesting: a nested branch (kingdom → age) alongside a flat
     // orphan root (Third Age) — both shapes render in one forest.
     const tree = buildEraTree(
       [
@@ -285,7 +279,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     const { container } = renderBands(tree);
 
     expect(screen.getAllByTestId('brief-time-band')).toHaveLength(3);
-    // Nested branch: parent at depth 0, child indented to depth 1.
     expect(bandOf(container, 'kb-kingdom').parentElement).toHaveAttribute(
       'data-depth',
       '0',
@@ -297,7 +290,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     expect(bandOf(container, 'kb-age').parentElement).toHaveStyle({
       paddingLeft: '24px',
     });
-    // Orphan root: depth 0, no indent, rendered as a sibling band.
     expect(bandOf(container, 'kb-orphan').parentElement).toHaveAttribute(
       'data-depth',
       '0',
@@ -308,7 +300,7 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('create_era_entry_visible_on_brief_empty_state', async () => {
-    // V1.160 P1 T2 (F-001 / R-V1159P1-001 closed): the "新建 era" create
+    // note: V1.160 P1 T2 (F-001 / R-V1159P1-001 closed): the "新建 era" create
     // entry renders on the Brief empty panel — the create-first-era path
     // (T4 DoD). The empty panel keeps its V1.123 copy + Narrative CTA, and
     // the create entry sits in the header chrome above it.
@@ -323,7 +315,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     await screen.findByTestId('timeline-brief-empty-state');
 
-    // Create entry visible on the empty panel; the dialog opens on click.
     const entry = screen.getByTestId('timeline-create-era-entry');
     expect(entry).toBeInTheDocument();
     await userEvent.click(entry);
@@ -331,7 +322,7 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('create_era_entry_brief_layer_only', async () => {
-    // V1.160 P1 T2 — the create entry is Brief-layer chrome only: visible
+    // note: V1.160 P1 T2 — the create entry is Brief-layer chrome only: visible
     // on Brief, hidden on Narrative and Moment (Work-Brief stays a
     // read-only projection per spec §3.3.3).
     const user = userEvent.setup();
@@ -343,10 +334,9 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // Brief is the default layer (era data exists) → entry visible.
+    // why: Brief is the default layer (era data exists) → entry visible.
     expect(screen.getByTestId('timeline-create-era-entry')).toBeInTheDocument();
 
-    // Narrative → hidden.
     await user.click(screen.getByTestId('timeline-layer-tab-narrative'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -356,7 +346,7 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     });
     expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
 
-    // Moment → hidden (Moment is a read-only projection; no World-era
+    // why: Moment → hidden (Moment is a read-only projection; no World-era
     // authoring affordance).
     await user.click(screen.getByTestId('timeline-layer-tab-moment'));
     await waitFor(() => {
@@ -367,7 +357,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     });
     expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
 
-    // Back to Brief → visible again.
     await user.click(screen.getByTestId('timeline-layer-tab-brief'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(

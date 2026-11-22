@@ -57,11 +57,11 @@ const SORT_KEY_WORDS: Record<SortKey, string> = {
 };
 
 export interface TimelineAltViewProps {
-  /** Projected Timeline nodes (event + context KeyBlock rows). */
+  /** note: projected Timeline nodes (event + context KeyBlock rows). */
   nodes: Node<TimelineNodeData>[];
-  /** Currently-selected node id (highlights the matching row). */
+  /** note: currently-selected node id (highlights the matching row). */
   selectedNodeId: string | null;
-  /** Selection callback — opens the inspector that owns the write path. */
+  /** note: selection callback — opens the inspector that owns the write path. */
   onSelectNode: (nodeId: string) => void;
 }
 
@@ -179,7 +179,7 @@ export function TimelineAltView({
                       {data.canonical_name ?? t('timeline.altView.unnamed')}
                     </td>
                     <td className="px-3 py-2 text-gray-900">
-                      {/* V1.147 P2 T3 — compute rows show the compute kind
+                      {/* why: V1.147 P2 T3 compute rows show the compute kind
                           label ("Compute result"), not the synthetic
                           `block_type='event'` of the log-event family. */}
                       {data.layoutHint === 'compute'
@@ -213,8 +213,6 @@ export function TimelineAltView({
   );
 }
 
-// ─── Sort + format helpers ──────────────────────────────────────────────────
-
 function compareNodes(
   a: TimelineNodeData,
   b: TimelineNodeData,
@@ -224,13 +222,13 @@ function compareNodes(
     case 'title':
       return (a.canonical_name ?? '').localeCompare(b.canonical_name ?? '');
     case 'kind':
-      // V1.156 P1 fix-wave 1 (F2) — null-safe: non-entity node families
+      // why: V1.156 P1 fix-wave 1 (F2) null-safe — non-entity node families
       // (Moment scene/beat carriers, the decoration spine) carry no
       // `block_type` at runtime even though the type requires it. Mirror
       // the title sort's null-safety so the Kind sort never throws.
       return (a.block_type ?? '').localeCompare(b.block_type ?? '');
     case 'occurredAt': {
-      // Undated events sort AFTER dated events (stable for both asc/desc by
+      // invariant: undated events sort AFTER dated events (stable for both asc/desc by
       // inverting consistently — the sort dir wrapper handles the sign).
       const av = a.occurredAtHint ?? '';
       const bv = b.occurredAtHint ?? '';
@@ -253,7 +251,7 @@ function compareNodes(
 }
 
 /**
- * Relative-time formatter for the `updated_at` column. Mirrors the World KB
+ * note: relative-time formatter for the `updated_at` column. Mirrors the World KB
  * entity table helper so the two surfaces share a consistent "Xd ago" voice.
  */
 function formatUpdated(iso: string | undefined): string {

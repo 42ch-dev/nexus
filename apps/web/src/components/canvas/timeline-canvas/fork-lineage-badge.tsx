@@ -1,5 +1,5 @@
 /**
- * Fork lineage badge — V1.162 P2 T2 (read-only lineage chrome, §3.3.2).
+ * note: Fork lineage badge — V1.162 P2 T2 (read-only lineage chrome, §3.3.2).
  *
  * Tells the author the ACTIVE branch is a fork (marker-derived `is_fork`),
  * shows the parent branch + fork-point event read-only (from the
@@ -25,21 +25,21 @@ import { shortId } from '@/lib/format';
 import type { ForkLineage } from '@/api/queries';
 
 export interface ForkLineageBadgeProps {
-  /** Branch-level marker-derived lineage (T2 hook output). */
+  /** note: branch-level marker-derived lineage (T2 hook output). */
   lineage: ForkLineage;
   /**
-   * One-hop parent hand-off. The orchestrator wires
+   * note: one-hop parent hand-off. The orchestrator wires
    * `handleBranchChange(lineage.parent_branch_id)`; omitted when the
    * lineage carries no parent (defensive — a fork marker always has one).
    */
   onOpenParent?: () => void;
   /**
-   * W-2 — the lineage marker query failed on a non-root branch: render a
+   * note: W-2 — the lineage marker query failed on a non-root branch: render a
    * degraded strip ("fork — lineage unavailable") with a retry instead of
    * hiding the fork chrome (the chrome doubles as the one-hop return path).
    */
   unavailable?: boolean;
-  /** Retry the failed lineage read (wired to the hook's `refetch`). */
+  /** note: retry the failed lineage read (wired to the hook's `refetch`). */
   onRetry?: () => void;
 }
 
@@ -91,7 +91,7 @@ export function ForkLineageBadge({
             {t('timeline.forkLineage.forkPointLabel')}:{' '}
             {lineage.forked_from_event_id ? shortId(lineage.forked_from_event_id) : '—'}
           </span>
-          {/* S-3 — the create-time label (spec §6.6.3) surfaces read-only in
+          {/* why: S-3 — the create-time label (spec §6.6.3) surfaces read-only in
               the chrome when set; never an edit affordance. */}
           {lineage.label ? (
             <span data-testid="fork-lineage-label">

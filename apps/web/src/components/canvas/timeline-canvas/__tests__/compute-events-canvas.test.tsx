@@ -1,5 +1,5 @@
 /**
- * TimelineCanvas — V1.147 P2 T3 compute-on-Timeline integration (AC-I3).
+ * note: TimelineCanvas — V1.147 P2 T3 compute-on-Timeline integration (AC-I3).
  *
  * Coverage:
  *   - Compute result nodes render on the Narrative layer ALONGSIDE KB event
@@ -33,9 +33,9 @@ import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
 import { TimelineCanvas } from '../timeline-canvas';
 
-// ─── Wire fixtures (daemon contract shapes) ─────────────────────────────────
+// note: wire fixtures — daemon contract shapes.
 
-/** Bugbot 1 — a forked branch id used for the `?branch=` pre-fill tests. */
+/** note: Bugbot 1 — a forked branch id used for the `?branch=` pre-fill tests. */
 const FORK_BRANCH_ID = 'fbk_fork_1';
 
 const KB_EVENT = {
@@ -139,8 +139,6 @@ const SUCCESS_PROPOSALS = {
   battle_report: { kind: 'combat', damage: 6 },
 };
 
-// ─── Mini app (routes) ──────────────────────────────────────────────────────
-
 function PageAppRoutes() {
   return (
     <Routes>
@@ -154,7 +152,7 @@ function PageAppRoutes() {
   );
 }
 
-/** Way back to the Timeline from the full-page `/modules` surface. */
+/** note: Way back to the Timeline from the full-page `/modules` surface. */
 function TimelineReturnLink() {
   return (
     <Link to="/worlds/world-7/timeline" data-testid="back-to-timeline">
@@ -164,7 +162,7 @@ function TimelineReturnLink() {
 }
 
 /**
- * Full MSW handler set. `state.eventsStore` is mutable: the accept handler
+ * note: Full MSW handler set. `state.eventsStore` is mutable: the accept handler
  * appends the compute_result event (simulating the daemon's Accept write).
  * The journey then navigates back to the Timeline — a different route, so the
  * canvas remounts and refetches the log; `useAcceptRun`'s `timeline.all`
@@ -179,7 +177,7 @@ function computeTimelineJourney(
     eventsFetchCount: 0,
     runsStore: [] as unknown[],
     acceptCalls: 0,
-    /** Bugbot 1 — captured POST /compute/run request bodies. */
+    /** note: Bugbot 1 — captured POST /compute/run request bodies. */
     runBodies: [] as unknown[],
   };
 
@@ -193,17 +191,15 @@ function computeTimelineJourney(
     ),
     http.get('/v1/daemon/worlds/:worldId/timeline/events', ({ request }) => {
       state.eventsFetchCount += 1;
-      // V1.162 P2 T2 — the fork-lineage chrome reads the SAME route with
-      // its own `event_type=fork_created&limit=1` filter (separate hook).
-      // The contract assertions below target the canvas's compute_result
-      // projection query, so only that family updates `lastEventsUrl`;
-      // the fork_created read keeps its own filter and must not overwrite
-      // the slot the assertions inspect.
+      // why: V1.162 P2 T2 — the fork-lineage chrome reads the SAME route with
+      // its own `event_type=fork_created&limit=1` filter (separate hook); only
+      // the compute_result projection query updates `lastEventsUrl`, so the
+      // contract assertions below keep inspecting the slot they own.
       const url = new URL(request.url);
       if (url.searchParams.get('event_type') === 'compute_result') {
         state.lastEventsUrl = request.url;
       }
-      // Page the store by the daemon's limit/cursor contract so
+      // why: page the store by the daemon's limit/cursor contract so
       // `has_more: true` + a second page can be exercised (review F1
       // regression: the canvas auto-fetches remaining pages).
       const limit = Number(url.searchParams.get('limit')) || 100;
@@ -256,7 +252,7 @@ function computeTimelineJourney(
     http.post('/v1/daemon/compute/runs/:runId/accept', ({ params }) => {
       state.acceptCalls += 1;
       expect(String(params.runId)).toBe('run_9');
-      // The daemon appends the compute_result event on Accept.
+      // why: the daemon appends the compute_result event on Accept.
       state.eventsStore = [COMPUTE_EVENT];
       return HttpResponse.json({
         run_id: 'run_9',
@@ -277,9 +273,9 @@ function computeTimelineJourney(
         created_at: '2026-08-01T01:00:00Z',
       }),
     ),
-    // F3 (review) — the app-under-test fires a registry scan (Settings shell /
-    // agent-host polling); serve it so MSW stops logging unhandled-request
-    // noise in the journey test.
+    // why: F3 (review) — the app-under-test fires a registry scan (Settings
+    // shell / agent-host polling); serve it so MSW stops logging
+    // unhandled-request noise in the journey test.
     http.post('/v1/daemon/agent-host/scan', () =>
       HttpResponse.json({ agents: [] }),
     ),
@@ -315,20 +311,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
-
 describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
   it('renders KB event nodes and Compute result nodes as distinct families (no double-render)', async () => {
     renderTimelineApp({ initialEvents: [COMPUTE_EVENT] });
 
-    // KB author event (rendered in the node card + the NLE band label).
+    // note: KB author event renders in the node card + the NLE band label.
     await screen.findAllByText('The coronation');
-    // Compute result node (merged log event family).
     const computeNode = await screen.findByTestId('compute-result-node-chrome');
     expect(within(computeNode).getByText('Aria strikes Brann')).toBeInTheDocument();
     expect(within(computeNode).getByText('Compute result')).toBeInTheDocument();
     expect(within(computeNode).getByText('From module run')).toBeInTheDocument();
-    // Module display name resolved from the registry.
     expect(within(computeNode).getByText(/Basic Combat/)).toBeInTheDocument();
   });
 
@@ -351,8 +343,8 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
   });
 
   it('auto-fetches remaining events pages — nodes from page 2 render (review F1)', async () => {
-    // 105 events → page 1 = 100 (limit), page 2 = 5 (has_more: true on
-    // page 1). The last event renders only if the canvas wired
+    // why: 105 events → page 1 = 100 (limit), page 2 = 5 (has_more: true on
+    // page 1); the last event renders only if the canvas wired
     // `fetchNextPage` for its snapshot projection.
     const events = Array.from({ length: 105 }, (_, i) => ({
       ...COMPUTE_EVENT,
@@ -361,11 +353,10 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     }));
     const { container, state } = renderTimelineApp({ initialEvents: events });
 
-    // The last page's event renders as a canvas node — RF wraps each node in
-    // `.react-flow__node[data-id=…]`. Scope to the canvas node instead of a
-    // global unique-text lookup: the same event title also renders in the NLE
-    // band clip (the band projects the same compute nodes), so a bare
-    // `findByText` would match two elements.
+    // why: RF wraps each node in `.react-flow__node[data-id=…]`; scope to the
+    // canvas node instead of a global unique-text lookup, because the same
+    // event title also renders in the NLE band clip (the band projects the same
+    // compute nodes), so a bare `findByText` would match two elements.
     await waitFor(() =>
       expect(
         container.querySelector('.react-flow__node[data-id="compute:evt_page_104"]'),
@@ -375,7 +366,7 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
   });
 
   it('shows an honest cap note when the compute-event projection hits the 500 ceiling (V1.147 P3 T2)', async () => {
-    // 520 events → pages 1–5 fetch exactly 500; page 5 still reports
+    // why: 520 events → pages 1–5 fetch exactly 500; page 5 still reports
     // `has_more`, so the projection is capped and the canvas must say so
     // instead of silently dropping the older events.
     const events = Array.from({ length: 520 }, (_, i) => ({
@@ -399,12 +390,11 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
 
     await user.click(await screen.findByTestId('timeline-run-module-entry'));
 
-    // The `/modules` page renders the shared Run Studio.
     await screen.findByTestId('modules-page-body');
     await user.click(await screen.findByRole('button', { name: 'Basic Combat' }));
     await screen.findByTestId('run-studio');
 
-    // World pre-filled from `?world=world-7` (behavior spec §1 P2).
+    // note: World pre-filled from `?world=world-7` (behavior spec §1 P2).
     await waitFor(() =>
       expect(screen.getByTestId('run-studio-world')).toHaveValue('world-7'),
     );
@@ -414,18 +404,16 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     const user = userEvent.setup();
     renderTimelineApp({ initialEvents: [COMPUTE_EVENT] });
 
-    // Flip to the sortable list (alt view) — accessible row selection.
     await user.click(await screen.findByRole('button', { name: 'Show list view' }));
 
-    // Select the compute row → compute inspector opens.
     const row = await screen.findByText('Aria strikes Brann');
     fireEvent.click(row.closest('tr')!);
     await screen.findByTestId('timeline-compute-inspector');
     expect(screen.getByTestId('compute-inspector-section-module')).toBeInTheDocument();
     expect(screen.getByText('From module run')).toBeInTheDocument();
 
-    // Open Run → `/modules` page on the module detail with the run inspector
-    // deep-linked (run detail query resolves from `?run=run_9`).
+    // note: Open Run lands on the `/modules` module detail with the run
+    // inspector deep-linked; the run detail query resolves from `?run=run_9`.
     await user.click(screen.getByTestId('compute-inspector-open-run'));
     await screen.findByTestId('modules-page-body');
     await screen.findByTestId('run-studio');
@@ -436,18 +424,15 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     const user = userEvent.setup();
     const { state } = renderTimelineApp();
 
-    // 1. Entry: Run Module from the Timeline toolbar.
     await user.click(await screen.findByTestId('timeline-run-module-entry'));
     await screen.findByTestId('modules-page-body');
     await user.click(await screen.findByRole('button', { name: 'Basic Combat' }));
     await screen.findByTestId('run-studio');
 
-    // 2. World pre-filled (no manual pick).
     await waitFor(() =>
       expect(screen.getByTestId('run-studio-world')).toHaveValue('world-7'),
     );
 
-    // 3. Fill the guided form + run.
     await screen.findByRole('combobox', { name: /^Attacker/ });
     await user.selectOptions(
       screen.getByRole('combobox', { name: /^Attacker/ }),
@@ -461,7 +446,7 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     await user.click(screen.getByTestId('run-studio-run'));
     await screen.findByTestId('proposal-section-report');
 
-    // Bugbot 1 — from the ROOT Timeline (no `?branch=`), the run request
+    // why: from the ROOT Timeline (no `?branch=`), the run request
     // omits `branch_id` (the daemon defaults to the World's root).
     expect(state.runBodies[0]).toMatchObject({
       world_id: 'world-7',
@@ -469,14 +454,14 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     });
     expect((state.runBodies[0] as Record<string, unknown>).branch_id).toBeUndefined();
 
-    // 4. Accept — the daemon appends the compute_result event.
+    // why: Accept appends the compute_result event at the daemon.
     await user.click(screen.getByTestId('run-inspector-accept'));
     await waitFor(() => expect(state.acceptCalls).toBe(1));
     await screen.findByTestId('run-inspector-applied-note');
 
-    // 5. Return to the Timeline (`/modules` is a full page, so the canvas
-    // remounts and refetches) WITHOUT a manual refresh — the accepted
-    // Compute result node is already there.
+    // why: `/modules` is a full page, so returning to the Timeline remounts
+    // and refetches the canvas; the accepted Compute result node is already
+    // there without a manual refresh.
     await user.click(screen.getByTestId('back-to-timeline'));
     const computeNode = await screen.findByTestId('compute-result-node-chrome');
     expect(within(computeNode).getByText('Aria strikes Brann')).toBeInTheDocument();
@@ -485,22 +470,20 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
 
   it('Run Module from a forked-branch Timeline pre-fills the branch and submits branch_id (Bugbot 1)', async () => {
     const user = userEvent.setup();
-    // Active branch = fork (`?branch=fbk_fork_1` — the T1 mirror).
+    // why: active branch = fork (`?branch=fbk_fork_1` — the T1 mirror).
     const { state } = renderTimelineApp({ branch: FORK_BRANCH_ID });
 
-    // 1. Entry: Run Module from the forked-branch Timeline toolbar. The
-    // open URL now carries BOTH `?world=` and `?branch=<fork>`.
+    // why: entry from the forked-branch toolbar — the open URL now carries
+    // BOTH `?world=` and `?branch=<fork>`.
     await user.click(await screen.findByTestId('timeline-run-module-entry'));
     await screen.findByTestId('modules-page-body');
     await user.click(await screen.findByRole('button', { name: 'Basic Combat' }));
     await screen.findByTestId('run-studio');
 
-    // 2. World + fork branch pre-filled.
     await waitFor(() =>
       expect(screen.getByTestId('run-studio-world')).toHaveValue('world-7'),
     );
 
-    // 3. Fill the guided form + run.
     await screen.findByRole('combobox', { name: /^Attacker/ });
     await user.selectOptions(
       screen.getByRole('combobox', { name: /^Attacker/ }),
@@ -514,8 +497,7 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     await user.click(screen.getByTestId('run-studio-run'));
     await screen.findByTestId('proposal-section-report');
 
-    // 4. The run request carries the fork branch — compute run/accept
-    // writes the fork, NOT the world root (Bugbot 1).
+    // why: compute run/accept writes the fork branch, NOT the world root.
     expect(state.runBodies[0]).toMatchObject({
       world_id: 'world-7',
       module_id: 'basic-combat',
