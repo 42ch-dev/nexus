@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Focused contract tests for the P3 public first-workflow driver (P3-T2).
+ * note: Focused contract tests for the P3 public first-workflow driver (P3-T2).
  *
  * Scope: the driver's own observable contracts, exercised against loopback
  * servers and temporary directories it creates itself. Nothing here needs the
@@ -59,18 +59,17 @@ const RUN_ID = 'first-workflow:test-run';
 const EPOCH = '11111111-2222-3333-4444-555555555555';
 const READ_WINDOW_MS = 300;
 
-/** One SSE `run_state` frame carrying the ring's own `<epoch>:<sequence>` cursor. */
+/** note: One SSE `run_state` frame carrying the ring's own `<epoch>:<sequence>` cursor. */
 function stateFrame(sequence, epoch = EPOCH) {
   return `id: ${epoch}:${sequence}\nevent: run_state\ndata: ${JSON.stringify({ state_revision: sequence })}\n\n`;
 }
 
-/** Frame identity list `1..count` of the test epoch. */
 function observedIds(count, epoch = EPOCH) {
   return Array.from({ length: count }, (_, index) => `${epoch}:${index + 1}`);
 }
 
 /**
- * One owned loopback SSE server. `mode` selects the transport behaviour, not a
+ * note: One owned loopback SSE server. `mode` selects the transport behaviour, not a
  * data fixture: `no-response` accepts the connection and answers nothing at all
  * (the live run's own shape — the workflow transport writes its headers with the
  * first frame, so a run with nothing new to send has not flushed any yet),
@@ -106,7 +105,6 @@ function startSseServer(mode, frames = '') {
   });
 }
 
-/** Run `body` against one owned server and always release it. */
 async function withSseServer(mode, frames, body) {
   const server = await startSseServer(mode, frames);
   try {
@@ -116,7 +114,6 @@ async function withSseServer(mode, frames, body) {
   }
 }
 
-/** Assert a driver refusal by its stable outcome/category. */
 function assertDriverFailure(error, outcome, category) {
   assert.equal(error?.name, 'DriverFailure', `expected DriverFailure, got ${error?.name}: ${error?.message}`);
   assert.equal(error.outcome, outcome);
@@ -124,7 +121,7 @@ function assertDriverFailure(error, outcome, category) {
 }
 
 /**
- * The classified results of `classifySameRunReplay` for one replayed frame set.
+ * note: The classified results of `classifySameRunReplay` for one replayed frame set.
  * The default read shape is the CLOSED one (`closed`, not the driver's window):
  * the §4 outcome a gap-carrying reconnect must have.
  */
@@ -175,7 +172,7 @@ test('a cursor reconnect replays exactly the promised successors, in order, and 
   assert.equal(facts.exclusive, true);
   assert.equal(facts.duplicate_handoff, false);
 
-  // A repeated successor and a reordered pair are both duplicated/replayed
+  // why: A repeated successor and a reordered pair are both duplicated/replayed
   // events: every promised ID is present, so set membership alone would call
   // them a faithful replay.
   const repeated = [
@@ -272,7 +269,7 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
   const gapData = (from, to) => JSON.stringify({ run_id: RUN_ID, epoch: EPOCH, from_sequence: from, to_sequence: to });
   const gapFrame = { id: `${EPOCH}:5`, event: 'gap', data: gapData(2, 5) };
 
-  // §4 eviction close: the gap is the whole answer and the server closed on it.
+  // note: §4 eviction close: the gap is the whole answer and the server closed on it.
   const covered = classifyReplay([gapFrame]);
   assert.equal(covered.kind, 'gap');
   assert.deepEqual(covered.gaps, [{ from_sequence: 2, to_sequence: 5 }]);
@@ -280,7 +277,7 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
   assert.equal(covered.closed, true);
   assert.equal(covered.timed_out, false);
 
-  // The same gap on a stream that then idles until the driver's window expires
+  // why: The same gap on a stream that then idles until the driver's window expires
   // is NOT the contract's outcome — it must not be reported as an honest gap.
   assert.throws(
     () => classifyReplay([gapFrame], { read: { closed: false, timed_out: true } }),
@@ -290,7 +287,7 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
     },
   );
 
-  // A retention gap that arrives WITH the retained successors is the live replay
+  // note: A retention gap that arrives WITH the retained successors is the live replay
   // case: bounded record, gap plus the replayed tail, no fabricated content.
   const trimmed = classifyReplay([
     { id: `${EPOCH}:3`, event: 'gap', data: gapData(2, 3) },
@@ -302,7 +299,7 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
   assert.deepEqual(trimmed.missing_successors, [`${EPOCH}:2`, `${EPOCH}:3`]);
   assert.deepEqual(trimmed.replayed_ids, [`${EPOCH}:4`, `${EPOCH}:5`]);
 
-  // A gap may not contradict the very frames the same replay delivered: it
+  // why: A gap may not contradict the very frames the same replay delivered: it
   // states they are gone, so its range and the delivered frames must be
   // disjoint. Adjacent (2..3 + :4/:5, above) is the legal trim shape; the two
   // shapes below deliver a frame the gap claims was lost.
@@ -332,7 +329,7 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
     },
   );
 
-  // Unsafe / out-of-vocabulary bounds are not a bounded gap at all.
+  // why: Unsafe / out-of-vocabulary bounds are not a bounded gap at all.
   assert.equal(parseGapFrame({ event: 'gap', data: gapData(0, 1e100) }), null);
   assert.equal(parseGapFrame({ event: 'gap', data: gapData(2, 1e100) }), null);
   assert.equal(parseGapFrame({ event: 'gap', data: gapData(2.5, 5) }), null);
@@ -345,7 +342,7 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
     },
   );
 
-  // A gap that does not reach the successors the cursor promised leaves them
+  // why: A gap that does not reach the successors the cursor promised leaves them
   // uncovered.
   assert.throws(
     () => classifyReplay([{ ...gapFrame, data: gapData(2, 3) }]),
@@ -482,7 +479,7 @@ test('an unsolicited tool side effect is detected in the isolated root and the o
 });
 
 /**
- * One attempt directory populated in the guard's own record shape, so these
+ * note: One attempt directory populated in the guard's own record shape, so these
  * cases exercise the driver's consumer-side contract rather than a fixture.
  * `mutate` receives the attempt directory after the clean attempt is written.
  */
@@ -525,7 +522,7 @@ test('a clean attempt is accepted and carries an explicit evidence-integrity con
 
 test("the guard's evidence-failed marker disqualifies an otherwise clean attempt", () => {
   withAttemptDir((dir) => {
-    // The guard's own marker shape (`nexus-request-guard-evidence-failed/1`): a
+    // why: The guard's own marker shape (`nexus-request-guard-evidence-failed/1`): a
     // denied record could not be persisted, so the attempt's counts cannot be
     // believed even though they look perfect.
     writeFileSync(
@@ -547,7 +544,7 @@ test("the guard's evidence-failed marker disqualifies an otherwise clean attempt
         return true;
       },
     );
-    // A foreign or unreadable payload still reports as present — presence is the
+    // why: A foreign or unreadable payload still reports as present — presence is the
     // signal, never the decodability of the marker.
     writeFileSync(join(dir, 'evidence-failed'), 'not json');
     assert.throws(
@@ -588,7 +585,7 @@ test('a degraded preload (non-empty problems, e.g. a replaceable fetch) disquali
 test('a truncated record is skipped while the attempt runs and disqualifies it at rest', () => {
   withAttemptDir((dir, events) => {
     writeFileSync(join(events, `denied-${process.pid}-8-abcdef14.json`), '');
-    // Mid-run: the only in-progress state a single exclusive write can leave.
+    // why: Mid-run: the only in-progress state a single exclusive write can leave.
     assert.equal(readAttemptDir(dir).admitted, 1);
     assert.throws(
       () => readAttemptDir(dir, { final: true }),
@@ -652,17 +649,17 @@ test('an explicitly selected live attempt requires an inherited channel name wit
   assert.equal(assertLiveCredentialChannel(named), named);
 });
 
-/** Fixed mtime shared by both sides of an artifact swap. */
+/** note: Fixed mtime shared by both sides of an artifact swap. */
 const PINNED_MTIME = new Date('2026-01-02T03:04:05.000Z');
 
-/** (Re)write `path` at a pinned size and mtime, so only its content differs. */
+/** why: (Re)write `path` at a pinned size and mtime, so only its content differs. */
 function writePinnedArtifact(path, size, fill) {
   writeFileSync(path, Buffer.alloc(size, fill));
   utimesSync(path, PINNED_MTIME, PINNED_MTIME);
 }
 
 test('a same-size same-mtime large artifact with different content is not the same artifact', async () => {
-  // Just past the old 8 MiB hash cap: the identity the issue named, which used
+  // why: Just past the old 8 MiB hash cap: the identity the issue named, which used
   // to be size + mtime only and let an equal-shape replacement pass.
   const dir = mkdtempSync(join(tmpdir(), 'pfw-artifact-identity-'));
   const path = join(dir, 'cli.bin');
@@ -678,7 +675,7 @@ test('a same-size same-mtime large artifact with different content is not the sa
     assert.notEqual(current.sha256, recorded.sha256);
     assert.equal(sameArtifact(recorded, current), false);
 
-    // Identical content still passes, whatever the mtime says.
+    // note: Identical content still passes, whatever the mtime says.
     writePinnedArtifact(path, size, 0x61);
     assert.equal(sameArtifact(recorded, await artifactIdentity(path)), true);
   } finally {
@@ -696,10 +693,9 @@ test('a small artifact identity is unchanged: path, size, mtime and a streamed d
     assert.equal(identity.present, true);
     assert.equal(identity.bytes, 64);
     assert.equal(identity.mtime_ms, PINNED_MTIME.getTime());
-    // Exact digest for a known fixture (64 bytes of 0x61) — a behavioral check
+    // why: Exact digest for a known fixture (64 bytes of 0x61) — a behavioral check
     // that the streamed hash really covers the bytes, independent of key order.
     assert.equal(identity.sha256, 'ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb');
-    // An absent optional artifact still records its absence rather than throwing.
     assert.deepEqual(await artifactIdentity(absent, { required: false }), { path: absent, present: false });
     assert.equal(sameArtifact({ path, present: false }, { path, present: false }), true);
   } finally {
@@ -708,7 +704,7 @@ test('a small artifact identity is unchanged: path, size, mtime and a streamed d
 });
 
 test('a receipt recorded before artifact digests existed is stale, and the deterministic re-run is the remedy', () => {
-  // The pre-change receipt carried `sha256: null` for a large artifact; the
+  // why: The pre-change receipt carried `sha256: null` for a large artifact; the
   // re-check must treat it as stale (receipt_mismatch -> re-run) rather than as
   // an authorization or a silent pass.
   const stale = { path: '/tmp/cli.bin', present: true, bytes: 9, mtime_ms: 1, sha256: null };

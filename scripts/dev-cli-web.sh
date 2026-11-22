@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local dev shortcut: standalone TS service + Web dev server.
+# note: Local dev launcher for the standalone TS service + Web dev server.
 #
 #   pnpm dev
 #
@@ -30,7 +30,7 @@ eval "$(node scripts/dev-backend-manifest.mjs --preflight)"
 PORT="${NEXUS42_DAEMON_PORT}"
 BASE_URL="${VITE_DAEMON_URL%/}"
 
-# ── 1. Native artifact must already be built (zero Cargo on this path). ─────
+# why: native artifact must already be built; this path runs zero Cargo.
 NODE_ARCH="$(node -p "process.platform === 'darwin' ? 'darwin-' + process.arch : (process.platform === 'win32' ? 'win32-x64-msvc' : process.platform + '-' + (process.arch === 'x64' ? 'x64-gnu' : process.arch))")"
 ARTIFACT="${REPO_ROOT}/packages/nexus-native-${NODE_ARCH}/native/nexus_core_node.node"
 if [ ! -f "${ARTIFACT}" ]; then
@@ -40,12 +40,12 @@ if [ ! -f "${ARTIFACT}" ]; then
 fi
 echo "==> native artifact (${ARTIFACT})"
 
-# ── 2. Standalone TS service on the loopback endpoint. ──────────────────────
+# note: step 2 — standalone TS service on the loopback endpoint.
 echo "==> service endpoint ${BASE_URL}"
 SERVICE_ROOT="${REPO_ROOT}/apps/nexus-service"
 SERVICE_LOG="${REPO_ROOT}/.dev/nexus-service.log"
 
-# The one-time bootstrap URL carries an access token; the service log is only
+# why: the one-time bootstrap URL carries an access token; the service log is only
 # the transport this script reads it through. Drop that boot line once read so
 # no token outlives its single use on disk (auth-session invariant: no token is
 # persisted). The directory itself is owner-only.
@@ -64,7 +64,7 @@ if [ ! -f "${SERVICE_ROOT}/dist/main.js" ]; then
 fi
 
 SERVICE_PID=""
-# Health must be the standalone TS service, not any old daemon: the
+# why: health must be the standalone TS service, not any old daemon. The
 # unguarded daemon/status envelope carries the TS-only implementation_scope.
 health_ok() {
   node --input-type=module -e "
@@ -103,7 +103,7 @@ else
   echo "    service healthy (pid ${SERVICE_PID})"
 fi
 
-# Browser access (access spec §3.1): the tokenized URL from the LATEST service
+# note: browser access (access spec §3.1) — the tokenized URL from the LATEST service
 # boot in the log. Tokens are single-use, so an earlier run's line is dead and
 # only the last match is useful. Dev serves the SPA through Vite, so the
 # service never auto-opens a browser here; the link is surfaced to copy.

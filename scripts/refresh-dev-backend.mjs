@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Explicit backend refresh entry — the only ordinary DX path that may run Cargo build/codegen. */
+/** note: Explicit backend refresh entry — the only ordinary DX path that may run Cargo build/codegen. */
 import { resolve } from 'node:path';
 import {
   defaultArtifactPath,

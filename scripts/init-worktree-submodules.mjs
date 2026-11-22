@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * G1 — initialize and validate linked-worktree submodule metadata with native Git.
+ * note: G1 — initialize and validate linked-worktree submodule metadata with native Git.
  *
  * Native Git owns submodule metadata: every checkout gets its own administrative
  * directory (`.git/worktrees/<name>/modules/<submodule>`), its own index and its
@@ -115,7 +115,7 @@ async function runGit(cwd, args) {
     const { stdout } = await execFileAsync('git', args, {
       cwd,
       encoding: 'utf8',
-      // No optional index refreshes (validating must not rewrite an index) and
+      // why: no optional index refreshes (validating must not rewrite an index) and
       // no interactive credential prompt (this tool is not an authentication UI).
       env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
       maxBuffer: 32 * 1024 * 1024,
@@ -139,7 +139,7 @@ async function gitOut(cwd, args, owner) {
 }
 
 function parseArgs(argv) {
-  // Help is a standalone mode: anywhere else the token is just an unknown
+  // why: help is a standalone mode; anywhere else the token is just an unknown
   // argument, so a stray `--help` can never silently swallow the rest.
   if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) return { help: true };
   let worktree;
@@ -203,7 +203,7 @@ async function readDeclaredModules(repoDir, owner) {
 /**
  * Read one repository's index and fail closed on a submodule-relevant conflict.
  *
- * This deliberately does not depend on the `.gitmodules` file existing in the
+ * why: this deliberately does not depend on the `.gitmodules` file existing in the
  * working tree. An index that still carries an unmerged `.gitmodules` entry or an
  * unmerged gitlink describes a conflict that was never resolved, and
  * `readDeclaredModules` cannot see it once the file is gone. Returns the
@@ -294,7 +294,7 @@ async function validateSubmodule(record, worktreeGitDir, owner) {
   if (unmerged !== '') {
     throw new RefusalError(`${owner}: submodule '${record.path}' at ${record.dir} has unmerged index entries; resolve the conflict before initializing submodules`);
   }
-  // --ignore-submodules keeps a deliberately different submodule HEAD (and a
+  // why: --ignore-submodules keeps a deliberately different submodule HEAD (and a
   // not-yet-initialized nested submodule) out of the dirt verdict; the nested
   // submodule is judged by its own validated state.
   const dirty = firstLine(await gitOut(record.dir, ['status', '--porcelain', '--ignore-submodules=all'], owner));
@@ -403,7 +403,7 @@ function groupMissing(records, checkout) {
   }
   const groupsToInitialize = [];
   for (const group of groups.values()) {
-    // Only missing top-level entries are targeted; `--recursive` covers nested
+    // why: only missing top-level entries are targeted; `--recursive` covers nested
     // ones, and an already initialized submodule is never passed to Git.
     const entries = group.entries.filter(({ record }) =>
       !group.entries.some(other => other.record !== record && record.path.startsWith(`${other.record.path}/`)));
@@ -415,7 +415,7 @@ function groupMissing(records, checkout) {
 async function initializeMissing(groups, mutation) {
   for (const group of groups) {
     const paths = group.entries.map(entry => entry.relInRepo);
-    // From here on a mutating command is issued, so this run can no longer claim it did nothing on a
+    // why: from here on a mutating command is issued, so this run can no longer claim it did nothing on a
     // failure. The flag is set BEFORE the command runs because a native command that fails part-way
     // through its own work has still changed the tree; it does not by itself mean something is
     // initialized (the command can complete no submodule at all), which is why the refusal class is
@@ -429,7 +429,7 @@ async function initializeMissing(groups, mutation) {
 }
 
 /**
- * Which submodule paths are initialized in the checkout at the moment of a failure, observed by a
+ * why: which submodule paths are initialized in the checkout at the moment of a failure, observed by a
  * read-only re-inspection rather than inferred from this run's own bookkeeping — a native command
  * that failed part-way through its work leaves state that no bookkeeping recorded. `null` means the
  * re-inspection itself could not be completed, which is reported as an unknown state, never as an
@@ -449,7 +449,7 @@ function writeStdout(value) {
 }
 
 /**
- * The one refusal report. The class follows the checkout as re-observed after the failure, not this
+ * invariant: the one refusal report class follows the checkout as re-observed after the failure, not this
  * run's intent: `init.refuse.partial` means at least one submodule is initialized there and
  * `initialized_paths` lists those paths, while `init.refuse.preflight` means the report names no
  * initialized path — no mutation was attempted, or the attempted command completed no submodule —
@@ -480,7 +480,7 @@ async function run() {
   }
   const worktree = await canonicalize(options.worktree);
   if (!worktree) return await refusal(options.worktree, `not an existing path: ${options.worktree}`, { attempted: false });
-  // `attempted` records that a mutating command was issued; it does not decide the refusal class,
+  // why: `attempted` records that a mutating command was issued; it does not decide the refusal class,
   // which is read from the checkout re-observed after a failure (see `refusal`).
   const mutation = { attempted: false };
   try {
@@ -521,7 +521,7 @@ async function run() {
     return 0;
   } catch (error) {
     if (error instanceof RefusalError) return await refusal(worktree, error.message, mutation);
-    // Every other operational failure keeps the documented stdout contract too:
+    // invariant: every other operational failure keeps the documented stdout contract too:
     // the refusal object is still the only thing on stdout and the exit code is
     // 1, never a bare stack with empty stdout. Invalid invocation is unaffected
     // because parseArgs runs before this block and throws UsageError (exit 2).
@@ -537,7 +537,7 @@ try {
     process.stderr.write(`init-worktree-submodules: ${error.message}\n\n${USAGE}`);
     process.exitCode = 2;
   } else {
-    // Backstop for a failure `run()` could not report itself, i.e. writing the
+    // why: backstop for a failure `run()` could not report itself, i.e. writing the
     // refusal object was impossible too (for example stdout is already gone).
     // Operational failures inside `run()` are normalized into that JSON object.
     process.stderr.write(`init-worktree-submodules: fatal: ${error?.stack ?? error}\n`);

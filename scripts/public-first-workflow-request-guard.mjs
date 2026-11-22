@@ -2,6 +2,9 @@
  * P3-T3 upstream request-budget guard — v1.195 current-host contracts §6.3 (local
  * record); tracked pattern: `.agents/knowledge/workflow-patterns/single-live-action-request-guard.md`.
  *
+ * note: the contract pointers and evidence schemas below are normative; drift in
+ * either is what the tests assert literally.
+ *
  * This file is a **Node ESM preload**, not a library: loading it installs the
  * ceiling in the current process, and it exports nothing. The supported load
  * mechanism is the one the contract fixes — the driver puts
@@ -106,44 +109,42 @@ import {
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 
-/** Event file schema identifier. */
 const EVENT_SCHEMA = 'nexus-request-guard-event/1';
-/** Consumed-slot file schema identifier. */
 const SPENT_SCHEMA = 'nexus-request-guard-spent/1';
-/** Fixed basename of the consumed slot inside the attempt directory. */
+/** note: fixed basename of the consumed slot inside the attempt directory. */
 const SPENT_NAME = 'spent';
-/** Marker file schema written when evidence could not be persisted. */
+/** note: marker file schema written when evidence could not be persisted. */
 const MARKER_SCHEMA = 'nexus-request-guard-evidence-failed/1';
-/** Fixed basename of the terminal evidence-failure marker. */
+/** note: fixed basename of the terminal evidence-failure marker. */
 const MARKER_NAME = 'evidence-failed';
-/** Exit code used when the child must die rather than continue unrecorded. */
+/** note: exit code used when the child must die rather than continue unrecorded. */
 const UNRECORDABLE_EXIT_CODE = 78;
-/** Marker `reason` labels (fixed vocabulary). */
+/** note: marker `reason` labels (fixed vocabulary). */
 const MARKER_REASONS = Object.freeze({
   eventWriteFailed: 'event_write_failed',
   fetchNotReplaceable: 'fetch_not_replaceable',
 });
 /** The only model path this guard ever admits (contract §6.3 item 2). */
 const MODEL_PATH = '/chat/completions';
-/** Category recorded with the single admitted request. */
+/** note: category recorded with the single admitted request. */
 const ADMITTED_CATEGORY = 'model_request_admitted';
-/** Category recorded by every process that loads the guard. */
+/** note: category recorded by every process that loads the guard. */
 const LOADED_CATEGORY = 'guard_loaded';
-/** Attempt-directory permission bits other than the owner's must be clear. */
+/** invariant: attempt-directory permission bits other than the owner's must be clear. */
 const OWNER_ONLY_MASK = 0o077;
-/** Hostnames whose cleartext origin is the deterministic loopback test origin. */
+/** note: hostnames whose cleartext origin is the deterministic loopback test origin. */
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '[::1]', '::1']);
-/** Bound on the walk from the dsh entry up to its package root. */
+/** note: bound on the walk from the dsh entry up to its package root. */
 const MAX_PACKAGE_WALK = 12;
 
-/** The exact environment contract; no other variable is read. */
+/** invariant: the exact environment contract; no other variable is read. */
 const ENV_KEYS = Object.freeze({
   attemptDir: 'NEXUS_WORKFLOW_ATTEMPT_DIR',
   allowedUrl: 'NEXUS_WORKFLOW_ALLOWED_URL',
   dshRealpath: 'NEXUS_WORKFLOW_DSH_REALPATH',
 });
 
-/** The complete denial-category vocabulary (short, fixed, secret-free). */
+/** note: the complete denial-category vocabulary (short, fixed, secret-free). */
 const DENY = Object.freeze({
   malformedEnv: 'malformed_env',
   attemptDirMissing: 'attempt_dir_missing',
@@ -160,7 +161,7 @@ const DENY = Object.freeze({
 });
 
 /**
- * Fixed `problems` labels that make the whole configuration malformed: with any
+ * why: fixed `problems` labels that make the whole configuration malformed: with any
  * of them present the guard cannot establish what to admit at all, so the
  * request is denied as `malformed_env` rather than being classified.
  */
@@ -185,9 +186,8 @@ const IS_NODE =
   process.versions !== null &&
   typeof process.versions.node === 'string';
 
-/** Denial surfaced to the caller as a rejected `fetch`. */
+/** note: denial surfaced to the caller as a rejected `fetch`. */
 class RequestGuardDenied extends Error {
-  /** @param {string} category fixed denial category */
   constructor(category) {
     super(`nexus request guard denied (${category})`);
     this.name = 'NexusRequestGuardError';
@@ -195,12 +195,10 @@ class RequestGuardDenied extends Error {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Configuration resolution (all of it, once, before the ceiling is installed)
-// ---------------------------------------------------------------------------
+// note: configuration resolution — all of it, once, before the ceiling is installed.
 
 /**
- * Read the three contract variables. Only the NAME is dereferenced; no other
+ * invariant: only the three contract variable names are dereferenced; no other
  * variable (and never a credential-shaped one) is touched.
  */
 function readGuardEnv() {
@@ -217,7 +215,6 @@ function readGuardEnv() {
   return { values, problems };
 }
 
-/** Canonical real path of a filesystem path, or null when it does not resolve. */
 function canonicalPath(value) {
   try {
     return realpathSync(isAbsolute(value) ? value : resolve(value));
@@ -226,7 +223,6 @@ function canonicalPath(value) {
   }
 }
 
-/** The directory of the nearest enclosing `package.json`, or null. */
 function packageRootOf(filePath) {
   let current = dirname(filePath);
   for (let depth = 0; depth < MAX_PACKAGE_WALK; depth += 1) {
@@ -239,7 +235,7 @@ function packageRootOf(filePath) {
 }
 
 /**
- * Classify the process that loaded this guard by the identity of its entry
+ * why: classify the process that loaded this guard by the identity of its entry
  * module (`process.argv[1]`), canonicalized so an npm bin symlink resolves to
  * the installed entry the driver recorded.
  *
@@ -263,7 +259,6 @@ function classifyRuntime(dshCanonical) {
   };
 }
 
-/** Canonical real path of this process's entry module, or null. */
 function resolveObservedEntry() {
   if (!IS_NODE || !Array.isArray(process.argv)) return null;
   const entry = process.argv[1];
@@ -272,7 +267,7 @@ function resolveObservedEntry() {
 }
 
 /**
- * The attempt directory must already exist, be owned by this user and carry no
+ * why: the attempt directory must already exist, be owned by this user and carry no
  * group/other permission bits. The guard never creates it: that is what makes
  * "a second run cannot recreate the evidence directory" true.
  */
@@ -295,7 +290,7 @@ function validateAttemptDir(dir) {
 }
 
 /**
- * The selected URL must be an absolute URL addressed at the pinned model path,
+ * why: the selected URL must be an absolute URL addressed at the pinned model path,
  * with no userinfo, query or fragment. Its canonical `href` is then the exact
  * string an incoming request has to equal.
  *
@@ -327,14 +322,14 @@ function validateAllowedUrl(raw) {
   return { href: url.href, problem: null };
 }
 
-/** Is this the deterministic loopback origin (`127.0.0.0/8`, `localhost`, `::1`)? */
+/** note: is this the deterministic loopback origin (`127.0.0.0/8`, `localhost`, `::1`)? */
 function isLoopbackHostname(hostname) {
   if (LOOPBACK_HOSTNAMES.has(hostname)) return true;
   return /^127(\.\d{1,3}){3}$/.test(hostname);
 }
 
 /**
- * Resolve the whole configuration. Every problem is collected (the `loaded`
+ * note: resolve the whole configuration. Every problem is collected (the `loaded`
  * event reports all of them); the first one in priority order becomes the
  * denial category for an attempted fetch.
  */
@@ -363,8 +358,8 @@ function initialize() {
   const { values, problems } = readGuardEnv();
   state.problems.push(...problems);
 
-  // Runtime identity. An unresolved recorded entry means the identity itself is
-  // unknown — a configuration failure, never an admission.
+  // why: an unresolved recorded entry means the identity itself is unknown — a
+  // configuration failure, never an admission.
   let dshCanonical = null;
   if (values.dshRealpath !== undefined) {
     if (!isAbsolute(values.dshRealpath)) {
@@ -378,7 +373,7 @@ function initialize() {
   state.runtime = runtime.runtime;
   state.foreignCategory = runtime.foreignCategory ?? DENY.foreignRuntime;
 
-  // Attempt directory: validated, never created.
+  // invariant: attempt directory is validated, never created.
   let dirCategory = null;
   if (values.attemptDir !== undefined) {
     const dir = validateAttemptDir(values.attemptDir);
@@ -397,7 +392,6 @@ function initialize() {
     }
   }
 
-  // Selected URL.
   if (values.allowedUrl !== undefined) {
     const allowed = validateAllowedUrl(values.allowedUrl);
     if (allowed.href === null) state.problems.push(allowed.problem);
@@ -411,12 +405,10 @@ function initialize() {
   return state;
 }
 
-// ---------------------------------------------------------------------------
-// Evidence (best effort on `loaded`, mandatory before an admission)
-// ---------------------------------------------------------------------------
+// note: evidence is best effort on `loaded` and mandatory before an admission.
 
 /**
- * Write one event file. Returns whether the evidence exists; the caller decides
+ * note: write one event file. Returns whether the evidence exists; the caller decides
  * what a failure means. An event is written once with `wx` and never rewritten.
  */
 function writeEvent(state, kind, category, problems = null) {
@@ -440,7 +432,7 @@ function writeEvent(state, kind, category, problems = null) {
 }
 
 /**
- * Best-effort terminal marker. Its presence is what disqualifies the attempt,
+ * why: best-effort terminal marker. Its presence is what disqualifies the attempt,
  * so it is written once with `wx` (an existing marker already says exactly this)
  * and it never carries anything derived from a request. Returns false when no
  * marker exists and none could be written — the caller must then stop the child.
@@ -469,7 +461,7 @@ function writeMarker(state, kind, reason) {
 }
 
 /**
- * Stop the child when the guard can neither record the attempt nor hold the
+ * why: stop the child when the guard can neither record the attempt nor hold the
  * ceiling. Nothing here may be catchable: `process.exit` cannot be intercepted
  * by the runtime, and the signal fallback covers the case where it returns.
  */
@@ -477,17 +469,17 @@ function terminateUnrecordable() {
   try {
     process.exit(UNRECORDABLE_EXIT_CODE);
   } catch {
-    // fall through to the unconditional signal
+    // note: fall through to the unconditional signal
   }
   try {
     process.kill(process.pid, 'SIGKILL');
   } catch {
-    // nothing further is available; the exit above is the last resort
+    // note: nothing further is available; the exit above is the last resort
   }
 }
 
 /**
- * Terminal tainted state: this attempt can never be qualified and no further
+ * why: terminal tainted state — this attempt can never be qualified and no further
  * request may be dispatched. The marker is the durable signal the consumer
  * checks; when even the marker cannot be written the child is terminated, so a
  * rejection the runtime catches can never leave a run looking green.
@@ -500,7 +492,7 @@ function taint(state, kind, reason) {
 }
 
 /**
- * Persist one event, treating a real write failure as terminal for the attempt.
+ * why: persist one event, treating a real write failure as terminal for the attempt.
  * A missing evidence channel is not a write failure: it only happens when the
  * configuration was already refused (no admission is possible then, because an
  * admission requires this very write to succeed).
@@ -512,7 +504,7 @@ function persistEvent(state, kind, category, problems = null) {
 }
 
 /**
- * Take the single slot of this attempt. `wx` is an exclusive create, atomic
+ * why: take the single slot of this attempt. `wx` is an exclusive create, atomic
  * across processes; an existing slot is the second attempt and is denied
  * without any further inspection. The slot is never created, deleted or
  * recreated anywhere else in this file.
@@ -541,7 +533,7 @@ function spend(state) {
       }
       return DENY.filesystemError;
     }
-    // A short write (storage filling) must never be synced as if complete: the
+    // invariant: a short write (storage filling) must never be synced as if complete: the
     // payload is ASCII by construction, so the byte count is its length.
     let written = 0;
     while (written < payload.length) {
@@ -549,7 +541,7 @@ function spend(state) {
       if (!(bytes > 0)) return DENY.filesystemError;
       written += bytes;
     }
-    // `wx` survives a process crash; only an fsync makes the token survive
+    // why: `wx` survives a process crash; only an fsync makes the token survive
     // power loss.
     fsyncSync(fd);
     try {
@@ -557,7 +549,7 @@ function spend(state) {
     } finally {
       fd = null;
     }
-    // The file is durable only once its directory entry is synced as well, and
+    // why: the file is durable only once its directory entry is synced as well, and
     // that directory is durable only once ITS entry in the parent is synced: a
     // power loss right after creation can otherwise erase a fresh attempt
     // directory and the spent slot with it (I-000120). POSIX only: Windows
@@ -585,18 +577,16 @@ function spend(state) {
       try {
         closeSync(fd);
       } catch {
-        // The denial fails closed; the slot stays spent either way.
+        // invariant: the denial fails closed; the slot stays spent either way.
       }
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Request classification (decides before any I/O)
-// ---------------------------------------------------------------------------
+// note: request classification decides before any I/O.
 
 /**
- * Classify one `fetch(input, init)` call against the pinned URL and method.
+ * why: classify one `fetch(input, init)` call against the pinned URL and method.
  * Returns the denial category, or null when the call may be admitted. Nothing
  * about the request is otherwise read, copied or recorded.
  */
@@ -634,18 +624,14 @@ function classifyRequest(state, input, init) {
   return null;
 }
 
-/** The forwarded init: the caller's objects, with `redirect` forced to `error`. */
+/** note: the forwarded init — the caller's objects, with `redirect` forced to `error`. */
 function forwardedInit(init) {
   if (init === undefined || init === null) return { redirect: 'error' };
   return { ...init, redirect: 'error' };
 }
 
-// ---------------------------------------------------------------------------
-// Installation
-// ---------------------------------------------------------------------------
-
 /**
- * Install the ceiling. `fetch` becomes a non-configurable accessor whose getter
+ * why: install the ceiling. `fetch` becomes a non-configurable accessor whose getter
  * always answers the guarded function: an assignment from a later polyfill is
  * ignored (it cannot silently drop the ceiling and it cannot crash dsh either),
  * while `delete`/`defineProperty` fail closed. An absent `globalThis.fetch` is
@@ -663,7 +649,7 @@ function installGuard(state) {
       return new RequestGuardDenied(category);
     };
     if (!state.transportOk) throw deny(DENY.unsupportedTransport);
-    // Once evidence is broken nothing may be dispatched again: the attempt is
+    // why: once evidence is broken nothing may be dispatched again — the attempt is
     // already disqualified, and an admission could no longer be recorded.
     if (state.tainted) throw deny(DENY.evidenceWriteFailed);
     if (state.configError === DENY.malformedEnv) throw deny(DENY.malformedEnv);
@@ -673,7 +659,7 @@ function installGuard(state) {
     if (requestDenial !== null) throw deny(requestDenial);
     const spendFailure = spend(state);
     if (spendFailure !== null) throw deny(spendFailure);
-    // No dispatch without a persisted admission record: a run whose evidence is
+    // invariant: no dispatch without a persisted admission record — a run whose evidence is
     // incomplete must never be readable as a qualified one.
     if (!persistEvent(state, 'admitted', ADMITTED_CATEGORY)) throw deny(DENY.evidenceWriteFailed);
     return captured(input, forwardedInit(init));
@@ -687,7 +673,7 @@ function installGuard(state) {
       set: () => {},
     });
   } catch {
-    // Something already installed `fetch` as a non-configurable property, so
+    // why: something already installed `fetch` as a non-configurable property, so
     // the ceiling cannot be locked. An installable-but-replaceable wrapper would
     // be a silent bypass: a later assignment would drop the guard entirely, and
     // a run could then be authorized by evidence produced before the drop. The
@@ -701,7 +687,7 @@ function installGuard(state) {
 
 const guardState = initialize();
 installGuard(guardState);
-// The loaded handshake is part of the evidence: if it cannot be persisted the
+// why: the loaded handshake is part of the evidence; if it cannot be persisted the
 // attempt is tainted (and the child terminated when the marker cannot be
 // written either), so a missing handshake can never be mistaken for a clean run.
 persistEvent(guardState, 'loaded', LOADED_CATEGORY, guardState.problems);

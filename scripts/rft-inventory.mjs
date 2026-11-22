@@ -1,4 +1,4 @@
-/** Repository-specific RFT disposition collector. No product effects or network access. */
+/** note: Repository-specific RFT disposition collector. No product effects or network access. */
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -31,7 +31,7 @@ export function parseFlags(args) {
 export function identity({ kind, source_path = '', symbol_or_route, feature_condition = 'all', alias_of = null }) {
   const symbol = Array.isArray(symbol_or_route) ? symbol_or_route.join(' ') : symbol_or_route.trim().replace(/\s+/g, ' ');
   const features = sorted(feature_condition.split('+').map(value => value.trim())).join('+');
-  // Callable identity is a full clap path, never a variant name or leaf count.
+  // why: Callable identity is a full clap path, never a variant name or leaf count.
   const source = ['callable', 'route'].includes(kind) ? '' : source_path;
   return `${kind}:${hash(JSON.stringify([source, symbol, features, alias_of])).slice(0, 24)}`;
 }
@@ -102,7 +102,7 @@ export function rustTokens(source) {
 
 const values = tokens => tokens.map(token => token.string ? JSON.stringify(token.value) : token.value).join(' ');
 
-/** Evaluate cfg with test seams disabled; other build predicates remain unknown. */
+/** note: Evaluate cfg with test seams disabled; other build predicates remain unknown. */
 function productionCfg(tokens, start, end) {
   const name = tokens[start]?.value;
   if (end - start === 1 && name === 'test') return false;
@@ -184,7 +184,7 @@ export function completionPaths(completion) {
   const walk = (key, path, ancestry) => {
     if (ancestry.includes(key)) throw new Error(`Cyclic clap completion key: ${key}`);
     for (const child of edges.get(key) ?? []) {
-      // clap-generated help mirrors the entire tree, not another product command.
+      // why: clap-generated help mirrors the entire tree, not another product command.
       if (child.name === 'help') continue;
       const next = [...path, child.name];
       result.push({ path: next, key: child.key, leaf: !(edges.get(child.key) ?? []).some(edge => edge.name !== 'help') });
@@ -260,7 +260,7 @@ export function routerRegistrations(source) {
       i = end;
     }
   };
-  // The final binding composes runtime_routes and protected_routes. The release
+  // why: The final binding composes runtime_routes and protected_routes. The release
   // fallback shadows it later but does not unregister either lane.
   const composition = root.body.match(/let router = Router::new\(\)[\s\S]*?;/)?.[0];
   if (!composition) throw new Error('Unresolved final router composition');
@@ -455,7 +455,7 @@ function row(kind, source_path, symbol_or_route, extra = {}) {
   return value;
 }
 
-/** Follow declared modules, not every .rs file (standalone test modules are not production). */
+/** why: Follow declared modules, not every .rs file (standalone test modules are not production). */
 async function moduleClosure(root, entries) {
   const sources = new Map();
   const visit = async (path, moduleDir) => {
@@ -487,7 +487,7 @@ function sqlTables(source) {
     if (!token.string) continue;
     const sql = token.value.replace(/--[^\n]*/g, '');
     for (const match of sql.matchAll(/\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM|FROM|JOIN)\s+["`]?([a-z_][a-z_0-9]*)/gi)) {
-      // A SQL string, not arbitrary diagnostic prose containing “from …”.
+      // note: A SQL string, not arbitrary diagnostic prose containing “from …”.
       if (/^\s*(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|CREATE|ALTER|DROP)\b/i.test(sql)) result.push(match[1]);
     }
   }
@@ -562,7 +562,7 @@ export async function collectInventory({ baseline, inventoriesDir }) {
     const report = JSON.parse(source);
     if (!Array.isArray(report.files) || typeof report.report !== 'string') throw new Error(`Invalid static inventory: ${path}`);
     provenance.push({ input: `${name}.json`, sha256: hash(source), file_rows: report.files.length });
-    // Preserve every prose row. Historical destinations are evidence, not the locked vocabulary.
+    // invariant: Preserve every prose row. Historical destinations are evidence, not the locked vocabulary.
     for (const [index, claim] of report.report.split(/\n\n+/).entries()) {
       add(row('report-evidence', `${name}.json`, `paragraph:${index + 1}`, { evidence_class: 'scout-snapshot-not-exhaustive', support_state: 'historical-evidence', claim, retirement_gate: 'Evidence only; current declarations and rust-core-service-boundary §7.5 override historical counts/destinations' }));
     }
@@ -609,7 +609,7 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   note('wrappers-and-presets', 'Args wrappers and unregistered KbDaemonCommand do not add public paths; cfg(test) parser wrappers are excluded. creator run is one dynamic manifest entry, not a hardcoded preset tree.');
   note('historical-destinations', 'Scouts assign contradictory historical RFT keys. All current rows use rust-core-service-boundary §7.5; Works list/status/use remain RFT-08 basic reads.');
 
-  // v1.193 P2 retired the entire Rust daemon composition: the
+  // why: v1.193 P2 retired the entire Rust daemon composition: the
   // `nexus-daemon-runtime` crate (its `create_router` route table, handlers,
   // middleware, capability registry and boot tasks), the app-only
   // `basic-cli` / `legacy-cli` / `web-embed` / `connect-client` /

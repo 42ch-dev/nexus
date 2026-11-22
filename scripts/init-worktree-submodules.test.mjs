@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Focused contract tests for the G1 linked-worktree submodule initializer.
+ * note: Focused contract tests for the G1 linked-worktree submodule initializer.
  *
  *   node --test scripts/init-worktree-submodules.test.mjs
  *
@@ -65,7 +65,7 @@ exec sh -c "$*"
 `;
 
 /**
- * Git plumbing that writes index entries (`update-index --index-info`) reads its
+ * why: Git plumbing that writes index entries (`update-index --index-info`) reads its
  * payload from stdin, which `execFile` cannot feed.
  */
 function runWithInput(file, args, options, input) {
@@ -108,7 +108,7 @@ function firstLine(text) {
 function record(label, command, result) {
   const stdout = result.stdout.trim() === '' ? '' : ` | stdout: ${result.stdout.trim().split('\n').join(' ; ')}`;
   const stderr = result.stderr.trim() === '' ? '' : ` | stderr: ${firstLine(result.stderr)}`;
-  // Evidence lines go to stdout, which is what a transcript captures; `console` is not allowed here.
+  // why: Evidence lines go to stdout, which is what a transcript captures; `console` is not allowed here.
   process.stdout.write(`EVIDENCE ${label}: ${command} => exit ${result.code}${stdout}${stderr}\n`);
 }
 
@@ -136,7 +136,7 @@ class WorktreeFixture {
     this.superproject = join(root, 'superproject');
     this.worktreesRoot = join(this.superproject, '.worktrees');
     this.extraWorktrees = [];
-    // Hermetic and clean: the fixture's own ssh transport, no user git config,
+    // why: Hermetic and clean: the fixture's own ssh transport, no user git config,
     // no protocol override, no index side effects, no credential prompt.
     this.env = {
       ...process.env,
@@ -185,7 +185,6 @@ class WorktreeFixture {
     return await run(process.execPath, [SCRIPT, ...args], { cwd: this.root, env: this.env });
   }
 
-  /** Git plumbing whose payload arrives on stdin (index stages). */
   async gitInput(args, input) {
     const result = await run('git', args, { cwd: this.superproject, env: this.env, input });
     assert.equal(result.ok, true, `git ${args.join(' ')} failed: ${firstLine(result.stderr)}`);
@@ -209,7 +208,7 @@ class WorktreeFixture {
     this.nestedPinned = await this.head(this.nestedOrigin);
 
     await this.gitOk(['init', '-q', '--initial-branch=main', this.subOrigin], { cwd: this.root });
-    // Both commits keep the nested submodule registered, so checking out the
+    // why: Both commits keep the nested submodule registered, so checking out the
     // older commit leaves a clean working tree (only its content differs).
     await writeFile(join(this.subOrigin, 'sub.txt'), 'sub one\n');
     await writeFile(join(this.subOrigin, '.gitmodules'), this.modulesEntry('nested', 'nested', this.nestedOrigin));
@@ -228,14 +227,14 @@ class WorktreeFixture {
     await this.gitOk(['update-index', '--add', '--cacheinfo', `${GITLINK_MODE},${this.subPinned},sub`]);
     await this.gitOk(['add', '.gitmodules']);
     await this.gitOk(['commit', '-q', '-m', 'register submodule']);
-    // Main keeps its own native metadata: the fixture needs one real main
+    // why: Main keeps its own native metadata: the fixture needs one real main
     // pointer to reproduce the copied-pointer failure and to compare checkouts.
     await this.gitOk(['submodule', 'update', '--init', '--recursive']);
     await this.gitOk(['worktree', 'add', '-q', this.worktree(FEATURE_A), '-b', FEATURE_A]);
     await this.gitOk(['worktree', 'add', '-q', this.worktree(FEATURE_B), '-b', FEATURE_B]);
   }
 
-  /** Linked worktree outside `<main>/.worktrees/`, created by the location test. */
+  /** note: Linked worktree outside `<main>/.worktrees/`, created by the location test. */
   async addNonCanonicalWorktree() {
     const path = join(this.root, 'linked-elsewhere');
     const branch = 'fixture-elsewhere';
@@ -253,7 +252,7 @@ class WorktreeFixture {
       if (!existsSync(worktree.path)) {
         continue;
       }
-      // Restore fixture state first (recorded submodule pins, and the file edits
+      // why: Restore fixture state first (recorded submodule pins, and the file edits
       // this file's tests create) so an earlier assertion failure cannot leave
       // the fixture unrestorable. Failures are reported, never swallowed.
       const restorePins = await this.git(['-C', worktree.path, 'submodule', 'update', '--init', '--recursive']);
@@ -277,7 +276,7 @@ class WorktreeFixture {
       if (!deinit.ok) {
         failures.push(`submodule deinit --all failed in ${worktree.path}: ${firstLine(deinit.stderr)}`);
       }
-      // Git 2.54 refuses non-force `worktree remove` for any worktree whose
+      // why: Git 2.54 refuses non-force `worktree remove` for any worktree whose
       // tree contains submodules ("working trees containing submodules cannot
       // be moved or removed") even after deinit. The attempt is kept as
       // evidence, and the PM-authorized fallback for this disposable fixture is
@@ -360,7 +359,7 @@ test('fresh linked worktrees use independent native metadata', async () => {
   const worktreeA = fixture.worktree(FEATURE_A);
   const worktreeB = fixture.worktree(FEATURE_B);
 
-  // Red: reproduce the historical topology — a main-checkout pointer copied into
+  // why: Red: reproduce the historical topology — a main-checkout pointer copied into
   // a linked checkout. Raw Git must fail there before any native initialization.
   const mainPointer = await readFile(join(fixture.superproject, 'sub', '.git'), 'utf8');
   assert.match(mainPointer, /^gitdir: /, 'main submodule must expose a native gitdir pointer');
@@ -380,7 +379,7 @@ test('fresh linked worktrees use independent native metadata', async () => {
   assert.equal(await readFile(join(worktreeA, 'sub', '.git'), 'utf8'), mainPointer, 'refusal must leave the copied pointer untouched');
   assert.equal(existsSync(join(fixture.worktreeGitDir(FEATURE_A), 'modules')), false, 'refusal must not create metadata');
 
-  // Restore only the exact fixture-created bytes, then initialize natively.
+  // why: Restore only the exact fixture-created bytes, then initialize natively.
   await rm(join(worktreeA, 'sub'), { recursive: true, force: true });
 
   const freshA = await fixture.wrapper(['--worktree', worktreeA]);
@@ -399,7 +398,7 @@ test('fresh linked worktrees use independent native metadata', async () => {
   assert.equal(freshB.code, 0, freshB.stderr);
   assert.deepEqual(JSON.parse(freshB.stdout).submodules.map(entry => entry.action), ['initialized', 'initialized']);
 
-  // Every checkout: its own gitdir, its own index, its own working tree.
+  // invariant: Every checkout: its own gitdir, its own index, its own working tree.
   const checkouts = { main: fixture.superproject, a: worktreeA, b: worktreeB };
   const facts = {};
   for (const [label, checkout] of Object.entries(checkouts)) {
@@ -416,7 +415,7 @@ test('fresh linked worktrees use independent native metadata', async () => {
     const status = await fixture.git(['-C', checkout, 'status', '--porcelain', '--ignored=matching']);
     record(`${label}-status`, `git -C ${checkout} status --porcelain --ignored=matching`, status);
     assert.equal(status.ok, true, `${label} status must work: ${firstLine(status.stderr)}`);
-    // The main fixture checkout legitimately reports its own ignored
+    // why: The main fixture checkout legitimately reports its own ignored
     // `.worktrees/` directory; a linked checkout must report nothing at all.
     const expected = label === 'main' ? ['!! .worktrees/'] : [];
     assert.deepEqual(status.stdout.split('\n').filter(line => line.trim() !== ''), expected);
@@ -428,7 +427,7 @@ test('fresh linked worktrees use independent native metadata', async () => {
     assert.deepEqual(lines.map(line => line.slice(1).split(' ')[0]), [fixture.subPinned, fixture.nestedPinned]);
     assert.deepEqual(lines.map(line => line[0]), [' ', ' ']);
 
-    // Content bytes, not path appearance.
+    // note: Content bytes, not path appearance.
     assert.equal(await readFile(join(checkout, 'sub', 'sub.txt'), 'utf8'), 'sub two\n');
     assert.equal(await readFile(join(checkout, 'sub', 'nested', 'nested.txt'), 'utf8'), 'nested two\n');
   }
@@ -466,7 +465,7 @@ test('repeat preserves pin and rejects dirty or copied metadata', async () => {
   assert.equal(stable.stdout, first.stdout, 'a validated repeat must produce identical JSON');
   assert.equal(await digest(subIndexA), indexDigest, 'a validated repeat must not rewrite the submodule index');
 
-  // An intentionally different but clean submodule HEAD is reported, never reset.
+  // invariant: An intentionally different but clean submodule HEAD is reported, never reset.
   await fixture.gitOk(['-C', join(worktreeA, 'sub'), 'checkout', '-q', fixture.subOlder]);
   const bBefore = await checkoutFacts(fixture, worktreeB);
   const mainBefore = await checkoutFacts(fixture, fixture.superproject);
@@ -483,7 +482,6 @@ test('repeat preserves pin and rejects dirty or copied metadata', async () => {
   assert.deepEqual(await checkoutFacts(fixture, worktreeB), bBefore, 'B must stay untouched');
   assert.deepEqual(await checkoutFacts(fixture, fixture.superproject), mainBefore, 'main must stay untouched');
 
-  // Dirt is refused with no mutation.
   await writeFile(join(worktreeA, 'sub', 'dirt-untracked.txt'), 'untracked\n');
   await writeFile(join(worktreeA, 'sub', 'sub.txt'), 'modified by the test\n');
   const indexDigestAtRefusal = await digest(subIndexA);
@@ -496,11 +494,10 @@ test('repeat preserves pin and rejects dirty or copied metadata', async () => {
   assert.equal(await fixture.head(join(worktreeA, 'sub')), fixture.subOlder, 'refusal must not move HEAD');
   assert.equal(await digest(subIndexA), indexDigestAtRefusal, 'refusal must not rewrite the index');
 
-  // Restore only the dirt this test created.
+  // why: Restore only the dirt this test created.
   await rm(join(worktreeA, 'sub', 'dirt-untracked.txt'), { force: true });
   await fixture.gitOk(['-C', join(worktreeA, 'sub'), 'checkout', '--', 'sub.txt']);
 
-  // A copied main pointer in a linked checkout is refused and left untouched.
   const mainPointer = await readFile(join(fixture.superproject, 'sub', '.git'), 'utf8');
   await fixture.gitOk(['-C', worktreeB, 'submodule', 'deinit', '--all']);
   await rm(join(worktreeB, 'sub'), { recursive: true, force: true });
@@ -518,7 +515,7 @@ test('repeat preserves pin and rejects dirty or copied metadata', async () => {
   assert.deepEqual(JSON.parse(reinitialized.stdout).submodules.map(entry => entry.action), ['initialized', 'initialized']);
   assert.equal(await fixture.head(join(worktreeB, 'sub')), fixture.subPinned);
 
-  // Leave A on the recorded pin so the fixture worktree stays removable.
+  // why: Leave A on the recorded pin so the fixture worktree stays removable.
   await fixture.gitOk(['-C', worktreeA, 'submodule', 'update', '--init', 'sub']);
   assert.equal(await fixture.head(join(worktreeA, 'sub')), fixture.subPinned);
 });
@@ -528,7 +525,7 @@ test('nested initialization never resets an initialized child', async () => {
   const worktreeB = fixture.worktree(FEATURE_B);
   const nestedAdmin = join(fixture.worktreeGitDir(FEATURE_A), 'modules', 'sub', 'modules', 'nested');
 
-  // Both the parent and the nested child deliberately sit on another clean commit.
+  // why: Both the parent and the nested child deliberately sit on another clean commit.
   await fixture.gitOk(['-C', join(worktreeA, 'sub'), 'checkout', '-q', fixture.subOlder]);
   await fixture.gitOk(['-C', join(worktreeA, 'sub', 'nested'), 'checkout', '-q', fixture.nestedOlder]);
   const indexDigest = await digest(join(fixture.worktreeGitDir(FEATURE_A), 'modules', 'sub', 'index'));
@@ -540,7 +537,7 @@ test('nested initialization never resets an initialized child', async () => {
   assert.equal(await fixture.head(join(worktreeA, 'sub')), fixture.subOlder);
   assert.equal(await fixture.head(join(worktreeA, 'sub', 'nested')), fixture.nestedOlder);
 
-  // Drop only the nested child's working tree and per-worktree metadata: the
+  // why: Drop only the nested child's working tree and per-worktree metadata: the
   // parent stays initialized, so a recursive reset would be wrong.
   await rm(join(worktreeA, 'sub', 'nested'), { recursive: true, force: true });
   await rm(nestedAdmin, { recursive: true, force: true });
@@ -565,14 +562,13 @@ test('nested initialization never resets an initialized child', async () => {
   assert.deepEqual(await checkoutFacts(fixture, worktreeB), bBefore, 'B must stay untouched');
   assert.deepEqual(await checkoutFacts(fixture, fixture.superproject), mainBefore, 'main must stay untouched');
 
-  // Leave A on the recorded pins so the fixture worktree stays removable.
+  // why: Leave A on the recorded pins so the fixture worktree stays removable.
   await fixture.gitOk(['-C', worktreeA, 'submodule', 'update', '--init', '--recursive']);
   assert.equal(await fixture.head(join(worktreeA, 'sub')), fixture.subPinned);
   assert.equal(await fixture.head(join(worktreeA, 'sub', 'nested')), fixture.nestedPinned);
 });
 
 test('fail-closed invocation and checkout location checks', async () => {
-  // --help must print usage and exit 0 without probing Git at all.
   const probeBin = join(fixture.root, 'probe-bin');
   await mkdir(probeBin, { recursive: true });
   await writeFile(join(probeBin, 'git'), '#!/bin/sh\necho "git must not run for --help" >&2\nexit 97\n', { mode: 0o755 });
@@ -585,7 +581,6 @@ test('fail-closed invocation and checkout location checks', async () => {
   assert.doesNotMatch(help.stdout, /^\{/, 'help is the only non-JSON stdout mode');
   assert.equal(help.stderr, '');
 
-  // `-h` is the same standalone mode: usage, exit 0, no probing.
   const shortHelp = await run(process.execPath, [SCRIPT, '-h'], {
     cwd: fixture.root,
     env: { ...fixture.env, PATH: `${probeBin}:${process.env.PATH}` },
@@ -600,7 +595,7 @@ test('fail-closed invocation and checkout location checks', async () => {
     ['--worktree', 'relative/path'],
     ['--worktree', fixture.superproject, '--worktree', fixture.worktree(FEATURE_A)],
     ['--unknown'],
-    // Help is a standalone mode: mixed with anything else it is not a valid
+    // why: Help is a standalone mode: mixed with anything else it is not a valid
     // invocation, and the extra argument must never be silently ignored.
     ['--help', '--unknown'],
     ['--worktree', fixture.worktree(FEATURE_A), '--help'],
@@ -612,26 +607,22 @@ test('fail-closed invocation and checkout location checks', async () => {
     assert.equal(invalid.stdout, '', 'invalid invocations must not write stdout');
   }
 
-  // The main worktree is refused.
   const main = await fixture.wrapper(['--worktree', fixture.superproject]);
   assert.equal(main.code, 1);
   assert.match(main.stderr, /main worktree/);
   assert.equal(JSON.parse(main.stdout).ok, false);
 
-  // A path that is not a worktree root of any repository is refused.
   const unrelated = join(fixture.root, 'unrelated');
   await mkdir(unrelated, { recursive: true });
   const notARepo = await fixture.wrapper(['--worktree', unrelated]);
   assert.equal(notARepo.code, 1);
   assert.equal(JSON.parse(notARepo.stdout).ok, false);
 
-  // A linked worktree outside `<main>/.worktrees/` is refused.
   const elsewhere = await fixture.addNonCanonicalWorktree();
   const nonCanonical = await fixture.wrapper(['--worktree', elsewhere.path]);
   assert.equal(nonCanonical.code, 1);
   assert.match(nonCanonical.stderr, /must live directly under/);
 
-  // A symlink escape is refused and left untouched.
   const escape = join(fixture.worktreesRoot, 'escape');
   await symlink(fixture.superproject, escape);
   const escaped = await fixture.wrapper(['--worktree', escape]);
@@ -651,7 +642,7 @@ test('an unresolved .gitmodules index conflict is refused without the worktree f
   const baseline = await fixture.wrapper(['--worktree', worktreeA]);
   assert.equal(baseline.code, 0, `the fixture must start from an initialized checkout: ${baseline.stdout}${baseline.stderr}`);
 
-  // An index that still carries the unresolved `.gitmodules` conflict *and* the
+  // why: An index that still carries the unresolved `.gitmodules` conflict *and* the
   // unresolved submodule gitlink, with the working-tree `.gitmodules` gone. A
   // preflight gated on that file's existence skipped this state entirely and
   // reported an empty — therefore "successful" — submodule list.
@@ -671,7 +662,7 @@ test('an unresolved .gitmodules index conflict is refused without the worktree f
   const conflicted = await fixture.wrapper(['--worktree', worktreeA]);
   record('unmerged-index-refusal', `node scripts/init-worktree-submodules.mjs --worktree <A>`, conflicted);
   const leftBehind = { gitmodules: existsSync(gitmodules), index: await digest(index) };
-  // Restore before asserting so a failing run cannot strand the shared fixture.
+  // why: Restore before asserting so a failing run cannot strand the shared fixture.
   await fixture.gitOk(['-C', worktreeA, 'read-tree', 'HEAD']);
   await fixture.gitOk(['-C', worktreeA, 'checkout', 'HEAD', '--', '.gitmodules']);
 
@@ -692,7 +683,7 @@ test('an index gitlink that .gitmodules does not declare is refused', async () =
   const baseline = await fixture.wrapper(['--worktree', worktreeA]);
   assert.equal(baseline.code, 0, `the fixture must start from an initialized checkout: ${baseline.stdout}${baseline.stderr}`);
 
-  // The declaration file is gone while the index still commits the gitlink, so
+  // why: The declaration file is gone while the index still commits the gitlink, so
   // nothing declares that submodule and its state cannot be established. An
   // empty ok list would report a checkout that was never checked.
   const digestBefore = await digest(index);
@@ -718,7 +709,7 @@ test('an unresolved gitlink index entry is refused and the resolved checkout val
   const baseline = await fixture.wrapper(['--worktree', worktreeA]);
   assert.equal(baseline.code, 0, `the fixture must start from an initialized checkout: ${baseline.stdout}${baseline.stderr}`);
 
-  // An unresolved *gitlink* while the declaration file is intact: the submodule
+  // why: An unresolved *gitlink* while the declaration file is intact: the submodule
   // the superproject records is a conflict, not a state to initialize from.
   await fixture.gitOk(['-C', worktreeA, 'update-index', '--force-remove', '--', 'sub']);
   await fixture.gitInput(['-C', worktreeA, 'update-index', '--index-info'], [
@@ -746,7 +737,7 @@ test('operational filesystem failures keep the JSON stdout contract', async () =
   const worktreeA = fixture.worktree(FEATURE_A);
   const stranded = join(worktreeA, 'sub');
 
-  // A not-initialized submodule path that exists but cannot be listed: an
+  // why: A not-initialized submodule path that exists but cannot be listed: an
   // ordinary filesystem failure rather than a Git or safety refusal. It must
   // still be reported through the same JSON object on stdout with exit 1.
   await fixture.gitOk(['-C', worktreeA, 'submodule', 'deinit', '--all']);
@@ -764,7 +755,7 @@ test('operational filesystem failures keep the JSON stdout contract', async () =
   assert.equal(json.worktree, worktreeA);
   assert.equal(json.ok, false);
   assert.deepEqual(json.submodules, []);
-  // The refusal names its own class: this one is a preflight refusal (the read failed before any
+  // note: The refusal names its own class: this one is a preflight refusal (the read failed before any
   // mutation was attempted), so nothing was changed and nothing is enumerated.
   assert.equal(json.refusal.code, 'init.refuse.preflight');
   assert.equal(json.refusal.initialized_paths, null);
@@ -775,7 +766,7 @@ test('operational filesystem failures keep the JSON stdout contract', async () =
 });
 
 test('a native initialization refusal distinguishes an untouched preflight from a partial subset', async _t => {
-  // F-003: the initializer promised "state unchanged" for every exit-1 failure, but native
+  // why: F-003: the initializer promised "state unchanged" for every exit-1 failure, but native
   // initialization is not atomic — `git submodule update --init --recursive` runs once per repository
   // group and a later failure leaves the earlier work in place. Rolling Git initialization back is
   // riskier than telling the truth, so the refusal distinguishes PREFLIGHT (this run changed nothing:
@@ -786,7 +777,7 @@ test('a native initialization refusal distinguishes an untouched preflight from 
   const worktreeA = fixture.worktree(FEATURE_A);
   const subModuleDir = join(fixture.worktreeGitDir(FEATURE_A), 'modules', 'sub');
 
-  // Control — a preflight refusal raised before any mutation: the main worktree is rejected by
+  // why: Control — a preflight refusal raised before any mutation: the main worktree is rejected by
   // validation, which reads before it ever mutates anything, so nothing is enumerated.
   const preflight = await fixture.wrapper(['--worktree', fixture.superproject]);
   assert.equal(preflight.code, 1, preflight.stdout);
@@ -800,7 +791,7 @@ test('a native initialization refusal distinguishes an untouched preflight from 
   const parkedSub = join(fixture.root, 'sub-origin-parked');
   const parkedNested = join(fixture.root, 'nested-origin-parked');
   try {
-    // Case A — the parent clones, its nested child cannot: the failure leaves the parent initialized.
+    // why: Case A — the parent clones, its nested child cannot: the failure leaves the parent initialized.
     // The per-worktree submodule metadata is dropped with the working tree so the native command must
     // really reach both origins instead of reusing an existing module directory.
     await fixture.gitOk(['-C', worktreeA, 'submodule', 'deinit', '--all']);
@@ -814,14 +805,14 @@ test('a native initialization refusal distinguishes an untouched preflight from 
     assert.equal(partialJson.ok, false);
     assert.deepEqual(partialJson.submodules, []);
     assert.equal(partialJson.refusal.code, 'init.refuse.partial');
-    // Exactly which paths the failure left initialized — re-observed, not inferred.
+    // note: Exactly which paths the failure left initialized — re-observed, not inferred.
     assert.deepEqual(partialJson.refusal.initialized_paths, ['sub']);
     assert.match(partial.stderr, /init\.refuse\.partial: at least one submodule was initialized by this run and is NOT rolled back/);
     assert.match(partial.stderr, /already initialized: sub/);
     assert.equal(existsSync(join(worktreeA, 'sub', '.git')), true, 'the report is the truth: the child really is initialized');
     assert.equal(existsSync(join(worktreeA, 'sub', 'nested', '.git')), false, 'the nested child is not initialized');
 
-    // Case B — the native command ran but completed nothing at all: the checkout is observably
+    // why: Case B — the native command ran but completed nothing at all: the checkout is observably
     // unchanged, so the refusal is preflight with an empty enumeration. `partial` is reserved for an
     // observed initialized subset (>= 1 path), and the note must not claim a mutation that never
     // happened.
@@ -845,7 +836,7 @@ test('a native initialization refusal distinguishes an untouched preflight from 
     if (existsSync(parkedNested)) await rename(parkedNested, fixture.nestedOrigin);
   }
 
-  // The partial state is not a trap: a re-run against the restored origins validates the initialized
+  // why: The partial state is not a trap: a re-run against the restored origins validates the initialized
   // subset and finishes the rest, which is the manual-safe continuation the refusal points at.
   const finished = await fixture.wrapper(['--worktree', worktreeA]);
   assert.equal(finished.code, 0, `${finished.stdout}${finished.stderr}`);

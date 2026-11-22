@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LAN web service launcher — mints a random API key per boot and prints it;
+# note: LAN web service launcher — mints a random API key per boot and prints it;
 # pass NEXUS42_DAEMON_API_KEY=<k> to reuse one.
 set -euo pipefail
 cd "$(dirname "$0")/.."

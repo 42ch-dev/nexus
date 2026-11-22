@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Served-UI smoke test — verifies the daemon binary can start and serve the
+# why: served-UI smoke test — verifies the daemon binary can start and serve the
 # embedded web SPA over HTTP. Runs against a throwaway home directory so it is
 # safe to execute in CI and locally.
 set -euo pipefail
@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_HOME="$(mktemp -d)"
 CREATIVE_ROOT="${SMOKE_HOME}/Documents/nexus/smoke/smoke"
 
-# Pick a free ephemeral port so a stale local daemon on the default port
+# why: pick a free ephemeral port so a stale local daemon on the default port
 # does not silently shadow this test. When NEXUS_DAEMON_PORT is set, use it
 # exactly and fail fast if something else is already listening there.
 if [ -n "${NEXUS_DAEMON_PORT:-}" ]; then
@@ -20,11 +20,10 @@ BASE="http://127.0.0.1:${PORT}"
 CREATOR_ID="smoke"
 WORKSPACE_SLUG="smoke"
 
-# Best-effort helpers for port ownership checks.
 listener_pid() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
-    # The `|| true` keeps this helper from returning a non-zero status when
+    # why: `|| true` keeps this helper from returning a non-zero status when
     # no process is listening on the port (with `set -o pipefail` active).
     lsof -ti tcp:"${port}" 2>/dev/null | head -n 1 || true
   fi
@@ -44,11 +43,10 @@ fail() {
   exit 1
 }
 
-# Determine the daemon binary path without building yet. An explicit override
-# is useful for local verification against an already-built artifact.
+# note: an explicit NEXUS42 override is useful for local verification against an
 NEXUS42="${NEXUS42:-${REPO_ROOT}/target/release/nexus42}"
 
-# Fail fast if the chosen port is occupied by an unrelated process. Only a
+# why: fail fast if the chosen port is occupied by an unrelated process. Only a
 # leftover Nexus smoke daemon (same binary, same port, --foreground) may be
 # terminated; everything else is left alone and the script aborts.
 preexisting_pid="$(listener_pid "${PORT}")"
@@ -74,13 +72,13 @@ fi
 
 cd "${REPO_ROOT}"
 
-# The embedded SPA is read at cargo build time; ensure the dist exists.
+# note: the embedded SPA is read at cargo build time, so the dist must exist first.
 if [ -z "${SKIP_WEB_BUILD:-}" ]; then
   echo "Building web SPA..."
   pnpm run build:web
 fi
 
-# Build the nexus42 release binary so the test exercises the same artifact that
+# why: build the nexus42 release binary so the test exercises the same artifact that
 # embeds the SPA (static assets are release-only), unless an override path was
 # provided and the binary already exists.
 if [ ! -x "${NEXUS42}" ]; then
@@ -88,12 +86,12 @@ if [ ! -x "${NEXUS42}" ]; then
   cargo build -p nexus42 --release --quiet
 fi
 
-# Use a throwaway HOME so the smoke test does not touch the developer's
+# why: a throwaway HOME keeps the smoke test out of the developer's
 # ~/.nexus42. All operational paths are derived from HOME.
 export HOME="${SMOKE_HOME}"
 NEXUS_HOME="${SMOKE_HOME}/.nexus42"
 
-# Seed a minimal config + workspace so the daemon can resolve its state DB
+# why: seed a minimal config + workspace so the daemon can resolve its state DB
 # without going through the interactive `creator workspace init` flow.
 echo "Seeding throwaway workspace..."
 mkdir -p "${NEXUS_HOME}"
@@ -128,11 +126,10 @@ cat > "${NEXUS_HOME}/creators/${CREATOR_ID}/workspaces/${WORKSPACE_SLUG}/meta.js
 }
 EOF
 
-# Initialize the SQLite schema so the daemon can open its state DB.
+# why: initialize the SQLite schema so the daemon can open its state DB.
 "${NEXUS42}" system db status >/dev/null
 
-# Start the daemon in the foreground and background it so the script owns the
-# process and can clean it up reliably.
+# note: foreground + background lets the script own the process and clean it up.
 echo "Starting daemon on ${BASE}..."
 "${NEXUS42}" daemon start --port "${PORT}" --foreground >"${SMOKE_HOME}/daemon.log" 2>&1 &
 DAEMON_PID=$!
@@ -140,7 +137,7 @@ DAEMON_PID=$!
 cleanup() {
   echo "Stopping daemon..."
   if kill "${DAEMON_PID}" 2>/dev/null; then
-    # Give the daemon a moment to shut down gracefully, then forcefully.
+    # note: grace period first, then force.
     for _ in {1..10}; do
       if ! kill -0 "${DAEMON_PID}" 2>/dev/null; then
         break
@@ -154,8 +151,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Wait for the HTTP server to be ready, but fail immediately if the daemon
-# process dies before the health endpoint responds.
+# why: wait for the HTTP server to be ready, but fail immediately if the daemon
+# dies before the health endpoint responds.
 ready=false
 for _ in {1..30}; do
   if curl -fsS "${BASE}/v1/daemon/runtime/health" >/dev/null 2>&1; then
@@ -183,7 +180,7 @@ echo "Checking Daemon API health..."
 curl -fsS "${BASE}/v1/daemon/runtime/health" | grep -q '"status"'
 
 echo "Checking served Web UI..."
-# The root path serves the embedded SPA; look for the basic HTML skeleton.
+# note: the root path serves the embedded SPA; look for the basic HTML skeleton.
 curl -fsS "${BASE}/" | grep -q '<html'
 
 echo "Served-UI smoke passed."

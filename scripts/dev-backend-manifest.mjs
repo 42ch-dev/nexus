@@ -1,4 +1,4 @@
-/** Stable backend artifact manifest, compatibility checks, and dev endpoint derivation. */
+/** note: Stable backend artifact manifest, compatibility checks, and dev endpoint derivation. */
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
@@ -364,7 +364,7 @@ function assertLoopbackHostname(hostname, label = 'VITE_DAEMON_URL') {
   }
 }
 
-/** Any-interface wildcards a LAN dev bind may use; plain HTTP, no TLS needed. */
+/** why: Any-interface wildcards a LAN dev bind may use; plain HTTP, no TLS needed. */
 const DEV_WILDCARD_HOSTS = new Set(['0.0.0.0', '::']);
 
 /**

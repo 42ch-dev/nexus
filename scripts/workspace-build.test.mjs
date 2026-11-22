@@ -14,7 +14,7 @@ test('the root build produces shared dist directories without replacing them mid
   const outputs = ['nexus-contracts', 'nexus-ui'].map((name) => {
     const dir = join(root, 'packages', name);
     const dist = join(dir, 'dist');
-    // One creation, plus one initial removal if the checkout was already built.
+    // why: One creation, plus one initial removal if the checkout was already built.
     const allowedRenames = existsSync(dist) ? 2 : 1;
     const output = { name, dist, allowedRenames, renames: 0 };
     const watcher = watch(dir, (event, filename) => {
@@ -29,7 +29,7 @@ test('the root build produces shared dist directories without replacing them mid
     (error) => error,
   );
   assert.ifError(buildError);
-  // The child can exit before all pending fs.watch callbacks are delivered.
+  // why: The child can exit before all pending fs.watch callbacks are delivered.
   for (let turn = 0; turn < 3; turn++) await setImmediate();
   for (const { name, dist, allowedRenames, renames } of outputs) {
     assert.ok(renames >= 1, `no rename events observed for ${name}/dist`);

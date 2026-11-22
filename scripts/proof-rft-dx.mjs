@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** RFT DX proof runner — cold/warm/no-Cargo evidence for web/studio/shared-ui. */
+/** note: RFT DX proof runner — cold/warm/no-Cargo evidence for web/studio/shared-ui. */
 import { execFile, spawn } from 'node:child_process';
 import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { cpus, freemem, totalmem, arch, platform, release } from 'node:os';
@@ -349,7 +349,7 @@ const EVIDENCE_MAX_DEPTH = 12;
 const EVIDENCE_MAX_STRING = 256 * 1024;
 const EVIDENCE_MAX_ITEMS = 50_000;
 
-/** Strict evidence schema: only allowlisted top-level fields are persisted. */
+/** note: Strict evidence schema: only allowlisted top-level fields are persisted. */
 function toEvidenceObject(payload) {
   const evidence = {};
   for (const [key, value] of Object.entries(payload)) {
@@ -358,7 +358,7 @@ function toEvidenceObject(payload) {
   return evidence;
 }
 
-/** Strong bounded validator before persistence: plain JSON values only, with depth/size/key-shape limits. */
+/** note: Strong bounded validator before persistence: plain JSON values only, with depth/size/key-shape limits. */
 function boundEvidenceData(value, depth) {
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
