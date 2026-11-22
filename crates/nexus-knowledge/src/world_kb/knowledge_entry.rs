@@ -57,14 +57,14 @@ pub struct KnowledgeEntryBody {
     pub attributes: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    /// Dynamic runtime state for computable `KnowledgeEntries` (V1.61, compass Q4/Q5).
+    /// note: Dynamic runtime state for computable `KnowledgeEntries` (V1.61, compass Q4/Q5).
     /// Nested by `block_type` to avoid field-name collisions across module
     /// types (e.g. `state.character.current_hp`). Per-module state shapes
     /// are declared in each compute module's `manifest.json` (V1.62).
     /// Only meaningful when [`computable`](Self::computable) is `Some(true)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<serde_json::Value>,
-    /// Marks this `KnowledgeEntryRecord` as participating in WASM compute (V1.61, compass Q4).
+    /// note: Marks this `KnowledgeEntryRecord` as participating in WASM compute (V1.61, compass Q4).
     /// When `Some(true)`, `state` holds mutable runtime state and `attributes`
     /// hold immutable compute params. Stored inside `body_json` (no DB column)
     /// for additive, migration-free rollout.
@@ -72,7 +72,7 @@ pub struct KnowledgeEntryBody {
     pub computable: Option<bool>,
 }
 
-/// Result of a conflict check for confirm gates.
+/// note: Result of a conflict check for confirm gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictCheckResult {
     pub has_hard_conflicts: bool,
@@ -96,7 +96,7 @@ impl ConflictCheckResult {
     }
 }
 
-/// A simplified world membership reference for permission checks.
+/// note: A simplified world membership reference for permission checks.
 /// Full `WorldMembership` is in `world_membership` module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipPermissionCheck {
@@ -104,7 +104,7 @@ pub struct MembershipPermissionCheck {
     pub can_sync_kb: bool,
 }
 
-/// Closed canonical owner reference for a [`KnowledgeEntryRecord`]
+/// note: Closed canonical owner reference for a [`KnowledgeEntryRecord`]
 /// (v1.184 P1).
 ///
 /// Exactly one variant is set per record, mirroring the `kb_key_blocks`
@@ -114,34 +114,34 @@ pub struct MembershipPermissionCheck {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum KnowledgeOwnerRef {
-    /// World-owned narrative KB entry (the pre-v1.184 sole shape).
+    /// note: World-owned narrative KB entry (the pre-v1.184 sole shape).
     World(String),
-    /// Character-owned entry shared across the Character's active bindings.
+    /// note: Character-owned entry shared across the Character's active bindings.
     Character(String),
-    /// Binding-local entry isolated to exactly one `ActorWorldBinding`.
+    /// note: Binding-local entry isolated to exactly one `ActorWorldBinding`.
     ActorWorldBinding(String),
 }
 
 impl KnowledgeOwnerRef {
-    /// Canonical World owner.
+    /// note: Canonical World owner.
     #[must_use]
     pub fn world(world_id: impl Into<String>) -> Self {
         Self::World(world_id.into())
     }
 
-    /// Canonical Character owner.
+    /// note: Canonical Character owner.
     #[must_use]
     pub fn character(character_id: impl Into<String>) -> Self {
         Self::Character(character_id.into())
     }
 
-    /// Canonical binding owner.
+    /// note: Canonical binding owner.
     #[must_use]
     pub fn actor_world_binding(binding_id: impl Into<String>) -> Self {
         Self::ActorWorldBinding(binding_id.into())
     }
 
-    /// The `owner_kind` column vocabulary for this owner (`"world"` /
+    /// note: The `owner_kind` column vocabulary for this owner (`"world"` /
     /// `"character"` / `"actor_world_binding"`).
     #[must_use]
     pub const fn kind(&self) -> &'static str {
@@ -152,7 +152,7 @@ impl KnowledgeOwnerRef {
         }
     }
 
-    /// The owner's id (regardless of kind).
+    /// note: The owner's id (regardless of kind).
     #[must_use]
     pub fn id(&self) -> &str {
         match self {
@@ -160,7 +160,7 @@ impl KnowledgeOwnerRef {
         }
     }
 
-    /// `Some(world_id)` when World-owned, else `None`.
+    /// note: `Some(world_id)` when World-owned, else `None`.
     #[must_use]
     pub fn world_id(&self) -> Option<&str> {
         match self {
@@ -169,7 +169,7 @@ impl KnowledgeOwnerRef {
         }
     }
 
-    /// `Some(character_id)` when Character-owned, else `None`.
+    /// note: `Some(character_id)` when Character-owned, else `None`.
     #[must_use]
     pub fn character_id(&self) -> Option<&str> {
         match self {
@@ -178,7 +178,7 @@ impl KnowledgeOwnerRef {
         }
     }
 
-    /// `Some(binding_id)` when binding-owned, else `None`.
+    /// note: `Some(binding_id)` when binding-owned, else `None`.
     #[must_use]
     pub fn actor_world_binding_id(&self) -> Option<&str> {
         match self {
@@ -188,22 +188,22 @@ impl KnowledgeOwnerRef {
     }
 }
 
-/// `KnowledgeEntryRecord` aggregate — a structured knowledge unit owned by a
+/// note: `KnowledgeEntryRecord` aggregate — a structured knowledge unit owned by a
 /// World, Character, or `ActorWorldBinding`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KnowledgeEntryRecord {
     pub schema_version: u32,
     pub entry_id: String,
-    /// Canonical owner (immutable after insert — stores reject any change).
+    /// note: Canonical owner (immutable after insert — stores reject any change).
     pub owner: KnowledgeOwnerRef,
-    /// Resolved holder `KnowledgeEntry` id for a disclosure-restricted entry
+    /// note: Resolved holder `KnowledgeEntry` id for a disclosure-restricted entry
     /// (durable §1/§3). `None` = in-scope shared, or a holder unspecified by
     /// an adopted foreign row. Service-resolved only: the authoring path
     /// derives it from the admitted [`KnowledgeAudience`], a client never
     /// supplies it, and ordinary store updates cannot transfer it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub holder_entry_id: Option<String>,
-    /// Stored disclosure vocabulary (`owner-private`) or `None` for shared
+    /// note: Stored disclosure vocabulary (`owner-private`) or `None` for shared
     /// (durable §1/§3). "Shared" is the *absence* of disclosure, never the
     /// string `"shared"`. Carried as an open string natively because adopted
     /// foreign rows are rejected by [`validate_native_governance`] rather than
@@ -224,14 +224,14 @@ pub struct KnowledgeEntryRecord {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
-    // V1.52 T-A P2: Work→KnowledgeEntryRecord provenance (entity-scope-model.md §5.5.7)
+    // note: V1.52 T-A P2: Work→KnowledgeEntryRecord provenance (entity-scope-model.md §5.5.7)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_work_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_chapter: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_provenance_kind: Option<String>,
-    /// Unknown keys carried under `extensions.nexus` on the spoke boundary —
+    /// note: Unknown keys carried under `extensions.nexus` on the spoke boundary —
     /// everything outside the 7 typed identity/owner fields (`world_id`,
     /// `character_id`, `actor_world_binding_id`,
     /// `created_from_command_id`, `source_work_id`, `source_chapter`,
@@ -244,7 +244,7 @@ pub struct KnowledgeEntryRecord {
     /// SPOKE `KnowledgeEntry.owner` / `.disclosure` fields instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions_nexus_extras: Option<serde_json::Value>,
-    /// Per-entry functional-dialect modules (`modules.*`).
+    /// note: Per-entry functional-dialect modules (`modules.*`).
     ///
     /// Carried as a JSON object (`{"activation": {...}, "pack": {...}}`).
     /// Preserved verbatim across the `SQLite` read-modify-write cycle and the
@@ -254,7 +254,7 @@ pub struct KnowledgeEntryRecord {
     pub modules: Option<serde_json::Value>,
 }
 
-/// Parse a stored `kb_key_blocks.created_at` value without rewriting bytes.
+/// note: Parse a stored `kb_key_blocks.created_at` value without rewriting bytes.
 ///
 /// Production inserts bind RFC3339. The table DEFAULT (`datetime('now')`) and
 /// preserved pre-v1.184 rows use SQLite `YYYY-MM-DD HH:MM:SS` (UTC, space
@@ -275,7 +275,7 @@ pub fn parse_stored_created_at(raw: &str) -> Result<chrono::DateTime<chrono::Utc
         .map_err(|_| format!("created_at is not RFC3339 or SQLite datetime: {raw}"))
 }
 
-/// Millisecond unix timestamp for Actor `KnowledgeView` / SQL keyset order.
+/// note: Millisecond unix timestamp for Actor `KnowledgeView` / SQL keyset order.
 ///
 /// The SQL keyset builds the same key: `strftime('%s') * 1000` plus the stored
 /// fraction truncated at the third digit. It must **not** read
@@ -291,7 +291,7 @@ pub fn stored_created_at_order_millis(raw: &str) -> Result<i64, String> {
 }
 
 impl KnowledgeEntryRecord {
-    /// Create a new provisional World-owned `KnowledgeEntryRecord`.
+    /// note: Create a new provisional World-owned `KnowledgeEntryRecord`.
     ///
     /// **World convenience constructor** (v1.184 P1): the pre-v1.184
     /// `KnowledgeEntryRecord::new` shape, preserved so the (still-World-scoped)
@@ -308,7 +308,7 @@ impl KnowledgeEntryRecord {
         )
     }
 
-    /// Create a new provisional Character-owned `KnowledgeEntryRecord`.
+    /// note: Create a new provisional Character-owned `KnowledgeEntryRecord`.
     #[must_use]
     pub fn for_character(character_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
         Self::with_owner(
@@ -318,7 +318,7 @@ impl KnowledgeEntryRecord {
         )
     }
 
-    /// Create a new provisional binding-owned `KnowledgeEntryRecord`.
+    /// note: Create a new provisional binding-owned `KnowledgeEntryRecord`.
     #[must_use]
     pub fn for_binding(binding_id: &str, block_type: BlockType, canonical_name: &str) -> Self {
         Self::with_owner(
@@ -328,7 +328,7 @@ impl KnowledgeEntryRecord {
         )
     }
 
-    /// Shared constructor core for every owner kind.
+    /// note: Shared constructor core for every owner kind.
     #[must_use]
     fn with_owner(owner: KnowledgeOwnerRef, block_type: BlockType, canonical_name: &str) -> Self {
         let entry_id = format!("kb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
@@ -355,7 +355,7 @@ impl KnowledgeEntryRecord {
         }
     }
 
-    /// `Some(world_id)` when this record is World-owned, else `None`.
+    /// note: `Some(world_id)` when this record is World-owned, else `None`.
     ///
     /// Replaces the pre-v1.184 `KnowledgeEntryRecord::world_id` field. Callers that
     /// operate on World-owned records only (e.g. world-scoped store reads)
@@ -365,7 +365,7 @@ impl KnowledgeEntryRecord {
         self.owner.world_id()
     }
 
-    // NOTE (V1.145 P1a): the lifecycle methods that delegate status transitions
+    // why: the lifecycle methods that delegate status transitions (V1.145 P1a)
     // to spoke-operations (`confirm` / `deprecate` / `merge_into` / `delete`)
     // moved to `nexus_spoke_adapter::conversion::KnowledgeEntryRecordSpokeExt`. They
     // could not stay here because they call spoke-operations through the
@@ -376,20 +376,20 @@ impl KnowledgeEntryRecord {
     // `spoke_to_knowledge_record` — orphan rule forbids the `From` impls here). This
     // crate now owns only the pure domain aggregate + its non-spoke methods.
 
-    /// Check if this KB is in confirmed state.
+    /// note: Check if this KB is in confirmed state.
     #[must_use]
     pub fn is_confirmed(&self) -> bool {
         self.status == KeyBlockStatus::Confirmed.as_str()
     }
 
-    /// Check if body modifications are allowed.
+    /// note: Check if body modifications are allowed.
     /// Only provisional KBs allow body updates; confirmed KBs require fork/append.
     #[must_use]
     pub fn can_modify_body(&self) -> bool {
         self.status == KeyBlockStatus::Provisional.as_str()
     }
 
-    /// Validate `source_anchor` traceability.
+    /// note: Validate `source_anchor` traceability.
     /// Per G6: `source_anchor` must reference visible story manifests in same world.
     pub fn validate_source_anchor(
         &self,
@@ -397,13 +397,12 @@ impl KnowledgeEntryRecord {
         visible_manifests: &[&str],
     ) -> Result<(), KbError> {
         if let Some(ref anchor) = self.source_anchor {
-            // Check refs point to visible manifests in same world
             anchor.validate_refs(world_id, visible_manifests)?;
         }
         Ok(())
     }
 
-    /// Set body content (only allowed for provisional KBs).
+    /// note: Set body content (only allowed for provisional KBs).
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
@@ -416,7 +415,7 @@ impl KnowledgeEntryRecord {
         Ok(())
     }
 
-    /// Set source anchor (only allowed for provisional KBs).
+    /// note: Set source anchor (only allowed for provisional KBs).
     ///
     /// # Errors
     /// Returns `Err(KbError::...)` if validation fails.
@@ -429,7 +428,7 @@ impl KnowledgeEntryRecord {
         Ok(())
     }
 
-    /// Typed parse of the `modules.mental` nine-field dialect from
+    /// note: Typed parse of the `modules.mental` nine-field dialect from
     /// `modules_json` (V1.164 P2 T1, l5-mind).
     ///
     /// `None` when the module is absent or not a JSON object — malformed
@@ -444,7 +443,7 @@ impl KnowledgeEntryRecord {
         serde_json::from_value(serde_json::Value::Object(obj.clone())).ok()
     }
 
-    /// Typed parse of the `modules.belief` proposition array from
+    /// note: Typed parse of the `modules.belief` proposition array from
     /// `modules_json` (V1.164 P2 T1, l5-mind).
     ///
     /// One [`BeliefPropositionRaw`] per array element; rows that are not
@@ -470,13 +469,13 @@ impl KnowledgeEntryRecord {
 
 // ── Native holder governance (v1.191 P1 T2, durable §§1/3) ────────────────
 //
-// The closed author-facing audience, its omission semantics, the native
+// note: the closed author-facing audience, its omission semantics, the native
 // validation of the two governance columns, and the raw-input gate that keeps
 // legacy/reserved keys from being silently dropped by deserialization.
 // Admission (`nexus-core`) resolves *which* holder a private audience names;
 // this module owns only the closed input contract and the column shape.
 
-/// The one disclosure value the core knows (`owner-private`).
+/// note: The one disclosure value the core knows (`owner-private`).
 ///
 /// "Shared" is the absence of disclosure, never the string `"shared"`
 /// (durable §3). Any other stored value is open Domain-Profile vocabulary the
@@ -484,18 +483,18 @@ impl KnowledgeEntryRecord {
 /// [`validate_native_governance`]).
 pub const DISCLOSURE_OWNER_PRIVATE: &str = "owner-private";
 
-/// Legacy World-only visibility key (`creator_only`), reserved on every
+/// note: Legacy World-only visibility key (`creator_only`), reserved on every
 /// audience-aware authoring input (durable §5).
 ///
 /// Its presence is rejected even when `false`; `false` is not a silently
 /// ignored optional extension.
 pub const LEGACY_CREATOR_ONLY_KEY: &str = "creator_only";
 
-/// Stable machine-readable reason for a rejected legacy `creator_only` key
+/// note: Stable machine-readable reason for a rejected legacy `creator_only` key
 /// (durable §5), for the daemon invalid-input family.
 pub const LEGACY_CREATOR_ONLY_UNSUPPORTED: &str = "legacy_creator_only_unsupported";
 
-/// Closed author-facing audience of the knowledge authoring surfaces
+/// note: Closed author-facing audience of the knowledge authoring surfaces
 /// (durable §3).
 ///
 /// Wire shape: `{"kind":"shared"}`, `{"kind":"author-only"}`, or
@@ -511,23 +510,23 @@ pub const LEGACY_CREATOR_ONLY_UNSUPPORTED: &str = "legacy_creator_only_unsupport
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum KnowledgeAudience {
-    /// In-scope shared: visible to every reader already authorized for the
+    /// note: In-scope shared: visible to every reader already authorized for the
     /// container. The default for an omitted create audience.
     #[serde(rename = "shared")]
     Shared,
-    /// The admitted controlling Creator's own holder.
+    /// note: The admitted controlling Creator's own holder.
     #[serde(rename = "author-only")]
     AuthorOnly,
-    /// A permitted Character's holder.
+    /// note: A permitted Character's holder.
     #[serde(rename = "character-private")]
     CharacterPrivate {
-        /// Owning Character id (`chr_*`); resolved against stored ownership.
+        /// note: Owning Character id (`chr_*`); resolved against stored ownership.
         character_id: String,
     },
 }
 
 impl KnowledgeAudience {
-    /// Construct a `character-private` audience with a nonempty Character id.
+    /// note: Construct a `character-private` audience with a nonempty Character id.
     ///
     /// # Errors
     /// Returns [`KbError::ValidationError`] for an empty or non-Character id.
@@ -541,7 +540,7 @@ impl KnowledgeAudience {
         Ok(Self::CharacterPrivate { character_id })
     }
 
-    /// The wire/DB discriminant (`shared` / `author-only` / `character-private`).
+    /// note: The wire/DB discriminant (`shared` / `author-only` / `character-private`).
     #[must_use]
     pub const fn kind(&self) -> &'static str {
         match self {
@@ -551,7 +550,7 @@ impl KnowledgeAudience {
         }
     }
 
-    /// The Character this audience targets, when it names one.
+    /// note: The Character this audience targets, when it names one.
     #[must_use]
     pub fn character_id(&self) -> Option<&str> {
         match self {
@@ -560,25 +559,25 @@ impl KnowledgeAudience {
         }
     }
 
-    /// Whether this audience requires a resolved holder during admission.
+    /// note: Whether this audience requires a resolved holder during admission.
     #[must_use]
     pub const fn requires_holder(&self) -> bool {
         !matches!(self, Self::Shared)
     }
 }
 
-/// The native governance column pair of a [`KnowledgeEntryRecord`]
+/// note: The native governance column pair of a [`KnowledgeEntryRecord`]
 /// (`holder_entry_id` + `disclosure`, durable §3).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KnowledgeGovernance {
-    /// Resolved holder `KnowledgeEntry` id; `None` = shared.
+    /// note: Resolved holder `KnowledgeEntry` id; `None` = shared.
     pub holder_entry_id: Option<String>,
-    /// Stored disclosure (`owner-private`); `None` = shared.
+    /// note: Stored disclosure (`owner-private`); `None` = shared.
     pub disclosure: Option<String>,
 }
 
 impl KnowledgeGovernance {
-    /// In-scope shared: both columns absent.
+    /// note: In-scope shared: both columns absent.
     #[must_use]
     pub const fn shared() -> Self {
         Self {
@@ -587,26 +586,26 @@ impl KnowledgeGovernance {
         }
     }
 
-    /// Whether both governance columns are absent (shared).
+    /// note: Whether both governance columns are absent (shared).
     #[must_use]
     pub const fn is_shared(&self) -> bool {
         self.holder_entry_id.is_none() && self.disclosure.is_none()
     }
 }
 
-/// Which authoring operation an omitted `audience` belongs to (durable §3).
+/// note: Which authoring operation an omitted `audience` belongs to (durable §3).
 ///
 /// The omission rule is the only place create and patch differ: on create an
 /// omitted audience means shared, on patch it preserves the stored pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KnowledgeAuthoringOp {
-    /// Creating a new entry.
+    /// note: Creating a new entry.
     Create,
-    /// Editing an existing entry under `expected_revision` CAS.
+    /// note: Editing an existing entry under `expected_revision` CAS.
     Patch,
 }
 
-/// Resolve one authored audience into the native governance columns
+/// note: Resolve one authored audience into the native governance columns
 /// (durable §3).
 ///
 /// - `authored == None` (no `audience` key on the request): on
@@ -655,7 +654,7 @@ pub fn resolve_authored_governance(
     }
 }
 
-/// Validate one native governance column pair (durable §3).
+/// note: Validate one native governance column pair (durable §3).
 ///
 /// - Both columns absent is shared.
 /// - A holder may stand alone: an adopted foreign row may carry a holder with
@@ -693,18 +692,18 @@ pub fn validate_native_governance(
     }
 }
 
-/// A reserved key present on a raw authoring input (durable §§3, 5, 7).
+/// note: A reserved key present on a raw authoring input (durable §§3, 5, 7).
 ///
 /// Held as a typed value so the public surface can return the stable reason
 /// string without parsing a message, and so `false` is rejected exactly like
 /// `true` instead of being ignored as an optional extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReservedAuthoringKey {
-    /// Legacy World-only `creator_only` boolean (durable §5).
+    /// note: Legacy World-only `creator_only` boolean (durable §5).
     LegacyCreatorOnly,
-    /// Service-resolved `holder_entry_id` authored by a client (durable §3).
+    /// note: Service-resolved `holder_entry_id` authored by a client (durable §3).
     HolderEntryId,
-    /// Service-resolved `disclosure` authored by a client (durable §3).
+    /// note: Service-resolved `disclosure` authored by a client (durable §3).
     Disclosure,
 }
 
@@ -722,7 +721,7 @@ impl std::fmt::Display for ReservedAuthoringKey {
 impl std::error::Error for ReservedAuthoringKey {}
 
 impl ReservedAuthoringKey {
-    /// The offending JSON key.
+    /// note: The offending JSON key.
     #[must_use]
     pub const fn key(&self) -> &'static str {
         match self {
@@ -732,7 +731,7 @@ impl ReservedAuthoringKey {
         }
     }
 
-    /// The stable machine-readable reason for the invalid-input error family.
+    /// note: The stable machine-readable reason for the invalid-input error family.
     #[must_use]
     pub const fn reason(&self) -> &'static str {
         match self {
@@ -742,7 +741,7 @@ impl ReservedAuthoringKey {
     }
 }
 
-/// Reject reserved and legacy keys on a raw audience-aware authoring input
+/// note: Reject reserved and legacy keys on a raw audience-aware authoring input
 /// before deserialization can discard them (durable §§5, 7).
 ///
 /// Applies to the actor-knowledge create/patch bodies and the World KB entity
@@ -773,7 +772,7 @@ pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), Res
 
 // ── Mental-layer dialect raw types (V1.164 P2 T1, l5-mind) ────────────────
 //
-// Typed serde raw intermediates for the spoke `modules.mental` (nine-field)
+// note: typed serde raw intermediates for the spoke `modules.mental` (nine-field)
 // and `modules.belief` (proposition array) dialects, following the
 // `ActivationConfigRaw` precedent (`nexus-spoke-adapter/src/adapter/
 // activation.rs`): serde types over the handbook shape where the
@@ -790,7 +789,7 @@ pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), Res
 // stay in `modules_json` and survive the adapter seam verbatim (PD-13) —
 // the typed view is a handbook-names lens, not a lossless re-emitter.
 
-/// Typed view of the `modules.mental` nine-field dialect on a holder
+/// note: Typed view of the `modules.mental` nine-field dialect on a holder
 /// `KnowledgeEntry`.
 ///
 /// All nine fields are optional — a holder carries the subset the author or
@@ -800,38 +799,38 @@ pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), Res
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MentalFieldsRaw {
-    /// Mental identity (self-concept, role, occupation) — not the wire
+    /// note: Mental identity (self-concept, role, occupation) — not the wire
     /// `entry_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<serde_json::Value>,
-    /// Summary / count / `entry_id` refs — never a second copy of the
+    /// note: Summary / count / `entry_id` refs — never a second copy of the
     /// labeled `modules.belief` array (PD-14).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub beliefs: Option<serde_json::Value>,
-    /// Current focus of perception or thought.
+    /// note: Current focus of perception or thought.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<serde_json::Value>,
-    /// Desired end states.
+    /// note: Desired end states.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goals: Option<serde_json::Value>,
-    /// Planned courses of action toward goals.
+    /// note: Planned courses of action toward goals.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intentions: Option<serde_json::Value>,
-    /// Affective state.
+    /// note: Affective state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub emotions: Option<serde_json::Value>,
-    /// Preferences, values, personality traits.
+    /// note: Preferences, values, personality traits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispositions: Option<serde_json::Value>,
-    /// Rules and customs the entity regards as binding.
+    /// note: Rules and customs the entity regards as binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub norms: Option<serde_json::Value>,
-    /// Obligations and prohibitions on behavior.
+    /// note: Obligations and prohibitions on behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints: Option<serde_json::Value>,
 }
 
-/// One `modules.belief` proposition record (handbook field table).
+/// note: One `modules.belief` proposition record (handbook field table).
 ///
 /// Serves both narrated world facts (`holder: "world"`) and actor beliefs
 /// (`holder: <entry_id>`); the `holder` field is the semantic discriminator.
@@ -842,41 +841,41 @@ pub struct MentalFieldsRaw {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct BeliefPropositionRaw {
-    /// Belief holder: an `entry_id`, a group id, or the special `world`
+    /// note: Belief holder: an `entry_id`, a group id, or the special `world`
     /// marking a narrated fact. Not `actor` (TL-5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub holder: Option<String>,
-    /// Minimal content being represented.
+    /// note: Minimal content being represented.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposition: Option<String>,
-    /// Recursive belief depth: `0` = world-level narrated fact, `1` =
+    /// note: Recursive belief depth: `0` = world-level narrated fact, `1` =
     /// first-order belief about the world, `2`/`3` = deeper nesting as flat
     /// rows (depth cap 3).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order: Option<i64>,
-    /// Truth Status: `True` / `False` / `Unknown`.
+    /// note: Truth Status: `True` / `False` / `Unknown`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truth: Option<String>,
-    /// Knowledge Access: `Private` / `Shared` / `Public`. Not
+    /// note: Knowledge Access: `Private` / `Shared` / `Public`. Not
     /// `knowledge_access` (TL-5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<String>,
-    /// Representation: `Explicit` / `Implicit`.
+    /// note: Representation: `Explicit` / `Implicit`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub representation: Option<String>,
-    /// Content Type (closed space, slash-containing labels are literal).
+    /// note: Content Type (closed space, slash-containing labels are literal).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
-    /// Mental Source: `Narration` / `Perception` / `Memory` / `Testimony` /
+    /// note: Mental Source: `Narration` / `Perception` / `Memory` / `Testimony` /
     /// `Inference` / `Imagination` / `Unknown`. Not `mental_source` (TL-5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// Context: `Deceptive` / `Temporal` / `Counterfactual` / `Neutral`.
+    /// note: Context: `Deceptive` / `Temporal` / `Counterfactual` / `Neutral`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
 }
 
-/// Returns true when `id` is a Character subject id (`chr_*` wire prefix).
+/// note: Returns true when `id` is a Character subject id (`chr_*` wire prefix).
 #[must_use]
 pub fn is_character_subject_id(id: &str) -> bool {
     id.starts_with("chr_")
@@ -935,7 +934,7 @@ fn belief_label_value<'a>(row: &'a BeliefPropositionRaw, field: &str) -> Option<
     }
 }
 
-/// Closed-space failures for one belief row as `(field, reason)` pairs in
+/// note: Closed-space failures for one belief row as `(field, reason)` pairs in
 /// handbook order; empty when every present label is legal.
 fn belief_row_label_failures(row: &BeliefPropositionRaw) -> Vec<(&'static str, String)> {
     let mut failures = Vec::new();
@@ -959,7 +958,7 @@ fn validate_closed_belief_labels(row: &BeliefPropositionRaw) -> Result<(), KbErr
     }
 }
 
-/// Validate one Character `ToM` belief row for the v1.184 P4 record API.
+/// note: Validate one Character `ToM` belief row for the v1.184 P4 record API.
 pub fn validate_character_tom_belief_row(
     row: &BeliefPropositionRaw,
     viewer_character_id: &str,
@@ -973,8 +972,8 @@ pub fn validate_character_tom_belief_row(
     let order = row.order.ok_or_else(|| {
         KbError::ValidationError("Character ToM belief row requires order".into())
     })?;
-    // Closed order space: every value outside 1..=2 (including negatives)
-    // rejects deterministically — no unreachable arm, no panic path.
+    // invariant: every value outside 1..=2 (including negatives) rejects
+    // deterministically — no unreachable arm, no panic path.
     if !(1..=2).contains(&order) {
         return Err(KbError::ValidationError(format!(
             "Character ToM belief order must be 1 (L1) or 2 (L2), got {order}"
@@ -992,7 +991,7 @@ pub fn validate_character_tom_belief_row(
             )));
         }
     } else {
-        // order == 2 (guard above closed the space to 1..=2).
+        // note: order == 2 (guard above closed the space to 1..=2).
         if !is_character_subject_id(holder) {
             return Err(KbError::ValidationError(format!(
                 "L2 belief holder must be a Character id (chr_*), got {holder}"
@@ -1017,7 +1016,7 @@ pub fn validate_character_tom_belief_row(
 // contract §3): `<index>` is present only for `belief` array rows and
 // `<field>` only when the failure addresses a member.
 
-/// Render one module-dialect failure into the frozen prefix grammar.
+/// note: Render one module-dialect failure into the frozen prefix grammar.
 fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason: &str) -> String {
     let mut path = format!("modules.{dialect}");
     if let Some(index) = index {
@@ -1031,7 +1030,7 @@ fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason
     format!("{path}: {reason}")
 }
 
-/// Borrowed view of one authored module value.
+/// note: Borrowed view of one authored module value.
 ///
 /// The JSON containers a patch carries, or any other JSON value handed in
 /// directly. Validating the borrow keeps the write seam from materialising a
@@ -1039,7 +1038,7 @@ fn module_error(dialect: &str, index: Option<usize>, field: Option<&str>, reason
 pub enum AuthoredModuleValue<'a> {
     Object(&'a serde_json::Map<String, serde_json::Value>),
     Array(&'a [serde_json::Value]),
-    /// Any non-container JSON value; every dialect addresses it as the wrong
+    /// note: Any non-container JSON value; every dialect addresses it as the wrong
     /// container.
     Other(&'a serde_json::Value),
 }
@@ -1054,7 +1053,7 @@ impl<'a> From<&'a serde_json::Value> for AuthoredModuleValue<'a> {
     }
 }
 
-/// Validate an authored `modules.mental` value.
+/// note: Validate an authored `modules.mental` value.
 ///
 /// It must be an object in the nine-field [`MentalFieldsRaw`] handbook shape.
 /// Field values stay raw JSON and unknown inner keys round-trip verbatim
@@ -1068,7 +1067,7 @@ pub fn validate_mental_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> 
     }
 }
 
-/// Validate an authored `modules.belief` value.
+/// note: Validate an authored `modules.belief` value.
 ///
 /// It must be an array whose every element is a [`BeliefPropositionRaw`]
 /// object carrying legal closed labels. Unknown element keys round-trip
@@ -1092,14 +1091,14 @@ pub fn validate_belief_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> 
             ));
             continue;
         };
-        // Typed failures are member-addressed: probe each present member
+        // why: typed failures are member-addressed: probe each present member
         // alone through the handbook raw type, so member names and their
         // serde reasons come from `BeliefPropositionRaw` itself. An unknown
         // key is ignored by serde (PD-13) and never fails this probe; only a
         // mistyped handbook member does.
         let mut mistyped = false;
         for (member, member_value) in members {
-            // Borrowed singleton probe: serde reads the one member through its
+            // note: borrowed singleton probe; serde reads the one member through its
             // generic map deserializer, so no per-member object is built and an
             // unknown key stays ignored (PD-13).
             let probe = MapDeserializer::new(std::iter::once((member.as_str(), member_value)));
@@ -1132,7 +1131,7 @@ pub fn validate_belief_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> 
     errors
 }
 
-/// Validate an authored `modules.observation` value.
+/// note: Validate an authored `modules.observation` value.
 ///
 /// It is an object whose `observers` (when present) is an array of non-empty
 /// entry-id strings — an explicit `[]` is the meaningful PD-9 "no observers"
@@ -1179,7 +1178,7 @@ pub fn validate_observation_module<'a>(value: impl Into<AuthoredModuleValue<'a>>
     errors
 }
 
-/// Pinned pre-v1.184 P4 `modules.mental` + `modules.belief` fixture.
+/// note: Pinned pre-v1.184 P4 `modules.mental` + `modules.belief` fixture.
 pub const LEGACY_MENTAL_BELIEF_MODULES_FIXTURE: &str = r#"{
             "mental": {
                 "identity": { "role": "harbor_master" },
@@ -1231,7 +1230,7 @@ mod tests {
         assert_eq!(kb.world_id(), Some("wld_test123"));
         assert!(kb.entry_id.starts_with("kb_"));
     }
-    // ── v1.184 P1 T2: closed owner ref + constructors ─────────────────
+    // note: v1.184 P1 T2 closed owner ref + constructors.
 
     #[test]
     fn test_world_convenience_constructor_sets_world_owner() {
@@ -1266,7 +1265,7 @@ mod tests {
 
     #[test]
     fn test_owner_kind_matches_db_vocabulary() {
-        // The `kind()` strings are the `owner_kind` CHECK vocabulary verbatim.
+        // note: the `kind()` strings are the `owner_kind` CHECK vocabulary verbatim.
         assert_eq!(KnowledgeOwnerRef::world("w").kind(), "world");
         assert_eq!(KnowledgeOwnerRef::character("c").kind(), "character");
         assert_eq!(
@@ -1333,7 +1332,7 @@ mod tests {
             .is_err());
     }
 
-    // ── State roundtrip (V1.61 P1) ─────────────────────────────────
+    // note: V1.61 P1 state roundtrip.
 
     #[test]
     fn test_state_roundtrip_serialize_deserialize_preserves_state() {
@@ -1368,7 +1367,6 @@ mod tests {
 
     #[test]
     fn test_state_roundtrip_without_state_and_computable() {
-        // Legacy KnowledgeEntryRecord without state/computable should roundtrip correctly
         let body = KnowledgeEntryBody {
             summary: Some("Old block".to_string()),
             attributes: None,
@@ -1407,9 +1405,9 @@ mod tests {
             .contains_key("character"));
     }
 
-    // ── Mental-layer dialect (V1.164 P2 T1, l5-mind) ─────────────────
+    // note: V1.164 P2 T1 mental-layer dialect (l5-mind).
 
-    /// Fixture entry carrying the handbook `modules.mental` subset +
+    /// note: Fixture entry carrying the handbook `modules.mental` subset +
     /// `modules.belief` rows (worked-example box/basket story).
     fn mental_dialect_entry(entry_id: &str, block_type: BlockType) -> KnowledgeEntryRecord {
         let mut kb = KnowledgeEntryRecord::new("wld_test", block_type, "Dialect Holder");
@@ -1519,7 +1517,7 @@ mod tests {
 
     #[test]
     fn test_paper_alias_row_is_not_produced_and_does_not_round_trip() {
-        // AC-V1164-7 / TL-5: a row using the OmniToM paper aliases
+        // note: AC-V1164-7 / TL-5; a row using the OmniToM paper aliases
         // `actor` / `knowledge_access` / `mental_source` is not produced by
         // the parse type and does not round-trip as-is.
         let alias_row = serde_json::json!({
@@ -1531,11 +1529,11 @@ mod tests {
         });
         let parsed: BeliefPropositionRaw =
             serde_json::from_value(alias_row.clone()).expect("raw type ignores unknown keys");
-        // Handbook fields are not populated from paper aliases.
+        // note: handbook fields are not populated from paper aliases.
         assert_eq!(parsed.holder, None);
         assert_eq!(parsed.access, None);
         assert_eq!(parsed.source, None);
-        // Re-emission never contains the aliases and differs from the input
+        // note: re-emission never contains the aliases and differs from the input
         // (the typed form is handbook-names only).
         let emitted = serde_json::to_value(&parsed).unwrap();
         assert_ne!(emitted, alias_row);
@@ -1556,7 +1554,7 @@ mod tests {
         assert_eq!(early, late);
     }
 
-    // ── v1.184 P4 T1: legacy pin + Character ToM belief admission ─────
+    // note: v1.184 P4 T1 legacy pin + Character ToM belief admission.
 
     #[test]
     fn legacy_mental_belief_modules_fixture_round_trips_unchanged() {
@@ -1617,9 +1615,8 @@ mod tests {
             source: Some("Perception".into()),
             context: Some("Neutral".into()),
         };
-        // Missing order rejects.
         assert!(validate_character_tom_belief_row(&base, viewer).is_err());
-        // Negative, zero, and above-2 orders reject deterministically (C1:
+        // note: negative, zero, and above-2 orders reject deterministically (C1:
         // no unreachable!/panic path — every value outside 1..=2 errors).
         for bad in [-2, -1, 0, 3, 4, i64::MIN, i64::MAX] {
             let row = BeliefPropositionRaw {
@@ -1635,7 +1632,7 @@ mod tests {
         }
     }
 
-    // ── V1.203 P2: authored module-dialect seam ───────────────────────
+    // note: V1.203 P2 authored module-dialect seam.
 
     #[test]
     fn validate_mental_module_accepts_objects_and_rejects_non_object() {
@@ -1660,7 +1657,7 @@ mod tests {
 
     #[test]
     fn validate_belief_module_pins_field_mapped_prefix() {
-        // A bad closed label carries the row index and the member name; a
+        // note: a bad closed label carries the row index and the member name; a
         // legal row ahead of it reports nothing.
         assert_eq!(
             validate_belief_module(&serde_json::json!([
@@ -1672,17 +1669,14 @@ mod tests {
                     .to_string()
             ]
         );
-        // A non-object element is row-addressed without a member.
         assert_eq!(
             validate_belief_module(&serde_json::json!(["row"])),
             vec!["modules.belief.0: must be a belief proposition object".to_string()]
         );
-        // A non-array value is dialect-addressed.
         assert_eq!(
             validate_belief_module(&serde_json::json!({"holder": "kb_ana"})),
             vec!["modules.belief: must be an array".to_string()]
         );
-        // Every closed label across the handbook table is accepted.
         assert_eq!(
             validate_belief_module(&serde_json::json!([{
                 "holder": "world",
@@ -1718,9 +1712,6 @@ mod tests {
 
     #[test]
     fn validate_belief_module_reports_mistyped_members_by_name() {
-        // A known string member with a non-string value is member-addressed
-        // (`modules.belief.<index>.<member>`), carrying the raw type's serde
-        // reason — not the row-level fallback.
         assert_eq!(
             validate_belief_module(&serde_json::json!([
                 {"holder": "kb_ana", "order": 1, "truth": 17},
@@ -1729,15 +1720,12 @@ mod tests {
                 "modules.belief.0.truth: invalid type: integer `17`, expected a string".to_string()
             ]
         );
-        // `order` is the raw type's integer member; a string loses its prefix
-        // without this correction.
         assert_eq!(
             validate_belief_module(&serde_json::json!([{"order": "first"}])),
             vec![
                 "modules.belief.0.order: invalid type: string \"first\", expected i64".to_string()
             ]
         );
-        // A genuinely non-object row keeps the row-level fallback.
         assert_eq!(
             validate_belief_module(&serde_json::json!([42])),
             vec!["modules.belief.0: must be a belief proposition object".to_string()]
@@ -1746,7 +1734,7 @@ mod tests {
 
     #[test]
     fn validate_observation_module_shape_rules() {
-        // Explicit empty observers is the PD-9 claim: accepted, as is an
+        // note: explicit empty observers is the PD-9 claim: accepted, as is an
         // absent key and an unknown inner key.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"observers": []})),
@@ -1764,12 +1752,10 @@ mod tests {
             })),
             [] as [std::string::String; 0]
         );
-        // Non-object access is rejected with the member-qualified prefix.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"access": ["kb_ana"]})),
             vec!["modules.observation.access: must be a JSON object".to_string()]
         );
-        // Non-array observers and empty entries.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"observers": "kb_ana"})),
             vec!["modules.observation.observers: must be an array".to_string()]
@@ -1778,20 +1764,19 @@ mod tests {
             validate_observation_module(&serde_json::json!({"observers": ["kb_ana", " "]})),
             vec!["modules.observation.observers: entry 1 must be a non-empty string".to_string()]
         );
-        // A non-object observation value is dialect-addressed.
         assert_eq!(
             validate_observation_module(&serde_json::json!([1, 2])),
             vec!["modules.observation: must be an object".to_string()]
         );
     }
 
-    // Minimum ratio by which the removed singleton copy must out-allocate the
-    // real belief-member probe. Measured 6 vs 3212 allocations on this fixture
-    // (~535x); 8x leaves room for payload/allocator drift while still failing
-    // if the copy lands on the measured path.
+    // why: the removed singleton copy must out-allocate the real belief-member
+    // probe. Measured 6 vs 3212 allocations on this fixture (~535x); 8x leaves
+    // room for payload/allocator drift while still failing if the copy lands
+    // on the measured path.
     const COPY_MARGIN: u64 = 8;
 
-    /// p4 t3 fix wave 1 — allocation regression check for the belief-member probe.
+    /// note: p4 t3 fix wave 1 — allocation regression check for the belief-member probe.
     ///
     /// The probe reads one member through a borrowed one-entry map; it
     /// must not materialise the per-member singleton JSON object the pre-fix
@@ -1803,7 +1788,7 @@ mod tests {
     #[test]
     fn belief_member_probe_does_not_materialise_a_singleton_object() {
         const MEMBER: &str = "unknown_belief_member";
-        // Fixture prepared outside the measured region: 64 unknown keys x 16
+        // note: fixture prepared outside the measured region; 64 unknown keys x 16
         // unknown leaf objects, each leaf its own allocation.
         let payload = {
             let mut member_payload = serde_json::Map::new();
@@ -1827,10 +1812,9 @@ mod tests {
         row.insert(MEMBER.to_string(), payload.clone());
         let module = serde_json::Value::Array(vec![serde_json::Value::Object(row)]);
 
-        // Warm the thread-local counter outside the measured regions.
         let _ = allocation_counter::measure(|| {});
 
-        // The removed shape: one owned singleton object per member, holding a
+        // note: the removed shape — one owned singleton object per member, holding a
         // deep copy of the member value.
         let singleton_copy = allocation_counter::measure(|| {
             let singleton = serde_json::Value::Object(
@@ -1842,7 +1826,7 @@ mod tests {
             black_box(validate_belief_module(black_box(&module)));
         });
 
-        // The real probe is compared against the removed singleton-copy shape
+        // why: compare the real probe against the removed singleton-copy shape
         // instead of against absolute counts, so allocator/profile drift that
         // moves both readings together does not flake while a copy
         // re-appearing on the measured path still fails.

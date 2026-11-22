@@ -1,4 +1,5 @@
 //! The shared `KbStore` contract, run against the in-memory backend.
+// note: each case delegates to the backend-agnostic contract in `support/`.
 
 #![allow(clippy::unwrap_used)]
 

@@ -4,13 +4,14 @@
 //! - `BlockType` wire enum (`nexus_contracts::BlockType`) is the single SSOT.
 //! - Novel "seven categories" are carried in `body.attributes.novel_category`.
 //! - When `ValidationMode::Novel`, certain `BlockType`s require `novel_category`.
+// note: this module is the validation seam for wire `BlockType` and body semantics.
 
 use crate::world_kb::errors::{KbError, ValidationError, ValidationKind};
 use crate::world_kb::knowledge_entry::KnowledgeEntryBody;
 use nexus_contracts::BlockType;
 use std::fmt;
 
-/// Valid `novel_category` values (body layer, NOT a second `block_type`).
+/// note: Valid `novel_category` values (body layer, NOT a second `block_type`).
 ///
 /// Per entity-scope-model.md §5.1.1 mapping table:
 ///
@@ -37,7 +38,7 @@ pub const NOVEL_CATEGORIES: &[&str] = &[
     "economy",
 ];
 
-/// Default mapping from `novel_category` to `BlockType`.
+/// note: Default mapping from `novel_category` to `BlockType`.
 ///
 /// Used for advisory warnings when the provided `block_type` differs
 /// from the default for a given `novel_category`.
@@ -54,16 +55,16 @@ pub fn default_block_type_for_category(category: &str) -> Option<BlockType> {
     }
 }
 
-/// Maximum allowed length for `canonical_name`.
+/// note: Maximum allowed length for `canonical_name`.
 pub const CANONICAL_NAME_MAX_LEN: usize = 256;
 
-/// Characters forbidden in `canonical_name`.
+/// note: Characters forbidden in `canonical_name`.
 const FORBIDDEN_CHARS: &[char] = &[
     '/', '\\', '`', '$', ';', '&', '|', '>', '<', '!', '*', '?', '"', '\'', '(', ')', '{', '}',
     '[', ']', '#',
 ];
 
-/// Valid `game_bible_category` values (V1.54 P1).
+/// note: Valid `game_bible_category` values (V1.54 P1).
 ///
 /// Per entity-scope-model.md §5.1.1 game-bible taxonomy:
 ///
@@ -86,7 +87,7 @@ pub const GAME_BIBLE_CATEGORIES: &[&str] = &[
     "economy_tier",
 ];
 
-/// Valid `script_category` values (V1.55 P3).
+/// note: Valid `script_category` values (V1.55 P3).
 ///
 /// Per entity-scope-model.md §5.1.1 script taxonomy:
 ///
@@ -97,23 +98,23 @@ pub const GAME_BIBLE_CATEGORIES: &[&str] = &[
 /// | `act`             | `act`                     |
 pub const SCRIPT_CATEGORIES: &[&str] = &["dialogue", "beat", "act"];
 
-/// Validation mode controlling how strictly `body` is checked.
+/// note: Validation mode controlling how strictly `body` is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationMode {
-    /// Standard validation — only structural checks on `body`.
+    /// note: Standard validation — only structural checks on `body`.
     Generic,
-    /// Novel profile validation — requires `novel_category` in `body.attributes`
+    /// note: Novel profile validation — requires `novel_category` in `body.attributes`
     /// and validates it against the mapping table.
     Novel,
-    /// Game-bible profile validation (V1.54 P1) — requires `game_bible_category`
+    /// note: Game-bible profile validation (V1.54 P1) — requires `game_bible_category`
     /// in `body.attributes` and validates it against the mapping table.
     /// Rejects `novel_category` when active.
     GameBible,
-    /// Script profile validation (V1.55 P3) — requires `script_category`
+    /// note: Script profile validation (V1.55 P3) — requires `script_category`
     /// in `body.attributes` and validates it against the mapping table.
     /// Rejects `novel_category` and `game_bible_category` when active.
     Script,
-    /// Structured compute validation (V1.61 P1) — validates computable
+    /// note: Structured compute validation (V1.61 P1) — validates computable
     /// `KnowledgeEntryRecord`s carry the structural shape expected by the compute
     /// envelope: `attributes` and `state` are JSON objects, with `state`
     /// nested by `block_type` per compass Q5 (e.g. `state.character.current_hp`).
@@ -143,13 +144,13 @@ impl fmt::Display for ValidationMode {
     }
 }
 
-/// Check whether a string is a valid `game_bible_category` (V1.54 P1).
+/// note: Check whether a string is a valid `game_bible_category` (V1.54 P1).
 #[must_use]
 pub fn is_valid_game_bible_category(category: &str) -> bool {
     GAME_BIBLE_CATEGORIES.contains(&category)
 }
 
-/// Default mapping from `game_bible_category` to `BlockType` (V1.54 P1).
+/// note: Default mapping from `game_bible_category` to `BlockType` (V1.54 P1).
 pub fn default_block_type_for_game_bible_category(category: &str) -> Option<BlockType> {
     match category {
         "species" => Some(BlockType::Species),
@@ -163,13 +164,13 @@ pub fn default_block_type_for_game_bible_category(category: &str) -> Option<Bloc
     }
 }
 
-/// Check whether a string is a valid `script_category` (V1.55 P3).
+/// note: Check whether a string is a valid `script_category` (V1.55 P3).
 #[must_use]
 pub fn is_valid_script_category(category: &str) -> bool {
     SCRIPT_CATEGORIES.contains(&category)
 }
 
-/// Default mapping from `script_category` to `BlockType` (V1.55 P3).
+/// note: Default mapping from `script_category` to `BlockType` (V1.55 P3).
 #[must_use]
 pub fn default_block_type_for_script_category(category: &str) -> Option<BlockType> {
     match category {
@@ -180,13 +181,13 @@ pub fn default_block_type_for_script_category(category: &str) -> Option<BlockTyp
     }
 }
 
-/// Check whether a string is a valid `novel_category`.
+/// note: Check whether a string is a valid `novel_category`.
 #[must_use]
 pub fn is_valid_novel_category(category: &str) -> bool {
     NOVEL_CATEGORIES.contains(&category)
 }
 
-/// Validate `canonical_name` format and safety.
+/// note: Validate `canonical_name` format and safety.
 ///
 /// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P1-S5
 /// — String allocations in validation error paths (format! per error) are
@@ -224,7 +225,6 @@ pub fn validate_canonical_name(name: &str) -> Result<(), KbError> {
         }));
     }
 
-    // Check for control characters
     if let Some((pos, _)) = name.char_indices().find(|(_, c)| c.is_control()) {
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidCanonicalName,
@@ -233,7 +233,6 @@ pub fn validate_canonical_name(name: &str) -> Result<(), KbError> {
         }));
     }
 
-    // Check for forbidden characters
     if let Some(fc) = name.chars().find(|c| FORBIDDEN_CHARS.contains(c)) {
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidCanonicalName,
@@ -248,7 +247,7 @@ pub fn validate_canonical_name(name: &str) -> Result<(), KbError> {
     Ok(())
 }
 
-/// `true` for cross-profile block types whose bodies are freeform world-shape
+/// note: `true` for cross-profile block types whose bodies are freeform world-shape
 /// markers, not profile-specific categories (entity-scope-model §5.1.1):
 /// `event` (V1.122 Timeline layer) and `era` (V1.123 Brief layer). These are
 /// exempt from `novel_category` / `game_bible_category` / `script_category`
@@ -258,7 +257,7 @@ const fn is_cross_profile_block_type(block_type: BlockType) -> bool {
     matches!(block_type, BlockType::Event | BlockType::Era)
 }
 
-/// Validate a `KnowledgeEntryBody` for the given `BlockType` and `ValidationMode`.
+/// note: Validate a `KnowledgeEntryBody` for the given `BlockType` and `ValidationMode`.
 ///
 /// # Errors
 ///
@@ -273,7 +272,6 @@ pub fn validate_body(
     body: Option<&KnowledgeEntryBody>,
     mode: ValidationMode,
 ) -> Result<(), KbError> {
-    // Structural checks that apply regardless of mode
     if let Some(b) = body {
         if let Some(ref attrs) = b.attributes {
             if !attrs.is_object() {
@@ -286,7 +284,7 @@ pub fn validate_body(
         }
     }
 
-    // Cross-profile block types (`event`, `era`) are NOT subject to
+    // why: cross-profile block types (`event`, `era`) are NOT subject to
     // `novel_category` / `game_bible_category` / `script_category`
     // enforcement (entity-scope-model §5.1.1 — V1.123 implementation note,
     // reaffirmed V1.159): their `body.attributes` are freeform world-shape
@@ -318,7 +316,7 @@ pub fn validate_body(
     }
 }
 
-/// Validate novel-profile `body` semantics (V1.40 P1).
+/// note: Validate novel-profile `body` semantics (V1.40 P1).
 fn validate_novel_body(
     block_type: BlockType,
     body: Option<&KnowledgeEntryBody>,
@@ -368,7 +366,7 @@ fn validate_novel_body(
         }));
     }
 
-    // Advisory: warn if the novel_category doesn't map to the default block_type.
+    // note: advisory warning when the novel_category does not map to the default block_type.
     if let Some(default_bt) = default_block_type_for_category(category) {
         if block_type != default_bt {
             tracing::warn!(
@@ -387,7 +385,7 @@ fn validate_novel_body(
     Ok(())
 }
 
-/// Validate game-bible profile `body` semantics (V1.54 P1).
+/// note: Validate game-bible profile `body` semantics (V1.54 P1).
 ///
 /// Requires `game_bible_category` in `body.attributes` and validates it
 /// against the seven valid values. Rejects `novel_category` if present.
@@ -412,7 +410,7 @@ fn validate_game_bible_body(
         })
     })?;
 
-    // Reject novel_category in game-bible mode — profile categories must not leak
+    // why: reject novel_category in game-bible mode — profile categories must not leak.
     if attrs.get("novel_category").is_some() {
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidNovelCategory,
@@ -451,7 +449,7 @@ fn validate_game_bible_body(
         }));
     }
 
-    // Advisory: warn if the game_bible_category doesn't map to the default block_type.
+    // note: advisory warning when the game_bible_category does not map to the default block_type.
     if let Some(default_bt) = default_block_type_for_game_bible_category(category) {
         if block_type != default_bt {
             tracing::warn!(
@@ -470,7 +468,7 @@ fn validate_game_bible_body(
     Ok(())
 }
 
-/// Validate script profile `body` semantics (V1.55 P3).
+/// note: Validate script profile `body` semantics (V1.55 P3).
 ///
 /// Requires `script_category` in `body.attributes` and validates it
 /// against the three valid values. Rejects `novel_category` and
@@ -495,7 +493,7 @@ fn validate_script_body(
         })
     })?;
 
-    // Reject novel_category and game_bible_category in script mode — profile categories must not leak
+    // why: reject novel_category and game_bible_category in script mode — profile categories must not leak.
     if attrs.get("novel_category").is_some() {
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidNovelCategory,
@@ -544,7 +542,7 @@ fn validate_script_body(
         }));
     }
 
-    // Advisory: warn if the script_category doesn't map to the default block_type.
+    // note: advisory warning when the script_category does not map to the default block_type.
     if let Some(default_bt) = default_block_type_for_script_category(category) {
         if block_type != default_bt {
             tracing::warn!(
@@ -563,7 +561,7 @@ fn validate_script_body(
     Ok(())
 }
 
-/// Validate computable `KnowledgeEntryRecord` body against per-BlockType structured schema (V1.61 P1).
+/// note: Validate computable `KnowledgeEntryRecord` body against per-BlockType structured schema (V1.61 P1).
 ///
 /// When `body.computable` is `Some(true)`:
 /// 1. `attributes` must be present and a JSON object (immutable compute params, compass Q4).
@@ -586,16 +584,16 @@ fn validate_structured_body(
     body: Option<&KnowledgeEntryBody>,
 ) -> Result<(), KbError> {
     let Some(b) = body else {
-        return Ok(()); // no body → nothing to validate
+        return Ok(());
     };
 
-    // Only validate computable KnowledgeEntries; non-computable entries pass through
+    // note: only computable entries are validated; non-computable entries pass through.
     match b.computable {
         Some(true) => {}
         _ => return Ok(()),
     }
 
-    // Gate 1: attributes must be present and an object (immutable compute params)
+    // note: gate 1 — attributes must be present and an object (immutable compute params).
     let _attrs = b.attributes.as_ref().ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingStructuredAttributes,
@@ -606,7 +604,7 @@ fn validate_structured_body(
         })
     })?;
 
-    // Gate 2: state must be present and an object
+    // note: gate 2 — state must be present and an object.
     let state_val = b.state.as_ref().ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingStructuredState,
@@ -626,7 +624,7 @@ fn validate_structured_body(
         })
     })?;
 
-    // Gate 3: state must contain the per-block_type nested key (compass Q5)
+    // note: gate 3 — state must contain the per-block_type nested key (compass Q5).
     let expected_state_key = block_type_state_key(block_type);
     if let Some(expected_key) = expected_state_key {
         if !state_obj.contains_key(expected_key) {
@@ -640,7 +638,7 @@ fn validate_structured_body(
             }));
         }
     }
-    // If the block_type is not in the computable set, we don't enforce a
+    // why: a block type outside the computable set does not enforce a
     // specific state key — the block is computable but the state shape is
     // module-defined (additionalProperties: true in the wire schema).
 
@@ -667,7 +665,7 @@ pub const fn block_type_state_key(block_type: BlockType) -> Option<&'static str>
         BlockType::Faction => Some("faction"),
         BlockType::Ability => Some("ability"),
         BlockType::Species => Some("species"),
-        // Not in the computable set — state shape is module-defined
+        // note: not in the computable set — state shape is module-defined.
         BlockType::Scene
         | BlockType::Organization
         | BlockType::Conflict
@@ -712,7 +710,7 @@ mod tests {
         }
     }
 
-    // ── Generic mode ──────────────────────────────────────────────
+    // note: Generic mode ──────────────────────────────────────────────
 
     #[test]
     fn generic_mode_accepts_none_body() {
@@ -741,18 +739,18 @@ mod tests {
         assert!(validate_body(BlockType::Character, Some(&body), ValidationMode::Generic).is_err());
     }
 
-    // ── Novel mode: happy paths ──────────────────────────────────
+    // note: Novel mode: happy paths ──────────────────────────────────
 
     #[test]
     fn novel_mode_accepts_all_seven_categories() {
         let block_types = [
-            BlockType::InfoPoint,    // foundation
-            BlockType::Event,        // background
-            BlockType::Character,    // character
-            BlockType::Scene,        // location
-            BlockType::Organization, // society
-            BlockType::Conflict,     // rules
-            BlockType::Item,         // economy
+            BlockType::InfoPoint,    // note: foundation
+            BlockType::Event,        // note: background
+            BlockType::Character,    // note: character
+            BlockType::Scene,        // note: location
+            BlockType::Organization, // note: society
+            BlockType::Conflict,     // note: rules
+            BlockType::Item,         // note: economy
         ];
 
         for (i, bt) in block_types.iter().enumerate() {
@@ -766,7 +764,7 @@ mod tests {
         }
     }
 
-    // ── Novel mode: error paths ──────────────────────────────────
+    // note: Novel mode: error paths ──────────────────────────────────
 
     #[test]
     fn novel_mode_rejects_none_body() {
@@ -822,7 +820,7 @@ mod tests {
         assert!(msg.contains("must be a string"));
     }
 
-    // ── Structured error verification ─────────────────────────────
+    // note: Structured error verification ─────────────────────────────
 
     #[test]
     fn novel_missing_body_returns_structured_kind() {
@@ -882,7 +880,7 @@ mod tests {
         }
     }
 
-    // ── Game-Bible mode: happy paths ──────────────────────────────
+    // note: Game-Bible mode: happy paths ──────────────────────────────
 
     fn make_game_bible_body(category: Option<&str>) -> KnowledgeEntryBody {
         KnowledgeEntryBody {
@@ -923,7 +921,7 @@ mod tests {
 
     #[test]
     fn game_bible_mode_rejects_novel_category() {
-        let body = make_body(Some("character")); // novel_category in game-bible mode
+        let body = make_body(Some("character")); // note: novel_category in game-bible mode
         let result = validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
@@ -973,7 +971,7 @@ mod tests {
         assert!(msg.contains("must be a string"));
     }
 
-    // ── Game-Bible: structured error verification ──────────────────
+    // note: Game-Bible: structured error verification ──────────────────
 
     #[test]
     fn game_bible_missing_body_returns_structured_kind() {
@@ -1022,7 +1020,7 @@ mod tests {
         }
     }
 
-    // ── BlockType deserialize new variants ─────────────────────────
+    // note: BlockType deserialize new variants ─────────────────────────
 
     #[test]
     fn blocktype_deserialize_new_game_bible_variants() {
@@ -1048,7 +1046,7 @@ mod tests {
         }
     }
 
-    // ── canonical_name validation ─────────────────────────────────
+    // note: canonical_name validation ─────────────────────────────────
 
     #[test]
     fn canonical_name_accepts_valid() {
@@ -1098,12 +1096,12 @@ mod tests {
     fn canonical_name_rejects_excessive_length() {
         let long_name = "a".repeat(257);
         assert!(validate_canonical_name(&long_name).is_err());
-        // Exactly 256 is ok
+        // note: exactly 256 is ok.
         let max_name = "a".repeat(256);
         assert!(validate_canonical_name(&max_name).is_ok());
     }
 
-    // ── Utility ──────────────────────────────────────────────────
+    // note: Utility ──────────────────────────────────────────────────
 
     #[test]
     fn is_valid_novel_category_true_for_all_seven() {
@@ -1115,7 +1113,7 @@ mod tests {
     #[test]
     fn is_valid_novel_category_false_for_unknown() {
         assert!(!is_valid_novel_category("unknown"));
-        assert!(!is_valid_novel_category("Character")); // case-sensitive
+        assert!(!is_valid_novel_category("Character")); // note: case-sensitive.
     }
 
     #[test]
@@ -1171,7 +1169,7 @@ mod tests {
         assert_eq!(default_block_type_for_category("unknown"), None);
     }
 
-    // ── Game-Bible utility ─────────────────────────────────────────
+    // note: Game-Bible utility ─────────────────────────────────────────
 
     #[test]
     fn is_valid_game_bible_category_true_for_all_seven() {
@@ -1187,8 +1185,8 @@ mod tests {
     #[test]
     fn is_valid_game_bible_category_false_for_unknown() {
         assert!(!is_valid_game_bible_category("unknown"));
-        assert!(!is_valid_game_bible_category("Species")); // case-sensitive
-        assert!(!is_valid_game_bible_category("character")); // novel category, not game-bible
+        assert!(!is_valid_game_bible_category("Species")); // note: case-sensitive.
+        assert!(!is_valid_game_bible_category("character")); // note: novel category, not game-bible.
     }
 
     #[test]
@@ -1224,7 +1222,7 @@ mod tests {
         assert_eq!(default_block_type_for_game_bible_category("unknown"), None);
     }
 
-    // ── Script mode (V1.55 P3 fix-wave: direct unit coverage) ──────
+    // note: Script mode (V1.55 P3 fix-wave: direct unit coverage) ──────
 
     fn make_script_body(category: Option<&str>) -> KnowledgeEntryBody {
         KnowledgeEntryBody {
@@ -1257,7 +1255,7 @@ mod tests {
 
     #[test]
     fn script_mode_rejects_novel_category() {
-        let body = make_body(Some("character")); // novel_category in script mode
+        let body = make_body(Some("character")); // note: novel_category in script mode
         let result = validate_body(BlockType::Dialogue, Some(&body), ValidationMode::Script);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
@@ -1269,7 +1267,7 @@ mod tests {
 
     #[test]
     fn script_mode_rejects_game_bible_category() {
-        let body = make_game_bible_body(Some("species")); // game_bible_category in script mode
+        let body = make_game_bible_body(Some("species")); // note: game_bible_category in script mode
         let result = validate_body(BlockType::Dialogue, Some(&body), ValidationMode::Script);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
@@ -1341,7 +1339,7 @@ mod tests {
         assert!(msg.contains("body.attributes is required"));
     }
 
-    // ── Script: structured error verification ──────────────────────
+    // note: Script: structured error verification ──────────────────────
 
     #[test]
     fn script_missing_body_returns_structured_kind() {
@@ -1388,7 +1386,7 @@ mod tests {
         }
     }
 
-    // ── Script utility ─────────────────────────────────────────────
+    // note: Script utility ─────────────────────────────────────────────
 
     #[test]
     fn is_valid_script_category_true_for_all_three() {
@@ -1400,9 +1398,9 @@ mod tests {
     #[test]
     fn is_valid_script_category_false_for_unknown() {
         assert!(!is_valid_script_category("unknown"));
-        assert!(!is_valid_script_category("Dialogue")); // case-sensitive
-        assert!(!is_valid_script_category("character")); // novel category, not script
-        assert!(!is_valid_script_category("species")); // game-bible category, not script
+        assert!(!is_valid_script_category("Dialogue")); // note: case-sensitive.
+        assert!(!is_valid_script_category("character")); // note: novel category, not script.
+        assert!(!is_valid_script_category("species")); // note: game-bible category, not script.
     }
 
     #[test]
@@ -1422,7 +1420,7 @@ mod tests {
         assert_eq!(default_block_type_for_script_category("unknown"), None);
     }
 
-    // ── Structured validation (V1.61 P1) ──────────────────────────
+    // note: Structured validation (V1.61 P1) ──────────────────────────
 
     fn make_computable_body(block_type: BlockType) -> KnowledgeEntryBody {
         let state_key = block_type_state_key(block_type).unwrap_or("unknown");
@@ -1628,7 +1626,7 @@ mod tests {
         assert_eq!(block_type_state_key(BlockType::Faction), Some("faction"));
         assert_eq!(block_type_state_key(BlockType::Ability), Some("ability"));
         assert_eq!(block_type_state_key(BlockType::Species), Some("species"));
-        // Non-computable types return None
+        // note: non-computable types return None.
         assert_eq!(block_type_state_key(BlockType::Scene), None);
         assert_eq!(block_type_state_key(BlockType::Event), None);
     }

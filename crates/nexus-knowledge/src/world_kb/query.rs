@@ -1,34 +1,35 @@
 //! KB query and result types for World-scoped narrative KB operations.
+// note: query types are re-exported from the crate root.
 
 use nexus_contracts::BlockType;
 
-/// Query parameters for KB search operations.
+/// note: Query parameters for KB search operations.
 ///
 /// All queries are scoped by `world_id` (required).
 /// Additional filters are optional and combined with AND logic.
 #[derive(Debug, Clone)]
 pub struct KbQuery {
-    /// World scope — required for every query.
+    /// note: World scope — required for every query.
     pub world_id: String,
-    /// Filter by block type.
+    /// note: Filter by block type.
     pub block_type: Option<BlockType>,
-    /// Filter by exact canonical name.
+    /// note: Filter by exact canonical name.
     pub canonical_name: Option<String>,
-    /// Text search within block content (summary, tags, `canonical_name`).
+    /// note: Text search within block content (summary, tags, `canonical_name`).
     pub text_search: Option<String>,
-    /// Filter by computable flag (V1.61 P1).
+    /// note: Filter by computable flag (V1.61 P1).
     /// - `Some(true)` — only blocks with `computable: true`
     /// - `Some(false)` — only blocks with `computable: false` or absent
     /// - `None` — no filter (default)
     pub computable: Option<bool>,
-    /// Maximum number of results.
+    /// note: Maximum number of results.
     pub limit: Option<usize>,
-    /// Number of results to skip (for pagination).
+    /// note: Number of results to skip (for pagination).
     pub offset: Option<usize>,
 }
 
 impl KbQuery {
-    /// Create a new query scoped to the given world.
+    /// note: Create a new query scoped to the given world.
     #[must_use]
     pub fn new(world_id: &str) -> Self {
         Self {
@@ -42,28 +43,28 @@ impl KbQuery {
         }
     }
 
-    /// Filter by block type.
+    /// note: Filter by block type.
     #[must_use]
     pub const fn with_block_type(mut self, block_type: BlockType) -> Self {
         self.block_type = Some(block_type);
         self
     }
 
-    /// Filter by exact canonical name.
+    /// note: Filter by exact canonical name.
     #[must_use]
     pub fn with_canonical_name(mut self, name: &str) -> Self {
         self.canonical_name = Some(name.to_string());
         self
     }
 
-    /// Add text search filter (case-insensitive substring match).
+    /// note: Add text search filter (case-insensitive substring match).
     #[must_use]
     pub fn with_text_search(mut self, text: &str) -> Self {
         self.text_search = Some(text.to_string());
         self
     }
 
-    /// Filter by computable flag (V1.61 P1).
+    /// note: Filter by computable flag (V1.61 P1).
     ///
     /// - `Some(true)` — only blocks with `body.computable == true`
     /// - `Some(false)` — only blocks with `body.computable` absent or false
@@ -74,14 +75,14 @@ impl KbQuery {
         self
     }
 
-    /// Set result limit.
+    /// note: Set result limit.
     #[must_use]
     pub const fn with_limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit);
         self
     }
 
-    /// Set result offset.
+    /// note: Set result offset.
     #[must_use]
     pub const fn with_offset(mut self, offset: usize) -> Self {
         self.offset = Some(offset);
@@ -89,24 +90,24 @@ impl KbQuery {
     }
 }
 
-/// Result of inserting a `KnowledgeEntryRecord`.
+/// note: Result of inserting a `KnowledgeEntryRecord`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KbInsertResult {
-    /// ID of the created `KnowledgeEntryRecord`.
+    /// note: ID of the created `KnowledgeEntryRecord`.
     pub entry_id: String,
-    /// Canonical owner of the created record (v1.184 P1).
+    /// note: Canonical owner of the created record (v1.184 P1).
     pub owner: crate::world_kb::knowledge_entry::KnowledgeOwnerRef,
-    /// Creation timestamp.
+    /// note: Creation timestamp.
     pub created_at: String,
 }
 
-/// Result of querying `KnowledgeEntryRecord`s.
+/// note: Result of querying `KnowledgeEntryRecord`s.
 #[derive(Debug, Clone)]
 pub struct KbQueryResult {
-    /// Matching `KnowledgeEntryRecord`s (after pagination).
+    /// note: Matching `KnowledgeEntryRecord`s (after pagination).
     pub items: Vec<crate::world_kb::knowledge_entry::KnowledgeEntryRecord>,
-    /// Total number of matching items (ignoring limit/offset).
+    /// note: Total number of matching items (ignoring limit/offset).
     pub total_count: usize,
-    /// Whether more results exist beyond the current page.
+    /// note: Whether more results exist beyond the current page.
     pub has_more: bool,
 }

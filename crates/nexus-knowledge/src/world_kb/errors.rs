@@ -1,44 +1,45 @@
 //! KB-domain error types.
+// note: these types are re-exported from the crate root as the domain error surface.
 
 use std::fmt;
 use thiserror::Error;
 
-/// Kind of validation failure for structured error handling.
+/// note: Kind of validation failure for structured error handling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationKind {
-    /// `body.attributes.novel_category` is missing.
+    /// note: `body.attributes.novel_category` is missing.
     MissingNovelCategory,
-    /// `body.attributes.novel_category` is not one of the seven valid values.
+    /// note: `body.attributes.novel_category` is not one of the seven valid values.
     InvalidNovelCategory,
-    /// `body.attributes` is missing for a novel-profile `KnowledgeEntryRecord`.
+    /// note: `body.attributes` is missing for a novel-profile `KnowledgeEntryRecord`.
     MissingAttributes,
-    /// `body` is `None` for a novel-profile `KnowledgeEntryRecord`.
+    /// note: `body` is `None` for a novel-profile `KnowledgeEntryRecord`.
     MissingBody,
-    /// `body.attributes` exists but is not a JSON object.
+    /// note: `body.attributes` exists but is not a JSON object.
     NonObjectAttributes,
-    /// `body.attributes.novel_category` exists but is not a string.
+    /// note: `body.attributes.novel_category` exists but is not a string.
     NonStringNovelCategory,
-    /// `canonical_name` fails format/safety validation.
+    /// note: `canonical_name` fails format/safety validation.
     InvalidCanonicalName,
-    /// `body.attributes.game_bible_category` is missing (V1.54 P1).
+    /// note: `body.attributes.game_bible_category` is missing (V1.54 P1).
     MissingGameBibleCategory,
-    /// `body.attributes.game_bible_category` is not one of the seven valid values (V1.54 P1).
+    /// note: `body.attributes.game_bible_category` is not one of the seven valid values (V1.54 P1).
     InvalidGameBibleCategory,
-    /// `body.attributes.game_bible_category` exists but is not a string (V1.54 P1).
+    /// note: `body.attributes.game_bible_category` exists but is not a string (V1.54 P1).
     NonStringGameBibleCategory,
-    /// `body.attributes.script_category` is missing (V1.55 P3).
+    /// note: `body.attributes.script_category` is missing (V1.55 P3).
     MissingScriptCategory,
-    /// `body.attributes.script_category` is not one of the three valid values (V1.55 P3).
+    /// note: `body.attributes.script_category` is not one of the three valid values (V1.55 P3).
     InvalidScriptCategory,
-    /// `body.attributes.script_category` exists but is not a string (V1.55 P3).
+    /// note: `body.attributes.script_category` exists but is not a string (V1.55 P3).
     NonStringScriptCategory,
-    /// `body.attributes` is missing for a computable `KnowledgeEntryRecord` (V1.61 P1).
+    /// note: `body.attributes` is missing for a computable `KnowledgeEntryRecord` (V1.61 P1).
     MissingStructuredAttributes,
-    /// `body.state` is missing for a computable `KnowledgeEntryRecord` (V1.61 P1).
+    /// note: `body.state` is missing for a computable `KnowledgeEntryRecord` (V1.61 P1).
     MissingStructuredState,
-    /// `body.state` is not a JSON object for a computable `KnowledgeEntryRecord` (V1.61 P1).
+    /// note: `body.state` is not a JSON object for a computable `KnowledgeEntryRecord` (V1.61 P1).
     NonObjectStructuredState,
-    /// `body.state` does not contain the expected per-`block_type` nested key (V1.61 P1).
+    /// note: `body.state` does not contain the expected per-`block_type` nested key (V1.61 P1).
     InvalidStructuredStateKey,
 }
 
@@ -66,14 +67,14 @@ impl fmt::Display for ValidationKind {
     }
 }
 
-/// Structured validation error with kind, optional field, and human-readable message.
+/// note: Structured validation error with kind, optional field, and human-readable message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationError {
-    /// Categorised failure kind.
+    /// note: Categorised failure kind.
     pub kind: ValidationKind,
-    /// Optional field path (e.g., `"body.attributes.novel_category"`).
+    /// note: Optional field path (e.g., `"body.attributes.novel_category"`).
     pub field: Option<String>,
-    /// Human-readable message.
+    /// note: Human-readable message.
     pub message: String,
 }
 
@@ -89,57 +90,57 @@ impl fmt::Display for ValidationError {
 
 impl std::error::Error for ValidationError {}
 
-/// Error type for `KnowledgeEntryRecord` and `SourceAnchor` operations.
+/// note: Error type for `KnowledgeEntryRecord` and `SourceAnchor` operations.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum KbError {
-    /// Permission denied.
+    /// note: Permission denied.
     #[error("permission denied: {0}")]
     PermissionDenied(String),
 
-    /// Cannot modify an immutable confirmed state.
+    /// note: Cannot modify an immutable confirmed state.
     #[error("cannot modify confirmed immutable state")]
     ImmutableConfirmedState,
 
-    /// Entity is already in the target state.
+    /// note: Entity is already in the target state.
     #[error("entity is already in state: {0}")]
     AlreadyInState(String),
 
-    /// Unresolved hard conflict.
+    /// note: Unresolved hard conflict.
     #[error("unresolved hard conflict: {0}")]
     UnresolvedConflict(String),
 
-    /// Version mismatch.
+    /// note: Version mismatch.
     #[error("revision mismatch: expected {expected}, got {actual}")]
     RevisionMismatch {
-        /// Expected revision.
+        /// note: Expected revision.
         expected: u64,
-        /// Actual revision.
+        /// note: Actual revision.
         actual: u64,
     },
 
-    /// Structured validation error (taxonomy / canonical-name rules).
+    /// note: Structured validation error (taxonomy / canonical-name rules).
     #[error("validation error: {0}")]
     Validation(ValidationError),
 
-    /// Validation error with opaque message (legacy / non-structured paths).
+    /// note: Validation error with opaque message (legacy / non-structured paths).
     #[error("validation error: {0}")]
     ValidationError(String),
 
-    /// Excerpt exceeds maximum length.
+    /// note: Excerpt exceeds maximum length.
     #[error("excerpt exceeds maximum length: {actual} > {max}")]
     ExcerptTooLong {
-        /// Actual length.
+        /// note: Actual length.
         actual: usize,
-        /// Maximum allowed length.
+        /// note: Maximum allowed length.
         max: usize,
     },
 
-    /// Canonical owner metadata is absent at the conversion seam (v1.184 P1).
+    /// note: Canonical owner metadata is absent at the conversion seam (v1.184 P1).
     /// The seam fails closed rather than fabricating a World owner.
     #[error("knowledge entry has no canonical owner metadata")]
     MissingOwner,
 
-    /// Owner metadata on the spoke boundary is ambiguous or malformed
+    /// note: Owner metadata on the spoke boundary is ambiguous or malformed
     /// (v1.184 P1 fix): more than one typed owner key present, or an owner
     /// key carrying a non-string/null value. Zero owner keys is
     /// [`KbError::MissingOwner`]. The seam fails closed rather than picking
@@ -147,13 +148,13 @@ pub enum KbError {
     #[error("invalid owner metadata: {0}")]
     InvalidOwnerMetadata(String),
 
-    /// Wire `schema_version` exceeds the domain `u32` range (v1.184 P1 fix):
+    /// note: Wire `schema_version` exceeds the domain `u32` range (v1.184 P1 fix):
     /// reverse conversion fails closed instead of silently normalizing an
     /// unsupported future version to `1`.
     #[error("unsupported schema_version: {0} exceeds the u32 range")]
     UnsupportedSchemaVersion(u64),
 
-    /// Unknown `entry_type` on the spoke wire (v1.184 P1 fix): the wire
+    /// note: Unknown `entry_type` on the spoke wire (v1.184 P1 fix): the wire
     /// contract leaves `entry_type` an open string while the domain
     /// `BlockType` is closed — an unrecognized value fails closed instead of
     /// silently normalizing to the default block type.

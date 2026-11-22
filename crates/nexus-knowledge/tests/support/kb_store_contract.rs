@@ -4,6 +4,7 @@
 //! `nexus-knowledge` (`InMemoryKbStore`) and `nexus-local-db`
 //! (`SqliteKbStore`). Each target hands in its own freshly constructed store,
 //! so nothing here names a backend or shares one store across a case.
+// note: the contract is exercised by both backends so a semantic drift fails once, not per backend.
 
 #![allow(clippy::unwrap_used)]
 
@@ -14,7 +15,7 @@ fn make_block(world_id: &str, block_type: BlockType, name: &str) -> KnowledgeEnt
     KnowledgeEntryRecord::new(world_id, block_type, name)
 }
 
-/// Insert returns the stored identity and `get` reads the record back.
+/// note: Insert returns the stored identity and `get` reads the record back.
 pub async fn insert_and_get<S: KbStore + Sync>(store: &S) {
     let kb = make_block("wld_1", BlockType::Character, "Hero");
 
@@ -27,13 +28,13 @@ pub async fn insert_and_get<S: KbStore + Sync>(store: &S) {
     assert_eq!(fetched.world_id(), Some("wld_1"));
 }
 
-/// An unknown id is `NotFound`, never a backend-specific storage error.
+/// note: An unknown id is `NotFound`, never a backend-specific storage error.
 pub async fn get_not_found<S: KbStore + Sync>(store: &S) {
     let err = store.get_knowledge_entry("kb_absent").await.unwrap_err();
     assert!(matches!(&err, KbStoreError::NotFound(id) if id == "kb_absent"));
 }
 
-/// `list_by_world` returns only that world's active entries.
+/// note: `list_by_world` returns only that world's active entries.
 pub async fn list_by_world<S: KbStore + Sync>(store: &S) {
     for kb in [
         make_block("wld_1", BlockType::Character, "Hero"),
@@ -51,7 +52,7 @@ pub async fn list_by_world<S: KbStore + Sync>(store: &S) {
     assert_eq!(w2[0].canonical_name, "Villain");
 }
 
-/// A second active entry with the same `(owner, canonical_name, block_type)`
+/// note: A second active entry with the same `(owner, canonical_name, block_type)`
 /// is refused with the colliding owner and name, not a raw storage error.
 pub async fn uniqueness_rejects_duplicate<S: KbStore + Sync>(store: &S) {
     store
@@ -67,7 +68,7 @@ pub async fn uniqueness_rejects_duplicate<S: KbStore + Sync>(store: &S) {
             if owner == &KnowledgeOwnerRef::world("wld_1") && name == "Hero"));
 }
 
-/// Delete is soft: the row stays readable as `deleted` and leaves `list_by_world`.
+/// note: Delete is soft: the row stays readable as `deleted` and leaves `list_by_world`.
 pub async fn soft_delete<S: KbStore + Sync>(store: &S) {
     let kb = make_block("wld_1", BlockType::Character, "Hero");
     let id = kb.entry_id.clone();

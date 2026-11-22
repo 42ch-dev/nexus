@@ -18,6 +18,7 @@
 //!
 //! [`compute_kb_diff`] is the pure half used by `--dry-run`; [`diff_and_apply`]
 //! is compute + apply.
+// note: the rescan path never creates or removes KB rows; see the §5.5 invariant above.
 
 use crate::world_kb::knowledge_entry::{
     KnowledgeEntryBody, KnowledgeEntryRecord, KnowledgeOwnerRef,
@@ -25,7 +26,7 @@ use crate::world_kb::knowledge_entry::{
 use crate::world_kb::store::{KbStore, KbStoreError};
 use serde::Serialize;
 
-/// Whether a `KnowledgeEntryRecord` status counts as "active" for body refresh.
+/// note: Whether a `KnowledgeEntryRecord` status counts as "active" for body refresh.
 ///
 /// Mirrors the `kb_key_blocks` partial unique index
 /// `WHERE status NOT IN ('deleted', 'merged', 'deprecated')`.
@@ -33,16 +34,16 @@ fn is_active_status(status: &str) -> bool {
     !matches!(status, "deleted" | "merged" | "deprecated")
 }
 
-/// A `KnowledgeEntryRecord` body refresh applied by [`diff_and_apply`].
+/// note: A `KnowledgeEntryRecord` body refresh applied by [`diff_and_apply`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct KbSyncUpdate {
-    /// The `KnowledgeEntryRecord` whose body was refreshed.
+    /// note: The `KnowledgeEntryRecord` whose body was refreshed.
     pub entry_id: String,
-    /// The matched `canonical_name`.
+    /// note: The matched `canonical_name`.
     pub canonical_name: String,
 }
 
-/// Computed diff for a refreshable scan against a world's `kb_key_blocks`.
+/// note: Computed diff for a refreshable scan against a world's `kb_key_blocks`.
 ///
 /// `inserted` and `removed` are **advisory**: the rescan does not create or
 /// remove `KnowledgeEntryRecord`s (§5.5 reserves those for adopt/edit/delete). They are
@@ -50,25 +51,25 @@ pub struct KbSyncUpdate {
 /// actually persisted by [`diff_and_apply`].
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct KbSyncDiff {
-    /// Canonical names present in the new extraction but with no matching
+    /// note: Canonical names present in the new extraction but with no matching
     /// active `KnowledgeEntryRecord`. Promote via `creator world kb adopt`.
     pub inserted: Vec<String>,
-    /// Active `KnowledgeEntryRecord`s whose body was refreshed from the new extraction.
+    /// note: Active `KnowledgeEntryRecord`s whose body was refreshed from the new extraction.
     pub updated: Vec<KbSyncUpdate>,
-    /// Active `KnowledgeEntryRecord`s whose `canonical_name` vanished from the new
+    /// note: Active `KnowledgeEntryRecord`s whose `canonical_name` vanished from the new
     /// extraction. Review via `creator world kb edit|delete`.
     pub removed: Vec<String>,
 }
 
 impl KbSyncDiff {
-    /// Returns `true` when the diff contains no changes.
+    /// note: Returns `true` when the diff contains no changes.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.inserted.is_empty() && self.updated.is_empty() && self.removed.is_empty()
     }
 }
 
-/// Compute (no I/O) the diff between a world's existing `KnowledgeEntryRecord`s and a
+/// note: Compute (no I/O) the diff between a world's existing `KnowledgeEntryRecord`s and a
 /// freshly-extracted candidate set.
 ///
 /// Matching is by `canonical_name`, case-insensitive. Used by `--dry-run` to
@@ -84,7 +85,7 @@ pub fn compute_kb_diff(
     old_rows: &[KnowledgeEntryRecord],
     new_extracted: &[(String, KnowledgeEntryBody)],
 ) -> KbSyncDiff {
-    // Index active old rows by lowercased canonical_name for O(1) lookup.
+    // why: index active old rows by lowercased canonical_name for O(1) lookup.
     use std::collections::HashMap;
     let mut active_by_name: HashMap<String, &KnowledgeEntryRecord> = HashMap::new();
     for kb in old_rows.iter().filter(|kb| is_active_status(&kb.status)) {
@@ -99,12 +100,11 @@ pub fn compute_kb_diff(
     for (name, new_body) in new_extracted {
         let name_lower = name.to_ascii_lowercase();
         let Some(old_kb) = active_by_name.get(&name_lower) else {
-            // No active KnowledgeEntryRecord for this candidate — advisory insert.
+            // note: no active KnowledgeEntryRecord for this candidate — advisory insert.
             diff.inserted.push(name.clone());
             continue;
         };
         matched_old.insert(old_kb.entry_id.clone());
-        // Body refresh only when the extracted body differs from the row's.
         if old_kb.body.as_ref() != Some(new_body) {
             diff.updated.push(KbSyncUpdate {
                 entry_id: old_kb.entry_id.clone(),
@@ -113,7 +113,7 @@ pub fn compute_kb_diff(
         }
     }
 
-    // Active old rows not matched by any new candidate — advisory remove.
+    // note: active old rows not matched by any new candidate — advisory remove.
     for kb in old_rows.iter().filter(|kb| is_active_status(&kb.status)) {
         if !matched_old.contains(&kb.entry_id) {
             diff.removed.push(kb.canonical_name.clone());
@@ -123,7 +123,7 @@ pub fn compute_kb_diff(
     diff
 }
 
-/// Compute + apply a refreshable-scan diff: refresh the `body` of active
+/// note: Compute + apply a refreshable-scan diff: refresh the `body` of active
 /// `KnowledgeEntryRecord`s whose `canonical_name` matches a freshly-extracted candidate.
 ///
 /// Insert/delete of `KnowledgeEntryRecord`s is **not** performed (entity-scope-model §5.5
@@ -156,12 +156,12 @@ where
 {
     let mut diff = compute_kb_diff(old_rows, new_extracted);
 
-    // Apply only body refreshes. Re-resolve each updated row from old_rows to
+    // why: apply only body refreshes. Re-resolve each updated row from old_rows to
     // build the full KnowledgeEntryRecord (compute_kb_diff only carries ids/names).
     let mut applied: Vec<KbSyncUpdate> = Vec::with_capacity(diff.updated.len());
     for update in diff.updated.drain(..) {
         let Some(old_kb) = old_rows.iter().find(|kb| kb.entry_id == update.entry_id) else {
-            // Row vanished between compute and apply — skip defensively.
+            // note: row vanished between compute and apply — skip defensively.
             continue;
         };
         let new_body = new_extracted
@@ -174,7 +174,7 @@ where
         };
 
         let mut refreshed = old_kb.clone();
-        // World-scoped refresh: the source rows are World-owned, so pin the
+        // why: the source rows are World-owned, so pin the
         // owner to the world (v1.184 P1 — owner is otherwise immutable).
         refreshed.owner = KnowledgeOwnerRef::world(world_id.to_string());
         refreshed.body = Some(new_body);
@@ -222,11 +222,8 @@ mod tests {
             ("Newcomer".to_string(), body_with("fresh")),
         ];
         let diff = compute_kb_diff(&old, &new);
-        // "Kept" unchanged → not in updated.
         assert_eq!(diff.updated, Vec::<KbSyncUpdate>::new());
-        // "Newcomer" has no KnowledgeEntryRecord → advisory insert.
         assert_eq!(diff.inserted, vec!["Newcomer".to_string()]);
-        // No active old row vanished → no removes.
         assert_eq!(diff.removed, Vec::<String>::new());
     }
 
@@ -263,7 +260,6 @@ mod tests {
         let old = vec![kb];
         let new = vec![("Ghost".to_string(), body_with("old"))];
         let diff = compute_kb_diff(&old, &new);
-        // Deleted row is not active → "Ghost" looks newly extracted.
         assert_eq!(diff.inserted, vec!["Ghost".to_string()]);
         assert_eq!(diff.updated, Vec::<KbSyncUpdate>::new());
     }
@@ -283,7 +279,6 @@ mod tests {
         let store = InMemoryKbStore::with_validation_mode(
             crate::world_kb::validation::ValidationMode::Novel,
         );
-        // Seed a confirmed KnowledgeEntryRecord the store owns.
         let seeded = confirmed_block(world, "Lin Xia", body_with("v1"));
         store.insert_knowledge_entry(seeded.clone()).await.unwrap();
         let old_rows = store.list_by_world(world).await.unwrap();
@@ -294,7 +289,6 @@ mod tests {
             .unwrap();
         assert_eq!(diff.updated.len(), 1);
 
-        // The stored body was refreshed.
         let after = store.list_by_world(world).await.unwrap();
         assert_eq!(
             after[0].body.as_ref().unwrap().summary.as_deref(),

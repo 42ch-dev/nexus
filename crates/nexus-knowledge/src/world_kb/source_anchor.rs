@@ -2,11 +2,12 @@
 //!
 //! `SourceAnchor` is NOT an aggregate; it's a value object embedded in `KnowledgeEntryRecord`, Delta, etc.
 //! See data-model-v1.md §6.1.
+// note: the value object is re-exported from `world_kb` as part of the KB domain surface.
 
 use crate::world_kb::errors::KbError;
 use serde::{Deserialize, Serialize};
 
-/// Domain `SourceAnchor` — references platform Story summary entities.
+/// note: Domain `SourceAnchor` — references platform Story summary entities.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceAnchor {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -17,7 +18,7 @@ pub struct SourceAnchor {
     pub summary: Option<String>,
 }
 
-/// Reference to a platform Story summary entity.
+/// note: Reference to a platform Story summary entity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceSummaryRef {
     pub story_manifest_id: String,
@@ -26,12 +27,12 @@ pub struct SourceSummaryRef {
     pub unit_kind: Option<String>,
 }
 
-/// Maximum excerpt length per consistency-rules-v1.md G6.
+/// note: Maximum excerpt length per consistency-rules-v1.md G6.
 pub const MAX_EXCERPT_LENGTH: usize = 1024;
 
 impl SourceAnchor {
     #[must_use]
-    /// Create `SourceAnchor` referencing a single story summary unit.
+    /// note: Create `SourceAnchor` referencing a single story summary unit.
     pub fn new(story_manifest_id: &str, summary_unit_id: &str, unit_kind: Option<&str>) -> Self {
         Self {
             story_summary_refs: Some(vec![SourceSummaryRef {
@@ -44,7 +45,7 @@ impl SourceAnchor {
         }
     }
 
-    /// Create `SourceAnchor` with excerpt only (no story refs).
+    /// note: Create `SourceAnchor` with excerpt only (no story refs).
     #[must_use]
     pub fn from_excerpt(excerpt: &str) -> Self {
         Self {
@@ -54,7 +55,7 @@ impl SourceAnchor {
         }
     }
 
-    /// Add a story summary reference.
+    /// note: Add a story summary reference.
     pub fn add_summary_ref(
         &mut self,
         story_manifest_id: &str,
@@ -69,7 +70,7 @@ impl SourceAnchor {
         });
     }
 
-    /// Validate excerpt length (max 1024 chars per G6).
+    /// note: Validate excerpt length (max 1024 chars per G6).
     pub const fn validate_excerpt(&self) -> Result<(), KbError> {
         if let Some(ref excerpt) = self.excerpt {
             if excerpt.len() > MAX_EXCERPT_LENGTH {
@@ -82,7 +83,7 @@ impl SourceAnchor {
         Ok(())
     }
     ///
-    /// Validate all `story_summary_refs` point to visible manifests in the given world.
+    /// note: Validate all `story_summary_refs` point to visible manifests in the given world.
     pub fn validate_refs(
         &self,
         _world_id: &str,
@@ -102,7 +103,7 @@ impl SourceAnchor {
     }
 }
 
-// NOTE (V1.139 P1 T2): the legacy `From<NexusSourceAnchor>` / `From<NexusSourceAnchorStorySummaryRefsItem>`
+// why: the legacy `From<NexusSourceAnchor>` / `From<NexusSourceAnchorStorySummaryRefsItem>`
 // conversions were removed — those `nexus_contracts::domain::*` types were deleted in P0
 // (`key-block.schema.json` removed). The spoke-side anchor mapping now lives in
 // `knowledge_entry.rs` (`nexus_anchor_to_spoke` / `spoke_anchor_to_nexus`), the wire-boundary

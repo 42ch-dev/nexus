@@ -31,31 +31,31 @@ use crate::world_kb::store::KbStoreError;
 use crate::world_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
 use nexus_contracts::BlockType;
 
-/// Input for [`prepare_extract`].
+/// note: Input for [`prepare_extract`].
 ///
 /// Everything except [`governance`](Self::governance) is model output;
 /// `governance` is the trusted job policy and is the only authority for the
 /// holder/disclosure pair.
 #[derive(Debug, Clone)]
 pub struct ExtractPrepareInput {
-    /// Target world ID.
+    /// note: Target world ID.
     pub world_id: String,
-    /// Block type from LLM extraction.
+    /// note: Block type from LLM extraction.
     pub block_type: BlockType,
-    /// Canonical name from LLM extraction.
+    /// note: Canonical name from LLM extraction.
     pub canonical_name: String,
-    /// Body content from LLM extraction.
+    /// note: Body content from LLM extraction.
     pub body: KnowledgeEntryBody,
-    /// Source anchor for the chapter artifact.
+    /// note: Source anchor for the chapter artifact.
     pub source_anchor: SourceAnchor,
-    /// Validation mode: `Novel` for V1.40 novel works, `Generic` otherwise.
+    /// note: Validation mode: `Novel` for V1.40 novel works, `Generic` otherwise.
     pub validation_mode: ValidationMode,
-    /// Governance resolved by the service from the extraction job policy
+    /// note: Governance resolved by the service from the extraction job policy
     /// before the model ran. Model output never reaches this pair.
     pub governance: KnowledgeGovernance,
 }
 
-/// A validated extraction candidate awaiting persistence.
+/// note: A validated extraction candidate awaiting persistence.
 ///
 /// [`record`](Self::record) is final: its `entry_id` was allocated once by
 /// [`prepare_extract`], its governance pair came from the trusted policy, and
@@ -64,11 +64,11 @@ pub struct ExtractPrepareInput {
 /// transaction.
 #[derive(Debug, Clone)]
 pub struct PreparedExtractCandidate {
-    /// The exact aggregate to persist.
+    /// note: The exact aggregate to persist.
     pub record: KnowledgeEntryRecord,
 }
 
-/// Validate extraction input and prepare the candidate to persist.
+/// note: Validate extraction input and prepare the candidate to persist.
 ///
 /// Steps:
 /// 1. Validate `canonical_name` format (P1 grammar rules).
@@ -86,15 +86,13 @@ pub struct PreparedExtractCandidate {
 pub fn prepare_extract(
     input: ExtractPrepareInput,
 ) -> Result<PreparedExtractCandidate, KbStoreError> {
-    // Step 1: Validate canonical name.
     validate_canonical_name(&input.canonical_name)
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // Step 2: Validate body per mode.
     validate_body(input.block_type, Some(&input.body), input.validation_mode)
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // Step 3: Validate the trusted policy before it can reach a wire
+    // invariant: validate the trusted policy before it can reach a wire
     // conversion or a store (durable §3).
     let KnowledgeGovernance {
         holder_entry_id,
@@ -103,7 +101,6 @@ pub fn prepare_extract(
     validate_native_governance(holder_entry_id.as_deref(), disclosure.as_deref())
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // Step 4: Allocate the id once and attach the source anchor + governance.
     let mut record =
         KnowledgeEntryRecord::new(&input.world_id, input.block_type, &input.canonical_name);
     record.body = Some(input.body);
@@ -114,7 +111,7 @@ pub fn prepare_extract(
     Ok(PreparedExtractCandidate { record })
 }
 
-/// Persist exactly the prepared record.
+/// note: Persist exactly the prepared record.
 ///
 /// No id is allocated and no default is rebuilt here: the prepared candidate's
 /// `entry_id`, governance pair and source anchor are written as they are, so
@@ -177,7 +174,7 @@ mod tests {
         assert_eq!(prepared.record.status, "provisional");
         assert_eq!(prepared.record.canonical_name, "char_lin_xia");
         assert!(prepared.record.source_anchor.is_some());
-        // Shared policy → both governance columns stay absent.
+        // note: shared policy leaves both governance columns absent.
         assert!(prepared.record.holder_entry_id.is_none());
         assert!(prepared.record.disclosure.is_none());
     }
@@ -250,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_prepare_extract_takes_holders_from_the_policy_not_the_model_output() {
-        // Model output rides body/name/block type only. Even a body whose
+        // why: model output rides body/name/block type only. Even a body whose
         // attributes carry governance-shaped keys cannot choose the holder.
         let mut input = prepare_input();
         input.body = KnowledgeEntryBody {
@@ -312,7 +309,7 @@ mod tests {
     async fn test_persist_prepared_extract_stores_the_exact_record_without_minting() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let mut prepared = prepare_extract(prepare_input()).unwrap();
-        // Provable no-mint: persist stores the record it is handed, including
+        // invariant: persist stores the record it is handed, including
         // an id it did not allocate and governance it did not rebuild.
         prepared.record.entry_id = "kb_t12_fixed".to_string();
         prepared.record.holder_entry_id = Some("hld_t12".to_string());

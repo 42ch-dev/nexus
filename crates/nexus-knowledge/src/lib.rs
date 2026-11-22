@@ -11,6 +11,7 @@
 //! `nexus_local_db::kb_store::SqliteKbStore`). This crate provides domain
 //! types, traits, and adapter seams only — it **does not** introduce its own
 //! SQLite/file-backed production truth source. (DF-43 closure: V1.55 P0)
+// note: the module tree and re-exports below define the crate's public surface.
 
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::must_use_candidate)]
