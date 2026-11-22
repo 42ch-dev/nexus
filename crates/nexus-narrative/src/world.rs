@@ -3,6 +3,7 @@
 //! World is the top-level container for all story content, key blocks,
 //! timeline events, and world memberships.
 //! See data-model-v1.md §5.3.
+// note: a world roots story content, key blocks, timeline events, and memberships.
 
 use crate::errors::NarrativeError;
 use crate::fork_branch::ForkBranch;
@@ -10,7 +11,7 @@ use nexus_contracts::{TimePolicy, Visibility};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// World status enum.
+/// note: World status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WorldStatus {
@@ -30,7 +31,7 @@ impl WorldStatus {
     }
 }
 
-/// World aggregate — a narrative universe.
+/// note: World aggregate — a narrative universe.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct World {
     pub schema_version: u32,
@@ -57,7 +58,7 @@ pub struct World {
 }
 
 impl World {
-    /// Create a new world.
+    /// note: Create a new world.
     #[must_use]
     pub fn new(
         world_id: &str,
@@ -86,7 +87,7 @@ impl World {
         }
     }
 
-    /// Update time pointer (world progression).
+    /// note: Update time pointer (world progression).
     pub fn advance_time_pointer(&mut self, event_id: &str) -> Result<(), NarrativeError> {
         if self.status != WorldStatus::Active.as_str() {
             return Err(NarrativeError::InvalidState {
@@ -101,7 +102,7 @@ impl World {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Fork this world.
+    /// note: Fork this world.
     /// Creates a new child world and `ForkBranch` record.
     pub fn fork(
         &self,
@@ -144,15 +145,13 @@ impl World {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Update visibility.
+    /// note: Update visibility.
     pub fn set_visibility(&mut self, visibility: Visibility) -> Result<(), NarrativeError> {
         self.visibility = visibility;
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
         Ok(())
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::World> for World {
     fn from(c: nexus_contracts::World) -> Self {

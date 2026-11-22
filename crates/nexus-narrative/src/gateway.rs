@@ -7,6 +7,7 @@
 //! The trait accepts a `KbStore` type parameter so that world-scoped KB
 //! assets can be queried alongside narrative state without coupling the
 //! narrative crate to a concrete KB backend.
+// note: write/mutation operations are out of scope for V1.23 by design.
 
 use crate::errors::NarrativeError;
 use crate::fork_branch::ForkBranch;
@@ -18,17 +19,17 @@ use nexus_knowledge::world_kb::KbStore;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-/// Read-only gateway for narrative state queries.
+/// note: Read-only gateway for narrative state queries.
 ///
 /// All methods are async to accommodate eventual storage backends.
 /// The trait uses `#[allow(async_fn_in_trait)]` consistent with
 /// `KbStore` in `nexus-kb`.
 #[allow(async_fn_in_trait)]
 pub trait NarrativeGateway {
-    /// Get the current world state projection by world ID.
+    /// note: Get the current world state projection by world ID.
     async fn get_world_state(&self, world_id: &str) -> Result<WorldState, NarrativeError>;
 
-    /// Get timeline events for a world, optionally filtered by branch
+    /// note: Get timeline events for a world, optionally filtered by branch
     /// and capped by `limit` (server-side `LIMIT` clause; `None` = unlimited).
     async fn get_timeline(
         &self,
@@ -37,10 +38,10 @@ pub trait NarrativeGateway {
         limit: Option<usize>,
     ) -> Result<Vec<TimelineEvent>, NarrativeError>;
 
-    /// Get a single event by its ID.
+    /// note: Get a single event by its ID.
     async fn get_event(&self, event_id: &str) -> Result<TimelineEvent, NarrativeError>;
 
-    /// Assemble aggregated narrative context for the given query.
+    /// note: Assemble aggregated narrative context for the given query.
     ///
     /// This is the primary entry point for context assembly: it resolves
     /// world state, current timeline position, and active event into a
@@ -50,11 +51,11 @@ pub trait NarrativeGateway {
         query: &NarrativeQuery,
     ) -> Result<NarrativeContext, NarrativeError>;
 
-    /// List all worlds.
+    /// note: List all worlds.
     async fn list_worlds(&self) -> Result<Vec<WorldState>, NarrativeError>;
 }
 
-/// In-memory narrative gateway for testing and development.
+/// note: In-memory narrative gateway for testing and development.
 ///
 /// Stores worlds, timeline events, and fork branches in `HashMap`s behind
 /// [`RwLock`] for thread safety. Accepts a [`KbStore`] implementation for
@@ -63,7 +64,7 @@ pub struct InMemoryNarrativeGateway<K: KbStore> {
     worlds: RwLock<HashMap<String, World>>,
     events: RwLock<HashMap<String, TimelineEvent>>,
     forks: RwLock<HashMap<String, ForkBranch>>,
-    /// KB store integration point — wired for future context enrichment
+    /// note: KB store integration point — wired for future context enrichment
     /// (querying world-scoped KB assets alongside narrative state).
     /// Currently unused in read-only V1.23 gateway methods but kept as a
     /// required constructor parameter to ensure callers provide it.
@@ -72,7 +73,7 @@ pub struct InMemoryNarrativeGateway<K: KbStore> {
 }
 
 impl<K: KbStore> InMemoryNarrativeGateway<K> {
-    /// Create a new empty gateway backed by the given KB store.
+    /// note: Create a new empty gateway backed by the given KB store.
     #[must_use]
     pub fn new(kb_store: K) -> Self {
         Self {
@@ -83,7 +84,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         }
     }
 
-    /// Insert a world into the gateway (test helper).
+    /// note: Insert a world into the gateway (test helper).
     #[allow(clippy::missing_panics_doc)]
     pub fn insert_world(&self, world: World) {
         let id = world.world_id.clone();
@@ -91,7 +92,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         worlds.insert(id, world);
     }
 
-    /// Insert a timeline event into the gateway (test helper).
+    /// note: Insert a timeline event into the gateway (test helper).
     #[allow(clippy::missing_panics_doc)]
     pub fn insert_event(&self, event: TimelineEvent) {
         let id = event.timeline_event_id.clone();
@@ -99,7 +100,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         events.insert(id, event);
     }
 
-    /// Insert a fork branch into the gateway (test helper).
+    /// note: Insert a fork branch into the gateway (test helper).
     #[allow(clippy::missing_panics_doc)]
     pub fn insert_fork(&self, fork: ForkBranch) {
         let id = fork.fork_branch_id.clone();
@@ -107,7 +108,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         forks.insert(id, fork);
     }
 
-    /// Read lock on worlds.
+    /// note: Read lock on worlds.
     fn read_worlds(
         &self,
     ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, World>>, NarrativeError> {
@@ -116,7 +117,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
             .map_err(|e| NarrativeError::ValidationError(format!("lock error: {e}")))
     }
 
-    /// Read lock on events.
+    /// note: Read lock on events.
     fn read_events(
         &self,
     ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, TimelineEvent>>, NarrativeError>
@@ -126,7 +127,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
             .map_err(|e| NarrativeError::ValidationError(format!("lock error: {e}")))
     }
 
-    /// Read lock on forks.
+    /// note: Read lock on forks.
     fn read_forks(
         &self,
     ) -> Result<std::sync::RwLockReadGuard<'_, HashMap<String, ForkBranch>>, NarrativeError> {
@@ -135,7 +136,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
             .map_err(|e| NarrativeError::ValidationError(format!("lock error: {e}")))
     }
 
-    /// Resolve fork info for a world (if it is a fork child).
+    /// note: Resolve fork info for a world (if it is a fork child).
     fn resolve_fork_info(&self, world: &World) -> (bool, Option<ForkBranch>) {
         if let Some(ref fork_id) = world.root_fork_branch_id {
             if let Ok(forks) = self.forks.read() {
@@ -147,7 +148,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         (false, None)
     }
 
-    /// Project a [`World`] domain aggregate into a [`WorldState`] read model.
+    /// note: Project a [`World`] domain aggregate into a [`WorldState`] read model.
     fn project_world_state(&self, world: &World, include_fork: bool) -> WorldState {
         let (is_fork, fork_branch_id, parent_world_id, forked_from_event_id) = if include_fork {
             let (forked, fork_opt) = self.resolve_fork_info(world);
@@ -181,7 +182,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
         }
     }
 
-    /// Project a [`TimelineEvent`] into an [`EventSnapshot`].
+    /// note: Project a [`TimelineEvent`] into an [`EventSnapshot`].
     fn project_event_snapshot(event: &TimelineEvent) -> EventSnapshot {
         EventSnapshot {
             event_id: event.timeline_event_id.clone(),
@@ -199,7 +200,7 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
 
 #[allow(clippy::future_not_send)]
 #[allow(clippy::significant_drop_tightening)]
-// `unused_async_trait_impl` (new in clippy 1.98): these methods are `async`
+// why: `unused_async_trait_impl` (new in clippy 1.98): these methods are `async`
 // by trait contract (the trait is async for eventual storage backends, see
 // the trait docs) and perform no real async I/O — toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
@@ -266,7 +267,7 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         &self,
         query: &NarrativeQuery,
     ) -> Result<NarrativeContext, NarrativeError> {
-        // Phase 1: resolve world state (drop lock before continuing)
+        // note: Phase 1: resolve world state (drop lock before continuing)
         let (world_state, timeline_head_id) = {
             let worlds = self.read_worlds()?;
             let world = worlds
@@ -279,7 +280,7 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
             (state, head)
         };
 
-        // Phase 2: resolve timeline position
+        // note: Phase 2: resolve timeline position
         let timeline_position = if let Some(ref branch_id) = query.branch_id {
             let (max_seq, current_event_id, is_fork) = {
                 let events = self.read_events()?;
@@ -330,7 +331,7 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
             None
         };
 
-        // Phase 3: resolve event snapshot
+        // note: Phase 3: resolve event snapshot
         let event_snapshot = if let Some(ref event_id) = query.event_id {
             let events = self.read_events()?;
             events.get(event_id).map(Self::project_event_snapshot)
@@ -364,15 +365,13 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
     }
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::timeline_event::TimelineEventType;
     use nexus_contracts::{TimePolicy, Visibility};
 
-    /// Helper: create a test world.
+    /// note: Helper: create a test world.
     fn make_world(id: &str, title: &str) -> World {
         World::new(
             id,
@@ -384,12 +383,11 @@ mod tests {
         )
     }
 
-    /// Helper: create a test event on a branch.
+    /// note: Helper: create a test event on a branch.
     fn make_event(world_id: &str, branch_id: &str, seq: u64) -> TimelineEvent {
         TimelineEvent::new(world_id, branch_id, TimelineEventType::StoryAdvance, seq)
     }
 
-    // T1: get_world_state returns projected world state
     #[tokio::test]
     async fn test_get_world_state() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -403,7 +401,6 @@ mod tests {
         assert!(!state.is_fork);
     }
 
-    // T2: get_world_state returns error for missing world
     #[tokio::test]
     async fn test_get_world_state_not_found() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -415,7 +412,6 @@ mod tests {
         ));
     }
 
-    // T3: get_timeline returns events sorted by sequence
     #[tokio::test]
     async fn test_get_timeline_sorted() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -430,7 +426,6 @@ mod tests {
         assert_eq!(timeline[2].sequence_no, 3);
     }
 
-    // T4: get_timeline filters by branch
     #[tokio::test]
     async fn test_get_timeline_branch_filter() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -445,7 +440,6 @@ mod tests {
         assert_eq!(root[0].branch_id, "fbk_root");
     }
 
-    // T5: get_event returns single event
     #[tokio::test]
     async fn test_get_event() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -458,7 +452,6 @@ mod tests {
         assert_eq!(fetched.sequence_no, 1);
     }
 
-    // T6: get_event returns error for missing event
     #[tokio::test]
     async fn test_get_event_not_found() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -466,7 +459,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // T7: list_worlds returns all stored worlds
     #[tokio::test]
     async fn test_list_worlds() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -477,7 +469,6 @@ mod tests {
         assert_eq!(worlds.len(), 2);
     }
 
-    // T8: get_narrative_context assembles world + timeline + event
     #[tokio::test]
     async fn test_get_narrative_context_full() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -501,7 +492,6 @@ mod tests {
         );
     }
 
-    // T9: get_narrative_context with only world_id returns world state
     #[tokio::test]
     async fn test_get_narrative_context_world_only() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -514,15 +504,12 @@ mod tests {
         assert!(ctx.event_snapshot.is_none());
     }
 
-    // T10: get_narrative_context includes fork info when requested
     #[tokio::test]
     async fn test_get_narrative_context_with_fork_info() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
 
-        // Create parent world
         gw.insert_world(make_world("wld_parent", "Parent World"));
 
-        // Create child world via fork
         let parent = {
             let worlds = gw.read_worlds().unwrap();
             worlds.get("wld_parent").unwrap().clone()
@@ -539,7 +526,6 @@ mod tests {
         assert_eq!(ctx.world.parent_world_id.as_deref(), Some("wld_parent"));
     }
 
-    // T11: TimelinePosition correctly identifies fork branches
     #[tokio::test]
     async fn test_timeline_position_fork_detection() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -555,7 +541,6 @@ mod tests {
         gw.insert_world(child);
         gw.insert_fork(fork);
 
-        // Add an event on the fork branch
         let event = make_event(&child_id, &fork_branch_id, 1);
         gw.insert_event(event);
 
@@ -567,7 +552,6 @@ mod tests {
         assert_eq!(pos.branch_id, fork_branch_id);
     }
 
-    // T12: get_narrative_context returns error for missing world
     #[tokio::test]
     async fn test_get_narrative_context_missing_world() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -576,7 +560,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // T13: World state projection preserves key fields
     #[tokio::test]
     async fn test_world_state_projection_fields() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());
@@ -591,7 +574,6 @@ mod tests {
         assert_eq!(state.title, "Detailed World");
     }
 
-    // T14: Event snapshot projection preserves key fields
     #[tokio::test]
     async fn test_event_snapshot_projection() {
         let gw = InMemoryNarrativeGateway::new(nexus_knowledge::world_kb::InMemoryKbStore::new());

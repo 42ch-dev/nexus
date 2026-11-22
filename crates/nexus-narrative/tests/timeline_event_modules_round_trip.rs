@@ -14,6 +14,7 @@
 //! Content that fits those shapes therefore round-trips byte-for-byte; both
 //! sides serialize through the same `serde_json::Map` (BTreeMap-backed, no
 //! `preserve_order`), so identical content yields identical JSON text.
+// note: the round-trip contract is documented in docs/specs/architecture/spoke-adapter-architecture.md.
 
 use nexus_narrative::timeline_event::{SpokeTimelineEvent, TimelineEvent, TimelineEventType};
 use serde_json::json;
@@ -29,13 +30,13 @@ fn modules_round_trip_byte_for_byte_with_unknown_key() {
                 "hearing_range": true,
                 "modality": ["visual", "auditory"]
             },
-            // Unknown key: must survive the typed-map seam (AR-5 round-trip).
+            // note: Unknown key: must survive the typed-map seam (AR-5 round-trip).
             "position": "in-room"
         }
     }));
     let original = event.modules.clone().unwrap();
 
-    // Forward: nexus → spoke typed map.
+    // note: Forward: nexus → spoke typed map.
     let spoke: SpokeTimelineEvent = event.into();
     assert_eq!(spoke.modules.len(), 1, "observation module must be carried");
     assert_eq!(
@@ -44,13 +45,13 @@ fn modules_round_trip_byte_for_byte_with_unknown_key() {
         "module key must survive into the spoke typed map"
     );
 
-    // Reverse: spoke typed map → nexus.
+    // note: Reverse: spoke typed map → nexus.
     let back: TimelineEvent = spoke.into();
     let round_tripped = back
         .modules
         .expect("modules must survive the round-trip (None would mean data loss)");
 
-    // Byte-for-byte: identical content through the same serde_json::Map
+    // note: Byte-for-byte: identical content through the same serde_json::Map
     // normalization must serialize to identical JSON text.
     assert_eq!(
         serde_json::to_string(&original).unwrap(),
@@ -58,7 +59,7 @@ fn modules_round_trip_byte_for_byte_with_unknown_key() {
         "modules content must round-trip byte-for-byte"
     );
 
-    // Explicit content assertions (defend against silent drops/normalization).
+    // note: Explicit content assertions (defend against silent drops/normalization).
     assert_eq!(round_tripped["observation"]["position"], json!("in-room"));
     assert_eq!(
         round_tripped["observation"]["observers"],
@@ -92,7 +93,7 @@ fn modules_none_round_trips_to_none() {
     );
 }
 
-// ── Malformed modules: reject-not-drop at the forward seam ─────────────────
+// note: Malformed modules: reject-not-drop at the forward seam.
 //
 // The forward conversion deserializes nexus `Option<Value>` into the spoke
 // typed module map with an `expect` (timeline_event.rs ~477-480). Any valid
@@ -146,7 +147,7 @@ fn modules_null_rejected_at_seam() {
 #[test]
 #[should_panic(expected = "modules must deserialize into the spoke typed module map")]
 fn modules_invalid_key_rejected_at_seam() {
-    // "Bad-Key" violates the key pattern `^[a-z][a-z0-9_-]*$` (uppercase 'B')
+    // note: "Bad-Key" violates the key pattern `^[a-z][a-z0-9_-]*$` (uppercase 'B')
     // and fails the key newtype's FromStr validation during map deserialize.
     let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 8);
     event.modules = Some(json!({"Bad-Key": {}}));

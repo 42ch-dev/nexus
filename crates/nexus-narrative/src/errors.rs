@@ -1,95 +1,95 @@
 //! Narrative-domain error types.
-
+// note: one variant per failure category the narrative aggregates report.
 use thiserror::Error;
 
-/// Error type for Narrative aggregate operations.
+/// note: Error type for Narrative aggregate operations.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum NarrativeError {
-    /// Permission denied.
+    /// note: Permission denied.
     #[error("permission denied: {0}")]
     PermissionDenied(String),
 
-    /// Invalid state transition.
+    /// note: Invalid state transition.
     #[error("invalid state transition: {from} → {to}")]
     InvalidTransition {
-        /// Source state.
+        /// note: Source state.
         from: String,
-        /// Target state.
+        /// note: Target state.
         to: String,
     },
 
-    /// Entity is already in the target state.
+    /// note: Entity is already in the target state.
     #[error("entity is already in state: {0}")]
     AlreadyInState(String),
 
-    /// Entity is not in the expected state.
+    /// note: Entity is not in the expected state.
     #[error("entity is not in expected state: expected {expected}, got {actual}")]
     InvalidState {
-        /// Expected state.
+        /// note: Expected state.
         expected: String,
-        /// Actual state.
+        /// note: Actual state.
         actual: String,
     },
 
-    /// Unresolved hard conflict prevents the operation.
+    /// note: Unresolved hard conflict prevents the operation.
     #[error("unresolved hard conflict: {0}")]
     UnresolvedConflict(String),
 
-    /// Timeline conflict would reorder canon sequence.
+    /// note: Timeline conflict would reorder canon sequence.
     #[error("timeline conflict: {0}")]
     TimelineConflict(String),
 
-    /// Causality violation: cross-world causal reference.
+    /// note: Causality violation: cross-world causal reference.
     #[error("causality violation: {0}")]
     CausalityViolation(String),
 
-    /// Version mismatch.
+    /// note: Version mismatch.
     #[error("revision mismatch: expected {expected}, got {actual}")]
     RevisionMismatch {
-        /// Expected revision.
+        /// note: Expected revision.
         expected: u64,
-        /// Actual revision.
+        /// note: Actual revision.
         actual: u64,
     },
 
-    /// Validation error.
+    /// note: Validation error.
     #[error("validation error: {0}")]
     ValidationError(String),
 
-    /// Invalid manuscript storage configuration.
+    /// note: Invalid manuscript storage configuration.
     #[error("invalid storage configuration: {0}")]
     InvalidStorageConfig(String),
 
-    /// Invalid fork write scope.
+    /// note: Invalid fork write scope.
     #[error("invalid fork write scope: {0}")]
     InvalidForkWriteScope(String),
 
-    /// Invalid phase transition.
+    /// note: Invalid phase transition.
     #[error("invalid phase transition: {from} → {to}")]
     InvalidPhaseTransition {
-        /// Source phase.
+        /// note: Source phase.
         from: String,
-        /// Target phase.
+        /// note: Target phase.
         to: String,
     },
 
-    /// Provisional records still exist.
+    /// note: Provisional records still exist.
     #[error("provisional records exist: {count} outstanding")]
     ProvisionalRecordsExist {
-        /// Count of outstanding records.
+        /// note: Count of outstanding records.
         count: usize,
     },
 
-    /// Excerpt exceeds maximum length.
+    /// note: Excerpt exceeds maximum length.
     #[error("excerpt exceeds maximum length: {actual} > {max}")]
     ExcerptTooLong {
-        /// Actual length.
+        /// note: Actual length.
         actual: usize,
-        /// Maximum length.
+        /// note: Maximum length.
         max: usize,
     },
 
-    /// Requested entity does not exist.
+    /// note: Requested entity does not exist.
     ///
     /// Typed replacement for the former `ValidationError("… not found: …")`
     /// convention (V1.206 P2): consumers classify absence on the variant, not
@@ -98,11 +98,11 @@ pub enum NarrativeError {
     /// external rendering.
     #[error("not found: {resource}")]
     NotFound {
-        /// Opaque identity of the missing entity.
+        /// note: Opaque identity of the missing entity.
         resource: String,
     },
 
-    /// Storage backend error (database, I/O, etc.).
+    /// note: Storage backend error (database, I/O, etc.).
     #[error("storage error: {0}")]
     Storage(String),
 }

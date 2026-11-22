@@ -2,18 +2,19 @@
 //!
 //! Implements global invariants (G1-G6) and domain-specific validation
 //! from consistency-rules-v1.md.
+// note: each invariant is enforced by the function named below it.
 
 use crate::errors::NarrativeError;
 use crate::timeline_event::TimelineEvent;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 
-/// Maximum excerpt length per G6.
+/// note: Maximum excerpt length per G6.
 pub const MAX_EXCERPT_LENGTH: usize = 1024;
 
-/// Maximum provisional TTL in days per consistency-rules-v1.md §3.3.
+/// note: Maximum provisional TTL in days per consistency-rules-v1.md §3.3.
 pub const PROVISIONAL_TTL_DAYS: i64 = 30;
 
-/// Validate global hard invariant G1: Envelope integrity.
+/// note: Validate global hard invariant G1: Envelope integrity.
 /// Checks that required fields are present.
 pub fn validate_envelope_integrity(
     bundle_id: &str,
@@ -46,7 +47,7 @@ pub fn validate_envelope_integrity(
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate global hard invariant G4: Schema and enum closure.
+/// note: Validate global hard invariant G4: Schema and enum closure.
 /// Ensures all enum values are valid.
 pub fn validate_block_type(block_type: &str) -> Result<(), NarrativeError> {
     match block_type {
@@ -59,7 +60,7 @@ pub fn validate_block_type(block_type: &str) -> Result<(), NarrativeError> {
     }
 }
 
-/// Validate memory type enum closure.
+/// note: Validate memory type enum closure.
 pub fn validate_memory_type(memory_type: &str) -> Result<(), NarrativeError> {
     match memory_type {
         "canon" | "working" | "experience" => Ok(()),
@@ -72,7 +73,7 @@ pub fn validate_memory_type(memory_type: &str) -> Result<(), NarrativeError> {
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate manuscript phase enum closure.
+/// note: Validate manuscript phase enum closure.
 pub fn validate_manuscript_phase(phase: &str) -> Result<(), NarrativeError> {
     match phase {
         "brainstorm" | "draft" | "review" | "finalize" | "published" => Ok(()),
@@ -85,7 +86,7 @@ pub fn validate_manuscript_phase(phase: &str) -> Result<(), NarrativeError> {
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate global hard invariant G6: Sync boundary — excerpt length.
+/// note: Validate global hard invariant G6: Sync boundary — excerpt length.
 pub const fn validate_excerpt_length(excerpt: &str) -> Result<(), NarrativeError> {
     if excerpt.len() > MAX_EXCERPT_LENGTH {
         return Err(NarrativeError::ExcerptTooLong {
@@ -98,20 +99,18 @@ pub const fn validate_excerpt_length(excerpt: &str) -> Result<(), NarrativeError
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate `KnowledgeEntryRecord` provisional → confirmed gate (consistency-rules-v1.md §3.2).
+/// note: Validate `KnowledgeEntryRecord` provisional → confirmed gate (consistency-rules-v1.md §3.2).
 pub fn validate_kb_confirm_gate(
     kb: &KnowledgeEntryRecord,
     has_permission: bool,
     base_revision: u64,
     has_conflicts: bool,
 ) -> Result<(), NarrativeError> {
-    // Gate 1: Permission
     if !has_permission {
         return Err(NarrativeError::PermissionDenied(
             "can_confirm_canon permission required".to_string(),
         ));
     }
-    // Gate 2: Version match
     let current_rev = kb.revision.unwrap_or(0);
     if current_rev != base_revision {
         return Err(NarrativeError::RevisionMismatch {
@@ -119,13 +118,11 @@ pub fn validate_kb_confirm_gate(
             actual: current_rev,
         });
     }
-    // Gate 3: Required fields
     if kb.canonical_name.trim().is_empty() {
         return Err(NarrativeError::ValidationError(
             "canonical_name is required".to_string(),
         ));
     }
-    // Gate 5: No conflicts
     if has_conflicts {
         return Err(NarrativeError::UnresolvedConflict(
             "unresolved hard conflict".to_string(),
@@ -139,7 +136,7 @@ pub fn validate_kb_confirm_gate(
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate `TimelineEvent` provisional → canon gate (consistency-rules-v1.md §3.3).
+/// note: Validate `TimelineEvent` provisional → canon gate (consistency-rules-v1.md §3.3).
 pub fn validate_timeline_promote_gate(
     event: &TimelineEvent,
     has_permission: bool,
@@ -160,7 +157,7 @@ pub fn validate_timeline_promote_gate(
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate Fork creation (consistency-rules-v1.md §3.4).
+/// note: Validate Fork creation (consistency-rules-v1.md §3.4).
 pub fn validate_fork_creation(
     parent_world_id: &str,
     parent_branch_id: &str,
@@ -189,7 +186,7 @@ pub fn validate_fork_creation(
 ///
 /// # Errors
 /// Returns `Err(NarrativeError::...)` if validation fails.
-/// Validate Memory scope (consistency-rules-v1.md §3.6).
+/// note: Validate Memory scope (consistency-rules-v1.md §3.6).
 pub fn validate_memory_scope(
     memory_type: &str,
     creator_id: &str,
@@ -214,7 +211,7 @@ pub fn validate_memory_scope(
     Ok(())
 }
 #[must_use]
-/// Check if a provisional record has exceeded its TTL.
+/// note: Check if a provisional record has exceeded its TTL.
 pub fn is_provisional_expired(created_at: &str) -> bool {
     chrono::DateTime::parse_from_rfc3339(created_at).is_ok_and(|dt| {
         let now = chrono::Utc::now();
@@ -324,11 +321,9 @@ mod tests {
 
     #[test]
     fn test_provisional_ttl() {
-        // Recent timestamp — not expired
         let recent = chrono::Utc::now().to_rfc3339();
         assert!(!is_provisional_expired(&recent));
 
-        // Old timestamp (31 days ago) — expired
         let old = (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339();
         assert!(is_provisional_expired(&old));
     }

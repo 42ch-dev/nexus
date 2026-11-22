@@ -3,12 +3,13 @@
 //! `ManuscriptState` tracks the creation phase progression (brainstorm → draft →
 //! review → finalize → published). Platform does NOT own this in V1.0.
 //! See data-model-v1.md §5.9B, consistency-rules-v1.md §3.3.
+// note: the platform does not own manuscript phase; this aggregate is local-only.
 
 use crate::errors::NarrativeError;
 use nexus_contracts::ManuscriptPhase;
 use serde::{Deserialize, Serialize};
 
-/// Helper to convert `ManuscriptPhase` to string.
+/// note: Helper to convert `ManuscriptPhase` to string.
 const fn phase_to_str(phase: &ManuscriptPhase) -> &str {
     match phase {
         ManuscriptPhase::Brainstorm => "brainstorm",
@@ -19,7 +20,7 @@ const fn phase_to_str(phase: &ManuscriptPhase) -> &str {
     }
 }
 
-/// Helper to convert string to `ManuscriptPhase`.
+/// note: Helper to convert string to `ManuscriptPhase`.
 #[allow(dead_code)]
 fn str_to_phase(s: &str) -> ManuscriptPhase {
     match s {
@@ -31,7 +32,7 @@ fn str_to_phase(s: &str) -> ManuscriptPhase {
     }
 }
 
-/// `ManuscriptState` aggregate — local manuscript phase machine.
+/// note: `ManuscriptState` aggregate — local manuscript phase machine.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManuscriptState {
     pub schema_version: u32,
@@ -49,7 +50,7 @@ pub struct ManuscriptState {
 
 impl ManuscriptState {
     #[must_use]
-    /// Create new manuscript state in brainstorm phase.
+    /// note: Create new manuscript state in brainstorm phase.
     pub fn new(workspace_id: &str, world_id: &str, creator_id: &str) -> Self {
         let manuscript_state_id =
             format!("mss_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
@@ -66,7 +67,7 @@ impl ManuscriptState {
         }
     }
 
-    /// Transition to next phase.
+    /// note: Transition to next phase.
     /// Valid transitions: brainstorm→draft→review→finalize→published
     pub fn promote(&mut self) -> Result<(), NarrativeError> {
         let current = &self.manuscript_phase;
@@ -90,19 +91,19 @@ impl ManuscriptState {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Set active manifest.
+    /// note: Set active manifest.
     pub fn set_active_manifest(&mut self, manifest_id: &str) {
         self.active_manifest_id = Some(manifest_id.to_string());
         self.updated_at = chrono::Utc::now().to_rfc3339();
     }
 
-    /// Get current phase.
+    /// note: Get current phase.
     #[must_use]
     pub const fn current_phase(&self) -> &ManuscriptPhase {
         &self.manuscript_phase
     }
     #[must_use]
-    /// Check if phase transition is valid.
+    /// note: Check if phase transition is valid.
     pub const fn can_transition_to(&self, target: &ManuscriptPhase) -> bool {
         matches!(
             (&self.manuscript_phase, target),
@@ -115,7 +116,7 @@ impl ManuscriptState {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Validate provisional cleanup before finalize/published gate.
+    /// note: Validate provisional cleanup before finalize/published gate.
     /// Per consistency-rules-v1.md §3.3: provisional records must be promoted
     /// or cleaned before entering finalize/published.
     pub const fn validate_pre_gate_cleanup(
@@ -133,8 +134,6 @@ impl ManuscriptState {
         Ok(())
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::local::domain::ManuscriptState> for ManuscriptState {
     fn from(c: nexus_contracts::local::domain::ManuscriptState) -> Self {
@@ -183,19 +182,15 @@ mod tests {
     fn test_full_phase_progression() {
         let mut ms = ManuscriptState::new("wrk_test", "wld_test", "ctr_author");
 
-        // brainstorm → draft
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Draft);
 
-        // draft → review
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Review);
 
-        // review → finalize
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Finalize);
 
-        // finalize → published
         ms.promote().unwrap();
         assert_eq!(ms.manuscript_phase, ManuscriptPhase::Published);
     }
@@ -222,7 +217,7 @@ mod tests {
         for _ in 0..3 {
             ms.promote().unwrap();
         }
-        // ms is now finalize
+        // note: three promotes from brainstorm land in finalize.
         assert!(ms.validate_pre_gate_cleanup(5).is_err());
     }
 
@@ -232,7 +227,7 @@ mod tests {
         for _ in 0..4 {
             ms.promote().unwrap();
         }
-        // ms is now published
+        // note: four promotes from brainstorm land in published.
         assert!(ms.validate_pre_gate_cleanup(0).is_ok());
     }
 

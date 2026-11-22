@@ -2,12 +2,13 @@
 //!
 //! Tracks which creators belong to which worlds and what they can do.
 //! See data-model-v1.md §5.4.
+// note: roles map to fixed permission sets in `MembershipPermissions`.
 
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use strum::Display;
 
-/// Membership role enum - matches v1-spec §5.4, §7
+/// note: Membership role enum - matches v1-spec §5.4, §7
 /// Values: owner, maintainer, collaborator, `official_creator`
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "snake_case")]
@@ -19,7 +20,7 @@ pub enum MembershipRole {
     OfficialCreator,
 }
 
-/// Membership status enum.
+/// note: Membership status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MembershipStatus {
@@ -41,7 +42,7 @@ impl MembershipStatus {
     }
 }
 
-/// World membership permissions.
+/// note: World membership permissions.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct MembershipPermissions {
@@ -95,7 +96,7 @@ impl MembershipPermissions {
     }
 }
 
-/// `WorldMembership` aggregate — Creator-World relationship.
+/// note: `WorldMembership` aggregate — Creator-World relationship.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorldMembership {
     pub schema_version: u32,
@@ -110,7 +111,7 @@ pub struct WorldMembership {
 }
 
 impl WorldMembership {
-    /// Create a new world membership.
+    /// note: Create a new world membership.
     #[must_use]
     pub fn new(world_id: &str, creator_id: &str, role: MembershipRole) -> Self {
         let membership_id = format!("wmb_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
@@ -134,26 +135,24 @@ impl WorldMembership {
         }
     }
 
-    /// Check if membership is active.
+    /// note: Check if membership is active.
     #[must_use]
     pub fn is_active(&self) -> bool {
         self.membership_status == MembershipStatus::Active.as_str()
     }
 
-    /// Get `can_confirm_canon` permission.
+    /// note: Get `can_confirm_canon` permission.
     pub fn can_confirm_canon(&self) -> bool {
         self.permissions
             .as_ref()
             .is_some_and(|p| p.can_confirm_canon)
     }
 
-    /// Get `can_sync_kb` permission.
+    /// note: Get `can_sync_kb` permission.
     pub fn can_sync_kb(&self) -> bool {
         self.permissions.as_ref().is_some_and(|p| p.can_sync_kb)
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::WorldMembership> for WorldMembership {
     fn from(c: nexus_contracts::WorldMembership) -> Self {

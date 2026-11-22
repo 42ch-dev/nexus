@@ -3,12 +3,13 @@
 //! `ForkBranch` tracks the lineage of world forks, including verification
 //! status and write scope validation. See data-model-v1.md §5.7,
 //! consistency-rules-v1.md §3.4.
+// note: `ForkBranch` records lineage, verification status, and write-scope validation.
 
 use crate::errors::NarrativeError;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// `ForkBranch` status enum.
+/// note: `ForkBranch` status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ForkBranchStatus {
@@ -26,7 +27,7 @@ impl ForkBranchStatus {
     }
 }
 
-/// `ForkBranch` verification status enum.
+/// note: `ForkBranch` verification status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VerificationStatus {
@@ -48,7 +49,7 @@ impl VerificationStatus {
     }
 }
 
-/// `ForkBranch` aggregate — describes a world branch forked from a parent.
+/// note: `ForkBranch` aggregate — describes a world branch forked from a parent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ForkBranch {
     pub schema_version: u32,
@@ -64,7 +65,7 @@ pub struct ForkBranch {
 }
 
 impl ForkBranch {
-    /// Create a new fork from a parent world at a specific event.
+    /// note: Create a new fork from a parent world at a specific event.
     /// Per consistency-rules-v1.md §3.4: must reference valid `parent_world_id`,
     /// `parent_branch_id`, and `forked_from_event_id`.
     #[must_use]
@@ -90,7 +91,7 @@ impl ForkBranch {
         }
     }
 
-    /// Request verification of this fork.
+    /// note: Request verification of this fork.
     pub fn request_verification(&mut self) -> Result<(), NarrativeError> {
         if self.status != ForkBranchStatus::Active.as_str() {
             return Err(NarrativeError::InvalidState {
@@ -110,7 +111,7 @@ impl ForkBranch {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Verify this fork (admin/policy action).
+    /// note: Verify this fork (admin/policy action).
     pub fn verify(&mut self) -> Result<(), NarrativeError> {
         if self.verification_status != VerificationStatus::Requested.as_str() {
             return Err(NarrativeError::InvalidTransition {
@@ -124,7 +125,7 @@ impl ForkBranch {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Reject this fork verification.
+    /// note: Reject this fork verification.
     pub fn reject(&mut self, _reason: &str) -> Result<(), NarrativeError> {
         if self.verification_status != VerificationStatus::Requested.as_str() {
             return Err(NarrativeError::InvalidTransition {
@@ -138,7 +139,7 @@ impl ForkBranch {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Archive this fork branch.
+    /// note: Archive this fork branch.
     pub fn archive(&mut self) -> Result<(), NarrativeError> {
         if self.status == ForkBranchStatus::Archived.as_str() {
             return Err(NarrativeError::AlreadyInState("archived".to_string()));
@@ -152,7 +153,7 @@ impl ForkBranch {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Validate that structured writes only go to child world/branch.
+    /// note: Validate that structured writes only go to child world/branch.
     /// Per consistency-rules-v1.md §3.4.
     pub fn validate_write_scope(&self, target_world_id: &str) -> Result<(), NarrativeError> {
         if self.status != ForkBranchStatus::Active.as_str() {
@@ -169,8 +170,6 @@ impl ForkBranch {
         Ok(())
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::ForkBranch> for ForkBranch {
     fn from(c: nexus_contracts::ForkBranch) -> Self {
@@ -360,7 +359,7 @@ mod tests {
         assert_eq!(fb, deserialized);
     }
 
-    /// Current aggregate does not forbid `world_id` == `parent_world_id` (self-loop); callers must
+    /// note: Current aggregate does not forbid `world_id` == `parent_world_id` (self-loop); callers must
     /// enforce lineage invariants if needed (DM-R3 — cycle / lineage edge case).
     #[test]
     fn fork_from_allows_child_world_equal_to_parent_world_id() {

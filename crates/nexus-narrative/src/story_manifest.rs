@@ -2,12 +2,13 @@
 //!
 //! `StoryManifest` is the platform-authoritative summary for chapters, arcs,
 //! stories, and excerpts. See data-model-v1.md §5.9.
+// note: this type is the platform-authoritative summary carrier for its unit.
 
 use crate::errors::NarrativeError;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// Manifest type enum.
+/// note: Manifest type enum.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManifestType {
@@ -29,7 +30,7 @@ impl ManifestType {
     }
 }
 
-/// `StoryManifest` status enum.
+/// note: `StoryManifest` status enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StoryManifestStatus {
@@ -51,7 +52,7 @@ impl StoryManifestStatus {
     }
 }
 
-/// Manuscript storage enum.
+/// note: Manuscript storage enum.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ManuscriptStorage {
@@ -70,7 +71,7 @@ impl ManuscriptStorage {
     }
 }
 
-/// `StoryManifest` aggregate — platform-side chapter/arc manifest and summary.
+/// note: `StoryManifest` aggregate — platform-side chapter/arc manifest and summary.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoryManifest {
     pub schema_version: u32,
@@ -101,7 +102,7 @@ pub struct StoryManifest {
 }
 
 impl StoryManifest {
-    /// Create a new story manifest.
+    /// note: Create a new story manifest.
     #[must_use]
     pub fn new(
         world_id: &str,
@@ -133,13 +134,13 @@ impl StoryManifest {
         }
     }
 
-    /// Set summary text (platform-authoritative).
+    /// note: Set summary text (platform-authoritative).
     pub fn set_summary_text(&mut self, text: &str) {
         self.summary_text = Some(text.to_string());
         self.updated_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Configure manuscript output and storage.
+    /// note: Configure manuscript output and storage.
     pub fn configure_manuscript(
         &mut self,
         output: bool,
@@ -181,7 +182,7 @@ impl StoryManifest {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Stage for publishing.
+    /// note: Stage for publishing.
     /// Pre: `summary_text` is set, `content_hash` is computed.
     pub fn stage_for_publish(&mut self) -> Result<(), NarrativeError> {
         if self.status != StoryManifestStatus::SummaryReady.as_str() {
@@ -202,7 +203,7 @@ impl StoryManifest {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Mark as published.
+    /// note: Mark as published.
     pub fn publish(&mut self, artifact_id: &str) -> Result<(), NarrativeError> {
         if self.status != StoryManifestStatus::StagedForPublish.as_str() {
             return Err(NarrativeError::InvalidState {
@@ -218,7 +219,7 @@ impl StoryManifest {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Archive this manifest.
+    /// note: Archive this manifest.
     pub fn archive(&mut self) -> Result<(), NarrativeError> {
         if self.status == StoryManifestStatus::Archived.as_str() {
             return Err(NarrativeError::AlreadyInState("archived".to_string()));
@@ -233,7 +234,7 @@ impl StoryManifest {
     ///
     /// # Errors
     /// Returns `Err(NarrativeError::...)` if validation fails.
-    /// Validate storage configuration consistency.
+    /// note: Validate storage configuration consistency.
     /// e.g., `manuscript_storage=local_workspace` requires `local_path`.
     pub fn validate_storage_config(&self) -> Result<(), NarrativeError> {
         if let Some(ref storage) = self.manuscript_storage {
@@ -254,8 +255,6 @@ impl StoryManifest {
         Ok(())
     }
 }
-
-// ── Conversion: Domain ↔ Contract ──────────────────────────────────────
 
 impl From<nexus_contracts::StoryManifest> for StoryManifest {
     fn from(c: nexus_contracts::StoryManifest) -> Self {
