@@ -8,7 +8,7 @@
  * a locked app redirects to the entrance land route (with the § Copy reason as
  * toast) BEFORE the lazy factory is created, so its chunk is never requested.
  */
-import { Suspense, lazy, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 
@@ -127,6 +127,8 @@ export function AppShell() {
  */
 export function AppModuleRoute({ appId }: { appId: AppId }) {
   const { t } = useTranslation('shell');
+  const tRef = useRef(t);
+  tRef.current = t;
   const { entrance } = useEntrance();
   const activeCreatorId = useActiveCreatorId();
   const { isUnlocked } = useActivation(activeCreatorId);
@@ -142,9 +144,9 @@ export function AppModuleRoute({ appId }: { appId: AppId }) {
 
   useEffect(() => {
     if (locked && app?.lockReason) {
-      toast({ title: t(app.lockReason), variant: 'info' });
+      toast({ title: tRef.current(app.lockReason), variant: 'info' });
     }
-  }, [locked, app, toast, t]);
+  }, [locked, app, toast]);
 
   if (app === null || LazyComponent === null) {
     // Locked (or unknown) app: bounce to the first unlocked app of this
