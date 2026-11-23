@@ -280,12 +280,12 @@ When a state's conditional `next` references `_context.registry_refresh.*`, the 
 | Context field | Type | Source | Description |
 |---|---|---|---|
 | `_context.registry_refresh.source` | `String` | `RegistryRefreshOutput.source` | `"synthetic"`, `"cdn"`, or `"synthetic_fallback"` |
-| `_context.registry_refresh.snapshot_version` | `String` | `RegistryRefreshOutput.snapshotVersion` | e.g. `"2026-06-22.v1"` |
+| `_context.registry_refresh.snapshot_version` | `String` | `RegistryRefreshOutput.snapshotVersion` | Value returned by `REGISTRY_SNAPSHOT_VERSION` in `crates/nexus-capability/src/builtins/registry.rs` |
 | `_context.registry_refresh.capability_count` | `Number` | `RegistryRefreshOutput.capabilityCount` | Number of registered capabilities in the snapshot |
 | `_context.registry_refresh.fallback_reason` | `String` | `RegistryRefreshOutput.fallbackReason` | Empty on success; typed `CdnError` variant string when fallback occurred |
 | `_context.registry_refresh.retry_count` | `Number` | `RegistryRefreshOutput.retryCount` | Retries actually attempted (0 for synthetic, up to `maxRetries` for CDN) |
 
-**Invocation rule**: the runtime invokes the `registry.refresh` capability once, before evaluating the first branch expression for a state. The result is stored in the context for the duration of the state transition and re-read on subsequent re-entries. If the capability registry is unavailable, the runtime injects a minimal synthetic default (`source: "synthetic"`, `capability_count: 31`, `retry_count: 0`, `fallback_reason: ""`).
+**Invocation rule**: the runtime invokes the `registry.refresh` capability once, before evaluating the first branch expression for a state. The result is stored in the context for the duration of the state transition and re-read on subsequent re-entries. If the capability registry is unavailable, the runtime injects a minimal synthetic default (`source: "synthetic"`, `capability_count` equal to `REGISTRY_SNAPSHOT_CAPABILITIES.len()` from the same file, `retry_count: 0`, `fallback_reason: ""`).
 
 **Field naming**: capability output uses camelCase JSON fields (`capabilityCount`, `snapshotVersion`); the expression context maps these to `snake_case` for consistency with the expression grammar (`capability_count`, `snapshot_version`).
 
