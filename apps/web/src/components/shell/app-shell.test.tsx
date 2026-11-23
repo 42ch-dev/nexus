@@ -152,6 +152,7 @@ describe('AppShell', () => {
 describe('AppRail — progressive activation', () => {
   beforeEach(async () => {
     window.localStorage.clear();
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
     await i18n.changeLanguage('zh-CN');
   });
 
@@ -183,6 +184,29 @@ describe('AppRail — progressive activation', () => {
     await user.click(session);
     expect(await screen.findByText('创建作品后解锁「会话」')).toBeInTheDocument();
     expect(loads.session).not.toHaveBeenCalled();
+  });
+
+  it('renders locked-item reasons in English when the locale is en', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'en');
+    await i18n.changeLanguage('en');
+    useShellHandlers();
+    const user = userEvent.setup();
+    const loads = makeLoadSpies();
+    renderInApp(
+      <Routes>
+        <Route path="*" element={<AppRail apps={injectApps(loads)} />} />
+      </Routes>,
+      { activeCreatorId: 'creator-a', initialRouterEntries: ['/'] },
+    );
+
+    const work = screen.getByTestId('rail-item-work');
+    expect(work).toHaveAttribute('title', 'Unlocks once you complete the Brief');
+    await user.click(work);
+    expect(
+      await screen.findByText('Unlocks once you complete the Brief'),
+    ).toBeInTheDocument();
+    const session = screen.getByTestId('rail-item-session');
+    expect(session).toHaveAttribute('title', 'Unlocks once you create a Work');
   });
 
   it('unlocked items navigate to their route', async () => {

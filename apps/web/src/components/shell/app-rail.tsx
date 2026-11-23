@@ -47,9 +47,9 @@ export function AppRail({ apps }: AppRailProps) {
               type="button"
               data-testid={`rail-item-${app.id}`}
               aria-disabled="true"
-              title={app.lockReason}
+              title={app.lockReason && t(app.lockReason)}
               onClick={() =>
-                app.lockReason && toast({ title: app.lockReason, variant: 'info' })
+                app.lockReason && toast({ title: t(app.lockReason), variant: 'info' })
               }
               className="flex w-14 cursor-not-allowed flex-col items-center gap-0.5 rounded-control py-2 text-gray-600 opacity-35"
             >

@@ -9,6 +9,7 @@
  * highlight itself is skipped so it cannot mis-render over unrelated text.
  */
 import { useLayoutEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import type { ReadingAnnotation } from '@42ch/nexus-contracts';
@@ -72,6 +73,7 @@ function applyHighlights(container: HTMLElement, annotations: ReadingAnnotation[
 }
 
 export function HighlightLayer({ annotations, bodyLength, proseRef, children, className }: HighlightLayerProps) {
+  const { t } = useTranslation('reading');
   const hasDrift = annotations.some((a) => a.end_offset > bodyLength);
 
   useLayoutEffect(() => {
@@ -88,7 +90,7 @@ export function HighlightLayer({ annotations, bodyLength, proseRef, children, cl
           role="note"
           aria-live="polite"
         >
-          标注可能因正文编辑而偏移 / This highlight may have shifted after body edits
+          {t('highlight.driftNotice')}
         </div>
       )}
       {children}

@@ -24,6 +24,7 @@ import { appsForEntrance, isAppLocked, type AppId } from '@/lib/app-registry';
 import { useActivation } from '@/lib/activation-store';
 import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { useEntrance } from '@/lib/entrance-context';
+import { i18n } from '@/lib/i18n/config';
 import { useHotkey } from '@/lib/use-hotkey';
 import { useTimelineShortcut } from '@/lib/keyboard-shortcuts';
 import { useToast } from '@/lib/use-toast';
@@ -141,7 +142,7 @@ export function AppModuleRoute({ appId }: { appId: AppId }) {
 
   useEffect(() => {
     if (locked && app?.lockReason) {
-      toast({ title: app.lockReason, variant: 'info' });
+      toast({ title: i18n.t(app.lockReason, { ns: 'shell' }), variant: 'info' });
     }
   }, [locked, app, toast]);
 

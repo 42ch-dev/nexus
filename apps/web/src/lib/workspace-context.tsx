@@ -10,6 +10,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { useNexusClient } from '@/lib/client-context';
@@ -59,6 +60,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const client = useNexusClient();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { t } = useTranslation('shell');
   const creatorId = useActiveCreatorId();
 
   const listQuery = useQuery({
@@ -79,7 +81,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const name =
         listQuery.data?.items.find((w) => w.workspace_slug === workspaceSlug)?.display_name ??
         workspaceSlug;
-      toast({ title: `已切换到工作区「${name}」`, variant: 'info' });
+      toast({ title: t('workspace.switched', { name }), variant: 'info' });
     },
   });
 

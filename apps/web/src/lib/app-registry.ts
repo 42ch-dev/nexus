@@ -46,15 +46,15 @@ export interface AppDef {
   load: () => Promise<{ default: ComponentType }>;
   /** 作品 only — mapped to the activation store's `brief-saved` event (D26). */
   lockedUntil?: 'brief-saved';
-  /** Locked reason, verbatim from the plan § Copy table. Absent = never locked. */
+  /** `shell` namespace i18n key for the locked reason. Absent = never locked. */
   lockReason?: string;
 }
 
-/** Rail lock reasons — plan § Copy (final, product-owned), verbatim. */
+/** Rail lock reasons — `shell` namespace i18n keys under `rail.lockReason`. */
 export const RAIL_LOCK_REASON = {
-  work: '完成 Brief 后解锁「作品」',
-  session: '创建作品后解锁「会话」',
-  memory: '世界开始运转后解锁「记忆」',
+  work: 'rail.lockReason.work',
+  session: 'rail.lockReason.session',
+  memory: 'rail.lockReason.memory',
 } as const;
 
 const CREATOR_APPS: readonly AppDef[] = [

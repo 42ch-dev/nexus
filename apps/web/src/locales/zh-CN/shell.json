@@ -264,6 +264,9 @@
     "ariaLabel": "工作区",
     "title": "工作区（workspace）— 创作内容的容器，每个有自己的根目录"
   },
+  "workspace": {
+    "switched": "已切换到工作区「{{name}}」"
+  },
   "workspaceCreate": {
     "chip": "＋ 新建工作区",
     "title": "新建工作区",
@@ -338,7 +341,12 @@
     "harness": "Harness",
     "modules": "模块",
     "caps": "能力",
-    "characters": "角色"
+    "characters": "角色",
+    "lockReason": {
+      "work": "完成 Brief 后解锁「作品」",
+      "session": "创建作品后解锁「会话」",
+      "memory": "世界开始运转后解锁「记忆」"
+    }
   },
   "topnav": {
     "searchDisabled": "搜索（即将推出）",
