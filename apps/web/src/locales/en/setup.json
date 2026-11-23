@@ -173,5 +173,100 @@
     "workspaceBootstrapFailedDescription": "{{message}} Retry Continue, or use Reset local database below if the problem persists.",
     "resetLocalDatabase": "Reset local database",
     "profileDisplayName": "Profile name"
+  },
+  "wizard": {
+    "identity": {
+      "eyebrow": "NEXUS · First-Time Setup",
+      "title": "Your AI Creative Studio",
+      "description": "Worlds remember, so stories never contradict themselves. First, tell us — what do you want to do with Nexus?",
+      "optionsLabel": "What do you want to do with Nexus?",
+      "recommended": "Recommended",
+      "option": {
+        "contentCreator": {
+          "title": "I Write Stories",
+          "description": "Novels · Tabletop campaigns · Worldbuilding / AI remembers your lore and helps you draft"
+        },
+        "developer": {
+          "title": "I Build Tools",
+          "description": "Orchestration engine · Presets · WASM modules / The full Control Room and Strategy Canvas"
+        }
+      }
+    },
+    "nav": {
+      "next": "Next",
+      "back": "Back"
+    },
+    "scan": {
+      "loading": "Looking for available AI on your computer…",
+      "error": "Could not scan this computer for AI",
+      "errorWithReason": "Could not scan this computer for AI ({{reason}})",
+      "retry": "Retry Scan",
+      "launchCommand": "Launch command"
+    },
+    "agent": {
+      "stepLabel": "Step 2 of 3",
+      "title": "Your AI Partner",
+      "emptyTitle": "No AI Found",
+      "found_one": "Found {{count}} available AI on your computer",
+      "found_other": "Found {{count}} available AIs on your computer. We recommend the first one",
+      "emptyDescription": "Nexus needs a local AI assistant (such as Claude Code or Codex CLI) to write with you.",
+      "rowRecommended": "Installed · Ready to use · Recommended",
+      "rowInstalled": "Installed · Switchable",
+      "installGuide": "▸ None of these? See how to install an AI assistant",
+      "manualToggle": "▸ Advanced: Set a launch command manually"
+    },
+    "developer": {
+      "stepLabel": "Step 2 of 2 · Developer",
+      "title": "Agent and Workspace",
+      "description": "Choose the agent the orchestration engine uses, and where your projects live",
+      "agentsLabel": "Agent",
+      "rowRecommended": "ACP · Installed · Recommended",
+      "rowInstalled": "ACP · Installed",
+      "customLaunch": {
+        "optionalLabel": "Custom launch command (optional, overrides the selected agent's default launch)",
+        "requiredLabel": "Custom launch command (required: no agent was found on this computer)",
+        "placeholder": "e.g. claude --acp --model opus"
+      },
+      "workspaceRoot": "Workspace root",
+      "browse": "Browse…",
+      "finish": "Open Dev Console"
+    },
+    "firstWorld": {
+      "stepLabel": "Step 3 of 3",
+      "title": "Create Your First World",
+      "description": "A World is your story universe. Lore, timelines and characters all live inside it",
+      "templatesLabel": "World template",
+      "template": {
+        "blank": {
+          "label": "Blank World",
+          "description": "Start from scratch"
+        },
+        "fantasy": {
+          "label": "Fantasy Adventure",
+          "description": "Comes with a sample timeline and characters",
+          "name": "Throne of Ashes"
+        },
+        "scifi": {
+          "label": "Sci-Fi Expedition",
+          "description": "Comes with a sample timeline and characters",
+          "name": "Farstar"
+        }
+      },
+      "nameLabel": "World name",
+      "namePlaceholder": "e.g. Throne of Ashes",
+      "savedInDefault": "Files are saved in the default workspace ·",
+      "createFailed": "Could not create the World: {{reason}}. Try again or choose a different name.",
+      "submit": "Create and Open"
+    },
+    "changeLocation": "Advanced: Change location",
+    "defaultWorkspace": "Default workspace",
+    "unknownError": "Unknown error",
+    "toast": {
+      "retryDescription": "{{reason}}. Try again.",
+      "creatorInitFailed": "Could not set up the local Creator",
+      "statusRefreshFailed": "Could not refresh setup status",
+      "workspaceSelectFailed": "Could not select the default workspace",
+      "worldCreated": "🎉 World “{{name}}” created"
+    }
   }
 }

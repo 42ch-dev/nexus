@@ -173,5 +173,99 @@
     "workspaceBootstrapFailedDescription": "{{message}} 请重试“继续”，如果问题持续存在，请使用下方的“重置本地数据库”。",
     "resetLocalDatabase": "重置本地数据库",
     "profileDisplayName": "个人档案名称"
+  },
+  "wizard": {
+    "identity": {
+      "eyebrow": "NEXUS · 初次设置",
+      "title": "你的 AI 创作工作室",
+      "description": "世界有记忆，故事不自相矛盾。先告诉我——你想用 Nexus 做什么？",
+      "optionsLabel": "你想用 Nexus 做什么？",
+      "recommended": "推荐路径",
+      "option": {
+        "contentCreator": {
+          "title": "我来写故事",
+          "description": "长篇小说 · 跑团战役 · 世界观构建 / AI 记得你的设定，帮你写出初稿"
+        },
+        "developer": {
+          "title": "我来开发工具",
+          "description": "编排引擎 · 预设 · WASM 模块 / 完整的操作台与策略画布"
+        }
+      }
+    },
+    "nav": {
+      "next": "下一步",
+      "back": "返回"
+    },
+    "scan": {
+      "loading": "正在你的电脑上寻找可用的 AI…",
+      "error": "暂时无法扫描本机 AI",
+      "errorWithReason": "暂时无法扫描本机 AI（{{reason}}）",
+      "retry": "重试扫描",
+      "launchCommand": "启动命令"
+    },
+    "agent": {
+      "stepLabel": "第 2 步 / 共 3 步",
+      "title": "你的 AI 搭档",
+      "emptyTitle": "没有找到可用的 AI",
+      "found_other": "在你的电脑上找到了 {{count}} 个可用的 AI，推荐用第一个",
+      "emptyDescription": "Nexus 需要一个本地 AI 助手（如 Claude Code、Codex CLI）来协同创作。",
+      "rowRecommended": "已安装 · 开箱即用 · 推荐",
+      "rowInstalled": "已安装 · 可切换",
+      "installGuide": "▸ 都没有？查看如何安装一个 AI 助手",
+      "manualToggle": "▸ 高级：手动指定启动命令"
+    },
+    "developer": {
+      "stepLabel": "第 2 步 / 共 2 步 · 开发者",
+      "title": "Agent 与工作区",
+      "description": "选择编排引擎使用的 agent，以及项目存放位置",
+      "agentsLabel": "Agent",
+      "rowRecommended": "ACP · 已安装 · 推荐",
+      "rowInstalled": "ACP · 已安装",
+      "customLaunch": {
+        "optionalLabel": "自定义启动命令（可选，覆盖选中 agent 的默认启动方式）",
+        "requiredLabel": "自定义启动命令（必填：本机没有找到可用的 agent）",
+        "placeholder": "例如：claude --acp --model opus"
+      },
+      "workspaceRoot": "工作区根目录",
+      "browse": "浏览…",
+      "finish": "进入开发台"
+    },
+    "firstWorld": {
+      "stepLabel": "第 3 步 / 共 3 步",
+      "title": "创建你的第一个世界",
+      "description": "世界 = 你的故事宇宙。设定、时间线、角色都住在里面",
+      "templatesLabel": "世界模板",
+      "template": {
+        "blank": {
+          "label": "空白世界",
+          "description": "从零开始"
+        },
+        "fantasy": {
+          "label": "奇幻冒险",
+          "description": "带示例时间线与角色",
+          "name": "灰烬王座"
+        },
+        "scifi": {
+          "label": "科幻远征",
+          "description": "带示例时间线与角色",
+          "name": "远星号"
+        }
+      },
+      "nameLabel": "世界名称",
+      "namePlaceholder": "例如：灰烬王座",
+      "savedInDefault": "文件会保存在默认工作区 ·",
+      "createFailed": "创建世界失败：{{reason}}。请重试或更换名称。",
+      "submit": "创建并进入"
+    },
+    "changeLocation": "高级：更改位置",
+    "defaultWorkspace": "默认工作区",
+    "unknownError": "未知错误",
+    "toast": {
+      "retryDescription": "{{reason}}。请重试。",
+      "creatorInitFailed": "无法初始化本地创作者",
+      "statusRefreshFailed": "状态刷新失败",
+      "workspaceSelectFailed": "无法选择默认工作区",
+      "worldCreated": "🎉 世界「{{name}}」已创建"
+    }
   }
 }

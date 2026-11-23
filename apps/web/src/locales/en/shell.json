@@ -346,5 +346,20 @@
     "profileSection": "CREATOR PROFILE",
     "newCreator": "＋ 新建 Creator…",
     "activeMarker": "Active"
+  },
+  "access": {
+    "recovery": {
+      "title": "Access Required",
+      "body": "This browser is not yet authorized for this Nexus service. Each time Nexus starts, it prints an access link with a one-time token in the service terminal — copy it from there and open it, or enter your API key directly.",
+      "keyLabel": "Enter API key…",
+      "submit": "Authorize",
+      "invalid": "The API key is invalid or has expired. Check it and try again.",
+      "recheck": "Check Again"
+    }
+  },
+  "daemonIdentity": {
+    "verifying": "Verifying daemon identity…",
+    "failed": "Could not verify daemon identity",
+    "reconnect": "Reconnect"
   }
 }

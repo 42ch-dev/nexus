@@ -103,19 +103,19 @@ describe('StepAgent (creator AI partner)', () => {
   it('renders the installed agents with the recommended pick preselected', async () => {
     renderStep(makeClient(() => Promise.resolve({ agents: AGENTS })));
 
-    expect(screen.getByText('第 2 步 / 共 3 步')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '你的 AI 搭档' })).toBeInTheDocument();
+    expect(screen.getByText('Step 2 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your AI Partner' })).toBeInTheDocument();
 
     const recommended = await screen.findByTestId('agent-row-claude');
     expect(
-      screen.getByText('在你的电脑上找到了 2 个可用的 AI，推荐用第一个'),
+      screen.getByText('Found 2 available AIs on your computer. We recommend the first one'),
     ).toBeInTheDocument();
     expect(recommended).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByText('已安装 · 开箱即用 · 推荐')).toBeInTheDocument();
+    expect(screen.getByText('Installed · Ready to use · Recommended')).toBeInTheDocument();
     expect(screen.getByText('2.1.4')).toBeInTheDocument();
     expect(screen.getByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByText('已安装 · 可切换')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
+    expect(screen.getByText('Installed · Switchable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
   });
 
   it('persists the selected agent on the service', async () => {
@@ -131,7 +131,7 @@ describe('StepAgent (creator AI partner)', () => {
       launch_command: '/usr/local/bin/codex',
     });
 
-    await user.click(screen.getByRole('button', { name: '下一步' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(onNext).toHaveBeenCalledTimes(1);
   });
 
@@ -193,7 +193,7 @@ describe('StepAgent (creator AI partner)', () => {
       'aria-checked',
       'false',
     );
-    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
 
     await act(async () => {
       resolveProfile({
@@ -205,7 +205,7 @@ describe('StepAgent (creator AI partner)', () => {
       expect(screen.getByTestId('agent-row-codex')).toHaveAttribute('aria-checked', 'true'),
     );
     expect(screen.getByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
   });
 
   it('restores the daemon-global profile for any active creator', async () => {
@@ -226,13 +226,13 @@ describe('StepAgent (creator AI partner)', () => {
     const client = makeClient(() => Promise.resolve({ agents: [] }));
     const { onNext } = renderStep(client);
 
-    expect(await screen.findByRole('heading', { name: '没有找到可用的 AI' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'No AI Found' })).toBeInTheDocument();
     expect(
-      screen.getByText('Nexus 需要一个本地 AI 助手（如 Claude Code、Codex CLI）来协同创作。'),
+      screen.getByText('Nexus needs a local AI assistant (such as Claude Code or Codex CLI) to write with you.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: '▸ 都没有？查看如何安装一个 AI 助手' }));
+    await user.click(screen.getByRole('button', { name: '▸ None of these? See how to install an AI assistant' }));
     expect(screen.getByRole('link', { name: 'Claude Code' })).toHaveAttribute(
       'href',
       'https://claude.ai/code',
@@ -242,11 +242,11 @@ describe('StepAgent (creator AI partner)', () => {
       'https://openai.com/codex/',
     );
 
-    await user.click(screen.getByRole('button', { name: '▸ 高级：手动指定启动命令' }));
-    await user.type(screen.getByRole('textbox', { name: '启动命令' }), 'claude --model opus');
+    await user.click(screen.getByRole('button', { name: '▸ Advanced: Set a launch command manually' }));
+    await user.type(screen.getByRole('textbox', { name: 'Launch command' }), 'claude --model opus');
 
-    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '下一步' }));
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(onNext).toHaveBeenCalledTimes(1);
     expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'claude --model opus',
@@ -263,13 +263,13 @@ describe('StepAgent (creator AI partner)', () => {
     });
     renderStep(client, { onNext });
 
-    expect(await screen.findByRole('heading', { name: '没有找到可用的 AI' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
+    expect(await screen.findByRole('heading', { name: 'No AI Found' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
 
-    await user.click(screen.getByRole('button', { name: '▸ 高级：手动指定启动命令' }));
-    expect(screen.getByRole('textbox', { name: '启动命令' })).toHaveValue('my-cli --flag');
+    await user.click(screen.getByRole('button', { name: '▸ Advanced: Set a launch command manually' }));
+    expect(screen.getByRole('textbox', { name: 'Launch command' })).toHaveValue('my-cli --flag');
 
-    await user.click(screen.getByRole('button', { name: '下一步' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(onNext).toHaveBeenCalledTimes(1);
     expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'my-cli --flag',
@@ -288,7 +288,7 @@ describe('StepAgent (creator AI partner)', () => {
     });
 
     await user.click(await screen.findByTestId('agent-row-codex'));
-    await user.click(screen.getByRole('button', { name: '下一步' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
 
     expect(await screen.findAllByText('Could not save agent profile.')).toHaveLength(1);
     expect(onNext).not.toHaveBeenCalled();
@@ -303,13 +303,13 @@ describe('StepAgent (creator AI partner)', () => {
 
     renderStep(makeClient(scanAgents));
 
-    expect(await screen.findByText('暂时无法扫描本机 AI（daemon offline）')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+    expect(await screen.findByText('Could not scan this computer for AI (daemon offline)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: '重试扫描' }));
+    await user.click(screen.getByRole('button', { name: 'Retry Scan' }));
 
     await waitFor(() => expect(screen.getByTestId('agent-row-claude')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
   });
 
   it('keeps ACP protocol vocabulary off the creator surface', async () => {

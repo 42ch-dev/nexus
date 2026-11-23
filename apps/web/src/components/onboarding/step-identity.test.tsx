@@ -15,28 +15,28 @@ describe('StepIdentity', () => {
   it('renders the product-final identity copy', () => {
     render(<StepIdentity value={null} onChange={() => {}} onNext={() => {}} />);
 
-    expect(screen.getByText('NEXUS · 初次设置')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '你的 AI 创作工作室' })).toBeInTheDocument();
+    expect(screen.getByText('NEXUS · First-Time Setup')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your AI Creative Studio' })).toBeInTheDocument();
     expect(
-      screen.getByText('世界有记忆，故事不自相矛盾。先告诉我——你想用 Nexus 做什么？'),
+      screen.getByText('Worlds remember, so stories never contradict themselves. First, tell us — what do you want to do with Nexus?'),
     ).toBeInTheDocument();
-    expect(screen.getByText('我来写故事')).toBeInTheDocument();
+    expect(screen.getByText('I Write Stories')).toBeInTheDocument();
     expect(
-      screen.getByText('长篇小说 · 跑团战役 · 世界观构建 / AI 记得你的设定，帮你写出初稿'),
+      screen.getByText('Novels · Tabletop campaigns · Worldbuilding / AI remembers your lore and helps you draft'),
     ).toBeInTheDocument();
-    expect(screen.getByText('推荐路径')).toBeInTheDocument();
-    expect(screen.getByText('我来开发工具')).toBeInTheDocument();
+    expect(screen.getByText('Recommended')).toBeInTheDocument();
+    expect(screen.getByText('I Build Tools')).toBeInTheDocument();
     expect(
-      screen.getByText('编排引擎 · 预设 · WASM 模块 / 完整的操作台与策略画布'),
+      screen.getByText('Orchestration engine · Presets · WASM modules / The full Control Room and Strategy Canvas'),
     ).toBeInTheDocument();
   });
 
-  it('keeps 下一步 disabled until a card is chosen, then reports the entrance', async () => {
+  it('keeps Next disabled until a card is chosen, then reports the entrance', async () => {
     const user = userEvent.setup();
     const onNext = vi.fn();
     render(<Harness onNext={onNext} />);
 
-    const next = screen.getByRole('button', { name: '下一步' });
+    const next = screen.getByRole('button', { name: 'Next' });
     expect(next).toBeDisabled();
 
     const developer = screen.getByTestId('identity-option-developer');
