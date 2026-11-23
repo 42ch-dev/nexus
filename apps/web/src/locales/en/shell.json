@@ -260,6 +260,10 @@
     "creating": "Creating World…",
     "create": "Create"
   },
+  "workspaceChips": {
+    "ariaLabel": "Workspaces",
+    "title": "Workspaces — containers for creative content, each with its own root directory"
+  },
   "workspaceCreate": {
     "chip": "＋ New workspace",
     "title": "New workspace",
