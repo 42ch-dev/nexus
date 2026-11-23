@@ -109,18 +109,18 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
   it('renders the merged step copy with agent rows and the ACP pill', async () => {
     renderStep();
 
-    expect(screen.getByText('第 2 步 / 共 2 步 · 开发者')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Agent 与工作区' })).toBeInTheDocument();
-    expect(screen.getByText('选择编排引擎使用的 agent，以及项目存放位置')).toBeInTheDocument();
+    expect(screen.getByText('Step 2 of 2 · Developer')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Agent and Workspace' })).toBeInTheDocument();
+    expect(screen.getByText('Choose the agent the orchestration engine uses, and where your projects live')).toBeInTheDocument();
     expect(
-      screen.getByLabelText('自定义启动命令（可选，覆盖选中 agent 的默认启动方式）'),
-    ).toHaveAttribute('placeholder', '例如：claude --acp --model opus');
-    expect(screen.getByText('工作区根目录')).toBeInTheDocument();
+      screen.getByLabelText("Custom launch command (optional, overrides the selected agent's default launch)"),
+    ).toHaveAttribute('placeholder', 'e.g. claude --acp --model opus');
+    expect(screen.getByText('Workspace root')).toBeInTheDocument();
 
     expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('button', { name: '进入开发台' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled();
     expect(screen.getAllByText('ACP')).toHaveLength(2);
-    expect(screen.getByText('ACP · 已安装 · 推荐')).toBeInTheDocument();
+    expect(screen.getByText('ACP · Installed · Recommended')).toBeInTheDocument();
   });
 
   it('shows the reported creative_root in the advanced area (browser, display-only)', async () => {
@@ -130,21 +130,21 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('workspace-root')).toHaveTextContent('/home/creator/Nexus'),
     );
-    expect(screen.queryByRole('button', { name: '浏览…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '高级：更改位置' }));
+    await user.click(screen.getByRole('button', { name: 'Advanced: Change location' }));
 
-    expect(screen.getByRole('textbox', { name: '工作区根目录' })).toHaveValue(
+    expect(screen.getByRole('textbox', { name: 'Workspace root' })).toHaveValue(
       '/home/creator/Nexus',
     );
-    expect(screen.queryByRole('button', { name: '浏览…' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
   });
 
-  it('reads 默认工作区 when the service reports no root and hides the empty advanced area', async () => {
+  it('reads Default workspace when the service reports no root and hides the empty advanced area', async () => {
     renderStep({ client: makeClient(undefined) });
 
-    await waitFor(() => expect(screen.getByTestId('workspace-root')).toHaveTextContent('默认工作区'));
-    expect(screen.queryByRole('button', { name: '高级：更改位置' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('workspace-root')).toHaveTextContent('Default workspace'));
+    expect(screen.queryByRole('button', { name: 'Advanced: Change location' })).not.toBeInTheDocument();
   });
 
   it('picks a directory on desktop and persists it to the desktop config', async () => {
@@ -156,8 +156,8 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
       desktop: makeDesktop({ pickDirectory, setWorkspacePath }),
     });
 
-    await user.click(await screen.findByRole('button', { name: '高级：更改位置' }));
-    await user.click(screen.getByRole('button', { name: '浏览…' }));
+    await user.click(await screen.findByRole('button', { name: 'Advanced: Change location' }));
+    await user.click(screen.getByRole('button', { name: 'Browse…' }));
 
     await waitFor(() => expect(setWorkspacePath).toHaveBeenCalledWith('/tmp/picked-root'));
     expect(pickDirectory).toHaveBeenCalled();
@@ -177,7 +177,7 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
 
     await screen.findByTestId('agent-row-claude');
     const field = screen.getByLabelText(
-      '自定义启动命令（可选，覆盖选中 agent 的默认启动方式）',
+      "Custom launch command (optional, overrides the selected agent's default launch)",
     );
     expect(field).toHaveValue('');
 
@@ -199,10 +199,10 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
 
     expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'true');
     expect(
-      screen.getByLabelText('自定义启动命令（可选，覆盖选中 agent 的默认启动方式）'),
+      screen.getByLabelText("Custom launch command (optional, overrides the selected agent's default launch)"),
     ).toHaveValue('claude --opus');
 
-    await user.click(screen.getByRole('button', { name: '进入开发台' }));
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
     expect(onFinish).toHaveBeenCalledTimes(1);
     expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'Claude Code',
@@ -215,7 +215,7 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
     const { onFinish } = renderStep();
 
     await screen.findByTestId('agent-row-claude');
-    await user.click(screen.getByRole('button', { name: '进入开发台' }));
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
 
     expect(onFinish).toHaveBeenCalledTimes(1);
   });
@@ -234,13 +234,36 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
       } as unknown as NexusClient,
     });
 
-    expect(screen.getByRole('button', { name: '进入开发台' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
 
-    await user.type(
-      screen.getByLabelText('自定义启动命令（可选，覆盖选中 agent 的默认启动方式）'),
-      'my-agent --flag',
+    const customLaunch = await screen.findByLabelText(
+      'Custom launch command (required: no agent is available)',
     );
+    expect(screen.queryByText(/Custom launch command \(optional/)).not.toBeInTheDocument();
 
-    expect(screen.getByRole('button', { name: '进入开发台' })).toBeEnabled();
+    await user.type(customLaunch, 'my-agent --flag');
+
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled();
+  });
+
+  it('keeps the custom launch command required when the scan fails', async () => {
+    renderStep({
+      client: {
+        scanAgents: () => Promise.reject(new Error('daemon offline')),
+        getActiveWorkspace: () =>
+          Promise.resolve({
+            creator_id: 'creator-a',
+            workspace_slug: 'default',
+            operational_dir: '/tmp/nexus',
+          }),
+      } as unknown as NexusClient,
+    });
+
+    expect(await screen.findByText(/Could not scan this computer for AI/)).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Custom launch command (required: no agent is available)'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/no agent was found/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
   });
 });

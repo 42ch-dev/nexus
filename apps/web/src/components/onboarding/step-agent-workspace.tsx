@@ -4,7 +4,7 @@
  * One merged step: agent rows (ACP pill allowed on this surface), an optional
  * custom launch command and the workspace root. The browser never resolves
  * host paths, so the root is display-only: the field shows the `creative_root`
- * the service reports for the active workspace (`高级：更改位置` reveals it);
+ * the service reports for the active workspace (`Advanced: Change location` reveals it);
  * only the desktop build can pick a directory (`pickDirectory` → the desktop
  * config). The override itself lands with the deferred create route (I-000063).
  */
@@ -43,6 +43,7 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
 
   const workspaceRoot = pickedRoot ?? activeWorkspace.data?.creative_root ?? null;
   const canContinue = selection.status !== 'loading' && selection.canContinue;
+  const customLaunchRequired = selection.status !== 'loading' && selection.choices.length === 0;
 
   async function browse() {
     if (!desktop) return;
@@ -67,13 +68,13 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
 
   return (
     <div className="flex flex-col items-center">
-      <div className="text-label-12 text-gray-700">第 2 步 / 共 2 步 · 开发者</div>
-      <h1 className="mt-4 font-display text-display-32 text-gray-1000">Agent 与工作区</h1>
-      <p className="mt-3 text-copy-14 text-gray-900">选择编排引擎使用的 agent，以及项目存放位置</p>
+      <div className="text-label-12 text-gray-700">{t('wizard.developer.stepLabel')}</div>
+      <h1 className="mt-4 font-display text-display-32 text-gray-1000">{t('wizard.developer.title')}</h1>
+      <p className="mt-3 text-copy-14 text-gray-900">{t('wizard.developer.description')}</p>
 
       {selection.status === 'loading' ? (
         <p role="status" className="mt-8 text-copy-14 text-gray-900">
-          正在你的电脑上寻找可用的 AI…
+          {t('wizard.scan.loading')}
         </p>
       ) : null}
 
@@ -95,7 +96,7 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
       {selection.status === 'ready' ? (
         <div
           role="radiogroup"
-          aria-label="Agent"
+          aria-label={t('wizard.developer.agentsLabel')}
           className="mt-8 flex w-[480px] flex-col gap-3"
         >
           {selection.choices.map((choice) => (
@@ -105,8 +106,8 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
               protocol="ACP"
               description={
                 choice.pickerId === selection.recommendedId
-                  ? 'ACP · 已安装 · 推荐'
-                  : 'ACP · 已安装'
+                  ? t('wizard.developer.rowRecommended')
+                  : t('wizard.developer.rowInstalled')
               }
               selected={choice.pickerId === selection.selectedId}
               onSelect={() => selection.select(choice.pickerId)}
@@ -118,19 +119,23 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
       <div className="mt-8 flex w-[480px] flex-col gap-6">
         <ManualCommandField
           id="onboarding-custom-launch"
-          label="自定义启动命令（可选，覆盖选中 agent 的默认启动方式）"
-          placeholder="例如：claude --acp --model opus"
+          label={
+            customLaunchRequired
+              ? t('wizard.developer.customLaunch.requiredLabel')
+              : t('wizard.developer.customLaunch.optionalLabel')
+          }
+          placeholder={t('wizard.developer.customLaunch.placeholder')}
           value={selection.manual}
           onChange={selection.setManual}
         />
 
         <div className="flex flex-col gap-2">
-          <Label className="text-label-14 font-medium text-gray-1000">工作区根目录</Label>
+          <Label className="text-label-14 font-medium text-gray-1000">{t('wizard.developer.workspaceRoot')}</Label>
           <p
             className="rounded-control border border-gray-alpha-400 bg-background-200 px-3 py-2 text-copy-14 text-gray-900"
             data-testid="workspace-root"
           >
-            {workspaceRoot ?? '默认工作区'}
+            {workspaceRoot ?? t('wizard.defaultWorkspace')}
           </p>
 
           {desktop || workspaceRoot ? (
@@ -140,7 +145,7 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
               onClick={() => setShowAdvanced((open) => !open)}
               className={LINK_CLASS}
             >
-              高级：更改位置
+              {t('wizard.changeLocation')}
             </button>
           ) : null}
 
@@ -150,13 +155,13 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
                 id="onboarding-workspace-root"
                 type="text"
                 readOnly
-                aria-label="工作区根目录"
+                aria-label={t('wizard.developer.workspaceRoot')}
                 value={workspaceRoot ?? ''}
                 className="min-w-0 flex-1"
               />
               {desktop ? (
                 <Button variant="secondary" onClick={() => void browse()} className="shrink-0">
-                  浏览…
+                  {t('wizard.developer.browse')}
                 </Button>
               ) : null}
             </div>
@@ -166,10 +171,10 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
 
       <div className="mt-12 flex w-[480px] items-center justify-between">
         <Button variant="tertiary" onClick={onBack}>
-          返回
+          {t('wizard.nav.back')}
         </Button>
         <Button variant="primary" disabled={!canContinue} onClick={finish}>
-          进入开发台
+          {t('wizard.developer.finish')}
         </Button>
       </div>
     </div>

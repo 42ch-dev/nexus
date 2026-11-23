@@ -7,10 +7,9 @@
  * first-run marker — the gate flips from the selected/default workspace state
  * (compass D21/D25).
  *
- * Copy is product-owned and final (plan § Task 3), so it ships verbatim and
- * not through i18n — same convention as the identity and agent steps.
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button, Input, Label } from '@/components/ui';
 import { errorMessage } from '@/lib/error-message';
@@ -21,30 +20,16 @@ const LINK_CLASS =
   'text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:opacity-100';
 
 interface WorldTemplate {
-  id: string;
+  id: 'blank' | 'fantasy' | 'scifi';
   emoji: string;
-  label: string;
-  description: string;
-  /** Name the template preselects; the field stays editable after picking. */
-  name: string;
+  /** Whether the template preselects a catalog name; the field stays editable after picking. */
+  prefillsName: boolean;
 }
 
 const TEMPLATES: readonly WorldTemplate[] = [
-  { id: 'blank', emoji: '📄', label: '空白世界', description: '从零开始', name: '' },
-  {
-    id: 'fantasy',
-    emoji: '🏰',
-    label: '奇幻冒险',
-    description: '带示例时间线与角色',
-    name: '灰烬王座',
-  },
-  {
-    id: 'scifi',
-    emoji: '🚀',
-    label: '科幻远征',
-    description: '带示例时间线与角色',
-    name: '远星号',
-  },
+  { id: 'blank', emoji: '📄', prefillsName: false },
+  { id: 'fantasy', emoji: '🏰', prefillsName: true },
+  { id: 'scifi', emoji: '🚀', prefillsName: true },
 ];
 
 /** Prototype default: the fantasy template, with its name prefilled. */
@@ -57,8 +42,11 @@ interface StepFirstWorldProps {
 }
 
 export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
+  const { t } = useTranslation('setup');
+  const templateName = (template: WorldTemplate) =>
+    template.prefillsName ? t(`wizard.firstWorld.template.${template.id}.name`) : '';
   const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE.id);
-  const [name, setName] = useState(DEFAULT_TEMPLATE.name);
+  const [name, setName] = useState(() => templateName(DEFAULT_TEMPLATE));
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showRoot, setShowRoot] = useState(false);
@@ -70,7 +58,7 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
 
   function pickTemplate(template: WorldTemplate) {
     setTemplateId(template.id);
-    setName(template.name);
+    setName(templateName(template));
     setError(null);
   }
 
@@ -81,7 +69,11 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
     try {
       await onFinish(trimmed);
     } catch (failure) {
-      setError(`创建世界失败：${errorMessage(failure) || '未知错误'}。请重试或更换名称。`);
+      setError(
+        t('wizard.firstWorld.createFailed', {
+          reason: errorMessage(failure) || t('wizard.unknownError'),
+        }),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -89,15 +81,15 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
 
   return (
     <div className="flex flex-col items-center">
-      <div className="text-label-12 text-gray-700">第 3 步 / 共 3 步</div>
-      <h1 className="mt-4 font-display text-display-32 text-gray-1000">创建你的第一个世界</h1>
+      <div className="text-label-12 text-gray-700">{t('wizard.firstWorld.stepLabel')}</div>
+      <h1 className="mt-4 font-display text-display-32 text-gray-1000">{t('wizard.firstWorld.title')}</h1>
       <p className="mt-3 text-copy-14 text-gray-900">
-        世界 = 你的故事宇宙。设定、时间线、角色都住在里面
+        {t('wizard.firstWorld.description')}
       </p>
 
       <div
         role="radiogroup"
-        aria-label="世界模板"
+        aria-label={t('wizard.firstWorld.templatesLabel')}
         className="mt-10 grid w-[720px] max-w-full grid-cols-1 gap-3 sm:grid-cols-3"
       >
         {TEMPLATES.map((template) => {
@@ -119,9 +111,9 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
                 {template.emoji}
               </span>
               <span className="mt-3 text-heading-16 font-heading text-gray-1000">
-                {template.label}
+                {t(`wizard.firstWorld.template.${template.id}.label`)}
               </span>
-              <span className="mt-1 text-copy-13 text-gray-900">{template.description}</span>
+              <span className="mt-1 text-copy-13 text-gray-900">{t(`wizard.firstWorld.template.${template.id}.description`)}</span>
             </button>
           );
         })}
@@ -129,26 +121,26 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
 
       <div className="mt-8 flex w-[480px] flex-col gap-1.5">
         <Label htmlFor="onboarding-world-name" className="text-label-14 font-medium text-gray-1000">
-          世界名称
+          {t('wizard.firstWorld.nameLabel')}
         </Label>
         <Input
           id="onboarding-world-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="例如：灰烬王座"
+          placeholder={t('wizard.firstWorld.namePlaceholder')}
         />
       </div>
 
       <div className="mt-4 flex w-[480px] flex-col gap-2">
         <p className="text-copy-13 text-gray-900">
-          文件会保存在默认工作区 ·{' '}
+          {t('wizard.firstWorld.savedInDefault')}{' '}
           <button
             type="button"
             aria-expanded={showRoot}
             onClick={() => setShowRoot((open) => !open)}
             className={LINK_CLASS}
           >
-            高级：更改位置
+            {t('wizard.changeLocation')}
           </button>
         </p>
         {showRoot ? (
@@ -156,7 +148,7 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
             data-testid="first-world-root"
             className="rounded-control border border-gray-alpha-400 bg-background-200 px-3 py-2 text-copy-14 text-gray-900"
           >
-            {workspaceRoot ?? '默认工作区'}
+            {workspaceRoot ?? t('wizard.defaultWorkspace')}
           </p>
         ) : null}
       </div>
@@ -169,14 +161,14 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
 
       <div className="mt-12 flex w-[480px] items-center justify-between">
         <Button variant="tertiary" onClick={onBack}>
-          返回
+          {t('wizard.nav.back')}
         </Button>
         <Button
           variant="primary"
           disabled={trimmed === '' || submitting}
           onClick={() => void submit()}
         >
-          创建并进入
+          {t('wizard.firstWorld.submit')}
         </Button>
       </div>
     </div>

@@ -277,6 +277,7 @@ export function ManualCommandField({
   placeholder,
   label,
 }: ManualCommandFieldProps) {
+  const { t } = useTranslation('setup');
   return (
     <div className="flex flex-col gap-2">
       {label ? (
@@ -290,7 +291,7 @@ export function ManualCommandField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        aria-label={label ? undefined : '启动命令'}
+        aria-label={label ? undefined : t('wizard.scan.launchCommand')}
       />
     </div>
   );
@@ -304,13 +305,14 @@ export function ScanErrorNotice({
   reason: string;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation('setup');
   return (
     <div role="alert" className="flex flex-col items-center gap-3">
       <p className="text-copy-14 text-gray-900">
-        {reason ? `暂时无法扫描本机 AI（${reason}）` : '暂时无法扫描本机 AI'}
+        {reason ? t('wizard.scan.errorWithReason', { reason }) : t('wizard.scan.error')}
       </p>
       <Button variant="secondary" size="small" onClick={onRetry}>
-        重试扫描
+        {t('wizard.scan.retry')}
       </Button>
     </div>
   );

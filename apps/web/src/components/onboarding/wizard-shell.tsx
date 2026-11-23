@@ -18,6 +18,7 @@
  */
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { StepAgent } from '@/components/onboarding/step-agent';
@@ -39,6 +40,7 @@ type WizardStep = 'identity' | 'agent' | 'agent-workspace' | 'first-world';
 const DEFAULT_CREATOR_NAME = 'Default';
 
 export function WizardShell() {
+  const { t } = useTranslation('setup');
   const client = useNexusClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -80,8 +82,10 @@ export function WizardShell() {
     } catch (error) {
       toast({
         variant: 'error',
-        title: '无法初始化本地创作者',
-        description: `${errorMessage(error) || '未知错误'}。请重试。`,
+        title: t('wizard.toast.creatorInitFailed'),
+        description: t('wizard.toast.retryDescription', {
+          reason: errorMessage(error) || t('wizard.unknownError'),
+        }),
       });
       return;
     }
@@ -111,8 +115,10 @@ export function WizardShell() {
     } catch (error) {
       toast({
         variant: 'error',
-        title: '状态刷新失败',
-        description: `${errorMessage(error) || '未知错误'}。请重试。`,
+        title: t('wizard.toast.statusRefreshFailed'),
+        description: t('wizard.toast.retryDescription', {
+          reason: errorMessage(error) || t('wizard.unknownError'),
+        }),
       });
       return false;
     }
@@ -128,8 +134,10 @@ export function WizardShell() {
     } catch (error) {
       toast({
         variant: 'error',
-        title: '无法选择默认工作区',
-        description: `${errorMessage(error) || '未知错误'}。请重试。`,
+        title: t('wizard.toast.workspaceSelectFailed'),
+        description: t('wizard.toast.retryDescription', {
+          reason: errorMessage(error) || t('wizard.unknownError'),
+        }),
       });
       return false;
     }
@@ -141,7 +149,7 @@ export function WizardShell() {
     if (!(await selectWorkspaceOrReport())) return;
     const world = await client.createWorld({ title: name });
     void queryClient.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
-    toast({ variant: 'success', title: `🎉 世界「${name}」已创建` });
+    toast({ variant: 'success', title: t('wizard.toast.worldCreated', { name }) });
     navigate(`/worlds/${encodeURIComponent(world.world_id)}?layer=brief`);
   }
 

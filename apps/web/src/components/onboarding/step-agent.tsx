@@ -1,12 +1,12 @@
 /**
  * `onboarding-v3.html` S2).
  *
- * Copy is product-owned and final (plan § Copy), so it ships verbatim and not
- * through i18n — same convention as the identity step. Scan states: loading
+ * Scan states: loading
  * (Next disabled), ready (rows + recommended preselected), empty and error
  * (recoverable through the install guide / manual launch command).
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { AgentRow, ManualCommandField, ScanErrorNotice, useAgentSelection } from '@/components/onboarding/agent-selection';
 import { Button } from '@/components/ui';
@@ -61,6 +61,7 @@ interface StepAgentProps {
 }
 
 export function StepAgent({ onBack, onNext }: StepAgentProps) {
+  const { t } = useTranslation('setup');
   const selection = useAgentSelection();
   const desktop = useDesktopCapabilities();
   const [showInstallGuide, setShowInstallGuide] = useState(false);
@@ -76,26 +77,26 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
 
   return (
     <div className="flex flex-col items-center">
-      <div className="text-label-12 text-gray-700">第 2 步 / 共 3 步</div>
+      <div className="text-label-12 text-gray-700">{t('wizard.agent.stepLabel')}</div>
       <h1 className="mt-4 font-display text-display-32 text-gray-1000">
-        {selection.status === 'empty' ? '没有找到可用的 AI' : '你的 AI 搭档'}
+        {selection.status === 'empty' ? t('wizard.agent.emptyTitle') : t('wizard.agent.title')}
       </h1>
 
       {scanning ? (
         <p role="status" className="mt-3 text-copy-14 text-gray-900">
-          正在你的电脑上寻找可用的 AI…
+          {t('wizard.scan.loading')}
         </p>
       ) : null}
 
       {selection.status === 'ready' ? (
         <p className="mt-3 text-copy-14 text-gray-900">
-          在你的电脑上找到了 {selection.choices.length} 个可用的 AI，推荐用第一个
+          {t('wizard.agent.found', { count: selection.choices.length })}
         </p>
       ) : null}
 
       {selection.status === 'empty' ? (
         <p className="mt-3 max-w-[480px] text-center text-copy-14 text-gray-900">
-          Nexus 需要一个本地 AI 助手（如 Claude Code、Codex CLI）来协同创作。
+          {t('wizard.agent.emptyDescription')}
         </p>
       ) : null}
 
@@ -108,7 +109,7 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
       {selection.status === 'ready' ? (
         <div
           role="radiogroup"
-          aria-label="你的 AI 搭档"
+          aria-label={t('wizard.agent.title')}
           className="mt-8 flex w-[480px] flex-col gap-3"
         >
           {selection.choices.map((choice) => (
@@ -117,8 +118,8 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
               choice={choice}
               description={
                 choice.pickerId === selection.recommendedId
-                  ? '已安装 · 开箱即用 · 推荐'
-                  : '已安装 · 可切换'
+                  ? t('wizard.agent.rowRecommended')
+                  : t('wizard.agent.rowInstalled')
               }
               selected={choice.pickerId === selection.selectedId}
               onSelect={() => selection.select(choice.pickerId)}
@@ -137,7 +138,7 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
                 onClick={() => setShowInstallGuide((open) => !open)}
                 className={LINK_CLASS}
               >
-                ▸ 都没有？查看如何安装一个 AI 助手
+                {t('wizard.agent.installGuide')}
               </button>
               {showInstallGuide ? (
                 <div className="flex flex-col gap-1.5 pl-2">
@@ -155,7 +156,7 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
             onClick={() => setShowManual((open) => !open)}
             className={LINK_CLASS}
           >
-            ▸ 高级：手动指定启动命令
+            {t('wizard.agent.manualToggle')}
           </button>
           {showManual ? (
             <ManualCommandField
@@ -169,10 +170,10 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
 
       <div className="mt-12 flex w-[480px] items-center justify-between">
         <Button variant="tertiary" onClick={onBack}>
-          返回
+          {t('wizard.nav.back')}
         </Button>
         <Button variant="primary" disabled={!canContinue} onClick={advance}>
-          下一步
+          {t('wizard.nav.next')}
         </Button>
       </div>
     </div>

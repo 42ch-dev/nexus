@@ -346,5 +346,20 @@
     "profileSection": "CREATOR PROFILE",
     "newCreator": "＋ 新建 Creator…",
     "activeMarker": "当前"
+  },
+  "access": {
+    "recovery": {
+      "title": "需要访问授权",
+      "body": "此浏览器还没有获得本 Nexus 服务的访问授权。Nexus 每次启动都会在服务终端打印一条带一次性令牌的访问链接——回到终端复制并打开它即可；也可以直接输入你的 API Key。",
+      "keyLabel": "输入 API Key…",
+      "submit": "授权",
+      "invalid": "API Key 无效或已失效，请检查后重试。",
+      "recheck": "重新检测"
+    }
+  },
+  "daemonIdentity": {
+    "verifying": "正在验证守护进程身份…",
+    "failed": "无法验证守护进程身份",
+    "reconnect": "重新连接"
   }
 }

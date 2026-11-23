@@ -179,7 +179,7 @@ function FingerprintGate({
   if (!isConnectRoute && state.status === 'verifying') {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
-        <LoadingState label="Verifying daemon identity…" />
+        <LoadingState label={shellT('daemonIdentity.verifying')} />
       </div>
     );
   }
@@ -206,14 +206,14 @@ function FingerprintGate({
           ) : (
             <>
               <ErrorState
-                title="Could not verify daemon identity"
+                title={shellT('daemonIdentity.failed')}
                 description={state.message}
                 onRetry={() => void verify()}
-                retryLabel="Try again"
+                retryLabel={commonT('error.retry')}
               />
               <div className="mt-4 flex justify-center">
                 <Button variant="secondary" onClick={() => navigate('/settings/advanced#connection')}>
-                  Reconnect
+                  {shellT('daemonIdentity.reconnect')}
                 </Button>
               </div>
             </>

@@ -60,23 +60,23 @@ describe('StepFirstWorld (creator first World)', () => {
   it('renders the product copy with the fantasy template preselected', () => {
     renderStep();
 
-    expect(screen.getByText('第 3 步 / 共 3 步')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '创建你的第一个世界' })).toBeInTheDocument();
+    expect(screen.getByText('Step 3 of 3')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Create Your First World' })).toBeInTheDocument();
     expect(
-      screen.getByText('世界 = 你的故事宇宙。设定、时间线、角色都住在里面'),
+      screen.getByText('A World is your story universe. Lore, timelines and characters all live inside it'),
     ).toBeInTheDocument();
 
-    expect(screen.getByTestId('world-template-blank')).toHaveTextContent('空白世界');
-    expect(screen.getByTestId('world-template-blank')).toHaveTextContent('从零开始');
-    expect(screen.getByTestId('world-template-fantasy')).toHaveTextContent('奇幻冒险');
-    expect(screen.getByTestId('world-template-fantasy')).toHaveTextContent('带示例时间线与角色');
-    expect(screen.getByTestId('world-template-scifi')).toHaveTextContent('科幻远征');
+    expect(screen.getByTestId('world-template-blank')).toHaveTextContent('Blank World');
+    expect(screen.getByTestId('world-template-blank')).toHaveTextContent('Start from scratch');
+    expect(screen.getByTestId('world-template-fantasy')).toHaveTextContent('Fantasy Adventure');
+    expect(screen.getByTestId('world-template-fantasy')).toHaveTextContent('Comes with a sample timeline and characters');
+    expect(screen.getByTestId('world-template-scifi')).toHaveTextContent('Sci-Fi Expedition');
     expect(screen.getByTestId('world-template-fantasy')).toHaveAttribute('aria-checked', 'true');
 
-    const field = screen.getByLabelText('世界名称');
-    expect(field).toHaveAttribute('placeholder', '例如：灰烬王座');
-    expect(field).toHaveValue('灰烬王座');
-    expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
+    const field = screen.getByLabelText('World name');
+    expect(field).toHaveAttribute('placeholder', 'e.g. Throne of Ashes');
+    expect(field).toHaveValue('Throne of Ashes');
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
 
     expect(screen.queryByTestId('first-world-root')).not.toBeInTheDocument();
   });
@@ -87,16 +87,16 @@ describe('StepFirstWorld (creator first World)', () => {
 
     await user.click(screen.getByTestId('world-template-blank'));
     expect(screen.getByTestId('world-template-blank')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('世界名称')).toHaveValue('');
-    expect(screen.getByRole('button', { name: '创建并进入' })).toBeDisabled();
+    expect(screen.getByLabelText('World name')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
 
     await user.click(screen.getByTestId('world-template-scifi'));
-    expect(screen.getByLabelText('世界名称')).toHaveValue('远星号');
+    expect(screen.getByLabelText('World name')).toHaveValue('Farstar');
 
-    await user.clear(screen.getByLabelText('世界名称'));
-    await user.type(screen.getByLabelText('世界名称'), '  我的世界  ');
-    expect(screen.getByLabelText('世界名称')).toHaveValue('  我的世界  ');
-    expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
+    await user.clear(screen.getByLabelText('World name'));
+    await user.type(screen.getByLabelText('World name'), '  我的世界  ');
+    expect(screen.getByLabelText('World name')).toHaveValue('  我的世界  ');
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   });
 
   it('submits the trimmed name and locks the button while the finish runs', async () => {
@@ -105,15 +105,15 @@ describe('StepFirstWorld (creator first World)', () => {
     const onFinish = vi.fn(() => pending.promise);
     renderStep({ onFinish });
 
-    await user.clear(screen.getByLabelText('世界名称'));
-    await user.type(screen.getByLabelText('世界名称'), '  灰烬王座  ');
-    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+    await user.clear(screen.getByLabelText('World name'));
+    await user.type(screen.getByLabelText('World name'), '  Throne of Ashes  ');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
-    expect(onFinish).toHaveBeenCalledWith('灰烬王座');
-    await waitFor(() => expect(screen.getByRole('button', { name: '创建并进入' })).toBeDisabled());
+    expect(onFinish).toHaveBeenCalledWith('Throne of Ashes');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled());
 
     pending.resolve();
-    await waitFor(() => expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled());
   });
 
   it('keeps the draft and reports the reason when creation fails', async () => {
@@ -122,26 +122,26 @@ describe('StepFirstWorld (creator first World)', () => {
     renderStep({ onFinish });
 
     await user.click(screen.getByTestId('world-template-scifi'));
-    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(
-      await screen.findByText('创建世界失败：daemon refused。请重试或更换名称。'),
+      await screen.findByText('Could not create the World: daemon refused. Try again or choose a different name.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '创建你的第一个世界' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Create Your First World' })).toBeInTheDocument();
     expect(screen.getByTestId('world-template-scifi')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('世界名称')).toHaveValue('远星号');
-    expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
+    expect(screen.getByLabelText('World name')).toHaveValue('Farstar');
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   });
 
   it('claims no absolute path until the service reports a root', async () => {
     const user = userEvent.setup();
     renderStep({ client: makeClient(undefined) });
 
-    expect(screen.getByText(/文件会保存在默认工作区/)).toBeInTheDocument();
+    expect(screen.getByText(/Files are saved in the default workspace/)).toBeInTheDocument();
     expect(screen.queryByText('/home/creator/Nexus')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '高级：更改位置' }));
-    expect(screen.getByTestId('first-world-root')).toHaveTextContent('默认工作区');
+    await user.click(screen.getByRole('button', { name: 'Advanced: Change location' }));
+    expect(screen.getByTestId('first-world-root')).toHaveTextContent('Default workspace');
   });
 
   it('shows the reported creative_root in the advanced area', async () => {
@@ -149,9 +149,9 @@ describe('StepFirstWorld (creator first World)', () => {
     renderStep();
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '高级：更改位置' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: 'Advanced: Change location' })).toBeInTheDocument(),
     );
-    await user.click(screen.getByRole('button', { name: '高级：更改位置' }));
+    await user.click(screen.getByRole('button', { name: 'Advanced: Change location' }));
 
     expect(screen.getByTestId('first-world-root')).toHaveTextContent('/home/creator/Nexus');
   });
@@ -161,7 +161,7 @@ describe('StepFirstWorld (creator first World)', () => {
     const onBack = vi.fn();
     renderStep({ onBack });
 
-    await user.click(screen.getByRole('button', { name: '返回' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

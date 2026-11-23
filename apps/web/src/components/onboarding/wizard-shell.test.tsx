@@ -108,25 +108,25 @@ function renderShell(
 
 async function advanceIdentity(user: UserEvent, option: string) {
   await user.click(screen.getByTestId(`identity-option-${option}`));
-  await user.click(screen.getByRole('button', { name: '下一步' }));
+  await user.click(screen.getByRole('button', { name: 'Next' }));
 }
 
 async function reachWorldStep(user: UserEvent) {
   await advanceIdentity(user, 'content-creator');
-  await screen.findByRole('heading', { name: '你的 AI 搭档' });
-  await waitFor(() => expect(screen.getByRole('button', { name: '下一步' })).toBeEnabled());
-  await user.click(screen.getByRole('button', { name: '下一步' }));
-  await screen.findByRole('heading', { name: '创建你的第一个世界' });
+  await screen.findByRole('heading', { name: 'Your AI Partner' });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByRole('heading', { name: 'Create Your First World' });
 }
 
 describe('WizardShell', () => {
   beforeEach(() => window.localStorage.clear());
 
-  it('starts on the identity step with 下一步 gated by the choice', () => {
+  it('starts on the identity step with Next gated by the choice', () => {
     renderShell();
 
-    expect(screen.getByRole('heading', { name: '你的 AI 创作工作室' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '下一步' })).toBeDisabled();
+    expect(screen.getByRole('heading', { name: 'Your AI Creative Studio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
   it('persists the developer entrance, which selects the developer rail registry', async () => {
@@ -138,7 +138,7 @@ describe('WizardShell', () => {
     await waitFor(() =>
       expect(window.localStorage.getItem(ENTRANCE_STORAGE_KEY)).toBe('developer'),
     );
-    expect(await screen.findByRole('heading', { name: 'Agent 与工作区' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Agent and Workspace' })).toBeInTheDocument();
   });
 
   it('persists the creator entrance and advances to the AI partner step', async () => {
@@ -150,7 +150,7 @@ describe('WizardShell', () => {
     await waitFor(() =>
       expect(window.localStorage.getItem(ENTRANCE_STORAGE_KEY)).toBe('content-creator'),
     );
-    expect(await screen.findByRole('heading', { name: '你的 AI 搭档' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Your AI Partner' })).toBeInTheDocument();
   });
 
   it('returns from the second step to the identity choice', async () => {
@@ -158,11 +158,11 @@ describe('WizardShell', () => {
     renderShell();
 
     await advanceIdentity(user, 'content-creator');
-    await screen.findByRole('heading', { name: '你的 AI 搭档' });
+    await screen.findByRole('heading', { name: 'Your AI Partner' });
 
-    await user.click(screen.getByRole('button', { name: '返回' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
 
-    expect(screen.getByRole('heading', { name: '你的 AI 创作工作室' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your AI Creative Studio' })).toBeInTheDocument();
     expect(screen.getByTestId('identity-option-content-creator')).toHaveAttribute(
       'aria-checked',
       'true',
@@ -175,7 +175,7 @@ describe('WizardShell', () => {
     renderShell({ client });
 
     await advanceIdentity(user, 'content-creator');
-    await screen.findByRole('heading', { name: '你的 AI 搭档' });
+    await screen.findByRole('heading', { name: 'Your AI Partner' });
 
     expect(calls.filter((call) => call === 'creator')).toHaveLength(1);
     expect(window.localStorage.getItem('nexus:activeCreatorId')).toBe('creator-new');
@@ -196,15 +196,15 @@ describe('WizardShell', () => {
     renderShell({ client });
 
     await reachWorldStep(user);
-    expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
-    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+    expect(screen.getByLabelText('World name')).toHaveValue('Throne of Ashes');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/worlds/world-1?layer=brief'),
     );
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select', 'world']);
     expect(calls.slice(calls.indexOf('select') + 1)).toContain('probe');
-    expect(screen.getByText('🎉 世界「灰烬王座」已创建')).toBeInTheDocument();
+    expect(screen.getByText('🎉 World “Throne of Ashes” created')).toBeInTheDocument();
   });
 
   it('reuses an existing creator instead of creating another one', async () => {
@@ -213,7 +213,7 @@ describe('WizardShell', () => {
     renderShell({ client, activeCreatorId: 'creator-a' });
 
     await reachWorldStep(user);
-    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/worlds/world-1?layer=brief'),
@@ -228,13 +228,13 @@ describe('WizardShell', () => {
 
     await reachWorldStep(user);
     await user.click(screen.getByTestId('world-template-scifi'));
-    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(
-      await screen.findByText('创建世界失败：daemon refused。请重试或更换名称。'),
+      await screen.findByText('Could not create the World: daemon refused. Try again or choose a different name.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '创建你的第一个世界' })).toBeInTheDocument();
-    expect(screen.getByLabelText('世界名称')).toHaveValue('远星号');
+    expect(screen.getByRole('heading', { name: 'Create Your First World' })).toBeInTheDocument();
+    expect(screen.getByLabelText('World name')).toHaveValue('Farstar');
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select', 'world']);
   });
@@ -245,13 +245,13 @@ describe('WizardShell', () => {
     renderShell({ client });
 
     await reachWorldStep(user);
-    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
-    expect(await screen.findByText('无法选择默认工作区')).toBeInTheDocument();
-    expect(screen.queryByText(/创建世界失败/)).not.toBeInTheDocument();
+    expect(await screen.findByText('Could not select the default workspace')).toBeInTheDocument();
+    expect(screen.queryByText(/Could not create the World/)).not.toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
-    expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
-    expect(screen.getByRole('button', { name: '创建并进入' })).toBeEnabled();
+    expect(screen.getByLabelText('World name')).toHaveValue('Throne of Ashes');
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);
   });
 
@@ -261,14 +261,14 @@ describe('WizardShell', () => {
     renderShell({ client });
 
     await reachWorldStep(user);
-    await user.click(screen.getByRole('button', { name: '创建并进入' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
-    expect(await screen.findByText('状态刷新失败')).toBeInTheDocument();
-    expect(screen.getByText('gate probe failed。请重试。')).toBeInTheDocument();
-    expect(screen.queryByText('无法选择默认工作区')).not.toBeInTheDocument();
-    expect(screen.queryByText(/创建世界失败/)).not.toBeInTheDocument();
+    expect(await screen.findByText('Could not refresh setup status')).toBeInTheDocument();
+    expect(screen.getByText('gate probe failed. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText('Could not select the default workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Could not create the World/)).not.toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
-    expect(screen.getByLabelText('世界名称')).toHaveValue('灰烬王座');
+    expect(screen.getByLabelText('World name')).toHaveValue('Throne of Ashes');
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);
   });
 
@@ -278,11 +278,11 @@ describe('WizardShell', () => {
     renderShell({ client });
 
     await advanceIdentity(user, 'developer');
-    await screen.findByRole('heading', { name: 'Agent 与工作区' });
+    await screen.findByRole('heading', { name: 'Agent and Workspace' });
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '进入开发台' })).toBeEnabled(),
+      expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled(),
     );
-    await user.click(screen.getByRole('button', { name: '进入开发台' }));
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/developer'));
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);

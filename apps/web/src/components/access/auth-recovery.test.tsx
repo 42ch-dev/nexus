@@ -42,15 +42,15 @@ describe('AuthRecoveryGate', () => {
 
     signalUnauthorized(3);
 
-    expect(screen.getAllByText('需要访问授权')).toHaveLength(1);
+    expect(screen.getAllByText('Access Required')).toHaveLength(1);
     expect(
       screen.getByText(
-        '此浏览器还没有获得本 Nexus 服务的访问授权。Nexus 每次启动都会在服务终端打印一条带一次性令牌的访问链接——回到终端复制并打开它即可；也可以直接输入你的 API Key。',
+        'This browser is not yet authorized for this Nexus service. Each time Nexus starts, it prints an access link with a one-time token in the service terminal — copy it from there and open it, or enter your API key directly.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('输入 API Key…')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '授权' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Enter API key…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Authorize' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
     expect(screen.queryByText('intended destination')).not.toBeInTheDocument();
   });
 
@@ -59,13 +59,13 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    fireEvent.change(screen.getByLabelText('输入 API Key…'), { target: { value: 'wrong-key' } });
+    fireEvent.change(screen.getByLabelText('Enter API key…'), { target: { value: 'wrong-key' } });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '授权' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Authorize' }));
     });
 
-    expect(await screen.findByText('API Key 无效或已失效，请检查后重试。')).toBeInTheDocument();
-    expect(screen.getByText('需要访问授权')).toBeInTheDocument();
+    expect(await screen.findByText('The API key is invalid or has expired. Check it and try again.')).toBeInTheDocument();
+    expect(screen.getByText('Access Required')).toBeInTheDocument();
   });
 
   it('accepts a valid key, stores it, and restores the intended destination', async () => {
@@ -75,8 +75,8 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    fireEvent.change(screen.getByLabelText('输入 API Key…'), { target: { value: 'good-key' } });
-    fireEvent.click(screen.getByRole('button', { name: '授权' }));
+    fireEvent.change(screen.getByLabelText('Enter API key…'), { target: { value: 'good-key' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Authorize' }));
 
     expect(await screen.findByText('intended destination')).toBeInTheDocument();
     expect(window.localStorage.getItem('nexus-api-key')).toBe('good-key');
@@ -89,7 +89,7 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck' }));
 
     expect(await screen.findByText('intended destination')).toBeInTheDocument();
   });
@@ -106,7 +106,7 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck' }));
 
     expect(await screen.findByText('intended destination')).toBeInTheDocument();
 
