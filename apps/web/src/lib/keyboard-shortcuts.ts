@@ -64,8 +64,6 @@ const CHORD_RESET_MS = 1000;
  *                listener on every render (mirrors `useHotkey`).
  */
 export function useTimelineShortcut(handler: () => void): void {
-  // listener. An inline closure passed by the caller therefore never goes
-  // stale and never triggers an add/remove-listener churn cycle.
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
@@ -82,16 +80,11 @@ export function useTimelineShortcut(handler: () => void): void {
     }
 
     function onKeyDown(event: KeyboardEvent): void {
-      // text entry / contenteditable / canvas opt-out regions.
       if (isHotkeyTargetIgnored(document.activeElement)) {
-        // the chord so a subsequent `t` typing in the field does not fire
-        // the shortcut on refocus.
         reset();
         return;
       }
 
-      // never collides with `mod+k` (palette), Cmd/Ctrl+T (new tab), or any
-      // browser-reserved chord.
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
         reset();
         return;
@@ -99,12 +92,9 @@ export function useTimelineShortcut(handler: () => void): void {
 
       const key = event.key.toLowerCase();
       if (key === 'g') {
-        // does not fire; only the most-recent `g` carries forward).
         reset();
         pending = true;
         resetTimer = setTimeout(reset, CHORD_RESET_MS);
-        // background while the chord waits for the confirm key. The chord
-        // owns the keystroke.
         event.preventDefault();
         return;
       }

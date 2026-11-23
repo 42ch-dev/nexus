@@ -132,14 +132,10 @@ fn candidate_ids(body: &Value) -> Vec<String> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// C-001: the provider describes exactly the surface it serves.
 async fn describe_contract(matrix: Matrix) {
     let body = matrix.admin().describe().await;
     assert_eq!(body["memory_protocol_version"], json!(1));
-    // advertised matrix; the unadvertised shape is exercised by C-003/C-073.
     assert_eq!(
         body["capabilities"],
         json!(["spoke-memory", "spoke-memory-reflection"]),
@@ -212,8 +208,6 @@ async fn known_and_unknown_ops_fail_closed(matrix: Matrix) {
     let stale = admin.freeze_space("k-c002-stale", 9).await;
     assert_eq!(error_code(&stale), "REVISION_CONFLICT", "{stale}");
 
-    // dispatch gate denies known memory ops with `capability_missing` before any
-    // handler or payload decode runs (protocol §13).
     let mut capabilityless = matrix.raw_admin_without_memory_capability().await;
     for op in ["memory.describe", "memory.capture", "memory.recall"] {
         let response = capabilityless
@@ -323,15 +317,11 @@ async fn reflection_requires_subcapability(matrix: Matrix) {
 
 #[tokio::test]
 async fn c_003_reflection_requires_subcapability_local() {
-    // C-003's continuity row runs on the deliberately-unadvertised shape —
-    // `describe` omits the flag there and the dispatch gate keeps refusing it.
     reflection_requires_subcapability(Matrix::local_unadvertised().await).await;
 }
 
 #[tokio::test]
 async fn c_003_reflection_requires_subcapability_remote() {
-    // same operations, so the family's `capability_missing` is the real
-    // dispatch denial over Connect negotiation, not a served-but-pinned gap.
     reflection_requires_subcapability(Matrix::remote_unadvertised().await).await;
 }
 
@@ -390,7 +380,6 @@ async fn describe_has_no_space_catalogue(matrix: Matrix) {
         "capability facts only, exactly the served families: {body}"
     );
 
-    // and reports its end instead of growing without bound.
     let bounded = matrix.admin().list_spaces_page(1).await;
     let rows = bounded["spaces"].as_array().expect("space rows");
     assert!(
@@ -414,9 +403,6 @@ async fn c_005_describe_has_no_space_catalogue_local() {
 async fn c_005_describe_has_no_space_catalogue_remote() {
     describe_has_no_space_catalogue(Matrix::remote().await).await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// C-010: the space identity and its authority generation are stable across a
 /// write and across a restart.
@@ -543,7 +529,6 @@ async fn freeze_allowlist_base_operations(matrix: Matrix) {
     assert_eq!(result(&unfrozen)["status"], "active");
     assert_eq!(result(&unfrozen)["revision"], json!(3));
 
-    // later from the frozen period.
     let after = admin
         .capture(capture_body("k-c011-after", TEXT, &shared_scope()))
         .await;
@@ -596,7 +581,6 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         admission_control_is_token_owned(&matrix).await;
     }
 
-    // have committed its own probe captures).
     let before = candidate_ids(&candidates(&matrix.admin()).await).len();
     let space_id = matrix.space_id().to_owned();
     let mut hold = match matrix.kind() {
@@ -613,7 +597,6 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
         .await
         .expect("the capture reached its provider point");
 
-    // delta is exactly that request's own provider entries.
     let baseline = matrix.write_admission_count();
     let freeze_task = tokio::spawn(support::freeze_with(
         matrix.peer_client(),
@@ -625,9 +608,6 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
 
     let capture_outcome = match matrix.kind() {
         Kind::Local => {
-            // machinery; the freeze path does not publish) and is then blocked on
-            // the writer lock held by the capture. That arrival is acknowledged by
-            // the provider's own counter, not inferred from a client timeout.
             await_local_admission(
                 &matrix,
                 baseline.expect("the local leg exposes its admission counter"),
@@ -645,7 +625,6 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
             outcome
         }
         Kind::Remote => {
-            // commits first, and that is observed before the capture is resumed.
             let frozen = freeze_task.await.expect("the freeze request completes");
             assert_eq!(
                 result(&frozen)["status"],
@@ -695,10 +674,8 @@ async fn write_racing_freeze_has_one_admission_outcome(matrix: Matrix) {
 async fn admission_control_is_token_owned(matrix: &Matrix) {
     stale_and_replaced_arms_do_not_park_writes(matrix).await;
 
-    // both disarm their own token while the handle stays alive.
     timed_out_and_cancelled_observations_disarm_at_call(matrix).await;
 
-    // that same effect, never a fresh second one.
     controller_loss_keeps_one_effect(matrix, "k-c012-loss").await;
 
     if matrix.kind() == Kind::Local {
@@ -721,7 +698,6 @@ async fn stale_and_replaced_arms_do_not_park_writes(matrix: &Matrix) {
     .expect("no stale admission arm parks a later write");
     assert!(is_committed(&after_drop), "{after_drop}");
 
-    // must not clear B, and the next write must pause at B.
     let first = matrix.park_next_admission();
     let mut second = matrix.park_next_admission();
     drop(first);
@@ -746,9 +722,6 @@ async fn stale_and_replaced_arms_do_not_park_writes(matrix: &Matrix) {
 /// A retained handle whose observation times out or whose unpolled future is
 /// cancelled disarms its own token at the call, so the next write is admitted.
 async fn timed_out_and_cancelled_observations_disarm_at_call(matrix: &Matrix) {
-    // next real write: if the observation did not disarm at its own timeout, the
-    // write would park on the live arm until the provider's bound (a 2 s guard
-    // fails), so a prompt admission is causal evidence of the call-time guard.
     if matrix.kind() == Kind::Local {
         let timed_out = matrix.park_next_admission();
         let mut observation = timed_out;
@@ -771,9 +744,6 @@ async fn timed_out_and_cancelled_observations_disarm_at_call(matrix: &Matrix) {
         drop(observation);
     }
 
-    // at the call, so dropping the unpolled future disarms its own token. The
-    // handle stays alive across the real write; dropping it first would hide a
-    // missing call-time guard behind the handle's own `Drop`.
     let unpolled = matrix.park_next_admission();
     let mut observation = unpolled;
     {
@@ -1213,10 +1183,8 @@ async fn stale_fence_revision_cannot_lost_update(matrix: Matrix) {
 
     same_revision_fences_commit_exactly_one(&matrix, &space_id).await;
 
-    // fence, with the unfence held at the admission boundary first.
     unfence_races_a_stale_fence(&matrix, &space_id).await;
 
-    // when the fence commits is refused with no effect.
     in_flight_write_is_refused_after_the_fence_commits(&matrix, &space_id).await;
     matrix.shutdown().await;
 }

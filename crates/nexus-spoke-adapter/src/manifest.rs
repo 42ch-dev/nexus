@@ -42,10 +42,6 @@
 
 use crate::{HostCapabilityManifest, SpokeReject, SpokeRejectCode, SpokeResult};
 use serde_json::{json, Map, Value};
-// (standalone `spoke_schemas::ToolDescriptor` + an inline copy inside
-// `host_capability_manifest`), and `HostCapabilityManifest.tools` uses the
-// latter — import it from `spoke_operations` to avoid the duplicate-name
-// trap (upstream note, spoke-operations lib.rs).
 use spoke_operations::ToolDescriptor;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -321,9 +317,6 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
             .parse()
             .expect("locked extension key is schema-valid"),
         json!({
-            // delivered N-C2 read-half surface — the served set is
-            // authoritative (`served_ops`); the marker is the ladder
-            // position, not a capability list.
             "connect_host_slice": "n-c2",
             "served_ops": LOCAL_SERVED_OPS
                 .iter()
@@ -351,9 +344,6 @@ pub fn build_local_host_manifest(host_id: &str) -> SpokeResult<HostCapabilityMan
             .collect(),
         namespaces,
         authority: None,
-        // non-empty `tools` member is now serialized on the wire (the
-        // generated serde `skip_serializing_if = Vec::is_empty` rule still
-        // omits an empty `tools`, which this iteration does not ship).
         tools: local_tool_descriptors(),
         extensions,
     })
@@ -490,10 +480,6 @@ mod tests {
                 let _ = || {
                     let request: crate::CheckRequest =
                         serde_json::from_value(serde_json::json!({})).expect("typecheck-only");
-                    // world-scoped wrapper (auto-include of the world's
-                    // `status=active` rules + fail-closed foreign/embedded
-                    // reject); the baseline no-op checker is the production
-                    // run_checker shape (V1.148 daemon cutover).
                     drop(crate::orchestrate_check_world_scoped(
                         adapter,
                         "wld_typecheck",
@@ -516,8 +502,6 @@ mod tests {
                     drop(crate::orchestrate_compute(adapter, request));
                 };
             }
-            // Task 2 handlers serve directly through the adapter): the
-            // typecheck-only closures prove the adapter reach exists.
             "tools.nexus.list_observed_peers" => {
                 let _ = || {
                     drop(adapter.list_observed_peer_hosts());
@@ -525,8 +509,6 @@ mod tests {
             }
             "tools.nexus.list_modules" => {
                 let _ = || {
-                    // binding it (not dropping it) is the compile-time proof
-                    // the Task 2 handler's module-store scan is reachable.
                     let _ = adapter.user_modules_dir();
                 };
             }
@@ -550,8 +532,6 @@ mod tests {
                 let _: &dyn crate::ScopeQueryPort = adapter;
                 let _: &dyn crate::RuleQueryPort = adapter;
             }
-            // advertised when the `compute` feature (which owns the WASM
-            // engine and the module cache) is on.
             #[cfg(feature = "compute")]
             "l2-computable" => {
                 let _: &dyn crate::ComputablePorts = adapter;
@@ -562,9 +542,6 @@ mod tests {
                 let _: &dyn crate::ForkPorts = adapter;
                 let _: &dyn crate::ForkTimelineQueryPort = adapter;
             }
-            // because every KE-bearing port is production AND scope-bound —
-            // the upcasts prove the port families exist, and the adapter's
-            // request-bound selection is what enforces the governance axis.
             crate::manifest::CAPABILITY_KE_OWNERSHIP => {
                 let _: &dyn crate::KnowledgeEntryPort = adapter;
                 let _: &dyn crate::KnowledgeQueryPort = adapter;
@@ -575,9 +552,6 @@ mod tests {
                 let _: &dyn crate::ComputablePorts = adapter;
                 let _: &dyn crate::BaselinePorts = adapter;
             }
-            // Task 2 tool handlers serve (no new port types): observed
-            // peers via HostManifestPort (the production N-C3 read) and
-            // the host-local module store via the adapter accessor.
             "tools.nexus.list_observed_peers" => {
                 let _: &dyn crate::HostManifestPort = adapter;
                 let _: &dyn crate::BaselinePorts = adapter;
@@ -597,17 +571,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[allow(clippy::too_many_lines)] // one machine-checked honesty sweep; keep the steps linear
     async fn n_c1_manifest_is_honest() {
-        // writes to the real `~/.nexus42`).
         let manifest = match build_local_host_manifest("test-device-uuid-0000") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
         };
 
-        //    production adapter port (compile-time proof, §4.3 items 2).
-        //    V1.173: the lockstep is additionally machine-checked on the
-        //    manifest — `spoke_operations::validate_manifest_tools`
-        //    (AR-48 §3.1.8) — so a tool id missing from `capabilities[]`
-        //    (or a descriptor with `op != capability_id`) fails here.
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
@@ -626,8 +594,6 @@ mod tests {
             "capabilities must be exactly the advertised locked list \
              (baseline ++ ke-ownership ++ LOCAL_TOOL_OPS, compute names only with the feature)"
         );
-        // additive and UNCONSUMED — the manifest must never fabricate it
-        // (no capability without a production port behind it).
         for capability in [
             "spoke-memory",
             "spoke-memory-reflection",
@@ -646,11 +612,6 @@ mod tests {
             "validate_manifest_tools must pass on the served manifest (AR-48)"
         );
 
-        //    checker + assembler + computable-engine (the N-C2 E2
-        //    open-string roles, spec §4/§6.6; computable-engine is the
-        //    semantic reasoning-complete wire form — no literal string).
-        //    Role ⇔ served-op pairing: checker backs check, assembler backs
-        //    assemble, computable-engine backs compute — both directions.
         assert_eq!(
             manifest.roles,
             LOCAL_ROLES
@@ -661,7 +622,6 @@ mod tests {
             "roles must be exactly the advertised locked list (compute role only with the feature)"
         );
         let has_role = |role: &str| manifest.roles.iter().any(|r| r == role);
-        // compare like with like in both build configurations.
         let advertised_op = |op: &str| {
             LOCAL_SERVED_OPS
                 .iter()
@@ -691,9 +651,6 @@ mod tests {
             "N-C0 must not declare authority"
         );
 
-        //    semantic milestone is expressed as `computable-engine` role +
-        //    `l2-computable` capability, never a literal string — spec
-        //    §4/§6.6).
         let manifest_json = serde_json::to_value(&manifest).expect("manifest serializes");
         assert!(
             !manifest_json.to_string().contains("reasoning-complete"),
@@ -701,8 +658,6 @@ mod tests {
              computable-engine + l2-computable)"
         );
 
-        //    unknown fields (`deny_unknown_fields` on the generated struct;
-        //    the generated type has no PartialEq, so equality is JSON-level).
         let round_tripped: HostCapabilityManifest =
             serde_json::from_value(manifest_json.clone()).expect("round-trip deserializes");
         assert_eq!(
@@ -729,9 +684,6 @@ mod tests {
             Some(true)
         );
 
-        //     machine-checkable): extensions.nexus.served_ops is EXACTLY
-        //     LOCAL_SERVED_OPS — no more, no fewer — and every advertised op
-        //     maps to a production orchestrator (compile-time proof).
         let served_ops = nexus_ext
             .get("served_ops")
             .and_then(Value::as_array)
@@ -755,10 +707,6 @@ mod tests {
         {
             assert_op_maps_to_production_orchestrator(&adapter, op);
         }
-        // machine-checked against the real dispatch table in the
-        // connect-host interop suite (apps/nexus42
-        // `n_c1_manifest_served_ops_match_dispatch_both_directions`), where
-        // both the manifest builder and the dispatch gate are visible.
 
         //     `tools[]` ⇔ `LOCAL_TOOL_OPS` in order, `op == capability_id`
         //     per descriptor, every tool id in `capabilities[]` and in the
@@ -790,7 +738,6 @@ mod tests {
                 "every tool id must be in extensions.nexus.served_ops (AR-51)"
             );
         }
-        // V1.169 omit-empty pin flipped for S).
         assert!(
             manifest_json.get("tools").is_some(),
             "the served manifest must serialize a non-empty tools member"
@@ -824,9 +771,6 @@ mod tests {
 
     #[test]
     fn connect_hello_manifest_round_trips_through_the_wire_type() {
-        // `connect_hello::HostCapabilityManifest` wire type. The conversion
-        // is a JSON round-trip of the data type (both generated from the
-        // same schema; equality is asserted at the JSON level).
         let data = match build_local_host_manifest("test-device-uuid-0000") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
@@ -859,7 +803,6 @@ mod tests {
                 .collect::<Vec<_>>())
         );
 
-        // without loss (both directions are lossless).
         let back: HostCapabilityManifest =
             serde_json::from_value(hello_json).expect("wire type deserializes as data type");
         assert_eq!(
@@ -878,11 +821,6 @@ mod tests {
 
     #[test]
     fn from_connect_hello_round_trips_the_wire_type_back_to_data() {
-        // peer's manifest as the `connect_hello` wire type
-        // (`PeerSession::remote_manifest()`); the adapter's recording
-        // boundary consumes the data type. The reverse conversion must be
-        // lossless — a wire manifest round-trips to the identical data
-        // manifest (JSON-level equality: neither type has `PartialEq`).
         let data = match build_local_host_manifest("test-device-uuid-0000") {
             SpokeResult::Ok(m) => m,
             SpokeResult::Reject(r) => panic!("builder rejected: {r:?}"),
@@ -935,7 +873,6 @@ mod tests {
             assert_eq!(descriptor.schema_version.get(), 1);
         }
 
-        // data type and the connect_hello wire type.
         let data_json = serde_json::to_value(&data).expect("data manifest serializes");
         let hello_json = serde_json::to_value(&hello).expect("hello manifest serializes");
         for (label, json) in [
@@ -960,7 +897,6 @@ mod tests {
             "wire round-trip must keep the tools descriptors"
         );
 
-        // machine-checked lockstep — AR-48).
         assert!(
             matches!(
                 spoke_operations::validate_manifest_tools(&data),
@@ -970,7 +906,6 @@ mod tests {
              nexus namespace owned, unique)"
         );
 
-        // served_ops is exactly LOCAL_TOOL_OPS — nothing else.
         let tools_caps = LOCAL_CAPABILITIES
             .iter()
             .copied()

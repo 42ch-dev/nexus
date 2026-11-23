@@ -362,9 +362,6 @@ fn unreadable_provider_config_is_an_error_not_the_local_default() {
         .expect("write remote selection");
     assert_eq!(read_selection(home.path()), selection);
 
-    // real non-`NotFound` error (ENOTDIR on Unix). `Path::exists()` used to
-    // fold that into "absent", which pinned Local for a config the reader
-    // could not inspect.
     let not_a_dir = home.path().join("not-a-dir");
     std::fs::write(&not_a_dir, "regular file").expect("parent file");
     read_memory_provider_config(&not_a_dir)
@@ -412,14 +409,9 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         memory: None,
     };
 
-    // open's first admission must take this exclusive lock, so a single poll
-    // can only reach that wait — it can neither migrate, open a writer nor
-    // select a provider while this test owns the lock.
     let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&db_path)
         .expect("the fresh store has no live writer");
     let mut opened = Box::pin(CoreService::open(open(CoreAccess::EngineOwner)));
-    // fenced admission, so the workspace snapshot has been read and the
-    // provider selection has provably not run yet.
     let mut poll_once = std::task::Context::from_waker(std::task::Waker::noop());
     assert!(
         matches!(
@@ -428,8 +420,6 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         ),
         "the held migration fence keeps the open from finishing"
     );
-    // entry stays, but its read fails with ELOOP — between the workspace
-    // snapshot and the provider selection.
     std::fs::remove_file(&config).expect("drop the readable document");
     std::os::unix::fs::symlink("config.toml", &config).expect("self-referential config symlink");
     drop(fence);
@@ -445,7 +435,6 @@ async fn an_uninspectable_provider_table_fails_the_open_instead_of_selecting_loc
         "the provider snapshot refused the document: {error:?}"
     );
 
-    // acquires it once the document is readable again.
     std::fs::remove_file(&config).expect("drop the config symlink");
     std::fs::write(&config, &document).expect("restore config");
     let writer = CoreService::open(open(CoreAccess::DirectWriter))
@@ -504,7 +493,6 @@ async fn a_dangling_provider_config_link_fails_the_open_instead_of_selecting_loc
         ),
         "the held migration fence keeps the open from finishing"
     );
-    // symlink whose target does not exist.
     std::fs::remove_file(&config).expect("drop the readable document");
     std::os::unix::fs::symlink("absent-config.toml", &config).expect("dangling config symlink");
     drop(fence);
@@ -520,7 +508,6 @@ async fn a_dangling_provider_config_link_fails_the_open_instead_of_selecting_loc
         "the provider snapshot refused the dangling config link: {error:?}"
     );
 
-    // acquires it once the document is readable again.
     std::fs::remove_file(&config).expect("drop the config symlink");
     std::fs::write(&config, &document).expect("restore config");
     let writer = CoreService::open(open(CoreAccess::DirectWriter))
@@ -725,7 +712,6 @@ fn malformed_credential_id_is_rejected_without_writing() {
 
 #[test]
 fn malformed_connect_endpoints_are_rejected() {
-    // host are all refused (§3.2).
     for endpoint in [
         "https://example.com/ws",
         "ws://example.com:8420",
@@ -736,8 +722,6 @@ fn malformed_connect_endpoints_are_rejected() {
         "wss://host:bad",
         "ws://localhost:bad",
         "wss://[::1/ws",
-        // outside the locked loopback set are all refused by the raw
-        // transport grammar.
         "wss:///ws",
         "wss://@example.com/ws",
         "wss://example.com:",
@@ -855,9 +839,6 @@ fn malformed_provider_table_does_not_change_creator_or_workspace_resolution() {
     let home = home();
     std::fs::create_dir_all(nexus_dir(home.path())).expect("nexus dir");
 
-    // provider selection, and neither may disturb unrelated readers. The
-    // configured workspace is deliberately non-default so a fallback to
-    // `default` is observable.
     for malformed in [
         "\n[memory_provider]\nkind = \"bogus\"\n",
         "\n[memory_provider]\nkind = \"remote\"\nspace_id = \"space_alpha\"\n",
@@ -1003,8 +984,6 @@ fn credential_uppercase_seed_hex_is_refused() {
 #[cfg(unix)]
 #[test]
 fn non_regular_credential_path_is_refused() {
-    // the refusal, never a pathname pre-check. A short home keeps the socket
-    // path within `SUN_LEN`.
     let home = tempfile::Builder::new()
         .prefix("n3cred")
         .tempdir_in("/tmp")
@@ -1025,9 +1004,6 @@ fn non_regular_credential_path_is_refused() {
 fn capability_proof_must_be_the_published_shape() {
     let home = home();
 
-    // `CapabilityTokenProof` (`{v, claims, sig}`) and `CapabilityClaims`:
-    // required `iss`/`sub`/`aud` strings, string-array `capabilities`,
-    // unsigned `exp`, typed optional `iat`/`jti`, unknown fields refused.
     let mut refused = vec![
         "{}".to_string(),
         "{\"unrelated\": true}".to_string(),

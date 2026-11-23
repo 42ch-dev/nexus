@@ -39,10 +39,6 @@ function tempDir(prefix) {
   return dir;
 }
 
-/**
- * mode denies reading (metadata still resolves), and a symlink whose target
- * lives outside the root.
- */
 function webDistFixture() {
   const base = tempDir('nexus-webdist-');
   const root = join(base, 'dist');
@@ -60,9 +56,6 @@ function webDistFixture() {
   return root;
 }
 
-/**
- * fallback must be refused exactly like a direct `/index.html` hit.
- */
 function escapingIndexFixture() {
   const base = tempDir('nexus-webdist-esc-');
   const root = join(base, 'dist');
@@ -74,10 +67,6 @@ function escapingIndexFixture() {
   return root;
 }
 
-/**
- * WHATWG URL parser both collapse `%2e%2e` dot segments before they reach the
- * server, which is exactly the traversal form under test.
- */
 function rawRequest(port, path, { method = 'GET', headers = {} } = {}) {
   return new Promise((resolveRequest, rejectRequest) => {
     const req = http.request({ host: '127.0.0.1', port, path, method, headers, agent: false }, (res) => {

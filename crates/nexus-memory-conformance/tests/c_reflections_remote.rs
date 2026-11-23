@@ -144,9 +144,6 @@ async fn list_rows(matrix: &Matrix) -> Value {
         .await
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_042_basis_changes_invalidate_reflection_state_remote() {
     let matrix = Matrix::remote().await;
@@ -160,14 +157,12 @@ async fn c_042_basis_changes_invalidate_reflection_state_remote() {
     let digest_one = first["state_digest"].clone();
     assert!(is_state_digest(&digest_one), "{first}");
 
-    // digest differs, though nothing published has moved.
     create_shared_record(&matrix, "k-c042-r2", "Mira keeps the key under the barrel.").await;
     let second = admin_state(&matrix, SUBJECT).await;
     let digest_two = second["state_digest"].clone();
     assert_ne!(digest_one, digest_two, "{second}");
     assert_eq!(second["stale"], json!(false));
 
-    // published row goes stale at the next read, computed never stored.
     let generated = admin
         .reflections_generate(generate_body(
             SUBJECT,
@@ -202,9 +197,6 @@ async fn c_042_basis_changes_invalidate_reflection_state_remote() {
     assert_eq!(fresh["stale"], json!(false), "{fresh}");
     matrix.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn c_070_reflect_grant_committed_and_pending_generation_remote() {
@@ -244,8 +236,6 @@ async fn c_070_reflect_grant_committed_and_pending_generation_remote() {
         committed["result"]["reflection_id"]
     );
 
-    // first identical admission is parked before its writer transaction, the
-    // same-key request commits, and the released one replays that receipt.
     let mut hold: FaultHold = matrix
         .fixture_faults()
         .expect("the fixture leg exposes fault control")
@@ -296,9 +286,6 @@ async fn c_070_reflect_grant_committed_and_pending_generation_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_071_terminal_receipt_and_pinned_basis_listing_remote() {
     let matrix = Matrix::remote().await;
@@ -316,7 +303,6 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_remote() {
     assert!(is_committed(&generated), "{generated}");
     let receipt_id = generated["receipt_id"].as_str().expect("receipt id");
 
-    // reflection and the one charged cost, never the body text.
     let stored = matrix.admin().get_receipt(receipt_id).await;
     let receipt = &stored["receipt"];
     assert_eq!(receipt["status"], json!("committed"), "{stored}");
@@ -336,7 +322,6 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_remote() {
         "the receipt never carries the source content: {stored}"
     );
 
-    // pinned selection and the deterministic markdown body.
     let page = matrix
         .admin()
         .reflections_list(json!({
@@ -378,9 +363,6 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_072_generated_envelope_shape_remote() {
     let matrix = Matrix::remote().await;
@@ -394,7 +376,6 @@ async fn c_072_generated_envelope_shape_remote() {
     let described = matrix.admin().describe().await;
     let state = admin_state(&matrix, SUBJECT).await;
 
-    // the fixture's empty required-kinds list.
     assert_eq!(
         state["missing_required_profile_kinds"],
         json!([]),
@@ -440,7 +421,6 @@ async fn c_072_generated_envelope_shape_remote() {
         .reflections_list(json!({ "subject_id": SUBJECT }))
         .await;
     let row = page["reflections"][0].clone();
-    // facts and the read-time staleness verdict.
     for member in [
         "reflection_id",
         "space_id",
@@ -473,9 +453,6 @@ async fn c_072_generated_envelope_shape_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_073_reflection_reads_succeed_with_capability_remote() {
     let matrix = Matrix::remote().await;
@@ -501,7 +478,6 @@ async fn c_073_reflection_reads_succeed_with_capability_remote() {
         "a reflect holder generates over real loopback: {generated}"
     );
 
-    // is genuinely served, never capability_missing.
     let state = peer_state(&matrix, SUBJECT).await;
     assert!(state.get("error").is_none(), "{state}");
     assert_eq!(state["basis"]["record_count"], json!(1));
@@ -516,9 +492,6 @@ async fn c_073_reflection_reads_succeed_with_capability_remote() {
     assert_eq!(page["reflections"].as_array().expect("rows").len(), 1);
     matrix.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn c_075_reflection_subject_all_requires_unrestricted_grant_remote() {
@@ -567,9 +540,6 @@ async fn c_075_reflection_subject_all_requires_unrestricted_grant_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_remote() {
     let matrix = Matrix::remote().await;
@@ -590,7 +560,6 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_remote() {
     assert_eq!(rows.as_array().expect("rows").len(), 1);
     assert_eq!(rows[0]["stale"], json!(false), "{rows}");
 
-    // flag is never trusted.
     create_shared_record(&matrix, "k-c076-r2", "A new lighthouse changes the chart.").await;
     let rows = list_rows(&matrix).await["reflections"].clone();
     assert_eq!(rows[0]["stale"], json!(true), "{rows}");
@@ -617,11 +586,7 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
-// step or assertion; splitting the scenario would hide its setup order.
 #[allow(clippy::too_many_lines)]
 async fn c_077_tombstoned_bases_excluded_from_list_get_remote() {
     let matrix = Matrix::remote().await;
@@ -636,7 +601,6 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_remote() {
     create_shared_record(&matrix, "k-c077-r2", "Everyone can read this chart.").await;
     create_shared_record(&matrix, "k-c077-r3", "And this second shared chart.").await;
 
-    // selection, so each row pins a disjoint source set.
     let shared_state = matrix
         .admin()
         .reflections_state(json!({
@@ -677,8 +641,6 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_remote() {
         .await;
     assert!(is_committed(&shared_row) && is_committed(&context_row));
 
-    // is dead, so it is excluded from the listing and from the state's
-    // last-reflection lookup, while the shared row keeps serving.
     let deleted = matrix
         .admin()
         .delete_record(json!({
@@ -764,9 +726,6 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_078_generation_failure_honesty_and_no_double_charge_remote() {
     let matrix = Matrix::remote().await;
@@ -774,8 +733,6 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_remote() {
     create_shared_record(&matrix, "k-c078-r1", "The generator can fail honestly.").await;
     let digest = admin_state(&matrix, SUBJECT).await["state_digest"].clone();
 
-    // commits a terminal failed receipt with an error envelope, retry class
-    // and no cost — never a fabricated success.
     let faults: FixtureFaults = matrix
         .fixture_faults()
         .expect("the fixture leg exposes fault control");
@@ -813,7 +770,6 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_remote() {
         "a failed generation publishes no reflection: {page}"
     );
 
-    // re-run of the generation step.
     let replayed = matrix
         .admin()
         .reflections_generate(generate_body(
@@ -842,9 +798,6 @@ async fn c_078_generation_failure_honesty_and_no_double_charge_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_079_insufficient_data_policy_outcomes_remote() {
     let matrix = Matrix::remote().await;
@@ -852,7 +805,6 @@ async fn c_079_insufficient_data_policy_outcomes_remote() {
     let ensured = matrix.admin().ensure_subject(OTHER_SUBJECT).await;
     assert!(is_committed(&ensured), "{ensured}");
 
-    // generate refusal is the fixture's provider-variable policy outcome.
     let empty = matrix
         .admin()
         .reflections_state(state_body(OTHER_SUBJECT))
@@ -909,9 +861,6 @@ async fn c_079_insufficient_data_policy_outcomes_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_015_pending_receipt_long_running_operation_remote() {
     let matrix = Matrix::remote().await;
@@ -966,9 +915,6 @@ async fn c_015_pending_receipt_long_running_operation_remote() {
     );
     matrix.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn c_090_reflection_grant_surfaces_remote() {
@@ -1034,9 +980,6 @@ async fn c_090_reflection_grant_surfaces_remote() {
     matrix.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn c_100_reflection_error_classes_remote() {
     let matrix = Matrix::remote().await;
@@ -1048,10 +991,6 @@ async fn c_100_reflection_error_classes_remote() {
     assert_eq!(error_code(&denied), "NOT_AUTHORIZED");
     assert_eq!(retry_class(&denied), "terminal");
 
-    // crate-tested; over the typed SDK the cognition requirement is decided
-    // at Connect negotiation before the payload reaches the provider. The
-    // INVALID_INPUT envelope itself is exercised through the validator's
-    // page-bound refusal instead.
     let over_limit = matrix
         .admin()
         .reflections_list(json!({
@@ -1128,9 +1067,6 @@ async fn c_100_reflection_error_classes_remote() {
     );
     matrix.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// B3: an authorized same-key replay outranks the §8.2 freeze gate over the
 /// fixture boundary. A committed generation whose response was lost is
@@ -1306,7 +1242,6 @@ async fn c_r2_recovery_skips_a_live_generation_lease_remote() {
         .await
         .expect("the generate reached its generation pause");
 
-    // runs here against A's published pending receipt.
     let other = nexus_memory_conformance::FixtureMemoryProvider::open(matrix.fixture_db())
         .await
         .expect("open process B over the same fixture database");
@@ -1434,7 +1369,6 @@ async fn c_r3_recovery_settles_an_expired_lease_orphan_remote() {
     );
     drop(other);
 
-    // recovery and answers its typed refusal; nothing publishes.
     hold.release();
     let _ = join_bounded(parked, "the lost generation").await;
     matrix.shutdown().await;

@@ -136,7 +136,6 @@ fn cmd_validate(
     let descriptor = read_descriptor(descriptor_path, json_output)?;
 
     if let Some(module_dir) = module_dir {
-        // `<module-id>.wasm` + `manifest.json`.
         let manifest_path = module_dir.join("manifest.json");
         let wasm_path = module_dir.join(format!("{}.wasm", descriptor.wasm.module_id));
         verify_pairing(
@@ -167,8 +166,6 @@ fn cmd_validate(
     Ok(())
 }
 
-/// (AR-35 layout: `capability.json` + `manifest.json` + `<module-id>.wasm`).
-///
 /// Install-path semantics (S-2, QC2): an existing `<name>/` dir is
 /// **overwritten** — re-running install re-verifies the new trio first
 /// (fail-closed) and then replaces the three files; install never skips an
@@ -208,9 +205,6 @@ fn cmd_install(
     let cap_root = nexus_home_layout::user_capabilities_dir(&home);
     let dir = cap_root.join(&descriptor.name);
 
-    // by the descriptor's `wasm.moduleId` (the source `--wasm` filename is
-    // the author's staging name; the stored name is the module-id contract).
-    //
     // Atomic-trio install (S-2, QC3): the trio is staged into a sibling
     // dir first, then swapped into place with two same-filesystem renames
     // (current dir → backup, staging → dir), and the backup dropped. Every
@@ -252,7 +246,6 @@ fn cmd_install(
         })?;
     }
     if let Err(e) = std::fs::rename(&staging, &dir) {
-        // destination must never be left without a complete install.
         if backup.exists() {
             let _ = std::fs::rename(&backup, &dir);
         }
@@ -342,8 +335,6 @@ fn field_error(message: String) -> FieldError {
     let field = message
         .find('`')
         .and_then(|start| {
-            // the closing backtick and re-splitting yields `missing field `,
-            // not the field name.
             message[start + 1..]
                 .find('`')
                 .map(|end| message[start + 1..start + 1 + end].to_string())
@@ -374,8 +365,6 @@ const fn descriptor_field(err: &CapabilityDescriptorError) -> &'static str {
 /// Read + parse + validate a descriptor (AR-34) via the shared
 /// `nexus-orchestration` type — exit 2 on any failure, `--json` field-level.
 fn read_descriptor(descriptor_path: &Path, json_output: bool) -> Result<UserCapabilityDescriptor> {
-    // field-level shape as any other error — `--json` callers must get the
-    // promised `{valid, descriptor, errors}` document, not a bare message.
     let descriptor_bytes = match std::fs::read(descriptor_path) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -473,15 +462,6 @@ fn verify_pairing(
         ));
     }
 
-    // descriptor's `wasm.moduleId` and the manifest's `module_id` are the
-    // SAME contract — the `<module-id>.wasm` store name (AR-35). A trio
-    // whose manifest declares a different id (hashes otherwise consistent)
-    // would install with exit 0 and fail to load when a runtime serves it
-    // (missing `<manifestModuleId>.wasm`). Fail closed at exit 2, before
-    // any copy, mirroring the `compute install` gate (I2,
-    // compute/mod.rs L518-525). Field is the descriptor's `wasm.moduleId`;
-    // the message carries BOTH ids so `--json` callers get the mismatch
-    // values (S-1, QC2).
     if descriptor.wasm.module_id != manifest.module_id {
         return Err(fail_validation(
             descriptor_path,
@@ -497,7 +477,6 @@ fn verify_pairing(
         ));
     }
 
-    // fail closed (exit 3), mirroring admission gate 3.
     let Some(manifest_hash) = manifest.wasm_sha256.as_deref() else {
         return Err(fail_validation(
             descriptor_path,
@@ -516,7 +495,6 @@ fn verify_pairing(
     let wasm_bytes = match std::fs::read(wasm_path) {
         Ok(bytes) => bytes,
         Err(e) => {
-            // means the pairing cannot be verified (AR-39 fail-closed).
             return Err(fail_validation(
                 descriptor_path,
                 &[FieldError {
@@ -738,7 +716,6 @@ mod tests {
     #[test]
     fn validate_rejects_wasm_pairing_mismatch_exit_three() {
         let dir = tempfile::tempdir().unwrap();
-        // DIFFERENT hash → descriptor-vs-manifest mismatch (exit 3).
         let wasm_bytes = b"wasm module bytes";
         let real_sha = sha256_hex(wasm_bytes);
         let module_dir = dir.path().join("module");
@@ -782,9 +759,6 @@ mod tests {
 
     #[test]
     fn validate_rejects_module_id_mismatch_exit_two() {
-        // `module_id` must agree — hashes alone do not establish the trio's
-        // identity. A mismatch is a validation failure (exit 2), before any
-        // copy, mirroring the `compute install` gate (I2).
         let dir = tempfile::tempdir().unwrap();
         let wasm_bytes = b"wasm module bytes";
         let sha = sha256_hex(wasm_bytes);
@@ -805,8 +779,6 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        // (`descriptor-mod.wasm`, AR-35 store-name contract), but its
-        // manifest declares `manifest-mod` — an inconsistent identity.
         std::fs::write(module_dir.join("descriptor-mod.wasm"), wasm_bytes).unwrap();
         let descriptor = dir.path().join("capability.json");
         std::fs::write(
@@ -831,8 +803,6 @@ mod tests {
 
     #[test]
     fn module_id_mismatch_error_json_carries_both_ids() {
-        // carries BOTH ids in the message — consumers see the descriptor vs
-        // manifest identity values, not just the field name.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("capability.json");
         let out = validation_failure_json(
@@ -955,8 +925,6 @@ mod tests {
 
     #[test]
     fn install_rejects_module_id_mismatch_exit_two_no_dir() {
-        // descriptor's `wasm.moduleId` must fail closed at exit 2 BEFORE any
-        // copy — no install dir, no staging residue.
         let _home = crate::testutil::isolated_home();
         let dir = tempfile::tempdir().unwrap();
         let wasm_bytes = b"wasm module bytes";
@@ -1013,8 +981,6 @@ mod tests {
 
     #[test]
     fn install_reinstall_overwrites_previous_trio() {
-        // dir — install never skips; the old trio is fully replaced by the
-        // re-verified new trio (and no staging/backup residue remains).
         let _h = crate::testutil::isolated_home();
         let dir = tempfile::tempdir().unwrap();
         let trio = write_trio(dir.path(), "demo.pull", "basic-mod", b"wasm module bytes");
@@ -1043,7 +1009,6 @@ mod tests {
 
     #[test]
     fn install_failure_leaves_no_partial_trio_or_residue() {
-        // destination untouched and no staging residue — no partial trio.
         let _h = crate::testutil::isolated_home();
         let dir = tempfile::tempdir().unwrap();
         let wasm_bytes = b"wasm module bytes";
@@ -1065,7 +1030,6 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        // is even staged (exit 3); no dir, no staging, no backup.
         let descriptor = dir.path().join("capability.json");
         std::fs::write(
             &descriptor,

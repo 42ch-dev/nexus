@@ -76,9 +76,6 @@ export interface QuitServiceController {
 
 export interface DesktopQuitControllerOptions {
   controller: QuitServiceController;
-  /**
-   * `null` and counts as Cancel.
-   */
   chooseQuitChoice(status: DaemonStatus): Promise<QuitChoice | null>;
   /** Main-owned user-visible outcome; see {@link QuitOutcome} for when it is called. */
   reportQuitOutcome(outcome: QuitOutcome): void;
@@ -109,8 +106,6 @@ export class DesktopQuitController {
 
   private async decide(): Promise<boolean> {
     const status = this.controller.getStatus();
-    // nothing this app runs or is attached to, there is no service to stop or
-    // keep, so the quit is not gated by a dialog.
     if (status.state === 'stopped') return true;
 
     let choice: QuitChoice | null;
@@ -209,7 +204,6 @@ export function findNodeOnPath(env: NodeJS.ProcessEnv = process.env): string | n
   if (!path) return null;
   for (const dir of path.split(delimiter)) {
     if (dir === '') continue;
-    // a symlink. The strict no-symlink posture applies to user-home records.
     const candidate = join(dir, 'node');
     try {
       if (!statSync(candidate).isFile()) continue;
@@ -245,7 +239,6 @@ function probeNodeVersion(
 
 function assertServiceEntry(serviceEntry: string): void {
   try {
-    // refused; only the packaged regular file counts as available.
     if (statSync(serviceEntry).isFile()) return;
   } catch {
   }
@@ -308,7 +301,6 @@ export function createDetachedServiceHandoff(options: DetachedHandoffOptions): D
       assertServiceEntry(serviceEntry);
       let child: ChildProcess;
       try {
-        // process group of the exiting parent, so it is the one owner left.
         child = spawn(
           node,
           [serviceEntry, '--home', home, '--host', host, '--port', String(port), '--no-open'],

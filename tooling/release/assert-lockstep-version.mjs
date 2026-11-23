@@ -112,10 +112,6 @@ export function checkLockstep(repoRoot) {
     problems.push(`${CARGO_LOCK_PATH}: missing`);
   }
 
-  // be complete: outside the root workspace there is no inherited version, so a
-  // crate Cargo would publish can only version on its own and belongs here. The
-  // other direction — a listed crate that goes back to inheriting — is caught
-  // below by the non-contract member literal rule.
   const carrierManifests = new Set(
     contractEntries.map((entry) => posix.normalize(entry.manifest)),
   );
@@ -141,8 +137,6 @@ export function checkLockstep(repoRoot) {
       );
       continue;
     }
-    // member, otherwise the standalone workspace rooted next to the manifest.
-    // A crate pinned by neither is unchecked, so it fails instead.
     const entryLockPath = memberNames.has(entry.name)
       ? CARGO_LOCK_PATH
       : posix.join(posix.dirname(entry.manifest), CARGO_LOCK_PATH);
@@ -218,9 +212,6 @@ function printReport(report) {
   for (const surface of report.surfaces) {
     console.log(`  ${surface.path.padEnd(48)} ${surface.version}`);
   }
-  // the bracket below; folding them in here would show a second version on a
-  // green run and erase the pass/fail signal. Only product-version members
-  // belong on this line, so on `ok` it names exactly the decided version.
   const contractNames = new Set(report.contract.map((entry) => entry.name));
   const lockVersions = new Set(
     report.lockMembers
@@ -232,7 +223,6 @@ function printReport(report) {
       lockVersions.size === 1 ? [...lockVersions][0] : [...lockVersions].join(", ")
     } (${report.lockMembers.length} workspace members)`,
   );
-  // each one, so a crate missing from this list is visible before it passes.
   console.log(
     `  ${VERSION_BRACKETS_PATH} (${report.contract.length} independent crates):`,
   );

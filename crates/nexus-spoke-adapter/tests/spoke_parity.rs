@@ -19,7 +19,6 @@ use nexus_spoke_adapter::conversion::{knowledge_record_to_spoke, KnowledgeEntryR
 use nexus_spoke_adapter::ops::transition_status;
 use nexus_spoke_adapter::KnowledgeEntry;
 
-/// methods) so parity cases can start from any state.
 fn entry_in(status: &str) -> KnowledgeEntryRecord {
     let mut e = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Test Hero");
     e.status = status.to_string();
@@ -57,7 +56,6 @@ fn spoke_allows_the_six_edges_nexus_uses() {
 
 #[test]
 fn spoke_excludes_deprecated_to_merged() {
-    // deprecated entry cannot be merged directly — it must be restored first).
     assert!(
         !spoke_allows("deprecated", "merged"),
         "deprecated → merged must be rejected by spoke"
@@ -82,7 +80,6 @@ fn spoke_rejects_unknown_status() {
 
 #[test]
 fn already_in_state_guard_is_preserved_for_self_transition() {
-    // guard preserves the pre-refactor UX of rejecting a redundant deprecate.
     let mut e = entry_in("deprecated");
     let err = e
         .deprecate(None)

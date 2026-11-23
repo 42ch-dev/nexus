@@ -78,9 +78,6 @@ impl Task for PresetCapabilityTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // this build — refuses BEFORE any effect with the same TaskResult
-        // shape run() would produce for its worker refusal; unknown names
-        // keep the existing not-found refusal.
         let cap = match self.registry.get(self.name) {
             Some(cap) => cap,
             None if self.registry.is_reserved_only(self.name) => {

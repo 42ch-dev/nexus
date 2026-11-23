@@ -96,10 +96,6 @@ fn resolve_module_id(
     {
         return SpokeResult::Ok(module_id.to_string());
     }
-    // the structured control-flow signal for this reject: hosts classify
-    // the missing-module-name denial via
-    // [`is_module_identity_missing_reject`] instead of string-sniffing the
-    // message.
     reject(
         SpokeRejectCode::InvalidInput,
         "module identity required on session state or entry body.computable",
@@ -224,10 +220,6 @@ fn load_user_module(
             json!({ "module_id": module_id }),
         );
     }
-    // changed mid-invoke or is unreadable) — InternalError, like the
-    // embedded path's "known module whose embed/compile fails"
-    // classification.
-    //
     // Consistent-snapshot read (Greptile P1 — non-atomic module reload):
     // an operator replacing a module mid-invoke writes `<id>.wasm` and
     // `manifest.json` as two INDEPENDENT files, so reading them separately
@@ -271,9 +263,6 @@ fn load_user_module(
             );
         }
     };
-    // replacement landing between the manifest read and the wasm read —
-    // previously invisible to a bytes-only re-read — is caught by the
-    // s1 != s2 comparison.
     let wasm_stat_first = match std::fs::metadata(&wasm_path) {
         Ok(m) => m,
         Err(e) => {
@@ -312,12 +301,6 @@ fn load_user_module(
             );
         }
     }
-    // declares `wasm_sha256`, the loaded bytes must hash to it. This is the
-    // ONLY detector that sees a mixed pair whose writes landed outside the
-    // stat fence's observation windows — an old manifest + new wasm always
-    // mismatches. The check runs BEFORE `get_or_compile`, so a mixed pair
-    // never enters the cache; the stat fence above remains the legacy
-    // fallback for manifests without the field.
     let manifest: ModuleManifest = match serde_json::from_str(&manifest_json) {
         Ok(m) => m,
         Err(e) => {
@@ -370,10 +353,6 @@ fn module_pair_changed_mid_load(
 ) -> Result<bool, std::io::Error> {
     let wasm_stat_now = std::fs::metadata(wasm_path)?;
     let manifest_now = std::fs::read_to_string(manifest_path)?;
-    // means the wasm was replaced while it was being read. `modified()`
-    // may quantize on coarse-granularity filesystems — see
-    // [`load_user_module`] for the documented residual. An unreadable
-    // mtime counts as a change (fail-closed).
     let mtime_changed = match (wasm_stat_first.modified(), wasm_stat_now.modified()) {
         (Ok(first), Ok(now)) => first != now,
         _ => true,
@@ -436,8 +415,6 @@ fn load_embedded_module(
     cache: &ModuleCache,
     module_id: &str,
 ) -> SpokeResult<(WasmModule, ModuleManifest)> {
-    // doing any path-formatting or I/O. The embedded_module_ids() list is
-    // the authoritative allowlist; an id not present there is InvalidInput.
     let known = embedded_module_ids();
     if !known.contains(&module_id) {
         return reject(
@@ -446,8 +423,6 @@ fn load_embedded_module(
             json!({ "module_id": module_id }),
         );
     }
-    // should succeed. If they fail despite allowlist membership (e.g. stale
-    // include_dir! after build.rs change), that is a host error.
     let Some(wasm_bytes) = embedded_module_bytes(module_id) else {
         return reject(
             SpokeRejectCode::InternalError,
@@ -480,8 +455,6 @@ impl NexusAdapter<'_> {}
 #[async_trait]
 impl ComputablePort for NexusAdapter<'_> {
     async fn project(&self, request: ProjectRequest) -> SpokeResult<ProjectResponse> {
-        // session for one entry, so it is a KE-capable operand path and a
-        // host-only adapter rejects before touching storage.
         if let Err(reject) = self.require_read_scope("project") {
             return SpokeResult::Reject(reject);
         }
@@ -516,7 +489,6 @@ impl ComputablePort for NexusAdapter<'_> {
                 extensions: None,
             }),
             Err(e) => {
-                // already exists. Map to a friendly InvalidInput.
                 let msg = e.to_string();
                 if msg.contains("UNIQUE") {
                     reject(
@@ -537,8 +509,6 @@ impl ComputablePort for NexusAdapter<'_> {
 
     #[allow(clippy::too_many_lines)]
     async fn compute(&self, request: ComputeRequest) -> SpokeResult<ComputeResponse> {
-        // path loads (target entry, referenced entries, settle targets) is read
-        // through the bound selection, so a hidden operand fails closed.
         if let Err(reject) = self.require_read_scope("compute") {
             return SpokeResult::Reject(reject);
         }
@@ -548,9 +518,6 @@ impl ComputablePort for NexusAdapter<'_> {
         let dynamic_computable = request.computable;
         let settle = request.settle.unwrap_or(false);
 
-        // selection admits BEFORE any session state is read, so a session row
-        // (and its stored entry id) is never observed — let alone echoed — for
-        // an entry the caller cannot read.
         match self.get_knowledge_entry(&entry_id).await {
             SpokeResult::Ok(_) => {}
             SpokeResult::Reject(r) if r.code == SpokeRejectCode::KnowledgeEntryNotFound => {
@@ -582,8 +549,6 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         };
 
-        // NOT echoed — the caller already supplied its own `entry_id`, and the
-        // stored one is not proven readable by this caller.
         if session.entry_id != entry_id {
             return reject(
                 SpokeRejectCode::InvalidInput,
@@ -596,10 +561,6 @@ impl ComputablePort for NexusAdapter<'_> {
             );
         }
 
-        // `entry_id` on the wire) — mapped to InvalidInput like `project()`
-        // (P2 QC fix wave FW-3); the Connect gate already denies missing
-        // entries before execution, so this arm covers the check-then-act
-        // race where the entry is deleted between the gate and this call.
         let entry = match self.get_knowledge_entry(&entry_id).await {
             SpokeResult::Ok(e) => e,
             SpokeResult::Reject(r) => {
@@ -614,8 +575,6 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         };
 
-        // a failed compute leaves the session advanced while the entry is
-        // unchanged (Greptile P1: failed computes advance session state).
         let mut merged_state: Map<String, Value> = session
             .state_json
             .as_deref()
@@ -625,11 +584,6 @@ impl ComputablePort for NexusAdapter<'_> {
             merged_state.insert(k.clone(), v.clone());
         }
 
-        // referenced in the invocation (e.g., attacker_id, defender_id for
-        // basic-combat). Each entry is converted from spoke format to the
-        // flat-attributes format the WASM module expects.
-
-        // early — needed for the cross-entry world-scope check (F-003).
         let primary_world_id = entry
             .extensions
             .get(
@@ -647,9 +601,6 @@ impl ComputablePort for NexusAdapter<'_> {
         let primary_kb = spoke_entry_to_key_block(&entry);
         key_blocks.push(primary_kb);
 
-        // carry entry IDs (attacker_id, defender_id for basic-combat).
-        // F-003: only load entries whose world_id matches the primary entry's
-        // world; cross-world references are rejected as InvalidInput.
         for key in &["attacker_id", "defender_id"] {
             if let Some(ref_id) = merged_state.get(*key).and_then(Value::as_str) {
                 if ref_id != entry_id
@@ -689,7 +640,6 @@ impl ComputablePort for NexusAdapter<'_> {
 
         let world_id = primary_world_id.clone();
 
-        // module-specific params like attacker_id, defender_id).
         let invocation = if merged_state.is_empty() {
             Map::new()
         } else {
@@ -698,10 +648,6 @@ impl ComputablePort for NexusAdapter<'_> {
 
         let compute_input = ComputeInput {
             key_blocks,
-            // narrative context from the gateway into the compute envelope.
-            // This is acceptable while all embedded modules (basic-combat)
-            // do not use `narrative_query` — the first module that needs
-            // narrative state should trigger wiring this field.
             narrative_state: None,
             invocation,
             schema_version: std::num::NonZeroU64::new(1).expect("1 is non-zero"),
@@ -760,11 +706,6 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         }
 
-        // KnowledgeEntry each delta should apply to (schema L29-31). Default
-        // to `request.entry_id` when omitted. The adapter must group deltas
-        // by target and apply each group to its respective entry — NOT
-        // blindly apply everything to the primary entry.
-        //
         // Greptile P1 (partial settle): all target CAS writes + session
         // state update share one SQLite transaction via
         // `commit_compute_settlement`. A later CAS/session failure rolls
@@ -776,7 +717,6 @@ impl ComputablePort for NexusAdapter<'_> {
             let mut deltas_by_target: HashMap<String, Vec<_>> = HashMap::new();
             for delta in &output.state_delta {
                 let delta_value: Value = serde_json::to_value(delta).unwrap_or_default();
-                // schema contract. Skip deltas that have no path/op (defensive).
                 if delta_value.get("path").and_then(Value::as_str).is_none() {
                     continue;
                 }
@@ -796,7 +736,6 @@ impl ComputablePort for NexusAdapter<'_> {
                     SpokeResult::Reject(r) => return SpokeResult::Reject(r),
                 };
 
-                // entry in the same world as the primary compute entry.
                 let target_world_id = target_entry
                     .extensions
                     .get(&nexus_key)
@@ -873,8 +812,6 @@ impl ComputablePort for NexusAdapter<'_> {
                     }
                 }
 
-                // unchanged entry — a round-trip failure here means the
-                // state is inconsistent and the settle must be rejected.
                 let updated_target: crate::KnowledgeEntry =
                     match serde_json::from_value(Value::Object(target_body)) {
                         Ok(e) => e,
@@ -893,17 +830,6 @@ impl ComputablePort for NexusAdapter<'_> {
             }
         }
 
-        // the computed state to be persisted): a non-settle `compute` is a
-        // read-only projection — it returns the merged state in the response
-        // and leaves the staged session row untouched. This is also what lets
-        // the Connect host serve `compute` at all: its workspace pool is the
-        // cooperative DIRECT admission (the host must never take the daemon's
-        // engine ownership), and `compute_sessions` is engine-owned under the
-        // core writer protocol (`guard_compute_sessions_*`) — while `settle:
-        // true` is rejected on that surface (`settle_not_enabled`, spec §5 /
-        // §6.5), so no session write is ever attempted there. Entry settles
-        // and the session update still share ONE transaction whenever there is
-        // something to commit.
         let session_update = if settle {
             let updated_state_json =
                 serde_json::to_string(&merged_state).unwrap_or_else(|_| "{}".to_string());
@@ -936,8 +862,6 @@ impl ComputablePort for NexusAdapter<'_> {
     }
 }
 
-/// WASM module's `ComputeInput.key_blocks` snapshot.
-///
 /// The spoke `KnowledgeEntry.body.attributes` is a `Vec<AttributesItem>`
 /// (typed array), but the basic-combat module expects `body.attributes` as a
 /// flat object `{max_hp: 100, base_atk: 20, ...}`. This helper converts the
@@ -947,8 +871,6 @@ fn spoke_entry_to_key_block(entry: &crate::KnowledgeEntry) -> Map<String, Value>
         return Map::new();
     };
 
-    // identify key_blocks. Add it as a duplicate of entry_id so the
-    // module's select_combatants lookup works.
     if let Some(entry_id) = kb.get("entry_id").and_then(Value::as_str) {
         kb.insert(
             "key_block_id".to_string(),
@@ -1311,7 +1233,6 @@ mod tests {
         let adapter = scoped(pool.clone());
         let entry = spoke_character_entry("kb_mismatch", "Mismatch", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
-        // branch needs a target the caller CAN read.
         unwrap_ok(
             adapter
                 .put_knowledge_entry(
@@ -1406,7 +1327,6 @@ mod tests {
 
         assert!(matches!(project_resp, ProjectResponse::Variant0 { .. }));
 
-        // from storage and converts them to key_blocks for the WASM module.
         let mut computable = Map::new();
         computable.insert(
             "attacker_id".to_string(),
@@ -1521,10 +1441,6 @@ mod tests {
             panic!("expected Variant0 from compute");
         };
 
-        // (kb_settle_m), not the primary entry (kb_settle_h). The primary
-        // entry's post_state may be empty — that is correct when no deltas
-        // target it.
-
         let entry_h = unwrap_ok(
             adapter.get_knowledge_entry("kb_settle_h").await,
             "re-read hero",
@@ -1540,7 +1456,6 @@ mod tests {
             "settle should have persisted state into at least one entry"
         );
 
-        //    merges only state_delta, not the full merged session state.
         for forbidden_key in &["module_id", "attacker_id", "defender_id"] {
             for (label, state) in &[("hero", hero_state), ("monster", monster_state)] {
                 assert!(
@@ -1563,7 +1478,6 @@ mod tests {
         let entry = spoke_character_entry("kb_no_mod", "NoModule", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
-        // the entry — both resolution tiers are empty.
         unwrap_ok(
             adapter
                 .project(ProjectRequest {
@@ -1768,7 +1682,6 @@ mod tests {
     async fn user_module_load_reuses_compiled_module_cache() {
         let (pool, _db_dir) = fresh_pool().await;
 
-        // hermetic module store.
         let module_root = tempfile::tempdir().unwrap();
         let module_dir = module_root.path().join("basic-combat");
         std::fs::create_dir_all(&module_dir).unwrap();
@@ -1789,9 +1702,6 @@ mod tests {
             unwrap_ok(adapter.load_module("basic-combat"), "first load compiles");
         assert_eq!(cache.len(), 1, "first load compiles and caches");
         assert!(cache.contains("basic-combat"));
-        // no-recompile assertion compares the first compile against the
-        // post-second-load cache state (fetching both after both loads
-        // would trivially return the same latest entry).
         let first_entry = cache
             .get("basic-combat")
             .expect("cached entry after first load");
@@ -1810,13 +1720,6 @@ mod tests {
              (cache hit — no recompile)"
         );
 
-        // id ⇒ bytes-hash miss ⇒ recompile ⇒ the cached entry is REPLACED
-        // (overwrite eviction), never duplicated. The replacement is a
-        // minimal valid wasm module (magic + version, zero sections) —
-        // different bytes that still compile. The manifest is rewritten in
-        // the same update (a coherent pair) WITHOUT `wasm_sha256` — the
-        // embedded field only hashes the original bytes — so this pair
-        // loads through the legacy stat-fence fallback.
         let changed: &[u8] = b"\0asm\x01\0\0\0";
         std::fs::write(&wasm_path, changed).expect("rewrite module wasm");
         let manifest_no_hash = {
@@ -1841,10 +1744,6 @@ mod tests {
             "changed bytes must produce a FRESH compiled module (recompile, not stale serve)"
         );
 
-        // updating manifest.json WITHOUT touching the wasm (new schemas /
-        // sandbox overrides) must miss the cache and recompile with the
-        // NEW settings — the old behavior kept serving the stale manifest
-        // until the wasm changed or the process restarted.
         let manifest_v2 = {
             let mut value: serde_json::Value =
                 serde_json::from_str(&manifest_no_hash).expect("legacy manifest parses");
@@ -1884,7 +1783,6 @@ mod tests {
         let manifest_path = module_dir.join("manifest.json");
         let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
             .expect("embedded basic-combat bytes");
-        // from the EXACT embedded bytes — a correct pair.
         let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
             .expect("embedded basic-combat manifest");
         assert!(
@@ -1929,10 +1827,6 @@ mod tests {
         let manifest_path = module_dir.join("manifest.json");
         let bytes = nexus_wasm_host::embedded_module_bytes("basic-combat")
             .expect("embedded basic-combat bytes");
-        // bytes, but the installed wasm is DIFFERENT (a new build swapped in
-        // without updating the manifest — the Greptile P1 scenario). The
-        // manifest declares the hash of the ORIGINAL bytes; the installed
-        // bytes hash to something else.
         let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
             .expect("embedded basic-combat manifest");
         let changed: &[u8] = b"\0asm\x01\0\0\0";
@@ -2029,7 +1923,6 @@ mod tests {
         std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("write wasm");
         std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("write manifest");
 
-        // the wasm read, s2 and m2.
         let manifest_first = std::fs::read_to_string(&manifest_path).expect("first manifest read");
         let wasm_stat_first = std::fs::metadata(&wasm_path).expect("first wasm stat");
         let wasm_first = std::fs::read(&wasm_path).expect("first wasm read");
@@ -2045,11 +1938,6 @@ mod tests {
         );
         let _ = wasm_first;
 
-        // replacement lands after the caller's s1 stat (on the OLD wasm)
-        // and before the fence's s2 stat — the Greptile hole, where a
-        // bytes-only re-read observed a stable wasm (both byte reads saw
-        // the NEW file) and accepted OLD manifest + NEW wasm. The stat
-        // fence fires because s2 observes the NEW file's metadata.
         let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
         let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
         std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("rewrite wasm between stats");
@@ -2106,8 +1994,6 @@ mod tests {
         std::fs::write(&wasm_path, b"\0asm\x01\0\0\0").expect("write wasm");
         std::fs::write(&manifest_path, r#"{"module_id":"m"}"#).expect("write manifest");
 
-        // wasm stats and the byte read observe the NEW wasm, and both
-        // manifest reads observe the OLD manifest: the fence passes.
         let manifest_first = std::fs::read_to_string(&manifest_path).expect("manifest read");
         std::fs::write(&wasm_path, b"\0asm\x01\0\0\x01").expect("operator writes wasm");
         let wasm_stat_first = std::fs::metadata(&wasm_path).expect("wasm stat");
@@ -2144,7 +2030,6 @@ mod tests {
             .expect("embedded basic-combat bytes");
         let manifest = nexus_wasm_host::embedded_module_manifest("basic-combat")
             .expect("embedded basic-combat manifest");
-        // coherent B is legal to serve; a mixed A/B read must be rejected.
         let changed: &[u8] = b"\0asm\x01\0\0\0";
         let manifest_b = r#"{"module_id":"basic-combat","name":"Churn","version":"2"}"#;
         std::fs::write(&wasm_path, bytes).expect("write module wasm");
@@ -2172,8 +2057,6 @@ mod tests {
             }
         });
 
-        // InternalError (mid-load mutation) — never a panic, never a
-        // misclassified code.
         for _ in 0..200 {
             match adapter.load_module("basic-combat") {
                 SpokeResult::Ok(_) => {}
@@ -2211,8 +2094,6 @@ mod tests {
         let entry = spoke_character_entry("kb_vanished", "Vanished", 100, 20, 10, 100);
         unwrap_ok(adapter.put_knowledge_entry(entry, None).await, "create");
 
-        // compute runs (the check-then-act interleaving the Connect gate
-        // cannot see).
         unwrap_ok(
             adapter
                 .project(ProjectRequest {
@@ -2224,7 +2105,6 @@ mod tests {
                 .await,
             "project",
         );
-        // the row like a concurrent writer would.
         sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = ?")
             .bind("kb_vanished")
             .execute(&pool)
@@ -2272,7 +2152,6 @@ mod tests {
             }
             SpokeResult::Ok(_) => panic!("no module identity must reject"),
         }
-        // identity-missing (the gate must not remap it to module_not_found).
         let other: SpokeResult<()> = reject(
             SpokeRejectCode::InvalidInput,
             "some other client error",
@@ -2483,7 +2362,6 @@ mod tests {
             "create other_world char",
         );
 
-        // defender_id=kb_other_f003 (cross-world).
         let mut state = Map::new();
         state.insert(
             "module_id".to_string(),

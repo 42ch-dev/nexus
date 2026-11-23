@@ -20,7 +20,6 @@ import {
 import type { EditForm, Section } from '../state-machine';
 
 export function useStrategyCanvas(presetId: string, document: WorkflowDocument | null) {
-  // is parsed on this path.
   const parsed = useMemo(() => (document ? parsedPresetFromIr(document) : undefined), [document]);
   const revision = document?.revision ?? 0;
   const activeSession = useActiveSession(presetId);

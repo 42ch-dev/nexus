@@ -106,17 +106,11 @@ mod tests {
 
     #[test]
     fn defaults_match_compass_q6() {
-        // and the constants are both derived from these, so asserting against
-        // the constants alone would let the two drift together (QC1-03).
         assert_eq!(DEFAULT_FUEL, 10_000_000);
         assert_eq!(DEFAULT_MEMORY_MIB, 64);
         assert_eq!(DEFAULT_WALL_TIME, Duration::from_secs(30));
         let cfg = SandboxConfig::default();
         assert_eq!(cfg.fuel, 10_000_000);
-        // projection — `memory_mib()` alone would pass a drifted byte value.
-        // (Round 3, QC1-03 suggestion: the redundant `memory_mib() == 64`
-        // line is dropped; the projection stays covered by
-        // `with_memory_mib_converts_bytes`.)
         assert_eq!(cfg.max_memory_bytes, 67_108_864);
         assert_eq!(cfg.wall_time, Duration::from_secs(30));
     }
@@ -136,14 +130,11 @@ mod tests {
             wall_time: DEFAULT_WALL_TIME,
         };
 
-        // original byte ceiling: the min() runs on bytes, so no round-up or
-        // round-down may pass through the MiB conversion.
         let clamped = base.resolve(None, Some(64), None);
         assert_eq!(clamped.max_memory_bytes, 5 * 1024 * 1024 + 12_345);
         assert_eq!(clamped.fuel, DEFAULT_FUEL);
         assert_eq!(clamped.wall_time, DEFAULT_WALL_TIME);
 
-        // control above), in exact bytes, not rounded MiB.
         let lowered = base.resolve(None, Some(2), None);
         assert_eq!(lowered.max_memory_bytes, 2 * 1024 * 1024);
 

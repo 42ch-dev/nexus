@@ -50,7 +50,6 @@ const MORE_AGENTS: AgentPickerItem[] = [
   },
 ];
 
-// target this fixture because installed cards no longer carry outbound links.
 const UNINSTALLED_WITH_LINKS: AgentPickerItem[] = [
   {
     id: 'codex-native',
@@ -102,8 +101,6 @@ describe('AgentPicker', () => {
         onCustomLaunchChange={() => undefined}
       />,
     );
-    // outbound links can never nest inside one (the original B2 nested-
-    // interactive bug class). Installed cards render no links at all.
     expect(screen.queryByTestId('agent-card-select-codex-native')).toBeNull();
     const card = screen.getByTestId('agent-card-codex-native');
     expect(card.querySelector('a[href="https://example.com/install"]')).not.toBeNull();
@@ -641,7 +638,6 @@ describe('AgentPicker', () => {
     );
 
     const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
-    // fix the native href would load the external page inside the webview.
     fireEvent(link, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
     expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
     expect(openExternalUrl).toHaveBeenCalledTimes(1);
@@ -678,16 +674,13 @@ describe('AgentPicker', () => {
     );
 
     const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
-    // — the browser handles middle-click natively (AC-P1-8).
     expect(link).toHaveAttribute('target', '_blank');
     fireEvent(link, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
-    // contract is that the native href/target path stays intact.
     expect(link).toHaveAttribute('target', '_blank');
   });
 
 
   it('AC-P2-3: installed cards render no Install/Docs links', () => {
-    // identity + Installed badge (no outbound link chrome).
     render(
       <AgentPicker
         status="ready"

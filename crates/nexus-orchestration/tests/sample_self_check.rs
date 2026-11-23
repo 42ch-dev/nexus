@@ -67,7 +67,6 @@ fn game_narrative_sample_validates_clean() {
         .unwrap_or_else(|e| panic!("sample must load cleanly: {e:?}"));
     assert_eq!(loaded.id, "game-narrative");
 
-    // zero error AND zero warning diagnostics.
     let semantic = validate_preset_semantic(&loaded.manifest, &caps);
     let assets = validate_assets_in_bundle(&loaded.manifest, &bundle_root);
     let path_safety = validate_path_safety(&loaded.manifest);
@@ -83,8 +82,6 @@ fn game_narrative_sample_validates_clean() {
         );
     }
 
-    // BEFORE extraction, then a separate extract state — the embedded
-    // `research` scanning -> extracting pattern.
     let states = &loaded.manifest.states;
 
     let routing = states
@@ -165,7 +162,6 @@ fn game_narrative_sample_validates_clean() {
         Some(NextTarget::Linear("done".to_string()))
     );
 
-    // (the scan/judge lives in the scheduled_sweep state).
     let sweep_graph = &loaded.manifest.inner_graphs.as_ref().unwrap()["sweep_graph"];
     assert!(
         sweep_graph
@@ -193,9 +189,6 @@ fn game_narrative_sample_validates_clean() {
 
 #[test]
 fn dotted_preset_input_key_is_unreachable_in_expressions() {
-    // as "preset.input.mode"), but the grammar resolves `_context.a.b.c` by
-    // walking nested objects — a literal dotted key is unreachable, so the
-    // expression evaluates false even when the key is present.
     let flat_context = serde_json::json!({ "preset.input.mode": "scheduled" });
     let dotted = expr::parse("_context.preset.input.mode == 'scheduled'")
         .expect("dotted-key expression must parse");
@@ -205,7 +198,6 @@ fn dotted_preset_input_key_is_unreachable_in_expressions() {
          (this is why the sample routes lanes via _judge_result)"
     );
 
-    // llm_judge exit wrote true, false when absent (fail-closed default).
     let judge_true = serde_json::json!({ "_judge_result": true });
     let judge_absent = serde_json::json!({});
     let judge_expr =
@@ -430,16 +422,12 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
     );
 
     for asset in &document.assets {
-        // registers every asset as `id == path`: an id that names a different file than `path`
-        // keeps the name set above intact and still hashes a template no carrier uses.
         assert_eq!(
             asset.id, asset.path,
             "{bundle}/workflow.json: asset id `{}` does not name the file it hashes (`path` \
              `{}`) — re-import the bundle instead of editing `path` alone",
             asset.id, asset.path
         );
-        // loader's path-safety predicate (the one `validate_path_safety` applies to carrier
-        // references) runs here: an escaping path is refused, not hashed.
         nexus_preset::loader::assert_template_file_safe(&asset.path).unwrap_or_else(|reason| {
             panic!(
                 "{bundle}/workflow.json: asset `{}` is not a safe bundle-relative path: {reason}",
@@ -458,7 +446,6 @@ fn assert_workflow_json_exports_committed_yaml(bundle: &str) {
         );
     }
 
-    // not merely the same values — so a hand edit or a formatting drift reds here.
     let exported = export_preset(&document)
         .unwrap_or_else(|error| panic!("export {bundle}/workflow.json: {error}"));
     let exported_yaml = serde_yaml::to_string(&exported)
@@ -725,9 +712,6 @@ fn documented_shape_rewrites_and_stable_shapes_hold() {
     let bare = probe_export("    exit_when: {kind: llm_judge}\n    next: b\n");
     assert_eq!(bare["states"][0]["next"], Value::String("b".to_string()));
 
-    // `branches` shape once the exporter can tell the two apart. Either spelling must still point
-    // at `b`: the assertion is the target, not the collapsed form, so the fix keeps it green while
-    // a retargeted edge still fails.
     let collapsed =
         probe_export("    exit_when: {kind: llm_judge}\n    next: {branches: [], default: b}\n");
     let next = &collapsed["states"][0]["next"];

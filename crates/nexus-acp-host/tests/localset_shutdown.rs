@@ -114,7 +114,6 @@ async fn concurrent_shutdowns_share_one_settlement() {
     let (e1, e2) = tokio::join!(b1.shutdown(), b2.shutdown());
     assert!(e1.is_settled(), "{e1:?}");
     assert!(e2.is_settled(), "{e2:?}");
-    // confirmed one either.
     assert_eq!(e1.is_settled(), e2.is_settled());
 }
 
@@ -304,8 +303,6 @@ async fn pre_poll_cancel_releases_active_slot_once() {
 
 #[tokio::test]
 async fn control_work_bypasses_saturated_queue() {
-    // draining bridge refuses new work while the close snapshot reports what
-    // it drained.
     let bridge = LocalSetBridge::new();
     let bridge_ref = bridge.clone();
     let mut blockers = Vec::new();
@@ -439,16 +436,12 @@ async fn pending_queue_fills_independently_of_active_cap() {
 
 #[tokio::test]
 async fn bounded_join_retains_handle_for_a_later_join() {
-    // task below blocks the LocalSet *thread* synchronously, so the join
-    // cannot settle inside the budget; the handle is retained and stays
-    // joinable, and a later join succeeds once the thread finishes.
     let bridge = LocalSetBridge::new();
     let bridge_ref = bridge.clone();
     let blocker = tokio::spawn(async move {
         let _ = bridge_ref
             .execute(4, || {
                 Box::pin(async {
-                    // cannot service the queued shutdown control message.
                     std::thread::sleep(Duration::from_millis(700));
                     1
                 })
@@ -474,7 +467,6 @@ async fn bounded_join_retains_handle_for_a_later_join() {
         bridge.has_retained_runtime_thread(),
         "the runtime thread handle must be retained, never detached"
     );
-    // was joined": the retained handle keeps the bridge unsettled.
     assert!(
         !evidence.is_settled(),
         "a timed-out join is not settlement: {evidence:?}"
@@ -496,7 +488,6 @@ async fn bounded_join_retains_handle_for_a_later_join() {
     );
     blocker.abort();
     let _ = blocker.await;
-    // then processes the queued shutdown and exits.
     let joined = tokio::task::spawn_blocking(move || handle.join().is_ok())
         .await
         .expect("join helper");

@@ -281,8 +281,6 @@ pub fn local_db_err(e: LocalDbError) -> CoreError {
         LocalDbError::WriterFenced { .. } => CoreError::WriterFenced,
         LocalDbError::SchemaMismatch { .. } => CoreError::SchemaMismatch,
         LocalDbError::Sqlx(err) if is_sqlite_busy(&err) => CoreError::Busy,
-        // receipt write that collides on the first-writer-wins `operation_id`.
-        // The code is the contract; the transport decides its status.
         LocalDbError::OperationIdConflict { operation_id } => CoreError::Coded {
             code: nexus_local_db::OPERATION_ID_CONFLICT_CODE.to_string(),
             message: format!(
@@ -323,7 +321,6 @@ pub fn actor_db_err(e: LocalDbError) -> CoreError {
             message: code.message().to_string(),
         },
         LocalDbError::HolderStateInvalid { reason } => {
-            // `holder_state_invalid` code and its fixed product message (§2.2).
             tracing::debug!(target: "actors.holder_state", %reason, "holder registry state refused on a normal read");
             CoreError::ActorConflict {
                 code: nexus_local_db::HOLDER_STATE_INVALID_CODE.to_string(),

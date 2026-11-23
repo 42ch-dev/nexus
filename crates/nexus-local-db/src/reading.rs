@@ -385,8 +385,6 @@ mod tests {
     async fn setup_pool() -> (tempfile::TempDir, Pool<Sqlite>) {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("test.db");
-        // functions per connection, applies migrations with the FK-suspension
-        // scoping, and runs the post-migration `foreign_key_check`.
         let pool = crate::open_pool(&db_path).await.expect("open pool");
         (dir, pool)
     }

@@ -203,7 +203,6 @@ fn spoke_with_nexus(json_map: &serde_json::Value) -> spoke_schemas::KnowledgeEnt
     let rec = record_for(&KnowledgeOwnerRef::world("wld_x"), "Wire");
     let mut spoke = knowledge_record_to_spoke(&rec);
     let key = ExtensionKey::try_from("nexus").unwrap();
-    // shape `nexus_namespace` reads back), not a wrapped `Value`.
     let obj = json_map
         .as_object()
         .expect("nexus payload is an object")

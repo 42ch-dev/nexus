@@ -180,9 +180,6 @@ pub fn is_valid_transition(from: &str, to: &str) -> bool {
         ),
         "triaged" => matches!(to, "in_review" | "resolved" | "wont_fix" | "duplicate"),
         "in_review" => matches!(to, "resolved" | "wont_fix" | "duplicate"),
-        // outbound transition. `is_valid_status` already filtered the
-        // unknown `from` case above, so this arm is only reached for the
-        // three terminal statuses.
         _ => false,
     }
 }
@@ -470,8 +467,6 @@ pub async fn list_findings(
     let limit = filters.limit.unwrap_or(100);
     let offset = filters.offset.unwrap_or(0);
 
-    // match-guard rather than `if let … && …` so we hand the matched
-    // status string straight to the helper without a follow-up `.expect`.
     match filters.status.as_ref() {
         Some(s) if s.contains(',') => {
             return list_findings_with_status_set(pool, creator_id, filters, s).await;
@@ -560,9 +555,6 @@ async fn list_findings_with_status_set(
         statuses.push(trimmed.to_string());
     }
     if statuses.is_empty() {
-        // the caller gets the unfiltered list rather than a confusing
-        // empty page. The other filters (work_id / chapter / severity)
-        // still apply via the no-status branch below.
         return list_findings_unfiltered(pool, creator_id, filters).await;
     }
 
@@ -874,14 +866,12 @@ async fn enforce_status_transition(
             .await?;
 
     let Some(from) = current_status else {
-        // `rows_affected = 0` and the caller surfaces NotFound.
         return Ok(());
     };
 
     if is_valid_transition(&from, new_status) {
         Ok(())
     } else {
-        // `INVALID_TRANSITION` without string-prefix sniffing.
         Err(LocalDbError::IllegalTransition {
             from,
             to: new_status.to_string(),
@@ -959,18 +949,10 @@ pub async fn update_finding(
         }
     }
 
-    // patches `status`, fetch the row's current status and reject illegal
-    // transitions (e.g. resolved → open, terminal → anything) before any
-    // write. The DAO already validates that the target string is a known
-    // status (above), so `is_valid_transition` only needs to evaluate the
-    // state-machine edges.
     if let Some(ref new_status) = patch.status {
         enforce_status_transition(pool, creator_id, finding_id, new_status).await?;
     }
 
-    // included when the caller explicitly wants to touch the column.
-    // This lets `Some(None)` bind SQL NULL (clear) rather than COALESCE
-    // back to the existing value.
     let mut set_clauses = Vec::new();
     if patch.severity.is_some() {
         set_clauses.push("severity = ?");
@@ -1021,7 +1003,6 @@ pub async fn update_finding(
     if let Some(ref v) = patch.kind {
         q = q.bind(v);
     }
-    // outer Option; the inner &Option<String> binds directly (None → NULL).
     if let Some(ref v) = patch.rule_suggestion {
         q = q.bind(v);
     }
@@ -1423,10 +1404,6 @@ pub async fn create_finding_from_review_tx(
 ) -> Result<String, LocalDbError> {
     validate_finding_enums(&verdict.severity, "open", &verdict.target_executor)?;
 
-    // should set it explicitly, but the spec lists `craft` as a safe default).
-    // V1.47 P0 fix (qc2 W-2): once non-empty, `kind` is validated against the
-    // closed set [`FindingKind::ALL_STRS`]; unknown values are rejected with
-    // `ConstraintViolation` before any DB call.
     let kind = if verdict.kind.is_empty() {
         "craft".to_string()
     } else {
@@ -1434,7 +1411,6 @@ pub async fn create_finding_from_review_tx(
     };
     let now = chrono::Utc::now().timestamp();
 
-    // `rule_suggestion` payloads before any DB call.
     let rule_suggestion = normalize_rule_suggestion(verdict.rule_suggestion.as_deref())?;
 
     let finding_id = mint_finding_id();
@@ -1536,7 +1512,6 @@ mod tests {
     use crate::test_support::fresh_pool;
     use sqlx::SqlitePool;
 
-    /// and return the input string unchanged.
     #[test]
     fn finding_kind_validate_accepts_known_values() {
         for &known in FindingKind::ALL_STRS {
@@ -1544,8 +1519,6 @@ mod tests {
                 .unwrap_or_else(|e| panic!("known kind '{known}' should validate: {e}"));
             assert_eq!(validated, known);
         }
-        // length. V1.48 P0 T4: expanded from 5 → 7 to include `plot_hole`
-        // and `world_inconsistency` per `novel-writing/quality-loop.md` §2.1.
         assert_eq!(
             FindingKind::ALL_STRS.len(),
             7,
@@ -1629,9 +1602,6 @@ mod tests {
         );
     }
 
-    /// (`work_id`, chapter, status) exists after migration.
-    /// Per novel-writing/quality-loop.md §2.1: chapter-scoped finding lookups
-    /// (the review-stage hook's hot path) must use this index.
     #[tokio::test]
     async fn test_findings_work_chapter_status_index_exists() {
         let (_dir, pool) = fresh_pool().await;
@@ -2227,7 +2197,6 @@ mod tests {
         );
     }
 
-    /// per `findings-lifecycle.md` §2.
     #[test]
     fn valid_statuses_carries_six_state_lifecycle() {
         assert_eq!(
@@ -2607,8 +2576,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         seed_minimal_work(&pool, WORK, CREATOR).await;
 
-        // severity so the ordering is by created_at ASC within the bucket.
-        // Insert in lifecycle-enum order so created_at is monotonic.
         let statuses = [
             ("open", 1_000),
             ("triaged", 2_000),
@@ -2654,8 +2621,6 @@ mod tests {
             "actionable set must include only open + triaged; got {returned_statuses:?}"
         );
 
-        // (severity DESC, then created_at ASC) — both seeds share `major`,
-        // so created_at ASC wins; open (ts=1000) precedes triaged (ts=2000).
         let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
         assert_eq!(ids, vec!["ac0", "ac1"], "expected created_at ASC ordering");
     }

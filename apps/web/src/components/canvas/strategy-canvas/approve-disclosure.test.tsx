@@ -1,6 +1,4 @@
 /**
- * own (`.mstar/research/p2-simulator-limits.md` §3; compass D5).
- *
  * A bare "simulated" badge satisfies none of these: every assertion reads a
  * trajectory value (level wording, the stubbed-judge count and ids, the effect
  * fence reading, the predicted-wait label) or the no-output-preview statement.

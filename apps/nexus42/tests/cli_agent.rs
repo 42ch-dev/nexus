@@ -361,8 +361,6 @@ fn help_no_longer_shows_old_top_level_commands() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // (they're hidden behind `#[command(hide = true)]`)
-    // Check that 'agent' is not a primary command name (agent as subtext in other words is ok)
     assert!(
         !stdout.contains("Agent management (ACP integration)"),
         "Old 'Agent' help text should be removed"

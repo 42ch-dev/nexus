@@ -345,8 +345,6 @@ pub struct TimelineEventPageRow {
     pub source_command_id: Option<String>,
     pub metadata_json: Option<String>,
     pub extensions_nexus_json: Option<String>,
-    // surfaced on the daemon wire DTO `TimelineEventInfo.modules`. NULL when
-    // unrecorded (same semantics as `TimelineEventRow.modules_json`).
     pub modules_json: Option<String>,
     pub created_at: String,
 }
@@ -425,8 +423,6 @@ impl TimelineEventRow {
                 .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok()),
             source_command_id: self.source_command_id.clone(),
-            // → None (unrecorded), verbatim JSON otherwise (matches the
-            // kb_key_blocks.modules_json read pattern in kb_store.rs).
             modules: self
                 .modules_json
                 .as_ref()

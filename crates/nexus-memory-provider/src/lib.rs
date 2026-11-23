@@ -951,7 +951,6 @@ fn selection_scope_covers(pinned: &Selection, requested: Option<&Selection>) -> 
                 .all(|context_id| requested_ids.contains(context_id))
                 && (!*include_shared || *requested_shared)
         }
-        // restricted request, context pins under `shared_only` — is uncovered.
         _ => false,
     }
 }
@@ -1479,10 +1478,6 @@ impl LocalMemoryProvider {
                 )))
             }
         };
-        // probe decides whether this acquisition is contended, so a test can
-        // observe a real lock wait instead of a pre-lock rendezvous. The probe
-        // also takes the section when free, so the blocking `lock()` below runs
-        // only when another descriptor really holds it.
         #[cfg(feature = "test-hooks")]
         let wait_report = self.store.take_disposition_wait_report();
         let locked = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
@@ -1634,15 +1629,6 @@ impl LocalMemoryProvider {
         expected_revision: Option<i64>,
         idempotency_key: &str,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
-        // caller named (fix round 4, finding R4-F1): resolving the stored owner
-        // before locking means a caller can never consume A while holding B's
-        // section, interleaving A's review drain. The probe authorizes the
-        // caller first (fix round 5, finding R5-F1): the owner is the only thing
-        // the mismatch refusal would disclose, so a principal the candidate's
-        // coverage does not admit never learns it exists. A projected-only id has
-        // no provider row (`None`), so the supplied subject is the only owner it
-        // can adopt under, and the store's own adoption refuses a legacy row of
-        // another subject.
         let owner = match self
             .store
             .reviewable_candidate_subject(&self.space_id, candidate_id, principal_id(principal))
@@ -1664,9 +1650,6 @@ impl LocalMemoryProvider {
             Some(owner) => owner,
             None => subject_id,
         };
-        // round 2, finding F1): a legacy review drain holds the same section
-        // across its consumed-check, classification and persistence, so a
-        // dismissal can never commit in between.
         let _disposition = match self.disposition(subject_id).await {
             Ok(section) => section,
             Err(error) => return deny(&error),
@@ -1772,7 +1755,6 @@ impl LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // capture scope — created records inherit that placement verbatim.
         let admission = Admission {
             op,
             space_id: request.space_id.as_str(),
@@ -2702,7 +2684,6 @@ impl LocalMemoryProvider {
             payload_digest: &digest,
         };
         let subject_id = request.subject_id.as_str();
-        // candidate's immutable authorization fence.
         let placement = match &request.capture_scope {
             schemas::memory_capture_request::PlacementScope::Shared => Placement {
                 visibility: Placement::SHARED,
@@ -2734,8 +2715,6 @@ impl LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return Ok(deny(&error)),
         };
-        // (absent = None, serialized as null); the stored provenance must stay
-        // the published `anchors` array shape (may be empty), never null.
         let anchors = match to_json(&request.anchors, "capture anchors") {
             Ok(Value::Null) => json!([]),
             Ok(anchors) => anchors,
@@ -2752,7 +2731,6 @@ impl LocalMemoryProvider {
             "rationale_codes": classification.rationale_codes,
         });
         let occurred_at = request.occurred_at.map(storage::timestamp);
-        // candidate at all; that is a committed outcome with its count recorded.
         let keep_existing = candidate_id.is_some();
         let candidate_id = candidate_id.map_or_else(storage::mint_candidate_id, str::to_string);
         let candidates: Vec<NewCandidate<'_>> = if classification.disposition == "drop" {
@@ -3042,7 +3020,6 @@ impl LocalMemoryProvider {
             request.kinds.join(","),
             request.include_tombstoned
         );
-        // is verified against the snapshot the page was read in.
         let (offset, claimed) =
             match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
                 Ok(page) => page,
@@ -3228,7 +3205,6 @@ impl MemoryPort for LocalMemoryProvider {
             .kind
             .as_ref()
             .map(|kind| (kind.ns.as_str(), kind.id.as_str()));
-        // outside the dedup namespace, so every ensure records its own outcome.
         let ctx = OpContext {
             space_id: request.space_id.as_str(),
             requester_principal_id: principal_id,
@@ -3249,7 +3225,6 @@ impl MemoryPort for LocalMemoryProvider {
             principal_id,
             coverage: Coverage::Requirements(&requirements),
             issuance: None,
-            // the same transaction as the get-or-create.
             subject_gate: Some(request.subject_id.as_str()),
             placement_gate: None,
             freeze_gated: true,
@@ -3270,7 +3245,6 @@ impl MemoryPort for LocalMemoryProvider {
         request: schemas::MemorySubjectsGetRequest,
     ) -> SpokeResult<schemas::MemorySubjectsGetResponse> {
         let principal_id = principal_id(principal);
-        // transaction on the store's clock.
         match self
             .store
             .subject_for_read(
@@ -3309,8 +3283,6 @@ impl MemoryPort for LocalMemoryProvider {
             schemas::memory_subjects_fence_request::Action::Unfence => FenceAction::Unfence,
             schemas::memory_subjects_fence_request::Action::Archive => FenceAction::Archive,
         };
-        // context fence needs coverage of THAT context, and a whole-subject
-        // fence/archive needs unrestricted coverage of the subject.
         let mut requirement = admin_requirement(Some(request.subject_id.as_str()));
         match &target {
             FenceTarget::Subject => requirement.subject_all = true,
@@ -3366,14 +3338,10 @@ impl MemoryPort for LocalMemoryProvider {
         let principal_filter = request.principal_id.as_ref().map(|value| value.as_str());
         let subject_filter = request.subject_id.as_ref().map(|value| value.as_str());
         let limit = page_limit(request.limit);
-        // verified after the read, because the scope names the principal filter
-        // that read resolves.
         let page_offset = match claimed_offset(cursor_text(request.cursor.as_ref())) {
             Ok(offset) => offset,
             Err(error) => return deny(&error),
         };
-        // marker are ONE read transaction on the store's clock, and the returned
-        // filter is the one that read actually applied.
         let (rows, marker, filter, more) = match self
             .store
             .grants_page_for(
@@ -3464,8 +3432,6 @@ impl MemoryPort for LocalMemoryProvider {
             shared_access,
             expires_at,
         };
-        // delegates within its own subject — and non-amplification is evaluated
-        // on the same grant set, inside the transaction that inserts the grant.
         let requirements = [admin_requirement(subject_id)];
         let admission = Admission {
             op: OP_GRANT,
@@ -3501,7 +3467,6 @@ impl MemoryPort for LocalMemoryProvider {
             idempotency_key: Some(request.idempotency_key.as_str()),
             payload_digest: &digest,
         };
-        // contained while the space is frozen.
         let requirements = [admin_requirement(None)];
         let admission = Admission {
             op,
@@ -3544,7 +3509,6 @@ impl MemoryPort for LocalMemoryProvider {
     ) -> SpokeResult<schemas::MemoryCaptureResponse> {
         match self.capture_request(principal, request, None, None).await {
             Ok(result) => result,
-            // names none.
             Err(error) => deny(&store_error(StoreError::Database(error))),
         }
     }
@@ -3571,7 +3535,6 @@ impl MemoryPort for LocalMemoryProvider {
             ),
             status.as_deref().unwrap_or("*")
         );
-        // marker is verified against the snapshot the page was read in.
         let (offset, claimed) =
             match cursor_page(cursor_text(request.cursor.as_ref()), principal_id, &scope) {
                 Ok(page) => page,
@@ -3641,8 +3604,6 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryCandidatesDismissRequest,
     ) -> SpokeResult<schemas::MemoryCandidatesDismissResponse> {
-        // disposition section (fix round 3, finding F1): the legacy review drain
-        // holds the same section across its consumed-check and classification.
         let _disposition = match self
             .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
             .await
@@ -3699,8 +3660,6 @@ impl MemoryPort for LocalMemoryProvider {
         if let SpokeResult::Reject(reject) = validate_memory_candidates_review(&request) {
             return deny(&ProviderError::from_reject(reject, "decision"));
         }
-        // takes the owning bearer's disposition section too (fix round 3,
-        // finding F1).
         let _disposition = match self
             .candidate_disposition(request.space_id.as_str(), request.candidate_id.as_str())
             .await
@@ -3767,14 +3726,11 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(content) => content,
             Err(error) => return deny(&error),
         };
-        // null when absent); the stored provenance keeps the published array
-        // shape (may be empty), not null.
         let anchors = match to_json(&request.anchors, "record anchors") {
             Ok(Value::Null) => json!([]),
             Ok(anchors) => anchors,
             Err(error) => return deny(&error),
         };
-        // context claims are recorded verbatim and never authorize anything.
         let provenance = json!({
             "source_context_ids": request.source_context_ids.unwrap_or_default(),
             "anchors": anchors,
@@ -3942,7 +3898,6 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // so the authorized set — never the raw table — is what gets ranked.
         let (rows, marker, total) = match self
             .store
             .records(
@@ -3963,7 +3918,6 @@ impl MemoryPort for LocalMemoryProvider {
             Err(error) => return deny(&store_error(error)),
         };
         let total = usize::try_from(total).unwrap_or(usize::MAX);
-        // ranking it was minted under (MEM-R026).
         let terms = policy::query_terms(request.query.as_deref().unwrap_or_default());
         let scope = format!(
             "{}|sel={}|filter={}|query={}",
@@ -4105,8 +4059,6 @@ impl MemoryPort for LocalMemoryProvider {
         principal: &schemas::Principal,
         request: schemas::MemoryReceiptsGetRequest,
     ) -> SpokeResult<schemas::MemoryReceiptsGetResponse> {
-        // (MEM-R011), content-free (§6.10/MEM-R022), and admissible only under the
-        // caller's *current* authorization (MEM-R018/R021).
         let stored = match self
             .store
             .receipt(
@@ -4119,10 +4071,6 @@ impl MemoryPort for LocalMemoryProvider {
             Ok(stored) => stored,
             Err(error) => return deny(&store_error(error)),
         };
-        // poll answer — generation in progress, no effect and no cost yet
-        // (C-015/C-070). Journaled pending states keep the uncertain-error
-        // answer below: their pending means an unpublished file effect, not
-        // work in progress.
         if stored.status == RECEIPT_PENDING && stored.op == OP_REFLECTIONS_GENERATE {
             return match pending_receipt_body(&stored) {
                 Ok(body) => respond(json!({ "receipt": body })),
@@ -4134,7 +4082,6 @@ impl MemoryPort for LocalMemoryProvider {
                 Ok(body) => respond(json!({ "receipt": body })),
                 Err(error) => deny(&error),
             },
-            // the pending state instead of a terminal receipt.
             |error| deny(&error),
         )
     }
@@ -4181,12 +4128,6 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // over the *current* authorized basis (C-042 — no eager invalidation
-        // writes exist), so every basis-affecting fact shows up at the next
-        // read. The basis and the visible reflections come from ONE store
-        // read — one snapshot (inspector round 2) — so `state_digest`,
-        // `stale` and `last_reflection_id` can never disagree about which
-        // basis a caller is looking at.
         let (snapshot, rows) = match self
             .store
             .reflection_state_snapshot(
@@ -4216,11 +4157,6 @@ impl MemoryPort for LocalMemoryProvider {
         };
         let (profile_kinds, missing_required_profile_kinds) =
             profile_projection(&snapshot.profile_revisions);
-        // envelope this caller may see under this selection and provenance
-        // filter, excluding tombstoned-basis rows (C-077) — read in the same
-        // snapshot as the basis above. With no envelope to compare against,
-        // `stale` is honestly false — there is no pinned basis that could
-        // have gone stale.
         let last = rows.first();
         let stale = last.is_some_and(|visible| visible.stale);
         respond(json!({
@@ -4244,8 +4180,6 @@ impl MemoryPort for LocalMemoryProvider {
         if !self.reflections {
             return unsupported(OP_REFLECTIONS_LIST);
         }
-        // demands the same unrestricted grant an explicit `subject_all` does;
-        // a present one is covered like any other read selection (C-075).
         let selection = request.selection.as_ref().map(wire_read_selection);
         if let SpokeResult::Reject(reject) =
             validate_memory_reflections_list(&request, policy::MAX_PAGE_SIZE_BOUND)
@@ -4271,9 +4205,6 @@ impl MemoryPort for LocalMemoryProvider {
             .filter
             .as_ref()
             .map(|filter| filter.source_context_ids.clone());
-        // op, space, subject, the selection/filter resolution actually applied
-        // and the engine policy version. Any other request under it is
-        // `CURSOR_INVALID`.
         let scope = format!(
             "{}|sel={}|filter={}",
             cursor_scope(
@@ -4292,11 +4223,6 @@ impl MemoryPort for LocalMemoryProvider {
                 Ok(page) => page,
                 Err(error) => return deny(&error),
             };
-        // staleness recomputed per row against its pinned basis (the stored
-        // write-time cache is never served), tombstoned-basis rows excluded
-        // (C-077). The marker covers the whole visible set plus every record
-        // identity of the subject and the grant revisions, so any state or
-        // grant change invalidates the cursor with `CURSOR_INVALID`.
         let (rows, marker, ..) = match self
             .store
             .reflections(
@@ -4353,11 +4279,6 @@ impl MemoryPort for LocalMemoryProvider {
                 details: None,
             });
         }
-        // coverage before any receipt disclosure, but the §8.2 freeze gate
-        // does not run here — the store's transaction gate applies freeze to
-        // fresh work only, after replay resolution (§7.0.5/MEM-R021/C-036),
-        // so an already-committed generation's same-key retry stays
-        // recoverable while the space is frozen.
         if let Err(error) = self
             .reflect_admission(
                 principal,
@@ -4369,11 +4290,6 @@ impl MemoryPort for LocalMemoryProvider {
         {
             return deny(&error);
         }
-        // receipt (transaction 1 — the point of no return) inside the same
-        // transaction that rechecks authorization, the §7.25 CAS and the
-        // sufficiency verdicts, then generation runs deterministically over
-        // the pinned basis and transaction 2 commits exactly one terminal
-        // receipt. Every refusal below is pre-effect: no receipt, no cost.
         let principal_id = principal_id(principal);
         let subject_id = request.subject_id.as_str();
         let op = OP_REFLECTIONS_GENERATE;
@@ -4392,7 +4308,6 @@ impl MemoryPort for LocalMemoryProvider {
             placement_gate: None,
             freeze_gated: true,
         };
-        // [`pinned_request_shapes`]).
         let (selection_json, filter_json) = match pinned_request_shapes(&request) {
             Ok(pins) => pins,
             Err(error) => return deny(&error),
@@ -4641,7 +4556,6 @@ mod tests {
             }
         }
 
-        // A < C, with no cycle.
         assert_eq!(
             created_at_cmp("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.900Z"),
             Ordering::Less
@@ -4655,7 +4569,6 @@ mod tests {
             Ordering::Less
         );
 
-        // the unparseable class last in raw-text order.
         let mut sorted = values;
         sorted.sort_by(|left, right| created_at_cmp(left, right));
         assert_eq!(

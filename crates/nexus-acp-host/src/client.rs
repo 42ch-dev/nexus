@@ -232,8 +232,6 @@ fn nexus_mcp_server_to_sdk(server: NexusMcpServer) -> McpServer {
         NexusMcpServer::Http(h) => McpServer::Http(McpServerHttp::new(h.name, h.url)),
         NexusMcpServer::Sse(s) => McpServer::Sse(McpServerSse::new(s.name, s.url)),
         NexusMcpServer::Stdio(s) => {
-            // hand-built `NexusMcpServer::Stdio { command, args }` spawns
-            // the correct subcommand.
             McpServer::Stdio(McpServerStdio::new(s.name, s.command).args(s.args))
         }
     }
@@ -289,7 +287,6 @@ fn sdk_list_sessions_response_to_nexus(resp: &ListSessionsResponse) -> NexusList
 fn sdk_set_config_option_request_from_nexus(
     req: NexusSetConfigOptionRequest,
 ) -> SetSessionConfigOptionRequest {
-    // `From<String>`); pass a borrowed &str of the same value.
     SetSessionConfigOptionRequest::new(req.session_id.0, req.config_id, req.value.as_str())
 }
 
@@ -709,9 +706,6 @@ impl AcpSdkAdapter {
         let permission_events_for_handler = permission_events_tx.clone();
 
         let bridge_clone = bridge.clone();
-        // bridge's LocalSet thread: registered by task id/abort handle and
-        // aborted by bridge shutdown, but not charged against the bounded
-        // request budget (it lives as long as the owned child transport).
         let owned = bridge_clone.spawn_owned(move || {
             let connection_clone = connection_clone.clone();
             let agent_id = agent_id_for_log;
@@ -954,8 +948,6 @@ impl AcpSdkAdapter {
 
             match update {
                 SessionMessage::Message(_dispatch) => {
-                    // in NexusPromptCompleted (content consumption is handled
-                    // by the caller via subscribe/future streaming API).
                     tracing::trace!(
                         session_id = %session_id_str,
                         "Received streaming update"
@@ -1078,7 +1070,6 @@ impl AcpSdkAdapter {
         let captured_clone = captured.clone();
         let sid = session_id.to_string();
 
-        // convert the v1 dispatch to the raw form first.
         let result = MatchDispatch::new(dispatch.into_raw())
             .if_notification(async move |notif: SessionNotification| {
                 let updates = Self::session_update_to_acp_updates(notif.update, &sid);
@@ -1148,7 +1139,6 @@ impl AcpSdkAdapter {
 
 impl Drop for AcpSdkAdapter {
     fn drop(&mut self) {
-        // tracked there; abort it by task id so the owned transport closes.
         if let Some(handle) = self.setup_owned.take() {
             handle.abort();
         }
@@ -1289,22 +1279,16 @@ impl NexusAcpClient for AcpSdkAdapter {
                             })?
                             .map_err(|e| crate::AcpError::sdk(&e))?;
 
-                        // holding the session and the complete setup response
-                        // (`ActiveSession::response()` was removed).
                         let SessionSetup {
                             session, response, ..
                         } = session_result;
 
                         let session_id_str = session.session_id().to_string();
 
-                        // `Option<SessionModeState>` — map directly.
                         let nexus_modes = response
                             .modes
                             .map(|state| nexus_session_mode_state_from_sdk(&state));
 
-                        // SDK response may include config_options exposing
-                        // agent-specific configuration IDs for model/mode
-                        // switching via `set_config_option`.
                         let nexus_config_options = response
                             .config_options
                             .map(|opts| opts.iter().map(sdk_config_option_to_nexus).collect());
@@ -1343,7 +1327,6 @@ impl NexusAcpClient for AcpSdkAdapter {
         let bridge = self.bridge.clone();
 
         async move {
-            // since we need `request` to be owned for the borrow checker.
             let session_id_str = request.session_id.0.clone();
 
             let prompt_text = request
@@ -1397,9 +1380,6 @@ impl NexusAcpClient for AcpSdkAdapter {
             let stream_session_id = session_id_str.clone();
             let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
 
-            // operation. Each stream_prompt gets its own subscription, so
-            // permission results route per active operation and remain
-            // observable across serial prompts on the same session.
             let mut permission_rx = permission_events_tx.subscribe();
             tokio::spawn(async move {
                 loop {
@@ -1454,8 +1434,6 @@ impl NexusAcpClient for AcpSdkAdapter {
         let agent_id = self.agent_id.clone();
 
         async move {
-            // peer even when the bounded work queue is saturated, otherwise a
-            // full queue could block the cancellation that drains it.
             bridge
                 .execute_control(sdk_op_charge("cancel"), move || {
                     let control_connection = control_connection.clone();
@@ -1984,7 +1962,6 @@ mod tests {
 
     #[test]
     fn protocol_version_numeric_two_falls_back_to_stable_v1() {
-        // but this adapter is stable-v1-only: it must NOT pass through.
         let version = NexusProtocolVersion::new("2");
         let sdk_version = sdk_protocol_version_from_nexus(&version);
         assert_eq!(sdk_version, ProtocolVersion::V1);
@@ -2188,7 +2165,6 @@ mod tests {
         let sdk_req = sdk_set_config_option_request_from_nexus(nexus_req);
         assert_eq!(sdk_req.session_id.to_string(), "sess-1");
         assert_eq!(sdk_req.config_id.to_string(), "model");
-        // without `Display`; assert the value-id payload instead.
         assert_eq!(
             sdk_req.value.as_value_id().map(ToString::to_string),
             Some("claude-3-opus".to_string())

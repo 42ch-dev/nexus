@@ -310,9 +310,6 @@ pub async fn begin_operation(
         )));
     }
 
-    // refuses an insert over a TERMINAL id, so a replay after settlement must be
-    // answered from the stored row here instead of attempting the insert the
-    // store used to rely on being a no-op.
     if let Some(stored) = get_operation_receipt(pool, operation_id).await? {
         return existing_begin_outcome(stored, operation_id, request_fingerprint);
     }
@@ -336,9 +333,6 @@ pub async fn begin_operation(
     .await
     {
         Ok(inserted) => inserted,
-        // our read and this insert, so the schema refused the insert over its
-        // terminal id. The loser resolves to the stored row (the typed
-        // `Existing` / `operation_id_conflict`), never a raw trigger abort.
         Err(err) if is_terminal_receipt_refusal(&err) => {
             let stored = get_operation_receipt(pool, operation_id)
                 .await?
@@ -348,9 +342,6 @@ pub async fn begin_operation(
         Err(err) => return Err(db_err(err)),
     };
 
-    // exactly one racer inserted the `running` row (and owns the effect), the
-    // others inserted nothing and must answer from the stored receipt. Both
-    // sides then read the same stored row back.
     let acquired = inserted.rows_affected() == 1;
 
     let stored = get_operation_receipt(pool, operation_id)
@@ -396,8 +387,6 @@ pub async fn settle_operation(
 ) -> Result<OperationReceipt, LocalDbError> {
     let (result_json, error_json) = match status {
         STATUS_FINISHED => (Some(payload), None),
-        // the terminal payload, so the contract's "exactly one set" holds for
-        // every terminal settlement.
         STATUS_FAILED | STATUS_CANCELLED | STATUS_INTERRUPTED => (None, Some(payload)),
         other => {
             return Err(LocalDbError::ValidationError(format!(
@@ -423,9 +412,6 @@ pub async fn settle_operation(
     .await
     .map_err(db_err)?;
 
-    // (or raced another settler), the stored row is the truth. A missing row
-    // means `settle` was called without `begin` — a caller bug, surfaced as
-    // `RowNotFound` rather than a fabricated receipt.
     get_operation_receipt(pool, operation_id)
         .await?
         .ok_or_else(|| db_err(sqlx::Error::RowNotFound))
@@ -483,9 +469,6 @@ mod tests {
     use crate::test_support::fresh_engine_pool;
 
     fn op_id(suffix: &str) -> String {
-        // production receipts. The suffix must already be lowercase hex: the
-        // helper refuses anything else rather than silently aliasing two
-        // fixture ids onto one row (e.g. `7g` and `7a`).
         assert!(
             suffix
                 .chars()
@@ -560,7 +543,6 @@ mod tests {
             .expect("a late settlement reads the stored terminal back");
         assert_eq!(late, settled, "the settled receipt is never rewritten");
 
-        // engine owner: a direct UPDATE of the settled row aborts.
         let err = sqlx::query!(
             "UPDATE operation_receipts SET status = 'running' WHERE operation_id = ?",
             &id,
@@ -599,7 +581,6 @@ mod tests {
         assert_eq!(found, settled, "the subject lookup returns the stored row");
         assert_eq!(found.operation_id, begun.operation_id);
 
-        // consumer is a different receipt (and here, none).
         assert!(
             get_operation_receipt_by_subject(&pool, CONSUMER_CONNECT_INVOKE, "run-subject")
                 .await
@@ -689,7 +670,6 @@ mod tests {
         .unwrap();
         assert_eq!(settled.status, STATUS_CANCELLED);
         assert!(settled.terminal_at.is_some());
-        // renders a non-success reason (cancel/interruption) in `error_json`.
         assert_eq!(settled.result_json, None);
         assert_eq!(
             settled.error_json.as_deref(),
@@ -704,7 +684,6 @@ mod tests {
             other => panic!("a terminal receipt must answer, got {other:?}"),
         }
 
-        // receipt, sequence and created_at unchanged — no second apply.
         let replayed = match begin_operation(
             &pool,
             &id,
@@ -801,7 +780,6 @@ mod tests {
         assert_eq!(late.error_json, None);
         assert_eq!(late.terminal_at, finished.terminal_at);
 
-        // it, and it does not re-acquire the effect either.
         let late_begin = match begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-5", "fp-5")
             .await
             .unwrap()
@@ -834,7 +812,6 @@ mod tests {
             matches!(&err, LocalDbError::OperationIdConflict { operation_id } if operation_id == &id),
             "got {err:?}"
         );
-        // and it is never a silent dedupe: the first writer's row is intact.
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored.request_fingerprint, "fp-first");
         assert_eq!(stored.subject_id, "run-6");
@@ -894,7 +871,6 @@ mod tests {
             );
         }
 
-        // fabricated receipt.
         let err = settle_operation(&pool, &op_id("7f0"), STATUS_CANCELLED, "{\"x\":1}")
             .await
             .expect_err("settle without begin must fail");
@@ -930,7 +906,6 @@ mod tests {
     async fn schema_pins_terminal_payload_and_terminal_immutability() {
         let (_dir, pool) = fresh_engine_pool().await;
 
-        // payloads — all refused by the CHECK itself.
         for (suffix, result_json, error_json, terminal_at) in [
             ("ca", None, None, None),
             ("cb", None, None, Some("2026-10-07T00:00:01Z")),
@@ -1023,7 +998,6 @@ mod tests {
             "expected the terminal-immutability abort, got: {err}"
         );
 
-        // deleted, and nothing was reinserted).
         let stored = get_operation_receipt(&pool, &id).await.unwrap().unwrap();
         assert_eq!(stored, settled, "the settled row must be untouched");
         let count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM operation_receipts")
@@ -1244,7 +1218,6 @@ mod tests {
                     begin_operation(&pool, &id, CONSUMER_COMPUTE_RUN, "run-race", fingerprint).await
                 }
             });
-            // parks on the write lock; then the winner commits.
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             winner.commit().await.expect("winner commits");
 

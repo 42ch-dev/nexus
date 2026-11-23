@@ -101,9 +101,6 @@ export interface DesktopClientOptions {
    * a remote daemon (V1.92 P1).
    */
   baseUrl?: string;
-  /**
-   * an explicit `baseUrl` is provided.
-   */
   apiKey?: string;
   /** Override the daemon port (defaults to resolved port per §5 #3). */
   port?: number;

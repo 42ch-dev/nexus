@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /**
- * driver (`proof-runtime.mjs`) and the package/decision gates.
- *
  * Two consumers, one definition: the driver uses it to decide whether a run may
  * write canonical evidence at all, and the gates use it to decide whether an
  * existing document is acceptable. Keeping one implementation is the point — a
@@ -127,9 +125,6 @@ function sameSummary(a, b) {
   return ['count', 'min', 'p50', 'p95', 'max'].every((key) => a[key] === b[key]);
 }
 
-/**
- * `valueKey` is null) from an array, requiring every value to be finite.
- */
 function readRawSamples(root, path, count, valueKey, reasons) {
   const array = getPath(root, path);
   if (!Array.isArray(array)) {
@@ -289,8 +284,6 @@ export function evaluateRuntimeEvidence(doc, expectations = {}) {
   }
   const recordedConfounders = Array.isArray(doc.validity?.confounders) ? doc.validity.confounders : null;
 
-  // artifact or revision is stale no matter how the run itself went. The
-  // document's own confounders travel with the verdict so nothing is lost.
   if (mismatches.length > 0) {
     return {
       state: 'stale',

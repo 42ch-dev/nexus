@@ -55,7 +55,6 @@ function ipcDesktop(overrides: {
   getEntrance?: () => Promise<EntranceId>;
   setEntrance?: (value: EntranceId) => Promise<void>;
 } = {}) {
-  // `getSetupCompleted` on mount when a desktop is injected.
   return {
     getSetupCompleted: async () => true,
     setSetupCompleted: async () => undefined,

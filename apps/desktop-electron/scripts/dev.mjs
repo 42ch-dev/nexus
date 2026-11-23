@@ -45,7 +45,6 @@ function commandLabel(command, args) {
 function signalProcessGroup(child, signal) {
   if (!child.pid) return;
   try {
-    // helpers, the service utility and Vite's worker descendants.
     process.kill(-child.pid, signal);
   } catch (error) {
     if (error?.code !== 'ESRCH') {
@@ -147,7 +146,6 @@ async function validateNativePayload() {
 }
 
 async function prepare(mode) {
-  // workspace dependencies merely because the service imports their packages.
   for (const packageName of [
     '@42ch/nexus-contracts',
     '@42ch/nexus-native',

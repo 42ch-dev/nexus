@@ -138,8 +138,6 @@ async fn upsert_never_duplicates_across_chapters_for_same_name() {
     .await
     .unwrap();
 
-    // uniqueness on (creator, work_entry_id=name, world)) and refreshes its
-    // source_chapter_id + payload instead of duplicating.
     let outcome = upsert_pending_candidate(
         &pool,
         CREATOR,
@@ -445,7 +443,6 @@ async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
     )
     .await;
 
-    // nothing, so the caller skips instead of writing a foreign endpoint.
     let unknown = nexus_local_db::kb_relationships::resolve_entity_by_canonical_name(
         &pool,
         WORLD,
@@ -465,7 +462,6 @@ async fn v1191_extract_unresolved_endpoint_leaves_zero_relationship_rows() {
     .unwrap();
     assert_eq!(known.as_deref(), Some("kb_t13_aria"));
 
-    // non-existent endpoint is refused by the FK and leaves zero rows.
     let mut conn = pool.acquire().await.unwrap();
     let forced = nexus_local_db::kb_relationships::upsert_extraction_relationship(
         &mut conn,
@@ -501,7 +497,6 @@ async fn v1191_extract_cancelled_job_rolls_back_the_candidate_transaction() {
     nexus_local_db::kb_store::seed::world(&pool, WORLD, CREATOR, "T13", "t13", "private", "manual")
         .await;
 
-    // extraction run is in flight.
     let job = nexus_local_db::enqueue_extract_job_with_artifact(
         &pool,
         CREATOR,
@@ -519,7 +514,6 @@ async fn v1191_extract_cancelled_job_rolls_back_the_candidate_transaction() {
         .await
         .unwrap();
 
-    // caller's transaction (the repair the queue capability now performs).
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query(
         "INSERT INTO kb_key_blocks (key_block_id, world_id, canonical_name, block_type, status, \

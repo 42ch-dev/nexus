@@ -134,7 +134,6 @@ async fn workflow_ir_reads_the_installed_strategy_as_a_candidate_document() {
     assert_eq!(document.state.to_string(), "candidate");
     assert!(!document.nodes.is_empty());
 
-    // the document the route serves round-trips through the wire shape.
     let wire = serde_json::to_value(&document).expect("document is serializable");
     let decoded: WireWorkflowDocument =
         serde_json::from_value(wire).expect("document decodes as the schema DTO");

@@ -48,10 +48,6 @@ export interface DesktopCapabilities {
   openWith(path: string): Promise<void>;
   /** Reveal `path` in Finder (path-guarded). */
   revealInFinder(path: string): Promise<void>;
-  /**
-   * are accepted (validated by main). Returns a structured error on invalid
-   * scheme or open failure.
-   */
   openExternalUrl(url: string): Promise<void>;
   /**
    */
@@ -64,21 +60,8 @@ export interface DesktopCapabilities {
   stopDaemon(): Promise<void>;
   /** Restart the service atomically (owned or explicitly authorized attached). */
   restartDaemon(): Promise<void>;
-  /**
-   * can boot fresh. Creative files in the workspace are untouched. Resolves
-   * `{status:'confirmed'}` only after main's explicit native confirmation and a
-   * completed bounded reset; `{status:'cancelled'}` when the user declines the
-   * native dialog (nothing was closed, deleted or restarted — stay in
-   * recovery); rejects with a coded error on failure.
-   */
   resetLocalDatabase(): Promise<ResetLocalDatabaseResult>;
-  /**
-   * selected directory path, or `null` if the user cancelled.
-   */
   pickDirectory(defaultPath: string): Promise<string | null>;
-  /**
-   * and CLI agree on the active workspace root.
-   */
   setWorkspacePath(path: string): Promise<void>;
   /**
    * Browser build defaults to `true`; desktop reads from the main-owned config.
@@ -101,11 +84,6 @@ export interface DesktopCapabilities {
    * invoke transport errors are also surfaced as `null` so preselect never crashes.
    */
   getAgentProfile(): Promise<{ name: string; launchCommand?: string } | null>;
-  /**
-   * creator ID and mirroring the target Profile's workspace path to the legacy
-   * `workspace_path` key. Returns the resolved workspace path for the switched-to
-   * Profile (AC-P0-5).
-   */
   switchActiveCreator(creatorId: string): Promise<string>;
   /** Resolve the default workspace root path (desktop only). */
   getWorkspaceRoot(): Promise<string>;
@@ -114,8 +92,6 @@ export interface DesktopCapabilities {
 }
 
 function asDesktopError(err: unknown): DesktopCapabilityError {
-  // them as `Error` with a `code` own-property). Anything else collapses to
-  // `invoke_failed`.
   if (err && typeof err === 'object' && 'code' in err && 'message' in err) {
     const e = err as { code: string; message: string };
     return { code: e.code as DesktopCapabilityError['code'], message: e.message };
@@ -168,7 +144,6 @@ export class ElectronDesktopCapabilities implements DesktopCapabilities {
     try {
       const bridge = getDesktopBridge();
       if (!bridge) throw new Error('Desktop bridge unavailable.');
-      // never passes Electron event objects across the boundary.
       return bridge.onStatusChanged(callback);
     } catch (err) {
       throw asDesktopError(err);
@@ -242,8 +217,6 @@ export class ElectronDesktopCapabilities implements DesktopCapabilities {
   async getEntrance(): Promise<EntranceId> {
     try {
       const value = await invokeDesktop('get_entrance');
-      // ever writes valid values, but a hand-edited config.toml must not
-      // produce a third state.
       return isEntranceId(value) ? value : 'content-creator';
     } catch (err) {
       throw asDesktopError(err);

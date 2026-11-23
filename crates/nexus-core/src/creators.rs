@@ -88,12 +88,10 @@ impl CoreHomeService {
         &self,
         query: ListCreatorsQuery,
     ) -> CoreResult<ListCreatorsResponse> {
-        // with try_from rather than a sign-losing `as`.
         let limit = usize::try_from(query.limit.unwrap_or(50).clamp(1, 250)).unwrap_or(250);
 
         let ssot_ids = list_profile_ids_ssot(&self.nexus_home);
 
-        // unless the id is in the SSOT set).
         let identity_cache = load_identity_cache(&self.nexus_home);
         let mut sql_by_id: HashMap<String, NexusCreatorInfo> = HashMap::new();
         if let Some(db_path) = self.active_workspace_db_path() {
@@ -181,8 +179,6 @@ impl CoreHomeService {
     pub async fn create_creator(&self, display_name: String) -> CoreResult<CreatorDetail> {
         let display_name = validated_display_name(&display_name)?;
 
-        // by `nexus-creator::local_identity::generate_local_id`; the pattern
-        // itself is the public contract.
         let random: String = uuid::Uuid::new_v4()
             .to_string()
             .replace('-', "")
@@ -190,8 +186,6 @@ impl CoreHomeService {
             .take(12)
             .collect();
         let creator_id = format!("ctr_local{random}");
-        // run it anyway so future id-shape changes cannot bypass the
-        // path-traversal guard.
         validate_creator_id_safe(&creator_id).map_err(|reason| CoreError::Internal {
             category: format!("CREATOR_ID_GENERATION_ERROR: {reason}"),
         })?;
@@ -207,24 +201,15 @@ impl CoreHomeService {
         }
         ensure_profile_home_ssot(&self.nexus_home, &creator_id)?;
 
-        // must not fail on that absence (the first-run shell creates the
-        // creator before any workspace is selected). The row is materialized
-        // by the first workspace selection.
         let holder_entry_id = match workspace_db {
             Some(db_path) => {
                 let pool = nexus_local_db::init_pool(&db_path)
                     .await
                     .map_err(crate::error::local_db_err)?;
-                // materialization — the workspace `creators` row and its
-                // stable holder registry row commit together (§2.1), so no
-                // second Creator create SQL exists here.
                 let materialized =
                     nexus_local_db::ensure_creator_row(&pool, &creator_id, &display_name)
                         .await
                         .map_err(crate::error::local_db_err);
-                // that just committed with the subject back through the
-                // read-only primitive (a read never provisions), while the
-                // pool is still open.
                 let holder = match materialized {
                     Ok(()) => nexus_local_db::require_creator_holder(&pool, &creator_id)
                         .await
@@ -344,7 +329,6 @@ impl CoreHomeService {
             reason,
         })?;
 
-        // (enrichment targets only exist for Profiles that have a home).
         ensure_profile_home_ssot(&self.nexus_home, creator_id)?;
 
         if let Some(ref display_name) = display_name {
@@ -363,8 +347,6 @@ impl CoreHomeService {
         }
 
         let cache_path = self.nexus_home.join("creator_identity_cache.json");
-        // file exists but cannot be parsed, report an error instead of
-        // silently wiping all cached identities (QC2-F-002).
         let mut cache = if cache_path.exists() {
             load_identity_cache_strict(&cache_path)?
         } else {
@@ -397,7 +379,6 @@ impl CoreHomeService {
                 return Err(err);
             }
             pool.close().await;
-            // reflected by every consumer (QC1-F-001).
             set_cached_display_name(&mut cache, creator_id, display_name);
         }
 
@@ -448,10 +429,6 @@ impl CoreHomeService {
             });
         }
 
-        // the workspace slug reset must not straddle two lock epochs, or a
-        // concurrent writer landing between them splits the pair (a slug reset
-        // applied to a creator that is no longer the active one).
-        //
         // Profile switch previously *removed* the slug entry and relied on
         // read-path fallback; write `"default"` explicitly so config stays
         // self-describing and older read paths that lack the fallback do not
@@ -505,9 +482,6 @@ impl CoreHomeService {
 
         let cleared = clear_creator_credentials(&self.nexus_home, creator_id)?;
 
-        // decision is re-made on the locked document: a concurrent switch to
-        // another creator that lands first must not be clobbered by this
-        // logout.
         with_config_lock(&self.nexus_home, || {
             let mut config = read_cli_config(&self.nexus_home)?;
             if config
@@ -566,8 +540,6 @@ fn creator_detail_from_parts(
 ) -> CreatorDetail {
     CreatorDetail {
         creator_id: creator_id.to_string(),
-        // service-managed holder is not projected here (the trusted
-        // management read path resolves it).
         holder_entry_id: None,
         handle: entry.and_then(|e| e.handle.clone()),
         display_name: entry.and_then(|e| e.display_name.clone()),
@@ -714,7 +686,6 @@ fn apply_active_selection(config: &mut toml::Value, creator_id: &str) -> CoreRes
         .remove("active_workspace_slug_by_creator")
         .unwrap_or_else(|| toml::Value::Table(toml::Table::new()));
     let Some(slug_table) = slugs.as_table_mut() else {
-        // document exactly as it was.
         table.insert("active_workspace_slug_by_creator".to_string(), slugs);
         return Err(internal(
             "CONFIG_ERROR",
@@ -975,7 +946,6 @@ mod tests {
     fn use_creator_commits_the_selection_and_the_slug_reset_together() {
         let tmp = tempfile::tempdir().expect("temp home");
         let home = tmp.path().to_path_buf();
-        // its `.nexus42` root.
         let nexus_home = home.join(".nexus42");
         std::fs::create_dir_all(&nexus_home).expect("nexus home");
         seed_creator(&nexus_home, TARGET);
@@ -987,7 +957,6 @@ mod tests {
             crate::home::write_active_selection(&nexus_home, OTHER, Some("ws_other"), None)
                 .expect("seed");
 
-            // then clears the target's slug and re-selects the other creator.
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let racer = {
                 let racer_home = nexus_home.clone();
@@ -1024,11 +993,9 @@ mod tests {
                             return;
                         }
                         if stop.load(std::sync::atomic::Ordering::Relaxed) {
-                            // the committed selection, or a stale one.
                             poll();
                             return;
                         }
-                        // backoff and hides the interleaving we are probing.
                         std::thread::sleep(std::time::Duration::from_millis(1));
                     }
                 })

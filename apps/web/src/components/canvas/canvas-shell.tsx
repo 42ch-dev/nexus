@@ -1,6 +1,4 @@
 /**
- * (canvas-strategy-surface.md Draft §3.3).
- *
  * Provides the ReactFlowProvider, pan/zoom controls, minimap, dot-grid
  * background, selection model, keyboard shortcuts, and a screen-reader graph
  * summary (A1 + A8). Per-surface adapters feed `nodes`/`edges`/`nodeTypes`;
@@ -105,11 +103,6 @@ export interface CanvasShellProps {
    * `data-surface-kind` for downstream styling / integration tests.
    */
   surfaceKind?: CanvasSurfaceKind;
-  /**
-   * options are merged into the default `{ padding: '8%' }`. Surfaces that
-   * need to exclude certain nodes from fit-bounds calculations (e.g. the
-   * directed-axis-spine decoration node) can pass a `nodes` filter here.
-   */
   fitViewOptions?: FitViewOptions;
   /**
    * Defaults to the strategy accent (the shell's original hardcoded color);
@@ -122,9 +115,6 @@ export interface CanvasShellProps {
   minimapAccent?: string;
 }
 
-/**
- * node/edge state plumbing and the interactive chrome.
- */
 function CanvasShellInner({
   nodes,
   edges,
@@ -141,19 +131,13 @@ function CanvasShellInner({
   relayout,
   surfaceKind,
   fitViewOptions,
-  // own accent token opt in via the minimapAccent prop (R-V1121P3QC1-S002).
   minimapAccent = 'var(--color-canvas-strategy-accent)',
 }: CanvasShellProps) {
   const { t } = useTranslation('canvas');
-  // viewport. When a cached viewport exists, restore it instead of fitting.
   const { cachedViewport, onViewportChange } = useCanvasViewport(surfaceKey);
   const hasCachedViewport = cachedViewport !== null;
-  // tokens (per-theme tunable; dark canvas is ink, not neutral flip).
   const gridMetrics = useCanvasGridMetrics();
 
-  // accent badge overlay when the active surface is the World Timeline or
-  // Work Timeline so the central instrument reads as visually distinct from
-  // Strategy / Outline / World KB canvases. Other surfaces render no badge.
   const showTimelineBadge =
     surfaceKind === 'timeline' || surfaceKind === 'work-timeline';
 

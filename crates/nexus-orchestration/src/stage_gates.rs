@@ -172,7 +172,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         });
     }
 
-    // are both present. Layer 1 = embedded default; Layer 2 = per-work file.
     if let (Some(ref ws_dir), Some(ref wref)) = (&fields.workspace_dir, &fields.work_ref) {
         if let Some(rules) = read_rules_layers(ws_dir, wref) {
             map.as_object_mut().map(|o| {
@@ -184,14 +183,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         }
     }
 
-    // summary read from `Works/<work_ref>/Outlines/foreshadowing.md` when the
-    // index is non-empty, so outline/draft prompts can surface active F###.
-    // Mirrors the `rules_content` workspace read above. When the file is
-    // missing/empty (or workspace_dir/work_ref absent, e.g. the auto-chain
-    // enqueue path which sets workspace_dir=None), default to empty string so
-    // strict-mode template rendering does not fail on
-    // `{{preset.input.foreshadowing_summary}}`; the preset's
-    // `{{#if foreshadowing_summary}}` guard then omits the section.
     let fsummary = match (&fields.workspace_dir, &fields.work_ref) {
         (Some(ws_dir), Some(wref)) => {
             let work_dir = std::path::Path::new(ws_dir).join("Works").join(wref);
@@ -218,7 +209,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             )
         });
     } else {
-        // rendering does not fail on `{{preset.input.world_kb_block}}`.
         map.as_object_mut().map(|o| {
             o.insert(
                 "world_kb_block".to_string(),
@@ -246,12 +236,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             .map(|o| o.insert("volume".to_string(), serde_json::Value::Number(vol.into())));
     }
 
-    // block. The caller (CLI/auto-chain) builds it via
-    // `findings_block::build_open_findings_block` from the chapter-scoped DAO
-    // query. When `None` (worldless Works, no open findings, or auto-chain
-    // path without pool access yet), default to empty string so strict-mode
-    // template rendering does not fail on `{{preset.input.open_findings_block}}`.
-    // The preset's `{{#if open_findings_block}}` guard omits the section.
     let findings_block = fields.open_findings_block.clone().unwrap_or_default();
     map.as_object_mut().map(|o| {
         o.insert(
@@ -260,14 +244,6 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         )
     });
 
-    // novel-brainstorm, and novel-review-master presets reference these
-    // keys in their enter-action vars and prompt templates. Strict-mode
-    // template rendering fails on MISSING keys, so every key a preset
-    // references must be present (empty string is fine — the preset's
-    // `{{#if …}}` guards omit the section). The auto-chain/cron/review-
-    // master insertion paths build input through this function, so a
-    // missing key would make the drive loop fail at the first state and
-    // cancel the run — never a driven run with real provider progress.
     for key in [
         "references_dir",
         "output_dir",
@@ -1059,7 +1035,6 @@ mod tests {
     fn build_preset_input_world_kb_block_defaults_to_empty_for_worldless() {
         let fields = demo_work_fields("produce");
         let input = build_preset_input(&fields);
-        // as empty string so strict-mode templates don't fail.
         assert_eq!(input["world_kb_block"], "");
     }
 
@@ -1112,13 +1087,11 @@ mod tests {
         fields.workspace_dir = Some(ws.to_string_lossy().to_string());
 
         let input = build_preset_input(&fields);
-        // in the prompt template omits the section.
         assert_eq!(input["foreshadowing_summary"], "");
     }
 
     #[test]
     fn build_preset_input_foreshadowing_summary_empty_when_no_workspace_dir() {
-        // (no workspace read attempted).
         let fields = demo_work_fields("produce");
         let input = build_preset_input(&fields);
         assert_eq!(input["foreshadowing_summary"], "");

@@ -64,9 +64,6 @@ async fn seed_character_carrier(pool: &sqlx::SqlitePool) -> String {
 }
 
 fn mind_state_for_carrier(carrier_id: &str, mind_state_id: &str) -> Value {
-    // gate requires RFC 6901 pointers rooted at /modules/mental/<field> (see
-    // mind_state_gate.rs), so gate-facing wires built from it rewrite the
-    // delta path while the fixture bytes stay untouched in nexus-local-db.
     let mut wire: Value = serde_json::from_str(LEGACY_MIND_STATE_WIRE_FIXTURE).unwrap();
     wire["mind_state_id"] = json!(mind_state_id);
     wire["holder_entry_id"] = json!(carrier_id);
@@ -95,8 +92,6 @@ async fn revision(pool: &sqlx::SqlitePool, carrier_id: &str) -> i64 {
 
 #[tokio::test]
 async fn legacy_mind_state_fixture_derived_wire_validates_through_gate() {
-    // pin; the gate-facing wire built from it (RFC 6901 delta path) must
-    // still validate and round-trip through the gate into storage.
     let (pool, _dir) = setup_db().await;
     let carrier = seed_character_carrier(&pool).await;
     let wire = mind_state_for_carrier(&carrier, "ms_legacy_pin");
@@ -236,8 +231,6 @@ async fn rejects_chr_subject_on_mind_state_holder_entry_id() {
 
 #[tokio::test]
 async fn atomic_write_rejects_concurrent_soft_delete_without_revision_bump() {
-    // revision; the in-transaction CAS predicate must revalidate non-deleted
-    // status so the write cannot commit onto a deleted carrier.
     let (pool, _dir) = setup_db().await;
     let carrier = seed_character_carrier(&pool).await;
     let before = modules_json(&pool, &carrier).await;
@@ -276,7 +269,6 @@ async fn atomic_write_rejects_concurrent_soft_delete_without_revision_bump() {
 
 #[tokio::test]
 async fn atomic_write_rejects_concurrent_owner_drift() {
-    // admission and commit must miss the CAS predicate inside the transaction.
     let (pool, _dir) = setup_db().await;
     let carrier = seed_character_carrier(&pool).await;
     let before = modules_json(&pool, &carrier).await;

@@ -1,6 +1,4 @@
 /**
- * composed candidate.
- *
  * Every assertion here runs over the real service: a disposable home seeded by the native
  * fixture binary, a small pattern registry written into `<home>/.nexus42/patterns`, and the
  * actual native core behind the route. The compose route is a write, so a stubbed core would
@@ -22,10 +20,6 @@ const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** An embedded preset, so the revision-0 candidate exists without a shipped bundle. */
 const STRATEGY = 'novel-writing';
 const COMPOSE_PATH = `/v1/daemon/strategies/${STRATEGY}/compose`;
-/**
- * (the T7 strategy) imports judged states carrying `linear` edges, so the reachability walk
- * refuses it before compose is involved — a separate, pre-existing import/simulate mismatch.
- */
 const WALKABLE_STRATEGY = 'novel-project-init';
 const WALKABLE_COMPOSE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/compose`;
 const WALKABLE_SIMULATE_PATH = `/v1/daemon/strategies/${WALKABLE_STRATEGY}/simulate`;
@@ -142,11 +136,6 @@ const pin = (value) => ({ registry_id: value.registry_id, version: value.version
 describe('compose route (v1.239 P3-T7)', () => {
   let home;
   let service;
-  /**
-   * shared base and every refusal is asserted to leave it exactly where it was — the revision is
-   * the store's own CAS authority, so this is the strongest "nothing was written" evidence the
-   * wire exposes.
-   */
   let revision = 0;
 
   before(async () => {
@@ -290,7 +279,6 @@ describe('compose route (v1.239 P3-T7)', () => {
     assert.equal(node(response.document, 'swap-slot'), undefined);
     assert.ok(binding(response.document, 'source-research'), 'the untouched region stays');
     assert.ok(node(response.document, 'collect-sources'));
-    // collapsed node carried are dropped and named rather than defaulted away.
     assert.equal(
       response.document.nodes.filter((entry) => entry.kind === 'pattern_slot').length,
       2,
@@ -506,7 +494,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     assert.equal(first.payload.simulation_level, 'reachability');
     assert.equal(first.payload.schema_version, 1);
 
-    // changed document yields a different one.
     const again = await post(WALKABLE_SIMULATE_PATH, { document });
     assert.equal(again.payload.ir_content_hash, first.payload.ir_content_hash);
 
@@ -529,7 +516,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
   });
 
   test('a slot the graph wires is named by the trajectory', async () => {
-    // client's attach target, so no edge is authored on the way to the route.
     const document = composed.document;
     assert.deepEqual(
       document.edges.filter((edge) => edge.to === 'collect-sources'),

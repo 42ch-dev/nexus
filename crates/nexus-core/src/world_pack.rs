@@ -65,13 +65,7 @@ impl CoreService {
                 resource: "world_pack_import: read-only core access".to_string(),
             });
         }
-        // ownership guard runs before the selection is derived, so a foreign
-        // World keeps the cross-author 403 and only a missing World is the
-        // `world {id}` 404 — exactly as the export arm renders it.
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
-        // owned World, so the orchestrator persists under the management
-        // selection (server-chosen from stored ownership + the holder
-        // registry, never from the pack).
         let (read_scope, _) = crate::actor_knowledge::management_read_scope(
             &self.inner.pool,
             principal.creator_id(),
@@ -153,7 +147,6 @@ impl CoreService {
         holder_map: Vec<HolderMapping>,
     ) -> CoreResult<PackImportResponse> {
         self.verify_principal(principal)?;
-        // then the selection. A dry run never renders a different refusal.
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         let (read_scope, _) = crate::actor_knowledge::management_read_scope(
             &self.inner.pool,
@@ -254,12 +247,6 @@ impl CoreService {
         if creator_id.trim().is_empty() {
             return Err(CoreError::AuthRequired);
         }
-        // caller must exist in the stored creator state and own the target
-        // World. The retained CLI open path registers its pool as the
-        // `bootstrap` writer, so the pool's registration identity is no
-        // longer required to equal the caller; forged/unknown creators are
-        // still rejected here. Persistence stays fenced by the writer
-        // protocol triggers.
         let known_creator: i64 =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ?)")
                 .bind(creator_id)
@@ -270,8 +257,6 @@ impl CoreService {
             return Err(CoreError::AuthRequired);
         }
         guards::require_world_owner(pool, world_id, creator_id).await?;
-        // writer protocol triggers. The supplied pool is never re-opened or
-        // promoted to a writer.
         let mut connection = pool.acquire().await.map_err(|e| db_err(&e))?;
         let query_only: i64 = sqlx::query_scalar("PRAGMA query_only")
             .fetch_one(&mut *connection)
@@ -282,8 +267,6 @@ impl CoreService {
                 resource: "world_pack_import: read-only legacy pool".to_string(),
             });
         }
-        // (protocol inactive, mode/epoch drift): the triggers would fence
-        // every write anyway.
         let live_writer: i64 = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM core_writer_registration r \
              JOIN core_workspace_gate g ON g.pk = 1 \
@@ -401,8 +384,6 @@ async fn run_world_pack_import(
             reason: e.to_string(),
         }
     })?;
-    // audience uses, before any atom is examined: an inadmissible mapping fails
-    // the whole import with zero atom writes instead of silently quarantining.
     let resolved_mappings = resolve_holder_map(pool, creator_id, world_id, &holder_map).await?;
     let batch_id = mint_import_batch_id();
     let identity = ImportIdentityContext {
@@ -647,7 +628,6 @@ fn governance_disposition(
     }
     let Some(foreign_holder_id) = original_owner else {
         if original_disclosure.is_some() {
-            // atom is held rather than stored as a holderless disclosure.
             return GovernanceDisposition::Quarantine(QuarantineReason::UnresolvedHolder);
         }
         return GovernanceDisposition::Shared;
@@ -1016,7 +996,6 @@ async fn import_pack(
         target_entry_ids.insert(e.entry_id.clone());
     }
 
-    // standalone SourceAnchor store yet — skip silently (export emits empty).
     let _anchors = if include_anchors {
         pack.source_anchors.as_deref()
     } else {
@@ -1061,9 +1040,6 @@ async fn import_pack(
             .as_ref()
             .map(|disclosure| disclosure.as_str().to_string());
 
-        // never reinterpreted as `owner-private` and never carried into a row
-        // (durable §5/§6). Checked before persistence so the dry-run reports it
-        // too.
         if let Err(err) = extensions::refuse_legacy_creator_only(&entry) {
             summary.entries.rejected += 1;
             record_entry(
@@ -1082,7 +1058,6 @@ async fn import_pack(
         ) {
             GovernanceDisposition::Shared => None,
             GovernanceDisposition::Adoption(governance) => {
-                // the permitted local holder the explicit mapping authorized.
                 let Some(local_holder) = governance.holder_entry_id.as_deref() else {
                     summary.entries.rejected += 1;
                     record_entry(
@@ -1132,9 +1107,6 @@ async fn import_pack(
 
         if let Ok(existing_by_id) = store.get_knowledge_entry(&entry.entry_id).await {
             if existing_by_id.world_id() == Some(world_id) {
-                // match, this is the same entry — honor conflict policy.
-                // If canonical_name or block_type differs, honor conflict policy on
-                // the entry_id collision (cannot safely overwrite a different entry).
                 let is_same_entry = existing_by_id.canonical_name == entry.canonical_name.as_str()
                     && existing_by_id.block_type == entry_type;
 
@@ -1219,8 +1191,6 @@ async fn import_pack(
                         .await?;
                     }
                     ConflictPolicy::Overwrite => {
-                        // the imported entry changed canonical_name or block_type.
-                        // The entry_id is the anchor; identity drift is the edit.
                         remap.insert(pack_entry_id.clone(), existing_by_id.entry_id.clone());
                         target_entry_ids.insert(existing_by_id.entry_id.clone());
                         import_overwritten_entry(
@@ -1829,10 +1799,6 @@ async fn import_overwritten_entry(
             outcome: ImportOutcome::Created,
             ..
         } => {
-            // stamped atomically inside the CAS update tx (adapter
-            // `run_cas_update_in_tx` → `update_key_block_auxiliary_fields_in_tx`),
-            // so the former separate `stamp_import_provenance_column` UPDATE
-            // (non-atomic vs the body replace) was removed.
             remap.insert(pack_entry_id.to_string(), existing_id.clone());
             target_entry_ids.insert(existing_id.clone());
             summary.entries.overwritten += 1;
@@ -1972,9 +1938,6 @@ async fn quarantine_pack_atom(
     reason: QuarantineReason,
     dry_run: bool,
 ) -> Result<(), PackImportError> {
-    // is read from the untransformed pack (`ParsedPack::source`) and serialized
-    // once, so nothing about the typed entry (defaults, rebuilt extensions,
-    // field order) can reach the quarantine row.
     let original_entry_json = raw_entry.to_string();
     let new_atom = NewQuarantinedAtom {
         import_batch_id: identity.batch_id,
@@ -2055,8 +2018,6 @@ async fn persist_entry_upsert(
         };
     };
 
-    // one caller-owned transaction (the same bound-transaction seam the
-    // candidate-adopt path uses).
     let tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(err) => return PersistOutcome::rejected(format!("adoption tx begin failed: {err}")),
@@ -2278,9 +2239,6 @@ fn review_to_response(review: ImportQuarantineReview) -> CoreResult<PackImportRe
         .atoms
         .into_iter()
         .map(|atom| {
-            // verbatim stored JSON is parsed once here, so what leaves the
-            // boundary is the pack document's atom, never a typed
-            // re-serialization of the entry.
             let original_entry =
                 serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
                     atom.original_entry.as_deref().unwrap_or_default(),

@@ -1,9 +1,3 @@
-/**
- * validation and Strategy canvas edits over the P3 `CoreService` authority
- * (`nexus_core::presets`). Thin translation only — the wire shapes are the
- * schema-owned generated DTOs, and every refusal (unknown preset, revision
- * conflict, validation failure) is the core's own.
- */
 import type {
   ApprovedStrategySnapshot,
   CoreStrategyPatchResponse,

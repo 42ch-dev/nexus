@@ -115,12 +115,6 @@ import { ForkLineageBadge } from './fork-lineage-badge';
 export interface TimelineCanvasProps {
   worldId: string;
   /**
-   * component tests). Production passes nothing: the Moment layer's carrier
-   * is composed from the bound Works' canonical `WorkOutline.scenes[]` /
-   * `beats[]` (V1.200 DR-26), each entry tagged with its owning Work. An
-   * explicitly supplied payload is projected verbatim (populated OR
-   * deliberately empty) and never acts as an automatic empty-data fallback.
-   *
    * The fixture is captured by the adapter factory (alongside the active
    * layer) so the adapter memo deps include it — a fixture identity change
    * re-projects the Moment layer without a layer swap.
@@ -128,43 +122,13 @@ export interface TimelineCanvasProps {
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
-/**
- * (AC-V1163-3 — "focuses the named event"). The `entity:` node-id prefix is
- * ALSO used by context entities and Brief-era nodes, so an id match alone is
- * not enough: a crafted `?event=<context-entity-id>` must not select those.
- * Module-level so the shared focus hook's effect deps stay stable across
- * re-renders (the same `layoutHint` discriminator `boundWorkEventTarget` uses).
- */
 const isTimelineEventNode = (node: Node<TimelineNodeData>): boolean =>
   node.data.layoutHint === 'event';
 
-/**
- * (review F1). The canvas consumes the events log as a SNAPSHOT source — the
- * complete canon `compute_result` projection, not a browse list — so remaining
- * pages are auto-fetched while `hasNextPage`. This constant is the safety
- * valve: a pathological World log (> 500 events) stops fetching and logs a
- * dev warning instead of issuing unbounded refetches. Pages beyond the cap are
- * honestly not rendered (the projection renders only what it fetched).
- */
 const TIMELINE_EVENTS_PROJECTION_CAP = 500;
 
-/**
- * (`resolve_run_branch` / timeline-events root fallback in `compute_runs.rs` +
- * `timeline_events.rs`): root is `fbk_root` when no explicit root fork branch
- * is stored. v1.190 P5-T1: the narrative-worlds projection
- * (`NarrativeWorldState`) carries no `root_fork_branch_id`, so this constant
- * IS the root branch id on this seam. Root is otherwise represented as NO
- * `?branch=` param; comparing against this id lets the parent hop normalize a
- * root parent to `undefined` instead of writing the root id into the URL (the
- * dual-representation bug).
- */
 const ROOT_BRANCH_ID_FALLBACK = 'fbk_root';
 
-/**
- * no injected scene/beat fixture. Module-level so the adapter memo deps stay
- * referentially stable across re-renders — no new object identity per render
- * (mirrors the Outline Canvas `EMPTY_SCENE_BEAT_FIXTURE` pattern).
- */
 const EMPTY_SCENE_BEAT_FIXTURE: SceneBeatFixturePayload = { scenes: [], beats: [] };
 
 /**
@@ -216,7 +180,6 @@ function buildConflictDraft(
         ? info.draftPatch.body
         : JSON.stringify(info.draftPatch.body);
   }
-  // the event inspector) serializes into the modal's `modules` field row.
   if (info.draftPatch.modules !== undefined) {
     draftValues.modules = JSON.stringify(info.draftPatch.modules);
   }
@@ -269,12 +232,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [searchParams, setSearchParams],
   );
 
-  // the parent against this so a hop to the World's root CLEARS `?branch=`
-  // (root = no param) instead of setting the root id — the degraded-badge
-  // guard (`forkLineageUnavailable`) must never see a truthy root
-  // `activeBranchId`. v1.190 P5-T1: the narrative-worlds projection never
-  // carried `root_fork_branch_id` (see ROOT_BRANCH_ID_FALLBACK above), so the
-  // root branch id is the constant; the former per-World lookup was dead.
   const rootBranchId = ROOT_BRANCH_ID_FALLBACK;
 
   //
@@ -320,10 +277,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         : forkLineage.data ?? { is_fork: false },
     [forkLineage.data, forkLineageUnavailable],
   );
-  // `handleBranchChange` so the timeline-events query re-keys to the
-  // parent branch and the parent Timeline renders immediately. No merge /
-  // edit / multi-branch workspace — parent hop ONLY.
-  //
   // Bugbot 2 — a parent that IS the World's root branch hops to `undefined`
   // (clears `?branch=`), never to the root id string: root is canonically
   // NO param, and the degraded-badge guard treats any truthy
@@ -341,12 +294,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [timelineEvents.data],
   );
 
-  // is a snapshot source (the canvas needs the COMPLETE canon compute_result
-  // log, not a browsable list), so pages are fetched automatically while
-  // `hasNextPage`, up to the hard `TIMELINE_EVENTS_PROJECTION_CAP` (500).
-  // The effect fires at most once per resolved page: its deps change only
-  // when a page lands (`fetchNextPage` is stable; `hasNextPage` flips when
-  // the last page resolves), so there is no refetch loop.
   useEffect(() => {
     if (!timelineEvents.hasNextPage) return;
     if (eventsList.length >= TIMELINE_EVENTS_PROJECTION_CAP) {
@@ -367,15 +314,9 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     void timelineEvents.fetchNextPage();
   }, [timelineEvents.hasNextPage, timelineEvents.fetchNextPage, eventsList.length, worldId]);
 
-  // more pages existed (`hasNextPage` stays true after the effect stops
-  // fetching), the canvas says so instead of silently dropping older events.
-  // A World with exactly 500 events and nothing more (`hasNextPage` false)
-  // shows no note — nothing is hidden.
   const isProjectionCapped =
     eventsList.length >= TIMELINE_EVENTS_PROJECTION_CAP && timelineEvents.hasNextPage;
 
-  // when the registry has not loaded the module — honest for preset-path
-  // modules absent locally).
   const computeModuleNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of computeModules.data ?? []) map.set(m.module_id, m.name);
@@ -387,11 +328,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // Open Run hand-off both navigate to the `/modules` page, which owns the
   // shared Run Studio.
 
-  // spec §1 P2 — context pre-fill + entry chrome, not a second studio).
-  // Bugbot 1 — when the canvas shows a FORKED branch, the entry ALSO
-  // pre-fills `?branch=<activeBranchId>` so the run request carries
-  // `branch_id` and compute run/accept writes the fork (not the world
-  // root). Root (undefined) → no branch param, unchanged.
   const onRunModule = useCallback(() => {
     navigate(
       `/modules?world=${encodeURIComponent(worldId)}${
@@ -400,7 +336,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     );
   }, [navigate, worldId, activeBranchId]);
 
-  // selects the module + opens the run inspector).
   const onOpenRun = useCallback(
     (runId: string, moduleId: string) => {
       navigate(
@@ -439,8 +374,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   );
   const nexusClient = useNexusClient();
 
-  // candidate set above. Enumerate the existing works endpoint by cursor.
-  //
   // V1.200 DR-26 (Greptile round 2) — every Moment-layer read keys on this
   // predicate: the effective `activeLayer` is derived from the same URL param
   // (and Moment is never the default layer), so the two agree wherever the
@@ -485,9 +418,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     return out;
   }, [momentWorkDetailQueries, allMomentWorks, worldId]);
 
-  // `WorkDetailResponse` carrying `world_id`; we filter to those matching the
-  // active World. Cached at the TanStack Query level — Work-detail readers
-  // (sidebar, Work detail page, Work Timeline orchestrator) share keys.
   const workDetailQueries = useQueries({
     queries: worksList.map((w: WorkSummary) => ({
       queryKey: ['work-detail', w.work_id],
@@ -517,7 +447,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   }, [workDetailQueries, worksList, worldId]);
   const outlineWorks = isMomentLayer ? momentRealizingWorks : realizingWorks;
 
-  // semantics preserved verbatim: same candidate set, same recency sort).
   const boundWorkId = useMemo<string | undefined>(() => {
     if (realizingWorks.length === 0) return undefined;
     const sorted = [...realizingWorks].sort((a, b) =>
@@ -526,10 +455,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     return sorted[0].workId;
   }, [realizingWorks]);
 
-  // (V1.163 P1 Task 2 — the event-level target is derived from the CURRENT
-  // selection, so the callback must read the projected `surface`). The
-  // reverse outline fan-out lives there too (QC3 F-1 — selection-lazy).
-  //
   // Captured conflict info (T4) — set by the mutation `onError` when the
   // daemon returns 409 / 422. The node ref lets the modal re-submit on
   // "Reapply" against a fresh `expected_version`.
@@ -538,11 +463,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   const [conflictVersion, setConflictVersion] = useState<number>(0);
   const [validationBanner, setValidationBanner] = useState<string[] | null>(null);
 
-  // orchestrator owns the list because the inspector is a controlled form
-  // per render: a draft is "pending" between an editor change and the
-  // mutation's settle. For the MVP guard we treat an active in-flight patch
-  // OR an open conflict modal as "unsaved" — both states would lose user
-  // intent on a tab close / reload.
   const hasUnsavedEdits =
     patchEntity.isPending || conflictInfo !== null;
 
@@ -601,8 +521,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // KB, the default would flip to Narrative — a sticky `?layer=brief`
   // would prevent that).
   const urlLayerRaw = searchParams.get('layer');
-  // layer state) so the QC1 W-003 layer-coercion effect and the inbound
-  // focus effect share ONE source of truth for the `?event=` value.
   const eventParamRaw = searchParams.get('event');
   const urlLayerOverride: TimelineLayer | null = useMemo(() => {
     if (
@@ -623,14 +541,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
   const activeLayer: TimelineLayer = urlLayerOverride ?? defaultLayer;
 
-  // deep-links always pair `?event=` with `?layer=narrative` (PD-6; both
-  // CTA directions emit both params). A hand-edited URL or bookmark that
-  // omits `layer` lands on the era-derived default — Brief on era Worlds —
-  // where the `entity:<key_block_id>` node does not exist in the projection
-  // (honest but weak empty focus, AC-V1163-3). Coerce the URL once per
-  // inbound event value so the Narrative projection renders the node. The
-  // one-shot ref (keyed on the event value) ensures a LATER user layer
-  // choice is never overridden by this effect.
   const inboundEventParam = eventParamRaw && eventParamRaw.length > 0 ? eventParamRaw : null;
   const inboundLayerCoercedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -643,12 +553,9 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     setSearchParams(next, { replace: true });
   }, [inboundEventParam, searchParams, setSearchParams]);
 
-  // the layer tabs, the breadcrumb, and the semantic zoom bridge. Writes
-  // the choice back to the URL so it survives refresh + surface switches.
   const handleLayerChange = useCallback(
     (layer: TimelineLayer) => {
       if (layer === defaultLayer) {
-        // keeps the URL minimal and lets the default track graph changes.
         if (searchParams.has('layer')) {
           const next = new URLSearchParams(searchParams);
           next.delete('layer');
@@ -663,8 +570,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [defaultLayer, searchParams, setSearchParams],
   );
 
-  // (not read from `surface`) because the fan-out queries must be declared
-  // before the adapter, which depends on their composed result.
   const [hasEventSelection, setHasEventSelection] = useState(false);
 
   //
@@ -697,11 +602,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     })),
   });
 
-  // canonical outlines, tagging each scene/beat with its owning Work (chapter
-  // numbers are Work-local: two Works that both own a chapter 1 must not
-  // collapse into one chapter region). Keyed on primitive signatures because
-  // `useQueries` returns a fresh array each render — depending on it directly
-  // would churn the payload identity and re-project every render.
   const boundWorksSignature = outlineWorks.map((w) => w.workId).join(',');
   const boundOutlinesSignature = workOutlineQueries
     .map((q) => {
@@ -724,10 +624,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the primitive signatures above
   }, [boundWorksSignature, boundOutlinesSignature]);
 
-  // adapter]` memo re-projects (semantic discrete swap per layer-feel §3.1).
-  // The ctxRef stays mutable; the adapter just captures the new layer
-  // value, so this is a cheap factory re-run, not a full layout rebuild.
-  //
   // V1.147 P2 T3 — the adapter also rebuilds when the compute events array or
   // the module-name map change (data-driven re-projection: `useCanvasSurface`
   // memoises on `[graph, adapter]`, so a new adapter identity re-runs the
@@ -756,8 +652,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
-  // `outlineFanOutEnabled` above). Setting the same boolean is a no-op for
-  // React, so this does not re-render on every projection rebuild.
   useEffect(() => {
     setHasEventSelection(surface.selectedNode?.data.layoutHint === 'event');
   }, [surface.selectedNode]);
@@ -778,7 +672,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     const selected = surface.selectedNode;
     if (!selected) return undefined;
     const selectedData = selected.data as TimelineNodeData;
-    // entities and compute log nodes never carry a World-event referent.
     if (selectedData.layoutHint !== 'event') return undefined;
     const worldEventId = selectedData.key_block_id;
     if (!worldEventId) return undefined;
@@ -812,32 +705,13 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   }, [workOutlineQueries, realizingWorks, surface.selectedNode]);
 
   const boundWorkEventId = boundWorkEventTarget?.eventId;
-  // THIS work when `boundWorkEventId` is set; in multi-Work Worlds it can
-  // differ from the surface-level fallback `boundWorkId` (most-recent
-  // realizing Work). Carried through ctxRef so the CTA's `data-work-id`
-  // matches the actual navigation target.
   const boundWorkEventWorkId = boundWorkEventTarget?.workId;
 
-  // `useCanvasSurface` hook memoizes the inspector on `[selectedNode,
-  // adapter]`; a LATE outline resolution mutates `ctxRef.current`
-  // (`boundWorkEventId` / `boundWorkEventWorkId`) without changing either
-  // dep, so the open inspector element would not re-render (the CTA stays
-  // surface-level until the user reselects). Re-create the element here
-  // keyed on the bind value so the open inspector upgrades its CTA in
-  // place when the outline settles. The element reads the freshest ctxRef
-  // at render time, so no other wiring changes.
   const inspector = useMemo(() => {
     if (!surface.selectedNode) return null;
     return adapter.renderInspector?.(surface.selectedNode) ?? null;
   }, [surface.selectedNode, adapter, boundWorkEventId]);
 
-  // adapter context ref captures the latest closure so the inspector's CTA
-  // always targets the current selection's bind. PD-5 three-state matrix:
-  //   1. Event-level match → deep-link `?layer=narrative&event=<id>`
-  //      (navigates to the EVENT's owning Work — the PD-7 winner, which can
-  //      differ from the surface-level fallback Work in multi-Work Worlds).
-  //   2. Surface bind only → V1.123 fallback `?layer=narrative` (no event).
-  //   3. No bind → callback not wired (`boundWorkId` undefined) → CTA hidden.
   const onViewInWorkTimeline = useCallback(() => {
     const target = boundWorkEventTarget;
     if (target) {
@@ -866,10 +740,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
 
   /**
-   * patch through `usePatchWorldKbEntity` (V1.73 `kb.patch_entity`). The
-   * adapter's inspector calls this; the orchestrator owns the mutation,
-   * invalidation, and conflict hand-off.
-   *
    * Returns a promise that settles with the underlying React Query mutation
    * (`mutateAsync`) so the inspector can reset its `isSubmitting` flag in a
    * `finally` block on every outcome — success AND error (PR #156 fix).
@@ -899,16 +769,12 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           dirtyFields,
         });
         if (info === null) {
-          // the hook's global onError. Nothing else to do here.
           return;
         }
         setConflictInfo(info);
         setConflictNode(node);
         if (info.kind === 'conflict') {
           setConflictVersion(info.currentVersion);
-          // relationship hook does). Refetch the canonical graph so the
-          // "Use current" / "Review side-by-side" actions operate against
-          // fresh state — mirrors the V1.73/V1.74 entity conflict flow.
           void graph.refetch();
         } else if (info.kind === 'validation') {
           setValidationBanner(info.errors);
@@ -917,9 +783,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     });
   }
 
-  /**
-   * just reported. Wired to the conflict modal's "Reapply" action.
-   */
   function handleReapply() {
     if (conflictInfo?.kind !== 'conflict') return;
     if (conflictNode === null) return;
@@ -956,20 +819,10 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     );
   }
 
-  // header button flips between the spatial when-axis canvas and the
-  // non-spatial sortable table companion. The toggle is hidden on the
-  // empty-state branch (there are no rows to list).
   const [showAltView, setShowAltView] = useState(false);
 
-  // backend create-on-absent path landed in V1.160 P1 T1 (`patch-entity`
-  // creates when the minted entity id is absent; F-001 / R-V1159P1-001
-  // closed), so the create path is LIVE — see `showCreateEra` below. The
-  // create dialog owns the era entity + optional parent-relationship
-  // mutations; this state only gates the dialog mount.
   const [eraCreateOpen, setEraCreateOpen] = useState(false);
 
-  // §3.3.3 V1.159 "Create entry"). Derived from the same graph read the
-  // Brief time-bands consume.
   const existingEras = useMemo(
     () =>
       (graph.data?.entities ?? [])
@@ -1006,11 +859,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [eventsList],
   );
 
-  // active branch context to the new fork's `branch_id`, which re-keys the
-  // `useWorldTimelineEvents` query → the forked branch's World Timeline
-  // renders immediately (no extra click). The success notice carries the
-  // label when provided, else the branch id. A toast-only parent landing is
-  // the rejected alternative (dead-ends the authoring loop — plan §2).
   const handleForkCreated = useCallback(
     (response: CreateForkResponse, label?: string) => {
       handleBranchChange(response.branch_id);
@@ -1023,8 +871,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     [handleBranchChange, t, toast],
   );
 
-  // stable; only the values inside ctxRef.current change.
-  //
   // T5: the context also carries the projected `nodes` + `selectedNodeId` +
   // `onSelectNode` so the alt-view table reads the same rows the canvas
   // renders and can drive React Flow selection from row clicks. Selection
@@ -1032,10 +878,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
   // alt-view itself performs NO writes (architect-locked §4.2).
   ctxRef.current = {
     worldId,
-    // no prop: the adapter projects the canonical carrier composed from the
-    // bound Works' outlines (`canonicalSceneBeatFixture`). An explicitly
-    // supplied `sceneBeatFixture` (Design Studio / tests) is an injection mode
-    // and takes precedence; an absent prop never means "substitute empty data".
     sceneBeatFixture,
     onPatchEntity: handlePatchEntity,
     onConflict: (info) => setConflictInfo(info),
@@ -1058,25 +900,16 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         ),
       );
     },
-    // a realizing Work is bound (the inspector hides the CTA otherwise —
-    // honest scope cut).
     boundWorkId,
-    // outline `event_id` when the SELECTED World event is realized by a Work
-    // outline event; the inspector's CTA deep-links to it. Undefined → the
-    // V1.123 surface-level fallback (`?layer=narrative` only) applies.
     boundWorkEventId,
-    // deep-link (can differ from `boundWorkId` in multi-Work Worlds), so
-    // the CTA's `data-work-id` matches the actual navigation target.
     boundWorkEventWorkId,
     onViewInWorkTimeline: boundWorkId ? onViewInWorkTimeline : undefined,
-    // `/modules` page.
     onOpenRun,
     // Opens the fork-create dialog pre-seeded with the picked event (the
     // fork point); always wired — the button only renders on compute nodes.
     onCreateFork: handleCreateFork,
   };
 
-  // banner — the new selection starts clean.
   useEffect(() => {
     setValidationBanner(null);
   }, [surface.selectedNodeId]);
@@ -1093,11 +926,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     );
   }
 
-  // the merged compute log events. A World whose only Narrative content is an
-  // accepted compute Run must render its Compute result node, not the
-  // global empty state. (V1.200 DR-26 adds the canonical Moment carrier as a
-  // third family — see the fix note below.)
-  //
   // V1.162 fix wave S-1 (qc3) — the events query is included in the
   // loading gate: during a branch-switch refetch the re-keyed
   // `useInfiniteQuery` has no data (`flattenPages → []`), so without this
@@ -1150,17 +978,8 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
     (!graph.data || (graph.data.entities ?? []).length === 0) &&
     eventsList.length === 0 &&
     !momentCarrierHasData &&
-    // Moment carrier for that Work is simply not composed yet, so the global
-    // empty state must not claim the timeline is empty while it resolves.
     momentPendingOutlineWorks.length === 0;
 
-  // graph carries zero `block_type=era` entities (the user clicked the Brief
-  // tab on a World that has no era data; Batch A T3's default-layer memo
-  // defaults such Worlds to Narrative, so this branch only triggers via an
-  // explicit user override). Per `layer-feel-differentiation.md` §2.2 + §7,
-  // the surface renders an honest Brief-empty panel with a CTA back to
-  // Narrative instead of an empty spatial canvas.
-  //
   // The graph itself is NOT globally empty here (the global empty branch
   // below owns zero-entity graphs). The Brief-empty branch only fires when
   // there are non-era entities to show on the Narrative layer.
@@ -1210,20 +1029,7 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
       />
     );
   }
-  // (`momentPendingOutlineWorks`, from the same index-aligned fan-out) and
-  // never blank the layer: each still-reading Work owns a row in the render,
-  // and the Works that settled keep rendering their scenes.
-  // Failed outline reads already count as unresolved Moment carrier data in
-  // `isEmpty` above, so they cannot be mislabeled as an empty World timeline.
 
-  // orchestrator's `isMomentEmpty` pattern: the active layer is Moment AND
-  // the projection returned zero nodes (no bound-Works scene/beat fixture /
-  // empty fixture). The graph itself is NOT globally empty here (the global
-  // empty branch above owns zero-entity graphs); this branch only fires
-  // when there is content on Brief/Narrative but nothing projectable on
-  // Moment — the honest panel (PD-3) explains scenes come from bound Works'
-  // Outline data, with a CTA back to Narrative.
-  //
   // Round 2 (finding 1) — only a SUCCESSFUL empty bound-Work set renders as
   // empty: a failed bound-Work outline read is not an empty Moment (the
   // aggregated affordance in the render owns that state). R5 — the same
@@ -1260,21 +1066,8 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         activeLayer={activeLayer}
         onLayerChange={handleLayerChange}
         showLayerSwitcher={!isEmpty}
-        // (spec §3.3.3 "Create entry", sibling to the layer switcher tabs).
-        // V1.160 P1 T2 — SHIPPED: the backend create-on-absent path landed
-        // in V1.160 P1 T1 (`patch-entity` creates when the minted entity id
-        // is absent; F-001 / R-V1159P1-001 closed), so the gate is live:
-        //   `showCreateEra={activeLayer === 'brief'}`
-        // which shows it whenever Brief is active — INCLUDING the Brief
-        // empty state (the "create your first era" path, T4 DoD) — and
-        // hides it on Narrative/Moment (Work-Brief stays read-only per
-        // spec §3.3.3). era_type editing on existing eras is UNAFFECTED
-        // (the edit path pre-reads an existing entity).
         showCreateEra={activeLayer === 'brief'}
         onCreateEra={() => setEraCreateOpen(true)}
-        // not available on the Brief layer when the time-band panel is
-        // present (the bands are the Brief rendering model; the toggle would
-        // only hide them).
         showAltViewToggle={
           !(activeLayer === 'brief' && surface.briefTimeBands !== null)
         }
@@ -1347,10 +1140,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
       {hasEvents ? (
         <div
-          // <CanvasShell> already carries the ordering disclaimer for SR
-          // users. This visible notice targets sighted users; SR users can
-          // still discover it via DOM navigation without a duplicate live
-          // announcement.
           role="note"
           data-testid="timeline-ordering-disclaimer"
           className="flex items-start gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-13 text-gray-700 shadow-elevation-2"
@@ -1362,8 +1151,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 
       {isProjectionCapped ? (
         <div
-          // ordering disclaimer — an honest statement that older compute
-          // events are not rendered, not a silent truncation.
           role="note"
           data-testid="timeline-compute-projection-cap-note"
           className="flex items-start gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-13 text-gray-700 shadow-elevation-2"
@@ -1394,8 +1181,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
       ) : isBriefEmpty ? (
         <BriefEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : isMomentEmpty ? (
-        // from bound Works' Outline data; Moments remain Work-owned. No
-        // World-owned Moment authoring CTA.
         <MomentEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : activeLayer === 'brief' && surface.briefTimeBands ? (
         // V1.159 P1 T2 — Brief layer vertical time-bands (spec §3.3.3 V1.159
@@ -1447,13 +1232,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
           ) : null}
         </div>
       ) : (
-        // remount on layer swap so the CSS keyframe animation replays; the
-        // `nexus-layer-enter` class carries the keyframe (fade + subtle scale
-        // per layer-feel-differentiation.md §4 "changing instrument"). The
-        // global `prefers-reduced-motion` rule in `apps/web/src/index.css`
-        // collapses animation-duration to 0.01ms so reduced-motion users get
-        // an instant swap. Viewport continuity survives via `useCanvasViewport`'s
-        // module-level cache (surfaceKey="timeline" is constant across layers).
         <div key={activeLayer} className="nexus-layer-enter" data-testid="timeline-canvas-layer-transition">
           <CanvasShell
             nodes={filterTimelineEntityNodes(surface.nodes)}
@@ -1464,8 +1242,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
             ariaLabel={t('timeline.canvasAriaLabel')}
             surfaceKey="timeline"
             surfaceKind="timeline"
-            // minimap with its own accent token, not the shell's strategy
-            // default.
             minimapAccent="var(--color-canvas-timeline-accent)"
             relayout={surface.relayout}
             fitViewOptions={{
@@ -1540,8 +1316,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
         open={forkDialogOpen}
         onOpenChange={(open) => {
           setForkDialogOpen(open);
-          // dialog closes without success. Reopening always re-derives it
-          // via `handleCreateFork`, so nothing lingers between flows.
           if (!open) setPendingFork(null);
         }}
         worldId={worldId}
@@ -1555,10 +1329,6 @@ export function TimelineCanvas({ worldId, sceneBeatFixture }: TimelineCanvasProp
 }
 
 /**
- * (World KB + Strategy) so the author can pivot from the hero. The peer links
- * preserve the active `worldId` (World KB) or drop to the list picker
- * (Strategy), matching `resolveCanvasNavTarget` semantics.
- *
  * The Work entry is intentionally NOT linked from here — Work entry stays
  * Outline (V1.118 regression gate), and Timeline is the World-entry hero.
  *
@@ -1589,18 +1359,7 @@ function TimelineCanvasHeader({
   onToggleView: () => void;
   activeLayer: TimelineLayer;
   onLayerChange: (layer: TimelineLayer) => void;
-  /**
-   * branch owns its own surface; the layer tabs add noise without value
-   * when the graph is empty (Task 5 owns the per-layer empty-state copy).
-   */
   showLayerSwitcher: boolean;
-  /**
-   * (Brief-layer chrome). SHIPPED: the V1.160 P1 T1 backend create-on-absent
-   * path closed F-001 / R-V1159P1-001, so the orchestrator passes
-   * `activeLayer === 'brief'`. The entry shows whenever the Brief layer is
-   * active — INCLUDING the Brief empty state (create-first-era path) — and
-   * hides on Narrative/Moment (Work-Brief stays read-only).
-   */
   showCreateEra: boolean;
   /** V1.159 P1 T3 + V1.160 P1 T2 — opens the era create dialog (live). */
   onCreateEra: () => void;
@@ -1741,9 +1500,6 @@ function TimelineCanvasHeader({
 }
 
 /**
- * (layer-feel-differentiation.md §3.2 explicit layer control; Moment added
- * by the V1.156 spec amendment §3.3.3 — 3×2 matrix completion).
- *
  * Inline segmented control (three buttons with `aria-pressed`). Built inline
  * rather than promoting to `packages/nexus-ui` because:
  *   - The set of layers + the active-layer discriminator are Timeline-
@@ -1788,8 +1544,6 @@ function TimelineLayerSwitcher({
       labelKey: 'timeline.layerSwitcher.narrative',
     },
     {
-      // Brief / Narrative semantics are unchanged. Moment is never the
-      // default (read-only projection — spec §3.3.3).
       layer: 'moment',
       testId: 'timeline-layer-tab-moment',
       labelKey: 'timeline.layerSwitcher.moment',

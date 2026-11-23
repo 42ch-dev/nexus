@@ -32,8 +32,6 @@ import { createDesktopConfig } from '../dist/desktop-config.js';
 const configPath = (home) => join(home, '.nexus42', 'config.toml');
 const agentPath = (home) => join(home, '.nexus42', 'agent-host', 'config.toml');
 const readText = (path) => readFileSync(path, 'utf8');
-// re-establish the plain-object shape these assertions pin, mirroring the
-// normalization at the product's own parse seam in src/desktop-config.ts.
 const toPlainToml = (value) =>
   Array.isArray(value)
     ? value.map(toPlainToml)
@@ -43,10 +41,6 @@ const toPlainToml = (value) =>
 const parseToml = (path) =>
   toPlainToml(parse(readText(path), { integersAsBigInt: 'asNeeded' }));
 
-/**
- * when it belongs to no other group. Without one a staged-and-renamed file
- * always inherits the process egid, so a captured-group assertion cannot fail.
- */
 function foreignGroup() {
   const egid = process.getegid?.();
   return process.getgroups?.().find((gid) => gid !== egid) ?? null;
@@ -118,7 +112,6 @@ test('workspace root precedence: per-creator map, legacy mirror, default slug', 
   );
   assert.equal(await config.get_workspace_root(), '/map/ws');
 
-  // another creator's path.
   writeTomlFile(
     configPath(home),
     [
@@ -149,7 +142,6 @@ test('bootstrap is idempotent, generates ctr_local + 12 hex, and never replaces 
   assert.equal(doc.active_creator_id, first.creator_id);
   assert.equal(doc.active_workspace_slug_by_creator[first.creator_id], 'default');
 
-  // reported without rewriting the document.
   writeTomlFile(configPath(home), `${readText(configPath(home))}\n# keep me\n`);
   assert.deepEqual(await config.ensure_setup_bootstrap(), {
     creator_id: first.creator_id,
@@ -308,7 +300,6 @@ test('written documents are owner-only (0600)', async (t) => {
   await config.ensure_setup_bootstrap();
   await config.set_agent_profile({ name: 'claude', launchCommand: 'claude' });
 
-  // neither the materialized copy nor the document is readable by other users.
   assert.equal(statSync(configPath(home)).mode & 0o777, 0o600);
   assert.equal(statSync(agentPath(home)).mode & 0o777, 0o600);
 });
@@ -473,7 +464,6 @@ test('a saved launch command is never executed here', async (t) => {
  */
 test('a release never unlinks a lock that only ends with our token', async (t) => {
   const source = readFileSync(new URL('../dist/desktop-config.js', import.meta.url), 'utf8');
-  // lock is taken) so the lock can be rewritten underneath it.
   const marker = 'await writeDocument(path, doc);';
   assert.ok(source.includes(marker), 'the write marker must exist in dist/desktop-config.js');
   const copyUrl = new URL(
@@ -497,7 +487,6 @@ test('a release never unlinks a lock that only ends with our token', async (t) =
     const lockPath = `${configPath(home)}.lock`;
 
     const pending = config.set_workspace_path({ path: '/ws' });
-    // still ends with our token, so a suffix compare would unlink it.
     const lockDeadline = Date.now() + 2000;
     let held = '';
     while (!held.endsWith('\n')) {
@@ -518,10 +507,6 @@ test('a release never unlinks a lock that only ends with our token', async (t) =
 });
 
 
-/**
- * process may not write is refused instead of replaced by a rename that the
- * directory — not the file — authorized.
- */
 test('a write-denied document is refused and keeps its bytes', async (t) => {
   const { home, config } = setup(t);
   const daemon = 'active_creator_id = "ctr_locked"\n';
@@ -544,10 +529,6 @@ test('a write-denied document is refused and keeps its bytes', async (t) => {
   assert.deepEqual(readdirSync(join(home, '.nexus42', 'agent-host')), ['config.toml']);
 });
 
-/**
- * policy and reapplies it before the rename, so publication never silently
- * tightens or widens access.
- */
 test('an existing 0640 document keeps its mode and group', async (t) => {
   const group = foreignGroup();
   if (group === null) {

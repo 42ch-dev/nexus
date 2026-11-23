@@ -1,6 +1,3 @@
-/**
- * replace_subtree and unnest route to the compose interactions.
- */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -81,7 +78,6 @@ describe('SlotInspector', () => {
   });
 
   it('consumes a refused op instead of rethrowing it at the event boundary', async () => {
-    // would surface as an unhandled rejection and fail this file.
     const refused = vi.fn(() => Promise.reject(new Error('409 conflict')));
     renderInspector({ onBindSlot: refused, onReplaceSubtree: refused, onUnnest: refused });
 

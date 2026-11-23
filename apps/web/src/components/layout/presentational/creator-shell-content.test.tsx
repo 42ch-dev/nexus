@@ -122,7 +122,6 @@ describe('CreatorShellContent', () => {
     fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
     fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
 
-    // `world_id_required`, so the submit stays disabled.
     expect(screen.getByLabelText('Work world')).toHaveValue('');
     expect(screen.getByTestId('sidebar-create-submit-work')).toBeDisabled();
     expect(onWorkSubmit).not.toHaveBeenCalled();
@@ -147,13 +146,10 @@ describe('CreatorShellContent', () => {
 
     fireEvent.click(screen.getByTestId('sidebar-create-tab-work'));
 
-    // error copy instead of the empty "No worlds available" option.
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText('Failed to load worlds')).toBeInTheDocument();
     expect(screen.queryByText('No worlds available')).not.toBeInTheDocument();
 
-    // the World state alone — the submit must STILL stay blocked under the
-    // read error (not merely because the fields are blank).
     fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });
     fireEvent.change(screen.getByLabelText('Long-term goal'), { target: { value: 'Finish draft' } });
     fireEvent.change(screen.getByLabelText('Initial idea'), { target: { value: 'A long road' } });
@@ -185,8 +181,6 @@ describe('CreatorShellContent', () => {
     fireEvent.click(within(alert).getByRole('button'));
     expect(onWorldsRetry).toHaveBeenCalledTimes(1);
 
-    // no error. Fill the text fields — the single-world preselect plus the
-    // filled fields make the submit enabled and the payload complete.
     rerender(<CreatorShellContent {...props} worlds={WORLD_OPTIONS} onWorldsRetry={onWorldsRetry} />);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Work title'), { target: { value: 'Novel' } });

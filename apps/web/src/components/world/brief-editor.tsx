@@ -1,7 +1,4 @@
 /**
- * creates (or edits) the era KnowledgeEntry backing the Brief layer through
- * {@link useSaveBrief}. Product-owned behaviour:
- *
  *   - `保存 Brief` is disabled while the trimmed text is empty — no error
  *     dialog, no toast.
  *   - Save failure keeps the editor mounted with the draft intact and shows
@@ -20,9 +17,6 @@ import { NexusClientError } from '@/lib/nexus';
 
 import { useSaveBrief } from './use-brief-mutation';
 
-/**
- * with the era-create dialog's copy of the same defensive narrowing).
- */
 function extractValidationErrors(err: unknown): string[] {
   if (err === null || typeof err !== 'object') return [];
   if (!('details' in err)) return [];
@@ -82,7 +76,6 @@ export function BriefEditor({
           : err instanceof Error
             ? err.message
             : String(err);
-      // stays mounted so the copy's "可直接重试" is literally true.
       setError(t('worldApp.briefEditor.saveFailure', { reason }));
     }
   }

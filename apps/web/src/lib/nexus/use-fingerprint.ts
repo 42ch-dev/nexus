@@ -13,13 +13,6 @@ export type FingerprintState =
       status: 'error';
       message: string;
       code?: string;
-      /**
-       * throw was a `NexusClientError` produced by the browser-client
-       * classifier (status=0 transport failures); absent for HTTP errors
-       * (4xx/5xx — recovery is daemon-side, not transport). Drives the
-       * Connection form's choice between `<TransportErrorBlock>` and the
-       * legacy inline error region.
-       */
       kind?: TransportErrorKind;
     };
 

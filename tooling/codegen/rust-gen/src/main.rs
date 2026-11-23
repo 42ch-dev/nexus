@@ -360,8 +360,6 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
         let Some(attr_at) = body[..at].rfind("# [") else {
             continue;
         };
-        // a field that carries `deserialize_with` makes serde reject omission,
-        // so the presence-preserving attribute must carry `default` itself.
         let attribute = concat!(
             "# [serde (default , deserialize_with = ",
             "\"crate :: tristate :: deserialize_presence\")] ",
@@ -824,7 +822,6 @@ fn dedupe_ref_targets(
     let names: BTreeSet<String> = duplicates.keys().cloned().collect();
     prune_duplicate_items(&mut file.items, &names);
 
-    // helper of the copy); import just the names the pruned module still uses.
     let pruned = prettyplease::unparse(file);
     let mut imports: Vec<syn::Item> = Vec::new();
     for (name, module) in &duplicates {
@@ -1036,7 +1033,6 @@ fn restore_primitive_newtype_try_from(file: &mut syn::File) -> Result<(), String
         let Some(name) = local_self_type(&block.self_ty) else {
             continue;
         };
-        // `FromStr` impl parses into qualifies; everything else is skipped.
         let Some(inner) = from_str_err_primitive(&block.items) else {
             continue;
         };
@@ -1104,15 +1100,6 @@ fn generate_schema_rust(
     let mut schema: Schema = serde_json::from_str(&content)
         .map_err(|err| format!("invalid JSON Schema in {}: {err}", schema_path.display()))?;
 
-    // handing it to `typify`. Without this, `typify` names the root type from the
-    // raw title (e.g. `"Nexus World Entity"` → `NexusWorldEntity`, `"Nexus Delta"`
-    // → `NexusDelta`) or emits no root type at all when the title is absent
-    // (e.g. `work-summary`). Overriding aligns the emitted name with the TS contract
-    // (`schemaToTypeName`) and the drift-test `entry!` registrations (`World`,
-    // `WorkSummary`, `ForkBranch`, …). Only the in-memory root `title` entry is
-    // touched; other metadata (description, $id, …) is preserved. The schemars-0.8
-    // `RootSchema` parser required an object root, so a non-object root stays a
-    // hard error here rather than being silently coerced.
     let file_name = rel
         .file_name()
         .and_then(|s| s.to_str())
@@ -1123,12 +1110,6 @@ fn generate_schema_rust(
         .ok_or_else(|| format!("root schema must be an object: {}", schema_path.display()))?
         .insert("title".to_owned(), Value::String(type_name.clone()));
 
-    // definition): the prep stage inlines the referenced schema verbatim, so
-    // typify names the merged root type from the REFERENCED member's `title`
-    // (e.g. `NexusCharacterDetail`), drifting from the basename-derived TS
-    // contract name set above. Capture that member-derived name; after
-    // generation the emitted identifiers are renamed to the contract name, and
-    // derived helper names (builders, nested newtypes) shift coherently.
     let member_type_name: Option<String> = schema
         .as_object()
         .and_then(|obj| obj.get("allOf"))
@@ -1138,7 +1119,6 @@ fn generate_schema_rust(
         .and_then(|title| title.as_str())
         .map(title_to_type_name);
 
-    // own schema representation.
     let typify_schema = serde_json::from_value(schema.to_value())
         .map_err(|err| format!("invalid typify input in {}: {err}", schema_path.display()))?;
     let mut type_space = TypeSpace::new(
@@ -1374,10 +1354,6 @@ fn run() -> Result<(), String> {
         );
     }
 
-    // committed tree (bespoke, stale or partial) only once every write succeeded. A
-    // failed or aborted run therefore leaves the previous generated tree intact instead
-    // of pruning it mid-window; stray files from a previous generator (e.g. a
-    // definitions-only emit like `common_types.rs`) still disappear with the swap.
     stage_and_swap(&out_root, |stage_root| {
         generate_tree(&root, &deref_dir, &src_dir, &out_root, stage_root)
     })
@@ -1414,7 +1390,6 @@ fn generate_tree(
         body: String,
     }
     let mut pending: Vec<PendingModule> = Vec::new();
-    // sorted schema paths), matching the committed `SCHEMA_VERSIONS` ordering.
     let mut schema_versions: Vec<(String, u32)> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
     let mut skipped = 0usize;
@@ -1447,7 +1422,6 @@ fn generate_tree(
             }
         }
 
-        // tree loses the top-level `schema_version` stamp and keeps the raw title).
         let src_path = src_dir.join(rel);
         let export_all = export_mode_for_schema(&src_path);
         let export_type = if export_all {
@@ -1493,8 +1467,6 @@ fn generate_tree(
         ));
     }
 
-    // first write, so the owner index sees the type names modules actually declare
-    // and a render failure cannot leave a partially written tree.
     let mut parsed: Vec<(PathBuf, PathBuf, String, syn::File)> = Vec::new();
     let mut render_failures: Vec<String> = Vec::new();
     for module in &pending {
@@ -1585,7 +1557,6 @@ fn generate_tree(
         );
     }
 
-    // `#![allow(...)]` attr + `SCHEMA_VERSIONS` / `LATEST_SCHEMA_VERSION`).
     write_barrels(stage_root, &generated_modules, &schema_versions);
 
     let latest = schema_versions.iter().map(|(_, v)| *v).max().unwrap_or(0);
@@ -1669,7 +1640,6 @@ where
 {
     let _lock = acquire_publication_lock(out_root)?;
     let stage_root = staging_root(out_root);
-    // this run could overwrite the recovery material.
     recover_interrupted_publication(out_root)?;
     if stage_root.exists() {
         fs::remove_dir_all(&stage_root)
@@ -1846,7 +1816,6 @@ mod tests {
             })
         });
 
-        // rather than clear the staging tree out from under it.
         locked_rx.recv().unwrap();
         let err = stage_and_swap(&out_root, |_| Ok(())).unwrap_err();
         assert!(

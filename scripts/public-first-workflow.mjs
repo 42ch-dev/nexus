@@ -223,11 +223,6 @@ const ADMISSION_POLL_MAX_INTERVAL_MS = 1_000;
 const GATE_BOUNDARY_TIMEOUT_MS = 15_000;
 const GATE_BOUNDARY_START_INTERVAL_MS = 100;
 const GATE_BOUNDARY_MAX_INTERVAL_MS = 500;
-/**
- * driving the run before the W6 resume re-drives it. The deadline is only
- * evaluated by a driver (`join_timeout_tick`), so the wait is what makes the
- * reroute deterministic instead of a race against the deadline.
- */
 const GATE_DEADLINE_MARGIN_MS = 750;
 /** Sanity bound on the fixture's declared `timeout_ms` (a usable bounded wait). */
 const GATE_TIMEOUT_MS_MAX = 60_000;
@@ -235,23 +230,7 @@ const GATE_TIMEOUT_MS_MAX = 60_000;
 const EFFECT_BOUNDARY_TIMEOUT_MS = 30_000;
 const EFFECT_BOUNDARY_START_INTERVAL_MS = 100;
 const EFFECT_BOUNDARY_MAX_INTERVAL_MS = 500;
-/**
- * replay, the refusal controls and the post-restart `history_unavailable` close
- * are all answered inside this window; a live run with nothing new to send
- * simply idles until it elapses — an explicit window of this driver's own, never
- * a socket-timeout race and never reported as a transport failure
- * (see `readEventStream`).
- */
 const EVENT_REPLAY_TIMEOUT_MS = 2_000;
-/**
- * adapter fixture's paths). `hostile_bodies_create_their_evidence_when_directly_run`
- * is the positive control proving an actually-executed unsolicited
- * `shell`/`str_replace_editor`/`run_code` body creates exactly these markers, so
- * their absence under this driver's isolated root is the end-to-end counterpart
- * of the sealed `deny_all` dispatch rejection
- * (`real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects`).
- * Only names are compared; nothing is read out of any marker.
- */
 const HOSTILE_MARKER_DIR = 'markers';
 const HOSTILE_MARKER_NAMES = ['shell-marker', 'shell-marker.pid', 'editor-marker', 'run-code-marker'];
 /** The Idea W5 appends before W6 resumes (S0-3 append-before-resume). */
@@ -262,29 +241,12 @@ const CORE_CONTEXT_TEMPLATE = '{{core_context.text}}';
 const MODEL_PROMPT_READ_CAP_BYTES = 262_144;
 /** Cap on the recorded per-request structures (the journey authorizes ONE prompt request). */
 const MODEL_REQUEST_STRUCTURE_CAP = 8;
-/**
- * their reads to what is left of their own absolute bound). Same order as
- * `HTTP_TIMEOUT_MS`: a single read is bounded, and overrunning it is its own
- * typed STOP rather than a global CLI timeout.
- */
 const PLACEMENT_READ_TIMEOUT_MS = 30_000;
 /** Cap on the placement CLI's captured output (a DTO is small). */
 const PLACEMENT_OUTPUT_CAP_BYTES = 1_048_576;
 
-/**
- * schedule`). A terminal row without a claimed run can never produce one, so it
- * is a refusal; anything else without a run id is still pending.
- */
 const TERMINAL_SCHEDULE_STATUSES = new Set(['cancelled', 'completed', 'failed']);
 
-/**
- * (`crates/nexus-orchestration/src/resume_rules.rs` rule 5: a non-terminal run
- * parked at a scheduler gate with its live `_gate_park_<task>` marker and no
- * human wait token). This is the ONE durable class W5/W6 may be placed at: a
- * fully committed step boundary (`safe_boundary`) has no gate to reroute, a
- * durable human wait is fenced against a plain resume, and a terminal or
- * interrupted run is never steered.
- */
 const GATE_PARK_RECOVERY_CLASS = 'converge_merge';
 /** Committed revision identifier shape (`crates/nexus-core/src/execution/session_commit.rs`). */
 const COMMIT_REVISION_PATTERN = /^rev_[A-Za-z0-9-]+$/;
@@ -344,10 +306,6 @@ const OFFICIAL_MODEL_URL = 'https://api.deepseek.com/chat/completions';
 /** Guard evidence inside one attempt directory. */
 const GUARD_SPENT_FILENAME = 'spent';
 const GUARD_EVENTS_DIRNAME = 'events';
-/**
- * presence disqualifies the attempt: a lost denial record is indistinguishable
- * from no denial at all, so "zero denials" may never be inferred from it.
- */
 const GUARD_EVIDENCE_FAILED_FILENAME = 'evidence-failed';
 /** The guard's own record schemas (its event/spend contract, read back here). */
 const GUARD_EVENT_SCHEMA = 'nexus-request-guard-event/1';
@@ -357,12 +315,6 @@ const GUARD_EVENT_KINDS = ['loaded', 'admitted', 'denied'];
 const GUARD_EVENT_RUNTIMES = ['dsh', 'other'];
 /** A guard record is a small JSON object, never a body/env dump. */
 const GUARD_RECORD_MAX_BYTES = 8_192;
-/**
- * records a URL, a header, a body, an environment dump or a secret). A string
- * value that looks like a URL, spans lines, is long enough to be content, or
- * sits under a credential-shaped key refuses the record, so a leak can never
- * pass as evidence.
- */
 const GUARD_UNSAFE_VALUE_PATTERN = /:\/\/|\n|\r/;
 const GUARD_UNSAFE_KEY_PATTERN = /authorization|api[_-]?key|secret|password|bearer|(^|_)body$|headers/i;
 const GUARD_SAFE_STRING_MAX_LENGTH = 200;
@@ -449,17 +401,8 @@ class DriverFailure extends Error {
 const blocked = (category, detail) => new DriverFailure('blocked', category, detail);
 const failed = (category, detail) => new DriverFailure('failed', category, detail);
 
-/**
- * explicitly authorized live action. There is no third mode and no implicit
- * escalation between them (§6.3 item 7).
- */
 const DRIVER_MODES = ['deterministic', 'live'];
 
-/**
- * live action requires both of its authorization inputs, and the live-only
- * options are refused in deterministic mode, so no invocation can reach the
- * live journey by accident or with a half-specified authorization.
- */
 function parseArgs(argv) {
   const options = {
     mode: 'deterministic',
@@ -536,8 +479,6 @@ function parseArgs(argv) {
   return options;
 }
 
-// with a stable shape, and every extraction asserts a single unambiguous match)
-
 /** Strip one layer of matching YAML quotes and any trailing inline comment. */
 function yamlScalar(raw) {
   let value = raw.trim();
@@ -560,12 +501,6 @@ function indentOf(line) {
   return line.length - line.trimStart().length;
 }
 
-/**
- * of `key` inside it. The block runs from the enter-action list item that owns
- * `name: <capability>` up to the next list item at the same or a shallower
- * indent, so sibling keys (`kind`, `name`, `args`) stay inside the block while
- * the next enter action does not.
- */
 function extractCapabilityArg(lines, capability, key) {
   const nameIndex = lines.findIndex((line) => line.trim() === `name: ${capability}`);
   if (nameIndex < 0) {
@@ -611,9 +546,6 @@ function extractPresetId(lines) {
   throw failed('fixture_contract', 'fixture preset header has no id');
 }
 
-/**
- * from the shallowest `- id:` indent so the split follows the file's own shape.
- */
 function stateBlocks(lines) {
   const entries = [];
   lines.forEach((line, index) => {
@@ -662,11 +594,6 @@ function blockScalar(lines, block, key) {
   return matches;
 }
 
-/**
- * `converge:` block, its `timeout_ms` deadline and the `on_timeout` state the
- * deadline reroutes onto. Every fact W5/W6 are placed with comes from here; the
- * driver never hard-codes a state name.
- */
 function extractConvergeGate(lines, blocks) {
   const gateBlocks = blocks.filter((block) => blockMatches(lines, block, /^\s*converge:/));
   if (gateBlocks.length !== 1) {
@@ -775,9 +702,6 @@ function readFixture() {
   if (gate.stateId === promptState.id) {
     throw failed('fixture_contract', 'the bounded gate and the effect state must be distinct states');
   }
-  // whose durable context holds the `workspace.commit` capability output as the
-  // LAST capability the graph invoked. The fixture must therefore end its effect
-  // state with that capability, or the receipt could never carry the revision.
   const effectStateCapabilities = [];
   for (let index = promptState.start; index < promptState.end; index += 1) {
     const match = /^\s*name:\s*(\S+)\s*$/.exec(lines[index]);
@@ -871,15 +795,8 @@ function resolveExecutable(explicit, name) {
   return null;
 }
 
-/**
- * the §6.3 guard interface, and no inherited credentials.
- */
 function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin, guardEnv }) {
   const env = {};
-  // made on the NAME before the value is ever dereferenced, so an inherited
-  // secret value is never materialized, copied, logged or persisted. Iterating
-  // `Object.entries`/`Object.values` here would read every value first and only
-  // then discard the credential-shaped ones — a credential inspection.
   for (const key of Object.keys(process.env)) {
     if (key === NODE_OPTIONS_KEY || isCredentialEnvKey(key)) continue;
     const value = process.env[key];
@@ -896,8 +813,6 @@ function buildChildEnv({ home, dshHome, modelPort, dshRuntimeBin, guardEnv }) {
 }
 
 /**
- * interface, with the inherited environment passed through by REFERENCE.
- *
  * This is the only shape that satisfies §6.3 item 6 literally: the driver never
  * enumerates the inherited environment, never dereferences an inherited value
  * and never copies any value into a store of its own. `spawn` walks the object
@@ -921,12 +836,6 @@ function buildLiveChildEnv({ home, dshHome, guardEnv }) {
   return Object.assign(env, guardEnv);
 }
 
-/**
- * {@link summarizeChildEnv} this never dereferences an inherited key:
- * `Object.hasOwn` answers "did this driver set this key itself?" without
- * touching the prototype, so the inherited credential (and every other
- * inherited value) is never read, compared or reported here.
- */
 function summarizeLiveChildEnv(env, inheritedKeys) {
   return {
     overrides: DRIVER_ENV_OVERRIDES.filter((key) => Object.hasOwn(env, key)),
@@ -942,10 +851,6 @@ function isCredentialEnvKey(key) {
 }
 
 /**
- * overrides are set, how many inherited credential-shaped names were dropped,
- * and whether any inherited credential-shaped name survived. Names only; no
- * value of an inherited variable is ever read.
- *
  * `NODE_OPTIONS` is counted as the guard preload it now is (the driver always
  * replaces an inherited value with its own absolute `--import`), so the count
  * says what actually happened instead of implying an inherited preload ran.
@@ -1002,11 +907,6 @@ function isAbsoluteHttpUrl(value) {
   );
 }
 
-/**
- * so a malformed driver-side interface is a typed STOP before any child exists
- * — the guard's own fail-closed check is the second line of defence, not the
- * first.
- */
 function guardChildEnv({ attemptDir, allowedUrl, dshRealpath }) {
   if (!existsSync(GUARD_PATH) || !statSync(GUARD_PATH).isFile()) {
     throw blocked(
@@ -1035,22 +935,12 @@ function guardChildEnv({ attemptDir, allowedUrl, dshRealpath }) {
   };
 }
 
-/**
- * (0700) directory that no other process knows about. The guard's evidence
- * lives in it, so it is deliberately NOT removed with the isolated root — a
- * `spent` token must survive the run that consumed it.
- */
 function createAttemptDir() {
   const dir = mkdtempSync(join(tmpdir(), 'nexus-workflow-attempt-'));
   chmodSync(dir, 0o700);
   return dir;
 }
 
-/**
- * live action. The directory MUST NOT exist: exclusive creation is what makes
- * "a second launch can never recreate or reset `spent`" true, so an existing
- * path is a refusal, never a reset, an overwrite or a reuse.
- */
 function takeAttemptDir(path) {
   if (typeof path !== 'string' || !isAbsolute(path)) {
     throw blocked('attempt_dir_unavailable', `--attempt-dir ${JSON.stringify(path)} is not an absolute path`);
@@ -1080,11 +970,6 @@ function readGuardRecord(path) {
   return { text: readFileSync(path, 'utf8'), bytes: stat.size };
 }
 
-/**
- * body, an environment dump or a secret). Deep string walk; the first unsafe
- * key or value refuses the whole record, so a leaky guard can never pass as
- * evidence even when its counts look right.
- */
 function assertGuardRecordSafe(value, path) {
   const walk = (node, key) => {
     if (key !== null && GUARD_UNSAFE_KEY_PATTERN.test(key)) {
@@ -1117,10 +1002,6 @@ function assertGuardRecordSafe(value, path) {
 }
 
 /**
- * records and never from this driver's expectations: an absent `events/`
- * directory, an unreadable record or an unknown kind/runtime is a failure, not
- * an empty result.
- *
  * Evidence integrity is part of the read, not a decoration on it (§6.3 item 4:
  * a denied attempt must disqualify the run even when the admitted count is still
  * one, so "zero denials" may never be inferred from records that were never
@@ -1163,7 +1044,6 @@ function readAttemptDir(dir, { final = false } = {}) {
     const path = join(eventsDir, name);
     const { text, bytes } = readGuardRecord(path);
     if (bytes === 0) {
-      // (final) it means the write never completed, so it disqualifies.
       state.truncated_events.push(name);
       if (final) {
         throw failed(
@@ -1225,12 +1105,6 @@ function readAttemptDir(dir, { final = false } = {}) {
   return state;
 }
 
-/**
- * an unreadable, empty or foreign payload still reports as present — the driver
- * only enriches the refusal when the payload really is the guard's own JSON
- * (`nexus-request-guard-evidence-failed/1`: `reason`, `kind`, `pid`, `at`) and
- * passes the same leak check as every other record.
- */
 function readEvidenceFailedMarker(path) {
   if (!existsSync(path)) return null;
   const marker = { present: true, reason: null, kind: null };
@@ -1287,9 +1161,6 @@ function readSpentToken(dir) {
 }
 
 /**
- * the preload, exactly one request was admitted, nothing was denied, the spend
- * token survives — AND the evidence that says so is complete.
- *
  * Evidence integrity is checked FIRST, because every count below is derived from
  * persisted records: a failed `denied` write would otherwise read as "zero
  * denials" and qualify exactly the attempt §6.3 item 4 requires it to refuse, and
@@ -1368,38 +1239,19 @@ function assertGuardAttempt(state, spent) {
     spent: spent.category,
     spent_at: spent.at,
     problems: [],
-    // was absent, no record was truncated, every record parsed, and the guard
-    // reported no degradation of its own ceiling. It is asserted here, not
-    // inferred, so a receipt that lacks it can never authorize a live request.
     evidence_integrity: 'complete',
     evidence_failed_marker: null,
   };
 }
 
-/**
- * receipt must still say what the guard observed, and reading it must never
- * replace the real blocker with a secondary failure.
- */
 function captureGuardAttempt(dir) {
   try {
-    // have an in-progress (zero-length) record, and the raw counts plus the
-    // evidence-failed marker are the evidence here. The strict FINAL read and the
-    // integrity assertion belong to the success path.
     return readAttemptDir(dir);
   } catch (error) {
     return { dir, unreadable: error instanceof Error ? error.message : String(error) };
   }
 }
 
-/**
- * size and a streamed content digest. Every present artifact is hashed whatever
- * its size, so an equal-size equal-mtime replacement (a debug CLI binary is
- * ~175 MB) cannot pass as the same artifact **as sampled at check time**.
- * Time scope: the digest proves identity only for the bytes that were read. A
- * replacement landing after that read, or concurrently with it, is outside what
- * this operator-owned workflow can guarantee — the receipt is a check-time
- * equality proof, not an immutability claim. `mtime_ms` stays as diagnostics.
- */
 async function artifactIdentity(path, { required = true } = {}) {
   if (!existsSync(path)) {
     if (required) throw blocked('missing_prerequisite', `prepared artifact missing at ${path}`);
@@ -1429,13 +1281,6 @@ function sameArtifact(recorded, current) {
   return recorded.sha256 === current.sha256;
 }
 
-/**
- * gate can re-check: the driver (which produced the receipt), the guard (which
- * bounds the request), the fixture (the graph), the prepared service entry and
- * CLI, the installed dsh entry (the guarded process identity) and — when it is
- * derivable — the installed transport module whose `fetch` dispatch is the
- * guard's whole premise.
- */
 async function localArtifactIdentities({ cliBinary, dshRealpath }) {
   const dshLibDir = dirname(dshRealpath);
   return {
@@ -1454,10 +1299,6 @@ async function localArtifactIdentities({ cliBinary, dshRealpath }) {
 }
 
 /**
- * describe the artifacts and runtime that are on disk NOW, and its own guard
- * proof must be a clean one-request attempt. A stale, foreign, blocked,
- * incomplete or unreadable receipt never authorizes a live request (§6.3 item 7).
- *
  * @throws {DriverFailure} `blocked`/`receipt_mismatch` — before any child exists
  *   and therefore with zero admissions.
  */
@@ -1516,10 +1357,6 @@ function assertDeterministicReceipt(receiptPath, { current }) {
     );
   }
   const guard = receipt.facts?.guard;
-  // evidence-integrity condition this driver asserts at the end of the
-  // deterministic run. A receipt that lacks it (an older receipt), that reports
-  // guard degradation, or that reports a failed evidence write is refused, so a
-  // degraded or partial guard proof can never become a live authorization.
   const integrityFailure =
     guard === null || typeof guard !== 'object'
       ? 'no guard proof'
@@ -1577,12 +1414,6 @@ function observeLiveCredentialChannel(inheritedKeys = Object.keys(process.env)) 
 }
 
 /**
- * channel without reading its value. A name is not proof that the credential is
- * valid: authentication or transport failure after admission consumes the
- * single request and is never retried. The caller explicitly selects live mode,
- * supplies a fresh attempt directory, and must have a current deterministic
- * receipt before reaching this gate.
- *
  * An absent channel still blocks before allocating anything. The channel's
  * value is left entirely to the normal inherited dsh credential resolver.
  */
@@ -1626,7 +1457,6 @@ function reserveLoopbackPort() {
 function encodePathSegment(value) {
   return String(value).replace(/[%/?#\s\p{Cc}]/gu, (char) => {
     const code = char.codePointAt(0);
-    // reads verbatim; those code points pass through untouched as before.
     if (code >= 0x80 && code <= 0x9f) return char;
     return `%${code.toString(16).toUpperCase().padStart(2, '0')}`;
   });
@@ -1718,11 +1548,6 @@ function tailLines(text, limit) {
 }
 
 
-/**
- * (§3.3: W1 success means durable descriptor, the run identity may be claimed
- * after the response) is distinct from a terminal refusal that can never
- * publish a run identity, and both are distinct from a claimed identity.
- */
 function classifyAdmissionObservation(summary) {
   const runId = summary?.current_session_id;
   const status = typeof summary?.status === 'string' ? summary.status : null;
@@ -1744,10 +1569,6 @@ async function readScheduleInspect(port, scheduleId, step, { timeoutMs = HTTP_TI
   return { inspected, summary: scheduleSummary(step, inspected) };
 }
 
-/**
- * treating a pending asynchronous admission as a missing producer, and without
- * ever fabricating an id.
- */
 async function awaitRunIdentity(port, scheduleId) {
   const deadline = Date.now() + ADMISSION_POLL_TIMEOUT_MS;
   let interval = ADMISSION_POLL_START_INTERVAL_MS;
@@ -1777,15 +1598,6 @@ async function awaitRunIdentity(port, scheduleId) {
 }
 
 /**
- * `current_session_id`) plus the authorized root run detail (identity fields and
- * the §4 `workspace_commit` projection). Placement does NOT come from here — the
- * routed projection is empty on this baseline — but the run identity does: both
- * halves must PROVE they describe the run being synchronized, the schedule by
- * owning `runId` and the detail by ANSWERING `runId`. An absent, empty,
- * non-string or different `session_id` is a `wrong_run` STOP — a malformed or
- * misrouted detail must never contribute identity, and the CLI placement read
- * that follows is bound to this same root run.
- *
  * `deadlineMs` clamps each request to what is left of the caller's absolute
  * bound (the shared `HTTP_TIMEOUT_MS` is only a ceiling), so a slow surface can
  * never push the observation past the poll's own deadline.
@@ -1825,14 +1637,6 @@ async function readDurableObservation(port, scheduleId, runId, step, { deadlineM
   };
 }
 
-/**
- * client's own timeout is an inactivity timer, so an active/trickling response
- * would outlive it; the guard makes the caller's declared bound real. A read
- * that loses the race is abandoned (its own request timeout still closes the
- * socket) and the caller converts the abort into its own typed STOP through
- * `onDeadline` — a transport fault that is NOT the deadline keeps propagating
- * as itself instead of being relabelled as a missing gate.
- */
 async function boundedObservation(promise, deadlineMs, onDeadline) {
   let timer = null;
   const guard = new Promise((_resolve, rejectPromise) => {
@@ -1846,9 +1650,6 @@ async function boundedObservation(promise, deadlineMs, onDeadline) {
 }
 
 /**
- * (`nexus42 ops inspect <run> --json`), or `null` when the DTO cannot prove it
- * describes the synchronized root run.
- *
  * The routed W4 HTTP detail does not carry the A7 `execution` projection on this
  * baseline (`crates/nexus-core/src/execution/handle_ops.rs::inspect_schedule`
  * builds `execution: None`), so placement comes from the daemon-free operator
@@ -1929,11 +1730,6 @@ function runPlacementCli(cliBinary, args, childEnv, timeoutMs) {
     child.once('error', (error) =>
       finish({ status: null, signal: null, stdout, stderr, timedOut: false, spawnError: error.message }),
     );
-    // its stdio streams may still be delivering buffered data, so a DTO larger
-    // than the pipe buffer could be parsed from a truncated string. `close`
-    // fires only after stdout/stderr are drained and closed, so the captured
-    // output is complete before anything reads it. The timeout path above still
-    // wins when the child (or a process holding its pipe) never closes.
     child.once('close', (code, signal) =>
       finish({ status: code, signal, stdout, stderr, timedOut: false, spawnError: null }),
     );
@@ -1941,14 +1737,6 @@ function runPlacementCli(cliBinary, args, childEnv, timeoutMs) {
 }
 
 /**
- * daemon-free operator surface. The CLI is handed the SAME root run id the W4
- * read resolved, and every failure is a typed, fail-closed STOP: a spawn failure
- * keeps its unmet-prerequisite outcome, an overrun returns the caller's own
- * poll STOP (or `placement_timeout` for a single bounded observation), a
- * non-zero exit and non-JSON stdout are `failed/placement_unreadable`, and a DTO
- * that cannot prove the run (or misses a field the driver consumes) is
- * `failed/placement_contract`.
- *
  * `timeoutMs` must be the caller's remaining budget: inside a poll that is the
  * time left of the poll's absolute deadline, so the placement read can never
  * outlive the declared gate/effect bound.
@@ -2001,8 +1789,6 @@ async function readPlacementViaCli(
 }
 
 /**
- * gate.
- *
  * `gate` is the only placement W5/W6 accept: the A7 class is the parked
  * converge/merge gate (no human wait token, no in-flight marker) AND the run's
  * `current_task_id` is the fixture's gate state. Every other state is decisive:
@@ -2028,9 +1814,6 @@ function classifyPreEffectGate(placement, gateStateId) {
 }
 
 /**
- * the boundary the deadline reroute must reach, which proves the reroute
- * happened and that W5/W6 were exercised strictly before the final manual wait.
- *
  *   * `manual_wait` — the effect state rests in a durable human wait.
  *   * `wrong_state` — something else rests in a human wait.
  *   * `terminal` — the run settled without reaching that wait.
@@ -2086,13 +1869,6 @@ function preEffectGateStop(step, boundary, gateStateId) {
 }
 
 /**
- * placement through the public operator surface. The gate is accepted only when
- * it is observed QUIET — two reads at least one poll apart with the SAME integer
- * `state_revision`, still parked at the fixture's gate state and still
- * pre-effect (no model request dispatched). A decisive non-gate observation (a
- * human wait, a terminal run, a foreign gate) STOPS immediately instead of
- * being retried into a timing assumption.
- *
  * The poll bound is an absolute wall-clock deadline: no read starts after it, an
  * observation that does not answer inside it is aborted (`boundedObservation`)
  * and the gate is never accepted after it. A gate observation whose record
@@ -2114,24 +1890,17 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests })
     let placement;
     try {
       placement = await boundedObservation(
-        // its own overrun aborts as this poll's typed STOP (never as a global
-        // CLI timeout), so the declared bound is the one that holds.
         readPlacement(runId, 'gate', { timeoutMs: Math.max(1, remaining), onTimeout: boundStop }),
         deadline,
         boundStop,
       );
     } catch (error) {
-      // STOP, whatever aborted it; a placement failure BEFORE the bound keeps
-      // propagating as itself, so a refused CLI is never relabelled as a
-      // missing gate.
       if (!(error instanceof DriverFailure) && Date.now() >= deadline) throw boundStop();
       throw error;
     }
     polls += 1;
     observation = classifyPreEffectGate(placement, gate.stateId);
     if (observation.state === 'gate') {
-      // own admission record (§6.3), which is transport-independent: a gate
-      // that already dispatched a request is not pre-effect in either mode.
       const requests = countRequests();
       if (requests !== 0) {
         throw failed(
@@ -2163,13 +1932,6 @@ async function awaitPreEffectGate({ readPlacement, runId, gate, countRequests })
   }
 }
 
-/**
- * effect state resting in its manual wait, read through the public operator
- * surface. A human wait at any OTHER state, a settled run or an absent record is
- * a typed STOP, never a pass. The bound is absolute in the same way as the gate
- * poll: no read starts after it, an observation that overruns it is aborted, and
- * the boundary is never accepted after it.
- */
 async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
   const deadline = Date.now() + EFFECT_BOUNDARY_TIMEOUT_MS;
   let interval = EFFECT_BOUNDARY_START_INTERVAL_MS;
@@ -2187,7 +1949,6 @@ async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
     let placement;
     try {
       placement = await boundedObservation(
-        // poll's absolute bound, and its overrun is this poll's typed STOP.
         readPlacement(runId, 'effect boundary', { timeoutMs: Math.max(1, remaining), onTimeout: boundStop }),
         deadline,
         boundStop,
@@ -2219,12 +1980,6 @@ async function awaitEffectBoundary({ readPlacement, runId, effectStateId }) {
 }
 
 /**
- * installed runtime (S3-3 as this driver can see it end-to-end): every model
- * request the sealed composition made advertised NO tools (the `tools` key
- * absent, not an empty array — the dispatch-level mechanism §6.2's adapter
- * control asserts), the admitted turn carried no tool result and no assistant
- * tool call, and its first request was the sealed `[system, user]` shape.
- *
  * The driven unsolicited-tool-call attempt itself belongs to the §6.2 adapter
  * controls (`real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects`
  * scripts three hostile calls and asserts the rejections plus the marker
@@ -2290,12 +2045,6 @@ function assertSealedToolPolicy(observations) {
 }
 
 /**
- * and SHA-256 for files. No file content is retained, the walk is depth- and
- * entry-capped, and the order is sorted so a receipt is comparable across runs.
- * `truncated` reports that a cap stopped the walk, so a caller that asserts
- * "nothing else exists" can refuse instead of reading a partial listing as a
- * clean one.
- *
  * @returns {{entries: Array<{path: string, kind: string, bytes?: number, sha256?: string}>, truncated: boolean}}
  */
 function directoryInventory(root, { maxDepth = 3, maxEntries = 64 } = {}) {
@@ -2339,10 +2088,6 @@ function directoryInventory(root, { maxDepth = 3, maxEntries = 64 } = {}) {
   return { entries, truncated };
 }
 
-/**
- * `run_code` body had actually executed against this isolated root (§6.2's
- * hostile-marker paths). Only presence is checked; no marker is read.
- */
 function hostileMarkersPresent(isolatedRoot) {
   const dir = join(isolatedRoot, HOSTILE_MARKER_DIR);
   const present = [];
@@ -2369,13 +2114,6 @@ function assertNoHostileMarkers(isolatedRoot) {
   return markers;
 }
 
-/**
- * declares — nothing else. This is the driver's end-to-end side-effect check on
- * the real admitted run: a tool that had produced any unsolicited write inside
- * the scope would appear here as an entry no fixture change declares, and the
- * declared file's bytes/sha are already compared against the same fixture in
- * step 12.
- */
 function assertScopeEffectOnly(scopeDir, fixture) {
   const { entries: inventory, truncated } = directoryInventory(scopeDir, { maxDepth: 2, maxEntries: 32 });
   if (truncated) {
@@ -2398,12 +2136,6 @@ function assertScopeEffectOnly(scopeDir, fixture) {
   return inventory;
 }
 
-/**
- * admitted schedule/run crosses the effect state exactly once, so exactly one
- * model request is authorized, it must carry the Idea W5 appended (the
- * boundary's own evidence that it consumed the committed core-context version),
- * and there is no second dispatch. Returns the checked counts for the receipt.
- */
 function assertSealedPromptCardinality(observations) {
   const requests = observations?.requests;
   if (requests === 0) {
@@ -2429,10 +2161,6 @@ function assertSealedPromptCardinality(observations) {
   return { requests, prompt_with_idea: observations.prompt_with_idea };
 }
 
-/**
- * deadline reroute re-drives the admitted run, so a resume that minted a second
- * run is a failure rather than a passing journey.
- */
 function assertSingleRun(items, presetId, runId) {
   if (!Array.isArray(items)) {
     throw failed('contract_violation', 'GET /orchestration/sessions carries no items array');
@@ -2509,15 +2237,11 @@ async function startService({ home, port, childEnv, evidenceDir, label }) {
   } catch (error) {
     writeFileSync(join(evidenceDir, `service-${label}.stderr.log`), stderrBuffer, 'utf8');
     if (error instanceof DriverFailure) {
-      // (owner-only, inside the isolated root); it is never copied into the
-      // printed receipt.
       error.serviceStderrLog = join(evidenceDir, `service-${label}.stderr.log`);
     }
     throw error;
   }
   writeFileSync(join(evidenceDir, `service-${label}.stderr.log`), stderrBuffer, 'utf8');
-  // diagnostics; the bounded tail is retained as evidence so a stream symptom
-  // is diagnosable from the receipt instead of only from the console.
   const stdoutLog = join(evidenceDir, `service-${label}.stdout.log`);
   const writeStdoutTail = () => {
     try {
@@ -2543,9 +2267,6 @@ function servicePortOf(discovery) {
   return Number.parseInt(match[1], 10);
 }
 
-/**
- * instance identity, then wait for its exit.
- */
 async function stopServiceVia(running, label) {
   const { child, discovery } = running;
   const response = await httpJson(servicePortOf(discovery), 'POST', '/v1/daemon/runtime/stop', {
@@ -2624,20 +2345,10 @@ function boundedServerClose(server, timeoutMs = MODEL_ENDPOINT_CLOSE_TIMEOUT_MS)
       });
       return;
     }
-    // close is not parked behind a connection nobody is using.
     dropIdleConnections();
   });
 }
 
-/**
- * confirmed shutdown; §7 "unconfirmed cleanup is a STOP with retained
- * evidence"). Every owned child contributes one cleanup record; a confirmed
- * shutdown leaves the journey outcome untouched, while any failed or
- * unconfirmed one overrides an earlier `ok` so neither the receipt nor the
- * process exit code can report success while an owned child may still be
- * alive. A journey that already failed or blocked keeps its primary blocker —
- * it exits non-zero either way — and the cleanup failure is recorded beside it.
- */
 function applyCleanupDisposition(receipt, cleanups) {
   const records = Array.isArray(cleanups) ? cleanups : [cleanups];
   receipt.cleanup = records;
@@ -2662,13 +2373,6 @@ function exitCodeFor(outcome) {
 
 
 /**
- * the message count, whether the caller advertised tools at all and how many,
- * whether a tool result or an assistant tool call is already in the
- * conversation, and the model name the runtime named. Nothing else is derived
- * from the body: no content, no header and no key is retained, echoed or written
- * anywhere, and no value out of the body is compared except the driver's own
- * non-secret Steer Idea (checked by the caller).
- *
  * These are the facts that make the sealed no-tools policy checkable on the
  * real admitted run: §6.2's adapter control asserts exactly this shape for the
  * sealed composition's first request (roles `[system, user]`, the `tools` key
@@ -2712,14 +2416,6 @@ function modelRequestStructure(text) {
   };
 }
 
-/**
- * `POST /chat/completions` and records only the non-secret STRUCTURE of each
- * request ({@link modelRequestStructure}) plus one boolean per request: whether
- * the prompt body carried the appended Steer Idea, which is the boundary's own
- * evidence that the first real prompt of the run consumed the committed
- * core-context version (W5). The body is read into a bounded buffer for those
- * comparisons only and is never stored, echoed or written anywhere.
- */
 function startModelEndpoint() {
   const observations = {
     requests: 0,
@@ -2745,14 +2441,11 @@ function startModelEndpoint() {
     req.on('data', (chunk) => {
       if (promptBytes >= MODEL_PROMPT_READ_CAP_BYTES) return;
       promptBytes += chunk.length;
-      // matched substring is the driver's own non-secret Idea, and nothing is
-      // retained beyond this boolean.
       if (!promptHasIdea && chunk.includes(STEER_IDEA)) promptHasIdea = true;
       chunks.push(chunk);
     });
     req.on('end', () => {
       if (promptHasIdea) observations.prompt_with_idea += 1;
-      // keeps a misbehaving runtime from growing the receipt.
       if (observations.structures.length < MODEL_REQUEST_STRUCTURE_CAP) {
         observations.structures.push(modelRequestStructure(Buffer.concat(chunks).toString('utf8')));
       }
@@ -2942,7 +2635,6 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
         closed = true;
         settle(false);
       });
-      // this read already ended on its own window (which settles first).
       response.on('error', (error) => refuse(error));
     });
     timer = setTimeout(() => {
@@ -2953,10 +2645,6 @@ function readEventStream(port, runId, { lastEventId, maxFrames = MAX_EVENT_FRAME
   });
 }
 
-/**
- * STOP, so a broken connection can never be mistaken for an idle window (the
- * `timed_out` shape an ordinary no-new-frame read returns).
- */
 async function readEventStreamOrStop(step, attempt) {
   try {
     return await attempt();
@@ -3011,10 +2699,6 @@ function parseGapFrame(frame) {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
   if (typeof payload.run_id !== 'string' || payload.run_id.length === 0) return null;
   if (typeof payload.epoch !== 'string' || payload.epoch.length === 0) return null;
-  // alone would accept an out-of-range literal such as `1e100`, whose range
-  // would then "cover" real successors (cursor sequences are safe integers by
-  // `parseEventCursor`), and a 0-based range is outside the vocabulary the ring
-  // emits (`<after_sequence + 1>..<first_retained - 1>` / `<sequence>..<sequence>`).
   if (!Number.isSafeInteger(payload.from_sequence) || payload.from_sequence < 1) return null;
   if (!Number.isSafeInteger(payload.to_sequence) || payload.to_sequence < payload.from_sequence) return null;
   return {
@@ -3041,10 +2725,6 @@ function parseHistoryUnavailableFrame(frame) {
 }
 
 /**
- * observed (§4: "same epoch, retained cursor → exclusive replay then tail
- * without duplicate handoff"). Exactly two honest outcomes are accepted, and an
- * idle window with no successor frame is NOT one of them:
- *
  *   * `successors` — every successor the cursor promised replayed, each from the
  *     cursor's own epoch, strictly AFTER the cursor, UNIQUE and strictly
  *     increasing in sequence, and in the delivery order the driver already
@@ -3146,8 +2826,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
         `replayed frame ${JSON.stringify(frame.id)} is at or before the cursor ${cursor}: the replay must be exclusive`,
       );
     }
-    // repeated or reordered successor is a duplicated/replayed event, not a
-    // replay proof — the set-membership check alone would accept `…:3, …:2, …:2`.
     if (parsed.sequence <= lastReplayedSequence) {
       throw failed(
         'replay_out_of_order',
@@ -3158,10 +2836,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
     lastReplayedSequence = parsed.sequence;
     replayed.push({ id: frame.id, event: frame.event ?? null, sequence: parsed.sequence });
   }
-  // states those frames are gone, so the two sets must be DISJOINT. Without this
-  // check a `gap 2..5` alongside delivered `…:4, …:5` passed as a bounded gap —
-  // a response that contradicts itself about 4 and 5 — because only the MISSING
-  // successors were compared against the range.
   for (const gap of gaps) {
     const contradicted = replayed.filter(
       (frame) => frame.sequence >= gap.from_sequence && frame.sequence <= gap.to_sequence,
@@ -3176,9 +2850,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
     }
   }
   const replayedIds = new Set(replayed.map((frame) => frame.id));
-  // arrive in the same relative order as the frames this driver already
-  // OBSERVED, so a response that reorders them can never be read as a faithful
-  // replay of the observed stream.
   const replayedInObservedOrder = replayed.map((frame) => frame.id).filter((id) => sequences.has(id));
   const observedInReplayedOrder = expected.filter((id) => replayedIds.has(id));
   if (replayedInObservedOrder.join(' ') !== observedInReplayedOrder.join(' ')) {
@@ -3199,11 +2870,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
         `(${uncovered.join(', ')}) and no explicit gap covers them`,
     );
   }
-  // reconnect — nothing else could be replayed — the server must close the
-  // stream with it; a stream that emits the gap and then idles until the
-  // driver's window expires is not the contract's outcome. A retention gap that
-  // arrives WITH the retained successors is the live replay case and is recorded
-  // as a bounded gap below.
   if (gaps.length > 0 && replayed.length === 0 && (read.closed !== true || read.timed_out === true)) {
     throw failed(
       'replay_gap_not_closed',
@@ -3229,13 +2895,6 @@ function classifySameRunReplay({ runId, cursor, observedIds, read }) {
   };
 }
 
-/**
- * earliest observed cursor promised and classify them
- * ({@link classifySameRunReplay}). Fails closed when the stream read carried
- * fewer than two cursor-bearing frames — the run is an admitted, gated, steered
- * and prompted one, so a single-frame read is itself the defect that makes a
- * replay unprovable, never a reason to record an idle window as a pass.
- */
 async function proveSameRunReplay({ port, runId, observed }) {
   const observedIds = [];
   for (const frame of observed) {
@@ -3259,11 +2918,6 @@ async function proveSameRunReplay({ port, runId, observed }) {
   return { replay: classifySameRunReplay({ runId, cursor, observedIds, read }), frames: read.frames };
 }
 
-/**
- * delivery order (the initial read's frames first, then the cursor reconnect's).
- * The receipt carries only ids and control-frame names — this union exists to be
- * scanned for an admissible workspace-commit response and is never printed.
- */
 function mergeObservedFrames(observed, replayed) {
   const merged = [];
   const seen = new Set();
@@ -3349,8 +3003,6 @@ async function collectStreamRefusals({ port, runId, observedIds }) {
       timed_out: read.timed_out === true,
     });
   }
-  // not a refusal — it is the explicit history-loss control frame, and reading
-  // it as a short stream or a 400 would both be wrong.
   const historyStep = 'GET /orchestration/sessions/{run_id}/events (prior epoch cursor)';
   const historyCursor = `00000000-0000-4000-8000-000000000000:${maxSequence}`;
   const historyRead = requireEventStreamStatus(
@@ -3457,8 +3109,6 @@ function assertHistoryLossExplicit({ runId, cursor, read }) {
 }
 
 /**
- * only admissible source of the receipt's commit revision (§6.1).
- *
  * Empty **by measurement, not as a placeholder**. `RunEventRegistry`
  * (`crates/nexus-core/src/execution/run_events.rs`) publishes exactly three
  * frame identities — `run_state`, `host_event` and `gap` — plus the
@@ -3474,9 +3124,6 @@ function assertHistoryLossExplicit({ runId, cursor, read }) {
 const COMMIT_RESPONSE_EVENT_IDENTITIES = new Set();
 
 /**
- * response** frame; `null` when no such frame exists. Never invented and never
- * derived from frame text or from the fixture bytes.
- *
  * Admission rules (the accepting branch lands with the P3-T2 producer, together
  * with its own evidence):
  *
@@ -3501,10 +3148,6 @@ function findCommitRevision(frames) {
 }
 
 /**
- * P3-T2 producer change only adds its identity; the branch is unreachable while
- * no identity is admissible, so it is asserted against the schema directly
- * rather than through a fabricated frame.
- *
  * @returns {string|null} the canonical revision, or `null` when the frame
  *   payload is not a successful workspace-commit response.
  */
@@ -3576,9 +3219,6 @@ function parseSessionWorkspaceCommit(detail) {
 }
 
 /**
- * file *and* its commit revision; §6.1 requires the commit revision in the
- * receipt).
- *
  * Two strictly validated, same-run sources are admissible, in this order:
  *
  *   1. the authorized root session detail's projected `workspace_commit`
@@ -3671,7 +3311,6 @@ async function runJourney(options) {
   let running = null;
   let attemptDir = null;
   try {
-    // it is validated before any temporary directory or child process exists.
     const fixture = readFixture();
     record('fixture', 'ok', {
       preset_id: fixture.presetId,
@@ -3706,14 +3345,9 @@ async function runJourney(options) {
     if (!dshBinary) {
       throw blocked('missing_prerequisite', 'no real dsh runtime on PATH (set DSH_RUNTIME_BIN to the installed runtime)');
     }
-    // this entry, so a symlinked launcher resolves to the installed module.
     const dshRealpath = canonicalRealPath(dshBinary, 'dsh runtime');
     record('preflight', 'ok', { node: process.versions.node, cli: basenameOf(cliBinary), dsh: basenameOf(dshBinary) });
 
-    // mode REQUIRES the prior deterministic receipt to name the very same
-    // artifacts and runtime, so a stale receipt can never authorize a request;
-    // and it establishes the inherited credential channel by NAME before any
-    // child exists.
     const artifacts = await localArtifactIdentities({ cliBinary, dshRealpath });
     facts.artifacts = artifacts;
     if (live) {
@@ -3723,8 +3357,6 @@ async function runJourney(options) {
       facts.credential_channel = channel;
       assertLiveCredentialChannel(channel);
       attemptDir = takeAttemptDir(options.attemptDir);
-      // that already existed is refused above, so this run cannot inherit,
-      // reset or reuse the spend record of an earlier attempt.
       facts.live = {
         official_url: OFFICIAL_MODEL_URL,
         deterministic_receipt: { path: options.deterministicReceipt, sha256: authorized.receipt_sha256 },
@@ -3755,7 +3387,6 @@ async function runJourney(options) {
     for (const path of [home, dshHome, workspace, evidenceDir]) mkdirSync(path, { recursive: true });
 
     const scopeDir = join(workspace, fixture.scopePath);
-    // creates nothing, so the declared scope must already exist.
     mkdirSync(scopeDir, { recursive: true });
     record('isolate', 'ok', { scope: `${basenameOf(workspace)}/${fixture.scopePath}` });
 
@@ -3774,7 +3405,6 @@ async function runJourney(options) {
       ? summarizeLiveChildEnv(childEnv, Object.keys(process.env))
       : summarizeChildEnv(Object.keys(process.env), childEnv);
     if (live) {
-      // driver read no inherited value to say so.
       facts.live.child_env = childEnvSummary;
     } else {
       facts.child_env = childEnvSummary;
@@ -3882,13 +3512,6 @@ async function runJourney(options) {
     );
     requireFields('PATCH /presets/{id}', patched, ['id', 'updated']);
     if (patched.updated !== true) throw failed('contract_violation', 'preset PATCH did not report updated=true');
-    // (`scaffold_user_preset` returns `bundle.display()`), while
-    // `POST /presets:validate` takes the preset YAML FILE it reads and parses
-    // (`validate_preset_file` rejects a directory with an untyped
-    // internal/FILE_READ_ERROR, i.e. HTTP 500). The driver therefore validates
-    // the very file the PATCH above wrote, derived with the retained bundle
-    // convention (`preset.yaml`), and refuses locally if the bundle it was told
-    // about does not contain it.
     const presetFile = presetYamlPath(scaffold.path);
     if (!existsSync(presetFile)) {
       throw failed(
@@ -3948,18 +3571,9 @@ async function runJourney(options) {
     };
     record('admit', 'ok', { schedule_id: admitted.schedule_id });
 
-    // descriptor is durable while the root run identity may still be claimed
-    // asynchronously (§3.3), so a pending admission is polled instead of being
-    // reported as a missing producer, and a terminal refusal/timeout are their
-    // own outcomes. The frozen response shape is
-    // `{schedule, depends_on, concurrency_kind}`
-    // (`inspect-schedule-response.schema.json` + `schedule-summary.schema.json`).
     const scheduleId = admitted.schedule_id;
     const admission = await awaitRunIdentity(port, scheduleId);
     const runId = admission.run_id;
-    // THIS root run (the W4 detail above resolved its identity); every placement
-    // read below is bound to the same id and fails closed on a refused CLI, a
-    // non-JSON answer, or a DTO that does not prove the run.
     const readPlacement = (targetRunId, step, options) =>
       readPlacementViaCli(cliBinary, childEnv, targetRunId, step, options);
     facts.inspect = {
@@ -3972,31 +3586,11 @@ async function runJourney(options) {
     };
     record('inspect', 'ok', { schedule_status: facts.inspect.status, admission_polls: admission.polls });
 
-    // exercised before the final manual wait; S0-3: the append is durable
-    // before resume counts as success). The gate is the state the checked-in
-    // fixture declares — its `converge:`/`timeout_ms` state, whose `on_timeout`
-    // reroute must be the effect state. Placement is confirmed on the public A7
-    // record (`recovery_class`/`current_task_id`/`state_revision`) of the SAME
-    // root run the W4 read resolved; a durable human wait (where the A4 fence
-    // refuses a plain resume) or any other placement is a typed STOP, never a
-    // bypassed wait and never a Steer claimed on a timing assumption.
-    // The request-budget guard's own admission record is the transport-
-    // independent request counter of this attempt (§6.3): the gate, the
-    // post-deadline re-check and the effect facts all read it, so "pre-effect"
-    // means the same thing in both modes and can never be asserted from an
-    // expected count.
     const countRequests = () => readAttemptDir(attemptDir).admitted;
     const gateBoundary = await awaitPreEffectGate({ readPlacement, runId, gate: fixture.gate, countRequests });
-    // (`join_timeout_tick`), so waiting it out HERE, with no signal issued, is
-    // what makes the W6 resume deterministic instead of a race with the
-    // deadline. `timeout_ms` comes from the fixture; the margin is the driver's
-    // own, not the fixture's.
     const deadlineAtMs = gateBoundary.parked_at_ms + fixture.gate.timeoutMs + GATE_DEADLINE_MARGIN_MS;
     const deadlineWaitedMs = Math.max(0, deadlineAtMs - Date.now());
     if (deadlineWaitedMs > 0) await sleep(deadlineWaitedMs);
-    // pre-effect: crossing the deadline alone performs no work. Both the W4
-    // identity read (same schedule/root) and the public placement read are
-    // re-taken.
     await readDurableObservation(port, scheduleId, runId, 'gate after deadline');
     const afterDeadlineBoundary = classifyPreEffectGate(
       await readPlacement(runId, 'gate after deadline'),
@@ -4038,10 +3632,6 @@ async function runJourney(options) {
     );
     requireFields('PATCH /orchestration/schedules/{id}/core-context', appendResponse, ['new_version']);
     facts.steer.appended_version = appendResponse.new_version;
-    // run moved on between the durable append and the resume, a plain resume
-    // would land where it is fenced. The Steer then stops with the exact
-    // observed state; the appended version stays durable and is never
-    // re-appended (S0-3).
     await readDurableObservation(port, scheduleId, runId, 'gate recheck');
     const gateRecheck = classifyPreEffectGate(
       await readPlacement(runId, 'gate recheck'),
@@ -4057,8 +3647,6 @@ async function runJourney(options) {
           'durable; resume was not issued and the append is never retried',
       );
     }
-    // resume re-drives that run and its deadline reroute enters the effect
-    // state. It is not a new admission and not a manual-wait bypass.
     const resumeResponse = await httpJson(
       port,
       'POST',
@@ -4071,8 +3659,6 @@ async function runJourney(options) {
       current_wait_id: resumeResponse.json?.current_wait_id ?? null,
     };
     if (resumeResponse.status < 200 || resumeResponse.status >= 300) {
-      // e.g. `workflow_wait_conflict`); the appended version remains durable and
-      // there is no automatic re-append and no retry.
       const refusal = statusFailure('POST /orchestration/schedules/{id}/signal (resume)', resumeResponse);
       throw new DriverFailure(
         refusal.outcome,
@@ -4082,16 +3668,12 @@ async function runJourney(options) {
       );
     }
     facts.steer.resumed = true;
-    // that is the observable proof that the deadline reroute ran, that the same
-    // schedule/root was re-driven, and that W5/W6 were exercised strictly
-    // before the final manual wait.
     const effectBoundary = await awaitEffectBoundary({
       readPlacement,
       runId,
       effectStateId: fixture.gate.effectStateId,
     });
     facts.steer.post_resume_boundary = effectBoundary.observed;
-    // still carries exactly this preset's ONE run, and it is the gated run.
     const sessionsPage = requireOk(
       'GET /orchestration/sessions',
       await httpJson(port, 'GET', '/v1/daemon/orchestration/sessions'),
@@ -4110,10 +3692,6 @@ async function runJourney(options) {
       post_resume_state: effectBoundary.observed.task_id,
     });
 
-    // is bounded by this driver's own window, so `timed_out` (nothing new to
-    // send while the run stays live) and a server-side close are distinct
-    // recorded facts, and a real transport failure rejects instead of being
-    // read as a short stream.
     const streamStep = 'GET /orchestration/sessions/{run_id}/events';
     const stream = requireEventStreamStatus(
       streamStep,
@@ -4142,15 +3720,6 @@ async function runJourney(options) {
       timed_out: stream.timed_out === true,
     });
 
-    // cursor contract promises, from the EARLIEST observed cursor of THIS run
-    // (a read that merely idles out its window is never a replay proof), or the
-    // explicit bounded gap the ring answers with when it cannot replay. The one
-    // reconnect also appends to the observed frame set, so a routed
-    // workspace-commit response — the SECONDARY revision source; the primary is
-    // the authorized root session detail read in step 12 — is still scanned
-    // without a second reconnect and without waiting on a frame identity the
-    // current run ring cannot route (`COMMIT_RESPONSE_EVENT_IDENTITIES` is
-    // empty by measurement in `crates/nexus-core/src/execution/run_events.rs`).
     const { replay, frames: replayedFrames } = await proveSameRunReplay({ port, runId, observed: stream.frames });
     facts.stream.replay = replay;
     record('stream_replay', replay.kind === 'successors' ? 'ok' : 'history_gap', {
@@ -4169,20 +3738,10 @@ async function runJourney(options) {
     };
     facts.stream.replay_added_frames = allFrames.length - stream.frames.length;
 
-    // is refused before any SSE header, a malformed and a future cursor are
-    // typed invalid-input refusals before any SSE header, and a cursor from
-    // another epoch against a live run is the explicit history-loss control
-    // frame. Each is asserted against its exact wire answer.
     const refusals = await collectStreamRefusals({ port, runId, observedIds });
     facts.stream.refusals = refusals;
     record('stream_refusals', 'ok', { controls: refusals.map((entry) => entry.control) });
 
-    // effect is the FIRST real prompt of the run crossing into the effect
-    // state, so its cardinality is asserted here: exactly one sealed prompt,
-    // carrying the appended Idea, and no second dispatch. Its sealed no-tools
-    // policy is asserted on the same real request, and the isolated root is
-    // checked for unsolicited tool side effects.
-    //
     // In live mode the model endpoint belongs to the authorised upstream, so
     // the prompt's own structure is not readable by this driver: the cardinality
     // and the tool policy of the request are then the guard's records (§6.3 —
@@ -4219,17 +3778,6 @@ async function runJourney(options) {
       hostile_markers: markers.present.length,
       scope_entries: scopeInventory.length,
     });
-    // authorized root session detail's projected `workspace_commit` (contract
-    // §4, P1-T2), strictly parsed here, or — if that projection is absent — a
-    // routed same-run frame carrying the canonical workspace-commit response.
-    // The read is a root-run read: `readDurableObservation` already refused any
-    // detail that is not the synchronized run, which is the only foreign-result
-    // guard such a projection can have (the DTO carries no run id of its own).
-    // The durable run-state revision is recorded beside the commit revision as
-    // information only and never substitutes: it proves run state, not the
-    // committed workspace. Nothing is computed from the fixture bytes and no
-    // identifier is invented; a missing/malformed/failed/foreign revision
-    // refuses the effect (missing_commit_revision), never a success.
     const effectObservation = await readDurableObservation(port, scheduleId, runId, 'effect');
     const placementAtEffect = await readPlacement(runId, 'effect');
     const sessionCommitRevision = parseSessionWorkspaceCommit(effectObservation.detail);
@@ -4255,7 +3803,6 @@ async function runJourney(options) {
         commitRevision: observedRevision,
         sessionCommitRevision,
         frames: allFrames,
-        // run-state value from the same placement surface, never a substitute.
         projectionStateRevision: placementAtEffect?.state_revision ?? null,
       }),
     );
@@ -4266,8 +3813,6 @@ async function runJourney(options) {
       revision_source: facts.effect.revision_source,
     });
 
-    // must not have committed anything: the authorized root detail still
-    // projects the SAME commit revision and the opened scope is byte-identical.
     requireOk(
       'POST /orchestration/schedules/{id}/signal (cancel)',
       await httpJson(port, 'POST', `/v1/daemon/orchestration/schedules/${encodePathSegment(scheduleId)}/signal`, {
@@ -4298,14 +3843,7 @@ async function runJourney(options) {
     };
     record('cancel', 'ok', { schedule_status: facts.cancel.status });
 
-    // repeated effect, and the LOST retained history stated explicitly. Every
-    // half is asserted: the restarted producer must answer the pre-restart
-    // cursor with exactly the one `history_unavailable` control frame (no
-    // invented history, no silent empty stream), the same root run must still
-    // own exactly this preset's ONE run, the effect bytes and ITS commit
-    // revision must be identical, and the scope must carry nothing new.
     facts.ready_stop = await stopServiceVia(running, 'ready');
-    // process reuses the same home and port.
     if (facts.ready_stop.confirmed !== true) {
       throw failed(
         'cleanup_unconfirmed',
@@ -4377,9 +3915,6 @@ async function runJourney(options) {
     });
 
     if (live) {
-      // authorized upstream. What the driver records instead of a request body
-      // structure is the guard's own credential-free evidence (§6.3 item 7:
-      // safe model/runtime identity, request count, outcome category, cleanup).
       facts.model_endpoint = {
         kind: 'official-https',
         url: OFFICIAL_MODEL_URL,
@@ -4403,14 +3938,6 @@ async function runJourney(options) {
       });
     }
 
-    // 1–4). Read AFTER every owned child has run — including the restarted
-    // service and any dsh probe it spawned — in FINAL mode, so the counts
-    // describe the whole attempt, a truncated record cannot be skipped, and the
-    // guard's own evidence-failed marker is part of the verdict rather than
-    // decoration. The guard's records are the single authority for "how many
-    // upstream requests happened"; the journey fails when the evidence is
-    // incomplete or degraded, when the dsh preload handshake is missing, when
-    // anything was denied, or when the admitted count is not exactly one.
     const guardState = readAttemptDir(attemptDir, { final: true });
     facts.guard = assertGuardAttempt(guardState, readSpentToken(attemptDir));
     record('request_guard', 'ok', {
@@ -4428,7 +3955,6 @@ async function runJourney(options) {
       category: isDriverFailure ? error.category : 'internal',
       detail: error instanceof Error ? error.message : String(error),
     };
-    // counts are evidence, and reading them must never mask the real blocker.
     if (attemptDir !== null && facts.guard === undefined) {
       facts.guard = captureGuardAttempt(attemptDir);
     }
@@ -4436,11 +3962,7 @@ async function runJourney(options) {
   } finally {
     const cleanups = [];
     if (running) {
-      // before the child is stopped, so a stream symptom is diagnosable.
       running.evidence?.writeStdoutTail?.();
-      // as evidence and overrides an otherwise `ok` journey, so the receipt and
-      // the exit code can never report success while an owned service may still
-      // be alive (§3.4 / §7).
       let cleanup = null;
       try {
         const stopped = await stopServiceVia(running, 'cleanup');
@@ -4467,11 +3989,6 @@ async function runJourney(options) {
       cleanups.push(cleanup);
     }
     if (model) {
-      // shutdown; §7: unconfirmed cleanup is a STOP with retained evidence).
-      // `close()` always resolves with a checked, bounded verdict — a rejected
-      // or throwing close, a close callback error and a close that never calls
-      // back inside the bound all arrive here as unconfirmed and take the same
-      // disposition as the service stop instead of being swallowed.
       const closed = await model.close();
       const cleanup = {
         subject: 'model_endpoint',
@@ -4529,11 +4046,6 @@ async function main() {
       writeFileSync(join(receipt.isolated_root, 'evidence', 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
     } catch {
     }
-    // root unless `--keep` was given, while a blocked or failed run retains its
-    // evidence directory (and the printed receipt names it) so the STOP can be
-    // diagnosed instead of erased. The attempt directory is NEVER removed: it
-    // holds the guard's `spent` token, and a later launch must not be able to
-    // recreate or reset the spend record of this attempt.
     const keepRoot = options.keep || receipt.outcome !== 'ok';
     if (!keepRoot) {
       for (const path of owned.paths) rmSync(path, { recursive: true, force: true });

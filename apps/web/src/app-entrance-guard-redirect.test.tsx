@@ -144,8 +144,6 @@ describe('EntranceGuard redirects (AR-19)', () => {
   });
 
   it('bounces Create on /schedule (V1.171 P2 — schedule CRUD stays develop-only; no creator chrome)', async () => {
-    // entrance even though the page now carries create/edit/delete chrome —
-    // the existing develop-only rule must keep bouncing it (AR-28).
     let resolvedPath = '';
     renderGuardTree(['/schedule'], (p) => (resolvedPath = p));
     await waitFor(() => {
@@ -186,8 +184,6 @@ describe('EntranceGuard redirects (AR-19)', () => {
   });
 
   it('passes Create through the strategy profile deep link (no bounce, no toast, no new guard)', async () => {
-    // matches the canvas rule (`/strategies/:presetId` develop-only +
-    // allowDeepLink) — the profile view is not a new bounce surface.
     let resolvedPathname = '';
     renderGuardTree(['/strategies/preset-1/profile'], (p) => (resolvedPathname = p));
     await waitFor(() => {

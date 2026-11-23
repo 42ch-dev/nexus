@@ -75,24 +75,10 @@ export interface EraCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   worldId: string;
-  /**
-   * (`{ entity_id, canonical_name }` pairs).
-   */
   existingEras: { entity_id: string; canonical_name: string }[];
-  /**
-   * — including when the optional parent-relationship create fails (the
-   * dialog closes and this fires so the graph refetches and shows the new
-   * era; the failed link is surfaced via a warning toast). The mutation
-   * hooks already invalidate the graph query; this callback lets the
-   * orchestrator react (e.g. explicit refetch).
-   */
   onSuccess?: (newEraId: string) => void;
 }
 
-/**
- * strings — the daemon enforces no enum; unknown values render with the
- * default band color.
- */
 const RECOMMENDED_ERA_TYPES = [
   'kingdom',
   'age',
@@ -104,10 +90,6 @@ const RECOMMENDED_ERA_TYPES = [
 /** Sentinel `<option>` value for the freeform era-type input. */
 const CUSTOM_ERA_TYPE = '__custom__';
 
-/**
- * (`kb_<uuid-without-dashes>`) so the daemon's id shape stays consistent
- * across client surfaces.
- */
 function mintEraEntityId(): string {
   return `kb_${crypto.randomUUID().replaceAll('-', '')}`;
 }
@@ -129,7 +111,6 @@ export function EraCreateDialog({
   const [customEraType, setCustomEraType] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  // filtered listbox; mirrors the command-palette APG pattern).
   const [parentQuery, setParentQuery] = useState('');
   const [parentId, setParentId] = useState<string | null>(null);
   const [parentOpen, setParentOpen] = useState(false);
@@ -233,12 +214,6 @@ export function EraCreateDialog({
             },
           });
         } catch {
-          // the dialog open for retry (a retry mints a fresh entity id →
-          // duplicate era): fall through to close + `onSuccess` so the graph
-          // refetches and shows the new era, and surface the missing parent
-          // link as a warning toast instead of an inline retry error. (The
-          // relationship hook's `onError` also toasts non-409/422 failures;
-          // this warning carries the "era WAS created" context.)
           toast({
             variant: 'warning',
             title: t('timeline.eraCreateDialog.parentLinkFailedTitle'),
@@ -260,12 +235,8 @@ export function EraCreateDialog({
             : t('timeline.eraCreateDialog.validationError'),
         );
       } else if (isWorldKbConflictError(err)) {
-        // convention) or a concurrent write won the row. Retry hint —
-        // closing and submitting again mints a fresh id.
         setError(t('timeline.eraCreateDialog.conflictError'));
       } else {
-        // error toast; mirror a generic inline message so the dialog never
-        // closes silently on failure.
         setError(t('timeline.eraCreateDialog.genericError'));
       }
     }
@@ -387,7 +358,6 @@ export function EraCreateDialog({
                       aria-selected={era.entity_id === parentId}
                       data-testid="era-create-parent-option"
                       onMouseDown={(e) => {
-                        // loses focus so the listbox stays interactive.
                         e.preventDefault();
                         handleParentSelect(era.entity_id);
                       }}
@@ -431,8 +401,6 @@ export function EraCreateDialog({
               type="submit"
               variant="primary"
               size="small"
-              // submit must stay clickable so the inline required-name error
-              // surfaces (form validation lives in `handleSubmit`).
               disabled={submitting}
               data-testid="era-create-submit"
             >
@@ -447,11 +415,6 @@ export function EraCreateDialog({
   );
 }
 
-/**
- * daemon's `WorldKbValidationError` carries the array under
- * `details.validation_summary.errors`; defensive `in`/`typeof` narrowing
- * keeps the dialog honest if the details shape drifts (no unchecked casts).
- */
 function extractValidationErrors(err: unknown): string[] {
   if (err === null || typeof err !== 'object') return [];
   if (!('details' in err)) return [];

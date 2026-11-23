@@ -39,9 +39,6 @@ import { WorkTimelinePage } from '@/pages/work-timeline-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 
 function makeClient(outline: WorkOutline): NexusClient {
-  // hooks fire (`/v1/daemon/works/*`, `/v1/daemon/works/list`). Then override
-  // `getWorkOutline` so the Work Timeline query resolves to the per-test
-  // fixture deterministically.
   const base = new BrowserClient();
   return Object.assign(base, {
     getWorkOutline: vi.fn().mockResolvedValue(outline),
@@ -138,10 +135,6 @@ describe('Work Timeline route + Canvas shell peer integration (V1.123 P2 Task 5)
   });
 
   it('preserves V1.118 regression: /works/:workId still redirects to outline (NOT timeline)', async () => {
-    // Outline (V1.118); Work Timeline is reachable as a peer from Work Canvas
-    // shell." Task 5 adds the timeline route as a SIBLING; the index redirect
-    // at `/works/:workId` MUST keep pointing to outline so the Work entry
-    // surface does not silently flip.
     useWorkRouteHandlers();
 
     renderInApp(<WorkRouteTree />, {
@@ -153,7 +146,6 @@ describe('Work Timeline route + Canvas shell peer integration (V1.123 P2 Task 5)
       expect(screen.getByTestId('outline-route')).toBeInTheDocument();
     });
 
-    // to timeline).
     expect(screen.queryByTestId('work-timeline-canvas')).toBeNull();
   });
 });

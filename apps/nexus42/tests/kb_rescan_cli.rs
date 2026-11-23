@@ -163,8 +163,6 @@ async fn rescan_after_chapter_edit_updates_candidate_rows() {
         after_edit.candidates_removed
     );
 
-    // KnowledgeEntryRecord yet), Lin Xia is advisory-removed (no KnowledgeEntryRecord either, since it
-    // was only ever a pending candidate here).
     assert!(after_edit
         .candidates_inserted
         .iter()
@@ -194,7 +192,6 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
         .unwrap();
     let _ = scan;
 
-    // extraction (simulates a body that fell out of sync with the source text).
     let store = SqliteKbStore::new(pool.clone());
     let mut blocks = store.list_by_world(WORLD).await.unwrap();
     let mut kb = blocks.remove(0);
@@ -207,7 +204,6 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
     kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
     store.update_knowledge_entry(kb).await.unwrap();
 
-    // extraction, so KB rows reflect the current chapter text (AC2/AC5).
     let rescan = kb_rescan_hermetic(&pool, OWNER, Some(dir.path()), &target(), false)
         .await
         .unwrap();

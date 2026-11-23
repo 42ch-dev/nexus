@@ -1,6 +1,4 @@
 /**
- * Moment inspector).
- *
  * Verifies the per-layer feel contract locked by:
  *   - `iterations/v1.123/specs/layer-feel-differentiation.md` §2.4 (Moment
  *     feel: vertical scene-stack, dense layout, manuscript-anchor badges
@@ -99,17 +97,11 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     expect(momentAdapter.layoutOptions?.rankSep).toBeDefined();
     expect(momentAdapter.layoutOptions?.nodeSep).toBeDefined();
 
-    // inherits V1.122 default spacing — the differentiation axis is direction
-    // + Moment density, not Narrative re-tuning).
     expect(narrativeAdapter.layoutOptions?.rankSep).toBeUndefined();
     expect(narrativeAdapter.layoutOptions?.nodeSep).toBeUndefined();
   });
 
   it('Moment projection stacks scenes vertically by chapter region (Y grows, X by chapter)', () => {
-    //   scene/beat cards + manuscript-anchor badges."
-    // Two scenes in different chapters → different X (chapter region) AND
-    // Y position reflecting the vertical stack. The exact metrics are
-    // adapter-internal; the contract is "X groups by chapter, Y stacks".
     const ctxRef = {
       current: {
         workId: 'work-1',
@@ -170,8 +162,6 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
   });
 
   it('adapter exposes a renderInspector that returns a non-null node for Moment scene nodes', () => {
-    // ReactNode for a given selected node. The useCanvasSurface hook drives
-    // this from selection state.
     const ctxRef = { current: { workId: 'work-1' } } as React.MutableRefObject<WorkTimelineCanvasAdapterContext>;
     const adapter = createWorkTimelineCanvasAdapter(ctxRef, 'moment');
     expect(typeof adapter.renderInspector).toBe('function');
@@ -195,9 +185,6 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
   });
 
   it('Moment scene inspector surfaces the manuscript anchor + "Edit in Outline" CTA (read-only hand-off per architect §6)', () => {
-    // with manuscript link + "Edit in Outline" hand-off. The CTA MUST NOT
-    // trigger any forbidden write endpoint (Work Timeline is read-only).
-    //
     // Test mirrors the V1.123 P1 Brief-era inspector dispatch test: drive
     // `adapter.renderInspector(node)` directly and render the returned JSX
     // in isolation. jsdom does not render React Flow nodes, so a full-canvas
@@ -210,7 +197,6 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
     const { nodes } = adapter.projectGraph(
       outline(),
     );
-    // scene node directly so we can test renderInspector on a real shape.
     const fakeSceneNode = {
       id: 'wt-scene:sc-1',
       type: 'work-timeline-moment-scene',
@@ -280,8 +266,6 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
   });
 
   it('Narrative event inspector surfaces event id + chapter + "Edit in Outline" CTA (distinct from Moment)', () => {
-    // event inspector; Moment scene/beat → moment inspector. Asserts the
-    // dispatch contract mirrors the V1.123 P1 Brief-era dispatch pattern.
     const ctxRef = { current: { workId: 'work-1' } } as React.MutableRefObject<WorkTimelineCanvasAdapterContext>;
     const adapter = createWorkTimelineCanvasAdapter(ctxRef, 'narrative');
     const fakeEventNode = {

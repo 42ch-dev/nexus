@@ -132,7 +132,6 @@ async fn fork_create_and_list_projection() {
     let fixture = DirectFixture::new().await;
     let (world_id, parent_branch, fork_point) = seed_world_with_fork_point(&fixture);
 
-    // from the fork-point event's branch via the timeline-events read.
     let create = fork_cli(
         &fixture,
         &[
@@ -209,7 +208,6 @@ async fn fork_create_bad_fork_point_rejected_as_input_error() {
     let fixture = DirectFixture::new().await;
     let (world_id, parent_branch, _) = seed_world_with_fork_point(&fixture);
 
-    // the core's fork-point validation rejects the unknown event.
     let out = fork_cli(
         &fixture,
         &[

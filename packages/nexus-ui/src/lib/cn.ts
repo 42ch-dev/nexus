@@ -46,7 +46,6 @@ const customTwMerge = extendTailwindMerge({
         'text-copy-13-mono',
       ],
       'font-family': ['font-display'],
-      // `cn('shadow-elevation-2', 'shadow-card')` collapsing to one class.
       shadow: [
         'shadow-elevation-0',
         'shadow-elevation-1',
@@ -68,7 +67,6 @@ const customTwMerge = extendTailwindMerge({
         'min-w-canvas-node-outline-scene-beat',
         'min-w-canvas-node-default',
       ],
-      // components.dialog/sheet), consumed by apps/web dialog.tsx + sheet.tsx.
       w: ['w-dialog', 'w-sheet'],
       'max-w': ['max-w-dialog'],
       opacity: ['opacity-disabled'],

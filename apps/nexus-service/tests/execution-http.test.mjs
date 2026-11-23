@@ -12,15 +12,6 @@ const root = join(__dirname, '..', '..', '..');
 const serviceRoot = join(__dirname, '..');
 const fixture = resolve(root, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
 
-/**
- * and the provider-family selection over the real in-process service, the
- * real native store, and deterministic no-model ACP fixture peers. No mock
- * forwards anything: selection is observed through the native provider
- * catalog, terminal truth through the durable operation journal (close +
- * reopen on the same home), and the migrated preset/strategy routes through
- * the core authority's own refusals.
- */
-
 function resolvePython() {
   const which = execFileSync('which', ['python3'], { encoding: 'utf8' }).trim();
   return realpathSync(which);
@@ -31,8 +22,6 @@ function realpathSync(p) {
   }).stdout.trim();
 }
 
-// fixture: selection must be Rust-admitted across the whole catalog, not a
-// single hard-coded peer.
 const PROVIDER_IDS = ['mock-acp-1', 'mock-acp-2', 'mock-acp-3', 'mock-acp-4'];
 
 function seedHome() {
@@ -125,8 +114,6 @@ describe('execution-http (P5-T3)', () => {
         `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
     }
-    // compute run family stays an explicit migration refusal (the WASM edge
-    // is a daemon-cohort capability), never a degraded fake.
     for (const route of inventory) {
       if (route.family === 'presets' || route.family === 'execution') {
         assert.equal(route.tier, 'tier2', `${route.method} ${route.path} must stay tier2`);
@@ -135,13 +122,9 @@ describe('execution-http (P5-T3)', () => {
   });
 
   test('provider selection and interrupted execution', async () => {
-    //    exactly the configured families and a session binds the chosen one.
     const catalog = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/providers`);
     assert.equal(catalog.status, 200, catalog.text);
     const listed = (catalog.payload.providers ?? []).map((entry) => entry.provider_id);
-    // maintained DSH native adapter is a real default catalog member (P4
-    // native_cli registration semantics) — asserted present, never deleted
-    // to flatter the fixture.
     for (const id of PROVIDER_IDS) {
       assert.ok(listed.includes(id), `missing configured provider family ${id}: ${catalog.text}`);
     }
@@ -161,7 +144,6 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(rememberDenied.status, 422, rememberDenied.text);
     assert.equal(rememberDenied.payload.error.code, 'invalid_input');
 
-    //    true settled semantic for an op orphaned by an orderly shutdown.
     const executed = await jsonFetch(
       `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/operations`,
       { method: 'POST', body: { kind: 'prompt', content: 'hello' } },
@@ -184,13 +166,7 @@ describe('execution-http (P5-T3)', () => {
       `an in-flight op orphaned by an orderly close settles as cancelled: ${settled.text}`,
     );
 
-    //    an in-flight journal row is pre-seeded into the workspace state DB
-    //    (the T1 `second_owner_and_restart_are_fenced` method — no close in
-    //    between), and the next open's settlement classifies it `interrupted`
-    //    and keeps it terminal-inspectable.
     const orphanId = crypto.randomUUID();
-    // the retained engine writer: stub the five `nexus_writer_*` scalars with
-    // the gate/registration values the closed engine owner committed.
     const seed = spawnSync(
       'python3',
       [
@@ -215,9 +191,6 @@ describe('execution-http (P5-T3)', () => {
       `an unsettled journal orphan must be classified interrupted: ${afterReopen.text}`,
     );
 
-    //    session id is a real 404 from the host registry — never a fake
-    //    success — and DSH cancellation is not offered as a fake success
-    //    anywhere on this surface.
     const unknownSessionId = randomUUID();
     const missing = await jsonFetch(
       `${baseUrl}/v1/daemon/agent-host/sessions/${unknownSessionId}`,
@@ -227,10 +200,6 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(missing.payload.error.code, 'not_found', missing.text);
   });
 
-  // `internal`, sanitized, and pinned. A provider-only (non-Actor) session
-  // drives the branch that reserves a dispatch, calls the provider, and
-  // registers the row; the provider seam is stubbed per invariant so each
-  // exit at `provider.ts` fires on the real public route.
   test('the public prompt POST 500 exits are typed internal and sanitized', async () => {
     const created = await jsonFetch(`${baseUrl}/v1/daemon/agent-host/sessions`, {
       method: 'POST',
@@ -249,8 +218,6 @@ describe('execution-http (P5-T3)', () => {
       });
 
     try {
-      // violates the provider protocol invariant: typed `internal`/500, never a
-      // fabricated operation.
       core.providerCall = async (request) => ({
         request_id: request.request_id,
         ok: true,
@@ -261,8 +228,6 @@ describe('execution-http (P5-T3)', () => {
       assert.equal(noOperationId.payload.error.code, 'internal', noOperationId.text);
       assert.equal(noOperationId.payload.error.message, 'Internal server error', noOperationId.text);
 
-      // `beginProviderOperationDispatch` must still be held when the row is
-      // registered; losing it is `internal`/500, not a silent unregistered op.
       core.providerCall = async (request) => {
         service.service.providerRegistry.endProviderOperationDispatch(request.request_id);
         return {
@@ -277,8 +242,6 @@ describe('execution-http (P5-T3)', () => {
       assert.equal(lostAdmission.payload.error.code, 'internal', lostAdmission.text);
       assert.equal(lostAdmission.payload.error.message, 'Internal server error', lostAdmission.text);
 
-      // is the sanitization boundary: 500 `internal` with a constant message,
-      // and the native detail never crosses the wire.
       const nativeDetail = '/Users/private-operator/.nexus42/state.db';
       core.providerCall = async (request) => {
         throw new Error(
@@ -310,11 +273,6 @@ describe('execution-http (P5-T3)', () => {
     }
   });
 
-  // (`CORE_ERROR_CODES`) rejects an unknown code before the mapper and every
-  // accepted code is in `STATUS_BY_CODE`, so the fallback is a defensive arm.
-  // E5 (errors.ts:111) is wire-reachable — a plain `Error` rejection at the
-  // stubbed `providerCall` seam reaches the route and classifies here — but is
-  // pinned at unit level for stability, not because the wire cannot carry it.
   test('every mapper 500 fallback arm is classified internal and sanitized', async () => {
     const { mapNativeError, statusForCode } = await import(join(serviceRoot, 'dist/errors.js'));
 
@@ -322,8 +280,6 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(statusForCode('not_supported'), 501);
     assert.equal(statusForCode('no_such_code'), 500);
 
-    // envelope, nor a pre-wire `invalid ` validation, is the catch-all
-    // `internal`/500 with the constant sanitized message.
     const unmapped = mapNativeError(
       new Error('registry exploded at /Users/private-operator/.nexus42'),
     );
@@ -340,8 +296,6 @@ describe('execution-http (P5-T3)', () => {
     const orchestration = await jsonFetch(`${baseUrl}/v1/daemon/orchestration/presets`);
     assert.equal(orchestration.status, 200, orchestration.text);
 
-    // strategy patch against a nonexistent strategy is refused by the same
-    // authority — both prove the route is live over real state, not 501.
     const missingPreset = await jsonFetch(`${baseUrl}/v1/daemon/presets/preset_missing`);
     assert.equal(missingPreset.status, 404, missingPreset.text);
     const strategyPatch = await jsonFetch(
@@ -356,14 +310,8 @@ describe('execution-http (P5-T3)', () => {
         },
       },
     );
-    // core's own 404 refusal — never 501, never a synthesized success.
     assert.equal(strategyPatch.status, 404, strategyPatch.text);
 
-    // (`compute.ts`) over the hosted owner, not an unmigrated route: this
-    // profile therefore answers from the compute/owner boundary — never the
-    // router's 501. The live C1–C8 contracts (and their refusals) are asserted
-    // in `compute-http.test.mjs`, which stages a real World and the real owned
-    // execution owner this fixture's workspace does not register.
     const computeRun = await jsonFetch(`${baseUrl}/v1/daemon/compute/run`, {
       method: 'POST',
       body: { capability_id: 'x', inputs: {} },

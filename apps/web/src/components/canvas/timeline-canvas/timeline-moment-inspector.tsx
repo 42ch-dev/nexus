@@ -84,11 +84,6 @@ function ManuscriptAnchorBlock({
   );
 }
 
-/**
- * note. Outline accent (amber-700) mirrors the Work Timeline Moment
- * inspectors + the Work-scoped Moment node feel (V1.123 layer-feel §2.4).
- * NO submit wiring, NO Save, NO cross-surface CTA — display-only.
- */
 function TimelineMomentInspectorShell({
   title,
   description,
@@ -124,12 +119,6 @@ function TimelineMomentInspectorShell({
   );
 }
 
-/**
- * status (if any) + the chapter/scene manuscript anchor. Outline accent
- * mirrors the Moment scene node (Work-scoped outline-projection). Read-only:
- * no Save, no `kb.patch_entity` path, no Edit-in-Outline CTA (the World
- * surface cannot resolve the owning Work id — see module doc).
- */
 export function TimelineMomentSceneInspector({
   node,
 }: {
@@ -181,11 +170,6 @@ export function TimelineMomentSceneInspector({
   );
 }
 
-/**
- * status (if any) + the chapter/scene/beat manuscript anchor. Outline accent
- * mirrors the Moment beat node. Read-only: no Save, no `kb.patch_entity`
- * path, no Edit-in-Outline CTA (see module doc).
- */
 export function TimelineMomentBeatInspector({
   node,
 }: {
@@ -238,10 +222,6 @@ export function TimelineMomentBeatInspector({
 }
 
 /**
- * `node.data.nodeKind`. Returns `null` for unknown kinds so the
- * `useCanvasSurface` derived `surface.inspector` slot renders nothing when
- * the selection does not match a Moment node.
- *
  * Mirrors the Work Timeline `renderWorkTimelineInspector` dispatch (V1.123).
  * Every branch renders read-only details; no write is invoked from the World
  * Timeline Moment layer (PD-3).

@@ -16,10 +16,6 @@ export type HubTabBarProps = {
   ariaLabel?: string;
   /** Prefix for tab button `id` (fallback `hub-tab-${useId()}`). */
   tabIdPrefix?: string;
-  /**
-   * `hub-tabpanel-${useId()}` — the SAME instance uid as the tab fallback,
-   * with a distinct prefix; a host overriding one prefix should pass both).
-   */
   tabPanelId?: string;
   'data-testid'?: string;
 };

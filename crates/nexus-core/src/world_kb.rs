@@ -95,8 +95,6 @@ pub fn project_entity(kb: &KnowledgeEntryRecord) -> WorldKbEntityProjection {
         aliases: aliases.unwrap_or_default(),
         source_anchor_count: Some(source_anchor_count),
         updated_at: kb.updated_at.clone(),
-        // (both absent for an in-scope shared row); it is never derived from
-        // the narrative owner. T9 owns the read-policy polish.
         holder_entry_id: wire_cast(kb.holder_entry_id.clone()),
         disclosure: wire_cast(kb.disclosure.clone()),
     }
@@ -608,9 +606,6 @@ pub mod patch {
                     .to_string(),
             });
         }
-        // stored state **inside this transaction** (ownership/activity, the
-        // World-row active binding and the fail-closed registry read all share
-        // the write's snapshot), before any material write is attempted.
         let audience = world_patch_audience(req.patch.audience.as_ref(), creator_id)?;
         let governance = resolve_authored_audience_tx(
             &mut tx,
@@ -637,9 +632,6 @@ pub mod patch {
             validate_body(validation_block_type, Some(body), ValidationMode::Novel)
                 .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
         }
-        // (post-extraction, pre-write, after the addressing/status/OCC checks
-        // above), joining the same 422 `validation_summary.errors` array.
-        //
         // D8 (v1.214 P1-S2): this seam deliberately stays **before** the
         // durable no-op short-circuit below. Re-supplying an unchanged but
         // drifted dialect is therefore still refused with this 422 — the
@@ -652,9 +644,6 @@ pub mod patch {
         }
 
         let post_patch = build_post_patch(&kb, &req.patch, body_for_validation.as_ref());
-        // governance pair (durable §3): supplying the stored title/body/modules
-        // again moves neither the KE nor the World revision, while a changed
-        // pair still writes even when the content is identical.
         if world_patch_content_unchanged(&kb, &post_patch)
             && governance_is_stored(&kb, governance.as_ref())
         {
@@ -681,8 +670,6 @@ pub mod patch {
                 return Err(e);
             }
         };
-        // resolved pair (or preserve it), re-assert the reverse WorldSheet
-        // rule, and bump the owning World's knowledge revision exactly once.
         nexus_local_db::kb_store::author_world_knowledge_governance_tx(
             &mut tx,
             world_id,
@@ -692,8 +679,6 @@ pub mod patch {
         )
         .await
         .map_err(actor_db_err)?;
-        // `None` (omitted audience) preserves the stored pair, which the read
-        // row already carries, so only an explicit audience updates it.
         let mut persisted = persisted;
         if let Some(governance) = governance.as_ref() {
             persisted.holder_entry_id = governance.holder_entry_id.clone();
@@ -732,7 +717,6 @@ pub mod patch {
                 Ok(AuthoredAudience::Creator { creator_id })
             }
             Some(NexusWorldKbEntityPatchAudience::CharacterPrivate(character_id)) => {
-                // borrows the request's own id.
                 let raw = character_id.as_str();
                 KnowledgeAudience::character_private(raw.to_string()).map_err(|e| {
                     CoreError::InvalidInput {
@@ -855,7 +839,6 @@ pub mod patch {
             validate_body(block_type, Some(body), ValidationMode::Novel)
                 .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
         }
-        // passes the same dialect seam before any material write.
         let module_errors = validate_authored_modules(&req.patch);
         if !module_errors.is_empty() {
             return Err(CoreError::world_kb_validation_failed(&module_errors, &[]));
@@ -863,8 +846,6 @@ pub mod patch {
         fresh.body = body_for_validation;
         apply_patch_modules(&mut fresh, None, &req.patch);
 
-        // stored state inside this transaction, before the row is written, so
-        // an identity that stopped being permitted refuses with no mutation.
         let audience = world_patch_audience(req.patch.audience.as_ref(), creator_id)?;
         let governance = resolve_authored_audience_tx(
             &mut tx,
@@ -900,8 +881,6 @@ pub mod patch {
         )
         .await
         .map_err(actor_db_err)?;
-        // `None` (omitted audience) preserves the stored pair, which the read
-        // row already carries, so only an explicit audience updates it.
         let mut persisted = persisted;
         if let Some(governance) = governance.as_ref() {
             persisted.holder_entry_id = governance.holder_entry_id.clone();
@@ -1169,9 +1148,6 @@ pub mod patch {
         use super::*;
         use std::hint::black_box;
 
-        // the real dispatch. Measured 6 vs 4226 allocations on this fixture
-        // (~700x); 8x leaves room for payload/allocator drift while still
-        // failing if the copy lands on the measured path.
         const COPY_MARGIN: u64 = 8;
 
         /// Large nested unknown payload: 64 first-level keys x 16 unknown leaf
@@ -1236,7 +1212,6 @@ pub mod patch {
 
             let _ = allocation_counter::measure(|| {});
 
-            // reached through the call shape the borrowed view still accepts.
             let copied_payload = allocation_counter::measure(|| {
                 black_box(validate_mental_module(&module_value_to_json(black_box(
                     &copied,
@@ -1246,12 +1221,6 @@ pub mod patch {
                 black_box(validate_authored_modules(black_box(&patch)));
             });
 
-            // the dispatch is measured directly. The real dispatch is compared
-            // against the removed copy shape instead of against absolute counts,
-            // so allocator/profile drift that moves both readings together does
-            // not flake while a copy re-appearing on the measured path still
-            // fails. An uninstalled counter reads 0 for both, which fails here
-            // too — the liveness check.
             assert!(
                 copied_payload.count_total > measured.count_total * COPY_MARGIN,
                 "the core dispatch copied the patch payload: {measured:?} vs whole-module copy {copied_payload:?}"
@@ -1295,7 +1264,6 @@ impl CoreService {
                 resource: "world_kb_promote: read-only core access".to_string(),
             });
         }
-        // foreign World before the read selection can answer 404.
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         let read_scope = self
             .creator_management_read_scope(principal, &world_id)
@@ -1331,7 +1299,6 @@ impl CoreService {
                 resource: "world_kb_relationship: read-only core access".to_string(),
             });
         }
-        // foreign World before the read selection can answer 404.
         guards::require_world_owner(&self.inner.pool, &world_id, principal.creator_id()).await?;
         let read_scope = self
             .creator_management_read_scope(principal, &world_id)
@@ -1419,7 +1386,6 @@ pub mod promote {
             });
         }
 
-        // job confirmed) while the client saw an error or is replaying.
         if candidate.promotion_status == "confirmed" && req.action.as_str() == "adopt" {
             if let Some(response) =
                 try_idempotent_confirmed_adopt_response(pool, &candidate, &req).await?
@@ -1567,7 +1533,6 @@ pub mod promote {
         crate::world_kb::validate_body(block_type, Some(&body), ValidationMode::Novel)
             .map_err(|e| CoreError::world_kb_validation_failed(&[e.to_string()], &[]))?;
 
-        // flips it to "confirmed" via `apply_promote_acceptance`.
         let mut kb = KnowledgeEntryRecord::new(world_id, block_type, &canonical_name);
         kb.body = Some(body);
         kb.status = "provisional".to_string();
@@ -1865,7 +1830,6 @@ pub mod promote {
     ) -> CoreResult<PromoteAdoptOrchestrateOutcome> {
         match result {
             SpokeResult::Ok(PromoteResponse::Variant0 { knowledge_entry, .. }) => {
-                // into the canonical data type downstream nexus code consumes.
                 let wire = serde_json::to_value(&knowledge_entry).map_err(|e| {
                     CoreError::Internal {
                         category: format!(
@@ -1881,7 +1845,6 @@ pub mod promote {
                         ),
                     })
             }
-            // `SpokeResult::Reject` (not Variant1).
             SpokeResult::Ok(PromoteResponse::Variant1 { .. }) => Err(CoreError::Internal {
                 category: format!(
                     "orchestrate_promote returned a PromoteResponse::Variant1 error envelope for {job_id}; \
@@ -1905,7 +1868,6 @@ pub mod promote {
         if reject.code == SpokeRejectCode::KnowledgeEntryAlreadyExists
             || reject.code == SpokeRejectCode::DuplicateActiveKnowledgeEntry
         {
-            // means a prior partial attempt completed successfully.
             let job = get_promotion(pool, job_id).await.map_err(|e| db_err(&e))?;
             if let Some(job) = job {
                 if job.promotion_status == "confirmed" {
@@ -1982,7 +1944,6 @@ pub mod promote {
         pool: &sqlx::SqlitePool,
         job_id: &str,
     ) -> CoreError {
-        // kind "world" — never a fabricated version conflict.
         if nexus_spoke_adapter::is_world_conflict_reject(&reject) {
             let current = reread_promotion_version(pool, job_id).await.unwrap_or(0);
             return RootCoreError::world_kb_conflict(
@@ -2048,7 +2009,6 @@ pub mod promote {
         .await
         .map_err(|e| db_err(&e))?;
         if result.rows_affected() != 1 {
-            // retries against the NEW version.
             let current = reread_promotion_version(pool, &req.job_id).await?;
             return Err(RootCoreError::world_kb_conflict(
                 current,
@@ -2116,8 +2076,6 @@ pub mod promote {
         let target_version = target.revision.unwrap_or(0);
 
         let mut tx = pool.begin().await.map_err(|e| db_err(&e))?;
-        // "version") so the client refreshes the target, not the candidate.
-        // The world-aware predicate binds the request's world.
         let _new_target_version = nexus_local_db::kb_store::cas_update_key_block_fields(
             &mut tx,
             target_id,
@@ -2147,7 +2105,6 @@ pub mod promote {
         .await
         .map_err(|e| db_err(&e))?;
         if reject.rows_affected() != 1 {
-            // actual current version.
             let _ = tx.rollback().await;
             let current = reread_promotion_version(pool, &req.job_id).await?;
             return Err(RootCoreError::world_kb_conflict(
@@ -2457,8 +2414,6 @@ pub mod relationship {
         require_valid_source_anchors(pool, world_id, Some(input.source_anchor_ids.as_slice()))
             .await?;
 
-        // before the orchestrator (cross-world access is forbidden, not a
-        // spoke reject).
         let existing = get_relationship(pool, relationship_id)
             .await
             .map_err(|e| match e {
@@ -2476,7 +2431,6 @@ pub mod relationship {
             });
         }
 
-        // `expected_version` must surface as a conflict here.
         let current_revision = u64::try_from(existing.revision).unwrap_or(0);
         if expected_version != current_revision {
             return Err(CoreError::world_kb_conflict(
@@ -2487,9 +2441,6 @@ pub mod relationship {
             ));
         }
 
-        // orchestrator asserts it, then the port CAS-bumps). `source` omitted:
-        // the port preserves the stored provenance.
-        //
         // `needs_review` preservation: when the input omits it, default to the
         // existing flag so a routine edit does not silently confirm an
         // extraction suggestion.
@@ -2504,7 +2455,6 @@ pub mod relationship {
             None,
         );
 
-        // routine update does not silently drop them.
         let known_nexus_keys: &[&str] = &[
             "world_id",
             "symmetric",
@@ -2749,7 +2699,6 @@ pub mod relationship {
         revision: Option<u64>,
         source: Option<&str>,
     ) -> SpokeRelation {
-        // back via `extract_nexus_locals`.
         let mut nexus_ns = serde_json::Map::new();
         nexus_ns.insert(
             "world_id".to_string(),
@@ -2775,11 +2724,6 @@ pub mod relationship {
                     .collect(),
             ),
         );
-        // (`patch_relationship_update` defaults an omitted flag to the stored
-        // one), and the relation must carry the resolved value — the store
-        // reads it back out of `extensions.nexus`. Dropping it here persisted
-        // every update as `needs_review = 0`, silently promoting a suggestion
-        // the caller never confirmed.
         nexus_ns.insert(
             "needs_review".to_string(),
             serde_json::Value::Bool(input.needs_review.unwrap_or(false)),
@@ -2843,7 +2787,6 @@ pub mod relationship {
                         other => local_db_err(other),
                     })
             }
-            // `SpokeResult::Reject` (not Variant1).
             SpokeResult::Ok(RelateResponse::Variant1 { .. }) => Err(CoreError::Internal {
                 category: format!(
                     "orchestrate_relate returned a RelateResponse::Variant1 error envelope for {relationship_id}; \
@@ -2891,16 +2834,10 @@ pub mod relationship {
                     "refetch the World KB graph and reapply",
                 )
             }
-            // raises `InvalidInput` for BOTH validation and storage failures.
-            // On this path every validation `InvalidInput` is pre-checked, so
-            // only storage failures reach here; mapped to InvalidInput as
-            // shipped (tracked for a spoke-level fix in a later iteration).
             SpokeRejectCode::InvalidInput => CoreError::InvalidInput {
                 field: "relationship".to_string(),
                 reason: reject.message,
             },
-            // endpoint existence; mapped to validation (not internal) keeps
-            // the contract honest if a future caller bypasses the guard.
             SpokeRejectCode::RelationSelfEdge
             | SpokeRejectCode::RelationMissingEndpoint
             | SpokeRejectCode::MissingRequiredField => {
@@ -2977,7 +2914,6 @@ pub mod key_block_state {
                 other => store_err(&other),
             })?;
 
-        // belonging to a different world as not found (same as patch_entity).
         if kb.world_id() != Some(world_id) {
             return Err(CoreError::NotFound {
                 resource: format!("key block {key_block_id} in world {world_id}"),

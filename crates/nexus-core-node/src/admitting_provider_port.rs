@@ -160,7 +160,6 @@ impl ProviderPort for AdmittingProviderPort {
         let method = request.method;
         let session_id = request.session_id.clone();
         let mut request_operation_id = request.operation_id.clone();
-        // touching the adapter, so a launched child is never dropped untracked.
         let reserved = if matches!(method, ProviderCallMethod::Launch) {
             if !self.state.try_reserve_js_session() {
                 return Err(CoreError {
@@ -231,9 +230,6 @@ impl ProviderPort for AdmittingProviderPort {
                                 .record_js_session_operation(session_id, operation_id);
                         }
                         Err(err) => {
-                            // stays aligned with the real provider state (the
-                            // operation is live), so inspect and native close
-                            // can still discover and reap it deterministically.
                             self.state
                                 .record_js_session_operation(session_id, operation_id.clone());
                             return Err(effect_committed_failure(err, &operation_id, session_id));
@@ -241,8 +237,6 @@ impl ProviderPort for AdmittingProviderPort {
                     }
                 }
             }
-            // operation id, so the owning session is resolved from the
-            // operation when session_id is absent.
             ProviderCallMethod::Cancel if reply.ok => {
                 let operation_id = request_operation_id.take();
                 let session_id = session_id.or_else(|| {
@@ -268,8 +262,6 @@ impl ProviderPort for AdmittingProviderPort {
                             }
                         }
                         Err(err) => {
-                            // inspect/cleanup. The missing durable row is
-                            // settled by the next open (orphan settlement).
                             let session = session_id.clone().unwrap_or_default();
                             if !session.is_empty() {
                                 self.state.record_js_operation_terminal(
@@ -307,10 +299,6 @@ impl ProviderPort for AdmittingProviderPort {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        // acknowledged before `inner.next` returns, so a re-pull can never
-        // replay it) but its durable mirror failed. Journal first, then apply
-        // the memory terminal, then return the exact retained batch exactly
-        // once (LIFE-3).
         if let Some(pending) = self
             .pending_terminal_batches
             .lock()
@@ -723,7 +711,6 @@ mod tests {
         let port =
             AdmittingProviderPort::new(Arc::new(HostManager::new()), inner.clone(), state.clone());
 
-        // write fails, and the exact batch is retained.
         let err = port
             .next("op-j".to_string(), 10, 64_000)
             .await

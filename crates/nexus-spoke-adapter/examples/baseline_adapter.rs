@@ -16,15 +16,8 @@
 //! cargo run -p nexus-spoke-adapter --example baseline_adapter
 //! ```
 
-// test twin (`tests/orchestration_adoption.rs`) can `#[path]`-import this
-// file as a hidden module. In the example binary itself `pub` is a no-op,
-// but it widens clippy's view of these items. These two lints are not
-// meaningful for fixture builders that are always consumed at the call
-// site and whose `.expect(...)` panics are the fixture contract.
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::must_use_candidate)]
-// protects the in-memory store for the method's duration); the nursery
-// significant_drop_* suggestions to shorten their lifetime are noise here.
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::significant_drop_in_scrutinee)]
 
@@ -213,7 +206,6 @@ impl KnowledgeEntryPort for NexusBaselineMock {
                 Some(stored) => {
                     let current = stored.revision.unwrap_or(0);
                     if current > expected {
-                        // read a stale base. Spec §7.3 CAS contract.
                         let mut details = Map::new();
                         details.insert("expectedBaseRevision".into(), json!(expected));
                         details.insert("storeRevision".into(), json!(current));
@@ -226,7 +218,6 @@ impl KnowledgeEntryPort for NexusBaselineMock {
                         );
                     }
                     if current < expected {
-                        // — impossible future base. Spec §7.3 CAS contract.
                         let mut details = Map::new();
                         details.insert("expectedBaseRevision".into(), json!(expected));
                         details.insert("storeRevision".into(), json!(current));
@@ -296,7 +287,6 @@ impl RelationPort for NexusBaselineMock {
                         Some(details),
                     );
                 }
-                // port's INSERT with `revision = 1`).
                 let mut stored = relation;
                 stored.revision = Some(1);
                 relations.insert(relation_id, stored.clone());
@@ -304,8 +294,6 @@ impl RelationPort for NexusBaselineMock {
             }
             Some(expected) => match relations.get(&relation_id) {
                 None => {
-                    // all. Collapses to STORED_REVISION_STALE with
-                    // storeRevision=null (mirrors production).
                     let mut details = Map::new();
                     details.insert("relation_id".into(), json!(relation_id));
                     details.insert("expectedBaseRevision".into(), json!(expected));
@@ -321,11 +309,6 @@ impl RelationPort for NexusBaselineMock {
                 Some(stored) => {
                     let current = stored.revision.unwrap_or(0);
                     if current != expected {
-                        // mismatch to STORED_REVISION_STALE (simpler than the
-                        // KnowledgeEntryPort 3-way split — the relate
-                        // orchestrator pre-routes create vs update, so the
-                        // only reachable failure here is "the store moved
-                        // since the caller's read"). Matches production.
                         let mut details = Map::new();
                         details.insert("relation_id".into(), json!(relation_id));
                         details.insert("expectedBaseRevision".into(), json!(expected));
@@ -338,7 +321,6 @@ impl RelationPort for NexusBaselineMock {
                             Some(details),
                         );
                     }
-                    // (matches production `update_relationship_in_tx`).
                     let mut updated = relation;
                     updated.revision = Some(expected + 1);
                     relations.insert(relation_id, updated.clone());
@@ -352,9 +334,6 @@ impl RelationPort for NexusBaselineMock {
 #[async_trait]
 impl KnowledgeQueryPort for NexusBaselineMock {
     async fn list_knowledge_entries(&self, _scope: &Scope) -> SpokeResult<Vec<KnowledgeEntry>> {
-        // scope filtering via `filter_knowledge_entries_by_scope`. Re-
-        // implementing that helper here would violate the call-boundary
-        // invariant (spec §7).
         spoke_ok(
             self.entries
                 .lock()
@@ -529,10 +508,6 @@ async fn main() {
     }
     println!();
 
-    // promote whose candidate still claims revision 2 triggers the
-    // orchestrator's `assert_revision_match(2, 3)`: the store is ahead of
-    // the caller's expectation, so it rejects with `STORED_REVISION_STALE`.
-    // This is the CAS gate surfacing through the orchestrator.
     println!("--- 2. orchestrate_promote (stale revision -> CAS reject) ---");
     match orchestrate_promote(&mock, promote_request(entry_id, 2)).await {
         SpokeResult::Ok(_) => println!("  UNEXPECTED OK — expected CAS reject"),
@@ -540,8 +515,6 @@ async fn main() {
     }
     println!();
 
-    // (returns all stored entries); spoke's scope helpers filter to the
-    // requested entry_ids and the packet builder assembles the result.
     println!("--- 3. orchestrate_assemble (happy path) ---");
     match orchestrate_assemble(&mock, assemble_request("world_1", entry_id), None).await {
         SpokeResult::Ok(AssembleResponse::Variant0 { packet, .. }) => {
@@ -556,11 +529,6 @@ async fn main() {
     }
     println!();
 
-    // `validate_create_revision`). The orchestrator loads stored → absent →
-    // create path → calls our mock's `put_relation(candidate, None)`. The
-    // mock seeds revision = 1 (spoke convention) and returns the stored
-    // relation. This is the 3rd shipped Surface B cutover (promote + upsert
-    // + relate) exercised through the mock.
     println!("--- 4. orchestrate_relate (create happy path) ---");
     match orchestrate_relate(&mock, relate_request("rel_demo", None)).await {
         SpokeResult::Ok(RelateResponse::Variant0 { relation, .. }) => {
@@ -574,9 +542,6 @@ async fn main() {
     }
     println!();
 
-    // claims revision 1 matches stored; the orchestrator's
-    // `assert_revision_match(1, 1)` passes, then our mock's CAS sees
-    // stored(1) == expected(1) → accepts and bumps to revision 2.
     println!("--- 5. orchestrate_relate (update happy path) ---");
     match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))).await {
         SpokeResult::Ok(RelateResponse::Variant0 { relation, .. }) => {
@@ -590,11 +555,6 @@ async fn main() {
     }
     println!();
 
-    // whose candidate STILL claims revision 1 triggers the orchestrator's
-    // `assert_revision_match(1, 2)`: the store is ahead of the caller's
-    // expectation, so it rejects with `STORED_REVISION_STALE`. Same shape
-    // as the promote CAS reject (block 2) — the CAS gate surfaces through
-    // the orchestrator's validation before the mock's put fires.
     println!("--- 6. orchestrate_relate (stale revision -> CAS reject) ---");
     match orchestrate_relate(&mock, relate_request("rel_demo", Some(1))).await {
         SpokeResult::Ok(_) => println!("  UNEXPECTED OK — expected CAS reject"),

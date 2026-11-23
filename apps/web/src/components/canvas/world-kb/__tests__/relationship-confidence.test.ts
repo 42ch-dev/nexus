@@ -112,9 +112,6 @@ describe('deriveRelationshipEdges (V1.76)', () => {
   });
 });
 
-// directly against `0.0`–`1.0` confidence (slider range 0.0–1.0, step 0.05).
-// An earlier revision stored the slider as 0–100 and compared it against 0–1
-// confidence, hiding every confirmed edge at the first non-zero step.
 describe('filterRelationshipEdgesByConfidence (qc3-W3 regression)', () => {
   function edgesFor(confidence: number | undefined, needsReview = false): Edge[] {
     return deriveRelationshipEdges([
@@ -128,9 +125,6 @@ describe('filterRelationshipEdgesByConfidence (qc3-W3 regression)', () => {
   });
 
   it('hides a confirmed edge whose confidence is below the threshold', () => {
-    // the old 0–100 slider, threshold 0.7 was stored as 70 and 0.5 >= 70 was
-    // always false, so the edge vanished; with the 0.0–1.0 slider it correctly
-    // hides only because 0.5 < 0.7).
     const filtered = filterRelationshipEdgesByConfidence(edgesFor(0.5), 0.7);
     expect(filtered).toHaveLength(0);
   });
@@ -151,8 +145,6 @@ describe('filterRelationshipEdgesByConfidence (qc3-W3 regression)', () => {
   });
 
   it('a threshold of 0.05 no longer wipes out a 0.5-confidence edge', () => {
-    // stored as 5, and confidence 0.5 >= 5 was false → edge hidden. With the
-    // normalized 0.0–1.0 slider, 0.5 >= 0.05 is true → edge kept.
     const filtered = filterRelationshipEdgesByConfidence(edgesFor(0.5), 0.05);
     expect(filtered).toHaveLength(1);
   });

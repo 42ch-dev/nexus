@@ -1,9 +1,3 @@
-/**
- * renders — the frozen snapshot (approval id, exact pins, simulation
- * identity, candidate revision) and the no-publish statement — and the named
- * refusal copy for the cases that refuse. The flag-off surface passes none of
- * this, keeping the shipped disabled disclosure (T7).
- */
 import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 

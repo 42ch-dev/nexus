@@ -14,7 +14,6 @@ import { useId } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-// (not the barrel) to apps/web, so the fixture resolves the same modules.
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -136,7 +135,6 @@ export function ValidatePresetDialogChrome({
   onClose,
   onSubmit,
 }: ValidatePresetDialogChromeProps) {
-  // literal id would pair every label with the first input in the document.
   const pathId = useId();
 
   return (

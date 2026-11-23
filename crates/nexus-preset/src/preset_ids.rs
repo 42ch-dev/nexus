@@ -164,7 +164,6 @@ mod tests {
                 NOVEL_REVIEW_MASTER_PRESET_ID,
             ]
         );
-        // enqueues schedules with these ids).
         for id in cron_role_preset_ids() {
             assert!(
                 crate::list_embedded_presets().iter().any(|e| e == id),

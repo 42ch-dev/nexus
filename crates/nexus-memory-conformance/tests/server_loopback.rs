@@ -64,9 +64,6 @@ const HOST_SEED: [u8; 32] = [0x42; 32];
 /// family.
 const MEMORY_CAPABILITIES: [&str; 1] = ["spoke-memory"];
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 fn manifest(host_id: &str, capabilities: &[&str]) -> HostCapabilityManifest {
     serde_json::from_value(json!({
         "schema_version": 1,
@@ -337,13 +334,10 @@ where
             () = self.notify.notified() => Err(TransportError::Closed),
             message = async {
                 let mut guard = self.stream.lock().await;
-                // already notified; refuse instead of reading on.
                 if self.closed.load(Ordering::SeqCst) {
                     return Err(TransportError::Closed);
                 }
                 let stream = guard.as_mut().ok_or(TransportError::Closed)?;
-                // `Pending` here is the native socket reporting "not ready",
-                // observed while this receive still holds the stream mutex.
                 let mut next = Box::pin(stream.next());
                 if let Some(probe) = &self.probe {
                     if poll_once_pending(next.as_mut()) {
@@ -400,8 +394,6 @@ where
         if let Some(probe) = &self.probe {
             probe.mark(&probe.cleanup_started);
         }
-        // send each hold their mutex across the native poll, so a lock-first
-        // release would wait for the very I/O it has to cancel.
         self.notify.notify_waiters();
         let stream_disposed = tokio::time::timeout_at(deadline, self.stream.lock())
             .await
@@ -418,11 +410,7 @@ where
             }
             if let Some(sink) = sink.as_mut() {
                 match tokio::time::timeout_at(deadline, sink.close()).await {
-                    // peer that never drains cannot hold teardown open, and
-                    // the drop below still ends the socket. Graceful.
                     Ok(Ok(())) | Err(_) => {}
-                    // that keeps the other half must not erase what the
-                    // close said.
                     Ok(Err(error)) => {
                         let mut failure = self.close_failure.lock().expect("close failure lock");
                         if failure.is_none() {
@@ -437,7 +425,6 @@ where
             false
         };
         if !(stream_disposed && sink_disposed) {
-            // close failure this attempt observed is already retained above.
             return Err(CleanupFailure::HalvesOwned {
                 stream: !stream_disposed,
                 sink: !sink_disposed,
@@ -494,7 +481,6 @@ where
         }
         tokio::select! {
             biased;
-            // parked native flush future, which releases the sink mutex.
             () = self.notify.notified() => {
                 if let Some(probe) = &self.probe {
                     probe.record_send_cancelled();
@@ -507,8 +493,6 @@ where
                     return Err(TransportError::Closed);
                 }
                 let sink = guard.as_mut().ok_or(TransportError::Closed)?;
-                // a `Pending` here is the stalled peer's native backpressure,
-                // observed while this send still holds the sink mutex.
                 let mut sending =
                     Box::pin(sink.send(Message::Binary(envelope.to_vec().into())));
                 let natively_pending =
@@ -516,8 +500,6 @@ where
                 if natively_pending {
                     if let Some(probe) = &self.probe {
                         probe.record(PendingSide::Send);
-                        // sink guard alive until close cancels them, so the
-                        // close boundary is this exact send, never a later one.
                         let parked = probe.park_pending_send().await;
                         drop(sending);
                         drop(guard);
@@ -724,7 +706,6 @@ async fn silent_peer_listener() -> (SocketAddr, Arc<Notify>, tokio::task::JoinHa
             .await
             .expect("the stalled upgrade is bounded")
             .expect("websocket upgrade");
-        // drains this peer's inbound frames.
         ending.notified().await;
         drop(ws);
     });
@@ -789,17 +770,12 @@ async fn resetting_peer_listener() -> (SocketAddr, Arc<Notify>, tokio::task::Joi
             .expect("the resetting upgrade is bounded")
             .expect("websocket upgrade");
         trigger.notified().await;
-        // deprecation warns about a blocking drop for non-zero linger; a zero
-        // timeout discards unsent data immediately and cannot block.
         #[allow(deprecated)]
         let _ = ws.get_ref().set_linger(Some(Duration::from_secs(0)));
         drop(ws);
     });
     (addr, reset, task)
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 struct Fixture {
     _home: TempDir,
@@ -1040,9 +1016,6 @@ const SUBJECT: &str = "sub_arc_warden";
 const CONTEXT: &str = "ctx_harbor_run_7";
 const OTHER_CONTEXT: &str = "ctx_market_run_2";
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 fn expect_ok<T>(result: SpokeResult<T>) -> T {
     match result {
         SpokeResult::Ok(value) => value,
@@ -1076,9 +1049,6 @@ fn digest_of(value: &Value) -> String {
         SpokeResult::Reject(reject) => panic!("payload digest: {reject:?}"),
     }
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn describe_and_unavailable_families_are_honest_over_the_signed_session() {
@@ -1126,9 +1096,6 @@ async fn describe_and_unavailable_families_are_honest_over_the_signed_session() 
     fixture.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
     let fixture = Fixture::start(None, None).await;
@@ -1167,7 +1134,6 @@ async fn all_twenty_five_base_operations_reach_the_durable_fixture() {
     let candidates_before =
         base_operations_freeze_unfreeze_and_fence(&fixture, &client, &principal, &space).await;
 
-    // candidate (MEM-R021), even after every later revision.
     let replayed = fixture
         .capture(fixture.capture_request(
             "cap-1",
@@ -1787,9 +1753,6 @@ async fn base_operations_freeze_unfreeze_and_fence(
     candidates_before
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn admission_is_the_explicit_peer_principal_table_only() {
     let fixture = Fixture::start(None, None).await;
@@ -1891,9 +1854,6 @@ async fn admission_is_the_explicit_peer_principal_table_only() {
     fixture.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 fn next_nonce() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     NEXT.fetch_add(1, Ordering::Relaxed)
@@ -1974,7 +1934,6 @@ async fn raw_invoke(
 async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundary() {
     let fixture = Fixture::start(None, None).await;
     fixture.ensure_subject().await;
-    // wire object is under this test's control.
     let (addr, host) =
         start_listener(&fixture.provider, &fixture.directory, &[CLIENT_SEED], None).await;
     let transport = raw_connect(addr).await;
@@ -1989,8 +1948,6 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
         .expect("payload object")
         .remove("source_context_ids");
 
-    // explicit member decodes to `Some([])` and the omitted one to `None`,
-    // so the raw object still has to be what the digest covers.
     let typed_explicit: MemoryCaptureRequest =
         from_value(explicit.clone()).expect("typed explicit request");
     let typed_omitted: MemoryCaptureRequest =
@@ -2046,9 +2003,6 @@ async fn raw_empty_and_omitted_source_context_ids_conflict_at_the_signed_boundar
     fixture.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn overlapping_invokes_keep_their_own_digests_and_operations_isolated() {
     let fixture = Fixture::start(None, None).await;
@@ -2091,12 +2045,8 @@ async fn overlapping_invokes_keep_their_own_digests_and_operations_isolated() {
     fixture.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn detached_completion_preserves_the_request_digest() {
-    // keeps waiting long enough to receive it.
     let fixture = Fixture::start(Some(150), Some(5_000)).await;
     fixture.ensure_subject().await;
     let payload = fixture.capture_request("detached-1", "detached digest proof", CONTEXT);
@@ -2133,9 +2083,6 @@ async fn detached_completion_preserves_the_request_digest() {
     fixture.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn missing_request_scope_fails_closed_without_effects() {
     let fixture = Fixture::start(None, None).await;
@@ -2143,7 +2090,6 @@ async fn missing_request_scope_fails_closed_without_effects() {
         from_value(fixture.capture_request("scope-1", "scope proof", CONTEXT))
             .expect("capture request");
 
-    // refuses before it can touch storage.
     let reject = expect_reject(
         MemoryPort::capture(fixture.provider.as_ref(), &fixture.principal, request).await,
     );
@@ -2159,9 +2105,6 @@ async fn missing_request_scope_fails_closed_without_effects() {
     assert_eq!(fixture.count("receipts").await, 0);
     fixture.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn retry_classes_and_details_survive_the_signed_boundary() {
@@ -2182,7 +2125,6 @@ async fn retry_classes_and_details_survive_the_signed_boundary() {
     assert_eq!(refusal.code, SpokeRejectCode::NotFound);
     assert_eq!(retry_class(&refusal).as_deref(), Some("terminal"));
 
-    // expires before the transaction commits.
     let receipts_before = fixture.count("receipts").await;
     let payload = fixture.capture_request("retry-precommit", "precommit proof", CONTEXT);
     let hold = fixture
@@ -2215,7 +2157,6 @@ async fn retry_classes_and_details_survive_the_signed_boundary() {
     ));
     assert_eq!(committed["status"], json!("committed"));
 
-    // the original receipt is recoverable.
     let post_payload = fixture.capture_request("retry-postcommit", "postcommit proof", CONTEXT);
     let candidates_after_postcommit = {
         fixture
@@ -2254,9 +2195,6 @@ async fn retry_classes_and_details_survive_the_signed_boundary() {
     fixture.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn receipts_and_dedup_rows_never_store_the_payload() {
     let fixture = Fixture::start(None, None).await;
@@ -2274,13 +2212,9 @@ async fn receipts_and_dedup_rows_never_store_the_payload() {
         !fixture.receipt_metadata_contains(secret).await,
         "receipt, target and dedup rows never carry the request text"
     );
-    // is what makes the receipt content-free.
     assert_eq!(fixture.count("candidates").await, 1);
     fixture.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn reconnect_keeps_identity_authority_and_receipts() {
@@ -2307,7 +2241,6 @@ async fn reconnect_keeps_identity_authority_and_receipts() {
     ));
     assert_eq!(receipt["receipt"]["receipt_id"], first["receipt_id"]);
 
-    // retry after a reconnect replays instead of re-executing.
     let replay = fixture.capture(payload).await;
     assert_eq!(replay["receipt_id"], first["receipt_id"]);
     assert_eq!(replay["payload_digest"], first["payload_digest"]);
@@ -2315,9 +2248,6 @@ async fn reconnect_keeps_identity_authority_and_receipts() {
 
     fixture.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_wire() {
@@ -2329,7 +2259,6 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
     let session_id = raw_handshake(&transport).await;
     let (server_leg, responder) = host.await.expect("the localhost host task");
 
-    // them before any payload is read.
     let mut sequence = 0_i64;
     for op in [
         "memory.reflections.state",
@@ -2360,8 +2289,6 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
         assert_eq!(error["details"]["retry_class"], json!("terminal"), "{op}");
     }
 
-    // effect surface the fixture exposes immediately around the invoke: a
-    // dispatch denial must not reach the provider at all.
     let before_unknown = [
         fixture.count("receipts").await,
         fixture.count("candidates").await,
@@ -2393,7 +2320,6 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
         "the unknown invoke committed no receipt, candidate, record or dedup row"
     );
 
-    // typed decode refuses it before the provider runs.
     sequence += 1;
     let mut forged = fixture.capture_request("forged-wire", "forged requester", CONTEXT);
     forged["principal_id"] = json!("prn_someone_else");
@@ -2417,9 +2343,6 @@ async fn unavailable_families_forged_claims_and_unknown_ops_are_refused_on_the_w
     server_leg.release().await;
     fixture.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn concurrent_providers_keep_digests_effects_and_keys_isolated() {
@@ -2446,7 +2369,6 @@ async fn concurrent_providers_keep_digests_effects_and_keys_isolated() {
     assert_eq!(first.count("candidates").await, 1);
     assert_eq!(second.count("candidates").await, 1);
 
-    // it leaves no effect there.
     let foreign = expect_reject(
         second
             .client
@@ -2460,8 +2382,6 @@ async fn concurrent_providers_keep_digests_effects_and_keys_isolated() {
     assert_eq!(retry_class(&foreign).as_deref(), Some("terminal"));
     assert_eq!(second.count("candidates").await, 1);
 
-    // same key to their own payload with independent effects, and each replay
-    // returns its own receipt without touching the other authority.
     let left_replay = first.capture(first_payload).await;
     let right_replay = second.capture(second_payload).await;
     assert_eq!(left_replay["receipt_id"], left["receipt_id"]);
@@ -2474,9 +2394,6 @@ async fn concurrent_providers_keep_digests_effects_and_keys_isolated() {
     second.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn server_scopes_overlap_with_independent_digests() {
     let fixture = Fixture::start(None, None).await;
@@ -2484,8 +2401,6 @@ async fn server_scopes_overlap_with_independent_digests() {
     let held_payload = fixture.capture_request("overlap-held", "held material", CONTEXT);
     let free_payload = fixture.capture_request("overlap-free", "free material", OTHER_CONTEXT);
 
-    // transaction, and prove a second invocation runs to completion while the
-    // first scope is still live.
     let mut admission_hold = fixture
         .provider
         .faults()
@@ -2529,7 +2444,6 @@ async fn server_scopes_overlap_with_independent_digests() {
 
 #[tokio::test]
 async fn timeout_before_digest_work_completes_with_the_original_digest() {
-    // waits long enough to receive it.
     let fixture = Fixture::start(Some(150), Some(5_000)).await;
     fixture.ensure_subject().await;
     let payload = fixture.capture_request("timeout-before-work", "post timeout material", CONTEXT);
@@ -2553,7 +2467,6 @@ async fn timeout_before_digest_work_completes_with_the_original_digest() {
     assert_eq!(fixture.count("receipts").await, 1);
 
     hold.release();
-    // until the released work has actually committed its receipt.
     let deadline = Instant::now() + Duration::from_secs(5);
     while fixture.count("receipts").await < 2 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -2561,7 +2474,6 @@ async fn timeout_before_digest_work_completes_with_the_original_digest() {
     assert_eq!(fixture.count("receipts").await, 2);
     assert_eq!(fixture.count("candidates").await, 1);
 
-    // of the object the server originally received.
     let replay = fixture.capture(payload.clone()).await;
     assert_eq!(replay["status"], json!("committed"));
     assert_eq!(replay["payload_digest"], json!(digest_of(&payload)));
@@ -2569,17 +2481,12 @@ async fn timeout_before_digest_work_completes_with_the_original_digest() {
     fixture.shutdown().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
-    // are never drained, so this end's writes hit genuine native backpressure.
     let (addr, stall, peer) = silent_peer_listener().await;
     let probe = Arc::new(PollProbe::default());
     let stalled = Arc::new(observed_connect(addr, Arc::clone(&probe)).await);
 
-    // reported by tungstenite itself, while that receive holds the stream mutex.
     let waiting = tokio::spawn({
         let stalled = Arc::clone(&stalled);
         async move { stalled.recv().await }
@@ -2591,7 +2498,6 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         )
         .await;
 
-    // native flush really returns Pending while the send holds the sink mutex.
     let sender = tokio::spawn({
         let stalled = Arc::clone(&stalled);
         async move {
@@ -2608,8 +2514,6 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
             "the blocked send reports a native Pending",
         )
         .await;
-    // sink mutex still in hand: no later iteration can run, so close is about
-    // to race this live future rather than a finished or different send.
     probe
         .wait_for(
             &probe.send_parked,
@@ -2617,7 +2521,6 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         )
         .await;
 
-    // wait for that cleanup instead of reporting completion while it runs.
     close_races_live_polls_and_a_queued_close(&probe, &stalled).await;
 
     let released = tokio::time::timeout(SETUP_BOUND, waiting)
@@ -2637,7 +2540,6 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
         Err(spoke_connect::remote::TransportError::Closed),
         "the close cancels the send that still owned the sink half"
     );
-    // the cleanup could acquire the sink it was holding.
     let cancelled = probe.send_cancelled.load(Ordering::SeqCst);
     let acquired = probe.sink_acquired.load(Ordering::SeqCst);
     assert!(
@@ -2650,7 +2552,6 @@ async fn bounded_teardown_releases_a_parked_receiver_and_a_stalled_peer() {
          cancelled={cancelled} acquired={acquired}"
     );
 
-    // left behind by this teardown.
     stall.notify_one();
     tokio::time::timeout(SETUP_BOUND, peer)
         .await
@@ -2699,7 +2600,6 @@ async fn close_races_live_polls_and_a_queued_close(
             saw_cleanup_finish,
             "a concurrent close must not report completion while the first cleanup is still running"
         ),
-        // nothing about the cleanup it did not run.
         Err(CleanupFailure::GateBusy) => {}
         Err(other) => panic!("the concurrent cleanup reported {other:?}"),
     }
@@ -2732,7 +2632,6 @@ async fn cleanup_that_cannot_take_a_half_fails_and_finishes_later() {
     });
     held_rx.await.expect("a live owner holds the stream half");
 
-    // it still owns, and leaves the completion fact unset.
     let first = tokio::spawn({
         let stalled = Arc::clone(&stalled);
         async move { stalled.release().await }
@@ -2741,9 +2640,6 @@ async fn cleanup_that_cannot_take_a_half_fails_and_finishes_later() {
         .wait_for(&probe.cleanup_started, "the first cleanup starts")
         .await;
 
-    // it cannot wait out the first cleanup and then spend a fresh one: it either
-    // gets the gate inside its own budget or fails as busy. Either way the total
-    // is bounded from its entry.
     let entry = Instant::now();
     let queued = tokio::time::timeout(SETUP_BOUND, stalled.release())
         .await
@@ -2827,7 +2723,6 @@ async fn failed_cleanup_stays_reportable_after_the_first_caller_discards_it() {
         matches!(received, Err(spoke_connect::remote::TransportError::Io(_))),
         "the receive keeps its own socket error: {received:?}"
     );
-    // result was discarded by the caller, like the SDK's detached close.
     assert!(
         probe.cleanup_finished.load(Ordering::SeqCst),
         "the receive-error path completed the real cleanup"
@@ -2884,15 +2779,12 @@ async fn partial_cleanup_keeps_the_close_failure_it_observed() {
     });
     held_rx.await.expect("a live owner holds the stream half");
 
-    // and its task ends only after the socket is gone.
     reset.notify_one();
     tokio::time::timeout(SETUP_BOUND, peer)
         .await
         .expect("the resetting peer ends within the bound")
         .expect("the resetting peer task joins");
 
-    // the close really fails there. That result is this caller's only, and it is
-    // discarded here exactly as the SDK's detached close discards it.
     let first = tokio::time::timeout(SETUP_BOUND, stalled.release())
         .await
         .expect("the partial close is bounded");
@@ -2909,7 +2801,6 @@ async fn partial_cleanup_keeps_the_close_failure_it_observed() {
         "a cleanup that still owns a half is not completion"
     );
 
-    // retried cleanup disposes it.
     release.notify_one();
     assert!(
         owned_rx
@@ -2944,10 +2835,6 @@ async fn partial_cleanup_keeps_the_close_failure_it_observed() {
     );
 }
 
-// ---------------------------------------------------------------------------
-//     changes, driven by a second mapped scoped principal (original F1)
-// ---------------------------------------------------------------------------
-
 /// The scoped caller's own connect identity. Its peer maps to its own memory
 /// principal, which holds no operator authority.
 const SCOPED_SEED: [u8; 32] = [0x63; 32];
@@ -2960,7 +2847,6 @@ async fn moved_record_keeps_scoped_replay_authority_in_both_grant_directions() {
     let admin = Arc::clone(&fixture.client);
     let admin_principal = fixture.principal.clone();
 
-    // may do below comes from the admin's grants, never from the operator.
     let scoped_id = format!("prn_{}", peer_id(&SCOPED_SEED));
     let directory = Arc::new(
         PeerDirectory::new()
@@ -3151,7 +3037,6 @@ async fn author_and_move_scoped_record(
         .expect("receipt id")
         .to_owned();
 
-    // historical A placement, the record's current placement is B.
     let moved = wire(&expect_ok(
         admin
             .promote_record(
@@ -3229,7 +3114,6 @@ async fn losing_original_context_refuses_without_effect(
         OTHER_CONTEXT,
     )
     .await;
-    // only thing that could move these rows.
     assert_eq!(
         authority
             .fixture
@@ -3342,8 +3226,6 @@ async fn keeping_original_context_replays_without_new_authority(
         replayed, state.original_receipt,
         "keeping A replays a receipt equal to the original JSON receipt"
     );
-    // the effect: a fresh key for the same record is still refused, and the
-    // durable rows are unchanged.
     let fresh = expect_reject(
         authority
             .scoped
@@ -3406,7 +3288,6 @@ async fn retained_capture_target_decides_before_changed_target(
     let state =
         capture_conflict_under_the_retained_target(fixture, scoped, scoped_principal, space).await;
 
-    // row is gone, the content-free dedup tombstone still protects the key.
     fixture.evict_receipt_body(&state.capture_receipt_id).await;
     let receipts_after_eviction = fixture.count("receipts").await;
     assert_eq!(receipts_after_eviction, state.receipts_before - 1);
@@ -3495,7 +3376,6 @@ async fn capture_conflict_under_the_retained_target(
     let candidates_before = fixture.count("candidates").await;
     let receipts_before = fixture.count("receipts").await;
 
-    // decides first, so this is a conflict — not a refusal of the new target.
     let changed_b = json!({
         "space_id": space,
         "subject_id": SUBJECT,
@@ -3526,18 +3406,12 @@ async fn capture_conflict_under_the_retained_target(
     }
 }
 
-// ---------------------------------------------------------------------------
-//     unserved-space refusal (I-000189 / I-000190)
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
     let fixture = Fixture::start(None, None).await;
     fixture.ensure_subject().await;
     let space = fixture.space_id.clone();
 
-    // resolution must surface IDEMPOTENCY_CONFLICT, never a rewritten
-    // authorization refusal.
     let issued = wire(&expect_ok(
         fixture
             .client
@@ -3594,7 +3468,6 @@ async fn revoke_keeps_real_replay_errors_and_unserved_spaces_stay_not_found() {
     assert_eq!(conflict.code, SpokeRejectCode::IdempotencyConflict);
     assert_eq!(retry_class(&conflict).as_deref(), Some("terminal"));
 
-    // operations, even for the correctly authenticated operator.
     unserved_spaces_stay_not_found_on_assembly_prechecks(&fixture).await;
     fixture.shutdown().await;
 }
@@ -3668,9 +3541,6 @@ async fn unserved_spaces_stay_not_found_on_assembly_prechecks(fixture: &Fixture)
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Install a real deferred-foreign-key trigger in the fixture's own disposable
 /// database: every receipt insert spawns a child row whose parent never exists,
 /// so SQLite accepts the statements and fails the COMMIT itself.
@@ -3709,7 +3579,6 @@ async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
     let fixture = Fixture::start(None, None).await;
     fixture.ensure_subject().await;
     let space = fixture.space_id.clone();
-    // existing pending candidate, and their own commits must be the failures.
     let for_dismiss = fixture
         .capture(fixture.capture_request("commit-dismiss", "dismiss material", CONTEXT))
         .await;
@@ -3780,7 +3649,6 @@ async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
     assert_eq!(review_refusal.code, SpokeRejectCode::OutcomeUncertain);
     assert_eq!(retry_class(&review_refusal).as_deref(), Some("uncertain"));
 
-    // receipt or dedup row, and no key was burned.
     assert_eq!(fixture.count("candidates").await, candidates_before);
     assert_eq!(fixture.count("receipts").await, receipts_before);
     assert_eq!(fixture.count("records").await, 0);
@@ -3789,7 +3657,6 @@ async fn commit_failures_on_all_three_delegated_mutations_are_uncertain() {
         namespace_before
     );
 
-    // exact capture request that failed, with its original key.
     same_keys_recover_after_the_commit_failure_is_removed(
         &fixture,
         &space,
@@ -3874,9 +3741,6 @@ async fn same_keys_recover_after_the_commit_failure_is_removed(
     assert_eq!(fixture.count("records").await, 1);
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn recall_counts_the_emitted_numeric_representation() {
     let fixture = Fixture::start(None, None).await;
@@ -3904,7 +3768,6 @@ async fn recall_counts_the_emitted_numeric_representation() {
         .expect("record id")
         .to_owned();
 
-    // spells the float as `1.0`, and the JCS helper would count it as `1`.
     let emitted = serde_json::to_string(&json!({
         "text": "num",
         "structured": { "weight": 1.0 },
@@ -3966,9 +3829,6 @@ async fn recall_counts_the_emitted_numeric_representation() {
     );
     fixture.shutdown().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn cross_provider_mixed_operation_overlap_keeps_each_digest() {

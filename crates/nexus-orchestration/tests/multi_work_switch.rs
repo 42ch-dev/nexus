@@ -119,7 +119,6 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
     assert!(updated.completion_locked_at.is_some());
     assert!(updated.driver_schedule_id.is_none());
 
-    // Create the Works/<work_ref>/ directory first (normally done by daemon)
     let work_dir = workspace_dir.join("Works").join("test-wrk_novel_a");
     std::fs::create_dir_all(&work_dir).unwrap();
 

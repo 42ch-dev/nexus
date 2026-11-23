@@ -1,7 +1,4 @@
 /**
- * directory picker, external-URL opener and the user-confirmed local-state
- * reset.
- *
  * Parity rows 1/2/5/19/20/25 of the frozen plan. Every path-bearing action
  * re-resolves the active workspace root per call (P0-T2's
  * `resolveWorkspaceRoot`), realpaths both root and candidate and denies
@@ -130,12 +127,6 @@ async function guardWorkspacePath(
 }
 
 
-// shared host contract (desktop-contract.ts) and rejects C0 controls / DEL
-// on the raw string BEFORE WHATWG parsing (which would otherwise strip or
-// remap some controls and let them pass). Both this action and the
-// protocol/navigation layer consume that one implementation.
-
-
 /**
  * Build the guarded action handler map. Main (P0-T7) composes this into the
  * full `DesktopHandlers` map; tests drive it with fake OS adapters.
@@ -155,7 +146,6 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       }
       const canonical = await guardWorkspacePath(resolveWorkspaceRoot, path);
       const failure = await shell.openPath(canonical);
-      // on failure; both must reach the caller (never a success envelope).
       if (failure !== '') {
         throw desktopError('open_failed', failure);
       }
@@ -193,8 +183,6 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       if (defaultPath !== undefined && typeof defaultPath !== 'string') {
         throw desktopError('invalid_input', 'defaultPath must be a string when present');
       }
-      // current workspace — it may pick a new workspace outside the root;
-      // the committed root governs subsequent guarded actions.
       return dialog.pickDirectory(defaultPath === undefined || defaultPath === '' ? {} : { defaultPath });
     },
 
@@ -212,7 +200,6 @@ export function createDesktopActions(options: DesktopActionsOptions): DesktopAct
       try {
         confirmed = await dialog.confirmReset();
       } catch (err) {
-        // code; a codeless dialog failure is a confirmation failure.
         const code =
           typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string'
             ? err.code

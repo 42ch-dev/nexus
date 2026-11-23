@@ -46,10 +46,8 @@
 //!   corrected). Same-entry write correctness is the orchestrators' OCC CAS.
 
 pub mod allowlist;
-// (trusted_issuers / require_capability_token / capability_token_provider).
 pub mod config;
 pub mod identity;
-// closure (architect-locked home; identity = the authenticated session peer).
 pub mod invoke;
 pub mod token;
 
@@ -184,7 +182,6 @@ pub async fn run_peers(command: PeersCommand) -> Result<()> {
 /// [`CliError::Other`] when the DB open or the adapter read is rejected.
 async fn peers_list() -> Result<()> {
     let pool = open_workspace_pool(None, None).await?;
-    // adapter (v1.191 P1 T14) serves it and fails closed on every KE port.
     let adapter = NexusAdapter::new_host(pool);
     let peers = match adapter.list_observed_peer_hosts().await {
         SpokeResult::Ok(peers) => peers,
@@ -275,13 +272,7 @@ fn normalize_last_seen(value: &str) -> String {
 /// (`project` / unknown) is answered `op_unsupported` by the handler (N-C0
 /// refusal contract extends).
 async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
-    // themselves. The device-id resolution mirrors `host_manifest_port`
-    // exactly so the Connect host_id is the SAME value HostManifestPort
-    // advertises (single builder SSOT).
     let home = crate::config::user_home_dir()?;
-    // recorded by the dialing path at `connect()` return
-    // ([`record_dialed_peer`]) — so the adapter is kept alive here (same
-    // Arc the invoke handler captures) for the process lifetime.
     let (config, host_id, allowlist_len, _adapter) =
         build_host_config(&home, &allow_peer, &listen, None).await?;
 
@@ -314,7 +305,6 @@ async fn start(allow_peer: Vec<String>, listen: Vec<String>) -> Result<()> {
     for addr in node.listen_addrs() {
         eprintln!("  listen: {addr}");
     }
-    // warn-and-skipped (see the `event_lane:` warning above).
     if let Some(lane) = peer_tools_lane.as_ref() {
         eprintln!("  {}", nexus_connect::event_lane_readiness_line(lane.addr));
     }
@@ -410,8 +400,6 @@ async fn dial_host(
         .connect(addr.clone())
         .await
         .map_err(|e| CliError::Other(format!("connect dial {addr} failed: {e}")))?;
-    // silent no-op (the N-C3 honesty contract requires the observation to
-    // land in the store).
     record_dialed_peer(&adapter, &session).await?;
     let manifest = session.remote_manifest();
     println!("dialed {addr} ok");
@@ -424,7 +412,6 @@ async fn dial_host(
         "  capabilities: {}",
         sanitize_cell(&manifest.capabilities.join(", "))
     );
-    // not printed as a separate line.
     node.shutdown()
         .await
         .map_err(|e| CliError::Other(format!("connect node shutdown failed: {e}")))?;
@@ -463,9 +450,6 @@ fn build_config(
 ) -> Result<(ConnectConfig, String, usize, allowlist::PeerScope)> {
     let identity = identity::load_or_create_identity(home)?;
 
-    //    `host_manifest_port::resolve_device_id_from_standard_home`.
-    //    `get_or_create_device_id` takes the RAW home and joins `.nexus42`
-    //    itself (canonical `~/.nexus42/device-id`; device_id_path contract).
     let host_id = get_or_create_device_id(home)
         .map_err(|e| CliError::Config(format!("device id unavailable: {e}")))?;
 
@@ -518,7 +502,6 @@ fn build_config(
         _ => None,
     };
 
-    //    build_host_config once the workspace adapter exists).
     let config = ConnectConfig {
         identity,
         peer_allowlist,
@@ -562,17 +545,8 @@ pub async fn build_host_config(
 ) -> Result<(ConnectConfig, String, usize, Arc<NexusAdapter<'static>>)> {
     let (mut config, host_id, allowlist_len, peer_scope) = build_config(home, allow_peer, listen)?;
 
-    // coexistence with a co-running daemon is WAL-governed, not
-    // runtime_lock-governed; P1 spec § Process model) + the per-process
-    // adapter singleton + the session-peer invoke dispatch handler
-    // (spoke-connect 0.9.2 `invoke_handler_v2` — caller identity is the
-    // authenticated session peer; the legacy `invoke_handler` is not
-    // selected, clean cutover per spec §5.2).
     let pool = open_workspace_pool(Some(home), workspace_db).await?;
     let modules_dir = nexus_home_layout::user_modules_dir(home);
-    // compiled-module cache and one host adapter; every KE invoke builds a
-    // scoped adapter from the caller's stored Actor grant and shares the
-    // cache (T8 hand-off — request binding never recompiles a module).
     let ports = invoke::ConnectPorts::new(pool, Some(modules_dir));
     let host_adapter = ports.host_adapter();
     config.invoke_handler_v2 = Some(invoke::build_handler(peer_scope, ports));
@@ -619,7 +593,6 @@ pub async fn record_dialed_peer(
                 )));
             }
         };
-    // (operator-visibility diagnostics only; no auth/allowlist input).
     let peer_id = session.remote_peer_id().to_string();
     match adapter
         .record_peer_manifest(&manifest, Some(&peer_id))
@@ -746,7 +719,6 @@ mod tests {
 
     #[test]
     fn render_peer_lines_strips_control_chars_from_peer_controlled_cells() {
-        // operator's terminal.
         let peers = vec![observed_peer(
             "peer-\u{1b}[31mred\u{1b}[0m-uuid\n0003",
             &["spoke-baseline", "l2-\u{1b}[32mcompute\u{1b}[0m"],
@@ -908,8 +880,6 @@ mod tests {
             .as_ref()
             .expect("provider is Some when enabled");
 
-        // iss = issuer-derived id, sub = this node's peer id, aud = the
-        // challenger, capabilities = the host manifest capabilities.
         let challenger = "12D3KooWChallengerPeer";
         let proof_value = provider(challenger).expect("provider mints a proof");
         let proof: CapabilityTokenProof =

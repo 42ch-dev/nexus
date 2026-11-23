@@ -396,11 +396,6 @@ async fn handle_connection(
     sessions: Arc<PeerSessionManager>,
     options: PeerResponderOptions,
 ) {
-    // allowlist + keys) and the admission (negotiation hello + operator
-    // allowlist) validate against THIS generation — grant-at-establish for
-    // the session it establishes. A reload landing mid-handshake applies
-    // at the NEXT connection; a live session keeps its generation until
-    // close/reconnect (AR-67 reconnect=replace, no mid-call yank).
     let generation = {
         let snapshot = options.config.get();
         ConnectionGeneration {
@@ -421,7 +416,6 @@ async fn handle_connection(
         Ok(ws) => ws,
         Err(e) => {
             tracing::debug!(error = %e, "peer-tools WS upgrade failed");
-            // connection never reaches the handshake.
             sessions.release_in_flight();
             return;
         }
@@ -432,7 +426,6 @@ async fn handle_connection(
         identity: RemoteIdentity {
             seed: options.identity_seed,
         },
-        // (DF-92): a fresh snapshot's peer_ids + keys gate the dialer.
         manifest: (*generation.manifest).clone(),
         allowlist: generation.snapshot.config.peer_ids.clone(),
         peer_keys: (*generation.snapshot.peer_keys).clone(),
@@ -457,17 +450,12 @@ async fn monitor_session(
     generation: ConnectionGeneration,
     options: PeerResponderOptions,
 ) {
-    // hello is closed by us after the bound — the responder's own recv would
-    // otherwise park forever).
     let handshake_timeout = Duration::from_millis(config.invoke_timeout_ms.max(1000));
     let established = tokio::time::timeout(handshake_timeout, wait_until_established(&responder))
         .await
         .ok()
         .flatten();
     let Some(peer_id) = established else {
-        // out: close the responder so the dialer fails fast. Zero session
-        // state — the manager never saw this peer. The accept reservation
-        // (QC-fix W-A) is released here.
         responder.close();
         sessions.release_in_flight();
         return;
@@ -483,10 +471,6 @@ async fn monitor_session(
         crate::table::ConnectResponderAdapter::new(Arc::clone(&responder), peer_id.clone()),
     );
 
-    // the full admission chain inside the process-global PeerToolTable
-    // (whole-manifest validation → grammar → reserved-ns → negotiated →
-    // allowlist → duplicate-peer). The session manager records the
-    // admitted subset (T2 granularity preserved for eviction bookkeeping).
     let admitted_ids: Vec<String> = responder
         .remote_manifest()
         .map_or_default(|manifest| {
@@ -499,11 +483,6 @@ async fn monitor_session(
                 generation.manifest.capabilities.iter().cloned().collect();
             let allowlist: std::collections::HashSet<String> =
                 generation.snapshot.config.tool_allowlist.iter().cloned().collect();
-            // IT IS MADE (C3 fix round 2): the holder's reservation is held
-            // exclusively across set derivation and registration, so a
-            // concurrent hot swap serializes with the decision instead of
-            // slipping between a snapshot read and the insert. See
-            // `table::admit_consistent_with_reservation`.
             match crate::table::admit_consistent_with_reservation(
                 crate::peer_tool_table(),
                 options.capability_registry.as_ref(),
@@ -761,7 +740,6 @@ async fn drive_delivery<P, Fut, F>(
         if frames.is_empty() {
             break;
         }
-        // generation never waits out another stream's send slot.
         let _guard = tokio::select! {
             biased;
             () = cancelled.notified() => break,
@@ -846,7 +824,6 @@ where
     })
     .await;
     let Ok(result) = outcome else {
-        // dropped below; its allocated sequence can never be reused.
         fail_closed();
         return None;
     };
@@ -1000,24 +977,13 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
     builtin_tool_ids: HashSet<String, S>,
 ) -> ConnectResult<PeerToolsLaneHandle> {
     ensure_injected_roster(&builtin_tool_ids)?;
-    // landing anywhere in the boot window diverges from the baseline and
-    // the first poll reloads (never absorbed; the capability watcher's
-    // W-B rule).
     let boot_digest = peer_config_digest(home);
-    // select it) — the lane-startup warnings must name THIS file, not a
-    // hardcoded `~/.nexus42/...`, so the remedy points at the file the
-    // operator can actually edit.
     let config_path = nexus_home_layout::connect_daemon_config_path(home);
     let config = Arc::new(
         PeerToolsConfig::load(home).map_err(|e| ConnectError::Internal {
             category: event_lane_config_warning(&config_path, &e),
         })?,
     );
-    // so admission reads `collision_policy` + `peer_priority` at
-    // admission time (live-derivation precedent: `live_reserved_tool_ids`
-    // reads the capability holder the same way — p1's reload swaps the
-    // Arc and NEW registrations pick up the new policy without further
-    // table mutation).
     crate::peer_tool_table().set_config(Some(Arc::new(config.registry_config())));
     // PR #229 F-2 (Cursor Security HIGH): the peer lane binds PLAINTEXT
     // (no WSS — `accept_async_with_config`), so a non-loopback bind must
@@ -1070,17 +1036,9 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
         identity_seed,
         host_id: device_id,
         config: PeerConfigHolder::clone(&config_holder),
-        // default hasher keeps `PeerResponderOptions` non-generic (a hasher
-        // type parameter there would ripple through every handler).
         builtin_tool_ids: Arc::new(builtin_tool_ids.into_iter().collect()),
         capability_registry,
     };
-    // caller's shutdown Notify stays SINGLE-consumer — `notify_one` stores
-    // exactly one permit, so a second direct consumer (the watcher) could
-    // steal it and leave the accept loop un-woken (a hung lane, observed
-    // by the p0 lane tests). A tiny relay owns the caller's notify and
-    // fans out to per-child notifies; `notify_one` STORES permits, so
-    // relay-before-registration cannot lose a wakeup.
     let accept_shutdown = Arc::new(Notify::new());
     let watch_shutdown = Arc::new(Notify::new());
     let _shutdown_relay = tokio::spawn({
@@ -1092,10 +1050,6 @@ pub async fn start_peer_tools_lane<S: BuildHasher>(
             watch_shutdown.notify_one();
         }
     });
-    // panic surfaces as a JoinError, logs ONE `peer config reload degraded`
-    // warn, and the lane keeps serving the last-good snapshot until a
-    // restart restores reload. `handle.watch_task` is the supervisor.
-    //
     // Detachment semantics (p1 QC): dropping/aborting `watch_task`
     // cancels only the supervisor — the inner watcher `JoinHandle`
     // detaches on drop (deliberately NO abort-on-drop guard). The
@@ -1216,7 +1170,6 @@ mod tests {
         assert!(text.contains("non-loopback refusal"), "{text}");
         assert!(text.contains("0.0.0.0:8425"), "{text}");
         assert!(text.contains(&expected), "{text}");
-        // non-default home never reads.
         assert!(!text.contains("~/.nexus42/connect/daemon.json"), "{text}");
 
         let malformed = event_lane_config_warning(
@@ -1319,7 +1272,6 @@ mod tests {
         let observed = ObservedTransport::new(Arc::new(pair.client) as Arc<dyn Transport>);
         observed.bind_session(&session);
 
-        // payload check rather than the earlier lifecycle returns.
         send_subscribe_request(&pair.server, &stream, "subscribe-1").await;
         observed.recv().await.unwrap();
         assert_eq!(observed.outbound_drops(), 0);
@@ -1327,7 +1279,6 @@ mod tests {
         observed.send(b"{ not json").await.unwrap();
         assert_eq!(observed.outbound_drops(), 1, "unparseable drop must count");
 
-        // `/payload/result`.
         observed
             .send(
                 serde_json::to_vec(&serde_json::json!({
@@ -1472,7 +1423,6 @@ mod tests {
             "the second stream must wait for the session send slot"
         );
 
-        // the wire rather than be abandoned (C3): the slot is not yet free.
         let _replacement = registry.subscribe(&session, &stream_a, None).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
@@ -1638,7 +1588,6 @@ mod tests {
         registry.activate(&session, &stream);
         let cancelled = subscription.cancellation();
 
-        // parks after allocation.
         gated.armed.store(true, Ordering::SeqCst);
         let fail_closed_called = Arc::new(AtomicBool::new(false));
         let fail_closed_flag = Arc::clone(&fail_closed_called);
@@ -1685,7 +1634,6 @@ mod tests {
             ConnectResponderState::Established,
             "the session must remain usable after a completed in-flight send"
         );
-        // generation's allocated sequence reached the wire.
         let follow_up = tokio::time::timeout(
             Duration::from_secs(2),
             responder.invoke_tool(DELIVER_TOOL, serde_json::json!({})),
@@ -1808,7 +1756,6 @@ mod tests {
         ));
         gated.blocked.notified().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
-        // still parked. The driver must consume only the original deadline.
         let replacement = registry.subscribe(&session, &stream, None).await;
         assert!(replacement.is_ok());
         let drain_start = tokio::time::Instant::now();
@@ -1890,7 +1837,6 @@ mod tests {
             Duration::from_millis(2_000),
             || {},
             move |frames| {
-                // check but before the request's first poll.
                 push_registry.remove_session(&push_session);
                 let responder = Arc::clone(&push_responder);
                 let stream = push_stream.clone();
@@ -2017,9 +1963,6 @@ mod tests {
 
     #[test]
     fn daemon_manifest_never_carries_collision_policy() {
-        // ONLY from the operator allowlist. The collision policy + peer
-        // priority are operator config consumed by the admission table —
-        // they must never leak into the hello.
         let config = PeerToolsConfig {
             collision_policy: CollisionPolicy::PriorityOrder,
             peer_priority: vec!["peer-b".to_owned()],
@@ -2053,8 +1996,6 @@ mod tests {
         std::fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         let config = nexus_home_layout::connect_daemon_config_path(home.path());
         std::fs::write(&config, r#"{"host":"0.0.0.0","port":0}"#).expect("write daemon.json");
-        // roster satisfies the reserved-set precondition (an empty one is
-        // refused at the entry, before the bind gate this test exercises).
         let roster: HashSet<String> = HashSet::from(["nexus-test-builtin".to_owned()]);
         let Err(err) =
             start_peer_tools_lane(home.path(), Arc::new(Notify::new()), None, roster.clone()).await
@@ -2063,8 +2004,6 @@ mod tests {
         };
         assert!(matches!(err, ConnectError::Internal { .. }), "got {err:?}");
 
-        // plaintext gate and really binds, so the refusal above is the
-        // non-loopback rule rather than a general lane-start failure.
         std::fs::write(&config, r#"{"host":"127.0.0.1","port":0}"#)
             .expect("write the loopback daemon.json");
         let shutdown = Arc::new(Notify::new());
@@ -2072,9 +2011,6 @@ mod tests {
             .await
             .expect("the loopback plaintext bind starts");
         assert!(lane.addr.ip().is_loopback(), "the lane bound loopback");
-        // spawned relay has not registered yet, and both returned handles are
-        // awaited so a live accept loop or supervised watcher is observed
-        // settling instead of detaching with the test.
         shutdown.notify_one();
         let mut accept = lane.task;
         let mut watch = lane.watch_task;
@@ -2143,7 +2079,6 @@ mod tests {
             "namespaces derive from allowlisted ids and fixed event capabilities"
         );
 
-        // truthful reason, so the hello above can never grow one.
         for entry in crate::config::KE_CAPABILITIES
             .iter()
             .chain(crate::config::KE_OPERATION_FAMILIES.iter())

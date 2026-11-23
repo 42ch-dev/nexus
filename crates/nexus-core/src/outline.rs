@@ -145,9 +145,6 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
         return None;
     }
     let after_open = &trimmed[3..];
-    // at end-of-string. Matching bare `\n---` would also accept substrings like
-    // `\n---more` or an unquoted YAML block scalar line starting with `---`,
-    // splitting the frontmatter prematurely (R-V172-GREPTILE-004).
     let (end, skip) = if let Some(idx) = after_open.find("\n---\n") {
         (idx, 5)
     } else {
@@ -174,8 +171,6 @@ async fn read_outline_file(
     rel_path: &str,
     chapters: &[WorkChapterRecord],
 ) -> Result<(OutlineFrontmatter, String), OutlineFault> {
-    // frontmatter rather than a path-guard error. The guard still verifies the
-    // resolved path would live inside the workspace root.
     let path =
         resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), false)
             .await
@@ -591,9 +586,6 @@ async fn get_work_outline(
 ) -> Result<WorkOutline, OutlineFault> {
     let chapters = list_chapters(service, work_id).await?;
 
-    // outline read degrades to the same default the missing-file path yields:
-    // the default frontmatter is derived in memory from the Work's chapter
-    // rows, is never persisted, and fabricates no ref or filesystem path.
     let Some(work_ref) = work.work_ref.as_deref().or(work.story_ref.as_deref()) else {
         let now = chrono::Utc::now().to_rfc3339();
         return default_frontmatter(&now, &chapters).to_work_outline(work_id.to_string());
@@ -647,7 +639,6 @@ async fn patch_outline_structure(
     let lock =
         WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
-    // for concurrent writers and avoid persisting a stale body snapshot.
     let (mut frontmatter, body) = read_outline_file(workspace_root, &rel_path, &chapters).await?;
     if base_revision != frontmatter.outline_revision {
         lock.release().await;
@@ -746,7 +737,6 @@ async fn patch_outline_chapter(
         });
     }
 
-    // metadata AND prose content — V1.75 extended the guard to `content`).
     if record.status == "published" && has_chapter_structural_edit(&req) {
         return Err(OutlineFault::BadRequest {
             code: "chapter_structure_edit_blocked".to_string(),
@@ -757,7 +747,6 @@ async fn patch_outline_chapter(
     let lock =
         WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
-    // for concurrent writers and avoid persisting a stale body snapshot.
     let (mut frontmatter, body) = read_outline_file(workspace_root, &rel_path, &chapters).await?;
     if base_revision != frontmatter.outline_revision {
         lock.release().await;
@@ -840,7 +829,6 @@ async fn patch_timeline_event(
     let lock =
         WorkLock::acquire(&service.inner.pool, principal.creator_id(), work_id, holder).await?;
 
-    // for concurrent writers and avoid persisting a stale body snapshot.
     let (mut frontmatter, body) = read_outline_file(workspace_root, &rel_path, &chapters).await?;
     if base_revision != frontmatter.outline_revision {
         lock.release().await;
@@ -1008,7 +996,6 @@ fn move_chapter_in_frontmatter(
         .flat_map(|vol| vol.chapter_ids.clone())
         .collect();
 
-    // mutable borrows inside the loop.
     let vol1_idx = if let Some(idx) = frontmatter
         .volumes
         .iter()
@@ -1232,8 +1219,6 @@ async fn persist_chapter_outline_content(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| format!("Works/{work_ref}/Outlines/chapters/ch{chapter:02}-outline.md"));
 
-    // (V1.65 GET, the canvas inspector) find the file. This mirrors the
-    // V1.65 PUT route's seeding behavior.
     if was_empty {
         let now = chrono::Utc::now().to_rfc3339();
         work_chapters::update_outline_path(
@@ -1251,8 +1236,6 @@ async fn persist_chapter_outline_content(
         })?;
     }
 
-    // plain-content writer (distinct from this module's frontmatter+body
-    // `atomic_write_outline`).
     crate::content::atomic_write_text(workspace_root, &outline_path, &content)
         .await
         .map_err(OutlineFault::Core)
@@ -1393,8 +1376,6 @@ fn apply_timeline_patch(
             ValidatedBinding::Bind(referent) => {
                 timeline_bind_world_event(req, frontmatter, chapters, referent)
             }
-            // before this synchronous helper runs. Kept explicit so the two
-            // halves cannot silently drift into an unvalidated write.
             ValidatedBinding::Unbind | ValidatedBinding::None => Err(OutlineFault::Internal {
                 code: "WORLD_EVENT_BIND_UNVALIDATED".to_string(),
                 message: "bind_world_event reached mutation without a validated referent"
@@ -1505,8 +1486,6 @@ fn timeline_link_foreshadow(
             message: "link_foreshadow requires foreshadows_event_id".to_string(),
         })?;
 
-    // event cannot foreshadow its own realization). Reject at the service
-    // level so a bypass of the UI's `!==` guard cannot create a self-loop edge.
     if source == target {
         return Err(OutlineFault::BadRequest {
             code: "self_foreshadow_forbidden".to_string(),
@@ -1525,10 +1504,6 @@ fn timeline_link_foreshadow(
         .find(|e| e.event_id == target)
         .ok_or_else(|| OutlineFault::NotFound(format!("event {target}")))?;
 
-    // planted by the source event and realized by the target event, so the
-    // source must be scheduled at or before the target's realization point.
-    // An event's temporal coordinate is its `realizes_chapter_id`; both ends
-    // must carry one to establish an ordering.
     let source_chapter = source_event.realizes_chapter_id;
     let target_chapter = target_event.realizes_chapter_id;
     match (source_chapter, target_chapter) {
@@ -1593,10 +1568,6 @@ fn timeline_unlink_foreshadow(
             message: "unlink_foreshadow requires foreshadows_event_id".to_string(),
         })?;
 
-    // the link handler's existence checks. An edge can outlive its events if
-    // the outline was edited outside the daemon (e.g. manual YAML edit removed
-    // an event but left a dangling foreshadow entry). Without this guard the
-    // unlink would silently succeed on a structurally invalid outline.
     if !frontmatter
         .timeline_events
         .iter()

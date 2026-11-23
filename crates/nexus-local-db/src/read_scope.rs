@@ -86,9 +86,6 @@ pub async fn creator_actor_view_scope(
     creator_id: &str,
     world_id: &str,
 ) -> Result<KnowledgeReadScope, LocalDbError> {
-    // a World still owned but paused/archived keeps its retained history
-    // readable. The World container is authorized only because the stored row
-    // says so — naming a foreign World never authorizes it.
     let stored: Option<String> =
         sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
             .bind(world_id)
@@ -104,8 +101,6 @@ pub async fn creator_actor_view_scope(
     let (containers, _) = owned_world_containers(pool, creator_id, world_id).await?;
     let holder_entry_id = crate::require_creator_holder(pool, creator_id).await?;
     KnowledgeReadScope::actor_view(holder_entry_id, containers).map_err(|err| {
-        // holder id. It fails closed rather than forming a holder-less
-        // selection that would admit shared rows only.
         LocalDbError::HolderStateInvalid {
             reason: err.to_string(),
         }

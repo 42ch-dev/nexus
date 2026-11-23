@@ -262,9 +262,6 @@ export interface NativeCoreBinding {
   getActiveWorkspace(): Promise<Uint8Array>;
   selectWorkspace(requestJson: Uint8Array): Promise<Uint8Array>;
   createWorkspace(requestJson: Uint8Array): Promise<Uint8Array>;
-  /**
-   * workspace selection (idempotent once published).
-   */
   promoteCore(): Promise<void>;
   captureCharacterPendingReview(
     principal: string,
@@ -410,17 +407,7 @@ export interface NativeCoreBinding {
 export interface NativeBinding {
   compatibility(): string;
   open(optionsJson: string, callbacks?: ProviderCallbacksNative): NativeCoreBinding;
-  /**
-   * trusted `home`; resolves with the number of reset stores, rejects with the
-   * wire `CoreError` envelope. Deletion happens in Rust behind the writer
-   * protocol's exclusive migration fences (v1.192 P0-T3R).
-   */
   resetLocalState(home: string): Promise<number>;
-  /**
-   * native publisher (probe → policy capture → sealed staging → ordered
-   * reapplication → rename). Opens no core; rejects with the wire `CoreError`
-   * envelope (`invalid_input` / `forbidden` / `internal`).
-   */
   publishDocument(path: string, contents: string): Promise<void>;
 }
 

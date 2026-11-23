@@ -218,7 +218,6 @@ describe('WorldFindingsPanel — truncated honesty', () => {
 
 describe('WorldFindingsPanel — loading', () => {
   it('renders LoadingState while the findings request is in flight', async () => {
-    // in-flight state (deferred-promise resolver, deterministic — no timing).
     let resolveFindings!: (value: WorldFindingsListResponse) => void;
     useHandlers(
       http.get('/v1/daemon/worlds/:worldId/findings', async () => {
@@ -235,7 +234,6 @@ describe('WorldFindingsPanel — loading', () => {
     expect(screen.getByText('Loading findings…')).toBeInTheDocument();
     expect(screen.queryByTestId('world-findings-count')).not.toBeInTheDocument();
 
-    // deferred promise only exists once MSW invokes the resolver.
     await waitFor(() => expect(resolveFindings).toBeTypeOf('function'));
     resolveFindings(findingsResponse([makeFinding({ finding_id: 'fnd_load', title: 'Loaded item' })]));
     await waitFor(() => expect(screen.getByText('Loaded item')).toBeInTheDocument());

@@ -23,7 +23,6 @@ interface Deferred<T> {
   resolve: (value: T) => void;
 }
 
-// local equivalent as brief-flow.test.tsx until the lib target reaches es2024.
 function withResolvers<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -170,7 +169,6 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
   });
 
-  // pins the page's independent guard for a producer that regresses.
   it('dedupes scan rows by provider id and keeps the curated launch recipe', async () => {
     const user = userEvent.setup();
     const agents: AgentScanEntry[] = [
@@ -379,7 +377,6 @@ describe('ServiceDegradedGate', () => {
 
   it('keeps a configured provider selectable even without a scan row', async () => {
     const user = userEvent.setup();
-    // it configured and enabled — it is the repair target, never disabled.
     const agents: AgentScanEntry[] = [
       { name: 'Alpha Agent', registry_agent_id: 'alpha-acp', launch_command: 'alpha-acp', launch_args: ['acp'], installed: true },
     ];
@@ -418,7 +415,6 @@ describe('ServiceDegradedGate', () => {
     expect(geminiUse).toBeEnabled();
     await user.click(geminiUse);
     expect(screen.getByLabelText('提供方 ID')).toHaveValue('gemini');
-    // must back the form (never blanked), and the saved payload keeps it.
     expect(screen.getByLabelText('启动命令')).toHaveValue('gemini');
   });
 
@@ -574,7 +570,6 @@ describe('ServiceDegradedGate', () => {
     const roster = await screen.findAllByRole('listitem');
     expect(roster).toHaveLength(1);
     await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
-    // scan row for the same id is not its recipe.
     expect(screen.getByLabelText('协议')).toHaveValue('acp');
     expect(screen.getByLabelText('启动命令')).toHaveValue('alpha-acp');
 
@@ -665,7 +660,6 @@ describe('ServiceDegradedGate', () => {
       ),
     });
 
-    // label. The installed ACP row is selectable, the detection row is not.
     const roster = await screen.findAllByRole('listitem');
     expect(roster).toHaveLength(2);
     const acpRow = roster.find(
@@ -810,7 +804,6 @@ describe('ServiceDegradedGate', () => {
     const roster = await screen.findAllByRole('listitem');
     expect(roster).toHaveLength(1);
     await user.click(within(roster[0]!).getByRole('button', { name: '启用' }));
-    // saved command.
     expect(screen.getByLabelText('启动命令')).toHaveValue('/opt/private/claude');
   });
 
@@ -967,7 +960,6 @@ describe('ServiceDegradedGate', () => {
     expect(screen.getByTestId('engine-repair-failure')).toHaveTextContent(
       '已选择编排提供方，但就绪检测未通过：编排引擎未就绪。',
     );
-    // profile alone cannot make the recheck succeed.
     expect(screen.getByLabelText('提供方 ID')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存并重启检测' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重新检测' })).toBeInTheDocument();
@@ -1089,7 +1081,6 @@ describe('ServiceDegradedGate', () => {
       deferreds.push(deferred);
       return deferred.promise;
     });
-    // probes are then in flight at once.
     const client = {
       daemonStatus,
       runtimeStatus: () => Promise.resolve({ workspace_initialized: true }),
@@ -1098,7 +1089,6 @@ describe('ServiceDegradedGate', () => {
 
     await waitFor(() => expect(daemonStatus).toHaveBeenCalledTimes(2));
 
-    // overwrite that outcome when it settles later.
     await act(async () => {
       deferreds[1]!.resolve(HEALTHY);
     });

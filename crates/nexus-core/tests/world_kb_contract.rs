@@ -37,8 +37,6 @@ async fn live_write_pool(
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    // (§2.2), and the management read selection resolves it — the fixture must
-    // therefore seed a complete subject, not a bare `creators` row.
     nexus_local_db::ensure_creator_row(pool, owner, "Test")
         .await
         .unwrap();
@@ -748,7 +746,6 @@ async fn provider_journal_contract_settle_rejects_stale_selection() {
         .await
         .unwrap();
 
-    // reopened, so its bound context is stale for every domain write.
     let nexus_home = fx.tmp.path().join(".nexus42");
     std::fs::write(
         nexus_home.join("config.toml"),
@@ -949,8 +946,6 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
     .unwrap();
     assert_eq!(binding.world_sheet_entry_id.as_deref(), Some(SHEET_ID));
 
-    // `invalid_world_sheet` with zero mutation — the pair stays null, the
-    // World revision stays put and the link is never silently dropped.
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let err = nexus_local_db::kb_store::author_world_knowledge_governance_tx(
         &mut tx,
@@ -978,7 +973,6 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
         Some(SHEET_ID)
     );
 
-    // refusal on the ordinary store lane.
     let store = SqliteKbStore::new(pool.clone());
     let mut row = store.get_knowledge_entry(SHEET_ID).await.unwrap();
     row.status = "deprecated".to_string();
@@ -999,7 +993,6 @@ async fn v1191_world_sheet_governance_rejects_both_directions() {
     ));
     assert_eq!(sheet_status(&pool, SHEET_ID).await, "confirmed");
 
-    // rule refuse a new link: the same predicate in both directions.
     let cleared = nexus_local_db::update_actor_world_binding(
         &pool,
         CREATOR,
@@ -1063,7 +1056,6 @@ async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
     let fx = setup_sheet_fixture().await;
     let pool = sheet_pool(&fx).await;
 
-    // title and an explicitly `shared` audience changes nothing.
     let restated: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": SHEET_ID,
         "expected_version": 0,
@@ -1094,8 +1086,6 @@ async fn v1191_world_sheet_governance_restated_content_is_a_no_op() {
 /// dialect first, then re-submit.
 #[tokio::test]
 async fn v1214_p1s2_drifted_dialect_restate_is_still_a_seam_422() {
-    // request below re-states this value unchanged, so the materialised
-    // content is identical — only the seam stands between it and a no-op.
     const DRIFT_ID: &str = "kb_drift";
     const DRIFTED: &str =
         r#"{"mental":["drifted"],"belief":{"holder":"kb_ana"},"observation":["drifted"]}"#;
@@ -1133,7 +1123,6 @@ async fn v1214_p1s2_drifted_dialect_restate_is_still_a_seam_422() {
         CoreError::WorldKbValidation(payload) => payload.validation_summary.errors,
         other => panic!("expected the seam's 422 payload, got {other:?}"),
     };
-    // not part of the contract — only the per-dialect message set is.
     errors.sort();
     assert_eq!(
         errors,
@@ -1214,8 +1203,6 @@ async fn v1191_world_sheet_governance_canvas_create_authors_the_audience() {
         .patch_world_kb_entity(&fx.principal, SHEET_WORLD.to_string(), unbound)
         .await
         .unwrap_err();
-    // keeps the actor-input family (a malformed id would be
-    // `InvalidInput { field: "patch.audience" }` from the wire mapping).
     assert!(matches!(err, CoreError::ActorInput(_)), "got {err:?}");
     let exists: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = 'kb_4d222222222222222222222222222222'",
@@ -1315,7 +1302,6 @@ async fn retained_world_kb_entity_create_update_conventions() {
     assert_eq!(stored.revision, Some(1));
     assert_eq!(stored.status, "provisional");
 
-    // silent create.
     let update_absent: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_ghost",
         "expected_version": 3,
@@ -1333,7 +1319,6 @@ async fn retained_world_kb_entity_create_update_conventions() {
     assert_eq!(details.current_version, 0);
     assert_eq!(details.entity_id, "kb_ghost");
 
-    // stored revision.
     let create_existing: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_cas",
         "expected_version": 0,
@@ -1401,7 +1386,6 @@ async fn retained_world_kb_entity_create_update_conventions() {
         );
     }
 
-    // included.
     let foreign_create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_other_new",
         "expected_version": 0,
@@ -1415,7 +1399,6 @@ async fn retained_world_kb_entity_create_update_conventions() {
         .unwrap_err();
     assert!(matches!(err, CoreError::WorldOwnerDenied { .. }));
 
-    // the terminal guard and writes nothing.
     let deleted_create: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_dead",
         "expected_version": 0,
@@ -1433,7 +1416,6 @@ async fn retained_world_kb_entity_create_update_conventions() {
     assert_eq!(dead.revision, Some(1));
     assert_eq!(dead.canonical_name, "Dead");
 
-    // authors the resolved pair, and an explicit shared patch clears it.
     let holder = nexus_local_db::creator_holder_entry_id(CREATOR);
     let private: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": entity_id,
@@ -1453,7 +1435,6 @@ async fn retained_world_kb_entity_create_update_conventions() {
         authored_wire["disclosure"],
         serde_json::json!("owner-private")
     );
-    // the next CAS base is the STORED revision, not the response's.
     let stored_version: i64 = sqlx::query_scalar(
         "SELECT COALESCE(revision, 0) FROM kb_key_blocks WHERE key_block_id = ?",
     )
@@ -1486,7 +1467,6 @@ async fn retained_world_kb_entity_create_update_conventions() {
     .unwrap();
     assert_eq!(stored_pair, (None, None), "the clear is durable");
 
-    // survive a title-only patch exactly.
     seed_kb_row(
         &pool,
         "kb_backpack",
@@ -1603,7 +1583,6 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
         );
     }
 
-    // modules-only patch is a valid edit.
     let revision: i64 =
         sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = 'kb_modular'")
             .fetch_one(&pool)
@@ -1634,7 +1613,6 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
         Some(&serde_json::json!(["a", "b"]))
     );
 
-    // omits the key entirely.
     seed_kb_row(
         &pool,
         "kb_plain",
@@ -1694,7 +1672,6 @@ async fn retained_world_kb_modules_semantics_and_graph_projection() {
         "an entity without modules omits the key on the wire: {plain}"
     );
 
-    // never deserialize.
     for bad in [
         serde_json::json!({"modules": {"Bad Key": {}}}),
         serde_json::json!({"modules": {"mental": 5}}),
@@ -1781,8 +1758,6 @@ async fn world_kb_contract_authored_module_dialect_validation() {
         assert_eq!(detail.validation_summary.errors, expected);
     }
 
-    // explicit-empty observers accepted, unknown inner keys verbatim, and an
-    // unrelated dialect key never gated.
     let accepted: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_dialect",
         "expected_version": 0,

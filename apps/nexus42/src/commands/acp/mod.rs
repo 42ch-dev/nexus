@@ -274,7 +274,6 @@ async fn probe_agent(agent_ref: &str) -> Result<()> {
             }
         }
         Err(_) => {
-            // Kill it since we're just probing
             if let Err(e) = child.kill().await {
                 eprintln!("  Warning: failed to kill agent process: {e}");
             }
@@ -524,8 +523,6 @@ fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
         .get(creator_id)
         .map_or(crate::config::DEFAULT_WORKSPACE_SLUG, |s| s.as_str());
 
-    // returned borrow shadows workspace_slug so only the sanitized value reaches
-    // operational_workspace_dir.
     nexus_home_layout::validate_creator_id_safe(creator_id)
         .map_err(crate::errors::CliError::Other)?;
     let workspace_slug = nexus_home_layout::sanitize_entry_id(workspace_slug)
@@ -540,8 +537,6 @@ fn cmd_agent_use(agent_ref: &str, config: &CliConfig) -> Result<()> {
 
     let config_path = ws_dir.join(DEFAULT_AGENT_CONFIG_FILE);
 
-    // already rejected control characters and non-printable input.
-    // The only remaining special chars in TOML basic strings are `\` and `"`.
     let escaped_ref = trimmed.replace('\\', "\\\\").replace('"', "\\\"");
     let content = format!(
         "# Nexus ACP default agent configuration\n\
@@ -944,8 +939,6 @@ fn interactive_prompt_loop(
             break;
         }
 
-        // LocalSet + SDK integration. The prompt would go through
-        // AcpSdkAdapter::prompt() within a LocalSet context.
         eprintln!(
             "  [note: ACP prompt integration pending — message '{trimmed}' not sent to agent]"
         );

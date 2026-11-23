@@ -8,15 +8,6 @@ import { before, describe, test } from 'node:test';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
-/**
- * authority once per retained Actor record. Those reads are native crossings, so
- * the sweep must spend ONE principal for the whole arm and issue the reads as one
- * bounded wave — while every record keeps the verdict the sequential chain gave
- * it (Character running ⇒ keep; settled ⇒ retire; Character miss ⇒ keep only
- * while the authority's generic row exists). The native authority is stubbed at
- * the `ServiceCore` seam and every crossing is recorded, so both the shape and
- * the per-record verdicts are observable from the same fixture.
- */
 let provider;
 let registryModule;
 let errors;
@@ -26,8 +17,6 @@ let cfg;
 const ABSENT = Symbol('absent');
 
 before(async () => {
-  // would race the sibling suites rewriting the same `dist`. A stale or empty
-  // `dist` fails here with the build hint, not as a misleading import error.
   const providerDist = join(serviceRoot, 'dist', 'provider.js');
   assert.ok(
     existsSync(providerDist) &&
@@ -94,7 +83,6 @@ function admission({ retained = [], characterOf = () => ABSENT, rowOf = () => AB
       inFlight += 1;
       peak = Math.max(peak, inFlight);
       try {
-        // at a time, a wave shows every record's read at once.
         await new Promise((resolve) => setImmediate(resolve));
         const character = characterOf(operationId);
         if (character === ABSENT) throw new errors.HttpError(404, 'not_found', 'no Character operation');
@@ -156,14 +144,10 @@ describe('retention sweep (one principal, one wave)', () => {
       1,
       'the whole sweep must share one minted principal',
     );
-    // per record. The upper bound keeps the assertion off the exact internal
-    // shape; the principal-identity assert above is the real contract.
     assert.ok(
       fixture.mints.length <= 2,
       `an admission of ${retained.length} retained records mints at most twice (minted ${fixture.mints.length})`,
     );
-    // sweep has no chunking cap (the arm's retention cap is its bound), so a
-    // partial peak is a regression to batched concurrency, not slack.
     assert.equal(
       fixture.peak(),
       retained.length,

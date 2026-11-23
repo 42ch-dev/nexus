@@ -214,8 +214,6 @@ async fn inspector_moment_supports_work_and_stage_flags() {
     );
     let json: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("json packet");
     assert!(json["modules"].is_object(), "{json}");
-    // status shape — success itself proves the core accepted the work→world
-    // binding (a mismatch surfaces 400).
     assert_eq!(json["moment_directive"]["status"], "none", "{json}");
 }
 

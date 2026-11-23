@@ -10,11 +10,6 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import { setupServer } from 'msw/node';
 
-/**
- * agent chip, Hub Agent card, onboarding restore). Tests that are not about the
- * profile get "no profile saved"; profile tests override this with their own
- * handler via `useHandlers` (later handlers win in msw).
- */
 const baselineHandlers: RequestHandler[] = [
   http.get('/v1/daemon/agent-host/profile', () => HttpResponse.json({ profile: null })),
 ];

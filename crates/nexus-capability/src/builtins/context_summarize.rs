@@ -140,10 +140,6 @@ impl Capability for ContextSummarize {
 
         let prompt_hash = blake3::hash(prompt.as_bytes()).to_hex().to_string();
 
-        // the shared per-run map. FAIL-CLOSED: a run with no registered
-        // token refuses with `CancellationUnavailable` — a fresh token would
-        // be uncancellable by any coordinator (never mint one here). The run
-        // admission path (engine start/spawn/recovery) registers the token.
         let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         let result = executor
@@ -275,8 +271,6 @@ mod tests {
         );
     }
 
-    /// given run ids (fail-closed contract; production registers at run
-    /// admission).
     fn cancels_with(
         ids: &[&str],
     ) -> std::sync::Arc<
@@ -365,10 +359,6 @@ mod tests {
         assert!(err.contains("missing 'content' field"));
     }
 
-    /// NOT forwarded to the executor — only context-injected `_session_id`
-    /// is trusted as the run identity. M-002: with no trusted `_session_id`
-    /// the capability now fails closed (Forbidden) instead of falling back
-    /// to a magic `default` run id.
     #[tokio::test]
     async fn context_summarize_raw_creator_id_ignored_on_spoof_attempt() {
         let executor = Arc::new(MockSummaryExecutor::new());
@@ -479,7 +469,6 @@ mod tests {
     /// multi-byte scalar for non-ASCII content. Must NOT panic.
     #[test]
     fn build_summary_prompt_truncates_multibyte_utf8_without_panic() {
-        // which is NOT a multiple of 3, so naive byte slicing would panic.
         let char_count = DEFAULT_MAX_CONTENT_BYTES / 3 + 100;
         let cjk_content: String = "字".repeat(char_count);
         assert!(cjk_content.len() > DEFAULT_MAX_CONTENT_BYTES);

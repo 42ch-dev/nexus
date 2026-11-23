@@ -349,7 +349,6 @@ fn recovery_class_for(
             if !descriptor_valid {
                 return RecoveryClass::Unreadable;
             }
-            // corrupt/ambiguous and non-replayable (mirrors `load_run`).
             let Some(status) = nexus_session_storage::SessionStatus::from_db_str(status) else {
                 return RecoveryClass::Unreadable;
             };
@@ -397,13 +396,6 @@ fn project(row: &CheckpointRow) -> InspectDto {
         ),
     };
 
-    // status/state are the authority for v1 rows; v0 rows are legacy.
-    // Terminal status wins over absent/corrupt state via the shared
-    // classifier (A7 rule 1). `parse_run_state` returns `None` for v0 rows
-    // (no blob) and corrupt/absent blobs; v1 state (and its wait token) is
-    // gated on EXACT execution_version == 1 — v0 stray bytes must never be
-    // interpreted through v1 wait semantics (Important 4), and unsupported
-    // negative/forward versions surface as `Unreadable` (Important 2).
     let run_state = parse_run_state(row.run_state_json.as_deref());
     let gate_park = shape.as_ref().is_ok_and(|data| {
         resume_rules::gate_park_live(data, row.current_task_id.as_deref().unwrap_or_default())
@@ -415,18 +407,12 @@ fn project(row: &CheckpointRow) -> InspectDto {
         descriptor_is_valid(row.run_descriptor_json.as_deref()),
         gate_park,
     );
-    // is `HumanWait`. A terminal/interrupted/unreadable row carrying stale
-    // wait bytes must not advertise a usable wait token (round-2 Minor).
     let wait_id = (recovery_class == RecoveryClass::HumanWait)
         .then_some(run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
-    // can no longer be reconstructed must not advertise continue.
     let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
-    // class (authoritative status/state) — the legacy context-key cascade
-    // stays the v0 projection only, so durable interrupted evidence is never
-    // hidden. `LegacyUnverified` routes through the legacy `resumable` above.
     let resumable = match recovery_class {
         RecoveryClass::LegacyUnverified => resumable,
         class => verdict_for_recovery(class, &row.status),
@@ -489,12 +475,6 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
     let context_readable =
         unreadable_kind.map(|kind| matches!(kind, UnreadableKind::UnexpectedShape));
 
-    // deserialization + version contract as detail mode. v1 state blobs are
-    // validated structurally here (equivalent to `RunStateV1`
-    // deserialization), so `json_valid` alone never labels corrupt evidence
-    // as readable; v0 rows stay legacy/unverified; negative/forward
-    // versions are unsupported/unreadable; the wait token is gated on exact
-    // version 1.
     let run_state = parse_run_state(row.run_state_json.as_deref());
     let recovery_class = recovery_class_for(
         row.execution_version,
@@ -503,12 +483,10 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         descriptor_is_valid(row.run_descriptor_json.as_deref()),
         row.gate_park_live,
     );
-    // is `HumanWait` (round-2 Minor — list must agree with detail).
     let wait_id = (recovery_class == RecoveryClass::HumanWait)
         .then_some(run_state.as_ref())
         .flatten()
         .and_then(|s| s.wait.as_ref().map(|w| w.wait_id.clone()));
-    // can no longer be reconstructed must not advertise continue.
     let source_ok = frozen_source_reconstructable(row.run_descriptor_json.as_deref());
 
     let legacy_resumable = verdict_for(
@@ -521,9 +499,6 @@ fn project_summary(row: &CheckpointSummary) -> InspectDto {
         ),
         unreadable_kind,
     );
-    // (authoritative status/state) — the legacy context-key cascade stays
-    // the v0 projection only, so durable interrupted evidence is never
-    // hidden. `LegacyUnverified` routes through the legacy cascade above.
     let resumable = match recovery_class {
         RecoveryClass::LegacyUnverified => legacy_resumable,
         class => verdict_for_recovery(class, &row.status),
@@ -563,10 +538,6 @@ fn verdict_for_recovery(class: RecoveryClass, row_status: &str) -> ResumableVerd
             verdict: Verdict::Unknown,
             rule: ResumeRule::UnreadableMetadata,
             runner_check: RunnerCheck::NotApplicable,
-            // the execution version is negative/forward) — an explicit
-            // non-replayable metadata reason, never the legacy
-            // context_unreadable wording. The session `context_json` being
-            // readable does not make v1 metadata replayable.
             explanation: "v1 run-state metadata unreadable (corrupt/unsupported \
                           or unsupported execution version) — non-replayable; \
                           no verdict fabricated"
@@ -754,7 +725,6 @@ const fn recovery_class_str(class: RecoveryClass) -> &'static str {
 fn allowed_actions_for(class: RecoveryClass, source_reconstructable: bool) -> Vec<String> {
     let actions: &[&str] = match class {
         RecoveryClass::Terminal => &["new_run"],
-        // advertise continue (tri-QC P1-C).
         RecoveryClass::HumanWait if !source_reconstructable => &["cancel", "new_run"],
         RecoveryClass::HumanWait => &["continue", "cancel"],
         RecoveryClass::Interrupted
@@ -787,7 +757,6 @@ fn render_detail(dto: &InspectDto) -> String {
     let _ = writeln!(out, "updated_at:     {}", render_ts(dto.updated_at));
 
     match &dto.run_failure {
-        // the cut (qc2 F-001); `--json` stays DTO-verbatim.
         Some(failure) => {
             let status = failure.run_status.as_deref().unwrap_or("failed");
             let first_line = failure
@@ -924,7 +893,6 @@ mod tests {
 
     #[test]
     fn terminal_status_forces_no_even_with_live_join_keys() {
-        // with context untouched — live join keys + no typed failure.
         let ctx = serde_json::json!({"data": {
             "_converge_arrivals_j1": ["a"],
             "_join_wait_start_j1": 1
@@ -979,8 +947,6 @@ mod tests {
 
     #[test]
     fn shape_anomaly_is_readable_but_unexpected_shape() {
-        // byte corruption (qc3 S1). Byte-readable → `context_readable: true`;
-        // the shape anomaly is carried in the classification/explanation.
         let dto = project(&row(br#"{"data": "not-an-object"}"#));
         assert_eq!(dto.context_readable, Some(true));
         assert_eq!(dto.resumable.verdict, Verdict::Unknown);
@@ -1027,7 +993,6 @@ mod tests {
             serde_json::json!("not_applicable")
         );
 
-        // shape anomaly lives in the classification/explanation).
         let shape = serde_json::to_value(project(&row(br#"{"data": "not-an-object"}"#))).unwrap();
         assert_eq!(shape["context_readable"], serde_json::json!(true));
         assert_eq!(shape["resumable"]["verdict"], serde_json::json!("unknown"));
@@ -1043,7 +1008,6 @@ mod tests {
 
     #[test]
     fn summary_shape_anomaly_is_readable_but_unexpected_shape() {
-        // valid JSON with non-object `data` → `context_readable: true`.
         let summary = CheckpointSummary {
             session_id: "ses_t".to_string(),
             creator_id: "cr_t".to_string(),

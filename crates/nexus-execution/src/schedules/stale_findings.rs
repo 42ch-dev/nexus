@@ -117,8 +117,6 @@ pub fn spawn_stale_findings_watcher(
         );
 
         let mut ticker = tokio::time::interval(config.interval);
-        // sweeps after a long pause (e.g. laptop sleep). `Delay` keeps
-        // sweeps spaced and avoids piling work on the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
@@ -194,8 +192,6 @@ pub async fn run_one_sweep(
             }
         }
         Err(e) => {
-            // bubble errors — that would crash the spawned task and
-            // silently stop the SLA signal.
             tracing::error!(
                 error = %e,
                 threshold_seconds,
@@ -250,9 +246,6 @@ async fn maybe_enqueue_review_master(
         return;
     }
 
-    // the configured default provider. The preset's graphs issue prompts
-    // (`acp.prompt` + `judge.llm`), so a missing provider refuses the
-    // enqueue — never a drive-enabled row with an empty binding map.
     let bindings = if let Some(provider_id) = binding_provider {
         if let Some(bindings) = nexus_orchestration::preset_runtime::default_bindings_for_preset(
             "novel-review-master",
@@ -290,10 +283,6 @@ async fn maybe_enqueue_review_master(
                 schedule_id = %schedule_id,
                 "stale-findings: enqueued novel-review-master (opt-in)"
             );
-            // review-master row is admitted through the SAME production
-            // starter as every other insertion branch. A starter failure is
-            // explicit (logged at error level); the row stays pending for a
-            // later tick / explicit start, never silently unhanded.
             if let Some(starter) = schedule_starter {
                 match starter.start(&schedule_id).await {
                     Ok(_sid) => {

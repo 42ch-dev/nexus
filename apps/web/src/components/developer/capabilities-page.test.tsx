@@ -57,9 +57,6 @@ describe('CapabilitiesPage', () => {
     expect(await screen.findByText('nexus.example.greet')).toBeInTheDocument();
     expect(screen.getByText('Input schema')).toBeInTheDocument();
     expect(screen.getByText('Output schema')).toBeInTheDocument();
-    // DTO (inputSchema/outputSchema — AR-40), so the schema payload must render
-    // through the page's field access. If the page read a snake_case key the
-    // wire never sends, SchemaBlock falls back to '—' and this assertion fails.
     expect(screen.getByText('{"type":"object"}')).toBeInTheDocument();
     expect(screen.getByText('{"type":"string"}')).toBeInTheDocument();
     expect(

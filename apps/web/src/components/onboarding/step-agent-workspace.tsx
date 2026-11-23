@@ -1,6 +1,4 @@
 /**
- * prototype `onboarding-v3.html` S2D).
- *
  * One merged step: agent rows (ACP pill allowed on this surface), an optional
  * custom launch command and the workspace root. The browser never resolves
  * host paths, so the root is display-only: the field shows the `creative_root`
@@ -62,7 +60,6 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
   }
 
   async function finish() {
-    // so the user can retry (commit() surfaces the error toast).
     if (await selection.commit()) onFinish();
   }
 

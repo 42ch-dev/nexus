@@ -97,7 +97,6 @@ export function workDetail(workId: string, over: Record<string, unknown> = {}): 
 export function createWorkCreated(): RequestHandler {
   return http.post('/v1/daemon/works', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { title?: string };
-    // the test's benefit via a separate field if needed by callers.
     return HttpResponse.json(
       { work_id: 'w-new', status: 'draft', _title: body.title ?? 'New Work' },
       { status: 201 },

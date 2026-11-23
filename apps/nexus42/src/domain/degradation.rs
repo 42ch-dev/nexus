@@ -321,8 +321,6 @@ impl DegradationGuard {
             }
         }
 
-        // failures alone can never trigger immediate re-degradation. Only NEW
-        // real failures should push past the threshold.
         let capped_count = snap.failure_count.min(
             DegradationPolicy::default()
                 .failure_threshold
@@ -986,11 +984,6 @@ mod tests {
             DegradationGuard::new(policy, DomainRuntimeMode::parse("local_first").unwrap());
         guard.set_state_for_testing(DegradationState::DegradedLevel1);
 
-        // (upgrade_cooldown_secs is 0 but last_upgrade_attempt is None, so this passes)
-        // Then it checks last_health_check which is None - so no upgrade
-        // Actually with cooldown=0, the upgrade will proceed if health is healthy
-        // Since we haven't recorded a health check, last_health_check is None
-        // and the upgrade fails because platform is not confirmed healthy
         assert!(!guard.try_upgrade());
     }
 

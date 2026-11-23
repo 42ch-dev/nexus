@@ -53,9 +53,6 @@ pub fn map_claude(
                                 text: thinking.thinking.clone(),
                             }));
                         }
-                        // host event this iteration (structured_tool_calls
-                        // stays false; unknown blocks are forward-compat
-                        // noise) — skip + debug.
                         other => tracing::debug!(
                             target: "nexus_agent_host::providers::native_cli::map_claude",
                             block_type = other.block_type(),
@@ -75,9 +72,6 @@ pub fn map_claude(
                     break;
                 }
                 if matches!(result.subtype, ResultSubtype::Unknown(_)) {
-                    // nested unknown noise — skip, do not fail the turn here.
-                    // A later `Result` frame (or the stream-abort backstop)
-                    // still supplies the one terminal.
                     tracing::debug!(
                         target: "nexus_agent_host::providers::native_cli::map_claude",
                         subtype = result.subtype.as_str(),
@@ -85,7 +79,6 @@ pub fn map_claude(
                     );
                     continue;
                 }
-                // …) or success-subtype-with-error-flag → one terminal failure.
                 events.push(HostEvent::OpFailed(OperationFailedEvent {
                     session_id: session_id.clone(),
                     op_id: op_id.clone(),
@@ -94,7 +87,6 @@ pub fn map_claude(
                 }));
                 break;
             }
-            // the `Result` frame / stream abort.
             ClaudeOutput::Error(err) => events.push(HostEvent::Status(StatusEvent {
                 session_id: Some(session_id.clone()),
                 level: StatusLevel::Warning,
@@ -108,11 +100,6 @@ pub fn map_claude(
                 level: StatusLevel::Warning,
                 message: format!("claude rate limit: {}", evt.rate_limit_info.status),
             })),
-            // ControlResponse / StreamEvent (cannot arrive without
-            // --include-partial-messages) / ToolProgress / CommandLifecycle /
-            // AuthStatus / ToolUseSummary / PromptSuggestion /
-            // ConversationReset / internal transcript events — skipped, no
-            // author-visible content on this surface.
             _ => tracing::debug!(
                 target: "nexus_agent_host::providers::native_cli::map_claude",
                 frame = output.message_type(),
@@ -157,15 +144,12 @@ pub fn classify_stream_error(
         ClaudeError::ConnectionClosed => "stream_closed",
         ClaudeError::Timeout => "timeout",
         ClaudeError::Io(_) | ClaudeError::BinaryNotFound { .. } => "io_error",
-        // decode failures surface as Deserialization); everything else is a
-        // provider-side failure.
         _ => "provider_error",
     };
     Some(OperationFailedEvent {
         session_id: session_id.clone(),
         op_id: op_id.clone(),
         error_category: category.to_string(),
-        // Deserialization Display embeds is not echoed unboundedly (N-2).
         error_message: crate::providers::native_cli::truncate_error_message(&error.to_string()),
     })
 }

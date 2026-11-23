@@ -63,9 +63,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
   const designFile = join(designRoot, 'DESIGN.md');
   const darkFile = join(designRoot, 'DESIGN.dark.md');
 
-  // imports) compiles at most once (W-001). The cache is reset explicitly on
-  // DESIGN watcher events and on document-request (manual-navigation) refresh,
-  // so a reload always re-reads the current pair without a stat per request.
   let compileCache: { css: string; brandCss: string } | null = null;
 
   /** Load + compile the pair; throws on malformed input (→ Vite overlay). */
@@ -107,11 +104,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
 
     configureServer(server) {
       const invalidateCssGraph = () => {
-        // virtual shared-CSS modules (keyed by virtual id, not a real file,
-        // so getModulesByFile/filesById miss them) and the Studio entry
-        // src/index.css whose cached transform output embeds the compiled
-        // tokens. Without invalidating the entry module, a reload re-fetches
-        // the stale transform result and the DESIGN edit is lost.
         for (const [id, mod] of server.moduleGraph.idToModuleMap ?? []) {
           if (
             id === TOKENS_VIRTUAL ||
@@ -129,10 +121,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
         server.ws.send({ type: 'full-reload' });
       };
 
-      // graph and the compile cache WITHOUT a full-reload (sending one from
-      // this request path would loop — the reload that already happened is the
-      // refresh). This is the missed-watch safety net: a manual reload picks
-      // up the current DESIGN pair even if chokidar never fired.
       server.middlewares.use((req, _res, next) => {
         if (
           (req.method === 'GET' || req.method === 'HEAD') &&
@@ -144,11 +132,6 @@ export function designTokensPlugin(repoRoot: string): Plugin {
         next();
       });
 
-      // Vite's watch root (apps/design-studio). The server.watcher only
-      // reports changes it is configured to watch; add the DESIGN pair
-      // explicitly so edits to them invalidate the CSS graphs and trigger a
-      // full reload. Without this the transform output stays cached and stale
-      // on every request (including manual reload / cold tabs).
       server.watcher.add([designFile, darkFile]);
       const watcher = server.watcher as unknown as { on(e: string, cb: (p: string) => void): void };
       if (watcher && typeof watcher.on === 'function') {

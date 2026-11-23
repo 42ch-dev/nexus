@@ -129,7 +129,6 @@ describe('AppShell', () => {
 
   it('exposes Settings in the mobile nav linking to /settings', () => {
     useShellHandlers();
-    // entrance legitimately hides this entry; the developer nav carries it.
     renderShell('developer');
     const links = screen.getAllByRole('link').filter(
       (element) => element.getAttribute('href') === '/settings',
@@ -174,7 +173,6 @@ describe('AppRail — progressive activation', () => {
     expect(work).toHaveAttribute('aria-disabled', 'true');
     expect(work).toHaveAttribute('title', '完成 Brief 后解锁「作品」');
 
-    // NOT navigate — the load factory stays uninvoked.
     await user.click(work);
     expect(await screen.findByText('完成 Brief 后解锁「作品」')).toBeInTheDocument();
     expect(loads.work).not.toHaveBeenCalled();

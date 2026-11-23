@@ -56,22 +56,9 @@ const ENTRANCE_VALUES: readonly string[] = ['developer', 'content-creator'];
 /** Slug written for a creator whose workspace was never explicitly chosen. */
 const DEFAULT_WORKSPACE_SLUG = 'default';
 
-/**
- * cross-process writers share (see `crates/nexus-core/src/config_lock.rs`,
- * `apps/nexus42/src/config.rs` and
- * `apps/nexus-service/src/agent-profile.ts`): exclusive create for the whole
- * read-modify-write, stale steal after 10 s, release by unlink. The in-process
- * gates below serialize this process only; the core, the CLI and the service
- * write this same file. `flock` is not an option: Node's stdlib has none, and mixing
- * lockfile-existence with flock breaks mutual exclusion.
- */
 const LOCK_STALE_MS = 10_000;
 const LOCK_BACKOFF_INITIAL_MS = 25;
 const LOCK_BACKOFF_CAP_MS = 500;
-/**
- * immutable file: EACCES/EPERM). Past this deadline the mutation fails instead
- * of hot-looping — the same 2× stale window the core and service writers use.
- */
 const LOCK_STEAL_DEADLINE_MS = 2 * LOCK_STALE_MS;
 
 const sleepFor = (ms: number): Promise<void> => {
@@ -80,16 +67,9 @@ const sleepFor = (ms: number): Promise<void> => {
   return promise;
 };
 
-/**
- * past the stale window is stolen, and unlinking on resume would delete the new
- * owner's lock and admit a third writer into the second's read-modify-write.
- * The whole line is the token, so the compare is byte-for-byte: a file that
- * merely contains or ends with our token belongs to another writer.
- */
 async function releaseConfigLock(lockPath: string, token: string): Promise<void> {
   try {
     const contents = await readFile(lockPath, 'utf8');
-    // the ownership proof, compared whole rather than by a token suffix.
     if (contents.replace(/\n$/, '') !== token) {
       console.error(`[nexus-desktop] ${lockPath} was stolen; leaving the new owner's lock`);
       return;
@@ -105,15 +85,8 @@ async function releaseConfigLock(lockPath: string, token: string): Promise<void>
   }
 }
 
-/**
- * milliseconds; `LOCK_STALE_MS` is a stale heuristic, not proof of a crash — a
- * paused live holder can look stale, and stealing can transiently yield two
- * holders. Safe only while all four writers stay user-paced.
- */
 async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promise<T> {
   await mkdir(dirname(lockPath), { recursive: true });
-  // whole line before unlinking, so a stolen holder cannot delete the new
-  // owner's lock.
   const token = `${process.pid} ${new Date().toISOString()} ${randomUUID()}`;
   let backoff = LOCK_BACKOFF_INITIAL_MS;
   let stealDeadlineMs: number | undefined;
@@ -123,10 +96,8 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
     try {
       const lock = await open(lockPath, 'wx', 0o600);
       try {
-        // the whole line is the ownership proof release compares.
         await lock.writeFile(`${token}\n`);
       } catch (err) {
-        // before failing, or the next writer stalls until the stale steal.
         await lock.close().catch(() => undefined);
         await rm(lockPath, { force: true }).catch(() => undefined);
         throw err;
@@ -145,8 +116,6 @@ async function withConfigLock<T>(lockPath: string, run: () => Promise<T>): Promi
         () => undefined, // Released between the create and the stat: retry now.
       );
       if (ageMs !== undefined && ageMs > LOCK_STALE_MS) {
-        // leaving two live holders, and a live slow holder can lose its lock.
-        // Accepted only because all four writers are user-paced.
         try {
           await rm(lockPath, { force: true });
         } catch (unlinkError) {
@@ -214,14 +183,6 @@ function isTomlTable(value: TomlValue | undefined): value is TomlTable {
   );
 }
 
-/**
- * (prototype-pollution hardening, README "Key safety"). This module's contract
- * is an ordinary plain-object document — indexing, spreads and `{ ...doc }`
- * behave like any other object — so the parsed tree is deep-copied back onto
- * `Object.prototype` at the single parse seam. Keys are re-added as own data
- * properties via `defineProperty`, so a literal `__proto__` key is stored as
- * data instead of invoking the prototype setter.
- */
 function toPlainToml(value: TomlValue): TomlValue {
   if (Array.isArray(value)) return value.map(toPlainToml);
   if (!isTomlTable(value)) return value;
@@ -237,19 +198,10 @@ function toPlainToml(value: TomlValue): TomlValue {
   return plain;
 }
 
-/**
- * `nexus-creator/src/local_identity.rs` (first 12 hex chars of a UUID v4).
- */
 function generateLocalCreatorId(): string {
   return `ctr_local${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 }
 
-/**
- * (`~/.nexus42/creators/<id>/…`), so separators and `..` are rejected here as
- * they were in the retired host's `validate_creator_id_safe`. Control
- * characters and the byte bound are already enforced by the frozen request
- * parser before a handler runs.
- */
 function assertSafeCreatorId(creatorId: string): void {
   if (creatorId.includes('/') || creatorId.includes('\\') || creatorId.includes('..')) {
     throw desktopError('invalid_input', `invalid creator_id: ${creatorId}`);
@@ -279,16 +231,11 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
   const agentProfilePath = join(home, NEXUS_DIR, AGENT_HOST_DIR, CONFIG_FILE);
   const defaultWorkspaceRoot = join(documentsPath, ...DEFAULT_WORKSPACE_SEGMENTS);
 
-  /**
-   * so mutations of one file run strictly one at a time and a later mutation
-   * always re-reads what an earlier one wrote.
-   */
   const configGate: { tail: Promise<unknown> } = { tail: Promise.resolve() };
   const agentProfileGate: { tail: Promise<unknown> } = { tail: Promise.resolve() };
 
   function serialized<T>(gate: { tail: Promise<unknown> }, run: () => Promise<T>): Promise<T> {
     const next = gate.tail.catch(() => undefined).then(run);
-    // every later one.
     gate.tail = next.then(
       () => undefined,
       () => undefined,
@@ -296,10 +243,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     return next;
   }
 
-  /**
-   * file that cannot be read or parsed throws instead of degrading to `{}`, so
-   * a corrupt document is never treated as absent.
-   */
   async function readDocument(path: string): Promise<TomlTable> {
     let text: string;
     try {
@@ -351,10 +294,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     }
   }
 
-  /**
-   * atomically. With `lockPath` the whole read-modify-write also holds the
-   * cross-process advisory lock.
-   */
   function mutate<T>(
     gate: { tail: Promise<unknown> },
     path: string,
@@ -372,10 +311,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     });
   }
 
-  /**
-   * a present non-string value means the document no longer means what it
-   * claims — the retired host failed deserialization in exactly that case.
-   */
   function ownedString(doc: TomlTable, key: string, label: string): string | undefined {
     const value = doc[key];
     if (value === undefined) return undefined;
@@ -385,9 +320,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     return value.length > 0 ? value : undefined;
   }
 
-  /**
-   * existing value is not a table (never silently replaced).
-   */
   function ownedTableForWrite(doc: TomlTable, key: string, label: string): TomlTable {
     const value = doc[key];
     if (value === undefined) {
@@ -485,9 +417,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
     },
 
     async set_entrance({ value }) {
-      // validated on write). The frozen parser rejects a non-enum value in the
-      // IPC path, but this exported map is also reachable directly — an
-      // out-of-enum write must never reach the document.
       if (!ENTRANCE_VALUES.includes(value)) {
         throw desktopError('invalid_input', `invalid entrance value: ${value}`);
       }
@@ -533,8 +462,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
           throw desktopError('config_corrupt', `${agentProfilePath}: providers is not an array of tables`);
         }
         const providers: TomlValue[] = existing ?? [];
-        // rejected the wrong shape). A malformed owned value fails closed here
-        // instead of being normalized in place and written back.
         for (const row of providers) {
           if (!isTomlTable(row)) {
             throw desktopError(
@@ -543,7 +470,6 @@ export function createDesktopConfig(home: string, documentsPath: string): Deskto
             );
           }
         }
-        // host and the Settings preselect (first native_cli) always agree.
         for (let index = providers.length - 1; index >= 0; index -= 1) {
           const row = providers[index];
           if (isTomlTable(row) && row['protocol'] === 'native_cli') providers.splice(index, 1);

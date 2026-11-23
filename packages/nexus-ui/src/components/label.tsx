@@ -3,8 +3,6 @@ import { type LabelHTMLAttributes, type Ref } from 'react';
 import { cn } from '../lib/cn';
 
 /**
- * gray-1000 text and is wired to its control via the standard `htmlFor`.
- *
  * Per the V1.100 form-field contract:
  * - `htmlFor` is app-owned — the label receives it as a standard prop and
  *   does not generate, cache, or own IDs.

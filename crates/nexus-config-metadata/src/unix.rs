@@ -118,7 +118,6 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
         }
     }
 
-    // target directory for the rest of the window.
     for (name, value) in &policy.xattrs {
         if read_xattr(descriptor, name)?.is_some_and(|existing| existing == *value) {
             continue;
@@ -128,8 +127,6 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        // the target had no access ACL, so the replacement cannot grant more
-        // than the document it replaces.
         let acl = c"system.posix_acl_access";
         if !policy.xattrs.iter().any(|(name, _)| name.as_c_str() == acl) {
             remove_xattr(descriptor, acl)?;
@@ -148,12 +145,10 @@ pub fn apply(policy: &UnixPolicy, file: &File, _path: &Path) -> io::Result<()> {
                     return Err(io::Error::last_os_error());
                 }
             }
-            // inherited so the replacement cannot grant more.
             None => clear_acl(descriptor)?,
         }
     }
 
-    // on macOS it records the captured mode beside the explicit ACL entries.
     file.set_permissions(Permissions::from_mode(policy.mode))
 }
 
@@ -284,8 +279,6 @@ fn checked_len(length: libc::ssize_t, what: &str) -> io::Result<usize> {
 /// Whether the filesystem does not support extended attributes at all.
 fn is_unsupported(error: &io::Error) -> bool {
     let code = error.raw_os_error();
-    // early-return `if` followed by a bool tail, and on Linux the macOS-only
-    // branch below is compiled away, exposing exactly that shape.
     #[cfg(target_os = "macos")]
     {
         code == Some(libc::ENOTSUP) || code == Some(libc::EOPNOTSUPP)

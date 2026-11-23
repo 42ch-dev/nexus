@@ -31,10 +31,6 @@ import {
 import { DirectedAxisSpine } from '../timeline-canvas/directed-axis-spine';
 import type { WorkTimelineNodeData } from './work-timeline-canvas-adapter';
 
-/**
- * when-axis. Body chrome extracted to `WorkTimelineNarrativeEventChrome`
- * (V1.124). i18n resolves chapter-anchor / no-chapter labels here.
- */
 export const WorkTimelineNarrativeEventNode = memo(function WorkTimelineNarrativeEventNode({
   data,
   selected,
@@ -96,10 +92,6 @@ export const WorkTimelineNarrativeEventNode = memo(function WorkTimelineNarrativ
   );
 });
 
-/**
- * scene-stack. Body chrome extracted to `WorkTimelineMomentSceneChrome`
- * (V1.124). Manuscript-anchor badge resolved here via i18n.
- */
 export const WorkTimelineMomentSceneNode = memo(function WorkTimelineMomentSceneNode({
   data,
   selected,

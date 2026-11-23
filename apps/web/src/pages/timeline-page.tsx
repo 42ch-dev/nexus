@@ -1,6 +1,4 @@
 /**
- * (V1.122 P1 T3). Default World entry: `/worlds/:worldId` redirects here.
- *
  * Reads the world id from the URL and renders {@link TimelineCanvas}. The
  * page is thin so the canvas can be tested in isolation. Peer surfaces
  * (World KB, Strategy) are reachable from the Timeline header + the canvas

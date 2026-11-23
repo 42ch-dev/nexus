@@ -117,7 +117,6 @@ impl PeerResponder for ConnectResponderAdapter {
                         _ => {}
                     }
                 }
-                // verbatim; it is never re-parsed from the message text.
                 let wire_code = reject
                     .details
                     .as_ref()
@@ -182,8 +181,6 @@ pub fn admit_consistent_with_reservation<S: std::hash::BuildHasher>(
         builtin_tool_ids: &HashSet<String, S>,
         live_reservation: Option<&std::collections::HashSet<&'static str>>,
     ) -> AdmissionOutcome {
-        // this seam): the merged reserved set — builtin ∪ live — must be
-        // materialized because `admit_and_register` takes it by reference.
         let mut reserved: HashSet<String> = builtin_tool_ids.iter().cloned().collect();
         if let Some(live) = live_reservation {
             reserved.extend(live.iter().map(|name| (*name).to_owned()));

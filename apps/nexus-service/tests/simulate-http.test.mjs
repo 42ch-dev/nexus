@@ -6,13 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * mounts it, admits it at the Strategy tier and hands the whole candidate body to the core
- * authority. The core's own static walk is proven in
- * `crates/nexus-orchestration/tests/sample_trajectory.rs`; this target proves the HTTP
- * contract — path id, tier, payload passthrough and the untouched core payload.
- */
-
 let routes;
 
 before(async () => {

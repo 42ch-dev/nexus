@@ -70,8 +70,6 @@ impl Capability for SoulExperienceAggregate {
 
         let home = std::path::Path::new(home_dir);
 
-        // side-effect-free. The preset orchestrator or CLI is responsible for
-        // writing the result to SOUL.md.
         let result = nexus_creator_memory::experience_aggregation::aggregate_experience_preview(
             home,
             MemoryBearerRef::Creator(creator_id),

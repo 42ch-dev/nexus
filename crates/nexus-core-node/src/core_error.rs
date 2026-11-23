@@ -353,7 +353,6 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             )]),
             http_status: Some(coded_wire_status(&code)),
         },
-        // `not_supported` (the sole raise site, `capabilities.rs`, sets it
         DomainError::PeerDenied {
             wire_code, message, ..
         } => CoreError {
@@ -495,7 +494,6 @@ pub fn wire_core_error_from_domain(err: DomainError) -> CoreError {
             }
             details.insert("retry_class".into(), Value::String(retry_class));
             match conflict_code {
-                // consumer-visible `conflict_code`/409 envelope the local
                 Some(conflict_code) => {
                     details.insert("conflict_code".into(), Value::String(conflict_code));
                     CoreError {

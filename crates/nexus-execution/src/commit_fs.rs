@@ -507,7 +507,6 @@ pub(crate) fn split_relative(rel_path: &str) -> io::Result<Vec<String>> {
 mod unix_dir {
     use super::{displaced_basename, restore_basename, CREATE_FILE_MODE};
     use nix::fcntl::{openat, renameat, AtFlags, OFlag};
-    // second edge for the three open flags below.
     use nix::libc;
     use nix::sys::stat::{mode_t, Mode};
     use nix::unistd::{linkat, unlinkat};
@@ -580,9 +579,6 @@ mod unix_dir {
             if self.exists(name)? {
                 return Err(io::Error::new(io::ErrorKind::AlreadyExists, "stage exists"));
             }
-            // macOS, u32 on Linux), so the narrowing to that alias — not a
-            // hard-coded u16 — is what keeps this portable. `from_bits_truncate`
-            // then masks to the mode bits it recognises.
             #[allow(clippy::cast_possible_truncation)]
             let mode = Mode::from_bits_truncate(mode.unwrap_or(CREATE_FILE_MODE) as mode_t);
             let fd = openat(
@@ -596,7 +592,6 @@ mod unix_dir {
                 mode,
             )
             .map_err(errno_io)?;
-            // it as-is: no reopened `/dev/fd` copy and no manual close.
             let mut file = File::from(fd);
             file.write_all(bytes)?;
             file.sync_all()?;
@@ -730,12 +725,8 @@ mod unix_dir {
         ) -> io::Result<()> {
             if self.exists(target)? {
                 let current = self.hash_file(target)?;
-                // that has already been applied (or was never applied at all).
-                // A replayed rollback must recognize that, not manufacture a
-                // conflict out of it.
                 let already_restored = pre_hash.is_some_and(|pre| current == pre);
                 match (post_hash, pre_hash) {
-                    // restored preimage (idempotent no-op) are both valid.
                     (Some(post), Some(pre)) if current != post && current != pre => {
                         return Err(third_state(
                             "rollback",
@@ -839,7 +830,6 @@ mod unix_dir {
                 Mode::empty(),
             )
             .map_err(errno_io)?;
-            // back owned, so it is wrapped directly instead of being reopened.
             Ok(File::from(fd))
         }
     }

@@ -1,6 +1,4 @@
 /**
- * (V1.73 P0 A6/A9).
- *
  * Verifies that a dirty field submits `worldKbPatchEntity` with the node's per-row
  * version as `expected_version`, that invalid JSON surfaces an inline error, and
  * that a 409 conflict hands off to the parent canvas (onConflict).
@@ -135,9 +133,6 @@ describe('EntityInspector', () => {
     });
   });
 
-  // must surface non-conflict / non-validation failures (500/403/network) as a
-  // toast instead of silently swallowing them — mirroring the promotion path's
-  // non-conflict guard (extended to also skip 422 validation).
   it('surfaces a non-conflict error (500) as a toast, not silence', async () => {
     const user = userEvent.setup();
     const client = makeClient({
@@ -161,10 +156,6 @@ describe('EntityInspector', () => {
     expect(onConflict).not.toHaveBeenCalled();
   });
 
-  // non-array stored belief (raw-seeded fallback) must save — the submit
-  // builder constructs/validates only the dirty dialects, so the untouched
-  // dialect's builder (whose raw-seeded fallback can report an error even
-  // when untouched) never runs and never blocks the write.
   describe('dirty-dialect-only submit construction (QC3-003)', () => {
     /** One recorded `worldKbPatchEntity(worldId, request)` invocation. */
     /** Module dialects carried by a patch request's `modules` key. */
@@ -181,7 +172,6 @@ describe('EntityInspector', () => {
 
     /** All recorded invocations of the mocked patch client method. */
     function patchCalls(client: NexusClient): PatchEntityCall[] {
-      // fabricating a shape: `makeClient` installs this as a resolved vi.fn.
       return vi.mocked(client.worldKbPatchEntity).mock.calls as PatchEntityCall[];
     }
 
@@ -273,7 +263,6 @@ describe('EntityInspector', () => {
     });
 
     it('an untouched invalid-raw belief still blocks a belief edit until repaired', async () => {
-      // must still reject a non-array parse.
       const client = makeClient();
       const { findByRole, findByText } = renderWith(
         client,

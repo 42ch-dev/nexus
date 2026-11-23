@@ -501,8 +501,6 @@ pub async fn mark_failed(
     Ok(())
 }
 
-// (entity-scope-model.md §5.5; compass §0.1 decision 7)
-
 /// Outcome of an idempotent upsert of a pending promotion candidate.
 ///
 /// Returned by [`upsert_pending_candidate`]. The composite identity of a
@@ -786,7 +784,6 @@ pub async fn insert_pending(
     canonical_name_guess: &str,
     proposed_payload: &str,
 ) -> Result<KbExtractPromotion, sqlx::Error> {
-    // lane passes its own connection to `insert_pending_with_llm` directly.
     let mut conn = pool.acquire().await?;
     insert_pending_with_llm(
         &mut conn,
@@ -1098,7 +1095,6 @@ pub async fn mark_confirmed_in_tx_with_cas(
         return Ok(true);
     }
 
-    // version changed (CAS mismatch). Re-read to disambiguate.
     let (status, version): (Option<String>, Option<i64>) =
         sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
             .bind(job_id)
@@ -1119,15 +1115,12 @@ pub async fn mark_confirmed_in_tx_with_cas(
         (None, _) => Err(LocalDbError::MissingVersionKey {
             key: format!("kb_extract_jobs/{job_id}"),
         }),
-        _ => {
-            // — shouldn't happen, but treat as version mismatch for safety.
-            Err(LocalDbError::VersionMismatch {
-                table: "kb_extract_jobs".to_string(),
-                id: job_id.to_string(),
-                expected: expected_version,
-                actual: version,
-            })
-        }
+        _ => Err(LocalDbError::VersionMismatch {
+            table: "kb_extract_jobs".to_string(),
+            id: job_id.to_string(),
+            expected: expected_version,
+            actual: version,
+        }),
     }
 }
 
@@ -1170,7 +1163,6 @@ pub async fn mark_auto_promoted_in_tx_with_cas(
         return Ok(true);
     }
 
-    // logic as mark_confirmed_in_tx_with_cas.
     let (status, version): (Option<String>, Option<i64>) =
         sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
             .bind(job_id)
@@ -1438,7 +1430,6 @@ mod tests {
             .await
             .unwrap();
 
-        // which we treat as "did not claim".
         let pool1 = pool.clone();
         let pool2 = pool.clone();
         let h1 = tokio::spawn(async move { claim_job(&pool1, "ctr_1").await });
@@ -1447,7 +1438,6 @@ mod tests {
         let r1 = h1.await.unwrap().ok().flatten();
         let r2 = h2.await.unwrap().ok().flatten();
 
-        // finds no queued row → None).
         let claimed_count = usize::from(r1.is_some()) + usize::from(r2.is_some());
         assert!(
             claimed_count == 1,

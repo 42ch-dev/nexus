@@ -1,6 +1,3 @@
-/**
- * Approve-disclosure and canvas-overlay tests.
- */
 import type { SimulationTrajectory, WorkflowDocument } from '@42ch/nexus-contracts';
 
 export function candidateDocument(overrides: Partial<WorkflowDocument> = {}): WorkflowDocument {

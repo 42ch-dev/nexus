@@ -1,6 +1,4 @@
 /**
- * (V1.123 P2 Task 5).
- *
  * Reads the work id from the URL and renders {@link WorkTimelineCanvas}. The
  * page is thin so the canvas can be tested in isolation. Peer surfaces
  * (Outline, Strategy via `go.strategy`, World KB) are reachable from the

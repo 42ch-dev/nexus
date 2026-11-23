@@ -1,6 +1,4 @@
 /**
- * (canvas-strategy-surface.md Draft §4.1 / §3.7).
- *
  * The author gives direction; Nexus executes and owns prose. Verbs prefer
  * Steer / Run / Resume / Ask Nexus to revise over "Edit body" (Draft §4.1).
  *

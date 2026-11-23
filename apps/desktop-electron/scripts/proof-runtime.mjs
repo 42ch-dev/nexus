@@ -65,10 +65,6 @@ function gitRev(args) {
   return res.status === 0 ? res.stdout : '';
 }
 
-/**
- * porcelain status and the diff against it, so a dirty tree is recorded as a
- * stable value rather than an unverifiable "dirty" flag.
- */
 function sourceProvenance() {
   const sha = gitRev(['rev-parse', 'HEAD']).trim() || 'unknown';
   const porcelain = gitRev(['status', '--porcelain']);
@@ -127,9 +123,6 @@ function parseArgs(argv) {
     home: process.env.NEXUS_PROOF_HOME ?? null,
     phases: null,
     diagnostic: false,
-    // launchservices and refuses anything else, while a diagnostic run keeps the
-    // cheap direct default. Choosing `direct` explicitly is still allowed for
-    // diagnostics and is recorded as a confounder, never as a product result.
     launchMethod: undefined,
     cold: 10,
     warm: 30,
@@ -294,8 +287,6 @@ function trackedGone(pid) {
 }
 
 /**
- * descendants.
- *
  * The ACP provider is a `/usr/bin/python3` child of the Node utility owner:
  * its command line carries no bundle marker, so once the owner dies the child
  * is reparented and bundle-anchored queries are blind to it. The pid tree
@@ -323,8 +314,6 @@ async function waitForTrackedExit(tracked, timeoutMs) {
 }
 
 /**
- * descendant is gone; return what survived.
- *
  * LaunchServices reparents helpers out of the adopted pid tree on exit, so a
  * quiet root pid is not proof of cleanup: close success is defined by this
  * bundle-wide empty observation.
@@ -343,7 +332,6 @@ async function waitForBundleEmpty(appPath, timeoutMs, tracked = []) {
 }
 
 function rssSample(appPath, rootPid) {
-  // helpers, so a tree walk silently reports 0 bytes for every sample.
   const owned = appPath ? bundleProcesses(appPath) : ownedProcesses(rootPid);
   const total = owned.reduce((sum, p) => sum + p.rss_kib, 0) * 1024;
   const cpu = owned.reduce((sum, p) => sum + p.cpu_percent, 0);
@@ -510,7 +498,6 @@ class AppUnderProof {
     this.home = home;
     this.port = port;
     this.logPath = logPath;
-    // LaunchServices gives us no pipe to attach to.
     this.proofLog = logPath.replace(/\.log$/, '.app.log');
     this.launchMethod = launchMethod;
     this.child = null;
@@ -519,8 +506,6 @@ class AppUnderProof {
     this.launchedVia = null;
     this.exitCode = undefined;
     this.spawnError = null;
-    // still alive (trackOwnerDescendants): the only witness for processes
-    // whose command line is not bundle-anchored.
     this.trackedDescendants = [];
   }
 
@@ -536,10 +521,7 @@ class AppUnderProof {
     const exe = appExecutable(this.appPath);
     const fd = openSync(this.logPath, 'a');
     const args = [`--remote-debugging-port=${this.port}`];
-    // discovery or CDP attach can still reap this app by bundle path.
     liveLaunches.add(this);
-    // becomes an uncaught exception and the run writes no evidence at all. Record
-    // it instead so the phase reports the failure through its normal path.
     const onSpawnError = (error) => {
       this.spawnError = `${error.code ?? 'spawn_error'}: ${error.message}`;
     };
@@ -568,9 +550,6 @@ class AppUnderProof {
       this.openExitCode = openResult;
       this.launchedVia = 'launchservices';
       this.pid = await this.#discoverMainPid(exe);
-      // the discovered pid as the owned root: otherwise cleanup cannot reach it
-      // and a leaked instance holds the single-instance lock for every later
-      // launch, which is what silently consumed whole run budgets.
       this.ownsAdoptedRoot = this.pid !== null && this.pid !== undefined;
     } else {
       this.child = spawn(exe, args, {
@@ -585,8 +564,6 @@ class AppUnderProof {
       this.pid = this.child.pid;
       this.launchedVia = 'direct';
     }
-    // instance holds the single-instance lock and this one exited immediately).
-    // That is an owner-unavailable condition, not a product measurement.
     let attached;
     try {
       attached = await Cdp.attach(this.port);
@@ -671,14 +648,12 @@ class AppUnderProof {
 
   async destroy() {
     if (this.cdp) this.cdp.close();
-    // not guaranteed to be the root of the helper tree.
     for (const proc of bundleProcesses(this.appPath)) {
       try {
         process.kill(proc.pid, 'SIGKILL');
       } catch {
       }
     }
-    // forced cleanup would leave the provider child behind.
     for (const entry of this.trackedDescendants) {
       try {
         process.kill(entry.pid, 'SIGKILL');
@@ -714,7 +689,6 @@ class AppUnderProof {
    */
   async quitAndWait(timeoutMs = 20_000) {
     try {
-      // call it, so request it through the main process.
       await this.cdp.evaluate(`window.nexusProof.requestQuit?.()`, 10_000);
     } catch {
     }
@@ -880,7 +854,6 @@ async function runLaunchCohort(ctx, count, label, samples) {
       await app.launch();
       const afterLaunch = Date.now();
       const ready = await app.waitReady();
-      // CDP attach versus renderer readiness, instead of one opaque number.
       samples.push({
         index: i,
         ms: Date.now() - started,
@@ -896,7 +869,6 @@ async function runLaunchCohort(ctx, count, label, samples) {
           ms: null,
           aborted: 'owner_unavailable',
           error: ownerUnavailable,
-          // attributable from the evidence alone instead of a bare exit code.
           diagnostics: app.diagnostics(),
         });
       } else {
@@ -905,7 +877,6 @@ async function runLaunchCohort(ctx, count, label, samples) {
     }
     const close = await app.closeCleanly();
     if (!close.exited) await app.destroy();
-    // measurement in the run; record what the close could not clean.
     if (close.survivors.length > 0) {
       ctx.launchSurvivors ??= [];
       ctx.launchSurvivors.push({ stage: label, index: i, survivors: close.survivors });
@@ -918,8 +889,6 @@ async function phaseLaunch(ctx) {
   const { args, checks } = ctx;
   const samples = { cold: [], warm: [] };
   ctx.portCursor = { value: args.portBase + 10 };
-  // evidence mid-phase, and without this the in-flight measurements are absent
-  // from exactly the record written to explain the failure.
   if (ctx.evidenceRef) ctx.evidenceRef.launch = { samples, partial: true };
 
   const coldCohort = await runLaunchCohort(ctx, args.cold, 'cold', samples.cold);
@@ -1021,9 +990,6 @@ async function phaseResources(ctx) {
     await app.launch();
     await app.waitReady();
 
-    // the soak writes are real compare-and-swap updates and the workload never
-    // depends on minting ids that may already exist (with any revision) in a
-    // reused proof home.
     const soakTargets = await app.cdp.evaluateJson(
       `(async () => {
          const api = window.nexusProof;
@@ -1070,8 +1036,6 @@ async function phaseResources(ctx) {
     const totalSamples = trace.map((sample) => sample.rss_bytes);
     const active = summarise(totalSamples);
     const growth = Math.max(...totalSamples.slice(-8)) - idleSample.rss_bytes;
-    // the close must prove none of them (least of all the Python provider
-    // child) survived it.
     app.trackedDescendants = trackOwnerDescendants(utilityOf(appPath)?.pid ?? null);
     const close = await app.closeCleanly();
     const survivalAfterClose = close.survivors;
@@ -1127,11 +1091,6 @@ async function phaseResources(ctx) {
       durations.push(Date.now() - began);
       if (i % 10 === 0 || i === 1) cycleSamples.push({ cycle: i, ...rssSample(cyclesApp.appPath, cyclesApp.pid) });
     }
-    // sample the plateau while the app is STILL ALIVE. Quitting first would
-    // sample a dead process and report 0 bytes (which silently "passed" the
-    // growth bound with a meaningless -568 MiB figure).
-    // Track the live owner's descendants before its close so the final quit
-    // also waits for the provider child to be gone.
     cyclesApp.trackedDescendants = trackOwnerDescendants(utilityOf(cyclesApp.appPath)?.pid ?? null);
     await cyclesApp.closeOwner();
     await sleep(30_000);
@@ -1179,9 +1138,6 @@ async function phaseResources(ctx) {
 }
 
 /**
- * descendant behind, and the reader must not be able to keep issuing work.
- */
-/**
  *
  * The crash handler is asynchronous, so reopening immediately races it; waiting
  * for the lifecycle to settle is what makes the reopen contract observable.
@@ -1207,10 +1163,6 @@ async function waitForUtilityRecovery(app, timeoutMs) {
 }
 
 async function collectSurvivors(app) {
-  // rooted at the adopted pid does not reach it. Tracked owner descendants
-  // add the provider children captured before their owner died: their
-  // command lines are not bundle-anchored, so only the captured identity
-  // can see them.
   const bundle = bundleProcesses(app.appPath)
     .filter((p) => p.command.includes('mock_acp_workflow') || isNativeOwnerProcess(p.command))
     .map((p) => ({ pid: p.pid, kind: isNativeOwnerProcess(p.command) ? 'utility' : 'provider-child' }));
@@ -1218,13 +1170,6 @@ async function collectSurvivors(app) {
   return [...bundle, ...trackedSurvivors];
 }
 
-/**
- * probe, launch, execute, a bounded drain that must observe at least one
- * `MessageDelta` and exactly one terminal (`OpFinished`/`OpFailed`), cancel,
- * and shutdown. A failed pull, a missing terminal event, or a failed shutdown
- * makes the whole operation fail — a dispatched request is not an observed
- * lifecycle (P3-T3 review I7).
- */
 async function runProviderOperation(app, home, index) {
   const op = { index, ok: false, steps: {}, drain: { batches: 0, events: 0, deltas: 0, terminals: [] } };
   try {
@@ -1240,7 +1185,6 @@ async function runProviderOperation(app, home, index) {
     op.steps.probe = {
       ok: Boolean(probe?.ok),
       available: probe?.result?.health?.available ?? null,
-      // the evidence rather than inferred from a false flag.
       error: probe?.error?.message ?? null,
       health: probe?.result?.health ?? null,
       reply_keys: probe && typeof probe === 'object' ? Object.keys(probe) : null,
@@ -1271,7 +1215,6 @@ async function runProviderOperation(app, home, index) {
     op.steps.execute = { ok: Boolean(execute?.ok), operation_id: operationId };
     if (!op.steps.execute.ok || !operationId) return op;
 
-    // the delta + single terminal pair the lifecycle contract promises.
     let drained = false;
     let pullFailed = null;
     for (let i = 0; i < 40 && !drained; i += 1) {
@@ -1292,8 +1235,6 @@ async function runProviderOperation(app, home, index) {
         op.drain.events += 1;
         if (event?.MessageDelta) op.drain.deltas += 1;
         if (event?.OpFinished || event?.OpFailed) {
-          // not `operation_id` — reading the wrong field reported a null id and
-          // made a correct terminal look like a foreign one.
           op.drain.terminals.push({
             kind: event.OpFinished ? 'OpFinished' : 'OpFailed',
             operation_id: event.OpFinished?.op_id ?? event.OpFailed?.op_id ?? null,
@@ -1342,7 +1283,6 @@ async function runProviderOperation(app, home, index) {
       60_000,
     );
     op.steps.shutdown = { ok: Boolean(shutdown?.ok) };
-    // any fixture verifier cannot disagree about what "done" means.
     op.ok = providerLifecycleComplete(op);
   } catch (error) {
     op.error = String(error);
@@ -1490,10 +1430,6 @@ async function phaseSecurity(ctx) {
       evidence.renderer.href_after_navigation_attempt === evidence.renderer.href &&
       evidence.renderer.window_open_result === 'null';
     const originOk = evidence.renderer.protocol === 'nexus-proof:';
-    // bundle is proven by `web-dist/index.html` being present in the asar, and
-    // "no native in the renderer" by the `.node` entry being *unpacked* (so it
-    // can only be reached by the utility process) with the renderer never
-    // fetching one.
     const webBundleOk =
       evidence.asar?.web_dist_index_present === true && evidence.renderer.root_child_count > 0;
     const nativeClosedInRendererOk =
@@ -1589,8 +1525,6 @@ async function phaseLifecycle(ctx) {
     const provider = await runProviderOperation(app, home, 0);
     evidence.provider = provider;
 
-    // the owner is deliberately dead, so sampling later would always report
-    // false and make this field meaningless.
     const ownerObservedWhileServing = utilityOf(appPath) !== null;
 
     // There is exactly one native owner at a time. Killing any other helper
@@ -1606,17 +1540,10 @@ async function phaseLifecycle(ctx) {
       );
     }
     const victim = utilitiesBefore[0];
-    // owner: the Python command is not bundle-anchored, so once the owner
-    // dies the child is reparented and only these captured identities can
-    // prove it exited.
     app.trackedDescendants = trackOwnerDescendants(victim.pid);
     process.kill(victim.pid, 'SIGKILL');
-    // than a fixed sleep: reopening before recovery lands is what produced
-    // "already open" instead of the documented interrupted/fenced contract.
     await waitForUtilityRecovery(app, 15_000);
     const afterKill = await app.cdp.evaluateJson(`window.nexusProof.getLifecycle()`, 30_000);
-    // record and reap any that outlived the owner so the run leaves no
-    // residual process behind.
     const trackedSurvivors = await waitForTrackedExit(app.trackedDescendants, 15_000);
     for (const entry of trackedSurvivors) {
       try {
@@ -1658,7 +1585,6 @@ async function phaseLifecycle(ctx) {
       60_000,
     );
     evidence.graph_after_kill = graphAfterReopen;
-    // also waits for its descendants (if any) to be gone.
     app.trackedDescendants = trackOwnerDescendants(utilityOf(appPath)?.pid ?? null);
     const closeExit = await app.closeCleanly();
     evidence.close_exited = closeExit.exited;
@@ -1676,9 +1602,6 @@ async function phaseLifecycle(ctx) {
       native.version_after_stale === native.updated_version &&
       native.title_after_stale === 'native-update' &&
       native.foreign_ok === false;
-    // and an explicit reopen must succeed. A confirmed attach to a still-live
-    // owner is equally valid — what must never happen is a silent success with
-    // no owner or an unrecoverable fence.
     const reopenOk = reopen.open_ok === true && (reopen.graph_ok === true || reopen.attached === true);
     const killOk =
       afterKill.phase === 'interrupted' &&
@@ -1695,10 +1618,6 @@ async function phaseLifecycle(ctx) {
         `foreign_denied=${native.foreign_ok === false} provider_probe=${provider.steps.probe?.ok} ` +
         `provider_cancel=${provider.steps.cancel?.ok} provider_shutdown=${provider.steps.shutdown?.ok}`,
     });
-    // real work inside the Electron utility process — the contract requires this
-    // independently of the pass/fail of the surrounding checks, and the provider
-    // side must be a completed lifecycle (delta + one terminal + shutdown), not a
-    // dispatched request.
     const providerComplete = providerLifecycleComplete(provider);
     evidence.native_utility_load = {
       ok: Boolean(nativeOk && providerComplete),
@@ -1779,10 +1698,6 @@ function artifactSizes(appPath, outDir) {
   };
 }
 
-/**
- * tree, counting each physical file once (symlinked duplicates are not
- * followed). This is the measure the PKG-2 "installed bundle" limit refers to.
- */
 function dirSize(root) {
   const walked = walkFiles(root);
   return {
@@ -1836,11 +1751,6 @@ async function main() {
     console.error(`packaged app missing: ${requestedAppPath}`);
     process.exit(1);
   }
-  // process identity against a symlinked --app path (e.g. /tmp on macOS, which
-  // is a symlink to /private/tmp) silently never matches: pid discovery burns
-  // its full timeout on every launch and owner detection reports nothing, while
-  // the app is running perfectly. It must also match the gate's realpath
-  // comparison for provenance.
   const appPath = realpathSync(requestedAppPath);
   if (!args.home || !existsSync(args.home)) {
     console.error(`--home (or NEXUS_PROOF_HOME) must point at a seeded disposable home; got ${args.home}`);
@@ -1866,8 +1776,6 @@ async function main() {
     args.soakSeconds === CANONICAL_SAMPLES.soakSeconds;
   const gating = !args.diagnostic && canonicalPhases && canonicalSamples;
 
-  // it to LaunchServices, and reject the explicit direct choice outright rather
-  // than producing a document that the contract will mark confounded.
   if (gating) {
     if (args.launchMethod === undefined) {
       args.launchMethod = 'launchservices';
@@ -1883,8 +1791,6 @@ async function main() {
   }
   const mode = gating ? 'canonical' : 'diagnostic';
 
-  // current: quarantine it before any work starts, and write the new one
-  // atomically at the end.
   const canonicalPath = join(outDir, 'runtime-lifecycle.json');
   let quarantinedPrevious = null;
   if (gating && existsSync(canonicalPath)) {
@@ -1892,9 +1798,6 @@ async function main() {
     renameSync(canonicalPath, quarantinedPrevious);
   }
 
-  // run. The caller supplies a seeded template home; this run copies it into a
-  // private home of its own, so maintenance + runtime sequences (or two
-  // architectures) can no longer couple through one path.
   const runHome = prepareRunHome(args.home, outDir, gating);
   const fixture = ensureAgentHostConfig(runHome);
   const startedAt = Date.now();
@@ -1950,14 +1853,6 @@ async function main() {
     );
   }
 
-  /**
-   * by the top-level deadline, so an expired run still leaves a structured,
-   * non-green record instead of nothing.
-   */
-  /**
-   * deduplicated: the same condition can be observed by several phases, and the
-   * record should state each distinct reason once.
-   */
   const applyValidity = () => {
     const unique = [...new Set(confounders)];
     evidence.validity = {
@@ -2120,9 +2015,6 @@ async function main() {
 
   let finalStatus;
   if (gating) {
-    // absent status is itself malformed when a check failed, which used to
-    // make a genuine RES-1 measurement report `contract_state: malformed`
-    // even though the persisted document correctly ended as `fail`.
     applyValidity();
     evidence.checks = checks;
     evidence.status = checks.every((check) => check.ok) ? 'pass' : 'fail';

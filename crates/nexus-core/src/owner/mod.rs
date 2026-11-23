@@ -20,16 +20,12 @@
 //! and never builds a second engine.
 
 pub mod applied_documents;
-// registry it consults is `nexus_connect::peer_tools` (v1.244 extraction);
-// `compute` additionally requires the WASM edge, so it is gated separately.
 pub mod capabilities;
 #[cfg(feature = "compute")]
 pub mod compute;
 pub mod executor;
 pub mod handle_ops;
 pub mod lifecycle;
-// workspace port bundle for the hosted factory, so it needs both the execution
-// layer and that factory's Host edge.
 #[cfg(all(feature = "execution", feature = "provider-host"))]
 pub mod production;
 // v1.234 P0+P1 (ADR #485 §4.4): the single byte-write port for Work artifacts;

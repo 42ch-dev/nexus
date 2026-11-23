@@ -58,9 +58,6 @@ const EXTRACT_IMPORT_ROOTS: readonly string[] = [
   '@web-works',
 ];
 
-/**
- * lookalike prefixes (`@web-ui-legacy`, `@42ch/nexus-ui-legacy`) never match.
- */
 function isPackageOrSubpath(importPath: string, root: string): boolean {
   return importPath === root || importPath.startsWith(`${root}/`);
 }

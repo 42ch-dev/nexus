@@ -100,9 +100,6 @@ const CREDENTIAL_ID: &str = "cred-remote-open";
 /// every wait is still bounded.
 const SETUP_BOUND: Duration = Duration::from_secs(30);
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 fn manifest(host_id: &str) -> HostCapabilityManifest {
     manifest_with(host_id, &MEMORY_CAPABILITIES)
 }
@@ -215,9 +212,6 @@ async fn start_listener_with_control(
     });
     (addr, task, control_rx)
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 struct Env {
     _tmp: TempDir,
@@ -401,9 +395,6 @@ async fn responder_of(
         .expect("the responder task completed")
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// The durable provider fixture one scenario is served from: the provider's own
 /// database, the one served space with its authority, the dialer identity the
 /// signed session is admitted as, and the operator-provisioned principal that
@@ -521,9 +512,6 @@ impl Fixture {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// A credential the loader cannot read fails the whole open before any socket is
 /// dialed: the static category is returned and no local provider appears.
 async fn assert_credential_refusal(env: &Env, host_pubkey: &[u8; 32]) {
@@ -638,7 +626,6 @@ async fn assert_close_releases(core: &CoreService, principal: &CorePrincipal) {
 async fn remote_open_pins_space_and_authority() {
     let fixture = Fixture::new().await;
 
-    // the static category is returned and no local provider appears.
     let uncredentialed = Env::new();
     assert_credential_refusal(&uncredentialed, &fixture.host_pubkey).await;
 
@@ -648,8 +635,6 @@ async fn remote_open_pins_space_and_authority() {
     fs::create_dir_all(legacy.parent().expect("legacy dir")).expect("legacy bearer dir");
     fs::write(&legacy, b"# legacy long-term memory\n").expect("seed the legacy bearer");
 
-    // space is absent from discovery, and the open fails instead of taking the
-    // provider's advertised space.
     assert_refused_open(
         &fixture,
         &env,
@@ -680,10 +665,6 @@ async fn remote_open_pins_space_and_authority() {
     )
     .await;
 
-    // serves the provider. A real product read then runs through the pinned
-    // binding: opening the Creator memory adapter ensures the subject and lists
-    // candidates in the pinned space over the signed session (the fixture
-    // refuses any other space).
     let (core, _responder) = assert_served_open(&fixture, &env).await;
     let principal = core.active_principal().await.expect("active principal");
     assert_eq!(
@@ -695,13 +676,9 @@ async fn remote_open_pins_space_and_authority() {
         "the fixture holds no pending candidates"
     );
 
-    // binding.
     assert_local_migration_refused(&core, &principal, &env).await;
     assert_close_releases(&core, &principal).await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// Test-only admission hold in front of the real assembled fixture service.
 ///
@@ -777,7 +754,6 @@ async fn cancelled_open_closes_only_its_own_established_session() {
         .expect("operator provisions the admin grant");
     let directory = Arc::new(PeerDirectory::new().with_peer(client_peer.clone(), principal_id));
 
-    // generous serve budget keeps the held call pending instead of timing out.
     let reached = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let held: Arc<dyn RemoteMemoryService> = Arc::new(AdmissionHold {
@@ -785,7 +761,6 @@ async fn cancelled_open_closes_only_its_own_established_session() {
         reached: Arc::clone(&reached),
         release: Arc::clone(&release),
     });
-    // the measured open is pending.
     let delivered_home = Env::new();
     delivered_home.write_credential(&CLIENT_SEED);
     let (delivered_addr, delivered_host) = start_listener(
@@ -822,9 +797,6 @@ async fn cancelled_open_closes_only_its_own_established_session() {
         .await
         .expect("the abandoned open reached the established-session admission");
 
-    // the established session it owns. The abort happens immediately after the
-    // hold is reached: the SDK's own invoke budget is shorter than this test's
-    // setup work, so the measured open must not wait behind another open.
     abandoned.abort();
     let Err(cancelled) = abandoned.await else {
         panic!("the abandoned open completed instead of being cancelled");
@@ -837,7 +809,6 @@ async fn cancelled_open_closes_only_its_own_established_session() {
     wait_for_closed(&abandoned_responder).await;
     release.notify_waiters();
 
-    // its pinned binding still serves the provider's space.
     let delivered_responder = responder_of(delivered_host).await;
     assert_eq!(
         delivered_responder.state().as_str(),
@@ -901,20 +872,15 @@ async fn dropping_the_open_closes_its_established_session() {
         .await
         .expect("the exact selection opens against the served space");
 
-    // session, so the drop below releases a live one.
     let principal = core.active_principal().await.expect("active principal");
     core.count_pending_reviews(&principal)
         .await
         .expect("the pinned remote binding serves the memory family");
 
-    // end this session.
     drop(core);
     let responder = responder_of(host).await;
     wait_for_closed(&responder).await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// A second Connect identity whose memory authority is exactly the one scoped
 /// grant the admin issues it.
@@ -1384,7 +1350,6 @@ impl EnvelopeObserver {
         if state.pending.is_none() && !state.poisoned {
             state.pending = Some(observed);
         } else {
-            // keep neither observation and stay poisoned forever.
             state.pending = None;
             state.poisoned = true;
         }
@@ -1549,9 +1514,6 @@ async fn start_listener_token_gated(
     });
     (addr, task)
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &CorePrincipal, title: &str) -> String {
     core.create_world(principal, dto(json!({ "title": title })))
@@ -1868,7 +1830,6 @@ async fn handshake_stages(run: &Admission, env: &Env) {
 async fn discovery_stages(run: &Admission, env: &Env) {
     let served = &run.fixture.served_space;
 
-    // speaks.
     run.stage(
         env,
         run.dialer(),
@@ -2356,10 +2317,8 @@ impl Loss {
             .await
             .expect("the product replay is answered");
 
-        // and the ORIGINAL candidate, and `receipts.get` serves the same tuple.
         assert_signed_replay(&self.fixture, &self.consumer).await;
 
-        // same namespace across the reconnect.
         assert_eq!(
             provider_effect_snapshot(&self.pool).await,
             self.effects_before,
@@ -2501,7 +2460,6 @@ impl Grants {
         )
         .await;
 
-        // operation.
         let (addr, task) = fixture
             .listener_for(&SCOPED_SEED, fixture.served_manifest())
             .await;
@@ -2692,7 +2650,6 @@ async fn scoped_grants_and_payload_identity_cannot_be_amplified() {
     let grants = Grants::open().await;
     grants.assert_read_only_refuses_capture().await;
 
-    // review capability travels with it.
     issue_grant(
         &grants.admin,
         &grants.admin_principal,
@@ -3039,7 +2996,6 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
         now + 600,
         now,
     );
-    // so issuance succeeded and only the verifier's clock check rejects it.
     let expired = capability_proof_at(
         &ISSUER_SEED,
         &fixture.client_peer,
@@ -3080,7 +3036,6 @@ async fn capability_token_verification_refuses_expired_and_forged_proofs() {
     ];
     let valid_json = serde_json::to_value(&valid).expect("the proof serializes");
     for (name, proof) in &cases {
-        // that proof against the authenticated peer it is handed.
         let env = Env::new();
         let proof_json = serde_json::to_value(proof).expect("the proof serializes");
         env.write_credential_with_token(&CLIENT_SEED, Some(&proof_json));
@@ -3153,7 +3108,6 @@ async fn assert_overlap_poisons_the_seam(
     case: &SeamCase,
 ) {
     let seam = Seam::new(fixture);
-    // refusal, so a later admission could consume it.
     seam.record(
         "memory.capture",
         "req_expired",
@@ -3289,9 +3243,6 @@ async fn overlapping_observations_poison_the_seam_without_provider_effect() {
     pool.close().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Dial the product transport to a raw peer address.
 async fn raw_ws_transport(addr: SocketAddr) -> Arc<dyn Transport> {
     let (ws, _response) = tokio::time::timeout(
@@ -3392,7 +3343,6 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "the send must be parked on the non-reading peer before close"
     );
 
-    // the caller still awaits the parked send.
     let closer = Arc::clone(&transport);
     let first_close = tokio::spawn(async move { closer.close().await });
     let closer = Arc::clone(&transport);
@@ -3407,8 +3357,6 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "a send cancelled by close reports Closed, never success"
     );
 
-    // completed clean close: the close frame cannot flush to a peer that
-    // stopped reading, so the terminal error is surfaced.
     let first = tokio::time::timeout(SETUP_BOUND, first_close)
         .await
         .expect("the first close must settle")
@@ -3431,7 +3379,6 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "a repeated close keeps the settled outcome"
     );
 
-    // end instead of the socket staying open.
     probe.notify_one();
     assert!(
         tokio::time::timeout(SETUP_BOUND, peer)
@@ -3441,7 +3388,6 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
         "dropping both halves must end the peer's stream"
     );
 
-    // normal close while/after the stalled one is torn down.
     let (echo_addr, echo_peer) = echo_peer().await;
     let (ws, _response) = tokio::time::timeout(
         SETUP_BOUND,
@@ -3484,7 +3430,6 @@ async fn product_ws_close_settles_a_parked_send_and_releases_the_peer() {
 /// the half a parked send still holds, and the closer inside a stalled flush.
 #[tokio::test]
 async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() {
-    // half that the parked send still owns. ──
     let (addr, probe, peer) = non_reading_peer().await;
     let (ws, _response) = tokio::time::timeout(
         SETUP_BOUND,
@@ -3510,7 +3455,6 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         "the sole close must be waiting for the half the parked send owns"
     );
     drop(closer);
-    // halves are still the transport's to release, and no second close runs.
     drop(sending);
     probe.notify_one();
     assert!(
@@ -3520,8 +3464,6 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
             .expect("the peer task must not panic"),
         "cancelling the sole close must not strand the socket halves"
     );
-    // peer started draining, so the disposal's flush completes. What matters is
-    // that it waits for the settled result instead of reporting an early flag.
     let late = tokio::time::timeout(SETUP_BOUND, transport.close())
         .await
         .expect("the later close settles");
@@ -3550,8 +3492,6 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         let transport = Arc::clone(&transport);
         async move { transport.close().await }
     });
-    // halves and start the flush, which cannot finish (8 MiB queued, peer not
-    // reading).
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(5), sending)
             .await
@@ -3561,8 +3501,6 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
     tokio::time::sleep(Duration::from_millis(150)).await;
     closer.abort();
     let _ = closer.await;
-    // later caller must see that real terminal error, not a cached success for
-    // the interrupted caller.
     let late = tokio::time::timeout(SETUP_BOUND, transport.close())
         .await
         .expect("the later close settles")
@@ -3571,7 +3509,6 @@ async fn sole_cancelled_close_releases_the_halves_and_keeps_a_truthful_result() 
         matches!(late, TransportError::Io(_)),
         "an interrupted flush is never cached as success, got {late:?}"
     );
-    // cancelled closer's teardown already performed.
     probe.notify_one();
     assert!(
         tokio::time::timeout(Duration::from_secs(5), peer)
@@ -3606,7 +3543,6 @@ async fn retained_pending_send_does_not_block_the_close() {
         "the send must be parked on the non-reading peer before close"
     );
 
-    // before the close.
     let queued = tokio::spawn({
         let transport = Arc::clone(&transport);
         async move { transport.send(b"queued-before-close").await }
@@ -3650,7 +3586,6 @@ async fn retained_pending_send_does_not_block_the_close() {
         "a non-reading peer leaves a real terminal close error, got {report:?}"
     );
 
-    // BEFORE the retained holder is released — not a timeout.
     let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
         .await
         .expect("the queued send must settle after close")
@@ -3707,7 +3642,6 @@ async fn retained_pending_recv_does_not_block_the_close() {
         "the recv must be parked before close"
     );
 
-    // before the close.
     let queued = tokio::spawn({
         let transport = Arc::clone(&transport);
         async move { transport.recv().await }
@@ -3751,7 +3685,6 @@ async fn retained_pending_recv_does_not_block_the_close() {
         "an idle close flushes cleanly, got {report:?}"
     );
 
-    // Closed BEFORE the retained holder is released — not a timeout.
     let queued_outcome = tokio::time::timeout(Duration::from_secs(5), queued)
         .await
         .expect("the queued recv must settle after close")
@@ -3947,9 +3880,6 @@ async fn live_read_readiness_does_not_close_a_queued_recv() {
         .expect("peer task");
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// A provider that advertises a narrower page bound than the adapter's former
 /// constant still serves a whole Core read: the pending page requests, and the
 /// count walks them, at the limit this open negotiated with this provider.
@@ -3992,7 +3922,6 @@ async fn a_narrower_provider_page_bound_still_serves_the_whole_core_read() {
         .await
         .expect("the exact selection opens against the served space");
     let principal = core.active_principal().await.expect("active principal");
-    // the first read is the empty queue.
     assert_eq!(
         core.count_pending_reviews(&principal)
             .await
@@ -4001,7 +3930,6 @@ async fn a_narrower_provider_page_bound_still_serves_the_whole_core_read() {
         0,
     );
 
-    // them, so a read that kept a hard-coded larger limit would be refused.
     let subject_id = legacy::creator_subject_id(&home.creator_id);
     let bound = nexus_memory_conformance::MAX_PAGE_SIZE.get();
     for index in 0..(bound + 5) {
@@ -4254,7 +4182,6 @@ async fn a_malformed_stored_document_never_reaches_the_wire() {
             "idempotency_key": key,
         }))
     };
-    // so the consumer dials a second listener for the same provider/principal.
     let (consumer_addr, consumer_task) = start_listener(
         provider.server(directory.admission()),
         manifest(&authority_host_id),
@@ -4276,7 +4203,6 @@ async fn a_malformed_stored_document_never_reaches_the_wire() {
         SpokeResult::Reject(reject) => panic!("the honest capture commits: {reject:?}"),
     }
 
-    // must never appear on the wire.
     assert_decoder_failure_is_opaque(
         &consumer,
         &consumer_principal,

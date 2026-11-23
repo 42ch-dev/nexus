@@ -33,7 +33,6 @@ static HOME_LOCK: Mutex<()> = Mutex::new(());
 /// // HOME is now set to a temp dir; will be restored on drop
 /// ```
 pub fn isolated_home() -> IsolatedHome {
-    // all subsequent tests that use isolated_home().
     let lock = HOME_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -113,9 +112,6 @@ mod tests {
 
     #[test]
     fn isolated_home_restores_original_home_on_drop() {
-        // capturing "the original" and asserting restoration is only sound
-        // while no sibling test can take the lock. Without this the test races
-        // under `--test-threads>1` and fails intermittently.
         let lock = HOME_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -125,7 +121,6 @@ mod tests {
             let during = std::env::var("HOME").expect("HOME should be set");
             assert_ne!(during, original.clone().unwrap_or_default());
         }
-        // hold guarantees no sibling test changed it in the meantime.
         assert_eq!(
             std::env::var("HOME").ok(),
             original,

@@ -564,7 +564,6 @@ describe('V1.163 Task 2 — World → Work event deep-link (AC-V1163-2/4/5, PD-5
     await selectEventRow(user);
     const cta = await screen.findByTestId('timeline-view-in-work-timeline');
     expect(cta).not.toHaveAttribute('data-event-id');
-    // WITHOUT the user reselecting (reactive inspector, QC3 F-2).
     await waitFor(() => expect(cta).toHaveAttribute('data-event-id', 'evt-work-1'));
     expect(cta).toHaveAttribute('data-work-id', 'work-1');
   });
@@ -643,7 +642,6 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
       ['/worlds/world-7/timeline?event=' + KB_EVENT_ID],
     );
 
-    // `entity:kb-evt-1` node exists in the projection…
     await waitFor(() =>
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
         'data-active-layer',
@@ -674,11 +672,6 @@ describe('V1.163 Task 2 — inbound `?event=` focus on the World Timeline (AC-V1
 });
 
 
-/**
- * direction: surface bind = realizing Work (`boundWorkId`), event bind =
- * matching outline `world_event_id` (`boundWorkEventId`). Expected CTA +
- * URL contract per the plan's Task 4 table.
- */
 type WorldPd5MatrixState = {
   state: string;
   surfaceBind: boolean;

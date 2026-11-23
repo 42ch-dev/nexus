@@ -312,7 +312,6 @@ async fn review_transfers_dependency_and_promotion_releases_it() {
     assert_eq!(dependencies(&pool, &seed.binding_id).await, (0, 1));
     assert_remote_conflict(remove(&seed, &pool).await.unwrap_err());
 
-    // provider receipt returned.
     let mut tx = begin_immediate(&pool).await.unwrap();
     record_remote_binding_object_tx(
         &mut tx,
@@ -621,7 +620,6 @@ async fn object_facts_stay_monotone_across_the_mapped_writes() {
         "no terminal fact blocks removal"
     );
 
-    // removed binding is a no-op (the mapped surface cannot revive it).
     remove(&seed, &pool).await.unwrap();
     assert_eq!(fact_states(&pool, &seed.binding_id).await, Vec::new());
     record(

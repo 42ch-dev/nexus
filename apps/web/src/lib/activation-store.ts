@@ -70,8 +70,6 @@ export function unlock(creatorId: string, appId: AppId): void {
 
 function subscribe(onStoreChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    // re-reads getSnapshot on notify, and an unchanged version bails out
-    // without re-rendering (QC S).
     if (event.key?.startsWith(STORAGE_PREFIX)) bumpVersion();
   };
   window.addEventListener(CHANGE_EVENT, onStoreChange);
@@ -89,7 +87,6 @@ function subscribe(onStoreChange: () => void): () => void {
 export function useActivation(creatorId: string | null): {
   isUnlocked: (appId: AppId) => boolean;
 } {
-  // returned function always sees the latest persisted map.
   useSyncExternalStore(subscribe, () => version, () => version);
   return {
     isUnlocked: useCallback((appId: AppId) => isUnlocked(creatorId, appId), [creatorId, version]),

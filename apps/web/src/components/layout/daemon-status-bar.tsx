@@ -72,15 +72,9 @@ export function DaemonStatusBar() {
   const { toast } = useToast();
   const mounted = useRef(true);
 
-  // via the agentHost scan query key). This is a lightweight PATH scan — global
-  // staleTime dedupes refetches. Do not block the bar on scan resolution; the
-  // badge falls back to the placeholder / raw profile name (AD-P2-4).
   const scan = useScanAgents({ filter: 'all' });
   const agents = scan.data?.agents ?? [];
 
-  // Agent Save handler can invalidate `queryKeys.agentProfile` and the badge
-  // refreshes immediately after a save — no 10s poll wait (AD-P1-1). Browser
-  // build disables the hook (`desktop === null`) and `data` stays undefined.
   const profileQuery = useAgentProfile();
   const profile = profileQuery.data ?? null;
 
@@ -127,12 +121,9 @@ export function DaemonStatusBar() {
 
   if (!desktop) return null;
 
-  // flash the footer before we know the daemon is mid-session.
   if (!status) return null;
 
   const state = status.state;
-  // Restart control can show inline pending state (V1.130 P0). Other
-  // non-running states are surfaced by the layout banner.
   if (state !== 'running' && state !== 'starting') return null;
 
   const handleRestart = async () => {

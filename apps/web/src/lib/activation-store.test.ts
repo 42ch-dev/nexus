@@ -1,6 +1,3 @@
-/**
- * unlock state; only `brief-saved` → `work` is writable this iteration (D26).
- */
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -52,7 +49,6 @@ describe('activation store', () => {
     const { result } = renderHook(() => useActivation('creator-a'));
     expect(result.current.isUnlocked('work')).toBe(false);
     act(() => {
-      // snapshot version must bump or useSyncExternalStore bails out.
       window.localStorage.setItem(KEY, JSON.stringify({ work: true }));
       window.dispatchEvent(new StorageEvent('storage', { key: KEY }));
     });

@@ -207,7 +207,6 @@ export function assertDiscoveryShape(raw: unknown): CoreServiceDiscovery {
   if (endpoint.transport === 'unix' && (!('path' in endpoint) || typeof endpoint.path !== 'string')) {
     throw utilityError('invalid_input', 'unix discovery endpoint has no path');
   }
-  // is the same shape.
   return raw as CoreServiceDiscovery;
 }
 
@@ -295,11 +294,6 @@ function sameEndpoint(a: CoreServiceDiscovery['endpoint'], b: CoreServiceDiscove
   return false;
 }
 
-/**
- * (undici wraps the real error as `cause`). Used to tell a refused connect —
- * no listener at all — from a timeout or a transport failure that proves
- * nothing about the owner.
- */
 function socketErrorCode(error: unknown): string | null {
   let current: unknown = error;
   for (let depth = 0; depth < 4; depth += 1) {
@@ -311,12 +305,6 @@ function socketErrorCode(error: unknown): string | null {
   return null;
 }
 
-/**
- * instance, home, endpoint and engine epoch as the private published record.
- * A replaced instance or a stale epoch never attaches. The record itself is
- * bound to this session's trusted home and endpoint before any probe, so the
- * response is transitively bound to them too.
- */
 function identityMatches(response: CoreServiceDiscovery, expected: CoreServiceDiscovery): boolean {
   return (
     response.instance_id === expected.instance_id &&
@@ -416,20 +404,10 @@ export class DesktopServiceController {
     return this.serialize(() => this.startLocked({ manual: true }));
   }
 
-  /**
-   * attached independent service is left running (row 8) — only the explicit
-   * path below may stop it.
-   */
   stop(): Promise<void> {
     return this.serialize(() => this.stopLocked(false));
   }
 
-  /**
-   * Stop-and-Quit require (P0-T6), including for an attached independent
-   * service. Deliberately *not* part of the frozen public surface — the frozen
-   * `stop(): Promise<void>` stays argument-free — and only reachable from the
-   * desktop main process.
-   */
   stopExplicit(): Promise<void> {
     return this.serialize(() => this.stopLocked(true));
   }
@@ -559,7 +537,6 @@ export class DesktopServiceController {
       return;
     }
     if (this.unconfirmedClose) {
-      // is legal, but the unconfirmed cleanup stays an explicit diagnostic.
       this.clearRetainedOwner();
       this.setStatus({
         state: 'error',
@@ -574,7 +551,6 @@ export class DesktopServiceController {
       this.setStatus({ state: 'stopped', port: this.targetPort });
       return;
     }
-    // while running: both retry on the row 10 backoff schedule.
     if (this.owned || this.status.state === 'starting') {
       this.owned = false;
       this.liveEndpoint = null;
@@ -717,17 +693,9 @@ export class DesktopServiceController {
     await this.startOwned();
   }
 
-  /**
-   * be joined by a second engine owner. A listener that cannot prove the
-   * published identity is a conflict — never attach-as-TS, never kill by pid
-   * (D-7, row 7).
-   */
   private async probeOwner(): Promise<OwnerProbe> {
     const record = this.readRecord();
     if (record) {
-      // published by another home (or naming another endpoint) is a planted or
-      // foreign-session record. It is never adopted, and the guarded probe —
-      // which carries this session's API key — is never sent to it.
       if (record.user_home !== this.home) {
         return {
           kind: 'conflict',
@@ -754,22 +722,10 @@ export class DesktopServiceController {
     return { kind: 'none' };
   }
 
-  /**
-   * probes the service on. Every request this controller issues targets it.
-   */
   private trustedOrigin(): string {
     return `http://${this.host}:${this.targetPort}`;
   }
 
-  /**
-   * is not this session's service. A record is admitted only when it names
-   * exactly this session's loopback origin (HTTP only, §8.1); another host,
-   * port, scheme or a decorated URL is a planted or foreign-session record.
-   * The returned endpoint is built from this session's own fields, so no part
-   * of a record — host, port, scheme or path — can reach a request, and the
-   * guarded probe that carries this session's API key can only ever go to this
-   * session's own service.
-   */
   private admittedEndpoint(
     endpoint: CoreServiceDiscovery['endpoint'],
   ): CoreServiceDiscovery['endpoint'] | null {
@@ -802,9 +758,6 @@ export class DesktopServiceController {
       this.setStatus({ state: 'error', port: this.targetPort, detail });
       throw utilityError('internal', detail);
     }
-    // answered over authenticated discovery and healthy HTTP. The file is
-    // replaceable, so it must agree with the owner's own report: this home's
-    // record, this instance, this endpoint.
     const record = this.readRecord();
     if (!record || record.instance_id !== ready.instance_id) {
       const detail =
@@ -822,7 +775,6 @@ export class DesktopServiceController {
       this.setStatus({ state: 'error', port: this.targetPort, detail });
       throw utilityError('internal', detail);
     }
-    // published record's above) — never the record's string off disk.
     const confirmed = await this.confirmIdentity(replyDiscovery.endpoint, record, deadline);
     if (!confirmed) {
       const detail = `service did not answer authenticated discovery and health within ${READINESS_DEADLINE_MS}ms`;
@@ -847,12 +799,10 @@ export class DesktopServiceController {
       return;
     }
     if (this.attached) {
-      // authenticated instance/epoch stop is the explicit path.
       if (!explicit && !this.unconfirmedClose) return;
       await this.stopAttachedService();
       return;
     }
-    // clears the retained-close fence.
     this.unconfirmedClose = false;
     this.setStatus({ state: 'stopped', port: this.targetPort, detail: undefined, version: undefined });
   }
@@ -889,11 +839,6 @@ export class DesktopServiceController {
     this.setStatus({ state: 'stopped', port: this.targetPort, detail: undefined, version: undefined });
   }
 
-  /**
-   * the owner process is still alive it stays retained and fences further
-   * ownership; a lost owner retains nothing, so the fence is cleared and only
-   * the diagnostic remains.
-   */
   private markUnconfirmed(detail: string): never {
     if (this.child === null && this.attached === null) {
       this.clearRetainedOwner();
@@ -945,13 +890,6 @@ export class DesktopServiceController {
     this.setStatus({ state: 'stopped', port: this.targetPort, detail: undefined, version: undefined });
   }
 
-  /**
-   * trusted endpoint has no listener at all (refused connect — verified
-   * discovery absence) or when the guarded route answers as a *different*
-   * instance, so the stopped one no longer owns the port. A still-listening
-   * service that answers an HTTP error (401/5xx/…), an unparsable body, or
-   * times out proves nothing: the owner is retained and the fence stays.
-   */
   private async waitForPortRelease(
     origin: string,
     stopped: CoreServiceDiscovery,
@@ -987,7 +925,6 @@ export class DesktopServiceController {
     }
     const child = this.ensureUtility();
     const generation = this.generation;
-    // home and never a renderer-supplied path.
     const reply = await this.request(
       child,
       generation,
@@ -1061,12 +998,6 @@ export class DesktopServiceController {
   }
 
 
-  /**
-   * is opened once and the descriptor is both type-checked (`fstat`) and read,
-   * so a leaf swapped after a separate check cannot redirect the read.
-   * `O_NOFOLLOW` keeps the retired no-symlink posture — a planted symlink at
-   * the leaf is refused, not followed.
-   */
   private readRecord(): CoreServiceDiscovery | null {
     const path = join(this.home, ...RECORD_SEGMENTS);
     let fd: number | null = null;
@@ -1173,7 +1104,6 @@ export class DesktopServiceController {
           : `service probe answered ${response.status}`;
       return { ok: false, body, absent: false, code, message };
     } catch (error) {
-      // transport failure leaves the owner question open.
       return {
         ok: false,
         body: null,

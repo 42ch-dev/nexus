@@ -79,7 +79,6 @@ fn malformed_json_leaves_the_manifest_untouched() {
 
 #[test]
 fn unprojectable_document_leaves_the_manifest_untouched() {
-    // terminal node, so an empty `terminal` list has no projection.
     let json = std::fs::read_to_string(repo_root().join(SAMPLES[1]).join("workflow.json"))
         .expect("read the sample workflow.json");
     let mut document: serde_json::Value =

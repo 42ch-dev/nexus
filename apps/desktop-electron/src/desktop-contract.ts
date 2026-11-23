@@ -294,7 +294,6 @@ export function desktopErr(request_id: string, code: string, message: string): D
     error: { code: boundedCode, message: msg },
   });
   let boundedMessage = typeof message === 'string' ? message : String(message);
-  // covered by measuring the built envelope, not just the raw string bytes.
   let response = build(boundedMessage);
   while (jsonBytes(response) > MAX_REQUEST_BYTES && boundedMessage.length > 0) {
     boundedMessage = boundedMessage.slice(0, Math.floor(boundedMessage.length / 2));
@@ -627,15 +626,6 @@ export function parseDesktopRuntimeMetadata(raw: unknown): DesktopRuntimeMetadat
   return { localEndpoint };
 }
 
-// root-service http(s) endpoint grammar, shared by the IPC payload
-// validator, `ConnectionStore` (direct set, persisted and legacy input) and
-// the CSP origin boundary. This is the remote Nexus service endpoint, NOT
-// the provider/model API URL field: callers append `/v1/daemon/...` and
-// desktop auth pins the exact origin, so only a concrete root service URL is
-// supported. Checked on the RAW string before any parsing — WHATWG URL
-// normalization strips/remaps some C0 controls and maps `\` to `/`, so a
-// post-parse check alone would accept control/backslash-bearing input.
-
 /**
  * Validate a remote service endpoint and return its parsed exact origin.
  * Rejects opaque/null origins, a missing or wildcard host, userinfo,
@@ -680,13 +670,6 @@ export function connectionEndpointOrigin(endpointUrl: unknown): string {
   if (parsed.pathname !== '' && parsed.pathname !== '/') {
     throw desktopError('invalid_input', 'endpointUrl must be a root service URL');
   }
-  // the root origin before they are assigned: the EMPTY `?` / `#` / `@` / `:@`
-  // delimiters, an empty `:port`, and dot-segment paths (`/.`, `/..`) all
-  // leave `.search`/`.hash`/`.username`/`.pathname` at their root values.
-  // Require the RAW form itself to be `scheme://authority` with nothing but
-  // an optional single trailing slash after it. Only the delimiters and the
-  // path are compared — never the normalized host bytes — so host case, an
-  // explicit default port and IDN hosts stay supported.
   if (endpointUrl.includes('?') || endpointUrl.includes('#') || endpointUrl.includes('@')) {
     throw desktopError(
       'invalid_input',
@@ -709,12 +692,6 @@ export function connectionEndpointOrigin(endpointUrl: unknown): string {
   return parsed.origin;
 }
 
-// by the protocol/navigation layer (P0-T1) and the `open_external_url`
-// action (P0-T3). Checked on the RAW input string before any parsing:
-// WHATWG URL normalization strips/remaps some C0 controls, so a post-parse
-// check alone would accept control-bearing input. http/https with a
-// nonempty host only; no userinfo, no surrounding whitespace, no controls.
-
 export function isAllowedDesktopExternalUrl(url: unknown): boolean {
   if (typeof url !== 'string' || url.length === 0) return false;
   if (jsonBytes(url) > MAX_URL_BYTES) return false;
@@ -731,8 +708,6 @@ export function isAllowedDesktopExternalUrl(url: unknown): boolean {
   if (parsed.username !== '' || parsed.password !== '') return false;
   return true;
 }
-
-// protocol navigation policy. Dev HMR origins are opt-in, never default.
 
 export const DESKTOP_SCHEME = 'nexus';
 export const DESKTOP_HOST = 'app';

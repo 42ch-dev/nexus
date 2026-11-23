@@ -86,9 +86,6 @@ impl KnowledgeEntryPort for StubKnowledgeEntryPort {
         result
     }
 
-    // revision compare, so there is no revision expectation for a preview to
-    // carry. And this stub applies no store rule of its own — it records the
-    // intent; whether the store would accept it is not a question it answers.
     async fn put_knowledge_entry(
         &self,
         entry: KnowledgeEntry,

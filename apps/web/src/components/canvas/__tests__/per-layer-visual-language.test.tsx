@@ -53,9 +53,6 @@ i18next.init({
 });
 
 function renderWithI18n(ui: ReactNode) {
-  // `ReactFlowProvider` ancestor. Wrap once per render — no need for a
-  // real `<ReactFlow>` graph; the provider's store is enough for Handle
-  // to mount cleanly in jsdom.
   return render(
     <MemoryRouter>
       <I18nextProvider i18n={i18next}>
@@ -65,9 +62,6 @@ function renderWithI18n(ui: ReactNode) {
   );
 }
 
-// which only reads `selected` / `dragging` (defaults) + `data` (typed).
-// `NodeProps` is generic over the node data; the test stubs pass plain
-// object data so we coerce via `unknown` to satisfy the prop shape.
 function nodeProps<TData extends Record<string, unknown>>(data: TData): NodeProps {
   return {
     id: 'test-node',
@@ -117,9 +111,6 @@ describe('TimelineBriefEraNode — Brief layer accent (P4 Task 2)', () => {
   });
 
   it('does NOT carry the worldkb-accent (P4 Task 2 migration: Brief has its own layer accent now)', () => {
-    // teal accent as a placeholder ("P4 may promote the accent to a
-    // dedicated Brief-era token"). P4 Task 2 completes that migration.
-    // The worldkb-accent class MUST NOT appear on the Brief-era node.
     const data: TimelineNodeData = {
       key_block_id: 'kb-era-1',
       block_type: 'era',
@@ -150,7 +141,6 @@ describe('WorkTimelineMomentSceneNode + BeatNode — Moment layer accent (P4 Tas
     const icon = container.querySelector('.text-canvas-layer-moment-accent');
     expect(icon).not.toBeNull();
 
-    // distinct from the Narrative event's worldkb-blue.
     const anchor = container.querySelector('span.text-canvas-layer-moment-accent');
     expect(anchor).not.toBeNull();
     expect(anchor?.textContent).toContain('sc-1');
@@ -179,11 +169,6 @@ describe('WorkTimelineMomentSceneNode + BeatNode — Moment layer accent (P4 Tas
   });
 
   it('does NOT carry the outline-accent on icons (P4 Task 2 migration: Moment has its own layer accent)', () => {
-    // outline amber accent as a placeholder ("P4 may promote the accent to
-    // a dedicated Moment token"). P4 Task 2 completes that migration. The
-    // outline-accent class on icon/badge MUST NOT appear (the surface
-    // spine stays `accent="outline"` on the NodeChromeShell — that's the
-    // surface identity, distinct from the per-layer accent on icon/badge).
     const sceneData: WorkTimelineNodeData = {
       workId: 'work-1',
       nodeKind: 'scene',
@@ -195,19 +180,12 @@ describe('WorkTimelineMomentSceneNode + BeatNode — Moment layer accent (P4 Tas
 
     const { container } = renderWithI18n(<WorkTimelineMomentSceneNode {...nodeProps(sceneData)} />);
 
-    // outline-accent text color after the P4 Task 2 migration.
     expect(container.querySelector('.text-canvas-outline-accent')).toBeNull();
   });
 });
 
 describe('Three-layer accent differentiation (AC-V1123-20 visual matrix)', () => {
   it('Brief, Narrative, Moment each render with a DISTINCT per-layer accent class', () => {
-    // side-by-side must distinguish the three instruments without reading
-    // chrome labels. At the visual dimension, the per-layer accent triple
-    // is the strongest differentiator — Brief (gold-bronze) / Narrative
-    // (blue) / Moment (ink). This test asserts the three node components
-    // render with three DISTINCT Tailwind color classes so the layer
-    // accent tokens are observable in the DOM.
     const briefData: TimelineNodeData = {
       key_block_id: 'kb-era-1',
       block_type: 'era',

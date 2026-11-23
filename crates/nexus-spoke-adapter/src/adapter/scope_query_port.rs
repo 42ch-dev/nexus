@@ -80,18 +80,13 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
         let world_id = scope.scope_id.clone();
         let world_owner = KnowledgeOwnerRef::world(world_id.as_str());
         if !selection.containers().contains(&world_owner) {
-            // caller's selection never authorized yields no rows at all.
             return SpokeResult::Ok(Vec::new());
         }
-        // (absent → None); the pre-0.16 semantics treated absent as empty.
         let entry_ids: Vec<String> = scope.entry_ids.clone().unwrap_or_default();
         let entry_types: Vec<String> = scope.entry_types.clone().unwrap_or_default();
 
         let store = SqliteKbStore::new(self.pool.clone());
         let entries = if entry_ids.is_empty() && entry_types.is_empty() {
-            // measured over eligible rows only. The keyset order
-            // (`created_at`, `key_block_id`) is the ordering the pre-T8 read
-            // produced.
             let probe = u32::try_from(LIST_BY_WORLD_LIMIT)
                 .map_or(u32::MAX, |limit| limit.saturating_add(1));
             let rows = match store
@@ -124,8 +119,6 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
             }
             rows
         } else {
-            // by the client filters (which can only shrink an already-eligible
-            // set — visibility is decided in SQL, never here).
             let rows = match store.list_by_owner_complete(&world_owner, selection).await {
                 Ok(rows) => rows,
                 Err(e) => {
@@ -145,18 +138,8 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
                 .collect()
         };
 
-        let wire: Vec<KnowledgeEntry> = entries
-            .iter()
-            // KnowledgeEntryRecord rows and the spoke wire type (spec §7.1); free
-            // function in nexus-spoke-adapter since V1.145 P1a.
-            .map(knowledge_record_to_spoke)
-            .collect();
+        let wire: Vec<KnowledgeEntry> = entries.iter().map(knowledge_record_to_spoke).collect();
 
-        // carrier is MCA-read-path + persist-path only. This orchestrator
-        // read path hands spoke entries straight back to the orchestrator,
-        // so a leaked carrier would persist into the `extensions` DB
-        // column. `knowledge_record_to_spoke` never sets it, but this debug-only
-        // assertion catches a future caller that accidentally stashes one.
         debug_assert!(
             !wire.iter().any(has_nexus_body),
             "KnowledgeQueryPort::list_knowledge_entries must not carry the _nexus_body carrier \
@@ -180,8 +163,6 @@ impl ScopeQueryPort for NexusAdapter<'_> {
     async fn list_timeline_events(&self, scope: &Scope) -> SpokeResult<Vec<TimelineEvent>> {
         let pool = self.pool.clone();
         let world_id = scope.scope_id.clone();
-        // looked up via the typify ExtensionKey newtype — mirrors the
-        // MCA `kb_query_from_scope` extraction (spec §7.5 scope-pushdown).
         let branch_id = scope
             .extensions
             .as_ref()
@@ -209,14 +190,6 @@ impl ScopeQueryPort for NexusAdapter<'_> {
             }
         };
 
-        // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
-        // defined in nexus-narrative packs the 7 typed nexus fields into
-        // extensions.nexus). Sole boundary between the nexus domain row and
-        // the spoke wire type; call-boundary invariant §7 preserved (the
-        // primitive's nexus type never crosses). The `Vec<TimelineEvent>`
-        // annotation pins the `Into` target to the spoke type (nexus
-        // TimelineEvent also has a `From` for nexus_contracts::TimelineEvent,
-        // so `.into()` is otherwise ambiguous).
         let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
         SpokeResult::Ok(wire)
     }
@@ -340,8 +313,6 @@ mod tests {
     }
 
     fn scope_for(world_id: &str) -> Scope {
-        // id in `scope_id` (the protocol-neutral opaque selector). The
-        // minimal scope has just `scope_id`; other filters default empty.
         serde_json::from_value(json!({
             "scope_id": world_id,
         }))
@@ -384,10 +355,6 @@ mod tests {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
-        // empty result (no rows match the WHERE clause). The port
-        // surfaces that as an empty success rather than a reject — the
-        // spoke scope query is "what entries exist in this scope?" and
-        // an empty answer is valid.
         assert!(entries.is_empty());
     }
 
@@ -510,13 +477,11 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, seeded) = seed_world_with_entries(&pool).await;
 
-        // entries would be omitted by the old list_by_world + in-memory filter.
         let store = SqliteKbStore::new(pool.clone());
         for i in 0..LIST_BY_WORLD_LIMIT {
             let mut filler =
                 KnowledgeEntryRecord::new(&world_id, BlockType::Item, &format!("Filler_{i:03}"));
             filler.entry_id = format!("kb_fill_{i:03}");
-            // `created_at` regardless of insert timing.
             filler.created_at = "2000-01-01T00:00:00Z".to_string();
             store.insert_knowledge_entry(filler).await.unwrap();
         }
@@ -531,8 +496,6 @@ mod tests {
         .await
         .unwrap();
 
-        // unfiltered window — a filtered hit proves nothing otherwise. Read the
-        // same keyset window the unfiltered port serves and pin that here.
         let window = store
             .list_by_owner_keyset(
                 &KnowledgeOwnerRef::world(&world_id),
@@ -620,9 +583,6 @@ mod tests {
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
 
-        // 2 branches). The port converts each nexus row to spoke via the
-        // V1.143 seam; the spoke type carries world_id + branch_id in
-        // extensions.nexus (spec §7.1 conversion contract).
         assert_eq!(events.len(), 3, "unfiltered scope returns all world events");
         let key = nexus_te_key();
         let has_root_branch = events.iter().any(|e| {
@@ -705,11 +665,9 @@ mod tests {
             SpokeResult::Ok(v) => v,
             SpokeResult::Reject(r) => panic!("expected ok, got reject: {r:?}"),
         };
-        // list_knowledge_entries' empty-world behavior; an empty answer is valid).
         assert!(events.is_empty());
     }
 
-    /// tests: `evt_tl_0`/`evt_tl_1` on `fbk_root`, `evt_tl_2` on `fbk_fork`.
     async fn seed_world_with_timeline_events(pool: &sqlx::SqlitePool) -> (String, [String; 3]) {
         seed::world(
             pool,

@@ -22,7 +22,6 @@ const outDir = process.argv.includes('--out')
   ? process.argv[process.argv.indexOf('--out') + 1]
   : join(root, '.mstar', 'iterations', 'v1.189', 'guides', 'evidence', 'native-wire');
 
-// including the early failure paths below.
 archiveEvidencePreFix6(join(outDir, 'lifecycle.json'));
 
 const home = mkdtempSync(join(tmpdir(), 'nexus-provider-proof-'));
@@ -145,8 +144,6 @@ function isStaleGenerationError(err) {
   return /stale generation|generation mismatch|invalid principal|tombstone|dead_env|env_dead|provider port unavailable/i.test(s);
 }
 
-// (`proof-isolated-worker.mjs`); those scenarios carry the close envelope, so
-
 const CLOSE_DEADLINE_MS = 5_000;
 const SCENARIO_EVIDENCE_FIELDS = [
   'deadline_ms',
@@ -157,8 +154,6 @@ const SCENARIO_EVIDENCE_FIELDS = [
   'surviving_pids',
 ];
 
-// happy-path session whose close is measured at the top level, so the close
-// envelope gate is applied to their parent instead of to them.
 const INHERITS_CLOSE_FROM = {
   terminal_identity: 'happy_lifecycle',
   cooperative_cancel_2s: 'happy_lifecycle',
@@ -497,7 +492,6 @@ async function runAdapterScenarios(core, ctx) {
   }
   const rssEnd = rssSnapshot();
   rssPeak = Math.max(rssPeak, rssEnd.rss);
-  // wrapper's own numbers as a separate, clearly-labelled figure.
   const workerRss = Object.entries(scenarios)
     .filter(([key]) => !key.startsWith('_'))
     .map(([key, scenario]) => ({

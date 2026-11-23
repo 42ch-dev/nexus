@@ -86,8 +86,6 @@ function beat(partial: Partial<BeatFixture> & Pick<BeatFixture, 'beatId' | 'scen
 function makeMockClient(outlineData: WorkOutline): NexusClient {
   return {
     getWorkOutline: vi.fn().mockResolvedValue(outlineData),
-    // the Brief layer has no era data source → honest Brief-empty panel
-    // when the user switches to Brief (V1.156 P2 T2).
     getWork: vi.fn().mockResolvedValue({ work_id: 'work-1', world_id: null }),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
@@ -109,7 +107,6 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
       expect(screen.getByTestId('work-timeline-canvas')).toBeInTheDocument();
     });
 
-    // §3.3 (V1.156 adds the Brief segment; Narrative + Moment unchanged).
     expect(screen.getByTestId('work-timeline-layer-tab-brief')).toBeInTheDocument();
     expect(screen.getByTestId('work-timeline-layer-tab-narrative')).toBeInTheDocument();
     expect(screen.getByTestId('work-timeline-layer-tab-moment')).toBeInTheDocument();
@@ -149,10 +146,6 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it('keeps the segmented-control a11y contract on the 3-way switcher (role=group + aria-label + per-tab aria-pressed)', async () => {
-    // extension): the switcher is a labeled `role="group"`; each layer tab
-    // is a real button with `aria-pressed` so SR users hear the active
-    // layer as a toggle state. Keyboard nav is native button behavior
-    // (Tab focuses each tab; Space/Enter activates).
     const client = makeMockClient(outline());
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 
@@ -161,8 +154,6 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
     const group = screen.getByRole('group', { name: 'Work Timeline layer' });
     expect(group).toBeInTheDocument();
 
-    // role="button" — keyboard focusable) with aria-pressed reflecting
-    // the active layer (default Narrative → only Narrative pressed).
     const tabButtons = within(group).getAllByRole('button');
     expect(tabButtons).toHaveLength(3);
 
@@ -195,11 +186,6 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it("defaults to 'narrative' even when the canvas injects a scene/beat fixture (override is UNCONDITIONAL)", async () => {
-    // have no wire-scene/beat data today. Even when a fixture is wired
-    // (Design Studio / test), the V1.123 default stays 'narrative' so
-    // the surface does not flip its UX between real Works and test
-    // fixtures. The default may flip to Moment in V1.124+ once the wire
-    // exposes scenes/beats.
     const client = makeMockClient(outline());
     renderInApp(
       <WorkTimelineCanvas
@@ -276,9 +262,6 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it('hides the layer switcher from the empty-state branch (no events to show)', async () => {
-    // empty-state panel owns the surface (Task 7 owns the visible copy;
-    // Task 4 hides the switcher so it does not add noise to the empty
-    // branch — mirrors the V1.122 Timeline layer-switcher gate).
     const client = makeMockClient(
       outline({ timeline_events: [] }),
     );
@@ -293,11 +276,6 @@ describe('WorkTimelineCanvas — layer switcher UI (V1.123 P2 Task 4)', () => {
   });
 
   it('does NOT trigger any forbidden write endpoint during a layer swap (read-only surface)', async () => {
-    // swap is a pure projection swap; no write path is wired. The
-    // orchestrator does not own any mutation hook here (unlike V1.122
-    // Timeline which wires `usePatchWorldKbEntity`). The negative
-    // assertion mirrors the V1.122 Timeline write-boundary test
-    // pattern, adapted for the V1.72 outline write paths.
     const client = makeMockClient(outline());
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 

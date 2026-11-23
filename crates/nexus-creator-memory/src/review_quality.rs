@@ -142,7 +142,6 @@ mod tests {
 
     #[test]
     fn single_token_passes_unique_and_alpha_but_fails_repeated() {
-        // repeated_token_ratio 1.0 > 0.45 → fails
         assert!(!is_high_signal("hello"));
         let q = quality_signal("hello");
         assert!((q.unique_ratio - 1.0).abs() < f32::EPSILON);
@@ -151,15 +150,11 @@ mod tests {
 
     #[test]
     fn exact_thresholds_all_met() {
-        // Need: unique ≥ 0.35, alpha ≥ 0.65, repeated ≤ 0.45
-        // "one two three four five six seven" = 7 unique tokens
-        // unique_ratio=1.0, alpha=1.0, repeated=1/7≈0.143
         assert!(is_high_signal("one two three four five six seven"));
     }
 
     #[test]
     fn just_below_unique_ratio_threshold() {
-        // 10 tokens, 3 unique = 0.30 < 0.35
         let text = "x x x x x x x y z"; // 9 tokens, 3 unique → 0.333 < 0.35
         let q = quality_signal(text);
         assert!(

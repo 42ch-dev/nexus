@@ -96,10 +96,6 @@ states:
   );
 }
 
-/**
- * bundles this test addresses, and one mock ACP provider so the hosted profile can establish an
- * execution owner — the agent tool refuses without one.
- */
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-service-generate-'));
   const seed = spawnSync(
@@ -114,10 +110,6 @@ function seedHome() {
     writePreset(nexusHome, id);
   }
 
-  // `nexus42 creator workspace create --creative-root <abs>` writes. Without it
-  // the workspace composition refuses the hosted execution owner with
-  // `uninitialized`, `startExecutionOwner` reports `engine_epoch: null`, and the
-  // agent-tool leg has no owner to dispatch through.
   const creativeRoot = join(home, 'creative-root');
   mkdirSync(creativeRoot, { recursive: true });
   writeFileSync(
@@ -162,8 +154,6 @@ function assertCandidate(payload, strategyId, surface) {
   assert.ok(Array.isArray(payload.warnings), `warnings ride the output — ${detail}`);
 }
 
-// one generate kernel; that is the point of the guard, so the cost stays. The
-// file needs headroom over the runner's global 180 s test timeout.
 describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () => {
   let home;
   let service;
@@ -198,10 +188,8 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
   }
 
   test('the CLI, the route and the agent tool reach one generate kernel', async () => {
-    // uncontended; the strategy is one of the seeded user bundles.
     const requestPath = join(home, 'legal-request.json');
     writeFileSync(requestPath, JSON.stringify(legalRequest(), null, 2));
-    // must stay the developer's, or rustup cannot resolve a toolchain under the overridden HOME.
     const cliEnv = {
       ...process.env,
       HOME: home,
@@ -224,7 +212,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
         CLI_STRATEGY,
         '--request',
         requestPath,
-        // payload this assertion parses is behind the flag.
         '--json',
       ],
       { env: cliEnv, encoding: 'utf8' },
@@ -232,7 +219,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
     assert.equal(cli.status, 0, `preset generate must commit: ${cli.stderr}`);
     assertCandidate(JSON.parse(cli.stdout), CLI_STRATEGY, 'nexus42 preset generate');
 
-    // request is exhaustion at round 1 and the D20 payload is observable as `details`.
     service = await startService(true);
     const exhausted = await post(service, generatePath(EXHAUST_STRATEGY), {
       base_revision: 0,
@@ -277,9 +263,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
     assertCandidate(routed.payload, ROUTE_STRATEGY, 'POST …/generate');
 
     const principal = await service.service.core.activePrincipal();
-    // fixture registers a creative root so the hosted owner is established —
-    // the same seam `compute-http.test.mjs` uses — and there is no skip here: a
-    // green run has to include this leg.
     assert.notEqual(
       service.service.engineEpoch,
       null,

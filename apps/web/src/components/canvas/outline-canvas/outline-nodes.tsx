@@ -1,7 +1,4 @@
 /**
- * the RF projection (`rf-projection.ts`; canvas-strategy-surface.md §3.3
- * surface 2 + §3.4).
- *
  * Node kinds:
  *   • outline-volume         — Volume lane node (label + chapter count)
  *   • outline-chapter        — Chapter card (title, status paint, word count)
@@ -30,13 +27,6 @@ import { STATUS_LABEL_KEYS, STATUS_OPTIONS } from './graph-projection';
 import { OutlineSceneNode, OutlineBeatNode } from './scene-beat-nodes';
 import { NodeChromeShell } from '../presentational/node-chrome-shell';
 
-/**
- * variable name (per DESIGN.md). DESIGN.md ships three status tokens
- * (pending/drafted/completed); the five-value `ChapterStatus` enum maps as
- * follows (V1.72 compass token alias):
- *   not_started → pending, outlined → pending, draft → drafted,
- *   finalized → completed, published → completed
- */
 const STATUS_TOKEN_VAR: Record<ChapterStatus, string> = {
   not_started: '--color-canvas-outline-chapter-card-status-pending',
   outlined: '--color-canvas-outline-chapter-card-status-pending',
@@ -49,12 +39,6 @@ function statusColorVar(status: ChapterStatus): string {
   return `var(${STATUS_TOKEN_VAR[status]})`;
 }
 
-/**
- * text on the 12% status tint uses the hue's existing `-1000` step (DESIGN.md
- * §Contrast rule — body-copy status text uses `*-1000` on its tinted fill);
- * the raw `*-700` status color fails AA on light tints. pending → gray-1000,
- * drafted → blue-1000, completed → green-1000 (no new tokens).
- */
 const STATUS_TEXT_TOKEN_VAR: Record<ChapterStatus, string> = {
   not_started: '--color-gray-1000',
   outlined: '--color-gray-1000',

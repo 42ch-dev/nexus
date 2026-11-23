@@ -49,8 +49,6 @@ export function environmentBudgetProof(): EnvironmentBudgetProof {
   const nativeProviderBytes = NATIVE_PROVIDER_BYTES_PER_OP * ops;
   const acpDeliveryBytes = ACP_DELIVERY_BYTES_PER_OP * ops;
   const socketReservedBytes = SSE_SOCKET_RESERVED_BYTES * SSE_MAX_TOTAL_SUBSCRIBERS;
-  // accounted separately via `nodeControlBytes`, so a saturated data pool still
-  // permits a bounded terminal/gap.
   const nodeRetainedBytes = SSE_MAX_AGGREGATE_PENDING_BYTES;
   const nodeControlBytes = SSE_CONTROL_RESERVED_TOTAL_BYTES;
   const totalBytes =

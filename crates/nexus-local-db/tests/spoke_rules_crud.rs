@@ -170,7 +170,6 @@ async fn set_rule_status_unknown_id_and_foreign_world_return_false() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_rules_by_world_orders_and_isolates() {
     let (pool, _dir) = setup_db().await;
-    // `canonical_name ASC, rule_id ASC` tie-break (two "beta" rows).
     insert_rule(&pool, &full_row("rul_beta2", "wld_1", "beta"))
         .await
         .unwrap();
@@ -195,9 +194,6 @@ async fn list_rules_by_world_orders_and_isolates() {
         "canonical_name ASC with rule_id ASC tie-break; other worlds absent"
     );
 
-    // layer (the adapter boundary owns the active-only auto-include).
-    // Transition two rows off the default `draft` seed so one world holds
-    // all three spoke statuses at once.
     set_rule_status(&pool, "wld_1", "rul_beta1", "active")
         .await
         .unwrap();
@@ -452,7 +448,6 @@ async fn update_rule_refreshes_updated_at_keeps_created_at() {
         .await
         .unwrap();
 
-    // `created_at` must stay untouched.
     let updated = update_rule(
         &pool,
         "wld_1",
@@ -480,8 +475,6 @@ async fn update_rule_refreshes_updated_at_keeps_created_at() {
     );
     assert_eq!(first.created_at, Some(1_700_000_000));
 
-    // `updated_at` is refreshed again (AR-4 — matched write wins, no OCC);
-    // `created_at` still untouched.
     let updated = update_rule(
         &pool,
         "wld_1",
@@ -518,8 +511,6 @@ async fn update_rule_stores_pre_serialized_json_verbatim() {
         .await
         .unwrap();
 
-    // re-serialize; the bytes given must be the bytes stored (no JSON
-    // assembly happens here; the daemon pre-serializes).
     let target_json = r#"[ "character" ,  "event" ]"#.to_string();
     let extensions_json = r#"{ "nexus" : { "constraint" : { "family" : "required_field" , "field" : "body.summary" } } }"#.to_string();
     let updated = update_rule(

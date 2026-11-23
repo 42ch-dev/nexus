@@ -121,7 +121,6 @@ async fn rollback_drops_schedule_json_column() {
         .execute(&pool)
         .await
         .expect("drop dependent partial index before DROP COLUMN");
-    // must drop that too before DROP COLUMN.
     sqlx::query("DROP INDEX IF EXISTS idx_works_schedule_json")
         .execute(&pool)
         .await
@@ -259,8 +258,6 @@ async fn resolve_work_id_by_ref_or_id_prefers_work_ref_match_on_collision() {
         .await
         .unwrap();
 
-    // via work_id). The query must return A's work_id ("wrk_collision")
-    // because work_ref wins over id per the doc contract.
     let resolved = nexus_local_db::works::resolve_work_id_by_ref_or_id(
         &pool,
         "ctr_test",

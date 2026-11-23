@@ -101,11 +101,6 @@ states:
  * The developer's own `~/.nexus42` is never read or written.
  */
 function seedHome(home) {
-  // NOT override the caller's Cargo configuration, so the prepared build
-  // prerequisites are what make the local cache sufficient. The explicit timeout
-  // + SIGKILL keeps a wedged cargo from blocking this synchronous call past the
-  // suite's own budget, and both pipes are captured so a failure reports the
-  // child's status and output.
   const seed = spawnSync(
     'cargo',
     [
@@ -156,14 +151,7 @@ describe('native authoring boundary', () => {
   let service;
 
   before(async () => {
-    // NEXUS42_DAEMON_API_KEY even with `allowRemote: false`, and a nonempty
-    // value selects `keyed_all`. Every fetch below is keyless loopback, so a
-    // developer/CI key would 401 before authoring was ever reached.
     delete process.env.NEXUS42_DAEMON_API_KEY;
-    // fallible step: ownership starts when the name is chosen, so a seed refusal
-    // (or an abort, or a failed write) still leaves `after` with the path to
-    // remove. Nothing is pre-deleted and the name is unique, so a run killed
-    // outright can only leave its own inert tree behind for no later run to touch.
     home = mkdtempSync(join(tmpdir(), 'nexus-authoring-native-'));
     seedHome(home);
     const { startService } = await import(join(serviceRoot, 'dist', 'index.js'));
@@ -187,10 +175,6 @@ describe('native authoring boundary', () => {
   }
 
   test('generate → simulate → approve persists revision and hash, and stale evidence writes nothing', async () => {
-    // established an engine epoch. Without this the rest would be a mock-route assertion.
-    // A positive epoch is the owner proof: `null` is "not projected yet" and `0` is the
-    // no-owner/domain-only sentinel the service publishes, so both would pass a null check
-    // while every deterministic authoring call still succeeded.
     assert.ok(
       Number.isInteger(service.service.engineEpoch) && service.service.engineEpoch > 0,
       `the native addon must report an established execution owner, got ${service.service.engineEpoch}`,
@@ -222,11 +206,6 @@ describe('native authoring boundary', () => {
       'the walk visits the document, so the trajectory is not an empty shell',
     );
 
-    // keys the approval on the current candidate hash with `ON CONFLICT DO
-    // NOTHING`, so a premature freeze replayed after a good approval is a no-op
-    // and cannot be observed. Before any approval exists it has nowhere to hide:
-    // it would insert an approval row or move the candidate, and the read-back
-    // below compares the COMPLETE payloads the refusal must leave untouched.
     const candidateBefore = await call('GET', candidatePath);
     assert.equal(candidateBefore.status, 200, candidateBefore.text.slice(0, 600));
     assert.equal(

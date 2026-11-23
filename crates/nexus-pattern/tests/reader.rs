@@ -227,7 +227,6 @@ fn broken_packages_do_not_hide_their_peers() {
 #[test]
 fn declared_effect_must_match_the_fragment_rollup() {
     let root = tempfile::tempdir().expect("temp root");
-    // joins the nodes itself rather than believing either claim.
     write_package(
         root.path(),
         "loud",
@@ -393,7 +392,6 @@ fn a_missing_registry_root_is_an_empty_listing() {
 #[test]
 fn the_version_label_is_owned_by_the_manifest_schema() {
     let root = tempfile::tempdir().expect("temp root");
-    // authority over the label, so the value a `u64`-backed parser would reject is accepted.
     write_package(
         root.path(),
         "wide-version",

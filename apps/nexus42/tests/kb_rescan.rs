@@ -222,7 +222,6 @@ async fn cross_chapter_existing_kb_match_refreshes_body() {
     .await
     .unwrap();
 
-    // the reuse summary now reports an existing KB row.
     seed_chapter(&pool, dir.path(), 2, "Aelin surveyed the harbor.").await;
     seed_chapter(&pool, dir.path(), 3, "Aelin opened the gate.").await;
     let report = kb_rescan_work_hermetic(&pool, OWNER, Some(dir.path()), WORK_REF, false)
@@ -239,7 +238,6 @@ async fn cross_chapter_existing_kb_match_refreshes_body() {
         "after adopt, dry/non-dry reuse summary must report existing KB row: {:?}",
         report.cross_chapter_reuse
     );
-    // a duplicate pending candidate for the same canonical_name.
     let pending_after = list_pending_for_world(&pool, WORLD, None).await.unwrap();
     let aelin_pending = pending_after
         .iter()
@@ -372,7 +370,6 @@ async fn cross_chapter_lock_io_failure_returns_e_lock_io() {
     let (dir, pool) = fresh_pool().await;
     seed_chapter(&pool, dir.path(), 1, "Aelin walked into the tavern.").await;
 
-    // an I/O error (EISDIR) → FileLockError::Io → CliError::LockIo (exit 78).
     let lock_path = dir.path().join("Works").join(WORK_REF).join(".lock");
     std::fs::create_dir_all(&lock_path).unwrap();
 

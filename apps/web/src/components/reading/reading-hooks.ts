@@ -28,11 +28,6 @@ export interface ChapterNeighbors {
   next: ChapterSummary | null;
   /** Distinct volume numbers present in the Work (sorted ascending). */
   volumes: number[];
-  /**
-   * cursor-walking additional pages). While true, `prev`/`next` may be null
-   * simply because the relevant page has not loaded yet — callers must NOT
-   * degrade to "first/last chapter" placeholders until this is false.
-   */
   loading: boolean;
 }
 
@@ -41,8 +36,6 @@ function matchCurrent(
   chapter: number,
   volume: number | undefined,
 ): boolean {
-  // caller is reading a specific volume context (the route's ?volume= query).
-  // `row.volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
   if (row.chapter !== chapter) return false;
   if (volume === undefined) return true;
   return row.volume === volume;
@@ -73,15 +66,12 @@ export function useChapterNeighbors(
   const chapters = useChapters(workId ?? undefined, { limit: NEIGHBOR_PAGE_LIMIT });
   const rows = useMemo(() => flattenPages(chapters.data), [chapters.data]);
 
-  // so normal-sized Works (first page returns `has_more: false`) never fetch a
-  // second page. Long Works walk 2-3 pages; chapters are rarely in the 100s.
   useEffect(() => {
     if (chapters.hasNextPage && !chapters.isFetchingNextPage) {
       void chapters.fetchNextPage();
     }
   }, [chapters.hasNextPage, chapters.isFetchingNextPage, chapters.fetchNextPage]);
 
-  // fetch in flight. Once all pages land, all three are false.
   const loading = chapters.isLoading || chapters.hasNextPage || chapters.isFetchingNextPage;
 
   return useMemo<ChapterNeighbors>(() => {
@@ -90,7 +80,6 @@ export function useChapterNeighbors(
     }
     const idx = rows.findIndex((r) => matchCurrent(r, chapter, volume));
     if (idx === -1) {
-      // not-yet-fetched page — keep neighbors null without implying first/last.
       return { chapters: rows, prev: null, next: null, volumes: deriveVolumes(rows), loading };
     }
     return {

@@ -1,7 +1,3 @@
-/**
- * the Task 1 service surface. Success is one explicit `已保存`; a failed save is
- * inline (`保存失败：…`) and the previously saved profile stays displayed.
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { delay, http, HttpResponse } from 'msw';
 import { screen, waitFor } from '@testing-library/react';
@@ -74,7 +70,6 @@ describe('ProfileBar', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存到 service' }));
 
     expect(await screen.findByTestId('harness-profile-saved')).toHaveTextContent('已保存');
-    // scan default is not user intent (the service preserves any stored one).
     expect(puts).toEqual([{ name: 'codex-cli' }]);
     expect(screen.queryByTestId('harness-profile-save-error')).not.toBeInTheDocument();
   });
@@ -319,7 +314,6 @@ describe('ProfileBar', () => {
     const select = screen.getByRole('combobox', { name: 'Agent profile' });
     const save = screen.getByRole('button', { name: '保存到 service' });
 
-    // persisted choice is still being read.
     await waitFor(() => expect(select).toHaveValue('claude-code'));
     expect(save).toBeDisabled();
 

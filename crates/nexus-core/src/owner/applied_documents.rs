@@ -78,10 +78,6 @@ pub async fn resolve_applied_document(
     preset_id: &str,
     loaded: Option<&LoadedPreset>,
 ) -> CoreResult<Result<Option<AppliedDocument>, ApplyLoadRefusal>> {
-    // store row: the document is constructed here from the same `EMBEDDED_PRESETS`
-    // tree the run reads, so admission and recovery reach one identity through
-    // one route. A hash failure is a fault of this route (outer `Err`), never a
-    // silent `None` that would rebuild the YAML graph.
     if let Some(loaded) = loaded {
         if let Some(nexus_preset::source_identity::PresetSourceIdentity::Embedded {
             preset_id,
@@ -110,14 +106,6 @@ pub async fn resolve_applied_document(
             })));
         }
     }
-    // user bundle with a current apply has an applied identity. `None` is the
-    // applied re-entry (I-000443: the run's bundle may be gone), and it cannot
-    // skip a refusal a `Some` would raise — `Some` of a NON-user bundle answers
-    // `Ok(None)` (an accept, never a refusal), and every other `Some` runs this
-    // same `current_apply` + `verified_apply_document` pair, so `None` only
-    // ever ADDS verification. Nor can an identity resolved here under the
-    // looser classification widen acceptance: `reconstruct_runner` rebuilds a
-    // run only when this identity equals the one the descriptor froze.
     if loaded.is_some_and(|loaded| !crate::apply::is_user_preset(preset_id, loaded)) {
         return Ok(Ok(None));
     }
@@ -170,7 +158,6 @@ impl AppliedAdmissionPort for CreatorAppliedDocuments {
         preset_id: &str,
         loaded: &LoadedPreset,
     ) -> Result<AppliedAdmission, AppliedAdmissionError> {
-        // apply under it. The one remaining arm (`ir-only`) always resolves.
         let intake_mode = intake_mode_for_admission(&self.nexus_home, preset_id, loaded)
             .map_err(AppliedAdmissionError::InvalidIntakeConfig)?;
         let applied =
@@ -178,7 +165,6 @@ impl AppliedAdmissionPort for CreatorAppliedDocuments {
                 .await
                 .map_err(|error| AppliedAdmissionError::Store(error.to_string()))?
                 .map_err(|refusal| AppliedAdmissionError::AppliedIdentity {
-                    // stable code plus the sentence naming strategy and apply.
                     code: refusal.reason().to_string(),
                     message: refusal.to_string(),
                 })?;
@@ -199,8 +185,6 @@ impl AppliedDocumentSource for CreatorAppliedDocuments {
         resolve_applied_document(&self.pool, &self.nexus_home, preset_id, loaded)
             .await
             .map_err(|error| error.to_string())?
-            // arrives here in `reconstruction_unavailable`, so a bare human
-            // sentence would lose the `applied_pin_*` family a caller branches on.
             .map_err(|refusal| format!("{}: {refusal}", refusal.reason()))
     }
 }

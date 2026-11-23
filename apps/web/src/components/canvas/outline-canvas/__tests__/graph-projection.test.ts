@@ -118,7 +118,6 @@ describe('changedFieldsOf', () => {
     ).toEqual(['remove_event']);
   });
 
-  // field in the conflict modal so stale unlink patches are labeled correctly.
   it('projects unlink_foreshadow as a changed field (I-QC1-003)', () => {
     expect(
       changedFieldsOf({
@@ -159,7 +158,6 @@ describe('changedFieldsOf', () => {
     ).toEqual([]);
   });
 
-  // content-specific field label so prose edits are not mislabeled as metadata.
   it('projects a chapter content edit as chapter_outline_content (V1.75 A3)', () => {
     expect(
       changedFieldsOf({

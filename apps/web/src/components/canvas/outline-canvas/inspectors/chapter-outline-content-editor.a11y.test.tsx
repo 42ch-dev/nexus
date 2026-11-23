@@ -32,7 +32,6 @@ vi.mock('@/api/queries', () => {
   };
 });
 
-// through `editor.chain().focus().<toggle>().run()`. Provide just enough surface.
 const mockChainRun = vi.fn();
 const mockChain = {
   focus: () => mockChain,

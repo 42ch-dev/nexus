@@ -132,7 +132,6 @@ describe('useAutoLayout — dagre integration', () => {
     expect(laidOutChild1.position.y).toBeGreaterThanOrEqual(0);
     expect(laidOutChild2.position.x).toBeGreaterThanOrEqual(0);
     expect(laidOutChild2.position.y).toBeGreaterThanOrEqual(0);
-    // are contained.
     expect(laidOutParent.style).toMatchObject({
       width: expect.any(Number),
       height: expect.any(Number),
@@ -208,8 +207,6 @@ describe('useAutoLayout — supplied-positions mode (W003)', () => {
       { initialProps: { nodes: initialNodes, edges } },
     );
 
-    // not classify the supplied positions as manual drags and must continue to
-    // preserve them.
     rerender({ nodes: initialNodes, edges });
 
     expect(result.current.nodes.find((n) => n.id === 'a')!.position).toEqual({ x: 10, y: 20 });
@@ -247,8 +244,6 @@ describe('useAutoLayout — defensive dagre label fallback (M001)', () => {
   });
 
   it('does not crash and falls back to finite positions when a dagre label is missing', async () => {
-    // simulating a dagre compound-graph edge case where layout does not assign
-    // coordinates to every setNode'd node.
     vi.doMock('@dagrejs/dagre', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@dagrejs/dagre')>();
       const OriginalGraph = actual.Graph;

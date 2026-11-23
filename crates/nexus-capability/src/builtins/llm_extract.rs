@@ -112,9 +112,6 @@ fn prepare_candidate(
         );
         return None;
     };
-    // quote when it gave one *and it occurs in the admitted text*, else the
-    // admitted chapter text it read, else the admitted source's own identity.
-    // Never empty, and never a citation the source does not contain.
     let source_quote = raw
         .get("source_quote")
         .and_then(Value::as_str)
@@ -259,11 +256,6 @@ impl Capability for LlmExtract {
         "nexus.llm.extract"
     }
 
-    // orchestration context, NOT accepted from user input (security:
-    // prevents cross-creator routing — SEC-V131-01, same rule as
-    // judge.llm). `_extract_target` / `_extract_source_id` are the same kind
-    // of trusted context: the caller's stored-state-resolved target policy and
-    // the admitted chapter artifact (v1.191 P1 T13).
     fn input_schema(&self) -> &'static str {
         nexus_preset::capability_catalog::NEXUS_LLM_EXTRACT_INPUT_SCHEMA
     }
@@ -339,21 +331,14 @@ impl Capability for LlmExtract {
             )
             })?;
 
-        // handle it uses must be owned (`Arc`), not borrowed from `&self`.
         let executor = Arc::clone(
             self.executor
                 .as_ref()
                 .ok_or(CapabilityError::WorkerUnavailable)?,
         );
 
-        // the shared per-run map. FAIL-CLOSED: a run with no registered
-        // token refuses with `CancellationUnavailable` — a fresh token would
-        // be uncancellable by any coordinator (never mint one here). The run
-        // admission path (engine start/spawn/recovery) registers the token.
         let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
-        // the admitted source identity. Both arrive as trusted context from
-        // the orchestration caller; neither is model output.
         let target = parse_extract_target(&input)?;
         let source_id = input
             .get("_extract_source_id")
@@ -367,9 +352,6 @@ impl Capability for LlmExtract {
                 )
             })?;
 
-        // artifact as its single admitted source. `ExtractRequest.run_id`
-        // rejects an empty id at deserialize, so a run without a stored
-        // identity can never reach the orchestrator.
         let request: ExtractRequest = serde_json::from_value(json!({
             "run_id": session_id,
             "sources": [{
@@ -386,9 +368,6 @@ impl Capability for LlmExtract {
             "sources": [{ "source_id": source_id, "text": chapter_prose }],
         });
 
-        // the agent returns a JSON object with a `candidates` array (entities)
-        // and an optional `relationships` array (V1.76). deny_all tool policy —
-        // extraction is read-only, no tools, no side-effect.
         let extract_prompt = format!(
             "{prompt_text}\n\n\
          Return ONLY a JSON object of the form {{\"candidates\": [{{\"canonical_name\": \
@@ -407,11 +386,6 @@ impl Capability for LlmExtract {
          CHAPTER PROSE:\n{chapter_prose}"
         );
 
-        // host over the admitted source, then prepares every candidate under
-        // the trusted target policy. The callback crosses to the adapter's
-        // driver thread, so its outcome crosses back through this slot: the
-        // precise capability error (a `WorkerUnavailable` must stay
-        // distinguishable from a refusal) and the local-shape candidates.
         let slot = Arc::new(std::sync::Mutex::new(ExtractionSlot::default()));
         let run_id = session_id.to_string();
         let outcome = {
@@ -425,7 +399,6 @@ impl Capability for LlmExtract {
                     bundle: admitted,
                 },
                 move |run_input| async move {
-                    // the orchestrator resolved it and the port handed it back.
                     let admitted_text = run_input.input["sources"][0]["text"]
                         .as_str()
                         .unwrap_or_default()
@@ -485,7 +458,6 @@ impl Capability for LlmExtract {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
-        // the callback returned to the orchestrator.
         if let Some(e) = failure {
             return Err(e);
         }
@@ -503,8 +475,6 @@ impl Capability for LlmExtract {
         Ok(json!({
             "candidates": local_candidates,
             "relationships": outcome.relationships,
-            // candidate ids), so a caller can verify what the orchestrator
-            // accepted. The candidate ids equal the local candidates' ids.
             "extract_run": outcome.response,
         }))
     }
@@ -952,7 +922,6 @@ mod tests {
             "creator_id": "spoofed_creator",
             "session_id": "spoofed_session"
         });
-        // (Forbidden) instead of falling back to a magic `default` run id.
         let result = cap.run(input).await;
         assert!(
             result.is_err(),
@@ -1045,7 +1014,6 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_model_output_cannot_choose_governance() {
-        // disclosure; the trusted target policy decides instead.
         let cap = LlmExtract::with_prompt_executor(mock_executor(
             r#"{"candidates":[{"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."}]}"#,
         ))

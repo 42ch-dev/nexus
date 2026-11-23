@@ -794,7 +794,6 @@ where
         match fetch_world_kb_entries(kb_store, world_id, request).await {
             Ok(entries) if !entries.is_empty() => {
                 let entries = if request.activation_enabled {
-                    // primary-fired/constant entries within the hop token
                     let activation_result = request.hop_edges.as_deref().map_or_else(
                         || {
                             nexus_spoke_adapter::adapter::activation::apply_activation(
@@ -837,7 +836,6 @@ where
                     hygiene_trace = Some(hygiene);
                     rendered
                 } else {
-                    // `### World (Before)` / `### Outlet:` /
                     Some(slots::format_entries(&entries))
                 }
             }
@@ -1371,7 +1369,6 @@ mod tests {
 
     #[tokio::test]
     async fn assemble_moment_reserves_directive_slot_empty() {
-        // `## Moment Directive` section (AC-I1b neutral-only promise).
         let stores = TestStores::new();
         let request = MomentRequest::new(minimal_stage0()).with_world("wld_1");
 
@@ -1389,7 +1386,6 @@ mod tests {
 
     #[test]
     fn to_full_context_renders_directive_between_timeline_and_world_kb() {
-        // insertion point P1 fills.
         let ctx = MomentContext {
             stage0_context: "stage0".to_string(),
             world_state: Some("ws".to_string()),
@@ -2582,7 +2578,6 @@ mod tests {
 
     #[test]
     fn hop_budget_caller_cap_bounds_the_remainder() {
-        // cross-domain remainder.
         let stage0 = stage0_with("small");
         let request = MomentRequest::new(stage0.clone())
             .with_max_tokens(1000) // remainder ≈ 994 tokens
@@ -2610,9 +2605,6 @@ mod tests {
 
     #[test]
     fn hop_budget_subtracts_world_state_and_timeline() {
-        // world_state − timeline) / 4`, floored. The personality section
-        // length is derived from the assembled delimiter format so the
-        // assertion pins the exact arithmetic.
         let stage0 = stage0_with("A king rules the land.");
         let assembled = stage0.assemble();
         let section_chars = {
@@ -2698,7 +2690,6 @@ mod tests {
         );
         assert!(last.ends_with('…'));
 
-        // (two-byte chars) and never splits a code point.
         let mind = CharacterMindInput::new(Some(wide_soul), vec![]);
         let wide = mind.soul.as_ref().unwrap();
         assert_eq!(wide.chars().count(), CHARACTER_MIND_MAX_SOUL_CHARS);
@@ -2803,8 +2794,6 @@ mod tests {
         assert!(full.contains("## Character ToM — L1\n\n## Character ToM — L2\n"));
     }
 
-    /// holder's World-owned `owner-private` row is admitted by nobody here and
-    /// is never read out of the store.
     #[tokio::test]
     async fn v1191_holder_context_matrix_shared_character_binding_and_private() {
         use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;

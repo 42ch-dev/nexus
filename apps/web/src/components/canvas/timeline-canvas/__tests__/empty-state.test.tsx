@@ -179,7 +179,6 @@ describe('TimelineCanvas — Brief-layer empty-state (V1.123 P1 T5)', () => {
   });
 
   it('clicking the Brief-empty CTA switches back to Narrative', async () => {
-    // Brief-empty world.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -299,7 +298,6 @@ describe('TimelineCanvas — Moment-layer honest empty-state (V1.156 P1 T2)', ()
     expect(momentEmpty).toBeInTheDocument();
     expect(momentEmpty).toHaveTextContent('bound Works');
     expect(momentEmpty).toHaveTextContent('Outline');
-    // Brief-empty patterns).
     expect(momentEmpty).toHaveTextContent('Switch to Narrative');
   });
 

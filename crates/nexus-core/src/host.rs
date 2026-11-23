@@ -37,8 +37,6 @@ use nexus_contracts::core_host_query_response::{
     NexusAgentScanEntryProtocolKind, NexusPaginationInfo,
 };
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::CharacterOperationResult;
-// gated with it: a production build carries no unused import
-// (see `HostHandle::settle_character_terminal`).
 #[cfg(any(test, feature = "test-hooks"))]
 use nexus_contracts::generated::daemon_api::agent_host::character_operation_result::{
     CharacterOperationResultFinishReason, CharacterOperationResultRunStatus,
@@ -72,7 +70,6 @@ use crate::soul::CoreCharacterMind;
 
 impl std::fmt::Debug for HostHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // catalog, or profile state leaks through Debug.
         f.debug_struct("HostHandle").finish_non_exhaustive()
     }
 }
@@ -226,12 +223,8 @@ impl AuthorityState {
 
     fn retire_admission(&self) {
         let mut gate = self.gate();
-        // live work, so this fails loudly (debug/tests) or wraps far away from
-        // zero (release) — never silently to a confirmable state.
         gate.in_flight -= 1;
         drop(gate);
-        // read a non-zero count is still woken by this retirement.
-        //
         // Wake EVERY joiner: the admission join is entered by every concurrent
         // quiesce on this authority, and the last retirement is the only wakeup
         // they will ever see. A `notify_one` handoff would let one joiner
@@ -326,8 +319,6 @@ fn native_scan_entries(
                     (command.clone(), args.clone())
                 }
             };
-            // a resolved DSH_RUNTIME_BIN, or a bare roster command that is not
-            // on PATH — the latter resolves to false).
             let installed = path_scan::command_on_path(probe_dirs, &launch_command)
                 || path_scan::is_executable_file(std::path::Path::new(&launch_command));
             NexusAgentScanEntry {
@@ -335,7 +326,6 @@ fn native_scan_entries(
                 installed,
                 launch_command: Some(launch_command),
                 launch_args,
-                // user-facing descriptions.
                 description: None,
                 icon_url: None,
                 registry_agent_id: Some(entry.provider_id.to_string()),
@@ -419,7 +409,6 @@ async fn registry_scan_entries(
     let Ok(client) = nexus_acp_host::registry::RegistryClient::new() else {
         return Vec::new();
     };
-    // scan endpoint cannot hang on the CDN.
     let Ok(Ok(registry)) =
         tokio::time::timeout(std::time::Duration::from_secs(10), client.get_registry()).await
     else {
@@ -477,8 +466,6 @@ impl CoreService {
     /// catalog cannot be discovered, or the [`HostManager`] fails to start.
     pub async fn open_host(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
         self.ensure_open()?;
-        // service; a second start is a typed busy rejection, never a
-        // second engine.
         self.claim_host_authority()?;
         match self.open_host_inner(port).await {
             Ok(handle) => Ok(handle),
@@ -548,11 +535,6 @@ impl CoreService {
     }
 
     async fn open_host_inner(&self, port: Arc<dyn ProviderPort>) -> CoreResult<HostHandle> {
-        // (`<user_home>/.nexus42`), so the agent-host config is one
-        // `agent-host/config.toml` below it — the same file the native boot
-        // reaches through `agent_host_config_path(user_home)`. Passing this
-        // root to that helper nests `.nexus42` twice and reads a file nothing
-        // writes.
         let nexus_root = self.inner.nexus_home.clone();
         validate_workspace_path(&nexus_root).map_err(config_err)?;
         let config_path = nexus_root.join("agent-host").join("config.toml");
@@ -679,8 +661,6 @@ impl HostHandle {
         if max_bytes == 0 {
             return Err(invalid("max_bytes", "max_bytes must be positive"));
         }
-        // that this authority did not record, or one recorded for a different
-        // session, is `not_found` — observation is never a cross-session leak.
         let recorded_session = self
             .registry
             .operation_session_id(&op_id)
@@ -804,8 +784,6 @@ impl HostHandle {
             Uuid::parse_str(&session_id)
                 .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?,
         );
-        // session unknown to BOTH the Actor index and the manager are the same
-        // `not_found`, never an internal host failure.
         let missing_session = || CoreError::NotFound {
             resource: format!("session {sid}"),
         };
@@ -821,13 +799,6 @@ impl HostHandle {
         if !known_to_index && self.session_cancellation_supported(&sid).await?.is_none() {
             return Err(missing_session());
         }
-        // never discarded: a provider that cannot cancel, a session the manager
-        // no longer knows, and an operation that finalized before the cancel
-        // landed all latch no intent, so the manager release below stays the
-        // authoritative teardown. Any OTHER refusal — a provider that
-        // advertised cancellation and then failed it — is surfaced, because
-        // this call must not report a teardown whose active work is still
-        // running.
         let mut refusal: Option<CoreError> = None;
         for op_id in self.registry.nonterminal_operations_for_session(&sid) {
             if let Err(err) = self.request_cancel(&op_id).await {
@@ -869,8 +840,6 @@ impl HostHandle {
             .operation_owner(operation_id)
             .ok_or_else(|| operation_not_found(operation_id))?;
         match self.session_cancellation_supported(&session_id).await? {
-            // adapter-level no-op is not a cancellation, and it must never
-            // latch cancel intent.
             Some(false) => {
                 return Err(CoreError::Coded {
                     code: "not_supported".into(),
@@ -884,20 +853,12 @@ impl HostHandle {
                 });
             }
         }
-        // drain that finalizes first) is decided here, and a finished operation
-        // refuses `409` — but the intent is not confirmed until the provider
-        // answers, so a drain that finalizes while the call is in flight
-        // records the run's own terminal, never a `cancelled` the provider may
-        // still refuse.
         self.registry
             .latch_provisional_operation_cancel(&owner, operation_id)?;
         if let Err(err) = self.host.cancel(operation_id.clone()).await {
-            // recorded as an accepted cancellation.
             self.registry.rollback_operation_cancel(operation_id);
             return Err(host_err(err));
         }
-        // even if no drain ever settles it. A drain that settled first stays
-        // authoritative (first-writer-wins at the registry).
         self.registry
             .commit_operation_terminal(operation_id, cancelled_outcome(&session_id, operation_id));
         self.registry.clear_indexed_operation(operation_id);
@@ -1046,9 +1007,6 @@ impl HostHandle {
                     }
                 }
             };
-            // pin; a Creator Actor session keeps the pre-existing cwd
-            // boundary (D11 selects only the Character root). Both are
-            // resolved before any Host, provider or memory effect.
             let canonical_root = match &actor {
                 AdmittedActor::Character { .. } => character_session_cwd(&request, &self.core)?,
                 AdmittedActor::Creator { .. } => session_cwd(&request, &self.core)?,
@@ -1060,11 +1018,6 @@ impl HostHandle {
                 branch_id: viewpoint.branch_id.as_ref().map(|id| (**id).clone()),
                 event_id: viewpoint.event_id.as_ref().map(|id| (**id).clone()),
             };
-            // per-Character activity lease and the shared World/Character
-            // knowledge leases (durable §4.3), and is held through Host
-            // creation AND registry insertion, so neither an archive nor a
-            // governance edit can race an in-flight create into a reusable
-            // session.
             let knowledge = self
                 .core
                 .admit_actor_knowledge_view(principal, &actor, viewpoint.clone())
@@ -1143,24 +1096,12 @@ impl HostHandle {
         session_id: String,
         request: ExecuteOperationRequest,
     ) -> CoreResult<OperationResponse> {
-        // until the operation returns: by then it has either failed before
-        // creating a drain or handed its drain to the registry, so a `close`
-        // that latches in between can never confirm around it.
         let _admission = self.admit_operation()?;
         self.core.verify_principal(principal)?;
         let uuid = Uuid::parse_str(&session_id)
             .map_err(|_| invalid("session_id", "session_id must be a valid UUID"))?;
         let sid = HostSessionId(uuid);
-        // of the registry transfer below: taken under the registry's own lock
-        // before this operation's first await, and retired only after its drain
-        // has been registered. A concurrent session shutdown joins through that
-        // same live-work accounting, so it cannot observe "this session has no
-        // work" while this admitted operation can still register the drain that
-        // shutdown is retiring — the registered drains alone are not that proof,
-        // because registration happens after asynchronous admission and Host
-        // execution.
         let _session_admission = self.registry.admit_session_operation(sid.clone());
-        // owner-scoped before any Host access, whatever the operation kind.
         if let Some((owner, _, _)) = self.registry.stored_session_owner(&sid) {
             if owner != principal.creator_id() {
                 return Err(CoreError::NotFound {
@@ -1207,13 +1148,9 @@ impl HostHandle {
                 }
                 let (assembled, fenced) = match indexed {
                     None => {
-                        // must stay a stale refusal instead of falling back to
-                        // raw prompt bytes.
                         if self.registry.is_actor_session(&sid) {
                             return Err(actor_session_stale(&sid.to_string()));
                         }
-                        // bytes, no knowledge fence (nothing is
-                        // selection-scoped here).
                         (content, None)
                     }
                     Some(ctx) => {
@@ -1228,10 +1165,6 @@ impl HostHandle {
                             branch_id: ctx.branch_id.clone(),
                             event_id: ctx.event_id.clone(),
                         };
-                        // cannot race the prompt into a stale session, and the
-                        // knowledge fences are read/held under it (durable
-                        // §4.3). The context is held through terminal capture
-                        // in the server-owned drain.
                         let knowledge = self
                             .core
                             .admit_actor_knowledge_view(principal, &ctx.actor, viewpoint.clone())
@@ -1239,9 +1172,6 @@ impl HostHandle {
                         if ctx.character_epoch != knowledge.activity_epoch() {
                             return Err(actor_session_stale(&sid.to_string()));
                         }
-                        // leases: a material governance change (or a policy
-                        // switch) retires this session and admits a fresh
-                        // context on the next create, never a stale reuse.
                         match self
                             .registry
                             .revalidate_knowledge(&sid, &knowledge.identity())?
@@ -1322,9 +1252,6 @@ impl HostHandle {
                 if let Some(snapshot) = snapshot {
                     let registry = self.registry.clone();
                     let session_id = snapshot.session_id.clone();
-                    // — accounted to its session, so a session shutdown joins
-                    // the work it retires — so close never drops live
-                    // lease/drain ownership on the floor.
                     self.registry.spawn_actor_drain(session_id, async move {
                         drain_character_operation(registry, stream, snapshot, fenced).await;
                     });
@@ -1441,11 +1368,7 @@ impl HostHandle {
                         let config = HostManager::agent_config(&self.host).await;
                         let probe_dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
                             .map_or_default(|path| std::env::split_paths(&path).collect());
-                        // ids: an enabled-but-stale entry (its command removed)
-                        // must not hide the working PATH binary of the same id.
                         let native = native_scan_entries(&config, &probe_dirs).map_err(host_err)?;
-                        // machine join the list, so an unconfigured home still
-                        // offers a working candidate.
                         let registry = registry_scan_entries(&config, &probe_dirs).await;
                         let entries = merge_scan_entries(native, registry);
                         Ok(CoreHostQueryResponse {
@@ -1468,8 +1391,6 @@ impl HostHandle {
                 let limit_us = usize::try_from(limit).unwrap_or(250);
                 let owner_scoped: CoreResult<Vec<NexusAgentHostSessionResponse>> = native
                     .iter()
-                    // session is invisible to this principal (legacy sessions
-                    // are never indexed and stay unchanged).
                     .filter(|s| {
                         self.registry
                             .stored_session_owner(&s.id)
@@ -1566,8 +1487,6 @@ impl HostHandle {
                         });
                     }
                 }
-                // state is gone, but a previously active op is still queryable
-                // as interrupted — read through the CoreService-owned journal.
                 if let Ok(Some((operation_id, session_id, _provider_id, status))) =
                     self.core.provider_operation_row_internal(raw).await
                 {
@@ -1656,10 +1575,6 @@ impl HostHandle {
             return Ok(report);
         }
         self.core.ensure_open()?;
-        // handle are refused even while the cleanup is still settling, and a
-        // later authority over the same service cannot be mistaken for it. The
-        // same latch freezes admission, so the count it returns is every
-        // admitted operation this close must account for.
         let in_flight = self.authority.latch_closing();
         let mut pending: Vec<String> = Vec::new();
         if in_flight > 0 {
@@ -1675,20 +1590,13 @@ impl HostHandle {
             pending.push(format!("actor-session-drain: {err}"));
         }
         self.registry.close();
-        // by this standalone close and by the native-ordered `close_before`.
         pending.extend(self.settle_shared_host(None).await);
-        // are dropped, an unsettled drain keeps the authority — and the
-        // knowledge leases it holds — instead of being detached and forgotten.
         let unsettled_drains = self.registry.prune_settled_drains();
         if unsettled_drains > 0 {
             pending.push(format!("actor-drains: {unsettled_drains} unsettled"));
         }
         let report = close_report(pending);
         if report.cleanup_confirmed {
-            // confirmed close frees the authority for a later open/attach; an
-            // unconfirmed close keeps the slot held. The claim is one-shot for
-            // this authority, so a concurrent confirmed close on a clone cannot
-            // free the slot a second time and clear a successor's claim.
             self.release_authority_slot();
         }
         self.authority.retain_close_report(&report);
@@ -1731,28 +1639,11 @@ impl HostHandle {
     /// entries.
     pub async fn quiesce_actor_sessions(&self) -> CoreResult<CoreCloseReport> {
         let mut pending: Vec<String> = Vec::new();
-        // barrier `close` latches — so no create or execute can be admitted
-        // while the quiesce runs, and the operations counted at that instant are
-        // exactly the ones this quiesce must account for. The registry latch
-        // below covers the Actor maps and the quiesce's own reads stay legal.
         self.authority.freeze_admissions();
         self.registry.close();
-        // operation admitted before the freeze registers its drain only after
-        // asynchronous admission and Host execution, so the registered drains
-        // alone are not proof of quiescence. Cancellation-safe, like the drain
-        // join below: the native owner bounds this with its own deadline and a
-        // retry joins the same admissions.
         self.authority.join_admissions().await;
         for operation_id in self.registry.nonterminal_operations() {
             if let Err(err) = self.request_cancel(&operation_id).await {
-                // session is already gone, nor one that FINISHED between the
-                // nonterminal snapshot above and this cancel's latch is a
-                // quiesce failure: none of them latched intent, the finished
-                // operation's own recorded terminal is its truth, and the drain
-                // join below still proves the settlement of the work this
-                // quiesce owns. Every other refusal is unaccounted work — the
-                // manager settlement that follows is not its teardown — so it
-                // keeps the cleanup unconfirmed.
                 if !is_unsupported_cancellation(&err)
                     && !is_missing_session(&err)
                     && !is_finished_operation(&err)
@@ -1803,7 +1694,6 @@ impl HostHandle {
         }
         let report = close_report(pending);
         if report.cleanup_confirmed {
-            // clones of one authority free the established-owner slot once.
             self.release_authority_slot();
         }
         self.authority.retain_close_report(&report);
@@ -1959,8 +1849,6 @@ impl HostHandle {
             request = request.with_event(event);
         }
         let narrative = SqliteNarrativeGateway::new(pool.clone());
-        // snapshot its admitted context was built from — the exact admitted
-        // holder plus the authorized containers, never a management selection.
         let view_scope = self
             .core
             .actor_view_read_scope(
@@ -2028,8 +1916,6 @@ fn close_report(pending: Vec<String>) -> CoreCloseReport {
             state: CoreCloseReportState::Interrupted,
             cleanup_confirmed: false,
             pending_operations: pending,
-            // (UserRequested/EngineReplaced/SchemaMismatch/WriterFenced);
-            // omitting `reason` instead of mislabelling the cause.
             reason: None,
         }
     }
@@ -2054,7 +1940,6 @@ fn port_err(err: nexus_contracts::CoreError) -> CoreError {
 }
 
 fn session_cwd(request: &CreateSessionRequest, core: &CoreService) -> CoreResult<PathBuf> {
-    // boundary is the fallback.
     request.cwd.as_ref().map_or_else(
         || {
             validate_workspace_path(&core.inner.nexus_home)
@@ -2102,9 +1987,6 @@ fn character_session_cwd(
             "a Character session requires an admitted creative root",
         ));
     };
-    // was retargeted or removed after open: refuse it rather than following
-    // whatever its pathname points at now. The pin's own error text is
-    // discarded on purpose — it names the admitted root's path.
     let resolved = validate_workspace_path(pin)
         .map_err(|_| invalid("cwd", "the admitted creative root is no longer resolvable"))?;
     if resolved.as_path() != pin {
@@ -2177,8 +2059,6 @@ fn observation_matches(
     session_id: &HostSessionId,
     operation_id: &HostOperationId,
 ) -> bool {
-    // session-scoped event (no operation id at all — session created/stopped
-    // and status) is selected by the session the observation came from.
     event_operation_id(event).map_or_else(
         || event_session_id(event) == Some(session_id),
         |event_operation| event_operation == operation_id,
@@ -2253,7 +2133,6 @@ fn observation_stream(
                             (receiver, session_id, operation_id),
                         ));
                     }
-                    // turns that into the typed resync gap.
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
                 }
             }
@@ -2273,9 +2152,6 @@ async fn drain_character_operation(
     fenced: Option<crate::actor_knowledge::AdmittedKnowledgeContext>,
 ) {
     use futures_util::StreamExt;
-    // about this exact `(session_id, operation_id)` pair. Unrelated
-    // operation/session events are ignored, and EOF (or a stream error) before
-    // any terminal is a fault — never an inferred success.
     let terminal = loop {
         match stream.next().await {
             Some(Ok(event)) => {
@@ -2285,17 +2161,12 @@ async fn drain_character_operation(
                     break terminal;
                 }
             }
-            // the run ended without this operation's observed terminal.
             Some(Err(_)) | None => break CharacterTerminal::Fault,
         }
     };
-    // registry lock: a cancel that latched first won the race and is the
-    // operation's truth.
     let cancel_won_the_race = registry.begin_operation_finalizing(&snapshot.operation_id);
     let (run_status, finish_reason) = character_terminal_outcome(&terminal, cancel_won_the_race);
     registry.settle_operation_terminal(&snapshot.operation_id, run_status, finish_reason);
-    // knowledge leases must not outlive the recorded outcome waiting for
-    // trailing producer events.
     drop(fenced);
 }
 

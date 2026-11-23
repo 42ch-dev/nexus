@@ -1,6 +1,4 @@
 /**
- * Manuscript Reading (BL-11 MVP slice).
- *
  * Promotes the post-V1.75-pivot residual (bare read-only body render) into a
  * designed reading experience: legible prose typography, chapter/volume
  * navigation (←/→ keyboard + prev/next controls), persisted reading progress,

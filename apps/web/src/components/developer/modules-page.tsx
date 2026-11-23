@@ -1,6 +1,4 @@
 /**
- * P1 T3 / V1.147 P2 T3 / v221-modules-rail T2.
- *
  * `/modules` is the single owner of the Modules surface: list/detail/query/
  * error live here once, rendered as the page body.
  *
@@ -48,10 +46,6 @@ export function ModulesPageBody() {
   const { t } = useTranslation('modules');
   const modules = useComputeModules();
 
-  // `?layer=` search-param convention on the Timeline surface). Seeds the
-  // initial module selection from `?module=`; `?run=` + `?world=` thread
-  // into the detail panel (Run inspector + World pre-fill). User selection
-  // writes the params back (replace) so refresh keeps the detail.
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     searchParams.get('module'),
@@ -71,14 +65,11 @@ export function ModulesPageBody() {
     setSelectedId(moduleParam);
   }, [moduleParam]);
 
-  // Timeline's branch derivation (`?branch=` empty → undefined/root — never
-  // an empty-string branch id, which the daemon would reject as invalid).
   const branchParam = searchParams.get('branch');
   const branchSeed = branchParam && branchParam.length > 0 ? branchParam : undefined;
 
   function selectModule(id: string) {
     setSelectedId(id);
-    // Module entry); a module change invalidates the deep-linked run context.
     const next = new URLSearchParams(searchParams);
     next.set('module', id);
     next.delete('run');
@@ -107,7 +98,6 @@ export function ModulesPageBody() {
             initialBranchId={branchSeed}
             initialRunId={searchParams.get('run') ?? undefined}
             onRunOpen={(runId) => {
-              // so refresh preserves the whole selection.
               const next = new URLSearchParams(searchParams);
               next.set('module', selectedId);
               next.set('run', runId);

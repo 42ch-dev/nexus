@@ -272,7 +272,6 @@ pub fn parse_pack(json: &Value) -> Result<ParsedPack, PackError> {
         _ => None,
     };
 
-    // extra keys (e.g. future dialects) survive here.
     let extra_modules = modules.clone();
 
     Ok(ParsedPack {

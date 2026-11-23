@@ -145,7 +145,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             )
             .await?;
 
-            // skip normal context output.
             let Some(ctx) = maybe_ctx else {
                 return Ok(());
             };
@@ -196,7 +195,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
 pub fn create_degradation_guard(config: &CliConfig) -> DegradationGuard {
     let mode = config.runtime_mode();
 
-    // replaying failures (avoids unintended re-degradation — C-001).
     if let Some(snap) = config.degradation_snapshot() {
         if snap.state != crate::domain::degradation::DegradationState::Normal {
             return DegradationGuard::restore_from_snapshot(snap, mode);
@@ -326,8 +324,6 @@ async fn build_stage0_from_local(
         )
     })?;
 
-    // surfaces (NXM-6): one read-only core serves both, so assembly keeps
-    // working beside a running daemon and never opens a bearer file.
     let (personality, experience, long_term_memories) =
         with_read_only_core(config, async |core, principal| {
             let soul = core
@@ -597,9 +593,6 @@ pub async fn run_assemble_moment(
     packet_out: Option<&str>,
     stage: Option<&str>,
 ) -> Result<Option<MomentContext>> {
-    // (NEXUS_MCA_LORE_ACTIVATION=off|0|false, case-insensitive) restores
-    // V1.146 flag-off semantics; any other value (incl. unset, empty, =1)
-    // keeps activation on (spec §6).
     let activation_off = lore_activation_env_is_off();
     if emit_packet && activation_off {
         return Err(crate::errors::CliError::Other(
@@ -622,16 +615,6 @@ pub async fn run_assemble_moment(
     // invocation, shared by the KB store and the hop-edge read.
     let view_scope = creator_view_scope(&pool, config, world_id).await?;
     let kb = nexus_spoke_adapter::SpokeBackedKbStore::new(pool.clone(), view_scope.clone());
-    // expansion when activation is on (off-switch ⇒ no hop load; spec §6).
-    // The edge source is the inherent `NexusAdapter::list_hop_edges_for_world`
-    // — spoke `RelationPort` is get/put only, so the storage list primitive
-    // (`list_confirmed_relationships_paginated`, confirmed graph) backs the
-    // loader. A storage-read failure degrades to activation-only (no hop
-    // pass), consistent with `assemble_moment`'s per-section degradation.
-    // The default call returns the first page of up to
-    // `HOP_EDGE_LIST_LIMIT` (10_000) newest edges; a caller that needs the
-    // full graph walks it with `list_hop_edges_for_world_paginated` (V1.158
-    // P2 T3, R-V1149P1-001).
     let wid = world_id.unwrap_or("wld_default");
     let hop_edges = if activation_off {
         None
@@ -656,9 +639,6 @@ pub async fn run_assemble_moment(
 
     let mut request = MomentRequest::new(stage0).with_world(wid);
 
-    // creator + work of the moment (spec §3.2). The active creator is always
-    // threaded through; the work is optional — a raw world assembly applies
-    // the World override directly.
     if let Some(cid) = config.active_creator_id.as_deref() {
         request = request.with_creator(cid);
     }
@@ -687,16 +667,10 @@ pub async fn run_assemble_moment(
             request = request.with_kb_block_type(bt);
         }
     }
-    // off-switch needs an explicit call here.
     if activation_off {
         request = request.with_activation_enabled(false);
     }
 
-    // preset runner / schedule path drives assembly through this CLI entry
-    // and threads the stage it is executing via `--stage` (see
-    // `guides/generation-trigger-wiring.md`). Unknown values degrade to
-    // unspecified (all slots on) with a warning — an unknown stage must
-    // never fail or panic the inspector path (T3 safe default).
     if let Some(stage_str) = stage {
         if let Some(stage) = GenerationStage::parse(stage_str) {
             request = request.with_generation_stage(stage);
@@ -708,10 +682,6 @@ pub async fn run_assemble_moment(
         }
     }
 
-    // caller hop cap. `hop_max_tokens` is set to the full cross-domain
-    // budget; MCA refines it to the spec Q1 remainder (personality never
-    // truncated + world_state + timeline + primary-KB reservations) at the
-    // call site (see `hop_budget_tokens` in nexus-moment-context-assembly).
     if let Some(edges) = hop_edges {
         request = request.with_hop_edges(edges);
         if let Some(mt) = max_tokens {
@@ -719,14 +689,6 @@ pub async fn run_assemble_moment(
         }
     }
 
-    // Directive store (composition-root adapter over the same pool) is wired
-    // here — an active directive renders into the reserved `moment.directive`
-    // slot and its TTL / scene-change lifecycle runs. When no directive is
-    // active, `assemble_moment_with_directive` is byte-equivalent to the
-    // plain `assemble_moment` (AC-I1b).
-    // v1.193 P1-T5: the store is the core composition root directly
-    // (`nexus_core::LocalDirectiveStore`); the old
-    // `nexus_daemon_runtime::directive_store` path was only a core re-export.
     let directives = nexus_core::LocalDirectiveStore::new(pool);
     let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
 
@@ -738,9 +700,6 @@ pub async fn run_assemble_moment(
             Ok(None)
         }
     } else if inspect {
-        // relocated builder) as a human-readable view. Observation only —
-        // the assembled output is untouched (AC-I6). Mirrors the
-        // --emit-packet stdout suppression: the view replaces the context.
         let packet = build_inspector_packet(&ctx);
         println!("{}", render_inspector_readable(&packet));
         Ok(None)
@@ -809,7 +768,6 @@ fn render_inspector_readable(packet: &serde_json::Value) -> String {
                     if let Some(slot) = slot_by_entry.get(id) {
                         writeln!(out, "      slot: {slot}").ok();
                     }
-                    // (not emitted today; forward-compatible, spec §2 H4).
                     if let Some(depth) = entry.get("hop_depth").and_then(serde_json::Value::as_u64)
                     {
                         writeln!(out, "      hop depth: {depth}").ok();
@@ -1466,7 +1424,6 @@ mod tests {
             moment_directive: Some("DIRECTIVE_SECRET_MARKER keep the prose terse".to_string()),
             moment_directive_depth: DirectiveDepth::Head,
             activation_trace: Some(trace),
-            // carries status/metadata only (never the body).
             slot_map: Some(vec![nexus_moment_context_assembly::slots::SlotMapEntry {
                 entry_id: "kb_hero".to_string(),
                 slot: "world.before".to_string(),
@@ -1508,7 +1465,6 @@ mod tests {
             json.contains("moment_directive"),
             "enriched moment_directive section present"
         );
-        // present, no `body` key anywhere in the packet.
         assert!(
             json.contains("\"scope\":\"work\""),
             "directive scope metadata present"
@@ -1557,7 +1513,6 @@ mod tests {
         use nexus_knowledge::world_kb::KbStore;
         use nexus_moment_context_assembly::MomentContext;
 
-        // helper that runs `assemble_moment` against a concrete store type.
         #[allow(clippy::future_not_send)]
         async fn run<K: KbStore>(pool: &sqlx::SqlitePool, kb_store: &K) -> MomentContext {
             let narrative =
@@ -1588,7 +1543,6 @@ mod tests {
             entry.entry_id = format!("kb_t4_{idx}");
             entry.body = Some(KnowledgeEntryBody {
                 summary: Some(format!("{name} summary")),
-                // round-trip as a float — the lossless carrier must recover it.
                 attributes: Some(serde_json::json!({"order": idx})),
                 ..Default::default()
             });
@@ -1604,8 +1558,6 @@ mod tests {
 
         let sqlite_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
         let ctx_sqlite = run(&pool, &sqlite_store).await;
-        // fixture seeds shared rows in one World, so the container-scoped
-        // management selection admits them without a holder registry row.
         let spoke_store = nexus_spoke_adapter::SpokeBackedKbStore::new(
             pool.clone(),
             nexus_knowledge::world_kb::KnowledgeReadScope::creator_management(
@@ -1721,7 +1673,6 @@ mod tests {
             );
         }
 
-        // but does NOT appear in placement.
         assert_eq!(activation_trace[1]["entry_id"], "kb_castle");
         assert_eq!(activation_trace[1]["accepted"], false);
         assert!(
@@ -1808,8 +1759,6 @@ mod tests {
 
     #[test]
     fn lore_activation_off_switch_env_wrapper() {
-        // test so the env writes stay sequential — no other test in this
-        // binary touches `NEXUS_MCA_LORE_ACTIVATION`.
         std::env::remove_var("NEXUS_MCA_LORE_ACTIVATION");
         assert!(
             !lore_activation_env_is_off(),

@@ -181,9 +181,6 @@ const FIT_UTF8: &str = "cipher 关隘。";
 const OVER_CHAR_UNDER_CHARS: usize = 200;
 const FIXTURE_PROVIDER: &str = "r4-mind-fixture";
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 fn manifest(host_id: &str) -> HostCapabilityManifest {
     serde_json::from_value(json!({
         "schema_version": 1,
@@ -253,9 +250,6 @@ async fn responder_of(
         .expect("the responder task is bounded")
         .expect("the responder task completed")
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// One disposable user home, bootstrapped through the real public home
 /// contract: a registered Creator, a selected workspace (which materializes the
@@ -585,9 +579,6 @@ impl Provider {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Test-only decorator over the REAL fixture memory service.
 ///
 /// It forwards every request unchanged to the assembled fixture service and
@@ -691,9 +682,6 @@ impl RemoteMemoryService for ServiceProbe {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 async fn core_db(env: &Env) -> SqlitePool {
     SqlitePool::connect_with(SqliteConnectOptions::new().filename(env.state_db()))
         .await
@@ -716,9 +704,6 @@ async fn scalar(pool: &SqlitePool, sql: &str) -> i64 {
         .expect("scalar query")
         .get::<i64, _>(0)
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// Withhold every legacy memory surface for the exercised interval (armed
 /// after the initial Core open and restored before close) and occupy the real
@@ -822,9 +807,6 @@ async fn assert_no_local_memory(env: &Env) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// The provider's stored `personality` document for one subject:
 /// `(space_id, body, revision)`.
 async fn provider_personality(
@@ -881,9 +863,6 @@ async fn provider_receipts(pool: &SqlitePool, op: &str) -> i64 {
     )
     .await
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &Principal, title: &str) -> String {
     core.create_world(principal, dto(json!({ "title": title })))
@@ -1018,9 +997,6 @@ async fn recall_reject(
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     let env = Env::boot("R4 Profile Owner").await;
@@ -1034,10 +1010,8 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     let principal = core.active_principal().await.expect("active principal");
     let subject_id = legacy::creator_subject_id(&env.creator_id);
 
-    // exercised interval below.
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
-    // provider's `memory.profile.get` in the pinned space.
     assert!(
         core.get_creator_soul(&principal)
             .await
@@ -1071,10 +1045,6 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     assert_eq!(revision, 1);
     pool.close().await;
 
-    // writes nothing. The refusal is the provider's real one; only its
-    // peer-controlled message/details are rewritten an untrusted peer could do
-    // the same. Neither the distinctive request body nor the peer text may
-    // travel back in Display OR Debug.
     probe.arm_refusal_sentinel(Some(PEER_SENTINEL));
     let updates_before_stale = probe.profile_updates();
     let stale = core
@@ -1136,9 +1106,6 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     assert_eq!(revision, 2);
     pool.close().await;
 
-    // before any provider call. Its own signed connection is served through the
-    // SAME observation decorator, so the counter around the refused call proves
-    // that the actual read-only session sent nothing.
     let (read_only, ro_responder) = provider
         .open_core_serving(&env, probe.clone(), CoreAccess::ReadOnly)
         .await;
@@ -1207,9 +1174,6 @@ async fn creator_soul_profile_reads_and_writes_run_on_the_remote_provider() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// `memory.recall` has no Core product caller on this slice: the Character mind
 /// projection reads kind-filtered `memory.records.list` instead of ranking every
 /// kind through recall. The operation is therefore exercised over the SDK's own
@@ -1226,7 +1190,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
 
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
-    // provider subject), then one binding-local record through the SDK session.
     assert!(core
         .create_creator_memory(&principal, "r4-recall-one", "story_summary", RECALL_ONE)
         .await
@@ -1238,8 +1201,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
 
-    // exact text. Recall is compared against THESE, never against another
-    // recall response.
     let shared_one = core
         .get_creator_memory(&principal, "r4-recall-one")
         .await
@@ -1284,7 +1245,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         RECALL_CONTEXT.to_string(),
     );
 
-    // `subject_all`, excluded by the selected-context view.
     let other_record = match adapter
         .create_record(
             &memory_principal,
@@ -1312,7 +1272,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         RECALL_OTHER.to_string(),
     );
 
-    // selection, so a subject mix-up cannot pass the set comparison.
     match adapter
         .ensure_subject(
             &memory_principal,
@@ -1386,8 +1345,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         )
     };
 
-    // the independently captured facts; missing, substituted or extra records
-    // fail even when the count matches.
     let all = recall_ok(
         &adapter,
         &memory_principal,
@@ -1464,8 +1421,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "the combined selection is exactly shared plus the selected context"
     );
 
-    // authorized set is exhausted; the concatenation must equal the independently
-    // captured subject triples, not another recall response.
     let page_size = json!({ "max_items": 1 });
     let mut seen: Vec<(String, Value, String)> = Vec::new();
     let mut cursor: Option<String> = None;
@@ -1504,10 +1459,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "the pages partition exactly the independently captured subject set"
     );
 
-    // carries the query hit and fits whole; the long item is deferred, then
-    // surfaced whole as the named overflow on the resumed page. Both bodies are
-    // compared to their independently seeded originals, so a truncated or empty
-    // content cannot pass.
     match adapter
         .ensure_subject(
             &memory_principal,
@@ -1628,10 +1579,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     assert_eq!(second_page["truncated"], json!(false));
     assert_eq!(second_page["next_cursor"], Value::Null);
 
-    // multibyte item and an item whose standard serialized UTF-8 form exceeds
-    // the whole budget while its Unicode scalar count does not. A provider that
-    // budgeted characters would serve both on the first page; the real byte
-    // budget defers the second.
     match adapter
         .ensure_subject(
             &memory_principal,
@@ -1658,11 +1605,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         .to_string();
     let over_char_under = "关".repeat(OVER_CHAR_UNDER_CHARS);
     let budget = usize::try_from(BYTE_BUDGET).expect("the budget fits usize");
-    // the WHOLE budget by Unicode scalar count, but its standard serialized
-    // UTF-8 form (and even its bare text bytes) are outside it. The fitting item
-    // consumes a positive amount, so no byte-accounting page can admit this body
-    // under the same budget. This is the platform serialization, not the
-    // provider's private budget helper.
     assert!(
         over_char_under.chars().count() <= budget,
         "the body's Unicode scalar count is inside the whole budget"
@@ -1925,7 +1867,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "another subject is outside the grant's subject scope"
     );
 
-    // claiming the admin principal still sees only its granted context.
     let claimed_admin = recall_ok(
         &scoped,
         &memory_principal,
@@ -1954,7 +1895,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "the scoped effects travelled the scoped peer's own signed session"
     );
 
-    // space is the provider's own, never a local default that would answer here.
     match adapter
         .recall(
             &memory_principal,
@@ -1974,7 +1914,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
     adapter.close();
     responder_of(sdk_responder).await;
 
-    // itself wrote nothing.
     let pool = provider.pool().await;
     let spaces: Vec<String> = sqlx::query("SELECT DISTINCT space_id FROM records")
         .fetch_all(&pool)
@@ -2020,9 +1959,6 @@ async fn sdk_recall_selects_budgets_pages_and_cursors_on_the_durable_provider() 
         "the open releases its own admission"
     );
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// Deterministic in-memory provider adapter: no process, no model, no network.
 ///
@@ -2174,8 +2110,6 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     let subject_id = legacy::character_subject_id(&character_id);
     let (trap, dirs) = arm_legacy_traps(&env, Some(&character_id)).await;
 
-    // provider's binding-local fragment `fact` record the projection must
-    // serve. This write also ensures the Character provider subject.
     capture(
         &core,
         &principal,
@@ -2193,7 +2127,6 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
     .await
     .expect("review the binding-local digest");
 
-    // session: a real provider profile object, never a local file.
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
     match adapter
@@ -2230,8 +2163,6 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
             },
         )
         .await;
-    // admitted Character creative root this open pinned, so it is the user
-    // home — the root the production native boot hands the manager.
     let workspace_root = env.user_home.clone();
     let host_config = nexus_agent_host::config::AgentHostConfig {
         max_ops_per_session: 4,
@@ -2270,7 +2201,6 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
         .await
         .expect("the admitted Character host session is created");
 
-    // creation; only the delta across this execution is attributed to it.
     let profile_gets_before = probe.profile_gets();
     let record_lists_before = probe.record_lists();
     handle
@@ -2306,7 +2236,6 @@ async fn host_character_mind_projection_serves_soul_and_memory_from_the_remote_p
         prompts[0]
     );
 
-    // record; nothing of either came from a local file or the local provider.
     let pool = provider.pool().await;
     let (space_id, body, revision) = provider_personality(&pool, &subject_id)
         .await

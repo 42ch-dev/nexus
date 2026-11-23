@@ -284,9 +284,6 @@ impl Capability for EssayProjectScaffold {
         let (workspace_root, resolved_works) = resolve_works_dirs(executor, &self.works_root)?;
         let work_dir = resolved_works.join(&work_ref);
 
-        // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL. Only the ref is claimed here; the
-        // profile lands with the finished scaffold, and a failure restores it.
         let mut claim = claim_work_ref(
             self.pool.as_ref(),
             &inp.creator_id,
@@ -296,10 +293,6 @@ impl Capability for EssayProjectScaffold {
         .await?;
 
         let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
-            // rollback cannot be async); the file bytes go through the injected
-            // executor, so only rollback bookkeeping stays local. Every path it
-            // records is already absolute, so the guard compensates the same
-            // tree the port wrote.
             let mut tx = ScaffoldTransaction::new();
 
             let outlines_dir = work_dir.join("Outlines");

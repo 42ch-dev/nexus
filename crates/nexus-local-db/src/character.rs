@@ -482,7 +482,6 @@ async fn create_in_tx(
     .await;
     map_actor_constraint(insert)?;
 
-    // transaction, so the identity is never usable without its holder.
     ensure_character_holder_in_tx(tx, character_id).await?;
 
     let binding = insert_binding_tx(
@@ -641,8 +640,6 @@ pub async fn update_character(
     let mut tx = begin_immediate(pool).await?;
     let result = async {
         let current = require_active_owned_character_tx(&mut tx, owner_creator_id, character_id).await?;
-        // across the transition. A missing/corrupt holder fails closed rather
-        // than editing an identity that has none; a rename never changes it.
         require_subject_holder(&mut *tx, &HolderSubject::Character(character_id.to_string()))
             .await?;
         if current.revision != expected_revision { return Err(revision_conflict()); }
@@ -706,9 +703,6 @@ pub async fn transition_character(
     let mut tx = begin_immediate(pool).await?;
     let result = async {
         let current = require_owned_character(&mut tx, owner_creator_id, character_id).await?;
-        // fails closed when the registry row is missing or corrupt, and the row
-        // is never written by the transition (identity and lifecycle epoch are
-        // the only things that move).
         require_subject_holder(
             &mut *tx,
             &HolderSubject::Character(character_id.to_string()),
@@ -806,7 +800,6 @@ async fn delete_character_in_tx(
     if in_use > 0 {
         return Err(LocalDbError::actor_in_use());
     }
-    // transaction, so a refusal anywhere leaves both rows untouched.
     sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ? AND character_id = ?")
         .bind(&holder_entry_id)
         .bind(character_id)

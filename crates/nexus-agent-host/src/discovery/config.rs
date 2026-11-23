@@ -93,7 +93,6 @@ mod tests {
 
     #[test]
     fn enabled_provider_produces_entry() {
-        // configured `args` list is rejected before it can become a candidate.
         let config = make_config(vec![crate::config::ProviderConfig {
             id: "claude-native".to_string(),
             protocol: "native_cli".to_string(),
@@ -105,7 +104,6 @@ mod tests {
         let err = entries_from_config(&config).expect_err("native args must be rejected");
         assert_eq!(err.category(), "internal_host_error");
 
-        // config candidate, still unavailable until a bounded probe.
         let config = make_config(vec![crate::config::ProviderConfig {
             id: "claude-native".to_string(),
             protocol: "native_cli".to_string(),

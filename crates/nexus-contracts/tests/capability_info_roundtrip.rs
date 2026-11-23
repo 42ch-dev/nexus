@@ -11,7 +11,6 @@ use nexus_contracts::CapabilityInfo;
 
 #[test]
 fn missing_origin_deserializes_with_default_builtin() {
-    // back-compat: `origin` defaults to "builtin").
     let json = r#"{"name":"sync.pull","input_schema":"{}","output_schema":"{}"}"#;
     let info: CapabilityInfo = serde_json::from_str(json).expect("deserialize CapabilityInfo");
     assert_eq!(info.name, "sync.pull");

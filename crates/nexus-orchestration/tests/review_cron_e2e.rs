@@ -149,7 +149,6 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
     let work = novel_work("wrk_e2e", 3);
     works::create_work(&pool, &work).await.unwrap();
 
-    // mirroring what `creator works cron set --review ...` writes.
     let schedule_json = serde_json::json!({
         "tz": "UTC",
         "roles": {

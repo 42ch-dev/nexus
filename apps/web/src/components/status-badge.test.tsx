@@ -4,8 +4,6 @@ import { render } from '@testing-library/react';
 import { FindingStatusBadge } from './status-badge';
 
 /**
- * components.finding-status-pill).
- *
  * Pins: each of the 6 finding statuses consumes the projected
  * `finding-status-*` token classes (bg/text/border) — no raw color-mix
  * arbitrary classes.

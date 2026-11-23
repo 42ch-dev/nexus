@@ -33,7 +33,6 @@ async fn v1191_holder_ports_scoped_and_host_constructions_are_distinct() {
         "the host construction binds no knowledge scope"
     );
 
-    // than widening to an unscoped read.
     match host.get_knowledge_entry("kb_any").await {
         SpokeResult::Reject(r) => {
             assert_eq!(r.code, SpokeRejectCode::InternalError, "got {r:?}");

@@ -52,8 +52,6 @@ pub fn admission(
     op: &str,
     provider: &str,
 ) -> Result<Option<RequestScope>, SpokeReject> {
-    // mutate; it is the same table the receipt target uses, so no second op
-    // classification exists here.
     if required_capabilities(op).is_none() {
         return Ok(None);
     }

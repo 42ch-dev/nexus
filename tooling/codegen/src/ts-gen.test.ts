@@ -56,7 +56,6 @@ describe('unrestricted JSON values', () => {
       required: ['result'],
       additionalProperties: false,
       properties: {
-        // (mirrors core-tool-execute-response.result / serde_json::Value).
         result: { description: 'Tool-produced JSON result; any JSON value.' },
         typed: { type: 'object', description: 'still an object' },
         nested: { type: 'array', items: { description: 'element is any JSON' } },
@@ -77,7 +76,6 @@ describe('unrestricted JSON values', () => {
     const schema: Record<string, unknown> = {
       default: {},
       examples: [{ a: 1 }],
-      // title annotation keyword.
       properties: { title: { type: 'string' } },
     };
     rewriteUnrestrictedJsonValues(schema);
@@ -133,7 +131,6 @@ describe('$ref target dedupe', () => {
   });
 
   it('prefixes a descendant-directory import with ./', () => {
-    // `works/work-pool-entry` would resolve as a package specifier.
     const parent = schemaModule('core', 'WorkPoolListResponse', [
       'WorkPoolListResponse',
       'WorkPoolEntry',
@@ -155,7 +152,6 @@ describe('$ref target dedupe', () => {
   });
 
   it('keeps a declaration whose canonical module does not declare it', () => {
-    // so it must not be treated as the canonical home.
     const character = schemaModule('domain', 'Character', ['Character']);
     const actorRef = schemaModule('domain', 'CharacterActorRef', ['CharacterActorRef']);
     const source = ['export interface CharacterActorRef {', '  actor_kind: string;', '}'].join('\n');
@@ -164,7 +160,6 @@ describe('$ref target dedupe', () => {
   });
 
   it('removes a declaration whose body holds a nested template literal', () => {
-    // literal `/*` reads as a block comment and the declaration end is missed.
     const pattern = schemaModule('core/works', 'Pattern', ['Pattern']);
     const listResponse = schemaModule('core/works', 'PatternListResponse', [
       'PatternListResponse',
@@ -310,7 +305,6 @@ describe('stage-and-swap tree write', () => {
       releaseFirst = resolve;
     });
     const first = stageAndSwap(outDir, () => firstBuild);
-    // fail visibly rather than clear the staging tree out from under it.
     await expect(stageAndSwap(outDir, () => {})).rejects.toThrow(/another codegen run/);
 
     releaseFirst();
@@ -383,7 +377,6 @@ describe('CoreSliceClient staging', () => {
     const outDir = path.join(root, 'generated');
     const coreDir = path.join(outDir, 'core');
     fs.mkdirSync(coreDir, { recursive: true });
-    // staged tree; the client re-export is appended to it.
     fs.writeFileSync(path.join(coreDir, 'index.ts'), "export type { Foo } from './foo';\n");
 
     generateCoreSliceClient(outDir);

@@ -4,11 +4,6 @@ import { cn } from '../lib/cn';
 
 import { Badge } from './badge';
 
-/**
- * timeline_events, new_key_blocks, battle_report). All-optional/subset
- * fields keep the primitive compatible with the generated DTOs via
- * structural typing — the package never imports wire contracts.
- */
 export interface StateDeltaProposal {
   op: 'add' | 'sub' | 'set';
   path: string;
@@ -56,10 +51,6 @@ export interface ProposalSectionsProps {
   /** True when the response payload was truncated — renders the truncated note. */
   truncated?: boolean;
   copy: ProposalSectionsCopy;
-  /**
-   * `onToggleEvent` is supplied, each timeline event renders a checkbox
-   * keyed by its stable id `evt_<index>`; `selectedEventIds` drives state.
-   */
   selectedEventIds?: string[];
   onToggleEvent?: (eventId: string) => void;
   className?: string;

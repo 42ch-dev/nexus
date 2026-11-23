@@ -1,6 +1,3 @@
-/**
- * subtitle (`世界 · 时间线`, product-owned copy). Sits above the layer tabs.
- */
 import { useTranslation } from 'react-i18next';
 
 export function WorldHeader({ name }: { name: string }) {

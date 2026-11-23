@@ -1,6 +1,4 @@
 /**
- * (plan v1219-onboarding T4).
- *
  * Probe: the unguarded `GET /v1/daemon/daemon/status`. A rejected probe means
  * the service cannot be reached; a non-empty `degraded.subsystems` means it
  * answers but cannot serve the API. Both collapse into one structured reason
@@ -64,8 +62,6 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
   const [reason, setReason] = useState<ServiceDegradedReason | null>(null);
   const [checking, setChecking] = useState(false);
   const mounted = useRef(false);
-  // longer the latest (a newer probe started, or the component unmounted)
-  // must not overwrite the newer outcome.
   const generation = useRef(0);
 
   /** @returns whether the service answered and this probe is still the latest. */
@@ -77,11 +73,8 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
       const status = await client.daemonStatus();
       if (!isLatest()) return false;
       const subsystems = completed ? status.degraded.subsystems : [];
-      // flash setup guidance while it is still in flight.
       setReason(subsystems.length > 0 ? { kind: 'subsystems', subsystems } : null);
       if (subsystems.length === 1 && subsystems[0] === 'engine') {
-        // either no provider selected (setup guidance) or a selected provider
-        // whose readiness probe failed (a real failure — keep the surface).
         const runtime = await client.runtimeStatus().catch(() => null);
         if (!isLatest()) return false;
         if (runtime?.workspace_initialized) {
@@ -117,7 +110,6 @@ export function ServiceStatusProvider({ children }: { children: ReactNode }) {
   }, [probe]);
 
   const retry = useCallback(async () => {
-    // recovered, initialized service from leaving the app on the wizard route.
     if (await probe()) await refresh();
   }, [probe, refresh]);
 

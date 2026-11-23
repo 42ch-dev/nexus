@@ -3,10 +3,6 @@ import { cn } from '../lib/cn';
 import { Button } from './button';
 import { RunStatusBadge, type RunStatus } from './run-status-badge';
 
-/**
- * this shape (preformatted local-time strings, resolved module/world
- * titles, i18n status label) — the table never formats or fetches.
- */
 export interface RunTableRow {
   runId: string;
   moduleName: string;
@@ -127,7 +123,6 @@ export function RunsTable({ rows, copy, onOpenRun, className }: RunsTableProps) 
                     aria-label={copy.copyIdLabel}
                     className="text-label-12 text-gray-700 underline decoration-gray-alpha-500 underline-offset-2 hover:text-gray-1000"
                     onClick={() => {
-                      // leave the visible mono id as the fallback.
                       void navigator.clipboard?.writeText(row.runId).catch(() => {});
                     }}
                     data-testid={`runs-table-copy-${row.runId}`}

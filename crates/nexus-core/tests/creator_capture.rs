@@ -130,7 +130,6 @@ async fn creator_capture_review_promote_round_trip() {
     assert!(response.success);
     assert_eq!(response.pending_id, PENDING);
 
-    // captured field preserved.
     let pending = core
         .list_pending_reviews(&principal, None, 50)
         .await
@@ -159,7 +158,6 @@ async fn creator_capture_review_promote_round_trip() {
         1
     );
 
-    // (`chapter` → the `story_summary` authored kind) and the world context.
     let candidates = pending_candidates(&core).await;
     assert_eq!(candidates.len(), 1, "one pending candidate");
     let candidate = &candidates[0];
@@ -179,8 +177,6 @@ async fn creator_capture_review_promote_round_trip() {
         "session_id is the source anchor"
     );
 
-    // command runs. The captured candidate is what it consumes; `chapter` with
-    // a high-signal digest classifies as `PromoteToLongTerm`.
     let reviewed = core
         .review_memory(
             &principal,
@@ -196,7 +192,6 @@ async fn creator_capture_review_promote_round_trip() {
     assert_eq!(reviewed.processed, Some(1));
     assert_eq!(reviewed.has_more, Some(false));
 
-    // queue is consumed.
     let records = core
         .list_creator_memories(&principal)
         .await
@@ -217,8 +212,6 @@ async fn creator_capture_review_promote_round_trip() {
     );
     assert_eq!(pending_candidates(&core).await.len(), 0);
 
-    // not-found answer — only a dismissal that itself consumed the row answers
-    // success (fix round 4, F3).
     let late = core
         .delete_pending_review(&principal, PENDING.to_string())
         .await

@@ -397,8 +397,6 @@ impl ProviderEventReader {
     ) -> PullStage {
         let mut state = self.pull_state.lock().await;
         if let Some(reason) = state.gap {
-            // may still have the terminal queued behind it; a lost OBSERVATION
-            // source reports no more data at all, and never completion.
             let has_more =
                 reason == ProviderEventBatchGapReason::Oversized && !state.terminal_delivered;
             return PullStage::Batch(ProviderEventBatch {
@@ -437,7 +435,6 @@ impl ProviderEventReader {
             });
         }
         if state.terminal_pending {
-            // not read past it, and do not report completion yet.
             return PullStage::Batch(ProviderEventBatch {
                 operation_id: operation_id.to_string(),
                 events: std::mem::take(events),
@@ -469,9 +466,6 @@ impl ProviderEventReader {
                     let size = serde_json::to_vec(&wire).map_or(0, |bytes| bytes.len());
                     let terminal = is_terminal(&event);
 
-                    // fit an *empty* batch under the caller's byte cap — can
-                    // never be delivered, so deferring it would spin forever.
-                    // That is a typed gap, never a partial or silent drop.
                     if size > MAX_EVENT_BYTES || size > cap_bytes as usize {
                         self.pull_state.lock().await.gap =
                             Some(ProviderEventBatchGapReason::Oversized);
@@ -515,7 +509,6 @@ impl ProviderEventReader {
                 }
                 Some(Err(err)) => {
                     if self.observation {
-                        // source is no longer trustworthy for this operation.
                         return Ok(PullStage::Batch(
                             self.lost_source(operation_id, events).await,
                         ));
@@ -524,14 +517,10 @@ impl ProviderEventReader {
                 }
                 None => {
                     if self.observation {
-                        // dropped) without this operation's terminal: a resync
-                        // gap, never an EOF a consumer could read as a
-                        // successful completion.
                         return Ok(PullStage::Batch(
                             self.lost_source(operation_id, events).await,
                         ));
                     }
-                    // deferred item — a terminal above all — has been delivered.
                     let mut state = self.pull_state.lock().await;
                     if !state.pending.is_empty() {
                         return Ok(PullStage::Batch(ProviderEventBatch {
@@ -776,8 +765,6 @@ impl ProviderPortAdapter {
             .exec(session_id.clone(), op)
             .await
             .map_err(|err| host_error_to_core_error(&err))?;
-        // the active control operation. Publish that same identity for both
-        // cancellation and terminal delivery rather than inventing a wire ID.
         let op_id = match op_id {
             Some(op_id) => op_id,
             None => self
@@ -790,7 +777,6 @@ impl ProviderPortAdapter {
                 .and_then(|session| session.active_op_id)
                 .ok_or_else(|| internal_error("control operation has no active host identity"))?,
         };
-        // RPC. Correlate it after HostManager applies its lifecycle transition.
         let stream = if control {
             let wire_id = op_id.clone();
             Box::pin(stream.map(move |event| {
@@ -826,7 +812,6 @@ impl ProviderPortAdapter {
             .ok_or_else(|| invalid_input("cancel requires operation_id"))?;
         let op_id = Self::parse_operation_id(op_raw)?;
         let op_id_str = op_id.to_string();
-        // session to Cancelling. DSH's adapter-level no-op is not cancellation.
         let sessions = self
             .host
             .list_sessions()
@@ -944,9 +929,6 @@ impl ProviderPort for ProviderPortAdapter {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        // the bounded-pull accounting itself lives in the shared
-        // [`ProviderEventReader`], so this port and the core Host observation
-        // cannot drift on limits, deferral or terminal delivery.
         let reader = self
             .operations
             .get(&operation_id)
@@ -1172,7 +1154,6 @@ mod tests {
             ])),
         );
 
-        // filler is delivered and the terminal must be deferred, not dropped.
         let cap = wire_size(&status_event("filler")) + wire_size(&terminal_event()) - 1;
 
         let first = port
@@ -1329,8 +1310,6 @@ mod tests {
                 CoreErrorCode::Busy,
                 503,
             ),
-            // invariant violations are typed `internal`/500, never reported as
-            // a client error and never collapsed into a generic refusal.
             (
                 HostError::LaunchFailed {
                     provider_id: provider.clone(),
@@ -1380,7 +1359,6 @@ mod tests {
             );
         }
 
-        // not drift: policy denial stays 403 rather than collapsing to 400.
         let denied = HostError::PolicyDenied {
             provider_id: None,
             session_id: None,
@@ -1452,8 +1430,6 @@ mod tests {
 
     #[tokio::test]
     async fn observation_source_loss_is_a_typed_resync_gap() {
-        // source is not the operation's own stream, so its loss can never be
-        // read as a clean completion.
         let items = || {
             Box::pin(futures_util::stream::iter(vec![Ok(status_event("first"))])) as HostEventStream
         };
@@ -1475,7 +1451,6 @@ mod tests {
         assert_eq!(gap.reason, ProviderEventBatchGapReason::Lagging);
         assert!(gap.resync_required);
 
-        // instead of turning it into completion.
         let second = observed.next("op-obs".to_string(), 16, 4096).await.unwrap();
         assert!(second.events.is_empty());
         assert!(!second.has_more);

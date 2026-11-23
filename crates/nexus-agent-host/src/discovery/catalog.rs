@@ -51,9 +51,6 @@ impl ProviderCatalog {
         for provider_config in &config.providers {
             let pid = ProviderId::new(&provider_config.id);
             if provider_config.enabled {
-                // `validate_provider_config` gate as `entries_from_config`, so
-                // an unsupported native id, a missing/blank command, or
-                // non-empty native args can never become a catalog candidate.
                 validate_provider_config(provider_config)?;
                 let protocol_kind = provider_config.protocol_kind()?;
                 let launch = match protocol_kind {
@@ -81,9 +78,6 @@ impl ProviderCatalog {
                     source: DiscoverySource::Config,
                     trust: TrustLevel::Explicit,
                     capabilities: caps,
-                    // process has been spawned at catalog load. `available`
-                    // means "configured and enabled", never "a launch
-                    // succeeded" (agent-host.md §4 V1.186 lock).
                     health: candidate_unavailable_health(
                         &pid,
                         "configured candidate; bounded probe required",
@@ -141,7 +135,6 @@ impl ProviderCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // but not by the non-test catalog path, so it is imported here.
     use crate::capability::model::ProviderHealth;
     use std::collections::HashMap;
 

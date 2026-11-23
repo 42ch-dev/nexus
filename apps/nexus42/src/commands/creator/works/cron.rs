@@ -125,10 +125,6 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
         validate_tz(tz)?;
     }
 
-    // `--<role> EXPR --no-<role>` self-contradictions before mutating. The
-    // pre-fix path silently last-write-wins (cron expression stored but
-    // role disabled), which is confusing to read back via `cron show`.
-    // The error names both flags so the author can spot the typo.
     for (role, has_expr, disabled) in [
         ("brainstorm", args.brainstorm.is_some(), args.no_brainstorm),
         ("write", args.write.is_some(), args.no_write),
@@ -175,16 +171,11 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
         }
     } else {
         schedule = WorkSchedule::defaults();
-        // `handle_set`) when resetting, so NEXUS_TZ / UTC land correctly. The
-        // raw CLI args have `tz=None` on a reset, so this only fires when the
-        // caller folded a concrete TZ into `effective_args`.
         if let Some(tz) = &args.tz {
             schedule.tz.clone_from(tz);
         }
     }
 
-    // author explicitly passes `--all-off`. Reject empty schedules with a
-    // stable error code so the foundation contract is enforced at config time.
     let any_enabled = schedule.roles.brainstorm.enabled
         || schedule.roles.write.enabled
         || schedule.roles.review.enabled;
@@ -558,8 +549,6 @@ async fn handle_set(
     };
 
     #[cfg(not(unix))]
-    // shared-DB write access is WAL-governed (P2 spec § Coexistence) — no
-    // advisory lock, proceed unlocked.
     let _file_lock = ();
 
     // The previous path (`get → apply → set`) was an unconditional
@@ -573,9 +562,6 @@ async fn handle_set(
     let stored = nexus_local_db::works::get_schedule_json(pool, &work_id).await?;
     let base = resolve_schedule(stored.as_deref());
 
-    // path (no flags) or when `--tz` is passed. A role-only patch without
-    // `--tz` must preserve the previously-configured `base.tz` — folding the
-    // env/default here used to silently clobber it.
     let is_reset = args.brainstorm.is_none()
         && args.write.is_none()
         && args.review.is_none()
@@ -601,7 +587,6 @@ async fn handle_set(
         .map_err(|e| CliError::Other(format!("schedule_json serialization failed: {e}")))?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    // pre-image; the UPDATE only applies if the row still matches.
     let mut tx = pool
         .begin()
         .await
@@ -616,7 +601,6 @@ async fn handle_set(
     .await
     .map_err(|e| CliError::Other(format!("schedule_json CAS write failed: {e}")))?;
     if !applied {
-        // CLI) raced ahead. Roll back and surface a retry hint.
         let _ = tx.rollback().await;
         return Err(CliError::Config(
             "schedule_json changed by another writer between read and write; \
@@ -628,13 +612,6 @@ async fn handle_set(
         .await
         .map_err(|e| CliError::Other(format!("schedule_json transaction commit failed: {e}")))?;
 
-    // (`nexus_orchestration::schedule::cron_supervisor`) memoises parsed
-    // `cron::Schedule`s per `(work_id, role)` keyed on the raw cron string.
-    // The cache self-heals on content drift, but a successful
-    // `schedule_json` write is the authoritative moment to drop every stale
-    // entry (e.g. a role config removed entirely) so no cached parse lingers
-    // across the user-visible config change. The evaluator is read-only on
-    // `schedule_json`, so this CLI write site is the only invalidation hook.
     nexus_orchestration::schedule::cron_supervisor::invalidate_cron_schedule_cache();
 
     if json {
@@ -686,7 +663,6 @@ async fn handle_list(
         .collect();
 
     if json {
-        // `work_ref` so machine consumers can always identify the row.
         let json_rows: Vec<serde_json::Value> = rows.iter().map(list_row_to_json).collect();
         println!(
             "{}",
@@ -717,7 +693,6 @@ async fn resolve_work_id(
 }
 
 #[cfg(test)]
-// `.unwrap()` keeps assertion intent readable; panics surface test names.
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
@@ -855,7 +830,6 @@ mod tests {
         ] {
             let base = WorkSchedule::defaults();
             let mut args = CronSetArgs::default();
-            // role names (cheaper than three near-identical literals).
             match role_expr_field {
                 "brainstorm" => args.brainstorm = Some(DEFAULT_BRAINSTORM_CRON.to_string()),
                 "write" => args.write = Some(DEFAULT_WRITE_CRON.to_string()),
@@ -950,8 +924,6 @@ mod tests {
             "schedule object must be present"
         );
 
-        // gap — `work_ref: null` must not leave the consumer without any
-        // identifier).
         let row_no_ref = ListRow {
             work_ref: None,
             work_id: "wrk_999".to_string(),
@@ -1004,7 +976,6 @@ mod tests {
 
     #[test]
     fn set_no_review_preserves_custom_tz() {
-        // no --tz. apply_set_args must leave base.tz unchanged (R-V150P0-W1).
         let mut base = WorkSchedule::defaults();
         base.tz = "Asia/Shanghai".to_string();
         let args = CronSetArgs {

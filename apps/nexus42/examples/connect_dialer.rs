@@ -105,7 +105,6 @@ async fn main() {
         session.negotiated_capabilities()
     );
 
-    // session staying open (N-C0 §3).
     let mut failures = Vec::new();
     for op in CORE_OPS.iter().chain(std::iter::once(&"garbage-op")) {
         match session

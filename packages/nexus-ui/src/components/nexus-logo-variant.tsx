@@ -20,9 +20,6 @@ import {
 export type { LogoVariantPalette, LogoVariantTheme };
 
 export interface NexusLogoVariantProps {
-  /**
-   * unless `palette` is provided. Not a product theme preference.
-   */
   theme?: LogoVariantTheme;
   /** Explicit gradient stops; overrides `theme` defaults when set. */
   palette?: LogoVariantPalette;

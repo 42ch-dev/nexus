@@ -23,9 +23,6 @@ const AUTH = { endpointOrigin: 'https://daemon.example.com:8443', apiKey: 'sk-li
 const GOOD_URL = 'https://daemon.example.com:8443/v1/daemon/runtime/discovery';
 const FETCH = { url: GOOD_URL, resourceType: 'fetch' };
 
-/**
- * (`Record<string, string>`), case-insensitively.
- */
 function headerValue(headers, name) {
   if (headers == null || typeof headers !== 'object' || Array.isArray(headers)) {
     throw new Error(`requestHeaders must be Electron's header map, got: ${JSON.stringify(headers)}`);

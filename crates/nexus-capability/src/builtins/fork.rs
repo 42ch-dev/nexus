@@ -128,18 +128,11 @@ impl Capability for ForkCreate {
 
         let new_branch_id = generate_fork_branch_id();
 
-        // new branch at sequence_no 0. This establishes the branch in storage
-        // (lazy forks are otherwise invisible until the first real event).
         let label = parsed.label.clone().unwrap_or_else(|| "fork".to_string());
         let marker_summary = format!(
             "forked from {}/{} ({label})",
             parsed.parent_branch_id, parsed.forked_from_event_id
         );
-        // marker is written `status=canon` with structured lineage in
-        // `extensions_nexus_json` (`fork_lineage`). Canon status reflects that
-        // a fork creation is a committed structural fact and makes the marker
-        // findable in the canon-default timeline read; lineage surfaces via
-        // `TimelineEventInfo.extensions` on the existing timeline-events route.
         let lineage_json = json!({
             "fork_lineage": {
                 "parent_branch_id": &parsed.parent_branch_id,
@@ -365,11 +358,6 @@ mod tests {
             .unwrap();
         let new_branch = out["branch_id"].as_str().unwrap();
 
-        // SQL the timeline-events route runs (`status` defaults to `canon`,
-        // `event_type` exact-match; see `list_timeline_events_page`). This
-        // verifies the Narrative-layer read does not choke on the
-        // `fork_created` event type (plan risk: canon-merge/overview
-        // interaction).
         let rows = nexus_local_db::narrative_gateway::list_timeline_events_page(
             &pool,
             &world_id,
@@ -394,7 +382,6 @@ mod tests {
             extensions["fork_lineage"]["forked_from_event_id"],
             fork_point
         );
-        // must carry the canonical `"fork"` default.
         assert_eq!(extensions["fork_lineage"]["label"], "fork");
     }
 }

@@ -26,7 +26,6 @@ function enterOf(node: IrNode): PresetEnterTask[] {
     name: action.name ?? action.tool_name ?? undefined,
     args: action.args as Record<string, unknown> | undefined,
   }));
-  // kind column reads `judge` or `manual_wait` instead of `unknown`.
   return actions.length > 0 ? actions : [{ kind: node.kind }];
 }
 
@@ -48,7 +47,6 @@ function nextOf(outgoing: IrEdge[]): PresetState['next'] {
 }
 
 export function parsedPresetFromIr(document: WorkflowDocument): ParsedPreset {
-  // state transition.
   const transitions = document.edges.filter((edge) => edge.kind !== 'depends_on');
   const states: PresetState[] = document.nodes
     .filter((node) => NON_STATE_KINDS[node.kind] !== true)

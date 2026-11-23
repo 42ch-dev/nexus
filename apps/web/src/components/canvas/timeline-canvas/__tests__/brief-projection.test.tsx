@@ -64,7 +64,6 @@ function eraEntity(
     key_block_id,
     block_type: 'era',
     canonical_name,
-    // `body.attributes` (`era_id`, `start_hint`, `end_hint`, `world_summary`).
     body: body ?? {
       attributes: {
         era_id: 'era-1',
@@ -159,7 +158,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     );
     const { nodes } = adapter.projectGraph(graph);
 
-    // empty-state copy; Task 2 just guarantees no non-era leakage).
     expect(nodes).toEqual([]);
   });
 
@@ -297,7 +295,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Brief projection (block
     const { nodes } = adapter.projectGraph(graph);
     const node = nodes[0] as Node<TimelineNodeData>;
 
-    // Brief-era inspector (Task 4).
     expect(node.data.eraId).toBe('era-first');
     expect(node.data.startHint).toBe('1000-01-01T00:00:00Z');
     expect(node.data.endHint).toBe('1100-01-01T00:00:00Z');
@@ -407,8 +404,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Narrative projection (V
   });
 
   it('excludes era entities from the Narrative context clusters (architect §5.2)', () => {
-    // `entities.filter(e => !['event','era'].includes(e.block_type))`. An
-    // era entity MUST NOT appear as a Context cluster on the Narrative
     const era = eraEntity({
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
@@ -439,7 +434,6 @@ describe('TimelineCanvasAdapter.projectGraphForLayer — Narrative projection (V
 
 describe('TimelineCanvasAdapter.projectGraph — default layer delegation', () => {
   it("default active layer is 'narrative' when no layer is passed to the factory (V1.122 backward compat)", () => {
-    // event+context node types, ordering disclaimer) MUST stay green.
     const event = entity({
       key_block_id: 'kb-event-1',
       block_type: 'event',
@@ -504,8 +498,6 @@ describe('TimelineCanvasAdapter — node-type registry (V1.123 P1 T2 + V1.126 P1
         'timeline-compute-result',
         'timeline-event',
         'timeline-key-block',
-        // components (World-Moment feel ≡ Work-Moment feel; no new node
-        // component family).
         'work-timeline-moment-beat',
         'work-timeline-moment-scene',
       ].sort(),

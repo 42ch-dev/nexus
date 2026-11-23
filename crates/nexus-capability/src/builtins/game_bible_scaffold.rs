@@ -359,9 +359,6 @@ impl Capability for GameBibleProjectScaffold {
         let logs_design_dir = logs_dir.join("design");
         let logs_review_dir = logs_dir.join("review");
 
-        // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL. Only the ref is claimed here; the
-        // profile lands with the finished scaffold, and a failure restores it.
         let mut claim = claim_work_ref(
             self.pool.as_ref(),
             &inp.creator_id,

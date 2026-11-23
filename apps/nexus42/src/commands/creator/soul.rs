@@ -247,8 +247,6 @@ mod tests {
 
     #[test]
     fn push_personality_identity_is_never_fabricated() {
-        // fallback printed an empty memory id and a made-up `personality_core`
-        // kind (fix round 3, F5).
         assert_eq!(
             personality_identity_lines(None),
             [] as [String; 0],

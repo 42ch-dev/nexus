@@ -35,8 +35,6 @@ const CONSUMER_FIXTURES_DIR = join(REPO_ROOT, CONSUMER_FIXTURES_PATH);
 const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.json";
 
 /**
- * fixture that consumes it or explicitly without one and why.
- *
  * @param {Record<string, string | null>} entries
  * @returns {string}
  */
@@ -61,9 +59,6 @@ function consumerAccounting(entries) {
 /** Kept in sync with the checker's scratch prefix. */
 const SCRATCH_PREFIX = "nexus-contract-package-";
 
-/**
- * for it, so the script's run loop is testable without a network.
- */
 const TINY_CRATE_DIR = "tiny-contract";
 const TINY_MANIFEST = [
   "[package]",
@@ -109,9 +104,6 @@ function tinyFixture(options = {}) {
 }
 
 /**
- * `<caseDir>/subject`, with `<caseDir>/consumer` installed under the discovery
- * path the checker reads for that entry.
- *
  * @param {string} caseDir Fixture case directory name.
  * @param {string} entryName Contract carrier and discovery name.
  * @param {{ initGit?: boolean }} [options] `initGit: false` lets a test add
@@ -253,7 +245,6 @@ test("staging fails closed when Git cannot list the working source", () => {
         2,
       )}\n`,
     );
-    // of falling back to a verbatim, ignore-blind copy.
     assert.throws(
       () => checkContractPackageability(dir),
       /staging failed: git ls-files failed/,
@@ -294,7 +285,6 @@ test("staging leaves gitignored working files out of the packed archive", () => 
     initGit: false,
   });
   try {
-    // into staging, Cargo would pack it and the consumer build would run it.
     writeRepoFile(dir, ".gitignore", "build.rs\n");
     writeRepoFile(
       dir,
@@ -430,7 +420,6 @@ test("a consumer-supplied Cargo config is refused before any resolution", () => 
       row.consumer.cause,
       /consumer fixture supplies its own Cargo config/,
     );
-    // patched or resolved, and Cargo produced no output.
     assert.deepEqual(row.consumer.declared, []);
     assert.deepEqual(row.consumer.patched, []);
     assert.deepEqual(row.consumer.resolved, []);
@@ -441,10 +430,6 @@ test("a consumer-supplied Cargo config is refused before any resolution", () => 
   }
 });
 
-/**
- * the temp workspace so workspace inheritance and `[workspace.dependencies]`
- * stay the product's own; only the entries a case names in its carrier pack.
- */
 const CONSUMER_CLOSURE = [
   "nexus-contracts",
   "nexus-workflow-ir",
@@ -454,12 +439,6 @@ const CONSUMER_CLOSURE = [
 ];
 
 /**
- * consumer fixture installed under the discovery path the checker reads. The
- * workspace root is the real root manifest with its member list narrowed to
- * the closure, so the fixture inherits the product dependency table instead of
- * duplicating it; versions stay the real literals, so the fixture's caret
- * requirements mean what a registry consumer would mean.
- *
  * @param {string} entryName Consumer fixture and packed entry name.
  * @param {string[]} entries Entries the carrier packages for this case.
  * @returns {string}
@@ -525,10 +504,6 @@ function rowFor(report, name) {
 }
 
 /**
- * with one consumer fixture installed under the discovery path the checker
- * reads. Standalone crates cannot be workspace members, so the root is an empty
- * virtual workspace and the carriers are the only entries that pack.
- *
  * @param {string} entryName Consumer fixture and packed entry name.
  * @param {string[]} modules `modules/<name>` crates the case needs.
  * @returns {string}
@@ -594,7 +569,6 @@ test("the contracts consumer round-trips a generated object from its archive", (
     );
     assert.equal(consumed.source, `archive:${row.archive.sha256}`);
     assert.ok(consumed.manifest.includes("archives"), consumed.manifest);
-    // ran to the end of its checks.
     assert.match(
       row.consumer.output,
       /nexus-contracts round-tripped wld_0123456789/,
@@ -653,8 +627,6 @@ test("the pattern consumer scans every packed package and pins its template memb
       row.consumer.patched.map((patched) => patched.name),
       ["nexus-contracts", "nexus-pattern", "nexus-workflow-ir"],
     );
-    // packed fixture members, so this line is archive evidence: all three
-    // shipped directories load and all three templates match their IR hashes.
     assert.match(
       row.consumer.output,
       /nexus-pattern scanned 3 packed packages \(2 available\) and pinned 3 template members to their archive IR hashes/,
@@ -671,10 +643,6 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
     "nexus-pattern",
   ]);
   try {
-    // dropping one from the tracked source must break the consumer build rather
-    // than leave a smaller archive that still passes. `verdict.md` is the member
-    // the package's own tests never read, which is exactly the gap I-000533
-    // named.
     rmSync(
       join(
         dir,
@@ -686,8 +654,6 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
 
     const report = checkContractPackageability(dir);
     assert.equal(report.ok, false);
-    // coverage proof of the archives it consumes; the failing consumer keeps
-    // its own named cause below.
     assert.notEqual(report.firstFailure, null);
 
     const row = rowFor(report, "nexus-pattern");
@@ -779,7 +745,6 @@ test("the module-test consumer runs its ABI tests against the dev-dependency fro
       row.consumer.patched.map((patched) => patched.name),
       ["nexus-module-sdk", "nexus-module-test"],
     );
-    // and the checker must have run it with `cargo test`.
     assert.equal(row.consumer.mode, "test");
     assert.match(row.consumer.output, /running 2 tests/);
     assert.match(row.consumer.output, /test result: ok\. 2 passed/);
@@ -825,7 +790,6 @@ test("the narrative consumer reads a world and its KbStore entries from archives
       /nexus-narrative read back world wld_consumer with entry kb_/,
     );
 
-    // knowledge package needs no fixture of its own to earn that evidence.
     for (const name of ["nexus-contracts", "nexus-knowledge", "nexus-narrative"]) {
       const resolved = row.consumer.resolved.find((entry) => entry.name === name);
       assert.equal(
@@ -840,7 +804,6 @@ test("the narrative consumer reads a world and its KbStore entries from archives
       );
     }
     assert.equal(rowFor(report, "nexus-knowledge").consumer, null);
-    // resolved graph pulled the archive in.
     assert.deepEqual(rowFor(report, "nexus-knowledge").coveredBy, [
       `${CONSUMER_FIXTURES_PATH}/nexus-narrative`,
     ]);
@@ -861,7 +824,6 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
       "../../.agents/skills/probe",
       join(dir, ".claude/skills/probe"),
     );
-    // is still one tree entry with its own bytes, and staging must copy it.
     symlinkSync("../../.agents/skills/absent", join(dir, ".claude/skills/absent"));
     gitOk(dir, ["add", "-A"]);
     gitOk(dir, [
@@ -876,13 +838,10 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
 
     const report = checkContractPackageability(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
-    // relative link must verify as that revision, or no plan can use the
-    // receipt (`unclean-evidence`).
     assert.equal(report.source.clean, true, JSON.stringify(report.source));
     assert.equal(report.source.mismatch, undefined);
     const sha = report.source.sha;
 
-    // so this is not a check that stopped checking.
     const stage = mkdtempSync(join(tmpdir(), "nexus-stage-link-"));
     try {
       cpSync(dir, stage, {
@@ -908,7 +867,6 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
 test("an archive no passing consumer consumes fails as a pack-only result", () => {
   const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
   try {
-    // fixture is absent and nothing else consumes it.
     writeRepoFile(dir, `${TINY_CRATE_DIR}/Cargo.toml`, TINY_MANIFEST);
     writeRepoFile(dir, `${TINY_CRATE_DIR}/src/lib.rs`, "pub fn tiny() {}\n");
     const carrier = JSON.parse(readFileSync(join(dir, VERSION_BRACKETS_PATH), "utf8"));
@@ -946,7 +904,6 @@ test("an archive no passing consumer consumes fails as a pack-only result", () =
       uncovered.cause,
       "pack-only: no passing consumer consumes nexus-tiny-contract",
     );
-    // requirement, not a global switch.
     const covered = rowFor(report, "nexus-fixture-public");
     assert.equal(covered.ok, true, covered.cause ?? "");
     assert.equal(covered.consumer.ok, true);
@@ -972,7 +929,6 @@ test("--require-clean refuses a dirty tree and emits no receipt", () => {
     assert.match(refused.stderr, /refused: unclean-evidence/);
     assert.equal(refused.stdout.trim(), "", "no receipt on an unclean tree");
 
-    // opt-in for the step that produces evidence.
     const plain = runReleaseScript(
       "check-contract-packageability.mjs",
       ["--json"],
@@ -986,9 +942,6 @@ test("--require-clean refuses a dirty tree and emits no receipt", () => {
 });
 
 test("a filtered path is compared by the blob Git stores, not its working-tree bytes", () => {
-  // stored blob is a pointer rather than the checkout's bytes. Comparing the
-  // staged file raw reported every clean checkout as unclean; the comparison
-  // must run Git's own conversion over the staged copy.
   const dir = tinyFixture();
   const stage = mkdtempSync(join(tmpdir(), "nexus-stage-filter-"));
   try {
@@ -1046,10 +999,6 @@ test("a patch a consumer declares but never resolves does not count as coverage"
         2,
       )}\n`,
     );
-    // declared dependency (so the checker supplies the patch), but it never
-    // enters the resolved graph, and the fixture itself still builds and runs.
-    // `patched` therefore says the archive was offered, not that anything used
-    // it.
     writeRepoFile(
       dir,
       `${CONSUMER_FIXTURES_PATH}/nexus-tiny-contract/Cargo.toml`,
@@ -1083,7 +1032,6 @@ test("a patch a consumer declares but never resolves does not count as coverage"
     assert.equal(report.ok, false);
     const row = rowFor(report, "nexus-tiny-contract");
     assert.equal(row.ok, false);
-    // because nothing resolved that archive.
     assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
     assert.deepEqual(
       row.consumer.patched.map((patched) => patched.name),
@@ -1130,7 +1078,6 @@ test("removing a declared fixture fails until the accounting is edited", () => {
       /consumer accounting failed: .*nexus-fixture-public declares the fixture nexus-fixture-public, which is not in the tree/,
     );
 
-    // makes the same tree a legitimate pack-only run.
     writeRepoFile(
       dir,
       CONSUMER_ACCOUNTING_PATH,
@@ -1152,10 +1099,6 @@ test("removing a declared fixture fails until the accounting is edited", () => {
 });
 
 test("the declared fixture directory is the one that runs", () => {
-  // an accepted deliberate act. The record names the directory that runs, so
-  // the evidence cannot describe a fixture the run never staged, and a declared
-  // runner cannot be skipped while the row stays green through another
-  // fixture's coverage.
   const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
   try {
     renameSync(
@@ -1178,9 +1121,6 @@ test("the declared fixture directory is the one that runs", () => {
 });
 
 test("declaring another entry's fixture fails as a misdirected declaration", () => {
-  // contracts only, while the `nexus-pattern` fixture is what actually resolves
-  // the workflow-ir archive. The row must not stay green on the pattern
-  // fixture's coverage: the declared runner is a claim about its own entry.
   const dir = realConsumerRepo("nexus-pattern", [
     "nexus-contracts",
     "nexus-workflow-ir",
@@ -1208,7 +1148,6 @@ test("declaring another entry's fixture fails as a misdirected declaration", () 
     assert.equal(report.ok, false);
     const misdirected = rowFor(report, "nexus-workflow-ir");
     assert.equal(misdirected.ok, false);
-    // consumed by another fixture, so this is not a coverage gap.
     assert.equal(misdirected.consumer.ok, true, misdirected.consumer.cause ?? "");
     assert.equal(
       misdirected.consumer.case,

@@ -58,7 +58,6 @@ export function ReadingProgress() {
     const flush = () => {
       frame = 0;
       const scrollable = scrollContainer.scrollHeight - scrollContainer.clientHeight;
-      // zero rather than dividing by zero.
       const ratio = scrollable > 0 ? scrollContainer.scrollTop / scrollable : 0;
       setPct(Math.max(0, Math.min(100, Math.round(ratio * 100))));
     };

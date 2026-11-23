@@ -1,6 +1,4 @@
 /**
- * bind and the per-character authoring surfaces.
- *
  * The list keeps the server's order; create posts `{ display_name, world_id }`
  * to POST /v1/daemon/characters and refreshes the list; the bindings panel
  * opens per character and adds a World binding via
@@ -238,10 +236,6 @@ describe('CharactersPage', () => {
       ];
     }
 
-    /**
-     * artifact queries. msw picks the FIRST matching handler in a batch, so
-     * per-test handlers must precede the baseline.
-     */
     function useArtifactsPage(handlers: RequestHandler[] = []) {
       useHandlers(
         http.get('/v1/daemon/characters', () =>
@@ -439,7 +433,6 @@ describe('CharactersPage', () => {
       await openArtifacts(user);
 
       await screen.findByText('Bind the character to a world before reading beliefs.');
-      // binding row and an empty selection there is no code path that fires it.
       expect(tomCalls).toBe(0);
     });
 
@@ -566,7 +559,6 @@ describe('CharactersPage', () => {
         expect(detailCalls).toBe(0);
         await user.click(screen.getByRole('button', { name: 'Edit' }));
 
-        // returned summary prefills the form.
         const form = await screen.findByRole('form', { name: 'Edit entry' });
         await waitFor(() => expect(detailCalls).toBe(1));
         const nameInput = within(form).getByLabelText('Canonical name');
@@ -615,7 +607,6 @@ describe('CharactersPage', () => {
         let createdBody: Record<string, unknown> | null = null;
         let characterPathPosts = 0;
         useArtifactsPage([
-          // address-split violation this test pins against.
           http.post(`/v1/daemon/characters/${characterId}/knowledge`, () => {
             characterPathPosts += 1;
             return HttpResponse.json({ item: entry }, { status: 201 });
@@ -675,8 +666,6 @@ describe('CharactersPage', () => {
     });
 
     it('drops per-character panel state and never reads the cross pair', async () => {
-      // remount key, switching A → B carries `editingId` over and fires a
-      // detail read for (B, A's entry) — the cross pair this test pins down.
       const bDetailReads: string[] = [];
       useHandlers(
         http.get('/v1/daemon/characters', () =>
@@ -744,7 +733,6 @@ describe('CharactersPage', () => {
       await screen.findByText('World bindings — Aria');
       await user.type(screen.getByLabelText('World ID'), 'wld-from-aria');
 
-      // knowledge edit form (selects A's entry).
       await user.click(within(ariaRow).getByRole('button', { name: 'Artifacts' }));
       await screen.findByText('Pending review — Aria');
       await user.type(screen.getByLabelText('Raw digest'), 'digest-from-aria');
@@ -763,7 +751,6 @@ describe('CharactersPage', () => {
       expect(screen.queryByRole('form', { name: 'Edit entry' })).toBeNull();
       expect(screen.queryByText('Mira')).toBeNull();
       await screen.findByText('No knowledge entries yet.');
-      // then a cross-pair detail read (the F-001 leak) would have been issued.
       await waitFor(() => expect(bDetailReads).toEqual([]));
     });
   });

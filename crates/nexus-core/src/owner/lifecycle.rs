@@ -619,8 +619,6 @@ impl ExecutionHandle {
     /// The retained drain body (see [`Self::close`] for the ordering contract).
     async fn run_close(self: Arc<Self>) {
         self.coordinator.begin_shutdown();
-        // blocked on a silent run wakes with `closed` instead of hanging past
-        // the close, and no token survives the generation that minted it.
         self.workflow_subscriptions.close_all();
         if let Some(authority) = &self.workspace_commit {
             authority.manager().close_commit_admission();
@@ -629,8 +627,6 @@ impl ExecutionHandle {
         self.coordinator.abort_all_drives().await;
         if let Some(authority) = &self.workspace_commit {
             authority.manager().wait_for_admitted_commits().await;
-            // mean this authority held no recoverable lease (or released it
-            // already), so the answer is deliberately not acted on.
             let _released = authority.release_authority();
         }
         self.settled.store(true, Ordering::SeqCst);
@@ -642,7 +638,6 @@ impl ExecutionHandle {
         loop {
             let notified = self.settled_notify.notified();
             tokio::pin!(notified);
-            // cannot be missed.
             notified.as_mut().enable();
             if self.is_settled() {
                 return;
@@ -812,7 +807,6 @@ impl CoreService {
         if self.inner.access != CoreAccess::EngineOwner {
             return Err(ExecutionOpenError::NotEngineOwner(self.inner.access));
         }
-        // gates the install, so it must outlive `build_execution`.
         let build_observer = deps.build_observer.take();
         //
         // - `handoff` carries the outcome of the start;
@@ -832,18 +826,11 @@ impl CoreService {
         });
         match handoff_rx.await {
             Ok(outcome) => {
-                // a caller that already holds the outcome gets here, so the
-                // receipt is exactly the proof the task needs. (Dropping this
-                // future instead closes the receipt, which tells the task to
-                // settle the owner it published.)
                 let _ = receipt_tx.send(());
                 outcome
             }
-            // means it panicked: propagate that panic instead of relabelling a
-            // build bug as a well-behaved closing service.
             Err(_) => match task.await {
                 Err(err) if err.is_panic() => std::panic::resume_unwind(err.into_panic()),
-                // cancelled join can only mean the runtime is going away.
                 _ => Err(ExecutionOpenError::Closing),
             },
         }
@@ -872,12 +859,6 @@ impl CoreService {
             .await
         {
             Ok(handle) => {
-                // is dropped before its next poll drops it again — so the owner
-                // is only handed over once the caller acknowledges receipt.
-                // Until then this task keeps the fence (a close waits) and,
-                // when the acknowledgement can never come, settles the owner
-                // itself instead of leaving an engine and its drives running
-                // for a start nobody received.
                 let queued = handoff.send(Ok(Arc::clone(&handle))).is_ok();
                 if !queued || receipt.await.is_err() {
                     self.withdraw_and_settle(&handle).await;
@@ -897,11 +878,6 @@ impl CoreService {
         build_observer: Option<Arc<dyn ExecutionBuildObserver>>,
         handoff: &tokio::sync::oneshot::Sender<Result<Arc<ExecutionHandle>, ExecutionOpenError>>,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
-        // `closing` and queued its drain on the exclusive half, so this start
-        // must refuse rather than build into a service that is releasing its
-        // admission. (Today's `RwLock` is write-preferring, so a start arriving
-        // behind a queued drain acquires AFTER the drain finished — the refusal
-        // covers exactly that ordering too.)
         self.ensure_open()
             .map_err(|_| ExecutionOpenError::Closing)?;
         // `CoreService::open` under `EngineOwner` deliberately JOINS this
@@ -921,21 +897,9 @@ impl CoreService {
         // slot on the next claim.
         let reservation = OwnerReservation::claim(&self.inner.db_path)?;
         let handle = self.build_execution(deps).await?;
-        // recovery) but nothing is published yet. A test holds this exact
-        // window to force a close to arrive mid-start; production supplies
-        // no observer and skips straight to the install below.
         if let Some(observer) = build_observer {
             observer.built().await;
         }
-        // drain takes the START fence exclusively, and this check+install runs
-        // under that fence's shared half — so either the install published the
-        // handle before the drain took the fence (the drain then observes the
-        // installed handle and settles it), or the drain already owns the fence
-        // and `closing` is visible here, so the build abandons its handle. The
-        // per-service slot mutex still makes the check+install itself atomic;
-        // the fence is what keeps the drain from releasing the pool and
-        // reporting a confirmed cleanup while this build is in flight.
-        //
         // A caller that is already gone is refused the same way: publishing an
         // owner nobody waits for only to withdraw it again is wasted work.
         let installing = {
@@ -952,9 +916,6 @@ impl CoreService {
             }
         };
         if !installing {
-            // build ran. The build ran recovery (which spawns drives), so
-            // settle the freshly built owner before abandoning it: a dropped
-            // handle must not leak live drives.
             handle.shutdown().await;
             return Err(ExecutionOpenError::Closing);
         }
@@ -1061,7 +1022,6 @@ impl CoreService {
         deps: RunnerDeps,
     ) -> Result<Arc<ExecutionHandle>, ExecutionOpenError> {
         let pool = self.inner.pool.clone();
-        // transport's cancel path must all fire the same per-run token.
         let session_cancels: Arc<
             std::sync::RwLock<
                 std::collections::HashMap<String, tokio_util::sync::CancellationToken>,
@@ -1073,9 +1033,6 @@ impl CoreService {
         let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(pool.clone())));
         let session_storage: Arc<dyn graph_flow::SessionStorage> = sqlite_storage.clone();
 
-        // hot-reload watcher). A core-only caller gets a bare builtin
-        // registry so the engine still has a capability surface.
-        //
         // C3: the fallback reuses the ONE shared engine/cache bundle this
         // owner already holds (`RunnerDeps::compute_*`, installed by the
         // hosted production factory) — a plain constructor that minted its
@@ -1128,18 +1085,11 @@ impl CoreService {
         if let Some(provider) = &deps.workspace_state_provider {
             engine.set_workspace_state_provider(Arc::clone(provider));
         }
-        // core-context version, so an edit committed while a run is
-        // mid-execution lands at that run's next state transition. Same Creator
-        // DB pool the supervisor reads schedule pointers through.
         engine.set_core_context_store(Arc::new(
             nexus_orchestration::schedule::derivation::CoreContextManager::new(Arc::new(
                 pool.clone(),
             )),
         ));
-        // the same Creator DB pool and the same workspace home — a restart
-        // mid-run rebuilds the applied graph, not the descriptor's. ONE adapter
-        // serves both the engine's recovery source and the coordinator's
-        // admission port, so the two can never resolve different documents.
         let applied_documents: Arc<crate::owner::applied_documents::CreatorAppliedDocuments> =
             Arc::new(
                 crate::owner::applied_documents::CreatorAppliedDocuments::new(
@@ -1169,9 +1119,6 @@ impl CoreService {
         }
         let coordinator = Arc::new(coordinator);
 
-        // coordinator-backed starter and the ONE clock task BEFORE recovery.
-        // A recovered terminal run settles through this supervisor, and the
-        // clock is installed-but-held until recovery completed below.
         let (scheduler_task, scheduler_shutdown, scheduler_start) =
             if let Some(config) = deps.hosted_scheduler {
                 let starter: Arc<dyn ScheduleRunStarter> =
@@ -1190,12 +1137,10 @@ impl CoreService {
                 if let Some(registry) = capability_holder.get() {
                     supervisor = supervisor.with_capability_registry(registry);
                 }
-                // executor the registry receives, never a second writer.
                 if let Some(executor) = &deps.workspace_executor {
                     supervisor = supervisor.with_workspace_executor(Arc::clone(executor));
                 }
                 let supervisor = Arc::new(supervisor);
-                // supervisor the clock drives.
                 coordinator.set_schedule_supervisor(Arc::clone(&supervisor));
                 let start = Arc::new(tokio::sync::Notify::new());
                 let shutdown = Arc::new(tokio::sync::Notify::new());
@@ -1210,21 +1155,12 @@ impl CoreService {
                 (None, Arc::new(tokio::sync::Notify::new()), None)
             };
 
-        // re-drive only the eligible converge/merge class through this owner.
         let decisions = coordinator
             .recover_persisted(&sqlite_storage, deps.shutdown_notify)
             .await;
         for d in &decisions {
             tracing::info!(decision = ?d, "execution start: recovery re-drive decision");
         }
-        // left `running` by a crash. It runs BEFORE the clock starts, asks
-        // each stuck run's durable receipt first, and never re-applies an
-        // effect — a terminal receipt answers the replay, and any other state
-        // is reported as the typed `uncertain` refusal. A read failure is a
-        // warning (the boot continues); it can never license a re-apply. The
-        // decisions — and the read failure itself — are retained on the handle
-        // so the boot-time answer stays observable and a failed read is not
-        // mistaken for "nothing was stuck".
         #[cfg(feature = "compute")]
         let (compute_run_recoveries, compute_run_recovery_error) =
             match crate::owner::compute::recover_stuck_compute_runs(&pool).await {
@@ -1247,12 +1183,8 @@ impl CoreService {
                     (Vec::new(), Some(err))
                 }
             };
-        // (see `ExecutionHandle::compute_run_recovery_error`); a production build
-        // reports it through the warning above and holds nothing.
         #[cfg(all(feature = "compute", not(any(test, feature = "test-hooks"))))]
         drop(compute_run_recovery_error);
-        // scheduler task cannot tick, so an admission sweep can never race the
-        // recovery pass above.
         if let Some(start) = scheduler_start {
             start.notify_one();
         }

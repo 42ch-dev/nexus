@@ -96,8 +96,6 @@ describe('Task 4 — Work Timeline → World Timeline affordance', () => {
   });
 
   it('hides "View on World Timeline" when onViewOnWorldTimeline is absent (no callback wired)', () => {
-    // has not wired the navigation callback. Guards against a phantom CTA that
-    // navigates nowhere.
     render(
       <MemoryRouter>
         <WorkTimelineEventInspector
@@ -127,15 +125,10 @@ describe('Task 4 — Work Timeline → World Timeline affordance', () => {
     fireEvent.click(screen.getByTestId('work-timeline-view-on-world-timeline'));
 
     expect(handler).toHaveBeenCalledTimes(1);
-    // node.data.realizesChapterId etc. when composing the navigation URL.
     expect(handler.mock.calls[0][0]).toEqual(workTimelineEventNode());
   });
 
   it('hides the affordance on Moment-layer scene nodes (cross-surface nav is Narrative-event-bound)', () => {
-    // the binding axis, but the durable V1.123 slice is Narrative-event-driven
-    // (WorkDetailResponse.world_id is the only join the wire exposes today).
-    // Moment scene/beat nodes do NOT surface this CTA — the inspector's
-    // signature still accepts the slots for forward compatibility.
     const sceneNode: Node<WorkTimelineNodeData> = {
       id: 'wt-scene:sc-1',
       type: 'work-timeline-moment-scene',
@@ -161,8 +154,6 @@ describe('Task 4 — Work Timeline → World Timeline affordance', () => {
       </MemoryRouter>,
     );
 
-    // (architect §3.4 — Moment-on-Outline carrier has no Work-event →
-    // World-event binding today). Moment inspectors MUST NOT surface it.
     expect(screen.queryByTestId('work-timeline-view-on-world-timeline')).toBeNull();
   });
 });
@@ -222,8 +213,6 @@ describe('Task 4 — World Timeline → Work Timeline affordance', () => {
   });
 
   it('hides "View in Work Timeline" when boundWorkId is absent (honest scope cut)', () => {
-    // binds to a different World) hide the affordance. Silent degradation is
-    // forbidden.
     render(
       <MemoryRouter>
         <TimelineInspector
@@ -269,9 +258,6 @@ describe('Task 4 — World Timeline → Work Timeline affordance', () => {
   });
 
   it('does NOT render the affordance on context (non-event) nodes', () => {
-    // (the World-event → Work-Timeline binding axis). Context entities
-    // (characters, locations) do not surface this CTA even when a realizing
-    // Work exists — they are not on the narrative when-axis.
     const contextNode = timelineEventNode({
       key_block_id: 'kb-char-1',
       block_type: 'character',

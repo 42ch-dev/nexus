@@ -353,8 +353,6 @@ pub async fn list_runs(
     );
 
     if let Some(cursor_val) = cursor {
-        // "{created_at}|{run_id}" pair.  RFC3339 timestamps never contain
-        // '|', so the split is unambiguous.
         let (cursor_created_at, cursor_run_id) = cursor_val
             .split_once('|')
             .ok_or_else(|| LocalDbError::ValidationError(format!(
@@ -502,7 +500,6 @@ pub async fn delete_terminal_runs(
         }
     }
     let result = match status {
-        // touch running/succeeded rows.
         None => {
             sqlx::query!(
                 "DELETE FROM compute_sessions \
@@ -513,7 +510,6 @@ pub async fn delete_terminal_runs(
             .execute(pool)
             .await?
         }
-        // narrows Clear to exactly that state.
         Some(s) => {
             sqlx::query!(
                 "DELETE FROM compute_sessions \

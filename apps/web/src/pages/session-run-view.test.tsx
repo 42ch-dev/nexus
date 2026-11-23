@@ -1,7 +1,4 @@
 /**
- * surface (compass D7): the three author-visible states plus the view-identity
- * and refusal behaviour.
- *
  * Every case drives a stubbed `subscribeWorkflowEvents` client injected through
  * `ClientProvider`, so the frames are the test's own (no network, no SSE):
  *  - a **running** view appends frames as they arrive, reached from a session
@@ -222,7 +219,6 @@ describe('SessionRunViewPage — running', () => {
     renderRunView(client, 'run-observe-only');
 
     expect(await screen.findByText('e1:1')).toBeInTheDocument();
-    // nothing names a run control.
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryByText(/drive|cancel|restart|resume/i)).toBeNull();
   });
@@ -245,8 +241,6 @@ describe('SessionRunViewPage — gap', () => {
     expect(gap).toHaveTextContent('Events were missed');
     expect(screen.getByTestId('run-phase')).toHaveTextContent('Gap');
 
-    // same stream, so the view consumes them in place — it never reconnects
-    // into the range whose gap was just reported.
     await act(async () => {
       feed.push(hostEvent('e1:2'));
     });
@@ -262,7 +256,6 @@ describe('SessionRunViewPage — gap', () => {
     const { client, calls } = stubClientFor([() => frames(GAP)]);
     renderRunView(client, 'run-gap-exhausted');
 
-    // same gap: the view stays honestly gapped rather than looping.
     expect(await screen.findByTestId('run-event-gap')).toHaveTextContent('Events were missed');
     await wait(300);
     expect(calls).toHaveLength(1);
@@ -293,11 +286,9 @@ describe('SessionRunViewPage — replay', () => {
     expect(within(replay).getByText('e1:1')).toBeInTheDocument();
     expect(within(replay).getByText('e1:2')).toBeInTheDocument();
     expect(calls[1].lastEventId).toBe('e1:2');
-    // from attach order rather than presented as server-reported provenance.
     expect(replay).toHaveTextContent('split by attach order');
     expect(screen.getByTestId('run-live')).toHaveTextContent('Waiting for the next event…');
 
-    // delivers: this one is still on the replay side of the boundary.
     await act(async () => {
       feed.push(hostEvent('e1:3'));
     });
@@ -326,9 +317,6 @@ describe('SessionRunViewPage — replay', () => {
   });
 
   it('keeps the retained frames under the history-unavailable notice rather than presenting them as an ordinary end', async () => {
-    // view's re-entry subscription with `history_unavailable` alone (the saved
-    // cursor names a prior epoch or an evicted ring), so the frames still on
-    // screen are only what this view had already retained.
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
       () => frames(HISTORY_UNAVAILABLE),

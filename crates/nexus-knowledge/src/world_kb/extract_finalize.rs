@@ -92,7 +92,6 @@ pub fn prepare_extract(
     validate_body(input.block_type, Some(&input.body), input.validation_mode)
         .map_err(|e| KbStoreError::ValidationLegacy(e.to_string()))?;
 
-    // conversion or a store (durable §3).
     let KnowledgeGovernance {
         holder_entry_id,
         disclosure,
@@ -146,8 +145,6 @@ mod tests {
         }
     }
 
-    // — SourceAnchor::from_excerpt is overloaded (excerpt vs chapter locator);
-    // acceptable while only one variant exists; refactor when multi-source anchors needed.
     fn chapter_anchor() -> SourceAnchor {
         SourceAnchor::from_excerpt("Chapter 3 body excerpt")
     }
@@ -244,7 +241,6 @@ mod tests {
 
     #[test]
     fn test_prepare_extract_takes_holders_from_the_policy_not_the_model_output() {
-        // attributes carry governance-shaped keys cannot choose the holder.
         let mut input = prepare_input();
         input.body = KnowledgeEntryBody {
             summary: Some("A brave warrior".to_string()),
@@ -305,7 +301,6 @@ mod tests {
     async fn test_persist_prepared_extract_stores_the_exact_record_without_minting() {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let mut prepared = prepare_extract(prepare_input()).unwrap();
-        // an id it did not allocate and governance it did not rebuild.
         prepared.record.entry_id = "kb_t12_fixed".to_string();
         prepared.record.holder_entry_id = Some("hld_t12".to_string());
         prepared.record.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());

@@ -40,7 +40,6 @@ mod build_walk;
 const MODULE_IDS: &[&str] = &["basic-combat"];
 
 fn main() {
-    // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
 
     let manifest_dir = PathBuf::from(
@@ -48,9 +47,6 @@ fn main() {
     );
     let embedded_root = manifest_dir.join("embedded-modules");
 
-    // not added it — and `cargo check` does not need the compiled blobs, just
-    // type-check completion. We emit a cfg flag so the crate's source can
-    // switch to empty stubs when the target is absent (R-V1139P0-005).
     if !has_wasm_target() {
         println!(
             "cargo:warning=nexus-wasm-host: wasm32-unknown-unknown target not found; \
@@ -121,8 +117,6 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
 
     if !is_fresh(&dest_wasm, &src_cargo, &src_manifest, &src_code) {
         compile_module(id, &src_dir);
-        // `basic_combat.wasm`); the embedded id keeps the dash.
-        //
         // The nested module build inherits `CARGO_TARGET_DIR` when the repo's
         // direnv layout (`.envrc`) is active, so the artifact lands in the
         // shared cache — NOT the module-local `target/`. Resolve the artifact
@@ -146,9 +140,6 @@ fn build_module(id: &str, modules_root: &Path, embedded_root: &Path) {
         copy_or_die(&artifact, &dest_wasm, &format!("{id}.wasm"));
     }
 
-    // the SHA-256 of the EXACT bytes it ships with. Recompute on every run
-    // (not just on recompile) so a staged pair from an older build — whose
-    // manifest predates the field — is upgraded to a self-consistent one.
     inject_wasm_sha256(id, &dest_wasm, &dest_manifest);
 }
 

@@ -182,7 +182,6 @@ async fn required_profile_missing_fails_closed_with_profile_incomplete() {
         "a missing authored profile is not a missing capability (MEM-R005)"
     );
 
-    // still missing, so the gate still fails closed.
     let authored = author(
         &provider,
         "preferences",
@@ -253,7 +252,6 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         SpokeRejectCode::ProfileIncomplete
     );
 
-    // becomes a failure of its own.
     let authored = author_document(
         &provider,
         "preferences",
@@ -269,7 +267,6 @@ async fn empty_required_profile_fails_closed_with_profile_incomplete() {
         SpokeRejectCode::ProfileIncomplete
     );
 
-    // honest-empty rather than being listed as authored content.
     let authored = author_document(
         &provider,
         SOUL_PROFILE_KIND,
@@ -397,7 +394,6 @@ async fn capability_mismatch_is_distinct_from_profile_admission() {
     );
     assert_eq!(error_code(&transfer), "CAPABILITY_PORT_MISSING");
 
-    // reflection family: the same capability-absence verdict as transfer.
     let unadvertised =
         LocalMemoryProvider::open_unadvertised(env.user_home.clone(), CREATOR, "default")
             .await

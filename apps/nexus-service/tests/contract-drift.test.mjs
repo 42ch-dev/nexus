@@ -51,10 +51,6 @@ const CAPABILITY = {
   origin: 'builtin',
 };
 
-/**
- * flags. Nested object literals are tracked by brace depth so only the
- * interface's own fields are collected.
- */
 function interfaceFields(source, name) {
   const start = source.indexOf(`export interface ${name} `);
   assert.ok(start >= 0, `interface ${name} not found`);
@@ -153,7 +149,6 @@ const COVERED = [
   {
     method: 'GET',
     path: '/v1/daemon/orchestration/capabilities',
-    // not the schema-facing generated `ListCapabilitiesResponse` (snake_case).
     localContract: {
       source: join(repoRoot, 'apps', 'web', 'src', 'lib', 'nexus', 'capability-info.ts'),
       name: 'CapabilityListResponse',

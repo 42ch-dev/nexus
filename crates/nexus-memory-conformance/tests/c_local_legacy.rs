@@ -294,9 +294,6 @@ async fn store_count(db: &Path, sql: &'static str) -> i64 {
     count
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Seed the author-visible legacy artifacts the preservation contract names:
 /// a `SOUL.md` with its required and user/pushed sections, and a long-term
 /// memory file carrying the nine-value kind frontmatter, slug, source sessions
@@ -400,7 +397,6 @@ async fn c112_verify_legacy_untouched(
         "no new file was written into the legacy layout"
     );
 
-    // its kind and body: the bytes above are live, not orphaned.
     let creator_subject = legacy::creator_subject_id(CREATOR);
     let ensured = wire(
         &provider
@@ -534,9 +530,6 @@ async fn c_112_local_layout_and_kind_frontmatter_preserved_local() {
     .await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// After the journal commit, the object's SQL effect is durable but its file
 /// effect is not published yet. Until an open's bounded recovery settles that
 /// intent, ordinary list/recall reads must not expose it and no file may exist.
@@ -556,7 +549,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     );
     assert_eq!(lost["error"]["code"], "OUTCOME_UNCERTAIN", "{lost}");
 
-    // and nothing was published.
     let listed = wire(&provider.list_records(&admin(), list_request(SUBJECT)).await);
     assert_eq!(listed["total_authorized"], 0, "{listed}");
     let recalled = wire(&provider.recall(&admin(), recall_request(SUBJECT)).await);
@@ -567,8 +559,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "a recovering intent has no published projection"
     );
 
-    // the pending receipt and the intended record this commit created, read
-    // from the released store before anything reopens it.
     let db = workspace_state_db_path(&env.user_home, CREATOR, WORKSPACE);
     let original_receipt = store_scalar(
         &db,
@@ -586,7 +576,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
     .await;
     assert_eq!(pending_status, "pending", "the original receipt is pending");
 
-    // readable once, with its exact body and settlement.
     drop(provider);
     let provider = open_provider(&env).await;
     assert_eq!(
@@ -622,7 +611,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "the recovered projection carries the body: {published}"
     );
 
-    // nor duplicates it, and answers the original identity.
     let replay = wire(
         &provider
             .create_record(&admin(), create_request("c113-recovering", KIND, TEXT))
@@ -650,9 +638,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "one create receipt effect"
     );
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 const PROVIDER: &str = "n3-local-mind-fixture";
 
@@ -931,7 +916,6 @@ async fn c115_seed(user_home: &std::path::Path) -> (String, String, String, Stri
         .await
         .expect("select the fixture workspace");
 
-    // provider fixtures can seed the ACTUAL admitted subjects.
     let core = CoreService::open(CoreOpenOptions {
         user_home: user_home.to_path_buf(),
         access: CoreAccess::EngineOwner,
@@ -1066,9 +1050,6 @@ async fn c115_refuse_and_control(admitted: &C115Admitted<'_>) {
         "no operation completed on a refusal"
     );
 
-    // executes and completes one operation. The Host's public response is
-    // `started`; no per-operation terminal status is claimed beyond the
-    // adapter execution/completion this fixture observes.
     let plain = admitted
         .handle
         .execute(

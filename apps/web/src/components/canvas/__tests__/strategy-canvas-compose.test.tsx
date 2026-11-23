@@ -1,6 +1,4 @@
 /**
- * (v239-p3-canvas-compose-ui T3/T3b/T4/T6/T7).
- *
  * Flag on (explicit selection over the content-creator default): the header
  * shows `Staging`; Add pattern → nest op guarded by the last-read revision;
  * Simulate walks the working document whose authored connecting edge wires
@@ -182,7 +180,6 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     renderCanvas();
     expect(await screen.findByTestId('strategy-staging')).toBeInTheDocument();
     expect(screen.getByTestId('strategy-add-pattern')).toBeInTheDocument();
-    // and no canvas gesture can start a structural edit outside the candidate.
     expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
     expect(shellProps.current.onConnect).toBeUndefined();
     expect(shellProps.current.onReconnect).toBeUndefined();
@@ -202,7 +199,6 @@ describe('StrategyCanvas — compose path (flag on)', () => {
       },
     });
 
-    // canvas's attach target reaches the slot, so no client-authored edge (T3b).
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(simulateBodies).toHaveLength(1));
     const walked = simulateBodies[0];
@@ -320,7 +316,6 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     await waitFor(() => expect(screen.getByTestId('approve-approved')).toBeInTheDocument());
 
-    // keeps comparing against the stale read.
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({
         queryKey: queryKeys.strategies.applied(STRATEGY_ID),
@@ -428,7 +423,6 @@ describe('StrategyCanvas — compose path (flag on)', () => {
         HttpResponse.json({
           current_apply: live,
           newest_approval: approvals[0] ?? null,
-          // would read as D16(c) "document no longer verifies".
           applied_document: SEED,
           applied_document_refusal: null,
         }),
@@ -555,7 +549,6 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     expect(screen.getByTestId('compose-conflict')).toHaveTextContent(
       'Candidate changed before this edit. Reload revision 7 and reapply the change.',
     );
-    // the daemon holds, so the user can reapply the edit against those bytes.
     expect(screen.getByTestId('compose-conflict-reload')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('compose-conflict-reload'));
     await waitFor(() =>
@@ -630,7 +623,6 @@ describe('StrategyCanvas — compose path (flag on)', () => {
 
   it('refuses to claim completeness at the approve gate when the listing is unreadable', async () => {
     useHandlers(
-      // its slots unreadable: the gate must name the failure, not "[nothing] unbound".
       http.get(CANDIDATE_PATH, () => HttpResponse.json(nestedResponse().document)),
       http.get(PATTERNS_PATH, () =>
         HttpResponse.json(
@@ -675,7 +667,6 @@ describe('StrategyCanvas — compose path (flag on)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Simulate…' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled());
 
-    // are known, so the gate must not claim them unknown.
     await queryClient.refetchQueries({ queryKey: ['canvas', 'strategy-compose', 'patterns'] });
     await waitFor(() => expect(patternReads).toBe(2));
 
@@ -728,8 +719,6 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
     expect(irReads).toBe(0);
     expect(patternReads).toBe(0);
 
-    // and both connection gestures write the preset file, which is not the
-    // document on canvas, so neither is offered — editing goes through Compose.
     expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
     expect(shellProps.current.onConnect).toBeUndefined();
     expect(shellProps.current.onReconnect).toBeUndefined();
@@ -761,7 +750,6 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
           applied_document_refusal: null,
         }),
       ),
-      // applied document (never the applied bytes themselves).
       http.get(CANDIDATE_PATH, () => {
         candidateReads += 1;
         return HttpResponse.json({ ...SEED, revision: 4 });
@@ -773,7 +761,6 @@ describe('StrategyCanvas — flag-off parity (T7)', () => {
 
     renderCanvas();
     await screen.findByRole('button', { name: 'Simulate…' });
-    // no transition author) — every editing affordance is disabled.
     expect(shellProps.current.onConnect).toBeUndefined();
     expect(shellProps.current.onReconnect).toBeUndefined();
     expect(screen.queryByTestId('strategy-add-pattern')).not.toBeInTheDocument();

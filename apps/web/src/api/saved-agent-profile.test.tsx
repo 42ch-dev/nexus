@@ -1,6 +1,4 @@
 /**
- * reads for the shared profile seam.
- *
  * Browser: the daemon-global service profile is authoritative; a null service
  * profile falls back ONCE to the legacy per-creator localStorage snapshot and
  * migrates it with a best-effort PUT. Desktop: the IPC profile is unchanged.
@@ -92,7 +90,6 @@ describe('useSavedAgentProfile', () => {
     expect(await screen.findByText('snapshot-agent')).toBeInTheDocument();
     expect(puts).toEqual([{ name: 'snapshot-agent' }]);
 
-    // neither consulted nor re-written.
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: 'stale-agent' }));
     await userEvent.click(screen.getByRole('button', { name: 'retry-profile' }));
 

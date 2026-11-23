@@ -6,13 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * over the native agent-host config document. The native core is stubbed at
- * the `ServiceCore.core` boundary the handlers read, so the route semantics
- * (defaults on a missing file, forward + return the saved document) are
- * observed through the real handlers.
- */
-
 let routes;
 let workspaces;
 
@@ -126,7 +119,6 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       command: 'replacement-agent',
       enabled: true,
     };
-    // document selects it alone, which is the native rule (`enabled` set).
     const available = new Set([replacement.id]);
     let stored = { ...DEFAULT_CONFIG, providers: [oldProvider] };
     const service = {
@@ -149,7 +141,6 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       },
     };
 
-    // replaces is still enabled on the way in.
     const response = await handle('PUT', service, {
       ...DEFAULT_CONFIG,
       providers: [oldProvider, replacement],
@@ -302,13 +293,11 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       );
     }
 
-    // user already had is still enabled afterwards.
     assert.equal(saves.length, 0);
     assert.equal(restarts.length, 0);
     const current = await handle('GET', service);
     assert.deepEqual(current.body.providers, [enabledProvider]);
 
-    // known-good provider can be re-enabled later.
     const disabled = { id: 'codex-acp', protocol: 'acp', command: null, enabled: false };
     const accepted = await handle('PUT', service, {
       ...DEFAULT_CONFIG,
@@ -318,8 +307,6 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
   });
 
   test('a stored enabled entry without a command is replaceable', async () => {
-    // not lock the user out: the replacement transform disables every entry but
-    // the one being saved, so the launchability rule has to read its result.
     const broken = { id: 'broken-acp', protocol: 'acp', command: null, enabled: true };
     const replacement = {
       id: 'claude-acp',
@@ -329,7 +316,6 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     };
 
     for (const submitted of [
-      // the provider it wants: the transform disables the stored entry.
       [broken, replacement],
       [{ ...broken, enabled: false }, replacement],
     ]) {

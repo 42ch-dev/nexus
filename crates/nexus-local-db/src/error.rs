@@ -314,7 +314,6 @@ impl LocalDbError {
 }
 
 impl fmt::Display for LocalDbError {
-    // splitting it across helpers would scatter a single user-facing mapping.
     #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

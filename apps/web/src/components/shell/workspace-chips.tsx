@@ -1,6 +1,4 @@
 /**
- * prototype `developer-shell-v1.html` screen 3).
- *
  * One chip per workspace `display_name`; the active chip reflects
  * `active_workspace_slug`. Switching calls set-active through the workspace
  * context (which invalidates workspace-scoped queries and toasts the § Copy
@@ -34,7 +32,6 @@ export function WorkspaceChips() {
         className="flex flex-wrap items-center gap-2"
       >
         {workspaces.map((workspace) => {
-          // comparison would light the wrong creator's chip (QC W).
           const active =
             activeWorkspace !== null &&
             workspace.creator_id === activeWorkspace.creator_id &&

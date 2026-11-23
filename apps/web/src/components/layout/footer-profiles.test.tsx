@@ -257,17 +257,6 @@ describe('FooterProfiles', () => {
   });
 });
 
-//
-// headline + body + CTA from the spec table. We drive each kind by injecting a
-// stub NexusClient whose `createCreator` rejects with a pre-classified error,
-// so the dialog UX is tested independently of the classifier (covered in
-// browser-client.test.ts). See the v1.129 `profile-create-reliability` record (local).
-// § Dialog UX contract for the locked copy + CTA table.
-
-/**
- * carrying the given kind. Other NexusClient methods stay no-op rejects so the
- * dialog renders without a real transport.
- */
 function makeRejectingClient(kind: TransportErrorKind): NexusClient {
   return {
     createCreator: vi.fn().mockRejectedValue(
@@ -388,8 +377,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     await openCreateDialogAndSubmit();
     const region = await screen.findByTestId('create-creator-transport-error');
 
-    // same payload. The transport will still reject (the stub always rejects),
-    // so the dialog stays open and the region remains visible.
     await userEvent.setup().click(
       within(region).getByRole('button', { name: /Retry/i }),
     );
@@ -401,8 +388,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
   });
 
   it('does not surface the classified region for HTTP errors (no kind)', async () => {
-    // handled by the global toast via useCreateCreator.onError, not the
-    // dialog's transport-recovery region.
     useHandlers(
       creatorsListHandler,
       http.post('/v1/daemon/creators', () =>
@@ -425,17 +410,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     );
   });
 
-  //
-  // must vary the same way: `openConnectionSettings` navigates, `useDesktopApp`
-  // is informational (no-op), `retry` re-submits. These tests pin the contract
-  // for each branch so a future regression that re-hardcodes `handleRetry` is
-  // caught immediately.
-
-  /**
-   * the router lands on `/settings/advanced`. The dialog's
-   * `handleOpenConnectionSettings` calls `navigate('/settings/advanced#connection')`,
-   * which this marker verifies.
-   */
   function renderWithSettingsTracker(client: NexusClient) {
     return renderInApp(
       <>
@@ -466,8 +440,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
     const region = await screen.findByTestId('create-creator-transport-error');
     expect(client.createCreator).toHaveBeenCalledTimes(1);
 
-    // targets the button whose onClick the QC3-F-001 fix branched, regardless
-    // of label collisions with the secondary CTA on other kinds.
     await user.click(within(region).getByTestId('create-creator-error-primary'));
 
     await waitFor(() =>
@@ -496,9 +468,6 @@ describe('CreateCreatorDialog classified transport error UX', () => {
   });
 
   it('regression guard: retry-default kinds still re-submit via the primary CTA (QC3-F-001)', async () => {
-    // onClick must still call mutate (regression guard against accidentally
-    // breaking the retry branch while adding the openConnectionSettings /
-    // useDesktopApp branches).
     const user = userEvent.setup();
     useHandlers(creatorsListHandler);
     const client = makeRejectingClient('daemon_down');

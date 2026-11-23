@@ -262,8 +262,6 @@ where
         return Ok(None);
     };
     let holder = validate_holder_row(row)?;
-    // unreachable through writes; asserting it anyway keeps this read from
-    // returning a holder the requested subject does not bind to.
     if holder.subject().as_ref() != Some(subject) {
         return Err(holder_state_invalid(&format!(
             "registry row {} is not bound to {}",

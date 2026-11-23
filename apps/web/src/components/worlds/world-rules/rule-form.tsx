@@ -1,6 +1,4 @@
 /**
- * T1/T2, DF-82).
- *
  * Four-family constraint authoring without JSON: family picker first (locked
  * labels/help), per-family operand fields appear after the pick and reset on
  * family change, plus `canonical_name` / `statement` / status / severity /
@@ -103,8 +101,6 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
     if (isRuleInvalidInputError(error)) {
       const details = error.details as { field?: string; reason?: string } | undefined;
       if (details && typeof details.field === 'string' && typeof details.reason === 'string') {
-        // form-level keys (`constraint`, `patch`) have no field surface:
-        // surface them at the submit level so the echo is never invisible.
         if (details.field === 'constraint' || details.field === 'patch') {
           setSubmitError(details.reason);
         } else {
@@ -114,11 +110,8 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
         setSubmitError(error.message);
       }
     } else if (isRuleNotFoundError(error)) {
-      // (world gone mid-form); an edit-mode 404 is an unknown/foreign rule —
-      // honest copy per mode, no id/world leak.
       setSubmitError(isEdit ? t('form.notFoundError') : t('form.worldNotFoundError'));
     } else {
-      // message so the form never closes silently on failure.
       setSubmitError(isEdit ? t('form.genericUpdateError') : t('form.genericError'));
     }
   }
@@ -140,9 +133,6 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
       return;
     }
 
-    // holds only what the server echoes, so a stale field message from an
-    // earlier submit can never survive next to a field the new response did
-    // not reject (bugbot 677244f5).
     setErrors({});
 
     if (isEdit) {
@@ -169,9 +159,6 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
 
   const familyHelp = state.family ? t(`form.families.${state.family}.help`) : null;
   const targetAxisDisabled = state.family === 'observer_cardinality';
-  // (warning)" option is a silent no-op (no null-clearing, AR-3) and its
-  // label misstates the rule's evaluation — hide it and state the stored
-  // value instead (qc F-001).
   const storedSeverity = isEdit && rule?.severity_hint ? rule.severity_hint : null;
 
   return (
@@ -436,11 +423,6 @@ export function RuleForm({ worldId, rule, onClose }: RuleFormProps) {
   );
 }
 
-/**
- * field vs module-row `module_key` + free field) plus the operand-specific
- * inputs. Errors key to the AR-2 `constraint.field` / `constraint.module_key`
- * vocabulary; the operand-level error renders only when no form is chosen.
- */
 function RequiredFieldOperands({
   operand,
   entryField,

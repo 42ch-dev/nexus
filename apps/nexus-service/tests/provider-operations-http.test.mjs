@@ -7,12 +7,6 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SESSION = '9f9619ff-8b86-4d11-b42d-00cf4fc964ff';
 
-/**
- * serves all three generated branches. `set_model`/`set_mode` used to answer
- * 501; they now dispatch on the provider lane (HostOperation wire payload) or
- * forward unchanged to the native authority for Actor-backed sessions.
- */
-
 let routes;
 let ProviderRegistry;
 

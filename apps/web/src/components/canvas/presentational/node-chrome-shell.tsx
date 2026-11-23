@@ -68,17 +68,8 @@ export const NODE_STATUS_DOT: Record<NodeStatus, string> = {
   completed: 'bg-teal-700',
 };
 
-/**
- * synonym for `'strategy'` (existing call sites); the surface names let new
- * callers pick the outline / worldkb spine without touching the shell.
- */
 export type NodeAccent = boolean | 'strategy' | 'outline' | 'worldkb';
 
-/**
- * one place to read; P3 T2 introduced the outline + worldkb entries to match
- * DESIGN.md §Canvas Surface ("strategy = purple-700, outline = amber-700,
- * World KB = teal-700").
- */
 const ACCENT_SPINE_CLASSES: Record<Exclude<NodeAccent, boolean>, string> = {
   strategy: 'border-l-[3px] border-l-canvas-strategy-accent',
   outline: 'border-l-[3px] border-l-canvas-outline-accent',
@@ -90,32 +81,10 @@ export interface NodeChromeShellProps {
   selected?: boolean;
   /** Optional status overlay ring (strategy surface). */
   status?: NodeStatus;
-  /**
-   * synonym for `'strategy'` (existing strategy call sites render the
-   * strategy spine unchanged).
-   */
   accent?: NodeAccent;
-  /**
-   * `shadow-card` (rest = elevation-1) to `shadow-elevation-4` so the node
-   * visibly lifts while the author is repositioning it (DESIGN.md §Elevation
-   * v0.4 recipe). RF node wrappers forward `NodeProps.dragging`.
-   */
   dragging?: boolean;
-  /**
-   * default `min-w-canvas-node-default` (e.g. scene/beat pass
-   * `min-w-canvas-node-outline-scene-beat`) or add node-specific sizing.
-   */
   className?: string;
-  /**
-   * and `borderColor` (border token, undefined when selected so the selected
-   * class wins); outline volume/timeline pass their pin/fill tokens here.
-   * Inline style wins over the base `bg-canvas-node-fill` / border classes.
-   */
   style?: CSSProperties;
-  /**
-   * every node kind passes `aria-label`; before this prop existed it was
-   * silently dropped and the i18n strings were dead).
-   */
   'aria-label'?: string;
   children?: ReactNode;
 }
@@ -137,7 +106,6 @@ export function NodeChromeShell({
   'aria-label': ariaLabel,
   children,
 }: NodeChromeShellProps) {
-  // keep rendering the strategy spine verbatim.
   const accentKind: Exclude<NodeAccent, boolean> | undefined =
     accent === true ? 'strategy' : accent === false ? undefined : accent;
 
@@ -146,20 +114,10 @@ export function NodeChromeShell({
       data-dragging={dragging ? 'true' : undefined}
       aria-label={ariaLabel}
       className={cn(
-        // (DESIGN.md §Elevation). Hover lifts to elevation-2; the
-        // `data-[dragging=true]` variant lifts further to elevation-4 when
-        // the RF wrapper forwards the dragging prop. The transition covers
-        // both box-shadow and border-color so the selection border flip
-        // animates alongside the elevation tiers (v1.183 P0
-        // R-V1121P3QC3-S001); duration/ease/motion-reduce stay on the v0.4
-        // motion scale.
         'min-w-canvas-node-default rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-[box-shadow,border-color] duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4',
         selected
           ? 'border-canvas-node-border-selected'
           : 'border-canvas-node-border',
-        // (status ring wins the ring slot when present). Pairs a 2px
-        // selected-color ring with a 2px background-color offset so the
-        // selection reads as a halo, not just a border-color flip.
         selected && !status
           ? 'ring-2 ring-canvas-node-border-selected ring-offset-2 ring-offset-background-100'
           : '',

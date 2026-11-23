@@ -89,7 +89,6 @@ export function SessionsPage() {
                 card={{
                   sessionId: s.session_id,
                   shortId: shortId(s.session_id),
-                  // `completed` reads green and is told apart by its label.
                   status: {
                     label: humanizeStatus(s.status),
                     variant: statusVariant(s.status),

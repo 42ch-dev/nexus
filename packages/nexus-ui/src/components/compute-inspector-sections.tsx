@@ -7,9 +7,6 @@ import { cn } from '../lib/cn';
 import { Button } from './button';
 
 /**
- * inspector content for a Narrative-layer Compute result node (behavior spec
- * §5 Inspector row).
- *
  * Content per spec: module name + version, report digest (module event
  * summary), affected KnowledgeEntries, provenance ("From module run" vs
  * "From preset" when distinguishable) + Run id, and an Open Run affordance
@@ -64,10 +61,6 @@ export interface ComputeInspectorSectionsProps {
   /** Provenance chip label — "From module run" / "From preset". */
   provenanceLabel: string;
   copy: ComputeInspectorSectionsCopy;
-  /**
-   * (`/modules?module=&run=` in the app). Rendered only when `runId`
-   * is present. Optional: read-only inspections omit it.
-   */
   onOpenRun?: () => void;
   className?: string;
 }

@@ -356,9 +356,6 @@ async fn findings_list_pagination_and_filter_parity() {
     assert_eq!(second.items.len(), 1);
     assert!(!second.pagination.has_more);
 
-    // rows (legacy quirk — the SQL `status = ?` filter simply never hits),
-    // while the comma-separated set form validates each token and rejects
-    // unknown ones with the verbatim legacy invalid_input message.
     let lone = core
         .list_findings(
             &principal,
@@ -506,7 +503,6 @@ async fn findings_update_and_batch_triage_semantics() {
         .unwrap();
     assert_eq!(no_patch.updated, 0);
 
-    // reported in the conflict bucket instead of failing the batch.
     core.update_finding(
         &principal,
         second.finding_id.clone(),
@@ -563,8 +559,6 @@ async fn findings_update_and_batch_triage_semantics() {
         .unwrap();
     assert_eq!(set.rule_suggestion.as_deref(), Some("prefer active voice"));
 
-    // clear it. (`description` rather than `status`, whose self-loop is an
-    // illegal transition.)
     let kept = core
         .update_finding(
             &principal,
@@ -729,8 +723,6 @@ async fn get_work_finding_binds_row_to_path_work() {
     ));
     core.close().await.unwrap();
 }
-
-// from the retired daemon runtime `reading_api.rs` fixture. ─────────────────
 
 /// Reading progress defaults to zero with a fresh timestamp, round-trips an
 /// upsert (the read serves the stored timestamp), and a delete returns the

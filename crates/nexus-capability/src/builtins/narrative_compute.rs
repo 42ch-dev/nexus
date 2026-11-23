@@ -102,7 +102,6 @@ fn default_module_id() -> String {
 /// Execute a WASM compute module for a world's computable `KnowledgeEntryRecord`s.
 #[derive(Clone)]
 pub struct NarrativeCompute {
-    // field only carries the constructor input for a `wasm`-enabled consumer.
     #[cfg_attr(not(feature = "wasm"), allow(dead_code))]
     pool: Option<Arc<sqlx::SqlitePool>>,
     /// The sandboxed WASM engine (feature `wasm`; absent otherwise and on the
@@ -226,9 +225,6 @@ impl Capability for NarrativeCompute {
 
             ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
-            // admitted Creator ActorView: another holder's `owner-private` World row
-            // never reaches the module, and a caller whose selection cannot be
-            // resolved refuses here instead of widening to the World listing.
             let selection =
                 admitted_creator_view_scope(pool, &parsed.creator_id, &parsed.world_id).await?;
             let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
@@ -244,9 +240,6 @@ impl Capability for NarrativeCompute {
                     "no computable knowledge entries found in world".to_string(),
                 ));
             }
-
-            // `key_blocks` items (opaque JSON objects; spoke-adapter-architecture
-            // spec §3.4) inline below.
 
             let gw =
                 nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
@@ -266,10 +259,6 @@ impl Capability for NarrativeCompute {
                 "timeline_position": "0", // V1.61: default to start of timeline
             });
 
-            // copies (`ComputeInputWorldRef`, `ComputeInputNarrativeState`) that
-            // are wire-equivalent to the domain contract types; JSON round-trips
-            // bridge them (drift gate proves equivalence). `key_blocks` items are
-            // opaque JSON objects (spoke-adapter-architecture spec §3.4).
             let compute_input = ComputeInput {
                 schema_version: std::num::NonZeroU64::new(1)
                     .expect("schema_version literal 1 is non-zero"),
@@ -280,11 +269,6 @@ impl Capability for NarrativeCompute {
                     .into_iter()
                     .map(
                         |kb: nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord| {
-                            // KnowledgeEntry JSON (the spoke $ref is unresolved at
-                            // codegen). Convert domain KnowledgeEntryRecord → spoke
-                            // KnowledgeEntry (sole conversion seam, now a free
-                            // function in nexus-spoke-adapter — V1.145 P1a) → JSON
-                            // object map.
                             let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
                                 knowledge_record_to_spoke(&kb);
                             serde_json::to_value(&spoke)
@@ -303,10 +287,6 @@ impl Capability for NarrativeCompute {
                 }),
             };
 
-            // (R-V161P3-PERF-002: compile once, reuse). Modules are pre-warmed at
-            // daemon boot (embedded + user-installed); a cache miss means the
-            // requested module id is neither embedded nor installed under
-            // `~/.nexus42/modules/`.
             let module_cache = self.module_cache.as_ref().ok_or_else(|| {
             tracing::warn!(
                 module_id = %parsed.module_id,
@@ -403,8 +383,6 @@ impl Capability for NarrativeCompute {
     }
 }
 
-/// with `provisional` status via the KB store.
-///
 /// # Security: `world_id` re-assertion (R-V161P3-CORR-002)
 ///
 /// Every emitted block MUST target the same world that was admitted by the
@@ -425,9 +403,6 @@ async fn create_new_key_blocks(
     let mut created = 0usize;
 
     for kb_map in blocks {
-        // KnowledgeEntry JSON. Convert Map → spoke KnowledgeEntry → domain
-        // KnowledgeEntryRecord (sole conversion seam, now a free function in
-        // nexus-spoke-adapter — V1.145 P1a) before persisting.
         let spoke: nexus_knowledge::world_kb::KnowledgeEntry =
             serde_json::from_value(serde_json::Value::Object(kb_map.clone()))
                 .map_err(|e| CapabilityError::Internal(format!("decode new_key_block: {e}")))?;
@@ -452,8 +427,6 @@ async fn create_new_key_blocks(
     Ok(created)
 }
 
-/// gateway.
-///
 /// Returns the number of events created.
 #[cfg(feature = "wasm")]
 async fn append_timeline_events(
@@ -503,7 +476,6 @@ async fn handle_compute_error(
         "narrative.compute failed; recording compute_error timeline event"
     );
 
-    // the original compute error so the caller knows something went wrong.
     let evt_result = nexus_local_db::narrative_write::append_event(
         pool,
         world_id,
@@ -540,8 +512,6 @@ mod tests {
     #[cfg(feature = "wasm")]
     use nexus_knowledge::world_kb::KbStore;
 
-    // keeps the default-build test surface warning-free (C3).
-
     /// The explicit compute attachment real executor runs need (C3): a
     /// pool-bound capability over a real engine + warmed cache — exactly what
     /// the production runtime injects. Plain constructors never build engines.
@@ -561,8 +531,6 @@ mod tests {
         world_id: &str,
         canonical_name: &str,
     ) -> serde_json::Map<String, serde_json::Value> {
-        // JSON. Fixture carries the spoke field names (entry_id, entry_type,
-        // extensions.nexus.world_id).
         serde_json::from_value(json!({
             "schema_version": 1,
             "entry_id": key_block_id,
@@ -825,8 +793,6 @@ mod tests {
         assert_eq!(state["character"]["current_hp"], 100.0);
     }
 
-    // any insert, rejecting cross-world block injection from a (hypothetically
-    // hostile or buggy) module.
     #[cfg(feature = "wasm")]
     #[tokio::test]
     async fn create_new_key_blocks_rejects_cross_world_injection() {
@@ -938,7 +904,6 @@ mod tests {
         )
         .await;
 
-        // is the selection's policy and not an empty KB.
         let unscoped = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
             .list_by_world("wld_a")
             .await
@@ -1015,9 +980,6 @@ mod tests {
 
         let cap = with_real_engine(pool.clone());
 
-        // it will return state_delta + battle_report. If it traps (e.g., because
-        // the module's ABI doesn't handle our exact character shapes), the error
-        // path creates a compute_error timeline event instead of crashing.
         let result = cap
             .run(json!({
                 "world_id": "wld_a",

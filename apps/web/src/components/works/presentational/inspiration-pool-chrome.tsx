@@ -84,18 +84,10 @@ export interface InspirationPoolChromeProps {
   onAddTitleChange: (value: string) => void;
   onAdd: (title: string) => void;
   adding?: boolean;
-  /**
-   * `aria-busy`). Non-null locks every promote button in the pool: the server
-   * checks status once, so one idea must never have two creates in flight.
-   */
   promotingItemId?: string | null;
   archivingItemId?: string | null;
   onPromote?: (row: InspirationPoolRow) => void;
   onArchive?: (row: InspirationPoolRow) => void;
-  /**
-   * single element (or null): the result is rendered inside `<Button
-   * asChild>` (Radix Slot), which throws on fragments/multi-element output.
-   */
   renderWorkLink?: (args: InspirationPoolWorkLinkArgs) => ReactElement | null;
   'data-testid'?: string;
 }
@@ -278,8 +270,6 @@ export function InspirationPoolChrome({
           <>
             <ul
               className="flex flex-col gap-2"
-              // pool name, so it replaces the list label (see the aria-hidden
-              // count paragraph below) instead of repeating it.
               aria-label={copy.countLabel ?? copy.listAriaLabel}
             >
               {rows.map((row) => (

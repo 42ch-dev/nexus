@@ -809,9 +809,6 @@ impl FixtureMemoryProvider {
         );
         let state_digest = basis_digest(&canonical)?;
 
-        // selection/filter: staleness compares against that pinned basis
-        // (§7.26); with nothing published there is nothing to be stale
-        // against, so `stale` is false.
         let tombstoned = tombstoned_record_ids(conn, space_id, subject_id).await?;
         let last = load_served_reflections(conn, space_id, subject_id)
             .await?
@@ -904,7 +901,6 @@ impl FixtureMemoryProvider {
         let profiles = load_profile_revisions(conn, space_id, subject_id).await?;
         let tombstoned = tombstoned_record_ids(conn, space_id, subject_id).await?;
 
-        // selection (or filter) keeps exactly the reflections pinned to it.
         let served: Vec<ServedReflection> = load_served_reflections(conn, space_id, subject_id)
             .await?
             .into_iter()
@@ -919,8 +915,6 @@ impl FixtureMemoryProvider {
             })
             .collect();
 
-        // provider snapshot marker plus the engine policy, so any grant or
-        // state change invalidates it even when the page's rows did not move.
         let snapshot = snapshot_marker(conn, space_id).await?;
         let binding = match jcs_sha256_hex(&json!({
             "principal": principal_id,
@@ -953,7 +947,6 @@ impl FixtureMemoryProvider {
         };
         let mut reflections = Vec::with_capacity(page.len());
         for row in page {
-            // pinned basis; nothing stored is trusted for it.
             let digest =
                 current_digest_for(&row.selection, row.filter.as_ref(), &records, &profiles)?;
             let stale = pinned_state_digest(&row.basis)? != digest;
@@ -988,8 +981,6 @@ impl FixtureMemoryProvider {
         Ok(records)
     }
 }
-
-// receipt flow with the GenerationPause/GenerationFailure fault points
 
 /// The fixture's content-free generation cost: one published-pattern unit kind
 /// charged exactly once, on the terminal committed receipt (C-078). The kind
@@ -1178,10 +1169,6 @@ impl FixtureMemoryProvider {
             }
             ReplayResolution::Fresh => {}
         }
-        // gate (§7.0.5/MEM-R021/C-036). The §8.2 freeze gate: generate sits
-        // outside the maintenance allowlist. Then the §7.7 subject lifecycle
-        // gate: a fenced subject rejects every fresh subject write, while an
-        // already-admitted completion keeps replaying above.
         let space = space_status(conn, space_id).await?;
         if space == "frozen" && !is_freeze_allowlisted(op) {
             return Err(space_frozen(space_id, op));
@@ -1229,9 +1216,6 @@ impl FixtureMemoryProvider {
             now,
         )
         .await?;
-        // instance as the lease owner with the generation deadline, so the
-        // reopen recovery passes over a generation another instance is
-        // executing right now and terminalizes only crash orphans.
         lease_pending_generate_in_tx(conn, &receipt_id, &self.generation_owner, now).await?;
         Ok(PendingGenerate::Staged(Box::new(StagedGenerate {
             space_id: space_id.to_owned(),
@@ -1253,15 +1237,11 @@ impl FixtureMemoryProvider {
     ) -> Result<MemoryReceipt, SpokeReject> {
         let request = admitted.request();
         checked(validate_memory_reflections_generate(request))?;
-        // competing identical admission can commit terminally while this one
-        // waits, and this one then replays that terminal receipt (C-070/C-076).
         self.faults()
             .hold(FaultPoint::AdmissionPause)
             .await
             .map_err(|_| fault_before_effect(FaultPoint::AdmissionPause))?;
 
-        // fresh-effect gates (freeze, subject fence), §7.27 policy +
-        // `expected_state_digest` CAS, then the pending receipt.
         let mut transaction = self.begin_write().await?;
         let pending = match self
             .stage_pending_generate_in_tx(
@@ -1279,7 +1259,6 @@ impl FixtureMemoryProvider {
             }
             PendingGenerate::Staged(pending) => pending,
         };
-        // receipt, dedup row or target behind.
         self.faults()
             .hold(FaultPoint::BeforeCommit)
             .await
@@ -1289,24 +1268,16 @@ impl FixtureMemoryProvider {
             return Err(outcome_uncertain());
         }
         transaction.commit().await.map_err(|_| commit_unknown())?;
-        // generation never ran (alternate C-015 shape).
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
             return Err(outcome_uncertain());
         }
-        // over `memory.receipts.get`); it is also the arming window that
-        // targets transaction 2 with the one-shot points.
         self.faults()
             .hold(FaultPoint::GenerationPause)
             .await
             .map_err(|_| outcome_uncertain())?;
 
-        // an honest failure is a terminal `failed` receipt with an error
-        // envelope and retry class, and no cost is ever charged for it.
         let generation_failed = self.faults().trip(FaultPoint::GenerationFailure);
 
-        // outcome (the reflection row commits with it, MEM-R009). An abort
-        // here leaves the pending receipt recoverable; the
-        // never-return-to-pending rule keeps the settle one-way.
         let mut transaction = self.begin_write().await?;
         let terminal = if generation_failed {
             ReceiptState::Failed(internal(
@@ -1354,7 +1325,6 @@ impl FixtureMemoryProvider {
             return Err(outcome_uncertain());
         }
         transaction.commit().await.map_err(|_| commit_unknown())?;
-        // but the response is lost; a same-key replay returns it (C-070/C-071).
         if self.faults().trip(FaultPoint::AfterCommitBeforeResponse) {
             return Err(outcome_uncertain());
         }
@@ -1425,7 +1395,6 @@ async fn insert_generated_reflection(
         "state_digest": state_digest,
         PINNED_SOURCE_IDS_KEY: source_ids,
     });
-    // mints; the extensions stay the empty map, so no extension key is minted.
     if ReflectionCostUnitKind::from_str(GENERATION_COST_UNIT_KIND).is_err()
         || ExtensionKey::from_str(GENERATION_COST_UNIT_KIND).is_err()
     {
@@ -1476,7 +1445,6 @@ async fn insert_generated_reflection(
     .execute(&mut *conn)
     .await
     .map_err(internal_failure)?;
-    // in this same transaction, and cursors bind to this marker (MEM-R026).
     bump_snapshot(conn, space_id).await
 }
 
@@ -1512,9 +1480,6 @@ pub async fn terminalize_orphaned_generate_receipts(
     .collect::<Result<Vec<_>, sqlx::Error>>()?;
     for (space_id, receipt_id, owner_id) in orphans {
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-        // must ride along: every leased receipt carries a non-NULL owner, and
-        // binding `None` here would match zero rows and fail every reopen
-        // (§7.0.3, inspector round 3).
         let settled = settle_receipt_in_tx(
             &mut transaction,
             &space_id,
@@ -1538,8 +1503,6 @@ pub async fn terminalize_orphaned_generate_receipts(
     }
     Ok(())
 }
-
-// serving selectors that drive these rules over loopback land in Task 6)
 
 #[cfg(test)]
 mod tests {
@@ -1617,8 +1580,6 @@ mod tests {
     fn c_075_subject_all_requires_unrestricted_grant() {
         assert!(admits(&[unrestricted(&["reflect"])], &selection_all()));
         assert!(admits(&[unrestricted(&["admin"])], &selection_all()));
-        // evaluator reads it as full coverage), so the negative cases here are
-        // context-limited grants.
         for narrow in [
             restricted(&["reflect"], &["ctx-a"], false),
             restricted(&["reflect"], &["ctx-a"], true),

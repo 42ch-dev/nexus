@@ -61,8 +61,6 @@ export function deriveRelationshipEdges(
       source: rel.source,
     };
     const label = relationshipEdgeLabel(rel);
-    // modulates stroke-width + opacity (PM-locked stepped bands). Suggested
-    // (needs_review) edges render dashed regardless of band.
     const strokeColor = rel.relation_type === 'custom'
       ? 'var(--color-canvas-worldkb-relationship-edge-custom)'
       : rel.symmetric

@@ -114,20 +114,12 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
       expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
     });
 
-    // is Brief (era data exists).
     const wrapper = screen.getByTestId('timeline-canvas-layer-transition');
     expect(wrapper).toBeInTheDocument();
     expect(wrapper.className).toContain('nexus-layer-enter');
   });
 
   it('carries the active layer as a `key` so React unmounts + remounts on swap (animation replay)', async () => {
-    // a remount on layer swap so the CSS keyframe animation replays in a
-    // real browser. We assert the wrapper is present with the right class
-    // + the layer swap updates `data-active-layer` on the ancestor — those
-    // are the contract surfaces that survive in jsdom (the actual DOM
-    // remount is a React-internal concern that's invisible to
-    // testing-library's element identity).
-    //
     // The animation replay contract is verified by the CSS file
     // (`apps/web/src/index.css` `.nexus-layer-enter` keyframe) +
     // inspection: the wrapper has `nexus-layer-enter` always, and the
@@ -165,7 +157,6 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
       'nexus-layer-enter',
     );
 
-    // under the new key.
     fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
@@ -176,7 +167,6 @@ describe('TimelineCanvas — layer transition animation wrapper (P4 Task 4)', ()
 
     const wrapperAfter = screen.getByTestId('timeline-canvas-layer-transition');
     expect(wrapperAfter.className).toContain('nexus-layer-enter');
-    // which carries the new layer on its data attribute.
     expect(
       (wrapperAfter.closest('[data-testid="timeline-canvas"]') as HTMLElement)?.getAttribute(
         'data-active-layer',
@@ -219,11 +209,6 @@ describe('WorkTimelineCanvas — layer transition animation wrapper (P4 Task 4)'
   });
 
   it('carries the active layer as a `key` so React unmounts + remounts on swap (animation replay)', async () => {
-    // wrapper's React `key={activeLayer}` is the keyed-remount idiom; the
-    // CSS keyframe in `apps/web/src/index.css` carries the visual
-    // animation. Real-browser evidence is owned by the Task 8 screenshot
-    // pack.
-    //
     // A scene/beat fixture is wired so the Moment layer renders nodes
     // (otherwise the canvas falls into Moment-empty state and the keyed
     // wrapper is absent — the empty-state branch owns that surface).
@@ -272,8 +257,6 @@ describe('WorkTimelineCanvas — layer transition animation wrapper (P4 Task 4)'
       screen.getByTestId('work-timeline-canvas-layer-transition').className,
     ).toContain('nexus-layer-enter');
 
-    // animation class still present (fixture supplies one scene so the
-    // canvas branch stays active).
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-moment'));
     await waitFor(() => {
       expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(

@@ -1,6 +1,4 @@
 /**
- * binding state, and running-session state.
- *
  * Author actions live on the row: the canvas drill-down (row name), the
  * profile drill-down link, Validate (dry-run of this preset's manifest), Reload
  * (re-read it from disk), and Delete (user presets only). Validate is offered
@@ -62,7 +60,6 @@ export function PresetCard({
 }: PresetCardProps) {
   const { t } = useTranslation('strategies');
   const bound = Boolean(profile.data && profile.data.states.length > 0);
-  // read is unknown, exactly like the running column.
   const bindingBadge = profile.isError
     ? { variant: 'warning' as const, label: t('harness.bindingUnknown') }
     : profile.isLoading

@@ -220,8 +220,6 @@ describe('buildStrategyGraph — YAML projection contract', () => {
 
 describe('buildStrategyGraph — validation tolerance', () => {
   it('does not crash on a dangling `next` target and surfaces it via danglingTargets', () => {
-    // dangling id at dequeue time and the projection surfaces the warning via
-    // danglingTargets for the ValidationPanel.
     const yaml = `
 preset:
   id: typo-preset
@@ -238,7 +236,6 @@ states:
     expect(result.nodes.find((n) => n.id === 'gathering')).toBeDefined();
     expect(result.danglingTargets.length).toBeGreaterThan(0);
     expect(result.danglingTargets[0]).toContain('outlinig');
-    // so the edges array has no synthetic edge for the dangling next.
     expect(result.edges.length).toBe(0);
   });
 });

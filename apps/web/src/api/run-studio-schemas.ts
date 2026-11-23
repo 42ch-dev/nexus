@@ -1,7 +1,4 @@
 /**
- * index signatures (V1.147 P1, qc1 W-003 fix) onto the `@42ch/nexus-ui`
- * primitive contracts.
- *
  * The generated `ModuleDetail` manifest is the wire SSOT — these helpers are
  * typed-guard functions on the wire shape, not a second source of truth. If a
  * future manifest bump changes the schema fragment shape, the guard rejects

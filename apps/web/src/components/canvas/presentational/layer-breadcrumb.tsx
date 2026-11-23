@@ -21,10 +21,6 @@ export interface LayerBreadcrumbSegment<L extends string> {
 }
 
 export interface LayerBreadcrumbProps<L extends string> {
-  /**
-   * `work-timeline`. Test ids are `${surfaceKey}-layer-breadcrumb` and
-   * `${surfaceKey}-layer-breadcrumb-segment-${layer}`.
-   */
   surfaceKey: string;
   /** Parent (coarse-zoom) layer — zoom-out target. */
   coarseSegment: LayerBreadcrumbSegment<L>;
@@ -52,8 +48,6 @@ export function LayerBreadcrumb<L extends string>({
   const isCoarseActive = activeLayer === coarseSegment.layer;
   const isFineActive = activeLayer === fineSegment.layer;
 
-  // renders only when the user has drilled into the fine layer. When the
-  // coarse layer is active, the breadcrumb shows just the coarse label.
   return (
     <nav
       data-testid={`${surfaceKey}-layer-breadcrumb`}

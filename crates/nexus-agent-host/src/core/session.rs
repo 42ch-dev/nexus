@@ -659,7 +659,6 @@ mod tests {
         registry.transition_to_starting(&id).unwrap();
         registry.transition_to_ready(&id).unwrap();
 
-        // ErrorRecoverable when process cleanup could not be confirmed.
         registry.transition_to_stopping(&id).unwrap();
         registry.transition_to_error_recoverable(&id).unwrap();
         assert_eq!(

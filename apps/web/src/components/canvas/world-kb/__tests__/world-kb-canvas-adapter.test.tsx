@@ -22,9 +22,6 @@ import type {
 import { createWorldKbCanvasAdapter, type WorldKbCanvasAdapterContext } from '../world-kb-canvas-adapter';
 import type { WorldKbNodeData } from '../types';
 
-// network. We are testing ROUTING (which inspector + which projection), not
-// submit behavior — that is covered by entity-inspector / promotion-inspector
-// test suites.
 const mocks = vi.hoisted(() => ({
   patchEntity: { mutate: vi.fn(), isPending: false },
   promote: { mutate: vi.fn(), isPending: false },

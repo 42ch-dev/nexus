@@ -70,9 +70,6 @@ export function ChaptersPage() {
       planned_word_count: edits.planned_word_count,
       volume: edits.volume,
     };
-    // (`CHAPTER_STRUCTURE_EDIT_BLOCKED`) with no `confirm_structural_edit`
-    // override, so it must never reach an actionable confirm dialog — showing
-    // one would always end in an error toast after the user confirms.
     if (row.status === 'finalized' && !confirmed) {
       setConfirmChapter(row);
       return;
@@ -170,11 +167,6 @@ export function ChaptersPage() {
                     return (
                       <TableRow
                         key={`${row.volume}:${row.chapter}`}
-                        // registered data-table-row-protected token (DESIGN.md
-                        // components.data-table.row-protected — purple-700
-                        // low-alpha wash). Was a raw color-mix arbitrary class,
-                        // then a Tailwind opacity modifier on purple-700; now
-                        // the dedicated registered-token class (no new hue).
                         className={isProtected ? 'bg-data-table-row-protected' : undefined}
                         data-testid={`chapter-row-${row.chapter}`}
                       >
@@ -279,9 +271,6 @@ export function ChaptersPage() {
                                 </Button>
                               </>
                             ) : row.status === 'published' ? (
-                              // structural edits (CHAPTER_STRUCTURE_EDIT_BLOCKED,
-                              // no override). Render a disabled, informational
-                              // affordance instead of an actionable Edit button.
                               <Button
                                 type="button"
                                 variant="tertiary"

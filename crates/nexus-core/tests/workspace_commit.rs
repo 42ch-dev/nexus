@@ -338,7 +338,6 @@ async fn delete_detects_target_recreated_after_capture() {
     mgr.startup_recovery().await.expect("startup");
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // fires after the delete captured the original and before it finalizes.
     let target = ws.path().join("d.txt");
     set_after_delete_capture_hook(Some(Arc::new(move || {
         std::fs::write(&target, b"recreated-by-external-writer").expect("external write");
@@ -472,8 +471,6 @@ async fn malformed_manifest_base64_bodies_are_refused() {
     let root = ws.path().to_string_lossy().to_string();
     let session = mgr.open_session(&root, "", true).await.expect("open");
 
-    // trailing bits, interior whitespace, and URL-safe symbols that the
-    // standard alphabet does not accept. None may create a file.
     for malformed in [
         "A",    // truncated quad
         "AB=",  // wrong padding count
@@ -508,7 +505,6 @@ async fn malformed_manifest_base64_bodies_are_refused() {
         );
     }
 
-    // well-formed body, so the refusals above are the decode boundary.
     let content = b"v1.191 base64 boundary";
     mgr.commit_session_durable(&session, &[create_change("accepted.txt", content)], &root)
         .await
@@ -903,13 +899,11 @@ async fn preset_graph_branches_on_live_committed_workspace_state() {
         root.clone(),
     )));
 
-    // to `pending_state`, proving the state is not a constant.
     assert_eq!(
         routed_state(&engine, &registry, "pre-commit").await,
         "pending_state"
     );
 
-    // WorkspaceCommitExecutor -> shared manager -> DB + files).
     let opened = registry
         .get("workspace.open")
         .expect("workspace.open registered")
@@ -949,7 +943,6 @@ async fn preset_graph_branches_on_live_committed_workspace_state() {
     assert_eq!(intent.revision, revision);
     assert_eq!(intent.state, nexus_local_db::IntentState::Committed);
 
-    // the other way — resolved live from the shared manager, not a fixture.
     assert_eq!(
         routed_state(&engine, &registry, "post-commit").await,
         "committed_state"

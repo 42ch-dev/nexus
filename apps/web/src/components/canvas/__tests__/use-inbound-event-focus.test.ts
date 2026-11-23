@@ -59,7 +59,6 @@ function renderFocus(
     selectedNodeId: options.selectedNodeId ?? null,
     onNodesChange,
   };
-  // the rerenders below exercise the "no target rule" (Work) call shape.
   const initialProps: HarnessProps = { surface, nodeId, isFocusTarget: options.isFocusTarget };
   const view = renderHook(
     ({ surface: s, nodeId: id, isFocusTarget }: HarnessProps) =>

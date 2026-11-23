@@ -12,8 +12,6 @@ import type { IncomingMessage } from 'node:http';
  * restart, and no token or session ever reaches disk.
  */
 export const SESSION_TTL_MS = 28_800_000;
-// only bounds how long an UNCONSUMED link stays valid — matching the session
-// lifetime means a printed URL never expires while the service runs.
 export const TOKEN_TTL_MS = SESSION_TTL_MS;
 export const SESSION_COOKIE = 'nexus_session';
 

@@ -6,15 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * at the Strategy tier and hands the whole request body — the guarded base revision and the exact
- * simulated trajectory — to the core authority. The core's own approvals, refusals and snapshot
- * immutability are proven in `crates/nexus-core/tests/approve_route.rs`; this target proves the
- * HTTP contract: path id, tier, payload passthrough (including a null trajectory, which the core
- * refuses as missing evidence rather than the adapter rejecting the body) and the untouched
- * refusal envelope.
- */
-
 let routes;
 
 before(async () => {
@@ -105,7 +96,6 @@ describe('approve route (POST /v1/daemon/strategies/{id}/approve)', () => {
   });
 
   test('surfaces the core refusal unchanged', async () => {
-    // status, code and structured details verbatim.
     const refusal = new Error(
       JSON.stringify({
         code: 'invalid_input',

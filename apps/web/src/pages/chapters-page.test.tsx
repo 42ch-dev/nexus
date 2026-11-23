@@ -1,6 +1,3 @@
-/**
- * and protected-chapter confirmation.
- */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { Route, Routes } from 'react-router';
@@ -322,8 +319,6 @@ describe('ChaptersPage banner/tint convergence (V1.121 v0.4)', () => {
 
     renderChapters();
     const row = await screen.findByTestId('chapter-row-1');
-    // components.data-table.row-protected token; no raw color-mix arbitrary
-    // class remains.
     expect(row.className).toMatch(/\bbg-data-table-row-protected\b/);
     expect(row.className).not.toMatch(/color-mix/);
     expect(row.className).not.toMatch(/\bbg-\[/);

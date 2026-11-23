@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /**
- * and consumed from its own archive.
- *
  * For each entry in `VERSION_BRACKETS_PATH` this
  *
  *   1. copies the source Git would ship — tracked files with their working-tree
@@ -99,22 +97,10 @@ const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
  */
 const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.json";
 
-/**
- * guest. A guest is a separate crate from the host consumer, so no host-side
- * dependency can reach the artifact.
- */
 const GUEST_DIR = "guest";
 
-/**
- * when that is set, so a worktree keeps its scoped target cache, and falls
- * back to the OS temp dir otherwise.
- */
 const SCRATCH_PREFIX = "nexus-contract-package-";
 
-/**
- * harness control dir, other checkouts and build outputs are not product
- * source and must not reach an archive.
- */
 const SKIPPED_STAGE_ENTRIES = new Set([
   ".direnv",
   ".git",
@@ -125,9 +111,6 @@ const SKIPPED_STAGE_ENTRIES = new Set([
 ]);
 
 /**
- * `name.path = ...`). Cargo package names are hyphen/underscore/alphanumeric,
- * so they need no regex escaping.
- *
  * @param {string} manifestContents
  * @param {import("./version-surfaces.mjs").ContractBracketEntry[]} entries
  * @returns {import("./version-surfaces.mjs").ContractBracketEntry[]}
@@ -191,20 +174,9 @@ function contractDependencies(manifestContents, entries) {
  * @property {boolean} ok
  * @property {PackageResult[]} results One row per contract entry, in carrier order.
  * @property {string | null} firstFailure Package name of the first failing crate.
- * @property {{path: string; fixtures: string[]; noFixture: {name: string, reason: string}[]}}
- *   against: entries with a fixture, and entries explicitly declared without one.
- * @property {{sha: string | null; clean: boolean; mismatch?: string[]}} source
- *   Revision the packed source came from, and whether the staged bytes are that
- *   revision's bytes: `clean` is true only for a tree with no uncommitted change
- *   **and** staged files whose blobs match `sha` (see `verifyStagedSource`).
- *   `mismatch` names the paths that broke the binding. A consumer may bind
- *   archive hashes to the revision only when `clean` is true and `sha` is the
- *   reviewed revision; a dirty tree makes no claim at all.
  */
 
 /**
- * stdout while warnings may land on stderr.
- *
  * @param {string} command
  * @param {string[]} args
  * @param {string} cwd
@@ -217,7 +189,6 @@ function run(command, args, cwd, input) {
     encoding: "utf8",
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
     input,
-    // smaller than a big `git ls-files` result.
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.error !== undefined) {
@@ -270,8 +241,6 @@ function failedRow(cause, output, archive = null) {
 }
 
 /**
- * the OS temp dir. The scratch dir is a child of it and always disposable.
- *
  * @returns {string}
  */
 function packageScratchParent() {
@@ -282,10 +251,6 @@ function packageScratchParent() {
 }
 
 /**
- * uncommitted modifications) plus untracked files that are not ignored. Git is
- * only asked for the path list; every byte copied comes from the working tree,
- * so an archive never carries stale HEAD or index content.
- *
  * A failed listing fails closed: falling back to a verbatim walk would put
  * gitignored local files back into archives and machine-local hashes.
  *
@@ -309,10 +274,6 @@ function workingSourcePaths(repoRoot) {
 }
 
 /**
- * stays as a guard for VCS/build entries even if a checkout tracks one, and
- * executable bits and symlinks are preserved because packed build scripts and
- * tools depend on them.
- *
  * Symlinks are re-created with their stored target bytes rather than copied by
  * `cpSync`, which resolves the target against the source directory (an absolute
  * path in the copy, which {@link verifyStagedSource} then reads as a mismatch on
@@ -352,9 +313,6 @@ function stageWorkingSource(repoRoot, stageRoot) {
 }
 
 /**
- * workspace. `publish: []` is Cargo's "publish = false"; anything else
- * (including an unset key) is not this check's business.
- *
  * @param {string} stageRoot
  * @returns {{ ok: boolean; cause: string | null; publishByName: Map<string, string[] | null> }}
  */
@@ -392,9 +350,6 @@ function workspacePolicy(stageRoot) {
 }
 
 /**
- * outside the repository and read the normalized manifest Cargo actually
- * shipped.
- *
  * @param {{
  *   entries: import("./version-surfaces.mjs").ContractBracketEntry[];
  *   entry: import("./version-surfaces.mjs").ContractBracketEntry;
@@ -578,11 +533,6 @@ function inside(candidate, root) {
 }
 
 /**
- * the archives are packed from. Every carrier entry must appear exactly once,
- * with either a fixture directory that exists in the tree or an explicit
- * no-fixture record and reason; anything else fails closed. Without this, a
- * repository could drop its fixtures and still report a clean pack-only run.
- *
  * The directory named here is the one the consumer run stages, so the record and
  * the evidence cannot disagree. That also bounds what this can prove: a rename
  * of a directory together with its record is indistinguishable from a
@@ -665,10 +615,6 @@ function readConsumerAccounting(stageRoot, entries) {
 }
 
 /**
- * in `guest/`. The guest crate is a separate workspace member, so the host
- * consumer's dependencies stay out of the artifact, and the target itself
- * refuses host-only crates (nexus-module-test, wasmtime).
- *
  * @param {{
  *   consumerRoot: string;
  *   targetRoot: string;
@@ -747,11 +693,6 @@ function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
 }
 
 /**
- * failure returns named evidence instead of throwing, so a Cargo failure can
- * never leave an empty passing report. `repoRoot` is only the escape detector's
- * reference (a consumer must not resolve from the original checkout); the
- * fixture itself is read from the verified stage.
- *
  * @param {{
  *   repoRoot: string;
  *   stageRoot: string;
@@ -774,11 +715,6 @@ function runConsumer({
   archives,
   policy,
 }) {
-  // were packed from, so package and consumer evidence share one set of
-  // reviewed inputs; the original checkout is no longer a consumer input. The
-  // directory is the one the accounting declares, not one derived from the
-  // entry name: otherwise a declared fixture could be skipped while the row
-  // still looked green, and the declaration would name something never run.
   const fixturePath = join(stageRoot, CONSUMER_FIXTURES_PATH, fixture);
   const consumerRoot = join(scratchRoot, "consumers", entryName);
   cpSync(fixturePath, consumerRoot, { recursive: true });
@@ -861,7 +797,6 @@ function runConsumer({
     };
   }
 
-  // more than one member.
   const selected = [
     ...new Map(
       evidence.declared
@@ -911,7 +846,6 @@ function runConsumer({
     };
   }
 
-  // visible to a test target only, so that is the shape a module crate's ABI harness has.
   const mode = existsSync(join(consumerRoot, "tests")) ? "test" : "run";
   evidence.mode = mode;
   const ran = run(
@@ -979,7 +913,6 @@ function runConsumer({
         cause: `consumer resolved ${row.name} from the packing tree (${row.manifest_path})`,
       };
     }
-    // inside the checkout; only inputs outside it are original-source escapes.
     if (
       inside(row.manifest_path, repoRoot) &&
       !inside(row.manifest_path, scratchRoot)
@@ -1005,10 +938,6 @@ function runConsumer({
 }
 
 /**
- * working tree (see {@link stageWorkingSource}), so the revision alone is not
- * provenance: `clean` says whether that tree still matched it. Both reads fail
- * closed — an unreadable revision or status reports "not clean".
- *
  * @param {string} repoRoot
  * @returns {{sha: string | null; clean: boolean}}
  */
@@ -1031,9 +960,6 @@ function blobId(bytes) {
 }
 
 /**
- * entries staging never copies (VCS metadata, build output, other checkouts) and
- * minus the subtrees the revision records as gitlinks.
- *
  * A gitlink (`160000 commit`) is one tree entry, not a directory of tracked
  * content, so an initialized submodule's files are not part of the revision and
  * are not compared. Only paths the revision itself names are pruned — this is
@@ -1167,7 +1093,6 @@ export function verifyStagedSource(repoRoot, sha, directory) {
       "git",
       ["--work-tree", directory, "hash-object", "--stdin-paths"],
       repoRoot,
-      // is what maps them back to the staged tree's attributes.
       `${toHash.map((path) => join(directory, path)).join("\n")}\n`,
     );
     const ids = hashed.ok ? hashed.stdout.split("\n").filter((id) => id.length > 0) : [];
@@ -1215,9 +1140,6 @@ export function checkContractPackageability(repoRoot) {
   let consumer = { fixtures: new Map(), noFixture: new Map() };
   try {
     stageWorkingSource(repoRoot, stageRoot);
-    // between. Only a clean tree is claimed, and only when the bytes actually
-    // staged hash to that revision's blobs; anything else downgrades the stamp
-    // to "not clean" instead of naming a revision the archive does not match.
     if (source.clean && source.sha !== null) {
       const mismatch = verifyStagedSource(repoRoot, source.sha, stageRoot);
       if (mismatch.length > 0) {
@@ -1225,7 +1147,6 @@ export function checkContractPackageability(repoRoot) {
       }
     }
 
-    // for whatever happens to be on disk: the accounting must name every entry.
     consumer = readConsumerAccounting(stageRoot, entries);
 
     for (const entry of entries) {
@@ -1261,8 +1182,6 @@ export function checkContractPackageability(repoRoot) {
 
     if (consumer.fixtures.size > 0 && archives.size > 0) {
       const policy = workspacePolicy(stageRoot);
-      // the staged workspace cannot report their `publish`; their archive's own
-      // normalized row is the source for them.
       for (const row of results) {
         if (row.package !== null) {
           policy.publishByName.set(row.name, row.package.publish);
@@ -1289,13 +1208,6 @@ export function checkContractPackageability(repoRoot) {
           row.cause = evidence.cause;
         }
       }
-      // fixture (knowledge by narrative), so a passing package row is not proof
-      // its archive is usable. Coverage is decided by what the consumer actually
-      // resolved, not by what the fixture proposed: `patched` only says a patch
-      // was supplied, while `resolved` is read from the consumer's own metadata
-      // after the origin loop has proven each of those rows came from the
-      // extracted archive. A patch that resolution ignored (a target-specific
-      // declaration, an unused patch) therefore proves nothing.
       /** @type {Map<string, {sha256: string, cases: Set<string>}>} */
       const coverage = new Map();
       for (const row of results) {
@@ -1333,8 +1245,6 @@ export function checkContractPackageability(repoRoot) {
           covered !== undefined && covered.sha256 === row.archive.sha256
             ? [...covered.cases].sort()
             : null;
-        // fixture also consumes the archive, running the declared one proves
-        // nothing unless it is one of the fixtures that resolved it.
         const declared = consumer.fixtures.get(row.name);
         const declaredCase =
           declared === undefined

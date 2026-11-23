@@ -161,9 +161,6 @@ test("composeCommitMessage appends the trailer block and truncates long headline
 });
 
 test("the release tag annotation reads the summary line, not the trailer", () => {
-  // first usable line of the bump commit body, read as
-  // `git show -s --format=%B <commit> | awk 'NR == 1 { next } NF { print; exit }'`.
-  // `%B` renders `headline\n\nbody`, so line 1 is the subject.
   const firstUsableBodyLine = (message) =>
     message
       .split("\n")
@@ -284,8 +281,6 @@ test("verifyPinnedBase passes on a match, is skipped without an expected OID, an
 });
 
 /**
- * the commit the working tree was prepared from — the QC2-001 race shape.
- *
  * @returns {{ root: string; origin: string; work: string; preparedOid: string; advancedOid: string }}
  */
 function createAdvancedOriginFixture() {
@@ -316,7 +311,6 @@ test("the helper refuses a stale prepared base instead of reverting the newer ma
     gitOk(work, ["reset", "-q", "--hard", preparedOid]);
     writeRepoFile(work, "package.json", '{"name":"scratch","version":"9.8.8"}\n');
 
-    // up as a deletion against the newer origin/main.
     gitOk(work, ["fetch", "-q", "origin", "main"]);
     assert.deepEqual(
       collectFileChanges(work, "main").deletions.map((entry) => entry.path),
@@ -362,10 +356,6 @@ test("the helper proceeds past the base pin when the fetched main still matches 
 });
 
 /**
- * the commit the previous release branch was published from and the working
- * tree prepared exactly like the workflow (fresh branch off `origin/main` plus
- * the version bump) — the QC3-002 re-dispatch shape.
- *
  * @param {{ existingRelease?: boolean }} [options]
  * @returns {{ root: string; origin: string; work: string; previousReleaseOid: string | null; advancedMainOid: string }}
  */
@@ -451,7 +441,6 @@ async function startGitHubStub({ refOid, commitOid = "c".repeat(40), commitError
   return {
     url: `http://127.0.0.1:${port}`,
     requests,
-    // GraphQL and counted separately.
     refMutations: () => requests.filter((entry) => entry.method !== "GET" && entry.url.startsWith("/repos/o/r/git/")),
     close: () =>
       new Promise((resolve) => {
@@ -461,8 +450,6 @@ async function startGitHubStub({ refOid, commitOid = "c".repeat(40), commitError
 }
 
 /**
- * GitHub environment pointed at it.
- *
  * @param {{ url: string }} stub
  * @param {string} work
  * @param {string[]} args
@@ -541,8 +528,6 @@ test("the helper replaces an existing release head with a commit parented on it"
     assert.equal(input.expectedHeadOid, fixture.previousReleaseOid);
     assert.notEqual(input.expectedHeadOid, fixture.advancedMainOid);
     assert.deepEqual(stub.refMutations(), []);
-    // the prepared working tree (main's later changes included) and the PR
-    // does not revert them.
     assert.deepEqual(
       input.fileChanges.additions.map((entry) => entry.path).sort(),
       ["main-only.txt", "package.json"],

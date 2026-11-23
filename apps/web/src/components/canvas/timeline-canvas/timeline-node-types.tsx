@@ -1,6 +1,4 @@
 /**
- * V1.147 P2 T3.
- *
  * Four node kinds, all projecting onto the Timeline surface:
  *   • timeline-brief-era  — V1.123 P1 T2 Brief-era marker
  *                           (`block_type=era` projected onto the Brief
@@ -221,7 +219,6 @@ export const TimelineComputeResultNode = memo(function TimelineComputeResultNode
   const { t } = useTranslation('canvas');
   const payload = d.compute;
 
-  // them together); render nothing honest otherwise.
   if (!payload) return null;
 
   const provenanceLabel =

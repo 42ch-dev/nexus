@@ -240,7 +240,6 @@ pub fn validate(
     if let Some(path) = find_cycle(graph.edges(), &roots) {
         violations.push(Violation::NestCycle { path });
     } else {
-        // any cycle exists.
         let mut memo = HashMap::new();
         for root in &roots {
             let depth = nest_depth(root, graph.edges(), &mut memo);
@@ -901,7 +900,6 @@ mod tests {
 
     #[test]
     fn rejects_a_pattern_reference_cycle() {
-        // reachable, because the document itself nests a leaf pattern pin.
         let a = slot_document("a", &json!([nest("n1", "slot", &pattern("b", "1.0.0"))]));
         let b = slot_document("b", &json!([nest("n2", "slot", &pattern("a", "1.0.0"))]));
         let patterns = [fragment("a", &a), fragment("b", &b)];

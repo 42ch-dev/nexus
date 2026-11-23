@@ -49,9 +49,6 @@ describe('SettingsConnectionSection', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
-    // primitive for transport-classified failures. Verifies the section-level
-    // wiring (the primitive is reachable through the Settings → Connection
-    // page that a manual tester loads after a stale-URL resume-gate redirect).
     await waitFor(() => {
       const block = screen.getByTestId('transport-error-block');
       expect(block).toHaveAttribute('data-kind', 'network');

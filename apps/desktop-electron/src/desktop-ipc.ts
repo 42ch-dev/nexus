@@ -1,6 +1,4 @@
 /**
- * IPC and trust boundary.
- *
  * `registerDesktopIpc(window, handlers)` admits invoke envelopes on
  * `nexus:desktop:invoke` ONLY from the live selected top-frame of the app
  * origin (no `sender.getURL()` fallback), bounded by the frozen admission
@@ -49,21 +47,7 @@ export type DesktopHandlers = {
 };
 
 export interface RegisterDesktopIpcOptions extends DesktopOriginOptions {
-  /**
-   * the LIVE current generation (see `getCurrentGeneration`), not just this
-   * value, so a stale registration left installed after navigation is
-   * rejected with `stale_sender`. Defaults to 0.
-   */
   generation?: number;
-  /**
-   * fails closed without it. Every sender check compares the registration's
-   * bound generation against `getCurrentGeneration()` evaluated at call
-   * time, so a registration left installed after a window-generation
-   * transition rejects events with `stale_sender` instead of comparing a
-   * closure constant to itself. Main increments the returned value on every
-   * window replacement/navigation generation transition — P0-T7 MUST supply
-   * this source when wiring `registerDesktopIpc`.
-   */
   getCurrentGeneration: () => number;
   requestTimeoutMs?: number;
 }
@@ -195,8 +179,6 @@ export async function registerDesktopIpc(
   handlers: DesktopHandlers,
   options: RegisterDesktopIpcOptions,
 ): Promise<RegisterDesktopIpcResult> {
-  // generation source is rejected outright (P0-T7 wiring obligation), so the
-  // sender check can never degenerate to a captured closure constant.
   if (typeof options.getCurrentGeneration !== 'function') {
     throw desktopError(
       'invalid_input',

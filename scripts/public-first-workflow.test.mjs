@@ -67,14 +67,6 @@ function observedIds(count, epoch = EPOCH) {
   return Array.from({ length: count }, (_, index) => `${epoch}:${index + 1}`);
 }
 
-/**
- * data fixture: `no-response` accepts the connection and answers nothing at all
- * (the live run's own shape — the workflow transport writes its headers with the
- * first frame, so a run with nothing new to send has not flushed any yet),
- * `idle` answers headers and then says nothing, `replay` answers the given frame
- * text and then idles, `reset` aborts the connection after writing its frames,
- * `close` ends the stream, `json-404` is a pre-header refusal.
- */
 function startSseServer(mode, frames = '') {
   const server = createServer((request, response) => {
     if (mode === 'no-response') return;
@@ -169,8 +161,6 @@ test('a cursor reconnect replays exactly the promised successors, in order, and 
   assert.equal(facts.exclusive, true);
   assert.equal(facts.duplicate_handoff, false);
 
-  // events: every promised ID is present, so set membership alone would call
-  // them a faithful replay.
   const repeated = [
     { id: `${EPOCH}:2`, event: 'run_state', data: '{}' },
     { id: `${EPOCH}:2`, event: 'run_state', data: '{}' },
@@ -272,7 +262,6 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
   assert.equal(covered.closed, true);
   assert.equal(covered.timed_out, false);
 
-  // is NOT the contract's outcome — it must not be reported as an honest gap.
   assert.throws(
     () => classifyReplay([gapFrame], { read: { closed: false, timed_out: true } }),
     (error) => {
@@ -281,7 +270,6 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
     },
   );
 
-  // case: bounded record, gap plus the replayed tail, no fabricated content.
   const trimmed = classifyReplay([
     { id: `${EPOCH}:3`, event: 'gap', data: gapData(2, 3) },
     { id: `${EPOCH}:4`, event: 'run_state', data: '{}' },
@@ -292,9 +280,6 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
   assert.deepEqual(trimmed.missing_successors, [`${EPOCH}:2`, `${EPOCH}:3`]);
   assert.deepEqual(trimmed.replayed_ids, [`${EPOCH}:4`, `${EPOCH}:5`]);
 
-  // states they are gone, so its range and the delivered frames must be
-  // disjoint. Adjacent (2..3 + :4/:5, above) is the legal trim shape; the two
-  // shapes below deliver a frame the gap claims was lost.
   assert.throws(
     () =>
       classifyReplay([
@@ -333,7 +318,6 @@ test('a covering gap is accepted only as the closed eviction outcome, and unsafe
     },
   );
 
-  // uncovered.
   assert.throws(
     () => classifyReplay([{ ...gapFrame, data: gapData(2, 3) }]),
     (error) => {
@@ -468,10 +452,6 @@ test('an unsolicited tool side effect is detected in the isolated root and the o
   }
 });
 
-/**
- * cases exercise the driver's consumer-side contract rather than a fixture.
- * `mutate` receives the attempt directory after the clean attempt is written.
- */
 function withAttemptDir(mutate) {
   const dir = mkdtempSync(join(tmpdir(), 'pfw-guard-evidence-'));
   const events = join(dir, 'events');
@@ -511,8 +491,6 @@ test('a clean attempt is accepted and carries an explicit evidence-integrity con
 
 test("the guard's evidence-failed marker disqualifies an otherwise clean attempt", () => {
   withAttemptDir((dir) => {
-    // denied record could not be persisted, so the attempt's counts cannot be
-    // believed even though they look perfect.
     writeFileSync(
       join(dir, 'evidence-failed'),
       JSON.stringify({
@@ -532,7 +510,6 @@ test("the guard's evidence-failed marker disqualifies an otherwise clean attempt
         return true;
       },
     );
-    // signal, never the decodability of the marker.
     writeFileSync(join(dir, 'evidence-failed'), 'not json');
     assert.throws(
       () => assertGuardAttempt(readAttemptDir(dir, { final: true }), readSpentToken(dir)),
@@ -645,7 +622,6 @@ function writePinnedArtifact(path, size, fill) {
 }
 
 test('a same-size same-mtime large artifact with different content is not the same artifact', async () => {
-  // to be size + mtime only and let an equal-shape replacement pass.
   const dir = mkdtempSync(join(tmpdir(), 'pfw-artifact-identity-'));
   const path = join(dir, 'cli.bin');
   const size = 8 * 1024 * 1024 + 1;
@@ -677,7 +653,6 @@ test('a small artifact identity is unchanged: path, size, mtime and a streamed d
     assert.equal(identity.present, true);
     assert.equal(identity.bytes, 64);
     assert.equal(identity.mtime_ms, PINNED_MTIME.getTime());
-    // that the streamed hash really covers the bytes, independent of key order.
     assert.equal(identity.sha256, 'ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb');
     assert.deepEqual(await artifactIdentity(absent, { required: false }), { path: absent, present: false });
     assert.equal(sameArtifact({ path, present: false }, { path, present: false }), true);
@@ -687,8 +662,6 @@ test('a small artifact identity is unchanged: path, size, mtime and a streamed d
 });
 
 test('a receipt recorded before artifact digests existed is stale, and the deterministic re-run is the remedy', () => {
-  // re-check must treat it as stale (receipt_mismatch -> re-run) rather than as
-  // an authorization or a silent pass.
   const stale = { path: '/tmp/cli.bin', present: true, bytes: 9, mtime_ms: 1, sha256: null };
   const current = { path: '/tmp/cli.bin', present: true, bytes: 9, mtime_ms: 1, sha256: 'aa' };
   assert.equal(sameArtifact(stale, current), false);

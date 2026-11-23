@@ -47,7 +47,6 @@ export function ActivationTraceList({ trace, slotByEntry }: ActivationTraceListP
     <ol className="flex flex-col gap-2" data-testid="activation-trace">
       {trace.map((entry) => {
         const fired = entry.accepted;
-        // post stage-gate routing of accepted entries).
         const slot = fired ? slotByEntry.get(entry.entry_id) : undefined;
         return (
           <li

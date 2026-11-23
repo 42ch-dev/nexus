@@ -25,15 +25,7 @@ interface EntranceContextValue {
   entrance: EntranceId;
   /** True while the desktop shell is being queried for the persisted value. */
   isLoading: boolean;
-  /**
-   * desktop IPC seam — the index redirect sends those users to the identity
-   * page once. Desktop first-run is the wizard step (AR-17), so this is
-   * always false there. Independent of the session-only URL override (AR-20).
-   */
   isFirstRun: boolean;
-  /**
-   * write: a landing-layout switch must not flash the wrong tree (AR-16).
-   */
   setEntrance: (value: EntranceId) => Promise<void>;
 }
 
@@ -51,10 +43,6 @@ interface EntrancePersister {
   write(value: EntranceId): Promise<void>;
 }
 
-/**
- * {@link DesktopCapabilities}; the provider detects them at runtime so the
- * T1 → T2 wiring needs no provider change (browser keeps localStorage).
- */
 interface EntranceIpcSeam {
   getEntrance?: () => Promise<EntranceId>;
   setEntrance?: (value: EntranceId) => Promise<void>;
@@ -98,7 +86,6 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
 
   const [urlOverride] = useState(() => parseEntrance(searchParams.get('entrance')));
 
-  // re-apply a stale stored read) after `setEntrance` flips the state.
   const persister = useMemo<EntrancePersister>(() => {
     if (hasIpcSeam && ipc) {
       return {
@@ -112,15 +99,12 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
   const [entrance, setEntranceState] = useState<EntranceId>(() => {
     if (initialEntrance !== undefined) return initialEntrance;
     if (urlOverride !== null) return urlOverride;
-    // the wrong tree. Desktop (IPC-only) resolves async below — unset/stale
-    // falls to content-creator without writing (AR-16).
     if (!hasIpcSeam) return readBrowserStoredEntrance() ?? DEFAULT_ENTRANCE;
     return DEFAULT_ENTRANCE;
   });
   const [isLoading, setIsLoading] = useState(
     () => hasIpcSeam && initialEntrance === undefined && urlOverride === null,
   );
-  // reads synchronously; desktop resolves in the mount effect below.
   const [hasStoredEntrance, setHasStoredEntrance] = useState(() => {
     if (initialEntrance !== undefined) return true;
     if (!hasIpcSeam) return readBrowserStoredEntrance() !== null;
@@ -131,13 +115,6 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
     if (initialEntrance !== undefined || !hasIpcSeam || urlOverride !== null) {
       return;
     }
-    // iteration): a cold desktop load that lands on a fast `setEntrance`
-    // (e.g. `/entrance` with an instant Continue) could let this in-flight
-    // mount read apply a STALE stored value over the just-written in-memory
-    // state. Storage already holds the new value, so the next reload
-    // self-heals; the same theoretical window exists in the inherited
-    // `SetupCompletedProvider` pattern (precedent). Guarding would require a
-    // write-generation counter that outlives the provider — deferred.
     let cancelled = false;
     persister
       .read()
@@ -147,7 +124,6 @@ export function EntranceProvider({ children, initialEntrance }: EntranceProvider
         setHasStoredEntrance(true);
       })
       .catch(() => {
-        // default (content-creator), no write.
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

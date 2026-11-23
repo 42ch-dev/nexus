@@ -172,7 +172,6 @@ async fn converge_any_idempotent_second_run_resumes() {
 
 #[tokio::test]
 async fn converge_dedup_three_distinct_predecessors_all_recorded() {
-    // in arbitrary order must all be recorded, so wait_for_all advances.
     let task = make_converge_task(
         "merge_dedup",
         ConvergeStrategy::WaitForAll,
@@ -201,8 +200,6 @@ async fn converge_dedup_three_distinct_predecessors_all_recorded() {
 
 #[tokio::test]
 async fn converge_dedup_same_source_twice_idempotent() {
-    // source_id must be idempotent (not double-counted). Only when a
-    // DIFFERENT predecessor arrives should the gate advance.
     let task = make_converge_task("merge_idem2", ConvergeStrategy::WaitForAll, &["a", "b"]);
     let ctx = Context::new();
 

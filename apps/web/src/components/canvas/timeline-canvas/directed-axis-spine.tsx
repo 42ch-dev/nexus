@@ -33,12 +33,6 @@ export type MomentSpineConfig = {
   chapterSegments: Array<{
     chapterId: number;
     chapterLabel: string;
-    /**
-     * Works (World Timeline Moment). Chapter numbers are Work-local, so
-     * `chapterId` alone is not a segment identity: two Works that both own a
-     * chapter 1 produce two segments that must carry distinct React keys, and
-     * the label is disambiguated with this Work (qc2 F-7 / qc3 F-002).
-     */
     workId?: string;
     sceneCount: number;
     sceneTicks: string[];
@@ -66,13 +60,6 @@ const TICK_LABEL_OFFSET = 14;
 // Same value used across all 4 emission sites (World Brief / World Narrative / Work Narrative
 // / Work Moment) — keep in sync if the canvas vertical layout changes.
 export const SPINE_Y_OFFSET = -8;
-
-// SPINE_Y_OFFSET = -8. In world coordinates, the visible spine line appears at
-// world y = (axis_Y) + |SPINE_Y_OFFSET|, which falls INSIDE the entity card cluster
-// (cards span Y=0 to ~Y=40). Visual overlap with entity cards is intentional — the
-// spine renders ON TOP of the cluster via z-index, not above it. If the canvas vertical
-// layout changes (e.g. entity cards grow taller), SPINE_Y_OFFSET must be updated to
-// maintain the visual position relative to the cluster.
 
 const SPINE_VIEWPORT_WIDTH = 4000;
 

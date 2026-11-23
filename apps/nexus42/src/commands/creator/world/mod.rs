@@ -258,8 +258,6 @@ async fn run_create(config: &CliConfig, title: &str) -> Result<()> {
 
 /// Run `creator world event-add`.
 #[allow(clippy::too_many_arguments)]
-// grouping the AR-5 observation flags into a struct would add indirection
-// for the two new callers (CLI + tests).
 async fn run_event_add(
     config: &CliConfig,
     world_id: &str,

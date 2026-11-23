@@ -441,10 +441,6 @@ pub enum WorldKbCommand {
 #[allow(clippy::future_not_send)]
 pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        // pack leaf) owns their admission, and it refuses an unmaterialized
-        // selection *before* `CoreService::open`. The local pool [`run_local`]
-        // opens runs `Schema::init`, which migrates — and therefore creates —
-        // the selected workspace, so these must not reach it at all.
         WorldKbCommand::Entity { command } => run_entity(command, config).await,
         WorldKbCommand::Graph { args } => run_graph(args, config).await,
         WorldKbCommand::Pack { command } => pack::run(command, config).await,
@@ -718,8 +714,6 @@ pub async fn kb_edit(
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
-    // the source Work's creator AND the World owner are both authorized.
-    // Legacy rows (NULL source_work_id) fall back to World owner only.
     require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
         .await?;
 
@@ -772,8 +766,6 @@ pub async fn kb_delete(
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
-    // the source Work's creator AND the World owner are both authorized.
-    // Legacy rows (NULL source_work_id) fall back to World owner only.
     require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
         .await?;
 
@@ -1130,8 +1122,6 @@ pub async fn kb_adopt(
         };
 
     #[cfg(not(unix))]
-    // shared-DB write access is WAL-governed (P2 spec § Coexistence) — no
-    // advisory lock, proceed unlocked.
     let _file_lock = ();
 
     let body: KnowledgeEntryBody =
@@ -1169,9 +1159,6 @@ pub async fn kb_adopt(
         Some("manual".to_string())
     };
 
-    // row flip share a single transaction; any failure (validation, insert,
-    // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
-    // KnowledgeEntryRecord is persisted.
     let mut tx = pool
         .begin()
         .await
@@ -1182,8 +1169,6 @@ pub async fn kb_adopt(
         .await
         .map_err(|e| map_kb_store_error("adopt", extract_job_id, world_id, e))?;
 
-    // (another writer raced between load_pending_candidate and this flip).
-    // On version mismatch → E_VERSION (exit 76, retry).
     let flipped = mark_confirmed_in_tx_with_cas(&mut tx, extract_job_id, candidate_version)
         .await
         .map_err(|e| {
@@ -1200,9 +1185,6 @@ pub async fn kb_adopt(
         })?;
 
     if !flipped {
-        // and this flip. Explicit rollback so the orphan KnowledgeEntryRecord insert is
-        // undone before we surface the error. Best-effort: a rollback failure
-        // is logged but the row was never committed so no orphan persists.
         if let Err(e) = tx.rollback().await {
             tracing::error!(
                 extract_job_id,
@@ -1220,8 +1202,6 @@ pub async fn kb_adopt(
         .await
         .map_err(|e| CliError::Other(format!("Failed to commit adopt transaction: {e}")))?;
 
-    // the dedicated columns first; fall back to the proposed_payload JSON keys
-    // for V1.50 rows where the columns are NULL (llm-extract.md §3.2).
     let (confidence, source_quote) = extract_llm_metadata(&candidate);
 
     if json {
@@ -1244,7 +1224,6 @@ pub async fn kb_adopt(
             insert_result.owner.world_id().unwrap_or_default()
         );
         println!("  Status:      confirmed");
-        // quote is truncated for terminal width (full text in --json).
         let conf_display = confidence.map_or_else(|| "-".to_string(), |c| format!("{c:.2}"));
         let quote_display = source_quote.as_deref().map_or_else(
             || "-".to_string(),
@@ -1337,15 +1316,6 @@ pub async fn kb_adopt_auto(
     let mut promoted: Vec<PromotedRecord> = Vec::new();
     let mut skipped: Vec<SkippedRecord> = Vec::new();
 
-    // (begin → insert_key_block_in_tx → CAS flip → commit) so that a
-    // per-candidate failure (duplicate canonical_name, validation error, CAS
-    // race) rolls back ONLY that candidate and the loop continues with the
-    // rest. Consolidating into a single transaction would change semantics —
-    // one candidate's failure would abort the whole batch, and partial
-    // promotion is the explicit product behavior adopt-auto guarantees
-    // (operators rely on the `promoted` / `skipped` split). A single-tx
-    // redesign with SAVEPOINTs is deferred to V1.61+ pending a product
-    // decision on all-or-nothing vs best-effort promotion.
     for candidate in pending {
         let Some(ref canonical_name) = candidate.canonical_name_guess else {
             skipped.push(SkippedRecord {
@@ -1487,9 +1457,6 @@ pub async fn kb_adopt_auto(
         });
     }
 
-    // can see why candidates were left pending (provenance gaps, low
-    // confidence, duplicate names, CAS races) without re-running the command
-    // with `--json`. One event per skip keeps the audit trail greppable.
     for s in &skipped {
         tracing::info!(
             extract_job_id = %s.extract_job_id,
@@ -1546,7 +1513,6 @@ async fn write_auto_promoted_log(
         return Ok(());
     };
 
-    // before constructing the log path.
     let work_ref = resolve_work_ref_for_log(pool, candidate.work_id.as_deref(), workspace_dir)
         .await
         .map_err(|e| format!("resolve work_ref: {e}"))?
@@ -1643,10 +1609,6 @@ pub async fn kb_reject(
 
     require_world_owner(pool, world_id, creator_id).await?;
 
-    // the reject audit-log path BEFORE the DB flip. A missing work_ref fails
-    // cleanly here — no rejected row, no orphan audit log under the wrong path.
-    // The prior behavior wrote under `Works/<work_id>/...` using the opaque DB
-    // id, which violated the home-layout `Works/<work_ref>/` convention.
     let work_ref =
         resolve_work_ref_for_log(pool, candidate.work_id.as_deref(), workspace_dir).await?;
 
@@ -1659,7 +1621,6 @@ pub async fn kb_reject(
         )));
     }
 
-    // workspace dir (hermetic tests) or write failure does not undo the reject.
     if let Err(e) = write_rejected_log(
         workspace_dir,
         extract_job_id,
@@ -1726,7 +1687,6 @@ async fn require_world_or_work_owner(
         }
     }
 
-    // for cases where the source work creator didn't match.
     require_world_owner(pool, world_id, creator_id).await
 }
 
@@ -1897,9 +1857,6 @@ fn write_rejected_log(
     let Some(ws_dir) = workspace_dir else {
         return Ok(());
     };
-    // back only if the caller passed None despite having a workspace dir
-    // (defensive — kb_reject resolves before calling, so this is unreachable
-    // in the CLI path but keeps the helper safe for direct callers).
     let work_ref = work_ref.unwrap_or("unknown-work");
 
     let date = chrono::Utc::now().format("%Y-%m-%d");

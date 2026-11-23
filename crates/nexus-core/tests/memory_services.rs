@@ -227,7 +227,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
     let (core, principal) = open_core(&env).await;
     let chr = env.character_id.clone();
     let bind1 = env.binding_id.clone();
-    // cache upsert admits binding provenance, so a fabricated id is refused).
     let bind2 = core
         .add_binding(&principal, chr.clone(), WORLD_B.to_string(), None)
         .await
@@ -266,7 +265,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         Some(bind1.as_str())
     );
 
-    // an unrelated scope that must survive the invalidation.
     let pool = plain_pool(&env).await;
     let cache_seed = |binding: Option<&str>| nexus_local_db::CharacterSoulNarrativeRecord {
         character_id: chr.clone(),
@@ -323,7 +321,6 @@ async fn promotion_is_revision_checked_atomic_and_cache_scoped() {
         .unwrap();
     assert_eq!(scoped.fragments.len(), 0);
 
-    // the unrelated scope survives.
     let pool = plain_pool(&env).await;
     let caches: Vec<Option<String>> = sqlx::query_as(
         "SELECT actor_world_binding_id FROM character_soul_narratives WHERE character_id = ?",
@@ -430,9 +427,6 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
     assert_eq!(char_out.fragmented, 1);
     assert_eq!(char_out.dropped, 1);
 
-    // the bridge's deterministic id and consumed in place, and the review writes
-    // provider records only — the legacy pending and fragment tables stay
-    // write-idle (compass D6).
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
@@ -488,7 +482,6 @@ async fn review_both_arms_share_classification_and_isolate_storage() {
     }
     pool.close().await;
 
-    // under the bridge's deterministic id on both arms.
     for pending_id in ["c_p", "c_f", "c_d"] {
         for candidate_id in [
             legacy::pending_review_candidate_id(pending_id),
@@ -559,8 +552,6 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
         .unwrap();
     assert_eq!(creator_read.state.to_string(), "insufficient_data");
 
-    // reflect must leave both cache tables completely untouched (no
-    // stats-only rows, no fingerprint rows) — before any synthesis exists.
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM character_soul_narratives").await,
@@ -585,7 +576,6 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
     assert_eq!(ungenerated.state.to_string(), "ungenerated");
     assert_eq!(ungenerated.current_fragment_count, 12);
 
-    // still zero-write on both bearers.
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM character_soul_narratives").await,
@@ -622,8 +612,6 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
     assert_eq!(still.state.to_string(), "ungenerated");
     assert!(still.narrative.is_none());
 
-    // foreign Character must return the retained 404 with the provider
-    // factory NEVER invoked — the panicking factory is the proof.
     let err = core
         .reflect_character_soul::<MockSynth>(
             &principal,
@@ -668,8 +656,6 @@ async fn reflect_states_follow_the_gate_cache_and_provider_presence() {
     );
     pool.close().await;
 
-    // fingerprint → the retained `stale` state: the cached narrative is
-    // returned flagged stale, with no provider consulted and no write.
     seed_character_fragment(&env, &chr, 12).await;
     let stale = core
         .reflect_character_soul::<MockSynth>(
@@ -943,7 +929,6 @@ async fn retained_pending_cursor_walk_has_no_gaps_or_overlap() {
         .collect();
     assert_eq!(walked, expected, "the walk is one total DESC ordering");
 
-    // walk only reaches it on the final page.
     assert!(
         !first
             .items
@@ -957,7 +942,6 @@ async fn retained_pending_cursor_walk_has_no_gaps_or_overlap() {
         "the walk must reach the row buried past page one"
     );
 
-    // restarts from the top instead of erroring or skipping the head.
     let dangling = first
         .pagination
         .next_cursor
@@ -996,7 +980,6 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     let (core, principal) = open_core(&env).await;
     seed_creator_pending(&env, "pending_bulk", DRAIN_TOTAL).await;
 
-    // refused and mutates nothing.
     let err = core
         .review_memory(
             &principal,
@@ -1021,9 +1004,6 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     );
     pool.close().await;
 
-    // signalled. The provider commits a durable record set per row, so a call
-    // can also stop at its own deadline; partial progress is the retained
-    // contract and repeated calls drain the queue.
     let first = core
         .review_memory(&principal, creator_review_request())
         .await
@@ -1044,9 +1024,6 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
         "an attempt the deadline stopped counts as processed but not completed"
     );
 
-    // drain reports completion once the queue is empty. `processed` counts
-    // attempts, so a deadline-stopped row is retried by the next call and
-    // completes exactly once.
     let mut fragmented = first.fragmented;
     let mut completed = false;
     for _ in 0..=DRAIN_TOTAL {
@@ -1080,8 +1057,6 @@ async fn retained_creator_review_drain_is_bounded_and_keeps_remaining_rows() {
     assert_eq!(third.has_more, Some(false));
     assert_eq!(third.promoted + third.fragmented + third.dropped, 0);
 
-    // exactly one fragment record exists per seeded candidate, and the legacy
-    // table never changed (compass D6).
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(&pool, "SELECT COUNT(*) FROM memory_pending_review").await,
@@ -1122,8 +1097,6 @@ async fn retained_creator_review_row_failure_keeps_has_more_true() {
     seed_creator_pending(&env, "pending_blocked", 2).await;
     let pinned = core.memory_provider_for_test().expect("pinned provider");
 
-    // selected) and arm the §14.3 commit-boundary fault: the next row's decision
-    // fails before its COMMIT and leaves no effect.
     let (entered, release) = arm_review_pause(&core, MemoryReviewPause::AfterRecheck);
     let drain = tokio::spawn({
         let core = core.clone();
@@ -1442,7 +1415,6 @@ async fn retained_character_pending_lifecycle_scope_delete_and_offset_pages() {
         .expect_err("a missing row must be not-found");
     assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
 
-    // cursors, newest first, and a terminal page without a cursor.
     for i in 0..5 {
         core.capture_character_pending_review(
             &principal,
@@ -1516,7 +1488,6 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
     let (core, principal) = open_core(&env).await;
     let chr = env.character_id.clone();
 
-    // fragments and the counters are the entire observable.
     let pool = plain_pool(&env).await;
     for i in 0..TOTAL {
         nexus_local_db::create_character_pending_review(
@@ -1561,9 +1532,6 @@ async fn retained_character_review_batch_is_bounded_and_reports_remaining() {
         "an attempt the deadline stopped counts as processed but not completed"
     );
 
-    // drain reports completion once the queue is empty. `processed` counts
-    // attempts, so a deadline-stopped row is retried by the next call and
-    // completes exactly once.
     let mut dropped = first.dropped;
     let mut completed = false;
     for _ in 0..=TOTAL {
@@ -2095,7 +2063,6 @@ async fn creator_delete_adopts_an_unmodified_projected_legacy_memory() {
 
     let (core, principal) = open_core(&env).await;
 
-    // first and only write this record ever sees.
     assert!(core
         .get_creator_memory(&principal, "bridge-memory")
         .await
@@ -2258,8 +2225,6 @@ async fn creator_experience_refresh_repeats_without_a_key_collision() {
 /// Seed the Character legacy surfaces: one binding-local fragment and one run
 /// capture receipt (which also enqueues its own pending row).
 async fn seed_legacy_character_content(env: &Env) {
-    // guard admits only an engine-mode writer, unlike the direct-mode surfaces
-    // the other seeds use.
     let guarded = common::engine_pool(&env.db_path, CREATOR).await;
     let pool = guarded.clone_pool();
     let lifecycle_epoch: i64 =
@@ -2308,7 +2273,6 @@ async fn seed_legacy_character_content(env: &Env) {
 async fn merged_reads_serve_provider_native_and_projected_legacy_records() {
     let env = seed_env().await;
     seed_legacy_creator_content(&env).await;
-    // output, so their bytes must survive every merged read below.
     let long_term_path =
         MemoryBearerRef::Creator(CREATOR).long_term_memory_path(&env.user_home, "bridge-memory");
     let soul_path = nexus_home_layout::creator_soul_md_path(&env.user_home, CREATOR);
@@ -2397,7 +2361,6 @@ async fn merged_reads_serve_provider_native_and_projected_legacy_records() {
         "a cached soul narrative keeps its own kind: {kinds:?}"
     );
 
-    // by-id route, and carry the legacy content they project.
     let fragment = bridge_ok(
         &provider
             .get_record(
@@ -2413,7 +2376,6 @@ async fn merged_reads_serve_provider_native_and_projected_legacy_records() {
     assert_eq!(fragment["record"]["revision"], 1);
     assert_eq!(fragment["record"]["subject_id"], BRIDGE_CREATOR_SUBJECT);
 
-    // the same order.
     let again = bridge_ok(
         &provider
             .list_records(
@@ -2685,7 +2647,6 @@ async fn merged_character_reads_respect_binding_placement_and_ownership() {
     );
     assert_eq!(context["total_authorized"], 2, "{context}");
 
-    // does not own projects nothing.
     let foreign = "chr_00000000000000000000000000000000";
     bridge_ok(
         &provider
@@ -2744,7 +2705,6 @@ async fn completion_marker_closes_the_legacy_projection() {
         "pre-migration the bridge projects the fragment, narrative and file: {before}"
     );
 
-    // close the projection, not the provider.
     let created = bridge_ok(
         &provider
             .create_record(
@@ -2923,8 +2883,6 @@ async fn legacy_bearer_projects_under_one_canonical_subject() {
     );
     assert_eq!(canonical["total_authorized"], 3, "{canonical}");
 
-    // is granted: its listing and its by-id read agree instead of the listing
-    // revealing an object that the by-id read reports absent.
     let shadow_page = bridge_ok(
         &provider
             .list_records(
@@ -2996,7 +2954,6 @@ async fn i_000149_consumed_candidate_cannot_resurrect_after_smaller_subject_ensu
         "consumed"
     );
 
-    // subject an out-of-band ensure is about to create.
     bridge_ok(
         &provider
             .grant(
@@ -3022,7 +2979,6 @@ async fn i_000149_consumed_candidate_cannot_resurrect_after_smaller_subject_ensu
             bridge_ensure_request(SMALLER, legacy::CREATOR_KIND_NS, CREATOR),
         )
         .await;
-    // consumer sees: the dismissed digest must not come back as pending.
     let resurrected = bridge_ok(
         &provider
             .list_candidates(
@@ -3057,7 +3013,6 @@ async fn i_000149_consumed_candidate_cannot_resurrect_after_smaller_subject_ensu
         "the refusal happens before insertion"
     );
 
-    // consumed shell and no subject can read it as pending content.
     assert_eq!(
         provider_candidate_status(&provider, &admin, &candidate_id).await,
         "consumed"
@@ -3094,7 +3049,6 @@ async fn i_000149_consumed_candidate_cannot_resurrect_after_smaller_subject_ensu
         "{canonical_pending}"
     );
 
-    // receives its own grant.
     let fresh = bridge_ok(
         &provider
             .ensure_subject(
@@ -3215,7 +3169,6 @@ async fn dismissal_adopts_the_projected_row_before_consuming_it() {
     let (core, principal) = open_core(&env).await;
     let candidate_id = legacy::pending_review_candidate_id("pend_adopt");
 
-    // nothing: adoption belongs to the mutation it precedes.
     assert_eq!(
         core.count_pending_reviews(&principal).await.unwrap().count,
         1
@@ -3245,7 +3198,6 @@ async fn dismissal_adopts_the_projected_row_before_consuming_it() {
     );
     pool.close().await;
 
-    // dismissal finds nothing to dismiss.
     assert_eq!(
         core.count_pending_reviews(&principal).await.unwrap().count,
         0
@@ -3262,8 +3214,6 @@ async fn dismissal_adopts_the_projected_row_before_consuming_it() {
         .expect_err("a consumed row is gone");
     assert!(matches!(err, CoreError::NotFound { .. }), "got {err:?}");
 
-    // repeat dismissal above neither duplicated nor resurrected the row, and
-    // adoption exists only inside the dismissal that consumes it.
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(
@@ -3321,7 +3271,6 @@ async fn character_dismissal_consumes_the_captured_row_under_its_bridge_id() {
 async fn just_in_time_adoption_is_inert_after_the_completion_marker() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pend_post_marker", None, "2026-01-01T00:00:01Z").await;
-    // the legacy projection only, so this one stays readable.
     let provider = open_bridge_provider(&env).await;
     let admin = bridge_principal();
     let subject = legacy::creator_subject_id(CREATOR);
@@ -3710,10 +3659,8 @@ async fn cross_creator_dismissal_keeps_the_pending_review_forbidden_reason() {
 #[tokio::test]
 async fn dismissal_ownership_lookup_failure_is_a_database_error() {
     let env = seed_env().await;
-    // through to the legacy ownership re-read that distinguishes 403 from 404.
     seed_foreign_creator_pending_row(&env, "pending_foreign").await;
     let (core, principal) = open_core(&env).await;
-    // own pool, so the reads ahead of it still answer.
     core.pool().close().await;
 
     let err = core
@@ -3746,7 +3693,6 @@ async fn legacy_dismissal_and_adoption_commit_together() {
     );
     let candidate_id = legacy::pending_review_candidate_id("pend_atomic");
 
-    // projected row is still pending for the next reader.
     provider.inject_commit_fault(false);
     let failed = provider
         .dismiss_legacy_candidate(&admin, &subject, &candidate_id, None, "atomic-1")
@@ -3765,7 +3711,6 @@ async fn legacy_dismissal_and_adoption_commit_together() {
         "pending"
     );
 
-    // one transaction, so a rejected dismissal leaves no adopted pending row.
     let stale = provider
         .dismiss_legacy_candidate(&admin, &subject, &candidate_id, Some(99), "atomic-2")
         .await;
@@ -3921,7 +3866,6 @@ async fn character_offset_window_serves_rows_past_the_former_scan_cap() {
     seed_character_pending_past_former_cap(&env, TOTAL).await;
     let (core, principal) = open_core(&env).await;
 
-    // empty page with `has_more = false` although the row existed.
     let page = core
         .list_character_pending_reviews(&principal, env.character_id.clone(), None, 5, 10_000)
         .await
@@ -3962,7 +3906,6 @@ async fn character_pending_queue_keeps_the_legacy_text_order_for_mixed_formats()
     );
     assert!(!tail.pagination.has_more);
 
-    // batch bound of the `Z` rows and never reaches the fractional tail.
     let batch = core
         .review_character_memory(
             &principal,
@@ -4017,7 +3960,6 @@ async fn keyword_search_finds_a_fragment_past_the_former_scan_cap() {
 async fn read_only_core_serves_memory_reads_and_refuses_the_write() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pend_read_only", None, "2026-01-01T00:00:01Z").await;
-    // the read-only core below serves the same read without writing anything.
     {
         let (core, principal) = open_core(&env).await;
         assert_eq!(
@@ -4138,8 +4080,6 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
     });
     entered.notified().await;
 
-    // the one a dismissal must take to consume that row: there is no window
-    // between the check and the classification for the dismissal to commit in.
     assert_eq!(
         provider_candidate_status(&provider, &admin, &candidate_id).await,
         "pending",
@@ -4150,9 +4090,6 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
         "the review decision is not interleavable with a dismissal"
     );
 
-    // from inside the lock attempt only after the non-blocking probe failed, so
-    // the test observes a real contended acquisition — not merely that the task
-    // had not finished yet. The drain stays held until that signal arrives.
     let pinned = core.memory_provider_for_test().expect("pinned provider");
     let waiting = Arc::new(tokio::sync::Notify::new());
     pinned.report_disposition_waits(Arc::clone(&waiting));
@@ -4183,7 +4120,6 @@ async fn creator_dismissal_cannot_commit_inside_the_review_decision() {
         "the row the drain checked is still classified"
     );
     assert_eq!(reviewed.fragmented, 1);
-    // its window is the retained `NotFound` — it never ran inside the decision.
     let late = dismissal
         .await
         .unwrap()
@@ -4259,7 +4195,6 @@ async fn character_dismissal_cannot_commit_inside_the_review_decision() {
         "the review decision is not interleavable with a dismissal"
     );
 
-    // R4-F3): it fires from inside the contending lock attempt.
     let pinned = core.memory_provider_for_test().expect("pinned provider");
     let waiting = Arc::new(tokio::sync::Notify::new());
     pinned.report_disposition_waits(Arc::clone(&waiting));
@@ -4343,7 +4278,6 @@ async fn creator_dismissal_between_check_and_classification_is_reverified() {
     });
     entered.notified().await;
 
-    // window before the drain takes the disposition section.
     assert_eq!(
         provider_candidate_status(&provider, &admin, &candidate_id).await,
         "pending"
@@ -4460,7 +4394,6 @@ async fn read_only_core_projects_bearers_no_writer_ever_ensured() {
     seed_creator_fragments(&env, 1).await;
     let binding = env.binding_id.clone();
     seed_character_pending_binding(&env, "pending_chr_unensured", &binding).await;
-    // bootstrap grant and ensures no subject at all.
     let provider = open_bridge_provider(&env).await;
     drop(provider);
 
@@ -4566,7 +4499,6 @@ async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
         Err(CoreError::NotFound { .. })
     ));
 
-    // commit while this read-only service stays open.
     let writer = open_bridge_provider(&env).await;
     seed_creator_pending_digest(
         &env,
@@ -4602,7 +4534,6 @@ async fn read_only_core_over_a_never_provisioned_workspace_answers_not_found() {
         "the read serves the provider/bridge state, not a stale snapshot"
     );
 
-    // persisted by the read-only instance.
     let pool = plain_pool(&env).await;
     for table in ["memory_subjects", "memory_receipts", "memory_candidates"] {
         assert_eq!(
@@ -4837,7 +4768,6 @@ async fn completion_marker_closes_only_the_space_it_names() {
 
     publish_migration_marker(&env, BRIDGE_SPACE).await;
 
-    // bearers; the provider's own record keeps serving.
     let creator_closed = bridge_ok(
         &provider
             .list_records(
@@ -5028,7 +4958,6 @@ async fn wire_candidate_mutations_never_adopt_a_projected_legacy_row() {
     let admin = bridge_principal();
     let projected = legacy::pending_review_candidate_id("pend_wire");
 
-    // op and, crucially, adopt nothing on the way.
     let dismissed = provider
         .dismiss_candidate(
             &admin,
@@ -5061,7 +4990,6 @@ async fn wire_candidate_mutations_never_adopt_a_projected_legacy_row() {
         "neither wire entry has an adoption path"
     );
 
-    // is also the path that ensures the bearer's deterministic subject.
     let (core, principal) = open_core(&env).await;
     core.delete_pending_review(&principal, "pend_wire".to_string())
         .await
@@ -5134,8 +5062,6 @@ async fn record_cursor_survives_a_dismissal_that_adopts_a_projected_row() {
     seed_creator_pending_row(&env, "pend_cursor", None, "2026-03-02T00:00:00Z").await;
     let provider = open_bridge_provider(&env).await;
     let admin = bridge_principal();
-    // below are minted against the same subject (and lifecycle status) the
-    // dismissal leaves behind.
     let subject = legacy::creator_subject_id(CREATOR);
     bridge_ok(
         &provider
@@ -5242,7 +5168,6 @@ async fn record_cursor_survives_a_dismissal_that_adopts_a_projected_row() {
 async fn dismissal_racing_the_completion_marker_adopts_nothing() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pend_race", None, "2026-01-01T00:00:01Z").await;
-    // leave the provider's own state readable.
     let provider = open_bridge_provider(&env).await;
     let admin = bridge_principal();
     let subject = legacy::creator_subject_id(CREATOR);
@@ -5270,7 +5195,6 @@ async fn dismissal_racing_the_completion_marker_adopts_nothing() {
                 .await
         }
     });
-    // section; P5 completes the space before the admission transaction opens.
     entered.notified().await;
     publish_migration_marker(&env, BRIDGE_SPACE).await;
     release.wait().await;
@@ -5441,7 +5365,6 @@ async fn seed_mind_projection_fixtures(env: &Env, other_binding: &str) -> (Strin
     ] {
         let mut memory = nexus_creator_memory::LongTermMemory::new(kind);
         memory.set_body(body);
-        // flood of newer unrelated records regardless of how large it is.
         memory.frontmatter.updated_at = updated_at.to_string();
         nexus_creator_memory::memory_io::save_memory(&env.user_home, bearer, slug, &memory)
             .expect("promoted memory fixture");
@@ -5470,7 +5393,6 @@ async fn character_mind_projection_serves_provider_seeded_soul_fragments_and_mem
         .binding_id
         .as_str()
         .to_string();
-    // mind (a bearer sees its own subject only).
     seed_legacy_creator_content(&env).await;
     let (alpha, zeta) = seed_mind_projection_fixtures(&env, &other_binding).await;
 
@@ -5551,7 +5473,6 @@ async fn character_mind_projection_ranks_the_complete_memory_set_by_slug_before_
     for (index, slug) in slugs.iter().enumerate() {
         let mut memory = nexus_creator_memory::LongTermMemory::new("story_summary");
         memory.set_body(&format!("Memory {slug} body."));
-        // slug ranking keeps it inside the 20-entry selection.
         memory.frontmatter.updated_at = if index == 0 {
             "2025-12-01T00:00:00Z".to_string()
         } else {
@@ -5675,7 +5596,6 @@ async fn character_mind_projection_keeps_the_legacy_text_order_across_timestamp_
         .await
         .unwrap();
     }
-    // selection never reaches it.
     nexus_local_db::create_character_fragment(
         &pool,
         CREATOR,
@@ -5782,7 +5702,6 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
         "a live subject projects its fragments and promoted memories"
     );
 
-    // terminal transition (§7.7), so the read sees a real archived subject.
     let subject = legacy::character_subject_id(&env.character_id);
     let archived = bridge_ok(
         &provider
@@ -5801,7 +5720,6 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
     );
     assert_eq!(archived["result"]["status"], "archived");
 
-    // provider already holds — and the projection is recall-equivalent.
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
@@ -5830,7 +5748,6 @@ async fn character_mind_projection_excludes_an_archived_subject_like_recall() {
 #[tokio::test]
 async fn character_mind_projection_fails_closed_when_the_provider_refuses() {
     let env = seed_env().await;
-    // the projection's first read is refused instead of yielding an empty mind.
     let read_only = CoreService::open(CoreOpenOptions {
         user_home: env.user_home.clone(),
         access: CoreAccess::ReadOnly,
@@ -6136,7 +6053,6 @@ async fn promoted_memory_slugs_stay_one_to_one() {
         );
     }
 
-    // promotion overwrote nothing the first one stored.
     let mut listed: Vec<String> = core
         .list_creator_memories(&principal)
         .await
@@ -6247,7 +6163,6 @@ async fn damaged_fragment_does_not_block_unrelated_memory_reads() {
         .await
         .expect("the delete is not blocked by a damaged sibling fragment"));
 
-    // genuinely returns is parsed and refused.
     let error = core
         .list_memory_fragments(&principal, None, None, 50)
         .await
@@ -6275,7 +6190,6 @@ async fn character_capture_is_one_provider_write_served_by_every_reader() {
     let chr = env.character_id.clone();
     let bind = env.binding_id.clone();
 
-    // re-delivery replays the stored capture instead of writing a second row.
     for (pending_id, binding) in [
         ("pend_shared_write", None),
         ("pend_local_write", Some(bind.as_str())),
@@ -6291,7 +6205,6 @@ async fn character_capture_is_one_provider_write_served_by_every_reader() {
         }
     }
 
-    // candidates under the bridge's deterministic ids and placements.
     let pool = plain_pool(&env).await;
     assert_eq!(
         count_where(
@@ -6360,7 +6273,6 @@ async fn character_capture_is_one_provider_write_served_by_every_reader() {
         1
     );
 
-    // binding-local one.
     core.delete_character_pending_review(&principal, chr.clone(), "pend_shared_write".to_string())
         .await
         .expect("dismiss the shared capture");
@@ -6411,7 +6323,6 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
     let (core, principal) = open_core(&env).await;
     let chr = env.character_id.clone();
     let keep = env.binding_id.clone();
-    // refusal and the memory dependency is what the removal is judged by.
     let removable = core
         .add_binding(&principal, chr.clone(), WORLD_B.to_string(), None)
         .await
@@ -6421,8 +6332,6 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
         .as_str()
         .to_string();
 
-    // write transaction; the removal starts in that window and cannot commit
-    // ahead of it.
     let pinned = core.memory_provider_for_test().expect("pinned provider");
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Barrier::new(2));
@@ -6446,11 +6355,6 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
         }
     });
     entered.notified().await;
-    // `BEGIN IMMEDIATE` without a busy wait, and that is what reports here: the
-    // capture's held write lock refuses that very attempt, and the removal then
-    // retries on that same lock for its transaction. A sequential execution —
-    // capture committed first — finds the lock free, reports nothing, and never
-    // reaches this release.
     let attempted = Arc::new(tokio::sync::Notify::new());
     let removal = tokio::spawn(nexus_local_db::begin_immediate_report::scope(
         Arc::clone(&attempted),
@@ -6462,8 +6366,6 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
             async move { core.remove_binding(&principal, chr, binding).await }
         },
     ));
-    // the capture commit first leaves the lock free, so no report arrives and
-    // this fails instead of hanging the suite.
     tokio::time::timeout(std::time::Duration::from_secs(10), attempted.notified())
         .await
         .expect("the removal must report the write lock the capture holds");
@@ -6505,7 +6407,6 @@ async fn character_capture_binding_never_outlives_the_provenance_check() {
     );
     pool.close().await;
 
-    // now runs inside the write transaction is the one that refuses it.
     core.remove_binding(&principal, chr.clone(), removable.clone())
         .await
         .expect("a binding with no memory is removable");

@@ -64,7 +64,6 @@ pub fn build_outer_graph(
     use crate::tasks::StateCompositeTask;
     use std::collections::HashMap;
 
-    // consuming `GraphBuilder`; `build()` validates edge endpoints.
     let mut builder = graph_flow::GraphBuilder::new(&manifest.preset.id);
 
     let incoming_labeled = incoming_labeled_edge_counts(manifest);
@@ -184,8 +183,6 @@ pub fn build_wired_outer_graph(
 
     let mut builder = graph_flow::GraphBuilder::new(&loaded.id);
 
-    // cancellation tokens wired into every `acp_prompt` node. Template files
-    // resolve to actual content from the frozen source identity (N-7).
     let inner_graphs = build_inner_graphs(
         &loaded.manifest,
         &loaded.id,
@@ -257,8 +254,6 @@ pub fn build_wired_outer_graph(
             .with_output_bindings(loaded.output_bindings.clone())
             .with_registry(caps.clone());
 
-        // workspace state provider, so preset conditional edges see real
-        // durable workspace state instead of a synthetic default.
         if let Some(provider) = engine.workspace_state_provider() {
             task = task.with_workspace_state_provider(provider);
         }
@@ -548,9 +543,6 @@ fn project_buildable_manifest(
 ) -> Result<PresetManifest, IrOuterGraphError> {
     refuse_unmappable(document)?;
     let manifest = nexus_preset::export_preset(document)?;
-    // whose inner tasks prompt the Host with zero instructions and whose judge
-    // would receive a bundle path as its instructions. Refuse it here, by node
-    // and path, before any task exists.
     refuse_unresolved_templates(&manifest, document.id.as_str(), template_source)?;
     Ok(manifest)
 }
@@ -677,12 +669,10 @@ pub fn build_wired_outer_graph_from_ir(
 
     let mut manifest = project_buildable_manifest(document, template_source)?;
 
-    // node kind is `outer_state`; the composite task overrides with `End`.
     for state in &mut manifest.states {
         state.terminal |= document.terminal.iter().any(|id| id == &state.id);
     }
 
-    // reaches this build and the None arm's embedded fallback is never taken.
     let inner_graphs = build_inner_graphs(
         &manifest,
         document.id.as_str(),
@@ -694,7 +684,6 @@ pub fn build_wired_outer_graph_from_ir(
 
     let mut builder = graph_flow::GraphBuilder::new(&manifest.preset.id);
 
-    // hand the composite task identical join gates.
     let incoming_labeled = incoming_labeled_edge_counts(&manifest);
     let converge_predecessors = converge_predecessor_sets(&manifest);
 
@@ -723,9 +712,6 @@ pub fn build_wired_outer_graph_from_ir(
         builder = builder.add_task(std::sync::Arc::new(task));
     }
 
-    // shared with the buildability predicate so the two cannot disagree about
-    // which edges exist. The parity projection below fails if the YAML builders
-    // ever diverge from it.
     Ok(wire_outer_topology(builder, &manifest, &document.entry).build()?)
 }
 
@@ -1077,14 +1063,6 @@ fn build_inner_graphs(
             for node in &ig.nodes {
                 let task = match node.kind {
                     GraphNodeKind::AcpPrompt => {
-                        // time (N-7): the Host must receive the rendered
-                        // prompt, never the raw bundle-relative path. Embedded
-                        // presets read from the compiled-in bundle; directory
-                        // presets read from their resolved root. Resolution
-                        // failure is refused upstream — loader asset validation
-                        // for YAML presets, `refuse_unresolved_templates` for IR
-                        // documents — so the default below is unreachable for a
-                        // loaded preset.
                         let template = node
                             .template_file
                             .as_deref()
@@ -1110,8 +1088,6 @@ fn build_inner_graphs(
                             .with_template(template)
                             .with_prompt_executor(prompt_executor.clone())
                             .with_session_cancels(session_cancels.clone());
-                        // executor selects the `default` role binding; never
-                        // synthesize `Some("")`.
                         if let Some(agent_ref) = &node.agent {
                             task = task.with_agent_ref(agent_ref.clone());
                         }
@@ -1127,20 +1103,6 @@ fn build_inner_graphs(
                 }
             }
 
-            // `ExecutionStatus::Completed` ONLY when a task returns
-            // `NextAction::End`; a node's `NextAction::Continue` with no
-            // outgoing edge instead parks the run at
-            // `Paused { reason: "No outgoing edge found from current task" }`
-            // while leaving `current_task_id` unchanged. `InnerGraphTask`
-            // treats a paused child as "resume and keep stepping", so a sink
-            // node would be re-executed up to its 256-poll bound — re-running
-            // the node's external prompt every time and never letting the
-            // parent step finish. Sink nodes are exactly the nodes that no
-            // `depends_on` edge targets, so an end node plus one edge per sink
-            // makes the child reach `Completed` after its real work.
-            // A graph that already declares a node named `end` owns that id;
-            // registering the terminal task would silently REPLACE that node.
-            // Such a graph keeps its authored topology.
             let declares_end = ig.nodes.iter().any(|node| node.id == "end");
             if !declares_end {
                 let depended_upon: std::collections::HashSet<&str> = ig
@@ -1280,11 +1242,6 @@ mod tests {
 
     #[tokio::test]
     async fn wired_builder_gates_implicit_merge_like_validate_path() {
-        // `build_wired_outer_graph` must wire the same `expected_incoming`
-        // the loader's bounded-join validation accepts — both now scan
-        // through `incoming_labeled_edge_counts`. Fixture: implicit
-        // labeled-edge merge (no `merge:`) with two incoming edges; a
-        // single arrival must hold the wired gate at 1/2.
         let yaml = r"
 preset:
   id: wired-merge-parity
@@ -1531,7 +1488,6 @@ states:
     }
 
     #[async_trait::async_trait]
-    // mutated in place, so it cannot be released before `execute_session`.
     #[allow(clippy::significant_drop_tightening)]
     impl crate::engine::OrchestrationEngine for ChildRunningEngine {
         async fn run_step(
@@ -1582,7 +1538,6 @@ states:
                 .to_string();
             let mut session = graph_flow::Session::new_from_task(id.clone(), &start);
             session.context = params.initial_context;
-            // (`spawn_child_session_internal`); every inner node resolves it.
             session
                 .context
                 .set("_session_id", id.clone())
@@ -1647,7 +1602,6 @@ states:
             _: &nexus_session_storage::SessionId,
             _: crate::engine::EngineSignal,
         ) -> Result<(), crate::engine::EngineError> {
-            // holds no pause state, so the resume is a no-op here.
             Ok(())
         }
         async fn list_active(
@@ -2175,8 +2129,6 @@ states:
     fn ir_applied_path_refuses_a_colliding_embedded_bundle_template() {
         let caps = Arc::new(test_capability_registry());
         let engine: Arc<dyn crate::engine::OrchestrationEngine> = Arc::new(UnreachableEngine);
-        // template exists in that bundle, so a restored embedded fallback would
-        // resolve it and build the graph.
         let document = ir_document(IR_INNER_GRAPH);
         let colliding = "prompts/generate-with-memory.md";
         assert!(
@@ -2398,8 +2350,6 @@ states:
         use std::collections::{BTreeMap, HashMap};
         use std::sync::{Arc, Mutex};
 
-        /// terminal node. The IR document lists `review` first so that `entry`
-        /// cannot be satisfied positionally.
         const YAML_LINEAR: &str = r"
 preset:
   id: parity-linear
@@ -3036,7 +2986,6 @@ states:
             }
         }
 
-        /// normalized projection.
         struct Built {
             graph: Graph,
             manifest: PresetManifest,
@@ -3402,10 +3351,6 @@ states:
 
         #[tokio::test]
         async fn parity_entry_selects_the_declared_initial_task() {
-            // `review` first, so `entry: plan` cannot be satisfied positionally
-            // (the YAML side is positional and must therefore declare `plan`
-            // first). Removing `set_start_task` from the IR builder starts the
-            // IR run at `review` and fails this test.
             let parity =
                 Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
             let (yaml, ir) = parity.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;
@@ -3451,7 +3396,6 @@ states:
 
         #[tokio::test]
         async fn parity_capability_enter_action_invokes_the_capability() {
-            // `states[].enter[*].kind=capability` → `CapabilityTask`.
             let parity =
                 Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
             let (yaml, ir) = parity
@@ -3489,8 +3433,6 @@ states:
 
         #[tokio::test]
         async fn parity_host_tool_enter_action_dispatches_in_process() {
-            // invoked inline (never a graph node), failing closed without the
-            // injected dispatch.
             let parity = Parity::with_host_tool(&[]);
             let (yaml, ir) = parity.compare(YAML_HOST_TOOL, IR_HOST_TOOL, &[], &[]).await;
 
@@ -3514,7 +3456,6 @@ states:
 
         #[tokio::test]
         async fn parity_inner_graph_enter_action_launches_the_child_graph() {
-            // over the attached child graph.
             let parity = Parity::with_inner_graphs();
             let (_, ir) = parity
                 .compare(
@@ -3544,7 +3485,6 @@ states:
 
         #[tokio::test]
         async fn parity_inner_step_acp_prompt_nodes_become_inner_tasks() {
-            // `inner_graphs.<name>.nodes[].kind=acp_prompt` → `AcpPromptTask`.
             let parity = Parity::with_inner_graphs();
             let (_, ir) = parity
                 .compare(
@@ -3596,7 +3536,6 @@ states:
 
         #[tokio::test]
         async fn parity_depends_on_edges_order_inner_nodes() {
-            // `depends_on` → `add_edge(dependency, step)` in the inner graph.
             let parity = Parity::with_inner_graphs();
             let (_, ir) = parity
                 .compare(
@@ -3629,8 +3568,6 @@ states:
 
         #[tokio::test]
         async fn parity_output_binding_writes_the_state_output() {
-            // `inner_graphs.<name>.output_binding` → `InnerGraphTask` post-run
-            // export to `state.<state>.output`.
             let parity = Parity::with_inner_graphs();
             let (_, ir) = parity
                 .compare(
@@ -3657,7 +3594,6 @@ states:
 
         #[tokio::test]
         async fn parity_exit_when_rule_continues() {
-            // an unset `_rule` is the unit rule and always transitions.
             let parity =
                 Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
             let (_, ir) = parity.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;
@@ -3685,7 +3621,6 @@ states:
 
         #[tokio::test]
         async fn parity_exit_when_manual_waits_then_resumes() {
-            // returning `NextAction::WaitForInput`.
             let parity = Parity::scripted(&[]);
             let (_, ir) = parity.compare(YAML_WAIT, IR_WAIT, &[], &[]).await;
 
@@ -3723,7 +3658,6 @@ states:
 
         #[tokio::test]
         async fn parity_exit_when_timer_waits_for_input() {
-            // `WaitForInput` (the clock signal is DR-12).
             let parity = Parity::scripted(&[]);
             let (_, ir) = parity.compare(YAML_WAIT, IR_WAIT, &[], &[]).await;
 
@@ -3750,7 +3684,6 @@ states:
 
         #[tokio::test]
         async fn parity_exit_when_llm_judge_go_continues_and_nogo_waits() {
-            // after the enter actions: go continues, no-go does not.
             let go = Parity::scripted(&[(
                 "parity.judge",
                 serde_json::json!({"result": true, "reason": "parity go"}),
@@ -3780,9 +3713,6 @@ states:
                 "the projected carrier keeps the bundle path — resolution is not \
                  visible in the manifest, so the dispatch assertions below own it"
             );
-            // path. Both intakes resolve `template_file` through
-            // `with_resolved_template`; dropping that chain from the IR builder
-            // dispatches `prompts/gather-exit.md` and fails here.
             let body = judge_template_body();
             assert_eq!(
                 dispatched_judge_prompt(&go_yaml.recorded),
@@ -3834,7 +3764,6 @@ states:
 
         #[tokio::test]
         async fn parity_exit_when_graph_complete_continues_after_the_inner_graph() {
-            // completion lets the outer task return `Continue`.
             let parity = Parity::with_inner_graphs();
             let (_, ir) = parity
                 .compare(
@@ -3867,12 +3796,6 @@ states:
 
         #[tokio::test]
         async fn parity_join_gate_carries_merge_converge_and_timeout() {
-            // `on_timeout` → the `StateCompositeTask` join gate. `nodes[kind=
-            // join]` itself is refused permanently (`ir_unprojected`), so the
-            // join is expressed by an `outer_state` carrying the join carriers
-            // — which is what the builder maps. Arrivals are supplied directly
-            // because a whole-graph trace cannot fabricate the second branch's
-            // arrival.
             let parity = Parity::scripted(&[(
                 "parity.judge",
                 serde_json::json!({"result": true, "reason": "parity go"}),
@@ -3929,10 +3852,6 @@ states:
 
         #[tokio::test]
         async fn parity_terminal_declaration_ends_the_run() {
-            // `terminal: <id>` → the task returns `NextAction::End`. The IR
-            // fixture declares `terminal: ["only"]` on an `outer_state`, so
-            // removing the builder's terminal-flag branch leaves it
-            // `outer_state`, and the run pauses instead of ending.
             let parity = Parity::scripted(&[]);
             let (_, ir) = parity.compare(YAML_TERMINAL, IR_TERMINAL, &[], &[]).await;
 
@@ -3954,7 +3873,6 @@ states:
 
         #[tokio::test]
         async fn parity_edges_linear_go_and_nogo_route_identically() {
-            // → outer edges plus the source task's `NextAction` routing.
             let linear =
                 Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
             let (_, linear_ir) = linear.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;
@@ -3998,8 +3916,6 @@ states:
 
         #[tokio::test]
         async fn parity_edges_conditional_and_default_route_by_expression() {
-            // → the source task evaluates the branch; the graph adds no edge for
-            // the taken branch, so the selected target is what the trace pins.
             let mut evidence = Vec::new();
             for score in [serde_json::json!(5), serde_json::json!(0)] {
                 let parity = Parity::scripted(&[]);
@@ -4060,10 +3976,6 @@ states:
 
         #[tokio::test]
         async fn parity_non_execution_fields_create_no_tasks() {
-            // `effect_class`/`effect_summary`, `meta.*` → no graph `Task`.
-            // These rows carry data the runner consumes around task execution
-            // (or not at all), so parity is asserted on the carriers the builder
-            // hands the runtime plus the unchanged task shape and trace.
             let parity = Parity::scripted(&[]);
             let (yaml, ir) = parity.compare(YAML_METADATA, IR_METADATA, &[], &[]).await;
 

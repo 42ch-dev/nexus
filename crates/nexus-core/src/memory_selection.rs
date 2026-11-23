@@ -47,7 +47,6 @@ pub struct RemoteMemoryProviderSelection {
     pub allowlist: Vec<String>,
 }
 
-// credential-file contents or token material (§2.1).
 impl std::fmt::Debug for RemoteMemoryProviderSelection {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -192,9 +191,6 @@ fn is_valid_space_id(id: &str) -> bool {
 }
 
 fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
-    // `tokio_tungstenite::connect_async`: it parses that text as an
-    // `http::Uri` (`IntoClientRequest for &str`), so this is the transport's
-    // own grammar rather than a second, normalized parser (§3.2).
     if endpoint.contains('#') {
         return Err(invalid(
             "connect_endpoint",
@@ -210,7 +206,6 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
     let authority = uri
         .authority()
         .ok_or_else(|| invalid("connect_endpoint", "must name a host"))?;
-    // component must be rejected even when it is empty (`wss://@host`).
     if authority.as_str().contains('@') {
         return Err(invalid("connect_endpoint", "must not carry userinfo"));
     }
@@ -224,7 +219,6 @@ fn validate_connect_endpoint(endpoint: &str) -> CoreResult<()> {
     if host.is_empty() {
         return Err(invalid("connect_endpoint", "must name a host"));
     }
-    // unreadable or empty port must not silently become 443/80.
     let port_suffix = authority.as_str().strip_prefix(host).unwrap_or_default();
     if !port_suffix.is_empty() {
         let port = port_suffix.strip_prefix(':').unwrap_or_default();

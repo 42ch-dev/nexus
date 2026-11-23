@@ -128,12 +128,6 @@ function requireExecutable(path, label) {
   if (stat.size === 0) fail(`${label} is empty: ${path}`);
 }
 
-/**
- * same rule as `verify-package.mjs` (fallback `Nexus`) so the two verifiers
- * cannot silently diverge on the probed binary. A missing or unreadable plist
- * falls back to the contract name; the executable must still exist, which
- * `requireExecutable` enforces fail-closed.
- */
 function resolveBundleExecutable(appPath) {
   const plistPath = join(appPath, 'Contents', 'Info.plist');
   if (!existsSync(plistPath)) return 'Nexus';
@@ -177,7 +171,6 @@ export function verifyLaunch({
   return new Promise((resolvePromise) => {
     let child;
     try {
-      // handoff children that stayed in it) can be killed at window end.
       child = spawn(command, [], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
       resolvePromise({ ...base, reason: `spawn failed: ${error.message}` });
@@ -187,9 +180,6 @@ export function verifyLaunch({
 
     let stderr = '';
     let markerSeen = false;
-    // marker split across a chunk boundary is still latched. Detection is
-    // independent of the bounded retention buffer below: the scan runs before
-    // any trimming, so a marker straddling the retention cut is not lost.
     let markerCarry = '';
     let settled = false;
 
@@ -204,21 +194,12 @@ export function verifyLaunch({
       }
     };
 
-    // may already be gone even when its `exit` event has not yet been delivered
-    // (event-loop lag), so the window-end PASS consults the OS, not just the
-    // child handle's exit bookkeeping.
     const childAlive = () => {
       if (child.exitCode !== null || child.signalCode !== null) return false;
       const pid = child.pid;
       return typeof pid === 'number' && isProcessAlive(pid);
     };
 
-    // path. The leader may already have exited, so the group is signalled
-    // best-effort; a descendant that ignores SIGTERM is escalated to SIGKILL
-    // after a bounded grace wait. The escalation is awaited before the probe
-    // resolves, so a standalone CLI cannot exit before it runs (no unref'd
-    // post-exit timer holds the SIGKILL). Destroying the streams stops a
-    // descendant that inherited the pipes from keeping this probe pending.
     const cleanup = async () => {
       killGroup(child.pid, 'SIGTERM');
       const deadline = Date.now() + KILL_GRACE_MS;
@@ -278,8 +259,6 @@ export function verifyLaunch({
           reason: `stderr contains "${BOOTSTRAP_FAILED_MARKER}"`,
         });
       } else if (!childAlive()) {
-        // event may still be pending (event-loop lag). Never record a PASS for
-        // a dead app: fail with the exit bookkeeping available so far.
         finish({
           ...base,
           exitCode: child.exitCode ?? undefined,

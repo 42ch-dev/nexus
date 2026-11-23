@@ -158,11 +158,6 @@ function FingerprintGate({
   const { t: shellT } = useTranslation('shell');
   const { t: commonT } = useTranslation('common');
 
-  // (and legacy `/connect` / `/settings/connection` while they redirect) to
-  // mount on fingerprint mismatch so the author is not hard-locked out of
-  // re-pinning. The Advanced page also hosts the Setup section, so only the
-  // Connection hash (or the landing view) is allowed; `#setup` is redirected
-  // to `#connection` while identity is unresolved.
   const isConnectRoute =
     location.pathname === '/connect' ||
     location.pathname === '/settings/connection' ||
@@ -191,16 +186,9 @@ function FingerprintGate({
           {state.kind ? (
             <TransportErrorBlock
               kind={state.kind}
-              // see fully localized transport-failure UX (the primitive's
-              // built-in copy is an English fallback for Studio).
               {...transportErrorCopyFor(state.kind, shellT, commonT)}
-              // to Connection settings (re-pin / re-enter endpoint).
               onRetry={() => void verify()}
               onOpenSettings={() => navigate('/settings/advanced#connection')}
-              // (e.g., the long-form "Cannot reach the daemon at this
-              // address…" string). Surfaced as the block's detail line so
-              // the primitive owns headline+body+CTAs (single voice) and the
-              // diagnostic stays accessible below.
               detail={state.message}
             />
           ) : (
@@ -240,7 +228,6 @@ export function ClientProvider({
 }: ClientProviderProps) {
   const [storedConfig, setStoredConfig] = useState<ConnectionConfig | null>(null);
   const [loaded, setLoaded] = useState(false);
-  // rebuilds the local client with `readStoredApiKey()`.
   const [authEpoch, setAuthEpoch] = useState(0);
   useEffect(() => {
     const onAuthorized = () => setAuthEpoch((value) => value + 1);
@@ -288,8 +275,6 @@ export function ClientProvider({
           } else {
             await storage.save(next);
           }
-          // returns the redacted public config (never the entered key — D-18),
-          // so the ephemeral API key is dropped from memory immediately.
           const persisted = await storage.load();
           setStoredConfig(persisted);
           storedConfigRef.current = persisted;

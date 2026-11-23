@@ -349,7 +349,6 @@ async fn work_world_binding_rejects_cross_context() {
         "inherit: {inherited}"
     );
 
-    //    precedence never routes World B's override into World A's assembly.
     let err = core
         .inspect_moment(
             &principal,
@@ -405,8 +404,6 @@ async fn inspect_and_directives_stay_owner_scoped() {
     let packet = serde_json::to_string(&packet).unwrap();
     assert!(!packet.is_empty(), "packet renders");
 
-    // exists but is owned by nobody here) stays 403 — never 404 — so scope
-    // existence is unobservable.
     let err = core
         .moment_directive(
             &principal,
@@ -643,8 +640,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "a binding-local row must not reach the model input: {packet_json}"
     );
 
-    // hold the Character's private row — the exclusion above is the ActorView
-    // policy, not an empty store. Management review is never model input.
     let pool = plain_pool(&env).await;
     let management = core
         .creator_management_read_scope(&principal, WORLD_A)
@@ -741,7 +736,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "the fresh read carries the new governance — no stale private text is reused"
     );
 
-    // (the model-input policy), while it stays in the Character's own.
     let creator_scope = core
         .creator_view_read_scope(&principal, WORLD_A)
         .await
@@ -757,7 +751,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "a Character-private fact is excluded from the Creator's model input"
     );
 
-    // half of ActorView), and the Character-global shared row stays visible.
     let creator_world_rows = SqliteKbStore::new(pool)
         .list_by_owner_complete(&KnowledgeOwnerRef::world(WORLD_A), &creator_scope)
         .await
@@ -779,9 +772,6 @@ async fn v1191_holder_context_inspect_reads_actor_view_and_retires_a_stale_snaps
         "another holder's private World row stays excluded: {names:?}"
     );
 }
-
-// from the retired daemon runtime fixtures (`directive_api.rs`,
-// `inspector_api.rs`). ──────────────────────────────────────────────────────
 
 /// Directive lifecycle at its core owner: `show` with nothing active renders
 /// the empty response, `set` returns the whole durable row, a second `set`
@@ -1103,7 +1093,6 @@ async fn retained_inspect_moment_places_activation_seeds_and_expands_confirmed_h
     )
     .unwrap();
 
-    // constant-band reason.
     let placement = packet["modules"]["placement"]
         .as_array()
         .expect("modules.placement array");

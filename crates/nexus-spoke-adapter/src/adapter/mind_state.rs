@@ -188,8 +188,6 @@ fn validated_mind_state_columns(value: &Value) -> Result<MindStateColumnValues<'
         ));
     };
 
-    // i64 domain (fail-closed) — a fractional, NaN, or huge value is rejected
-    // rather than truncated or wrapped into a schema version.
     let schema_version = match state.get("schema_version") {
         Some(Value::Number(n)) => {
             if let Some(i) = n.as_i64() {

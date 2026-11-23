@@ -1,6 +1,4 @@
 /**
- * (FB-CP-001, FB-CP-003, V1.111 P0 T1).
- *
  * Coverage mirrors the task brief: register / lookup / unregister / filter /
  * rank, plus the `useCommands()` + `useRegisterCommand()` React bindings.
  */
@@ -221,7 +219,6 @@ describe('useRegisterCommand — lifetime binding', () => {
   });
 
   it('survives React StrictMode double-mount (register → cleanup → register)', () => {
-    // id-keyed Map makes this a net register.
     const { unmount, rerender } = renderHook(() => useRegisterCommand(ADD_CHAPTER));
     rerender();
     expect(getCommands()).toEqual([ADD_CHAPTER]);
@@ -230,8 +227,6 @@ describe('useRegisterCommand — lifetime binding', () => {
   });
 
   it('does not churn the registry when re-rendered with an equivalent-id command (captures once on mount)', () => {
-    // different handler. The hook must register once (mount-only semantics),
-    // not on every render — otherwise the store thrashes.
     const handlerA = vi.fn();
     const handlerB = vi.fn();
     const { rerender } = renderHook(
@@ -241,7 +236,6 @@ describe('useRegisterCommand — lifetime binding', () => {
     expect(getCommands()).toEqual([{ ...ADD_CHAPTER, handler: handlerA }]);
 
     rerender({ handler: handlerB });
-    // by design (documented simplify note in command-registry.ts).
     expect(getCommands()).toEqual([{ ...ADD_CHAPTER, handler: handlerA }]);
   });
 });

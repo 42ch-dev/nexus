@@ -18,7 +18,6 @@ use crate::capability::model::ProviderHealth;
 use crate::capability::model::{HostOperation, LaunchSpec, ProbeRequest, ProtocolKind};
 use crate::{HostFacade, HostManager, LaunchStrategy, ProviderId};
 
-// before admitting further operations, not while an effect/pull is active.
 const MAX_OPERATIONS_PER_SESSION: usize = 64;
 
 struct SessionOwner {
@@ -291,7 +290,6 @@ impl MultiplexProviderPort {
         })?;
         let mut routes = self.routes()?;
         if routes.sessions.contains_key(session_id) {
-            // selected adapter/tracking wrapper retains cleanup ownership.
             return Err(error(
                 CoreErrorCode::Internal,
                 "provider returned an owned session_id",
@@ -306,7 +304,6 @@ impl MultiplexProviderPort {
                 closed: AtomicBool::new(false),
             }),
         );
-        // without holding the multiplexer lock.
         drop(routes);
         Ok(reply)
     }

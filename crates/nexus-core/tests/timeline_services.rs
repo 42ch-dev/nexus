@@ -338,7 +338,6 @@ async fn cursor_pages_preserve_filters() {
     assert!(none.items.is_empty());
     assert!(!none.has_more);
 
-    // unfiltered rows leaking in.
     let page1 = list(
         &f.core,
         &f.principal,

@@ -29,7 +29,6 @@ pub enum PlatformCommand {
 
     /// Context assembly
     Context {
-        // boxed to keep `PlatformCommand` small (type-size hygiene; no behavior).
         #[command(subcommand)]
         command: Box<context::ContextCommand>,
     },

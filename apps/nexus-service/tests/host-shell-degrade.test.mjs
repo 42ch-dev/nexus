@@ -7,13 +7,6 @@ import { before, describe, test } from 'node:test';
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * `allow_uninitialized`) has no Host authority until a workspace selection
- * promotes the core. The onboarding wizard calls the tier1 Agent-Host routes
- * BEFORE that promotion, so their native `uninitialized` rejection must degrade
- * to the same empty readiness bodies an absent host already produces — never a
- * 409 that deadlocks first-run setup. After promotion the full core exists and
- * the same rejection must still surface.
- *
  * The authority is stubbed at the `ServiceCore.core.hostQuery` seam the
  * handlers read, so the degradation is observed through the real route
  * handlers and their HTTP-visible bodies.

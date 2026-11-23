@@ -32,9 +32,6 @@ fn empty_session_cancels() -> std::sync::Arc<
 
 #[tokio::test]
 async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
-    // empty cancellation map; register the run's coordinator token so the
-    // task's fail-closed token resolution succeeds (production registers at
-    // run admission).
     let cancels = empty_session_cancels();
     cancels
         .write()
@@ -69,7 +66,6 @@ async fn acp_prompt_task_dispatches_to_executor_and_records_output() {
 
 #[tokio::test]
 async fn acp_prompt_task_no_executor_refuses() {
-    // success (A1: no echo/worker fallback).
     let task = AcpPromptTask::new(
         None,
         empty_session_cancels(),

@@ -180,11 +180,6 @@ describe('TimelineCanvas — layer breadcrumb (P4 Task 5)', () => {
   });
 });
 
-// layer on the Work Timeline, so the breadcrumb pair becomes Brief ›
-// Narrative — mirroring the World Timeline's breadcrumb exactly. Moment
-// sits outside the coarse/fine pair (reached via the switcher tabs), the
-// same as the World Timeline's Moment.
-
 describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -216,7 +211,6 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', (
       );
     });
 
-    // layer — the world-shape zoom-out target). No "Moment" segment.
     const breadcrumb = screen.getByTestId('work-timeline-layer-breadcrumb');
     expect(breadcrumb).toBeInTheDocument();
     expect(breadcrumb).toHaveTextContent('Brief');
@@ -260,7 +254,6 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', (
       );
     });
 
-    // panel, but the header chrome with the breadcrumb still renders).
     fireEvent.click(screen.getByTestId('work-timeline-layer-tab-brief'));
     await waitFor(() => {
       expect(screen.getByTestId('work-timeline-canvas')).toHaveAttribute(
@@ -277,9 +270,6 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', (
   });
 
   it('keeps the breadcrumb safe when Moment is active (Moment sits outside the Brief > Narrative pair)', async () => {
-    // with Moment outside it; the Work Timeline mirrors that exactly. The
-    // breadcrumb must render without crashing on the Moment layer (the
-    // switcher tabs remain the primary Moment affordance).
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,
@@ -330,7 +320,6 @@ describe('WorkTimelineCanvas — layer breadcrumb (P4 Task 5 + V1.156 P2 T2)', (
       );
     });
 
-    // — the pair renders the Narrative fine segment). No crash on Moment.
     expect(screen.getByTestId('work-timeline-layer-breadcrumb')).toBeInTheDocument();
   });
 });

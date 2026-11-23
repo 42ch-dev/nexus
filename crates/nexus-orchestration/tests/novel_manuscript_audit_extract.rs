@@ -213,9 +213,6 @@ fn extract_done_is_terminal() {
     );
 }
 
-// (which would be reachable via review_report if the wrong preset was dispatched)
-// The world_binding: required in YAML provides a hint to daemon, but the actual
-// enforcement is at the CLI level + preset gate evaluation.
 #[test]
 fn extract_preset_has_no_review_state() {
     let caps = CapabilityRegistry::with_builtins();

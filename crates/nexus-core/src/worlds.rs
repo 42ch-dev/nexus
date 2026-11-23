@@ -188,8 +188,6 @@ pub fn narrative_internal(what: &str, e: &nexus_narrative::NarrativeError) -> Co
 
 /// Hard-delete transaction (ported verbatim from the daemon handler).
 async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) -> CoreResult<()> {
-    // gate. This is the only precondition before mutation; worlds have no
-    // runtime lock analogue.
     let owned = narrative_write::is_world_owned(pool, creator_id, world_id)
         .await
         .map_err(|e| CoreError::Internal {
@@ -268,7 +266,6 @@ async fn delete_world_hard(pool: &SqlitePool, creator_id: &str, world_id: &str) 
     };
 
     if deleted == 0 {
-        // rolls back on Drop, discarding the no-op manual cleanup above.
         return Err(CoreError::NotFound {
             resource: format!("World {world_id} not found"),
         });

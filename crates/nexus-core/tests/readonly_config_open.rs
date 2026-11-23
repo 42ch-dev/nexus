@@ -398,7 +398,6 @@ async fn a_failed_writer_open_releases_its_admission() {
             .expect("the stored remote selection refuses the writer open"),
     );
 
-    // a real writer open now proves that admission was released.
     service
         .clear_memory_provider_selection()
         .expect("restore the local default");
@@ -424,7 +423,6 @@ async fn a_sealed_readonly_open_loads_a_legacy_snapshot_without_migrating() {
     let opened = CoreService::open(home.options(CoreAccess::ReadOnly)).await;
     drop(sealed);
 
-    // read-only open refuses as `auth_required`/`uninitialized`.
     let core = opened.expect("a read-only open must load the legacy snapshot");
     core.close().await.expect("close");
 

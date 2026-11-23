@@ -6,13 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * listing. The reader's own fixtures prove the scan and the fragment pin; this
- * suite drives the route over the `ServiceCore.core` seam it reads, so the
- * pagination, the typed refusals and the isolation of an unavailable package
- * are the handler's observed behaviour.
- */
-
 let routes;
 
 before(async () => {

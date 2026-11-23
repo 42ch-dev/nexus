@@ -19,10 +19,6 @@ export async function runCodegen(): Promise<void> {
   logger.info('Starting Nexus Codegen Pipeline');
   logger.info('==============================');
 
-  // `.schemas-localized` scratch tree that both generators read, so exclusion has to
-  // start before prep: the per-output-directory lock inside `generateTSTypes()` is
-  // reached only after those inputs already changed, letting a competing run delete
-  // files this run is still reading even though its own publication is later refused.
   const lockPaths = resolvePrepPaths();
   const releaseRunLock = acquirePublicationLock(lockPaths.localizedDir);
   try {
@@ -32,9 +28,6 @@ export async function runCodegen(): Promise<void> {
     logger.info('\n--- Generating TypeScript Types ---');
     await generateTSTypes();
 
-    // Invokes the external `nexus-rust-gen` binary (typify) over the dereferenced tree
-    // from stage 1. It is an isolated workspace (tooling/codegen/rust-gen, excluded from
-    // the root `[workspace]`) so it is built independently here via `cargo run --release`.
     logger.info('\n--- Generating Rust Types ---');
     execSync('cargo run --quiet --release', {
       cwd: path.join(prepPaths.repoRoot, 'tooling', 'codegen', 'rust-gen'),

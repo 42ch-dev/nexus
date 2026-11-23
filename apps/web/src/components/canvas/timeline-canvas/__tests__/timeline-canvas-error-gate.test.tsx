@@ -1,12 +1,6 @@
 /**
  * TimelineCanvas — World Moment outline-read error gate (001/R3, qc3 F-004).
  *
- * outline reads, so a failed read is NOT an empty outline. This pins the gate
- * the V1.200 DR-26 round-2 change introduced: with the World Timeline mounted
- * on the Moment layer, an msw 500 on `/v1/daemon/works/:workId/outline`
- * renders the retryable `ErrorState`, never the honest-empty panel, and the
- * retry refetches the failed read.
- *
  * Scope: the error gate only — no new gate semantics. The partial-failure and
  * per-Work pending shapes are covered by `moment-projection.test.tsx`
  * (`honest Moment bound-Work read states`).
@@ -68,7 +62,6 @@ describe('TimelineCanvas — World Moment outline-read error gate (001/R3)', () 
     let outlineReads = 0;
     let outlineFails = true;
     useHandlers(
-      // assertions below are about the bound-Work read, not World emptiness.
       http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
         HttpResponse.json({
           entities: [
@@ -122,7 +115,6 @@ describe('TimelineCanvas — World Moment outline-read error gate (001/R3)', () 
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load the world timeline.');
-    // not claim the bound Work has no scene/beat data.
     expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
 
     const readsBeforeRetry = outlineReads;

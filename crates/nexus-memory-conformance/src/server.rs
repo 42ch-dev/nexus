@@ -109,13 +109,10 @@ impl RemoteMemoryService for FixtureMemoryService {
     async fn invoke(&self, peer_id: &str, op: &str, payload: Value) -> SpokeResult<Value> {
         let scope = match raw_invoke::admission(&payload, op, &self.provider) {
             Ok(scope) => scope,
-            // typed decode may run: refuse the request instead of admitting it
-            // without its replay identity.
             Err(reject) => return raw_invoke::normalize(SpokeResult::Reject(reject)),
         };
         let result = match scope {
             Some(scope) => {
-                // executed request are the same object, never a copy.
                 raw_invoke::with_scope(scope, self.inner.invoke(peer_id, op, payload)).await
             }
             None => self.inner.invoke(peer_id, op, payload).await,
@@ -302,7 +299,6 @@ impl PrecheckRefusal {
             Self::Target => not_authorized(
                 "the authenticated principal holds no current grant covering this operation's target",
             ),
-            // one answer one indistinguishable refusal.
             Self::RecordAbsent => SpokeReject {
                 code: SpokeRejectCode::NotFound,
                 message: "the requested record does not exist in this space".to_owned(),
@@ -422,8 +418,6 @@ fn promote_target(
     source_context: Option<&str>,
     target: &PromoteScope,
 ) -> Result<OpTarget, SpokeReject> {
-    // records the union of the source and target contexts, the shared facet
-    // of either side, and both required capabilities.
     let (target_visibility, target_context) = match target {
         PromoteScope::Shared => ("shared", None),
         PromoteScope::Context(context) => ("context", Some(context.as_str())),
@@ -489,17 +483,13 @@ impl FixtureMemoryProvider {
         refusal: PrecheckRefusal,
         now: DateTime<Utc>,
     ) -> Result<ReplayStep, SpokeReject> {
-        // space is NOT_FOUND, never a grant decision.
         self.require_served_space(space_id)?;
         let mutation = Mutation::keyed(op, idempotency_key, admitted);
         match resolve_replay(conn, space_id, principal_id, &mutation, now).await? {
-            // inside `resolve_replay`, in this same transaction. The operation's
-            // current entity is irrelevant to it and is never re-derived here.
             ReplayResolution::Replayed(receipt) => Ok(ReplayStep::Replayed(receipt)),
             ReplayResolution::KeyReusable { receipt_id } => {
                 release_expired_binding_in_tx(conn, space_id, principal_id, &mutation, &receipt_id)
                     .await?;
-                // authorize it before the effect.
                 self.require_target_authority(conn, principal_id, space_id, target, refusal, now)
                     .await?;
                 Ok(ReplayStep::Execute)
@@ -611,8 +601,6 @@ impl MemoryPort for FixtureMemoryProvider {
         _principal: &Principal,
         _request: MemoryDescribeRequest,
     ) -> SpokeResult<MemoryDescribeResponse> {
-        // service face already performed. The capability list is honest for
-        // this provider's construction shape.
         respond(describe_body(self.advertises_reflection()))
     }
 
@@ -792,7 +780,6 @@ impl MemoryPort for FixtureMemoryProvider {
         principal: &Principal,
         request: MemorySubjectsEnsureRequest,
     ) -> SpokeResult<MemorySubjectsEnsureResponse> {
-        // keyless receipt records this outcome and can never be replayed.
         let op = "memory.subjects.ensure";
         let principal_id = principal_id(principal);
         let space_id = request.space_id.as_str().to_owned();
@@ -873,8 +860,6 @@ impl MemoryPort for FixtureMemoryProvider {
         let idempotency_key = request.idempotency_key.as_str().to_owned();
         let space_id = request.space_id.as_str().to_owned();
         let subject_id = request.subject_id.as_str().to_owned();
-        // transition needs unrestricted coverage of the subject, a context
-        // transition needs that one placement context.
         let target = match (capabilities_of(op), &request.target) {
             (Ok(capabilities), FenceTarget::Subject) => {
                 OpTarget::new(capabilities, Some(&subject_id), &[], false, true)
@@ -892,8 +877,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // authenticated principal, before the operation's clock and its writer
-        // transaction. Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
         let now = Utc::now();
         let mut transaction = match self.begin_write().await {
@@ -1069,8 +1052,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // admission and before the operation's clock and writer transaction.
-        // Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
         let now = Utc::now();
         let mut transaction = match self.begin_write().await {
@@ -1115,9 +1096,6 @@ impl MemoryPort for FixtureMemoryProvider {
                 return respond_receipt(&receipt);
             }
             Ok(ReplayStep::Execute) => {}
-            // slice's one indistinguishable wording. A replay conflict, an
-            // expired/retained outcome or a storage failure keeps its real
-            // code and details (§14.2).
             Err(reject) if reject.code == SpokeRejectCode::NotAuthorized => {
                 return SpokeResult::Reject(not_authorized(
                     "the grant is not revocable by the authenticated principal",
@@ -1212,8 +1190,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Ok(admitted) => admitted,
             Err(reject) => return SpokeResult::Reject(reject),
         };
-        // authenticated principal, before the private slice opens its writer
-        // transaction. Outcome-neutral; reads and other ops never reach it.
         self.faults().wait_target(op).await;
         match self
             .candidates_review(principal_id(principal), &admitted, Utc::now())
@@ -1348,7 +1324,6 @@ impl MemoryPort for FixtureMemoryProvider {
             Err(reject) => return SpokeResult::Reject(reject),
         };
         let Some((subject_id, visibility, context)) = placement else {
-            // answer its own uniform refusal, then discard the transaction.
             let outcome = self
                 .records_update_in_tx(&mut transaction, principal_id, admitted.request(), now)
                 .await;
@@ -1680,7 +1655,6 @@ impl MemoryPort for FixtureMemoryProvider {
         let space_id = request.space_id.as_str().to_owned();
         let subject_id = request.subject_id.as_str().to_owned();
         let idempotency_key = request.idempotency_key.as_str().to_owned();
-        // shared document access, exactly as the profile slice authorizes it.
         let target = match capabilities_of(op) {
             Ok(capabilities) => OpTarget::new(capabilities, Some(&subject_id), &[], true, false),
             Err(reject) => return SpokeResult::Reject(reject),

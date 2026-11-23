@@ -181,9 +181,6 @@ impl NativeCore {
     pub async fn provider_call(&self, request_json: Buffer) -> Result<Buffer> {
         self.deny_service_only()?;
         let request: ProviderCall = serde_json::from_slice(request_json.as_ref())?;
-        // §4): a core-indexed or tombstoned Actor id is refused before the port
-        // can serve it, while an id the core never indexed keeps its existing
-        // provider-only semantics.
         host_query::deny_actor_provider_ids(
             &self.inner,
             request.session_id.as_deref(),
@@ -212,7 +209,6 @@ impl NativeCore {
         max_bytes: u32,
     ) -> Result<Buffer> {
         self.deny_service_only()?;
-        // the core's own observation, so the raw lane must not drain it.
         host_query::deny_actor_provider_ids(&self.inner, None, Some(&operation_id))
             .map_err(core_error::napi_error_from_domain)?;
         let port = self
@@ -609,7 +605,6 @@ fn wire_core_error_from_reset(err: &nexus_local_db::LocalDbError) -> CoreError {
             details: serde_json::Map::from_iter([("path".into(), Value::String(path.clone()))]),
             http_status: Some(500),
         },
-        // leaking an unrelated diagnostic.
         _ => CoreError {
             code: CoreErrorCode::Internal,
             message: "local state reset failed".into(),

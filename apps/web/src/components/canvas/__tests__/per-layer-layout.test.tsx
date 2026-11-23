@@ -53,12 +53,6 @@ const workCtxRef: { current: WorkTimelineCanvasAdapterContext } = {
   current: { workId: 'work-1' },
 };
 
-/**
- * blow up on a missing graph. The graph itself is irrelevant for layout
- * option tests — we never call `projectGraph` here, only read the adapter's
- * `layoutOptions`.
- */
-
 describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   it('Brief layer (World Timeline) emits a horizontal era-sweep layout: LR + wide rankSep + tight nodeSep', () => {
     // The exact values (240/40) are tuning knobs; the contract is:
@@ -80,9 +74,6 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   });
 
   it('Narrative layer (World Timeline) preserves V1.122 baseline (LR + undefined rankSep/nodeSep)', () => {
-    // event axis + Context clusters off-axis." Narrative MUST NOT carry
-    // layer-specific rankSep/nodeSep; it leaves them undefined so
-    // `useAutoLayout`'s internal defaults (80/80) apply — V1.122 regression.
     const adapter = createTimelineCanvasAdapter(worldCtxRef, 'narrative');
     const opts = adapter.layoutOptions;
 
@@ -93,9 +84,6 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   });
 
   it('Narrative layer (Work Timeline) inherits the same V1.122 LR baseline', () => {
-    // baseline across BOTH Timeline surfaces. The Work Timeline Narrative
-    // adapter MUST NOT carry Moment-specific layout knobs — direction is LR
-    // and rankSep/nodeSep stay undefined so dagre's internal defaults apply.
     const adapter = createWorkTimelineCanvasAdapter(workCtxRef, 'narrative');
     const opts = adapter.layoutOptions;
 
@@ -106,13 +94,6 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   });
 
   it('Moment layer (Work Timeline) emits a vertical scene-stack: TB + tight rankSep + tight nodeSep', () => {
-    // (T→B preferred); scene/beat cards + manuscript-anchor badges."
-    // The exact values (60/30) are tuning knobs; the contract is:
-    //   - direction === 'TB' (vertical reading — DIFFERENT from Brief /
-    //     Narrative LR so a screenshot reads as a different instrument)
-    //   - rankSep + nodeSep both present and tight (dense manuscript stack)
-    //   - hasSuppliedPositions === true (supplied scene/beat positions win
-    //     on first open; these values only kick in on explicit relayout)
     const adapter = createWorkTimelineCanvasAdapter(workCtxRef, 'moment');
     const opts = adapter.layoutOptions;
 
@@ -123,11 +104,6 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   });
 
   it('Brief vs Narrative (World Timeline) differentiate on direction + density knobs', () => {
-    // from Narrative without reading chrome labels. The layout dimension of
-    // that contract: Brief carries EXPLICIT rankSep/nodeSep (sweep era
-    // spacing); Narrative leaves them undefined (baseline). Both share LR
-    // direction (Timeline family reading direction) — differentiation is on
-    // density, not axis.
     const brief = createTimelineCanvasAdapter(worldCtxRef, 'brief');
     const narrative = createTimelineCanvasAdapter(worldCtxRef, 'narrative');
 
@@ -144,16 +120,12 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   });
 
   it('Narrative vs Moment (Work Timeline) differentiate on direction (LR vs TB) + density', () => {
-    // DIFFERENT layout directions so a screenshot reads as a different
-    // instrument. This is the strongest layout-dimension differentiator in
-    // the three-layer contract — direction change, not just spacing change.
     const narrative = createWorkTimelineCanvasAdapter(workCtxRef, 'narrative');
     const moment = createWorkTimelineCanvasAdapter(workCtxRef, 'moment');
 
     expect(narrative.layoutOptions?.direction).toBe('LR');
     expect(moment.layoutOptions?.direction).toBe('TB');
 
-    // undefined (V1.122 baseline).
     expect(moment.layoutOptions?.rankSep).toBeDefined();
     expect(moment.layoutOptions?.nodeSep).toBeDefined();
     expect(narrative.layoutOptions?.rankSep).toBeUndefined();
@@ -161,16 +133,11 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   });
 
   it('Three-layer differentiation matrix holds across both Timeline surfaces', () => {
-    // distinct (direction, density) pair so the caller's "三层不一样的感受"
-    // mandate holds at the layout dimension. This is the consolidated
-    // AC-V1123-20 assertion P4 QC references when signing the three-layer
-    // feel contract.
     const brief = createTimelineCanvasAdapter(worldCtxRef, 'brief');
     const worldNarrative = createTimelineCanvasAdapter(worldCtxRef, 'narrative');
     const workNarrative = createWorkTimelineCanvasAdapter(workCtxRef, 'narrative');
     const moment = createWorkTimelineCanvasAdapter(workCtxRef, 'moment');
 
-    // contract — Narrative is the shared familiar layer across surfaces.
     expect(worldNarrative.layoutOptions?.direction).toBe(
       workNarrative.layoutOptions?.direction,
     );
@@ -185,7 +152,6 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
     expect(workNarrative.layoutOptions?.direction).toBe('LR');
     expect(moment.layoutOptions?.direction).toBe('TB');
 
-    // (80 default), Moment=tight rankSep (60). Three distinct density buckets.
     const briefRank = brief.layoutOptions?.rankSep ?? 80;
     const narrativeRank = worldNarrative.layoutOptions?.rankSep ?? 80;
     const momentRank = moment.layoutOptions?.rankSep ?? 80;
@@ -194,9 +160,6 @@ describe('Per-layer layout differentiation (V1.123 P4 Task 1)', () => {
   });
 
   it('Layer adapter construction is referentially stable across renders (V1.114 §3.3.1)', () => {
-    // MUST return adapters whose layoutOptions are shape-equal (factory
-    // re-runs are cheap; consumer-side `useMemo([activeLayer], ...)` keys
-    // only on layer change).
     const a1 = createTimelineCanvasAdapter(worldCtxRef, 'brief').layoutOptions;
     const a2 = createTimelineCanvasAdapter(worldCtxRef, 'brief').layoutOptions;
     expect(a1).toEqual(a2);

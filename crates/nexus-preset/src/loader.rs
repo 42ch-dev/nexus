@@ -155,7 +155,6 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    //     the same Value tree (single parse avoids double stack-overflow surface).
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
     let actual_depth = yaml_value_depth(&yaml_value);
     if actual_depth > max_depth {
@@ -165,11 +164,8 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    //     serde silently ignores unknown keys; warn so mis-placed sections
-    //     (e.g. `gates:` at root instead of under `preset:`) are surfaced.
     warn_unknown_top_level_keys(&yaml_value);
 
-    //    the stack-overflow attack surface — QC3 W-002).
     let manifest: PresetManifest =
         serde_yaml::from_value(yaml_value).map_err(PresetLoadError::from)?;
 
@@ -181,9 +177,6 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    //     id match, orphan inner graphs). Only certain error categories are fatal for
-    //     the loader; capability arg drift is reported as warnings because existing
-    //     embedded presets may not perfectly match schema metadata.
     let sem = super::validation::validate_preset_semantic(&manifest, caps);
     if sem.errors().any(|d| {
         matches!(
@@ -287,7 +280,6 @@ pub fn load_preset(
     }
 
     let mut loaded = load_preset_from_str(&yaml, caps)?;
-    // over the manifest + every referenced asset, with a canonicalized root.
     loaded.source_identity = Some(preset_source_identity(
         &loaded.manifest,
         Some(bundle_root),
@@ -322,7 +314,6 @@ pub fn preset_source_identity(
     let mut hasher = blake3::Hasher::new();
     hasher.update(manifest_yaml.as_bytes());
 
-    // symlink-consistent (A2/A7).
     let canonical_root = match bundle_root {
         Some(root) => Some(
             root.canonicalize()
@@ -337,9 +328,6 @@ pub fn preset_source_identity(
         None => None,
     };
 
-    // same collector as the asset validation surface so the identity covers
-    // template_file, prompt_file, system_prompt_file in capability args, and
-    // role system_prompt_file (Important 6).
     let mut asset_paths: Vec<String> = super::validation::collect_asset_file_references(manifest)
         .into_iter()
         .map(|(_, rel)| rel)
@@ -539,9 +527,6 @@ fn validate_manifest(
 
     let state_ids: HashSet<&str> = manifest.states.iter().map(|s| s.id.as_str()).collect();
 
-    // states the runtime gates as a merge join (`expected_incoming > 0`)
-    // so the bounded-join fail-closed rule below accepts implicit
-    // labeled-edge merges exactly as `build_outer_graph` wires them.
     let incoming_labeled = incoming_labeled_edge_counts(manifest);
 
     for (i, req_cap) in manifest.preset.requires_capabilities.iter().enumerate() {
@@ -794,7 +779,6 @@ fn validate_manifest(
     }
     let role_ids: HashSet<&str> = manifest.roles.iter().map(|r| r.id.as_str()).collect();
 
-    // but we want explicit error message)
     let mut seen_role_ids: HashSet<&str> = HashSet::new();
     for (i, role) in manifest.roles.iter().enumerate() {
         if seen_role_ids.contains(role.id.as_str()) {
@@ -1340,10 +1324,6 @@ states:
 
     #[test]
     fn join_timeout_fields_load_cleanly_on_implicit_labeled_edge_merge() {
-        // with NO explicit `merge:` is an implicit wait-all merge (§3.2) —
-        // the runtime gates it on `expected_incoming > 0`, so the
-        // bounded-join fields must load and bind to that gate instead of
-        // failing closed.
         let yaml = r"
 preset:
   id: ok-timeout-implicit-merge
@@ -1386,10 +1366,6 @@ states:
         );
         assert_eq!(join.timeout_ms, Some(1000));
         assert_eq!(join.on_timeout.as_deref(), Some("j1"));
-        // no merge:) is pinned by the join_timeout_e2e merge-gate tests; the
-        // loader and the graph wiring share `incoming_labeled_edge_counts`,
-        // so acceptance here means the gate the fields bound is the gate the
-        // runtime builds.
     }
     /// Engine stub for wiring-only tests: every method panics. The
     #[test]
@@ -2491,8 +2467,6 @@ states:
         );
     }
 
-    /// a template file which does not exist in the bundle directory.
-    /// This exercises the `validate_assets_in_bundle()` A3 surface.
     #[test]
     fn a3_loader_rejects_missing_template_file_in_bundle() {
         let tmp = tempfile::tempdir().unwrap();

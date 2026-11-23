@@ -50,9 +50,6 @@ impl AcpSoulNarrativeSynthesizer {
 
         let mut prompt = String::new();
 
-        // branch so the Creator arm is byte-for-byte identical to the legacy
-        // prompt (capitalized "Creator-SOUL", "as a writer", "this creator is
-        // becoming"), and the Character arm never references the Creator.
         let (header, body_intro, final_instruction) = match subject {
             "character" => (
                 "You are a reflective creative-writing mentor synthesizing a Character-SOUL narrative.\n\n",
@@ -151,10 +148,6 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
         input: SoulNarrativeSynthesisInput,
         session_scope: Option<&str>,
     ) -> Result<SoulNarrativeDraft, MemoryError> {
-        // registered. For a Character bearer this is `owner_creator_id`, NOT
-        // the `chr_…` storage id (which would resolve to no worker or the
-        // wrong worker). The Character identity is preserved as trusted
-        // context.
         let identity = bearer.identity();
         let (subject, character_id) = identity
             .character_id
@@ -168,10 +161,6 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
 
         let prompt = Self::build_prompt(&input, subject);
 
-        // scope, where local) so a Character/binding reflection never resumes
-        // another bearer's or scope's conversation. The Creator arm keeps the
-        // legacy global `soul_narrative_reflect` key (its `_creator_id` is
-        // already part of the IPC key) so Creator reflect history is unchanged.
         let session_id = Self::session_id(identity.character_id, session_scope);
         let mut payload = json!({
             "prompt": prompt,
@@ -285,7 +274,6 @@ mod tests {
             "Now, write a reflective Character-SOUL narrative (2-4 paragraphs) \
              synthesizing who this character is becoming."
         ));
-        // wording (acceptance criterion).
         assert!(
             !character.contains("Creator-SOUL"),
             "Character prompt must not reference Creator-SOUL: {character}"

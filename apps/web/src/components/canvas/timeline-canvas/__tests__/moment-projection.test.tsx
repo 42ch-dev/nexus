@@ -1,10 +1,6 @@
 /**
  * TimelineCanvasAdapter — V1.156 P1 T1 (Moment layer projection).
  *
- * `canvas-strategy-surface.md` §3.3.3 V1.156 amendment + product semantics
- * PD-3 (World Timeline Moment = READ/projection layer; Moments remain
- * Work-owned; no World-owned Moment write flow):
- *
  *   - `projectTimelineGraph(graph, 'moment', ...)` projects the V1.108
  *     `SceneBeatFixturePayload` scene/beat fixture onto the World Timeline
  *     Moment axis, mirroring the Work Timeline adapter's `projectMomentLayer`
@@ -127,9 +123,6 @@ function makeMockClient(): NexusClient {
 
 /**
  * Client mock for orchestrator-level `<TimelineCanvas>` mounts (F3 fix test).
- * orchestrator's read hooks (`useWorks`, `useWorldTimelineEvents`,
- * `useComputeModules`) degrade gracefully when their client methods are
- * absent, so only the graph read + works enumeration + health need stubbing.
  *
  * The Moment layer's COMPLETE works enumeration (`listWorks`, the bound-Work
  * source — V1.200 DR-26 round 2) must resolve: an unresolved / failed read is
@@ -157,14 +150,10 @@ function makeContext(
   };
 }
 
-// runtime; the adapter's return type is `Node<TimelineNodeData>`, so the
-// tests narrow through the shared index signature.
 function momentDataOf(node: Node<TimelineNodeData>): WorkTimelineNodeData {
   return node.data as unknown as WorkTimelineNodeData;
 }
 
-// discriminated union on `spineConfig.kind`) behind the generic node-data
-// type — same runtime narrowing, asserted rather than assumed.
 function momentSpineConfigOf(node: Node<TimelineNodeData>): MomentSpineConfig {
   const data = node.data as unknown as DirectedAxisSpineNodeData;
   if (data.spineConfig.kind !== 'moment') {
@@ -286,8 +275,6 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
   });
 
   it('carries bound-Work provenance with an empty World KB graph — two Works sharing chapter 1 stay distinct', () => {
-    // KB entities still renders the scenes of its bound Works. Chapter numbers
-    // are Work-local, so the two chapter-1 regions must not collapse.
     const g = graph({ entities: [] });
     const fx = fixture(
       [
@@ -303,8 +290,6 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
     const sceneB = nodes.find((n) => n.id === 'wt-scene:scn_b1')!;
     expect(momentDataOf(sceneA).workId).toBe('work-a');
     expect(momentDataOf(sceneB).workId).toBe('work-b');
-    // state (orchestrator-level counterpart:
-    // `TimelineCanvas — bound-Work Moment carrier composition`).
     expect(momentDataOf(sceneA).label).toBe('A one');
     expect(momentDataOf(sceneB).label).toBe('B one');
     expect(sceneA.position.x).not.toBe(sceneB.position.x);
@@ -314,9 +299,6 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
   });
 
   it('disambiguates the "Ch. N" spine labels of two bound Works that share a chapter (001/R2)', () => {
-    // Work-owned segments leaves the reader with screen position as the only
-    // provenance (qc2 F-7 / qc3 F-002). The colliding chapter names its owner;
-    // a Work-unique chapter keeps the compact label.
     const g = graph({ entities: [] });
     const fx = fixture([
       scene({ sceneId: 'scn_a1', chapterId: 1, workId: 'work-a' }),
@@ -334,7 +316,6 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
       'Ch. 2',
       'Ch. 1 · work-b',
     ]);
-    // distinct spine segments, not a duplicated React key.
     expect(chapterSegments.map((s) => `${s.workId ?? ''}#${s.chapterId}`)).toEqual([
       'work-a#1',
       'work-a#2',
@@ -343,9 +324,6 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
   });
 
   it('keeps the two chapter-1 spine labels distinct when the bound Works share a long id prefix (P2 T6 F-1)', () => {
-    // `…0002` the same visible handle. The labels must stay unique among the
-    // chapter's owners (extend, else fall back to the full id), while node
-    // identity is untouched.
     const g = graph({ entities: [] });
     const fx = fixture([
       scene({ sceneId: 'scn_x1', chapterId: 1, workId: 'wrk_12345678-0000-4000-8000-000000000001' }),
@@ -359,7 +337,6 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
 
     expect(labels).toHaveLength(2);
     expect(new Set(labels).size).toBe(2);
-    // full ids rather than rendering "12345678" twice.
     expect(labels).toEqual([
       'Ch. 1 · 12345678-0000-4000-8000-000000000001',
       'Ch. 1 · 12345678-0000-4000-8000-000000000002',
@@ -415,7 +392,6 @@ describe('TimelineCanvasAdapter.projectTimelineGraph — Moment projection (Scen
 
     const { edges } = projectTimelineGraph(g, 'moment', undefined, undefined, fx);
 
-    // realizes_event light links (beat → Narrative event) are P4 polish.
     expect(edges).toEqual([]);
   });
 
@@ -452,7 +428,6 @@ describe('TimelineCanvasAdapter — Moment projection reads fixture from ctxRef'
     const keys = Object.keys(adapter.nodeTypes).sort();
     expect(keys).toContain('work-timeline-moment-scene');
     expect(keys).toContain('work-timeline-moment-beat');
-    // surface (World Narrative keeps its own 'timeline-event' node).
     expect(keys).not.toContain('work-timeline-narrative-event');
     expect(keys).toContain('timeline-event');
     expect(keys).toContain('timeline-brief-era');
@@ -524,8 +499,6 @@ describe('TimelineCanvasAdapter.renderInspector — Moment nodes route to the re
     expect(container.textContent).toContain('Coronation Scene');
     expect(container.textContent).toContain('sc-1');
     expect(container.textContent).toContain('5');
-    // /works/<worldId>/outline (qc3 F-4 footgun: the node's `workId` field
-    // carries the World id on this surface).
     expect(
       container.querySelector(
         '[data-testid="work-timeline-inspector-edit-in-outline"]',
@@ -565,8 +538,6 @@ describe('TimelineCanvasAdapter.renderInspector — Moment nodes route to the re
   });
 
   it('Narrative event node still routes to the generic Timeline inspector (V1.122 regression)', () => {
-    // entity path. A `timeline-event` node still renders the generic KB
-    // inspector (title + body JSON editor).
     const g = graph();
     const adapter = createTimelineCanvasAdapter(
       { current: makeContext() },
@@ -632,11 +603,9 @@ describe('TimelineCanvasAdapter.renderAltView — Moment rows do not crash the t
     const adapter = createTimelineCanvasAdapter(ctxRef, 'moment');
     const { container } = renderInApp(<>{adapter.renderAltView!()}</>);
 
-    // the KB entity row renders.
     expect(container.textContent).toContain('Coronation');
     expect(container.textContent).not.toContain('Opening Scene');
 
-    // (regression: `block_type` undefined → `localeCompare` TypeError).
     const kindHeader = container.querySelectorAll('thead button')[1];
     expect(kindHeader).toBeDefined();
     expect(() => fireEvent.click(kindHeader)).not.toThrow();
@@ -665,7 +634,6 @@ describe('TimelineCanvasAdapter.renderAltView — Moment rows do not crash the t
     const adapter = createTimelineCanvasAdapter(ctxRef, 'moment');
     const { container } = renderInApp(<>{adapter.renderAltView!()}</>);
 
-    // behavior would render blank Moment rows that crashed on Kind sort).
     expect(container.textContent).not.toContain('Opening Scene');
     expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
     expect(() => fireEvent.click(container.querySelectorAll('thead button')[1])).not.toThrow();
@@ -729,8 +697,6 @@ describe('TimelineCanvas — fixture identity change re-projects the Moment laye
       ).toBeInTheDocument();
     });
 
-    // fixture) → re-projection → nodes exist → the empty-state panel
-    // disappears. No layer swap, no graph refetch.
     fireEvent.click(screen.getByText('inject-fixture'));
     await waitFor(() => {
       expect(
@@ -774,8 +740,6 @@ describe('TimelineCanvas — World-Moment NLE band (V1.156 P5)', () => {
       },
     );
 
-    // the pre-fix Narrative fallthrough produced zero tracks for scene/beat
-    // nodes and the overlay returned null.
     await waitFor(() => {
       expect(screen.getByTestId('nle-timeline-band-overlay')).toBeInTheDocument();
     });
@@ -991,7 +955,6 @@ describe('TimelineCanvas — bound-Work Moment carrier composition (V1.200 DR-26
 describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 round 2)', () => {
   it('surfaces a retryable error — never the honest-empty panel — when the Works enumeration fails', async () => {
     useHandlers(
-      // the surface: the assertions below are about the bound-Work source.
       http.get('/v1/daemon/worlds/:worldId/kb/graph', () =>
         HttpResponse.json({
           entities: [
@@ -1021,7 +984,6 @@ describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 
       initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
     });
 
-    // "scenes come from bound Works" empty panel.
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load the world timeline.');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
@@ -1066,8 +1028,6 @@ describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 
       initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
     });
 
-    // bound-Work set is UNKNOWN, so the loading affordance owns the surface —
-    // never the honest-empty panel that claims "no bound Works".
     await waitFor(() => expect(graphReads).toBeGreaterThan(0));
     await waitFor(() => {
       expect(screen.getByText('Loading Timeline…')).toBeInTheDocument();
@@ -1080,7 +1040,6 @@ describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 
   });
 
   it('surfaces an older bound Work’s failed outline read without hiding the Works that resolved', async () => {
-    // all other Worlds' Works) — the case the round-1 gate missed.
     const firstPage = Array.from({ length: 20 }, (_, index) =>
       workSummary(`work-${index}`, `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00Z`),
     );
@@ -1206,9 +1165,7 @@ describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 
       initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
     });
 
-    // reading — the slowest read no longer owns the whole layer.
     expect((await screen.findAllByText('B one')).length).toBeGreaterThan(0);
-    // with the Work's title (not its raw id).
     const pending = await screen.findByTestId('timeline-moment-work-loading');
     expect(pending.querySelector('[data-work-id="work-a"]')).not.toBeNull();
     expect(pending.querySelector('[data-work-id="work-b"]')).toBeNull();
@@ -1228,7 +1185,6 @@ describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 
     const workAGate = new Promise<void>((resolve) => {
       releaseWorkA = resolve;
     });
-    // once every bound-Work read has settled.
     const emptyOutline = (workId: string): WorkOutline => ({
       ...workOutline(workId, 'unused', `scn_${workId}`),
       scenes: [],
@@ -1279,14 +1235,12 @@ describe('TimelineCanvas — honest Moment bound-Work read states (V1.200 DR-26 
       initialRouterEntries: ['/worlds/world-7/timeline?layer=moment'],
     });
 
-    // is not an empty one — Work A's pending row owns that state instead.
     const pending = await screen.findByTestId('timeline-moment-work-loading');
     expect(pending.querySelector('[data-work-id="work-a"]')).not.toBeNull();
     expect(screen.queryByTestId('timeline-moment-empty-state')).toBeNull();
 
     releaseWorkA();
 
-    // panel render.
     expect(await screen.findByTestId('timeline-moment-empty-state')).toBeInTheDocument();
     expect(screen.queryByTestId('timeline-moment-work-loading')).toBeNull();
   });

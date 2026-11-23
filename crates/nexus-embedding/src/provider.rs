@@ -55,9 +55,6 @@ pub struct NoEmbeddings;
 #[async_trait]
 impl EmbeddingProvider for NoEmbeddings {
     fn identity(&self) -> &EmbeddingIdentity {
-        // `NoEmbeddings` is the injected provider, the composition root must
-        // pass `None` (no provider) to `verify_index` — this placeholder is
-        // never a valid populate stamp.
         static NO_PROVIDER_IDENTITY: EmbeddingIdentity = EmbeddingIdentity {
             provider_id: String::new(),
             model_id: String::new(),

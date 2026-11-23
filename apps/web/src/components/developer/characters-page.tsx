@@ -1,8 +1,4 @@
 /**
- * create and World-bind Creator-owned characters behind the single
- * `Characters` rail entry (compass D7/D8: lives in the developer rail, reads
- * as a creator-facing surface).
- *
  * `/characters` is the single owner of the character surface: the list, the
  * create form (name + owned World for the atomic initial binding) and the
  * per-character binding panel all live here once (T6). T7 adds the authoring
@@ -338,12 +334,6 @@ function BindingsPanel({
   );
 }
 
-/**
- * memory review drain, fragments, SOUL narrative and ToM beliefs. One section
- * per artifact kind; every section is scoped to the character opened from the
- * list. The ToM section reads bindings through the same query key the
- * `BindingsPanel` uses, so both share Task 6's cache entry.
- */
 function CharacterArtifactsPanel({ character }: { character: CharacterDetail['character'] }) {
   return (
     <div className="flex flex-col gap-4">
@@ -657,7 +647,6 @@ function SoulSection({ characterId }: { characterId: string }) {
   const client = useNexusClient();
   const qc = useQueryClient();
 
-  // report); synthesis only runs from the explicit regenerate mutation.
   const soul = useQuery({
     queryKey: queryKeys.characters.soul.narrative(characterId),
     queryFn: () => client.reflectCharacterSoul(characterId, { force_regenerate: false }),
@@ -724,11 +713,6 @@ function SoulSection({ characterId }: { characterId: string }) {
   );
 }
 
-/**
- * query is `enabled`-gated on the selection and the wire requires both
- * `binding_id` and `world_id`, which come from the selected binding row, so
- * there is no code path that lists beliefs without one.
- */
 function TomSection({ character }: { character: CharacterDetail['character'] }) {
   const { t } = useTranslation('characters');
   const client = useNexusClient();
@@ -929,12 +913,6 @@ function TomSection({ character }: { character: CharacterDetail['character'] }) 
   );
 }
 
-/**
- * contract's, not a UI choice: list/get/patch/delete are character-scoped,
- * while creation exists only on the admitted-principal route and carries
- * `owner_kind` + `character_id` in the body. Every `expected_revision` comes
- * from the revision the list returned for that row.
- */
 function KnowledgeSection({ character }: { character: CharacterDetail['character'] }) {
   const { t } = useTranslation('characters');
   const client = useNexusClient();
@@ -957,7 +935,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
     mutationFn: (request: UpdateKnowledgeEntryRequest) =>
       client.patchCharacterKnowledge(characterId, editingId!, request),
     onSuccess: () => {
-      // refetches instead of replaying pre-edit values.
       void qc.invalidateQueries({
         queryKey: queryKeys.characters.knowledge.detail(characterId, editingId ?? ''),
       });
@@ -1005,7 +982,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
       {
         owner_kind: 'character',
         character_id: characterId,
-        // created from their own surfaces.
         block_type: 'character',
         canonical_name,
         ...(summary ? { summary } : {}),
@@ -1038,7 +1014,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
       expected_revision: data.item.revision,
       canonical_name,
       summary: summary === '' ? null : summary,
-      // governance pair, and only an explicit "shared" clears it.
       ...(audienceValue ? { audience: audienceFor(audienceValue) } : {}),
     });
   };
@@ -1110,7 +1085,6 @@ function KnowledgeSection({ character }: { character: CharacterDetail['character
           ) : !detail.data ? (
             <LoadingState label={t('knowledge.editLoading')} />
           ) : (
-            // successful patch must remount the form to drop stale text.
             <form
               key={`${detail.data.item.entry_id}:${detail.data.item.revision}`}
               onSubmit={submitEdit}

@@ -8,18 +8,7 @@ export type CanvasSurfaceKind =
   | 'outline'
   | 'world-kb-entities'
   | 'world-kb-relationships'
-  // a World's `WorldKbGraphResponse` onto a left-to-right when-axis. Reuses
-  // the V1.73/V1.74 World KB DTOs verbatim (wire_contracts_changed: false);
-  // see `timeline-canvas/` + `iterations/v1.122/specs/timeline-canvas-architecture.md`.
   | 'timeline'
-  // scope expansion: the Work Timeline adapter declares
-  // `surfaceKind: 'work-timeline'` and the enum must accept it for the
-  // adapter to satisfy `CanvasSurfaceAdapter`). Task 5 owns the full peer
-  // integration (route `/works/:workId/timeline` + canvas-nav resolver +
-  // sidebar entry); this enum value is the minimum additive addition so
-  // Tasks 2–4 ship adapter + projection + layer switcher without breaking
-  // type-safety. See `work-timeline-canvas/` +
-  // `iterations/v1.123/specs/three-layer-architecture.md` §7.4.
   | 'work-timeline';
 
 export interface CanvasSurfaceLayoutOptions {
@@ -27,10 +16,6 @@ export interface CanvasSurfaceLayoutOptions {
   rankSep?: number;
   nodeSep?: number;
   /**
-   * author positions, or a deterministic layout it wants preserved) and
-   * `useAutoLayout` must NOT override them on first open. The author can still
-   * trigger an explicit `relayout()` to force dagre.
-   *
    * When false/undefined (default), `useAutoLayout` runs dagre on first open —
    * the historical behavior for Strategy and World KB.
    *

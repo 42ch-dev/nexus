@@ -32,14 +32,7 @@ export interface ActiveSession {
 export interface StrategySurfaceGraph {
   revision: number;
   activeSession: ActiveSession | null | undefined;
-  /**
-   * part of the graph payload so a new trajectory re-projects the nodes.
-   */
   trajectory: SimulationTrajectory | null;
-  /**
-   * returned, or the candidate the author is composing. Projected by
-   * `buildStrategyGraphFromIr` — there is no YAML fallback.
-   */
   document: WorkflowDocument;
   /** Pattern registry listing; supplies declared slots for slot nodes. */
   patterns?: PatternSummary[];
@@ -50,8 +43,6 @@ export interface StrategySurfaceGraph {
 }
 
 /**
- * inspectors / alt-view / conflict-modal without closing over stale values.
- *
  * All fields are read at render time from the ref; the adapter object itself is
  * stable and never recreated.
  */
@@ -63,13 +54,7 @@ export interface StrategyCanvasAdapterContext {
   promptTemplateRef: string | undefined;
   selectedNode: Node<StrategyNodeData> | null;
   parsed: ParsedPreset | undefined;
-  /**
-   * projecting; the orchestrator reads it for the ValidationPanel (V1.115 T2).
-   */
   danglingTargets: string[];
-  /**
-   * the slot inspector and expand toggle never render there.
-   */
   compose?: {
     isComposing: boolean;
     onToggleSlotExpanded: (slotNodeId: string) => void;
@@ -84,9 +69,6 @@ export interface StrategyCanvasAdapterContext {
 export type StrategyCanvasAdapter = CanvasSurfaceAdapter<StrategySurfaceGraph, StrategyNodeData, StrategyEdgeData>;
 
 /**
- * nodes/edges and renders surface-specific chrome (inspectors, alt-view, a11y
- * summary).
- *
  * `projectGraph` performs the projection via `buildStrategyGraphFromIr` inside
  * `useCanvasSurface`'s `useMemo`. The Canvas renders the applied IR document, so
  * there is no YAML projection to choose between (P6 condition 2).
@@ -105,20 +87,14 @@ export function createStrategyCanvasAdapter(
     layoutOptions: { direction: 'TB' },
 
     projectGraph(graph) {
-      // back to (P6 condition 2).
       const projected = buildStrategyGraphFromIr(graph.document, {
         expandedSlots: graph.expandedSlots,
         patterns: graph.patterns,
         containment: graph.containment,
       });
 
-      // can feed the ValidationPanel without extending the projectGraph return
-      // shape (adapter interface stability constraint).
       ctxRef.current.danglingTargets = projected.danglingTargets;
 
-      // status so strategy nodes can render the active indicator (previously
-      // owned by useStrategyCanvas's node-state sync effect; moved here so the
-      // adapter owns the full projection pipeline).
       let nodes = projected.nodes;
       const session = graph.activeSession;
       if (session) {
@@ -137,8 +113,6 @@ export function createStrategyCanvasAdapter(
         });
       }
 
-      // walk visited — a wired pattern slot is named, and the overlay says so
-      // on the slot itself.
       if (graph.trajectory) {
         const visited = new Set(graph.trajectory.nodes_visited);
         nodes = nodes.map((node) =>
@@ -165,8 +139,6 @@ export function createStrategyCanvasAdapter(
 
     renderInspector(_node) {
       const ctx = ctxRef.current;
-      // (bind / replace / unnest). Slot nodes have no PresetState, so this
-      // branch precedes the YAML-state inspector entirely.
       const selectedNode = ctx.selectedNode;
       if (ctx.compose && selectedNode?.type === 'strategy-pattern-slot') {
         return (

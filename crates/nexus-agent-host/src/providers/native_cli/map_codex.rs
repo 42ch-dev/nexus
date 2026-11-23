@@ -41,7 +41,6 @@ pub fn map_codex(
     for message in messages {
         match message {
             ServerMessage::Request { .. } => {
-                // surfaced to the author.
                 tracing::debug!(
                     target: "nexus_agent_host::providers::native_cli::map_codex",
                     "skipping codex server request (auto-responded by execute loop)",
@@ -83,7 +82,6 @@ pub fn map_codex(
                         break;
                     }
                 }
-                // or the stream-abort backstop.
                 Notification::Error(err) => events.push(HostEvent::Status(StatusEvent {
                     session_id: Some(session_id.clone()),
                     level: StatusLevel::Error,
@@ -115,10 +113,6 @@ pub fn map_codex(
                         message: notice.summary.clone(),
                     }));
                 }
-                // FileChangeOutputDelta/PlanDelta/TurnPlanUpdated/token-usage/
-                // thread-lifecycle/realtime/every other modeled method — no
-                // host event this iteration (structured_tool_calls stays
-                // false). PD-3 row 1: unknown methods are crate passthrough.
                 _ => tracing::debug!(
                     target: "nexus_agent_host::providers::native_cli::map_codex",
                     method = notification.method(),
@@ -193,15 +187,12 @@ pub fn classify_stream_error(
         CodexError::Deserialization(_) => "decode_error",
         CodexError::ConnectionClosed | CodexError::ServerClosed => "stream_closed",
         CodexError::Io(_) | CodexError::BinaryNotFound { .. } => "io_error",
-        // decode failures surface as Deserialization); everything else is a
-        // provider-side failure (server exit, JSON-RPC error response, …).
         _ => "provider_error",
     };
     Some(OperationFailedEvent {
         session_id: session_id.clone(),
         op_id: op_id.clone(),
         error_category: category.to_string(),
-        // Deserialization Display embeds is not echoed unboundedly (N-2).
         error_message: crate::providers::native_cli::truncate_error_message(&error.to_string()),
     })
 }

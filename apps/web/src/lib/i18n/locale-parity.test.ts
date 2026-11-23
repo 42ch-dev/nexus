@@ -109,13 +109,6 @@ function flattenValues(obj: JsonRecord, values: string[] = []): string[] {
   return values;
 }
 
-/**
- * control, bounce toast, layout labels, identity page, 操作台 Hub cards
- * (v1220 T1/T2).
- * Membership is namespace-exact — a shell-owned key must exist in `shell`
- * (and its zh-CN twin), never in `setup` (plan QC F-5: no cross-namespace
- * escape hatch for the entrance pin).
- */
 const SHELL_ENTRANCE_KEYS: readonly string[] = [
   'entrance.switchLabel',
   'entrance.bounceToast',
@@ -189,8 +182,6 @@ describe('locale key parity (en ↔ zh-CN)', () => {
   });
 
   it('ships no firing-cadence / next-fire promise or CLI-removal claim in the schedule copy, en and zh-CN (AR-30/PL-18)', () => {
-    // fabricated next run; the copy is config-only. PL-18: the in-product
-    // surface does not claim the CLI was removed (CLI stays a power tool).
     const enValues = Object.values(flattenValues(enSchedule)).join(' ');
     const zhValues = Object.values(flattenValues(zhSchedule)).join(' ');
     for (const [locale, values] of [

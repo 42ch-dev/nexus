@@ -16,11 +16,6 @@ export interface ProviderSessionRecord {
   state: string;
   activeOpId: string | null;
   model?: string;
-  /**
-   * session. Its presence is what routes a command to the Actor Host authority
-   * instead of the provider-only lane, so it is never inferred from a payload:
-   * it is copied from the native create/query row the authority returned.
-   */
   actorRef?: ActorRef;
   viewpoint?: SessionViewpoint;
 }
@@ -29,39 +24,13 @@ export interface ProviderOperationRecord {
   operationId: string;
   sessionId: string;
   providerId: string;
-  /**
-   * `pending` | `completed` | `failed` | `unknown`), or the local `started`
-   * value between admission and the first native observation, or the terminal
-   * projection of the operation's own reason (`finished` | `incomplete` |
-   * `failed` | `stopped` | `cancelled`). Never a constant.
-   */
   status: string;
   terminalEvent: ProviderHostEvent | null;
-  /**
-   * transcript. Every other terminal keeps its event and reason but retains no
-   * payload here, so a non-success can never read as a captured successful run.
-   */
   terminalTranscript: string | null;
-  /**
-   * truth and its live/terminal bounds are the core authority's (128 active /
-   * 1024 terminal), not this transport mirror's, so it never charges the
-   * provider-only live-operation cap.
-   */
   actorBacked?: boolean;
 }
 
 /**
- * terminal mapping derived from `ProviderHostEvent` (`finished`/`incomplete`/
- * `failed`/`stopped`/`cancelled`), the native wire statuses transcribed from
- * `operation_status_wire` in `crates/nexus-agent-host/src/providers/port.rs`
- * (`completed` for Ready/Stopped, `failed` for the error terminals), the cancel
- * acknowledgment (`cancelled`), and the native `interrupted` terminal produced
- * when a `SessionStopped` settles an active JS-provider operation. `incomplete`
- * is the provider-named unfinished run (`max_tokens`/`max_turn_requests`) — the
- * core authority's own row for the same terminal — and it is terminal here for
- * exactly the same reason as the rest: the reason arrived, so no later event
- * may overwrite it.
- *
  * The core authority's own run statuses are deliberately NOT part of this set:
  * an Actor operation's cancellability and outcome are the authority's, read on
  * demand, and marking a settled Actor run terminal here would make the mirror
@@ -92,11 +61,6 @@ export class ProviderRegistry {
   private attachedStreams = new Map<string, number>();
   /** Operations whose disposal was requested while a stream was attached. */
   private retirePending = new Set<string>();
-  /**
-   * not yet registered, keyed by the dispatch's own provider request id. The
-   * admission cap counts them, so parallel dispatches cannot all pass the same
-   * free-slot check while none of them has a row yet.
-   */
   private pendingProviderDispatches = new Set<string>();
 
   sessionRecord(sessionId: string): ProviderSessionRecord | undefined {
@@ -121,8 +85,6 @@ export class ProviderRegistry {
   }
 
   /**
-   * start pulling.
-   *
    * A reader is already inside its delivery loop, so the record and the hub it
    * reads must outlive that loop. Disposal under it loses the outcome twice: the
    * record is gone, so `ingestEvents` drops the batch it had in flight, and the
@@ -134,10 +96,6 @@ export class ProviderRegistry {
     this.attachedStreams.set(operationId, (this.attachedStreams.get(operationId) ?? 0) + 1);
   }
 
-  /**
-   * deferred while it read, so a retirement requested mid-stream still lands —
-   * after the stream, never inside it.
-   */
   detachOperationStream(operationId: string): void {
     const count = this.attachedStreams.get(operationId);
     if (count === undefined) return;
@@ -149,12 +107,6 @@ export class ProviderRegistry {
     if (this.retirePending.delete(operationId)) this.disposeNow(operationId);
   }
 
-  /**
-   * reads this before dispatching a provider effect, so a stalled/hung
-   * provider population cannot grow without bound. Actor-backed operations are
-   * excluded: the core authority owns their live bound, so this cap keeps
-   * meaning exactly what it meant before Actor sessions were served here.
-   */
   activeOperationCount(): number {
     let count = 0;
     for (const op of this.operations.values()) {
@@ -164,11 +116,6 @@ export class ProviderRegistry {
     return count;
   }
 
-  /**
-   * so do the dispatches admitted for rows not registered yet: the cap has to
-   * count both or parallel dispatches pass the same free slot. Synchronous, so a
-   * registration that reads it last cannot be overtaken by another admission.
-   */
   private hasLiveProviderOperationRoom(): boolean {
     return (
       this.activeOperationCount() + this.pendingProviderDispatches.size <
@@ -177,8 +124,6 @@ export class ProviderRegistry {
   }
 
   /**
-   * that dispatch's own provider request id.
-   *
    * The cap is read and charged synchronously, so two requests cannot both see
    * the same free slot: the second sees the first's reservation even though the
    * first has not registered a row yet. `false` means the dispatch must not be
@@ -190,21 +135,10 @@ export class ProviderRegistry {
     return true;
   }
 
-  /**
-   * failure, or a refusal after the reservation). Idempotent: a dispatch whose
-   * row was already registered releases nothing here.
-   */
   endProviderOperationDispatch(dispatchId: string): void {
     this.pendingProviderDispatches.delete(dispatchId);
   }
 
-  /**
-   * dispatch's reservation. The reservation is what guaranteed the room — a
-   * dispatch holds one slot from admission until here — so the row is inserted
-   * without a second capacity check, and the slot it takes is the slot it held.
-   * Returns whether the row was registered; a dispatch id with no reservation
-   * never registers anything.
-   */
   registerAdmittedProviderOperation(
     dispatchId: string,
     record: ProviderOperationRecord,
@@ -214,21 +148,11 @@ export class ProviderRegistry {
     return true;
   }
 
-  /**
-   * only — the authority owns the outcome and the observation — so it is aged out
-   * by the authority's own truth (see `retireActorOperation`).
-   */
   actorBackedOperations(): ProviderOperationRecord[] {
     return [...this.operations.values()].filter((op) => op.actorBacked === true);
   }
 
   /**
-   * its session association, and nothing else. The authority owns the run's
-   * status and outcome (read on demand through its own Character/generic
-   * observation), so the mirror must not transcribe a status into a
-   * cancellability claim here — nor leave a settled Actor run's session marked
-   * busy by a transport cache.
-   *
    * A mark is admission, not observation, so it never replaces a row it already
    * holds: every Actor stream re-marks its operation on (re)connect, and
    * rebuilding the row there rewound a settled record to `started` with no
@@ -250,9 +174,7 @@ export class ProviderRegistry {
   markActorOperation(operationId: string, sessionId: string, providerId: string): boolean {
     const existing = this.operations.get(operationId);
     if (existing) {
-      // never rewinds it, and its terminal FIFO position stands.
       if (existing.terminalEvent || isTerminalOperationStatus(existing.status)) return true;
-      // another association must not take it over.
       if (existing.sessionId !== sessionId || existing.providerId !== providerId) return true;
       existing.actorBacked = true;
       return true;
@@ -287,8 +209,6 @@ export class ProviderRegistry {
   }
 
   /**
-   * lane and both hydration paths go through.
-   *
    * An Actor-backed row is admitted by retention alone (`retainActorOperation`):
    * the authority has already accepted the run, so the mirror either retains the
    * bookkeeping inside the Actor arm's bound or retains nothing. A live
@@ -313,10 +233,6 @@ export class ProviderRegistry {
     return true;
   }
 
-  /**
-   * never refuses, so a row reaches the registry only after the arm that will
-   * charge it has room, or after a reservation guaranteed that room.
-   */
   private insertOperation(record: ProviderOperationRecord): void {
     this.operations.set(record.operationId, record);
     if (isTerminalOperationStatus(record.status)) {
@@ -378,12 +294,6 @@ export class ProviderRegistry {
   }
 
   /**
-   * event was accepted: a status settled terminal earlier (e.g. an accepted
-   * cancel, or a native-hydrated terminal) is authoritative, so a later
-   * provider event is refused rather than overwriting the outcome the
-   * durable journal already recorded. Callers must not publish a refused
-   * event as the stream's terminal.
-   *
    * The status is the terminal's own reason ({@link terminalEventStatus}),
    * and only a completed `end_turn` turn retains its payload as a successful
    * transcript: every other terminal keeps its event and reason for the
@@ -423,8 +333,6 @@ export class ProviderRegistry {
   }
 
   private disposeOperation(operationId: string): void {
-    // the reader would observe the closed hub mid-pull and lose the outcome it
-    // has in flight. Defer to that stream's detach instead.
     if ((this.attachedStreams.get(operationId) ?? 0) > 0) {
       this.retirePending.add(operationId);
       return;
@@ -465,8 +373,6 @@ export class ProviderRegistry {
   }
 
   /**
-   * arm holds at most `limit`.
-   *
    * The stream-admission path (`markActorOperation`, one per Actor SSE connect)
    * otherwise accumulated a record and a hub per distinct connected operation,
    * and those hubs hold control slots (the retained gap or terminal frame)
@@ -480,7 +386,6 @@ export class ProviderRegistry {
     if (this.actorBackedCount() <= limit) return;
     for (const [operationId, op] of this.operations) {
       if (!op.actorBacked) continue;
-      // to a live reader instead of taking the hub out from under it.
       this.disposeOperation(operationId);
       if (this.actorBackedCount() <= limit) return;
     }
@@ -488,12 +393,6 @@ export class ProviderRegistry {
 }
 
 /**
- * reports. Derived from the event's own reason, never defaulted to success:
- * `OpFinished` carries the provider's whole stop-reason set, so a blanket
- * `finished` recorded an exhausted run (`max_tokens`/`max_turn_requests` — the
- * core authority's own `incomplete` row) and a cancellation as successes on this
- * lane, and stored their payloads as successful transcripts.
- *
  * `refusal` is the failure row here (never `incomplete`): the ACP adapter
  * reports a post-start refusal as `OpFailed`, and only the core's own
  * `OpFinished(Refusal)` arm maps that reason to `incomplete`. A terminal the

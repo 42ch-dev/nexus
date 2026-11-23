@@ -496,21 +496,14 @@ impl WorkflowSubscription {
                 };
                 match live.poll() {
                     PolledFrame::Frame(frame) => frame,
-                    // published, or the owner released the ring.
                     PolledFrame::Closed => {
                         closed = true;
                         break;
                     }
                     PolledFrame::Empty => {
-                        // returned NOW, so the transport flushes each frame
-                        // as it arrives. Only an otherwise empty pull waits
-                        // for the next one.
                         if !frames.is_empty() {
                             break;
                         }
-                        // release landing in between must not be lost, and
-                        // `notify_waiters` stores no permit for a later
-                        // waiter.
                         let notified = self.wake.notified();
                         tokio::pin!(notified);
                         notified.as_mut().enable();
@@ -535,8 +528,6 @@ impl WorkflowSubscription {
             };
             let wire_bytes = encoded_sse_frame_bytes(&frame);
             if !frames.is_empty() && bytes.saturating_add(wire_bytes) > MAX_PULL_BYTES {
-                // lose a frame, and the caller's cursor then resumes from the
-                // last frame actually delivered.
                 state.pending = Some(frame);
                 break;
             }
@@ -599,7 +590,6 @@ impl WorkflowSubscriptionRegistry {
         }
         let entry = Arc::new(subscription);
         entries.insert(entry.id.clone(), Arc::clone(&entry));
-        // there and is released before the published entry is handed back.
         drop(entries);
         Some(entry)
     }
@@ -690,10 +680,6 @@ impl RunEventRegistry {
         }
     }
 
-    // one critical section: splitting them (as the lint's early `drop`
-    // suggests) would let two concurrent registrations both observe capacity
-    // and both insert, exceeding the cap. The guard is therefore held to the
-    // end of the atomic section on purpose.
     #[allow(clippy::significant_drop_tightening)]
     pub fn try_register_live(&self, run_id: &str) -> Option<RunEventSink> {
         let mut state = self
@@ -921,10 +907,6 @@ impl RunEventRegistry {
             return Err(PageError::UnknownRun(run_id.to_string()));
         };
         let first_retained = ring.records.front().map_or(1, |r| r.sequence);
-        // retention-trimmed: the reader must resynchronize rather than
-        // silently receive a non-contiguous page. The comparison is written
-        // WITHOUT `seq + 1`, which would wrap at `u64::MAX` (a schema-valid
-        // cursor) and either panic in debug or mis-report in release.
         let resync_required =
             after_sequence.is_some_and(|seq| seq.saturating_add(1) < first_retained);
         let mut raw = collect_from(ring, run_id, after_sequence);
@@ -1476,7 +1458,6 @@ mod tests {
         let sink = registry.try_register_live("run-1").expect("register");
         registry.publish_run_state("run-1", &mk_record("run-1", SessionStatus::Completed, 1));
         registry.mark_terminal("run-1");
-        // `HostEvent`; the ring's rejection is payload-independent.
         sink.publish_host_event("step", "attempt", &serde_json::json!({ "late": true }));
         let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
@@ -1690,7 +1671,6 @@ mod tests {
         let mut sub = registry
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
-        // cap and the subscriber is evicted as lagging.
         for i in 0..=MAX_PENDING_FRAMES_PER_SUB {
             registry.publish_run_state(
                 "run-1",
@@ -1797,12 +1777,6 @@ mod tests {
     async fn pull_holds_back_the_frame_that_exceeds_the_batch_ceiling() {
         const TARGET_FRAME_BYTES: usize = MAX_FRAME_BYTES - 32;
 
-        // to the encoded frame, so the measured overshoot is the exact payload
-        // adjustment. The probe publishes one frame that is safely UNDER the
-        // frame cap (an over-cap frame is replaced by a gap record, which would
-        // measure the wrong thing), and the real ring reproduces its encoding
-        // exactly (same run-id length, same single-digit sequences, same UUID
-        // epoch).
         let probe = RunEventRegistry::new();
         let _probe_sink = probe.try_register_live("probe").expect("probe ring");
         let trial = MAX_FRAME_BYTES - 512;
@@ -1872,7 +1846,6 @@ mod tests {
             "the held frame is exactly what would have exceeded the ceiling"
         );
 
-        // delivered, and the stream then reports the close.
         registry.mark_terminal("run-1");
         let PullOutcome::Batch { frames, closed } = subscription.pull().await else {
             panic!("the held frame's pull is the only outstanding one");
@@ -1936,7 +1909,6 @@ mod tests {
         assert!(tokens.take(minted.id()).is_none());
         assert_eq!(tokens.len(), 0);
 
-        // subscribe still in flight cannot republish one.
         let second = rings
             .subscribe_live("run-1", None, "/inspect".into())
             .expect("subscribe");
@@ -1958,9 +1930,6 @@ mod tests {
             "close also ends the entry a blocked pull is holding"
         );
 
-        // handed (with the ring permit it attaches) is dropped by the refusal.
-        // The tokens this test still holds keep their own permits alive, so the
-        // count is measured around the race rather than from zero.
         let held = rings.live_subscriber_count("run-1");
         let racing = rings
             .subscribe_live("run-1", None, "/inspect".into())

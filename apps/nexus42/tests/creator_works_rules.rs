@@ -129,7 +129,6 @@ async fn fresh_env() -> RulesEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // carrying the rule suggestion `findings accept` appends.
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("workspace pool")
@@ -241,7 +240,6 @@ async fn rules_writes_land_under_the_registered_creative_root() {
         describe(&out)
     );
     let body: serde_json::Value = serde_json::from_slice(&out.stdout).expect("reset prints json");
-    // resolved form (on macOS `/var` → `/private/var`).
     let reported = std::fs::canonicalize(&agents_md).expect("canonical agents.md path");
     assert_eq!(
         body["agents_md_path"],
@@ -262,8 +260,6 @@ async fn rules_writes_land_under_the_registered_creative_root() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_creative_root_names_the_root_not_the_creator() {
     let env = fresh_env().await;
-    // creator/workspace selection is intact, only the creative root is
-    // unresolvable.
     register_creative_root(
         &env.op_dir,
         &env.creator_id,

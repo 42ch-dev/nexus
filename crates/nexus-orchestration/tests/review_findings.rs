@@ -116,7 +116,6 @@ async fn ac1_auto_chain_review_terminal_persists_finding() {
             .with_binding_provider("test-provider".to_string()),
     );
 
-    // most recently finalized chapter (chapter 2 done, now reviewing).
     let work = novel_work("wrk_ac1", 2, 5);
     works::create_work(&pool, &work).await.unwrap();
 
@@ -225,7 +224,6 @@ async fn ac2_on_demand_review_run_persists_finding_same_path() {
 
     assert_eq!(count_findings(&pool, "wrk_ac2").await, 0);
 
-    // preset_id match, independent of driver status.
     sup.on_schedule_terminal("sch_ac2_review_ondemand", ScheduleStatus::Completed)
         .await
         .unwrap();
@@ -284,7 +282,6 @@ async fn negative_non_review_preset_does_not_persist_finding() {
         .await
         .unwrap();
 
-    // schedules but none of them write findings).
     assert_eq!(
         count_findings(&pool, "wrk_neg").await,
         0,
@@ -299,7 +296,6 @@ async fn ac3_rule_suggestion_field_exists_and_round_trips() {
     let work = novel_work("wrk_ac3", 1, 3);
     works::create_work(&pool, &work).await.unwrap();
 
-    // is persisted (mirrors what the supervisor hook does internally).
     let verdict = findings::ReviewVerdictFinding {
         work_id: "wrk_ac3".to_string(),
         chapter: Some(1),
@@ -365,9 +361,6 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
         "first terminal must create exactly 1 finding; got {n1}"
     );
 
-    // supervisor retry or double-fire). The schedule row was already flipped
-    // to 'completed' by the first call, so we reset it to 'running' to make
-    // the second on_schedule_terminal accept the transition.
     sqlx::query("UPDATE creator_schedules SET status = 'running' WHERE schedule_id = ?")
         .bind("sch_ac5_review")
         .execute(&pool)

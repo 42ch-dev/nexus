@@ -125,9 +125,6 @@ impl InvocationState {
         let mut key_blocks = HashMap::new();
         for kb in &input.key_blocks {
             if let Ok(json) = serde_json::to_value(kb) {
-                // the canonical fixture (and the real host's basic_combat
-                // fixture) use `key_block_id`, while spoke-produced blocks
-                // `entry_id_of` (AR-3).
                 let id = kb
                     .get("entry_id")
                     .and_then(serde_json::Value::as_str)
@@ -157,9 +154,6 @@ fn new_engine() -> Result<Engine, MiniHostError> {
     config.wasm_gc(false);
     config.wasm_function_references(false);
     config.wasm_exceptions(false);
-    // host disables it (`nexus-wasm-host/src/engine.rs`), so the mini-host must
-    // reject the same modules — otherwise ABI probes would admit modules the
-    // runtime host refuses.
     config.wasm_wide_arithmetic(false);
     Engine::new(&config).map_err(|e| MiniHostError::Instantiation(e.to_string()))
 }
@@ -193,7 +187,6 @@ pub fn run(
         init.call(&mut store, ()).map_err(map_call_error)?;
     }
 
-    // linear memory through the module's allocator.
     let alloc = required_export::<u32, u32>(&mut store, &instance, "alloc")?;
     let in_len = u32::try_from(input_bytes.len()).unwrap_or(u32::MAX);
     let in_ptr = alloc.call(&mut store, in_len).map_err(map_call_error)?;
@@ -534,8 +527,6 @@ mod tests {
 
     #[test]
     fn unwhitelisted_nexus_import_fails_instantiation() {
-        // importing a function the manifest did not whitelist fails
-        // instantiation even when it is not one of the real host functions.
         let wat = r#"(module
   (import "nexus" "not_a_real_function" (func $f (param i32)))
   (memory (export "memory") 1)
@@ -644,7 +635,6 @@ mod tests {
 
     #[test]
     fn kb_read_indexes_key_block_id_fallback() {
-        // `kb_read("kb_atk")` against it (fixture parity with the real host).
         let fixture: ComputeInput =
             serde_json::from_str(include_str!("../fixtures/combat-input.json"))
                 .expect("canonical fixture parses as ComputeInput");
@@ -705,8 +695,6 @@ mod tests {
 
     #[test]
     fn manifest_whitelist_gates_host_imports() {
-        // the import is not linked → instantiation fails (whitelist
-        // enforcement, like the real host).
         let wat = r#"(module
   (import "nexus" "kb_read" (func $kb_read (param i32 i32 i32 i32) (result i64)))
   (memory (export "memory") 1)
@@ -719,9 +707,6 @@ mod tests {
 
     #[test]
     fn rejects_newly_default_enabled_proposals() {
-        // proposals by default; the mini-host pins them OFF to match the real
-        // host's module-admission set. A module requiring the exceptions
-        // proposal (`try_table`) must fail validation, not instantiate.
         let wat = r#"(module
   (tag $e)
   (memory (export "memory") 1)

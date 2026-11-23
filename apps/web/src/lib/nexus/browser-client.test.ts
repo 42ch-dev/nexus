@@ -1,7 +1,4 @@
 /**
- * screens rely on: cursor pagination shape, the W-1 error-envelope unwrapping
- * on a real fetch, and transport-unreachable handling.
- *
  * These complement the pure unit tests in errors.test.ts (fromBody parsing)
  * by exercising the actual fetch → fromBody → thrown NexusClientError chain.
  */
@@ -545,10 +542,6 @@ describe('BrowserClient compute runs (V1.147 P1)', () => {
   });
 
   it('rejects with the canonical error envelope when the daemon fails a run', async () => {
-    // status=failed — on compute failure the daemon persists a Failed row and
-    // returns the shared ErrorResponse envelope (422 sandbox / 500 internal).
-    // The Failed row is surfaced through the runs list refetch, not as data
-    // from this call.
     useHandlers(
       http.post('/v1/daemon/compute/run', () =>
         HttpResponse.json(
@@ -613,7 +606,6 @@ describe('BrowserClient compute runs (V1.147 P1)', () => {
 
     const client = new BrowserClient();
     const res = await client.acceptRun('run_1');
-    // `{}` (accept everything) rather than an empty POST.
     expect(receivedContentType).toContain('application/json');
     expect(receivedBody).toEqual({});
     expect(res.status).toBe('applied');
@@ -722,7 +714,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
     expect(err).toBeInstanceOf(NexusClientError);
     expect(err.code).toBe('transport_unreachable');
     expect(err.kind).toBe('daemon_down');
-    // existing toast tests keep passing during the P1 sweep.
     expect(err.message).toContain('nexus42 daemon start');
   });
 
@@ -758,7 +749,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('classifies `tls` when the cause message carries a TLS signal', async () => {
-    // matches common signal substrings best-effort.
     const client = clientThrowing(
       new TypeError('ERR_CERT_AUTHORITY_INVALID'),
       'https://remote.example:8420',
@@ -777,9 +767,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('classifies `http_fallback` when the daemon returns 200 + text/html (release SPA fallback)', async () => {
-    // which serves text/html with HTTP 200. The classifier must intercept this
-    // BEFORE `response.json()` would throw a raw SyntaxError (legacy V1.128
-    // behavior).
     const response = new Response('<!doctype html><html>…</html>', {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -801,9 +788,6 @@ describe('BrowserClient transport classification (V1.129 P0)', () => {
   });
 
   it('still routes HTTP errors through fromBody (kind stays undefined for HTTP errors)', async () => {
-    // status and a parseable body. `kind` must remain undefined so HTTP-error
-    // UX (driven by `code`/`details`) does not get mis-routed into the dialog's
-    // transport-recovery CTA path.
     useHandlers(
       http.get('/v1/daemon/works', () =>
         HttpResponse.json(
@@ -920,7 +904,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
     const prefix =
       'id: e1:1\nevent: host_event\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"step_id":"s1","attempt_id":"a1","host_event":{"ThoughtDelta":{"session_id":"r1","op_id":"op-1","text":"';
     const encoded = encoder.encode(`${prefix}思考の断片"}}}\n\n`);
-    // `TextDecoder` would decode it as U+FFFD and corrupt the frame.
     const split = encoder.encode(prefix).length + 1;
 
     const frames = await collect(
@@ -1019,7 +1002,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
     const pulled = new Promise<void>((resolve) => {
       releasePull = resolve;
     });
-    // iterator is provably blocked on the open stream when the abort lands.
     const body = new ReadableStream<Uint8Array>(
       {
         start(streamController) {
@@ -1053,9 +1035,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
   });
 
   it('(g) recognizes a mixed `\\n` + `\\r\\n` blank boundary split across chunks', async () => {
-    // straddle a network chunk. Without the `\n\r\n` case the two frames merge
-    // into one block (or the first is delayed until EOF), breaking the control
-    // frame order the view relies on.
     const first =
       'id: e1:1\nevent: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"state_revision":1,"status":"running"}\n\r';
     const second =
@@ -1073,8 +1052,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
   });
 
   it('(h) stops draining buffered frames once the consumer aborts mid-chunk', async () => {
-    // ONE chunk, so the resumed generator must re-check the signal between
-    // yields instead of draining the rest of the buffer.
     const controller = new AbortController();
     const frames: WorkflowObservationFrame[] = [];
     for await (const frame of clientReturning(
@@ -1093,9 +1070,6 @@ describe('BrowserClient workflow observation stream (v1.201 P1)', () => {
   });
 
   it('(i) rejects a data frame with no usable `id:` cursor instead of inventing one', async () => {
-    // with an absent or empty `id:` is a wire-protocol violation, so it
-    // surfaces as a typed refusal rather than an event replayed/persisted
-    // under a synthetic empty cursor.
     const frames = [
       'event: run_state\ndata: {"run_id":"r1","epoch":"e1","sequence":1,"state_revision":1,"status":"running"}\n\n',
       'id:\nevent: host_event\ndata: {"run_id":"r1","epoch":"e1","sequence":2,"step_id":"s1","attempt_id":"a1","host_event":{"OpStarted":{"session_id":"r1","op_id":"op-1"}}}\n\n',

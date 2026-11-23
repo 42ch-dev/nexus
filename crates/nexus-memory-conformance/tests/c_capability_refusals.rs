@@ -191,9 +191,6 @@ fn assert_terminal_refusal(body: &Value, what: &str) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// C-100 (N3 base): terminal, uncertain and no-effect retryable mechanisms.
 async fn supported_error_envelopes_and_retry_classes(
     matrix: &Matrix,
@@ -985,8 +982,6 @@ async fn c_104_receipt_read_rechecks_revoked_authorization_remote() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_local() {
-    // so the continuity row proves the refusal on the deliberately-unadvertised
-    // shape (staging spec §4 N4-R).
     let matrix = Matrix::local_unadvertised().await;
     run_matrix_scenario(matrix, |m, r, t| {
         Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
@@ -996,8 +991,6 @@ async fn c_073_reflection_reads_refuse_without_capability_local() {
 
 #[tokio::test]
 async fn c_073_reflection_reads_refuse_without_capability_remote() {
-    // same operations, so the reads' `capability_missing` is the real
-    // dispatch denial over Connect negotiation.
     let matrix = Matrix::remote_unadvertised().await;
     run_matrix_scenario(matrix, |m, r, t| {
         Box::pin(async move { reflection_reads_refuse_without_capability(m, r, t).await })
@@ -1089,8 +1082,6 @@ fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
     });
     support::assert_no_receipt_disclosure(&permitted, &authorized, &current);
 
-    // op/result diagnostic, are not protected receipt tuples: recognition uses
-    // the authorized receipt's actual values, not generic field names.
     let top_level_current_op = json!({
         "op": "memory.receipts.get",
         "error": {"code": "NOT_FOUND", "details": {"retry_class": "terminal"}},
@@ -1102,8 +1093,6 @@ fn receipt_privacy_control_uses_actual_receipt_and_request_context() {
     });
     support::assert_no_receipt_disclosure(&unrelated_diagnostic, &authorized, &current);
 
-    // with the actual committed status is a receipt disclosure even though the
-    // caller already supplied the id.
     let bare_requested_id = json!({
         "error": {"details": {"receipt_id": "rcpt_authorized"}},
     });

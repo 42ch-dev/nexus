@@ -4,8 +4,6 @@ import { render, screen } from '@testing-library/react';
 import { MaturationIndicators } from './maturation-indicators';
 
 /**
- * components.reading-maturation-badge).
- *
  * Pins: KB-density and open-findings count badges consume the projected
  * `reading-maturation-*` token classes — no raw color-mix arbitrary values.
  */

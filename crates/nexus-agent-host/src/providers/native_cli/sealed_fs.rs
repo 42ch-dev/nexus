@@ -99,11 +99,6 @@ pub fn check_dir_boundary(fd: &OwnedFd, require_owner: bool) -> Result<(), Strin
 pub fn inode_of(fd: &OwnedFd) -> Result<(u64, u64), String> {
     let stat = rustix::fs::fstat(fd)
         .map_err(|error| format!("could not stat a pinned descriptor ({})", errno_name(error)))?;
-    // high-bit device id can be negative as a signed integer while being a
-    // perfectly valid identity. Widening through `as` preserves the bit
-    // pattern and therefore the identity; rejecting "negative" values would
-    // invent a failure for legitimate IDs, and `try_from` would report them as
-    // errors. The comparison only ever uses these for equality.
     #[allow(clippy::cast_sign_loss)]
     let (dev, ino) = (stat.st_dev as u64, stat.st_ino as u64);
     Ok((dev, ino))
@@ -130,7 +125,6 @@ fn walk_absolute(path: &Path, create_missing: bool) -> Result<OwnedFd, String> {
         .map_err(|error| format!("could not open the filesystem root ({})", errno_name(error)))?;
     for component in path.components() {
         let name = match component {
-            // to the pinned descriptor. Neither contributes a component.
             std::path::Component::RootDir | std::path::Component::CurDir => continue,
             std::path::Component::Normal(name) => name,
             std::path::Component::ParentDir => std::ffi::OsStr::new(".."),
@@ -149,7 +143,6 @@ fn walk_absolute(path: &Path, create_missing: bool) -> Result<OwnedFd, String> {
                         )
                     },
                 )?;
-                // entry even if the create raced one.
                 let next = open_dir_at(&fd, name).map_err(|error| {
                     format!(
                         "a sealed-home ancestor is not a plain directory ({})",
@@ -191,7 +184,6 @@ pub fn ensure_dir_at(dirfd: &OwnedFd, name: &str, mode: RawMode) -> Result<Owned
                     errno_name(error)
                 )
             })?;
-            // even if the create raced one.
             let fd = open_dir_at(dirfd, name).map_err(|error| {
                 format!(
                     "a freshly created sealed-home directory was swapped ({})",
@@ -313,7 +305,6 @@ pub fn remove_tree_at(dirfd: &OwnedFd, name: &str) -> Result<(), String> {
                 )
             })
         }
-        // anchor entry directly — never follow it to the target.
         Err(rustix::io::Errno::LOOP | rustix::io::Errno::NOTDIR) => {
             rustix::fs::unlinkat(dirfd, name, AtFlags::empty()).map_err(|error| {
                 format!(
@@ -359,7 +350,6 @@ fn empty_dir_at(fd: &OwnedFd) -> Result<(), String> {
                     )
                 })?;
             }
-            // never followed (ELOOP/ENOTDIR from the no-follow open).
             Err(rustix::io::Errno::LOOP | rustix::io::Errno::NOTDIR) => {
                 rustix::fs::unlinkat(fd, name, AtFlags::empty()).map_err(|error| {
                     format!(
@@ -386,7 +376,6 @@ mod tests {
     #[test]
     fn ancestor_symlink_is_rejected_without_writes() {
         let temp_dir = tempfile::tempdir().expect("temp dir");
-        // the anchor once (as `provision` does) before the no-follow pin.
         let canonical_temp = std::fs::canonicalize(temp_dir.path()).expect("canonical temp");
         let elsewhere = temp_dir.path().join("elsewhere");
         std::fs::create_dir_all(&elsewhere).expect("elsewhere");

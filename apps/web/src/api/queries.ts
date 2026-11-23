@@ -321,14 +321,6 @@ export function useUpdateWorldRule(worldId: string) {
   });
 }
 
-// considered for the V1.77 remediation surface but is intentionally absent
-// here. The FindingDetailPanel reads the selected row from the work-scoped
-// list cache, which is sufficient while the UI is a list+inspector hybrid. A
-// dedicated detail-endpoint hook can be re-introduced when (and only when) a
-// standalone finding-detail route or inspector needs it as the source of truth
-// (qc1 S-001).
-
-
 export interface PresetGroups {
   embedded: PresetSummary[];
   system: PresetSummary[];
@@ -498,8 +490,6 @@ export function useCreateWorld() {
     mutationFn: (request: CreateWorldRequest) => client.createWorld(request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
-      // counts per World). A newly created World must appear in overview
-      // caches, not only the narrative worlds list.
       void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotCreateWorld'),
@@ -664,13 +654,6 @@ export function useDeleteWorld() {
     mutationFn: (worldId: string) => client.deleteWorld(worldId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.worlds() });
-      // — `TimelineOverviewResponse.worlds` lists each World with its era/event
-      // counts, so a deleted World must be evicted from the overview cache or
-      // it keeps rendering until the next manual refetch. Invalidating
-      // `timeline.all` covers every cached overview page: `overview()` is the
-      // only timeline sub-key today and is unparameterized — `useInfiniteQuery`
-      // stores all cursor pages under that single key, so one prefix
-      // invalidation evicts them all.
       void qc.invalidateQueries({ queryKey: queryKeys.timeline.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeleteWorld'),
@@ -699,15 +682,10 @@ export function useUpdateFinding() {
     mutationFn: (vars: { workId: string; findingId: string; patch: UpdateFindingRequest }) =>
       client.updateFinding(vars.workId, vars.findingId, vars.patch),
     onMutate: async (vars) => {
-      // optimistic update. Scope to vars.workId — cancelling other Works'
-      // lists is unnecessary and contradicts the work-scoped invalidation
-      // (qc3 W-QC3-P0-001).
       await qc.cancelQueries({ queryKey: queryKeys.findings.list(vars.workId) });
-      // so onError can restore the pre-mutation state.
       const previousLists = qc.getQueriesData<FindingsListData>({
         queryKey: queryKeys.findings.list(vars.workId),
       });
-      // and must not clobber the cached value during the optimistic merge.
       const optimistic = Object.fromEntries(
         Object.entries(vars.patch).filter(([, v]) => v !== undefined),
       );
@@ -726,12 +704,6 @@ export function useUpdateFinding() {
           };
         },
       );
-      // work-scoped prefix (all filter views), while `setQueryData` restores
-      // each snapshot by its exact query key. This is correct because TanStack's
-      // `setQueryData` ignores filters that are not part of the exact key tuple;
-      // a rollback must target the same key that was snapshotted. If the
-      // snapshot/apply scope ever changes (e.g., page-cursor filters become part
-      // of the key), the rollback loop must be widened to match (qc1 S-004).
       return { previousLists };
     },
     onError: (error, _vars, context) => {
@@ -746,11 +718,6 @@ export function useUpdateFinding() {
       toast({ variant: 'success', title: t('toast.findingUpdated'), description: shortId(vars.findingId) });
     },
     onSettled: (_data, _error, vars) => {
-      // only), not the global findings-list prefix — so a status change /
-      // assignment / inline edit in one Work doesn't mark every other Work's
-      // findings lists stale and refetch them (qc3 W-QC3-P0-001). The scoped
-      // refetch is still needed: a status transition can move a finding between
-      // filter views of this Work.
       void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
     },
   });
@@ -812,7 +779,6 @@ export function useScaffoldPreset() {
   return useMutation({
     mutationFn: (request: ScaffoldPresetRequest) => client.scaffoldPreset(request),
     onSuccess: () => {
-      // newly scaffolded manifests surface in the catalog immediately.
       void qc.invalidateQueries({ queryKey: queryKeys.presets.all });
     },
     onError: (error) => errorToast(error, 'error.couldNotScaffoldPreset'),
@@ -825,7 +791,6 @@ export function useValidatePreset() {
   return useMutation({
     mutationFn: (request: ValidatePresetRequest) => client.validatePreset(request),
     onError: (error) => errorToast(error, 'error.couldNotValidatePreset'),
-    // is not added here so the validate dialog stays the single source of truth.
   });
 }
 
@@ -1015,8 +980,6 @@ export function readBrowserAgentProfile(
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== 'object') return null;
-    // validated at runtime — a polluted `launchCommand` is dropped rather than
-    // reaching `?.trim()` callers as a non-string.
     const { name, launchCommand } = parsed as { name?: unknown; launchCommand?: unknown };
     if (typeof name !== 'string' || name.trim() === '') return null;
     return { name, launchCommand: typeof launchCommand === 'string' ? launchCommand : undefined };
@@ -1070,9 +1033,6 @@ export interface SavedAgentProfileState {
   profile: AgentProfileSnapshot | null;
   /** True only while the profile read is fetching. */
   isLoading: boolean;
-  /**
-   * writes on this so a default is never committed as the persisted choice.
-   */
   isFetched: boolean;
   error: Error | null;
   refetch: () => void;
@@ -1137,7 +1097,6 @@ export function useAgentProfile() {
  */
 export function useVerifyAgent() {
   const client = useNexusClient();
-  // result does not settle a mutation whose component tree is already gone.
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -1154,7 +1113,6 @@ export function useVerifyAgent() {
       const trimmed = command.trim();
       if (!trimmed) return false;
       const res = await client.scanAgents({ filter: 'installed' });
-      // result rather than settling a mutation on a gone tree.
       if (controller.signal.aborted) {
         throw new DOMException('useVerifyAgent aborted on unmount', 'AbortError');
       }
@@ -1234,10 +1192,6 @@ export function usePendingReviewCount(creatorId: string | undefined) {
     queryFn: (): Promise<CountPendingReviewsResponse> => client.countPendingReviews(creatorId!),
     enabled: Boolean(creatorId),
     refetchInterval: MEMORY_COUNT_POLL_MS,
-    // `refetchInterval` when the tab/window is hidden by default, which keeps
-    // this 10s poll from draining battery/CPU on the desktop shell and
-    // backgrounded browser tabs. Do not add `refetchIntervalInBackground` here
-    // without a deliberate reason — this is a battery-sensitive surface.
   });
 }
 
@@ -1253,9 +1207,6 @@ export function useMemoryFragments(
     queryFn: () => client.listMemoryFragments(creatorId!, query),
     enabled: Boolean(creatorId),
     refetchInterval: options?.refetchInterval,
-    // `refetchInterval` when the tab/window is hidden by default, which keeps a
-    // SOUL auto-refresh poll from draining battery/CPU on the desktop shell and
-    // backgrounded browser tabs (matches usePendingReviewCount).
   });
 }
 
@@ -1325,11 +1276,6 @@ export function useDeletePendingReview() {
   });
 }
 
-/**
- * processes up to REVIEW_BATCH_LIMIT (50) rows per call; 20 calls × 50 rows =
- * 1,000 rows per user action before the drain stops with a still-draining
- * toast. Guards against pathological queues hanging the UI.
- */
 const REVIEW_DRAIN_MAX_CALLS = 20;
 
 /**
@@ -1372,14 +1318,12 @@ export function useReviewMemory() {
         processed += res.processed ?? 0;
         hasMore = res.has_more ?? false;
         if (!hasMore) break;
-        // has_more would loop forever on an unprocessable head row.
         if ((res.processed ?? 0) === 0) break;
       }
       return { promoted, fragmented, dropped, has_more: hasMore, processed };
     },
     onSuccess: (data: ReviewResponse) => {
       if (data.has_more) {
-        // the client stopped re-requesting. Non-error informational message.
         toast({
           variant: 'info',
           title: t('toast.reviewStillDraining'),
@@ -1403,17 +1347,10 @@ export function useReviewMemory() {
       }
     },
     onError: (error) => errorToast(error, 'error.couldNotCompleteReview'),
-    // server already processed/deleted the pending queue, the client would
-    // otherwise keep showing rows that no longer exist until a manual refresh.
-    // Matches the useDeletePendingReview onSettled pattern.
     onSettled: (_data, _error, creatorId) => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.count(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.fragments(creatorId) });
-      // any narrative scope (Creator-level or per-World) from `current` →
-      // `stale` (or lift it over the insufficient-data threshold). Invalidate
-      // the whole narrative cache prefix for this creator so every scope
-      // re-reads post-review state without a manual reload.
       void qc.invalidateQueries({ queryKey: [...queryKeys.memory.all, 'soul-narrative', creatorId] });
     },
   });
@@ -1695,13 +1632,9 @@ export function useRunCompute() {
     mutationFn: (request: RunRequest) => client.runCompute(request),
     onSuccess: (_data, request) => {
       void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
-      // module (brief: runs-list + module-detail invalidation).
       void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
     },
     onError: (error, request) => {
-      // error envelope — refetch the Runs lists so the row shows immediately
-      // (dogfood finding, V1.147 P1 T4). Unknown world / not-owner rejections
-      // create no row; an extra refetch is harmless there.
       void qc.invalidateQueries({ queryKey: queryKeys.compute.runs.lists() });
       void qc.invalidateQueries({ queryKey: queryKeys.compute.modules.detail(request.module_id) });
       errorToast(error, 'error.couldNotRunCompute');
@@ -1876,12 +1809,6 @@ export interface ForkLineage {
   label?: string;
 }
 
-/**
- * adapter's `computeProvenanceOf` leniency: unknown / malformed shapes
- * degrade to absent fields, never a fabricated lineage. `is_fork` is the
- * marker's presence (the caller has already selected the `fork_created`
- * row); the lineage fields ride inside the extension.
- */
 interface ForkLineageExtensionShape {
   parent_branch_id?: unknown;
   forked_from_event_id?: unknown;
@@ -1940,9 +1867,6 @@ export function useForkLineage(
         status: 'canon',
         limit: 1,
       });
-      // hard-filtered to `event_type=fork_created`, and the DTO's
-      // `event_type` is re-checked so a stray non-marker row can never be
-      // misread as a fork (the derivation stays honest about "marker").
       const marker = res.items[0];
       if (marker?.event_type !== 'fork_created') return { is_fork: false };
       return forkLineageOf(marker);
@@ -2136,7 +2060,6 @@ export function useReadingProgressSync(
   const enabled = options?.enabled ?? true;
   const restoredRef = useRef(false);
 
-  // different chapter restores its own position.
   useEffect(() => {
     restoredRef.current = false;
   }, [workId, chapter, volume]);
@@ -2151,7 +2074,6 @@ export function useReadingProgressSync(
     saveMutate({ workId, chapter, volume, scrollProgress: ratioToScrollProgress(ratio) });
   }, [workId, chapter, volume, saveMutate]);
 
-  // re-scrolling when the save mutation updates the cached scroll_progress.
   useEffect(() => {
     if (!enabled || !progress.isSuccess || restoredRef.current) return;
     const scrollContainer = document.querySelector('main');

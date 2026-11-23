@@ -1,6 +1,4 @@
 /**
- * multi-track lanes for the V1.128 App adoption overlay.
- *
  * App-local glue (not `@web-canvas/*`): reads RF node positions/types from the
  * existing timeline adapters without changing projection or wire contracts.
  * The directed-axis spine decoration node is excluded — the NLE band replaces
@@ -105,9 +103,6 @@ export function projectWorldTimelineNodesToNleTracks(
   }
 
   if (layer === 'moment') {
-    // Timeline Moment node types verbatim (`work-timeline-moment-scene` /
-    // `work-timeline-moment-beat`), so the World-Moment band mirrors the
-    // Work-Moment tracks (Scenes + Beats).
     return projectWithRules(nodes, [
       {
         id: 'scenes',

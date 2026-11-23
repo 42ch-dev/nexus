@@ -189,7 +189,6 @@ async fn handle_set(
         .await
         .map_err(map_core_error)?;
 
-    // empty branch would mean the settled row could not be decoded.
     let MomentDirectiveResponse::Directive {
         directive_id,
         insert_depth,
@@ -543,9 +542,6 @@ mod tests {
             let db_path = workspace_state_db_path(&user_home, &creator_id, WORKSPACE_SLUG);
             release_retained_writer_guards(&db_path);
 
-            // one (V1.40+), but stored rows from that path still exist, and the
-            // `--world` scope must refuse them rather than write a directive no
-            // assembly could inject.
             let worldless_work_id = "wrk_stored_worldless".to_string();
             {
                 let pool = nexus_local_db::init_engine_pool(&db_path)
@@ -560,8 +556,6 @@ mod tests {
             }
             release_retained_writer_guards(&db_path);
 
-            // `meta.json` `local_root` (the same key the workspace
-            // registration writes); the Work directory needs it.
             let creative_root = user_home.join("creative");
             std::fs::create_dir_all(&creative_root).unwrap();
             std::fs::write(
@@ -742,7 +736,6 @@ mod tests {
     async fn implicit_work_resolution_falls_back_to_works_status_when_the_pool_is_empty() {
         let env = Env::new().await;
 
-        // pool step alone cannot resolve anything here.
         let pool_page = env
             .core
             .list_work_pool(
@@ -761,7 +754,6 @@ mod tests {
             pool_page.entries.len()
         );
 
-        // selects.
         let works_page = env
             .core
             .list_works(
@@ -1149,7 +1141,6 @@ mod tests {
         assert_eq!(row.ttl_remaining, 0);
         assert_eq!(row.status, "expired");
 
-        // the output is byte-identical to the no-directive path (AC-I1b).
         let ctx2 = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
         assert!(ctx2.moment_directive.is_none());
         assert!(!ctx2.to_full_context().contains("## Moment Directive"));
@@ -1162,8 +1153,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn assemble_ttl_three_injects_exactly_three_then_stops() {
-        // injects on exactly 3 `assemble_moment` calls, then stops. Counting
-        // one generation = one injecting assemble (spec §3.3).
         use nexus_moment_context_assembly::{
             assemble_moment_with_directive, MomentRequest, Stage0Assembly,
         };

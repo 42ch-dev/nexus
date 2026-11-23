@@ -28,10 +28,6 @@ export interface UseCanvasSurfaceResult<TNodeData extends Record<string, unknown
   showAlt: boolean;
   setShowAlt: (value: boolean) => void;
   altView: ReactNode;
-  /**
-   * the surface when the Brief layer is active; `null` when the adapter
-   * does not implement `renderBriefTimeBands` (non-Timeline surfaces).
-   */
   briefTimeBands: ReactNode;
   inspector: ReactNode;
   selectedNode: Node<TNodeData> | null;
@@ -56,7 +52,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
   adapter: CanvasSurfaceAdapter<TGraph, TNodeData, TEdgeData>,
   queryResult: CanvasSurfaceQueryResult<TGraph>,
 ): UseCanvasSurfaceResult<TNodeData, TEdgeData> {
-  // should call useCanvasViewport directly.
   const surfaceKey = adapter.surfaceKind;
   const { cachedViewport, onViewportChange } = useCanvasViewport(surfaceKey);
 
@@ -72,7 +67,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
 
   const [nodes, setNodes] = useState<Node<TNodeData>[]>(projected.nodes);
 
-  // selection for nodes that persist across the rebuild (same as outline-canvas-graph).
   useEffect(() => {
     setNodes((prev) => {
       if (prev.length === 0) return projected.nodes;
@@ -94,9 +88,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
 
   const layout = useAutoLayout(nodes, projected.edges, adapter.layoutOptions);
 
-  // owns. Without this, measurement-only changes from React Flow compare the
-  // original (pre-layout) positions against the saved layout positions and are
-  // misclassified as manual drags, which suppresses auto-layout.
   useEffect(() => {
     if (layout.nodes === nodes) return;
     const layoutById = new Map(layout.nodes.map((n) => [n.id, n]));
@@ -120,10 +111,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
   }, [graph, adapter]);
 
   const altView = useMemo(() => adapter.renderAltView?.() ?? null, [adapter]);
-  // slot on its local intersection type (not the shared `CanvasSurfaceAdapter`
-  // base — `timeline-canvas-adapter.tsx`); non-Timeline adapters never define
-  // it, so the optional duck-typed read yields null for them. Re-computed on
-  // graph/adapter change so a refetch reflows the bands.
   const briefTimeBands = useMemo(() => {
     if (!graph) return null;
     const renderBriefTimeBands = (adapter as {

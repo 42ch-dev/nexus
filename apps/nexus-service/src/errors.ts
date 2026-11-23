@@ -30,7 +30,6 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   invalid_input: 400,
   forbidden: 403,
   not_found: 404,
-  // mirroring the 501 route_not_migrated semantics rather than fake success.
   not_supported: 501,
   world_kb_conflict: 409,
   world_kb_validation: 422,
@@ -49,7 +48,6 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
   compute_module_error: 422,
   outline_conflict: 409,
   outline_validation_failed: 422,
-  // client reloads the candidate and reapplies the operation.
   strategy_candidate_conflict: 409,
   strategy_already_approved: 409,
   workspace_conflict: 409,
@@ -59,9 +57,6 @@ const STATUS_BY_CODE: Record<CoreError['code'], number> = {
 const PUBLIC_INTERNAL_MESSAGE = 'Internal server error';
 
 /**
- * names the conflict (their reason) so the envelope matches its status, mirroring
- * `strategy_already_approved`.
- *
  * 409 follows one rule, not a bare list: the request is well-formed and the approval it names
  * exists, but the state that approval recorded has moved, so retrying this exact request cannot
  * succeed — it is already the current apply, or its frozen bytes no longer hash to the identity
@@ -112,7 +107,6 @@ export function mapNativeError(error: unknown): HttpError {
 
   const wire = parseNativeCoreError(error);
   if (wire) {
-    // path/SQL/config it carries in `details`) never reaches the client.
     if (wire.code === 'internal') {
       return new HttpError(500, 'internal', PUBLIC_INTERNAL_MESSAGE);
     }
@@ -130,7 +124,6 @@ export function mapNativeError(error: unknown): HttpError {
   }
 
   const message = error instanceof Error ? error.message : String(error);
-  // rejects with `invalid <field>: <reason>` — a client error, not a fault.
   if (message.startsWith('invalid ')) {
     return new HttpError(400, 'invalid_input', message);
   }

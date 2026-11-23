@@ -115,7 +115,6 @@ mod tests {
 
     #[test]
     fn unknown_stage_parses_to_none_safe_default() {
-        // (`None` ⇒ `Unspecified` ⇒ all slots on) at the caller — never a
         for bad in ["draft", "revise", "continue", "summarize", "", "PRODUCE"] {
             assert_eq!(
                 GenerationStage::parse(bad),

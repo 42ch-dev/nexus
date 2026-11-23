@@ -315,7 +315,6 @@ async fn fragments_json_emits_wrapper_dto() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pending_show_finds_id_beyond_first_page() {
     let env = fresh_env().await;
-    // page 2 (newest-first DESC order, 50 rows/page).
     seed_pending_desc(&env, 60).await;
 
     let out = env.cli(&["creator", "memory", "pending-show", "pending_test_55"]);

@@ -29,14 +29,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // general `@` -> design-studio/src alias catches it.
       '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
-      // the specific alias keeps it out of design-studio/src (v1.223 W1).
       '@/lib/status-variant': path.resolve(__dirname, '../web/src/lib/status-variant'),
-      // instance. This alias must appear before the general `@` catch-all.
       '@web-locales/en': path.resolve(__dirname, '../web/src/locales/en'),
-      // apps/web UI primitives via @/components/ui/*. Mirror that alias so
-      // Studio can import the presentational module without duplicating it.
       '@/components/ui': path.resolve(__dirname, '../web/src/components/ui'),
       '@': path.resolve(__dirname, './src'),
         '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),

@@ -41,7 +41,6 @@ export function EntrancePage() {
   const { entrance, setEntrance } = useEntrance();
   const navigate = useNavigate();
   const { toast } = useToast();
-  // default), so the initial highlight follows it (AR-20).
   const [selected, setSelected] = useState<EntranceId>(entrance);
   const [saving, setSaving] = useState(false);
 

@@ -86,8 +86,6 @@ impl Capability for JudgeLlm {
         "judge.llm"
     }
 
-    // orchestration context, NOT accepted from user input (security:
-    // prevents cross-creator routing — SEC-V131-01).
     fn input_schema(&self) -> &'static str {
         nexus_preset::capability_catalog::JUDGE_LLM_INPUT_SCHEMA
     }
@@ -132,10 +130,6 @@ impl Capability for JudgeLlm {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // the shared per-run map. FAIL-CLOSED: a run with no registered
-        // token refuses with `CancellationUnavailable` — a fresh token would
-        // be uncancellable by any coordinator (never mint one here). The run
-        // admission path (engine start/spawn/recovery) registers the token.
         let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         let judge_prompt = format!(

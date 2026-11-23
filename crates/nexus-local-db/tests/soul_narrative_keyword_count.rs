@@ -263,7 +263,6 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         .await
         .unwrap();
 
-    // count is threshold-saturated (20).
     assert_eq!(stats.fragment_count, 22);
     assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);

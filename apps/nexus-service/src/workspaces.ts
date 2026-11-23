@@ -1,8 +1,4 @@
 /**
- * v1220 P3-T2): home-level discovery, the active-selection read, set-active,
- * and create over the frozen `workspace` wire contracts
- * (`schemas/daemon-api/workspace/…`).
- *
  * Selection is a home-control operation owned by the native entry; this
  * surface only translates transport, then refreshes the boot-time runtime
  * identity in place so `/v1/daemon/runtime/status` reports the new workspace
@@ -56,8 +52,6 @@ export async function listWorkspaces(
       : discovered.items.filter((item) => item.creator_id === creatorId);
   if (cursor !== null) {
     const position = items.findIndex((item) => cursorOf(item) === cursor);
-    // page over data it already received (or over a changed list) believing it
-    // continued. The retained validation style is a 400 `invalid_input`.
     if (position < 0) {
       throw new HttpError(400, 'invalid_input', `cursor '${cursor}' does not match any workspace`, {
         field: 'cursor',
@@ -92,12 +86,6 @@ export function getActiveWorkspace(service: ServiceCore): Promise<ActiveWorkspac
   return service.core.getActiveWorkspace();
 }
 
-/**
- * the provider save → engine-restart sequence. Two concurrent finish requests
- * must not both observe an uninitialized shell and publish two cores, and a
- * provider save must never interleave with a selection that rebuilds the same
- * owner; the second waits for the first and then observes its outcome.
- */
 const selectionQueues = new WeakMap<ServiceCore, Promise<unknown>>();
 
 export function withSelectionLock<T>(
@@ -126,9 +114,6 @@ export function setActiveWorkspace(
     const response = await service.core.selectWorkspace(request);
     service.creatorId = response.creator_id;
     service.workspaceSlug = response.workspace_slug;
-    // is selected, so the first-run flow completes without a restart. Readiness
-    // is claimed only after promotion (and, for a provider profile, the
-    // execution owner) succeeded.
     if (!service.workspaceInitialized) await promoteShell(service);
     return response;
   });
@@ -136,14 +121,10 @@ export function setActiveWorkspace(
 
 /**
  * Promote the status-only shell and publish the runtime readiness facts.
- *
- * false (the request fails and may be retried); the native side is idempotent
- * once the core is published, so a retry only re-attempts the missing step.
  */
 async function promoteShell(service: ServiceCore): Promise<void> {
   await service.core.promoteCore();
   if (service.domainOnly) {
-    // same post-open facts).
     service.providerReady = true;
     service.engineEpoch = 0;
   } else {

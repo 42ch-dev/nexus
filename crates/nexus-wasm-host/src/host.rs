@@ -87,7 +87,6 @@ impl HostContext {
                 blocks.insert(id.to_string(), json);
             }
         }
-        // freeform JSON the module's `narrative_query` host import returns.
         let narrative_state = serde_json::to_value(&input.narrative_state).unwrap_or_default();
         Self {
             key_blocks: blocks,
@@ -253,7 +252,6 @@ mod tests {
         cfg.consume_fuel(true);
         let engine = Engine::new(&cfg).unwrap();
 
-        // function that calls the imported `kb_read` to fetch that block.
         let probe_wat = r#"(module
             (import "nexus" "kb_read"
               (func $kb_read (param i32 i32 i32 i32) (result i64)))

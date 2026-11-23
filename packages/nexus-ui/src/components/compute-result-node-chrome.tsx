@@ -3,9 +3,6 @@ import { Cpu } from 'lucide-react';
 import { cn } from '../lib/cn';
 
 /**
- * for a Narrative-layer Timeline node produced by an accepted compute Run
- * (behavior spec §5 Timeline citizenship).
- *
  * Pair with the app's canvas node shell (`NodeChromeShell` in
  * `apps/web/src/components/canvas/presentational/node-chrome-shell.tsx`) for
  * the outer card + surface spine + selection ring — exactly like
@@ -26,25 +23,16 @@ import { cn } from '../lib/cn';
  * literal English product vocabulary.
  */
 export interface ComputeResultNodeChromeProps {
-  /**
-   * (e.g. the damage line), else the module name. Caller-owned fallback.
-   */
   title: string;
   /**
    * Distinguishes compute nodes from manual Event nodes at a glance.
    */
   kindLabel: string;
-  /**
-   * (preset path), caller-resolved when distinguishable (spec §5).
-   */
   provenanceLabel: string;
   /** Module display name (product vocabulary — never protocol jargon). */
   moduleName: string;
   /** Module version string, e.g. "1.0.0" (rendered as `v{moduleVersion}`). */
   moduleVersion: string;
-  /**
-   * line. Absent for the preset path (no direct Run row exists).
-   */
   runId?: string;
   className?: string;
 }

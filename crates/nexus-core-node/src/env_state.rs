@@ -621,7 +621,6 @@ impl EnvState {
     pub async fn publish_closed(&self) {
         *self.lifecycle.lock().expect("lifecycle mutex poisoned") = EnvLifecyclePhase::Closed;
         self.clear_service_only_uninitialized();
-        // open installs its own.
         self.js_provider_port
             .lock()
             .expect("js provider port mutex poisoned")
@@ -659,7 +658,6 @@ impl EnvState {
         self.closing
             .store(self.generation.load(Ordering::SeqCst), Ordering::SeqCst);
         self.close_notify.notify_waiters();
-        // after this point still observes the closed state.
         self.close_watch.send_replace(true);
     }
 
@@ -733,11 +731,6 @@ impl EnvState {
                                     quiesce_pending.push("actor-quiesce-deadline".to_string());
                                     false
                                 } else {
-                                    // joins inside are deliberately unbounded
-                                    // (the authority retains its drain
-                                    // ownership), so an expired budget cancels
-                                    // this caller and keeps the whole
-                                    // authority instead of detaching live work.
                                     match tokio::time::timeout_at(
                                         tokio::time::Instant::from_std(deadline),
                                         authority.quiesce_actor_sessions(),
@@ -824,8 +817,6 @@ impl EnvState {
                             None => true,
                             Some(authority) => {
                                 let released = if ordered_close_unconfirmed {
-                                    // drains a retry must re-join, so both it
-                                    // and its manager/`LocalSet` stay retained.
                                     host_pending.push(
                                         "host-close-withheld: ordered-close-unconfirmed"
                                             .to_string(),
@@ -861,8 +852,6 @@ impl EnvState {
                                         }
                                     }
                                 };
-                                // straight away, so a retained authority never
-                                // leaves a detached `LocalSet` thread behind.
                                 if let Some(handle) = authority
                                     .manager()
                                     .localset_bridge()
@@ -1128,7 +1117,6 @@ mod tests {
             .flatten()
             .unwrap();
         assert_eq!(op.status.wire(), "running");
-        // between the two in production (LIFE-3).
         let (status, session_id) = state
             .detect_js_batch_terminal("op-1", &[op_finished("op-1")])
             .expect("the batch carries a terminal");
@@ -1170,7 +1158,6 @@ mod tests {
         let state = EnvState::new();
         state.record_js_session("sess-2".to_string(), "mock-acp".to_string());
         state.record_js_session_operation("sess-2", "op-y".to_string());
-        // operation settles exactly `op-x` and never touches `op-y`.
         state.record_js_operation_terminal("sess-2", "op-x", JsOperationStatus::Cancelled);
         assert_eq!(
             state
@@ -1329,7 +1316,6 @@ mod tests {
     async fn journal_failures_are_propagated_not_discarded() {
         let (_tmp, state) = open_env_with_core().await;
         let core = state.journal_core().expect("core installed");
-        // back; the owned seam must surface the failure, not swallow it.
         core.close().await.expect("close");
         assert!(
             state

@@ -1,12 +1,6 @@
 /**
  * Brief empty-state + backward-compat — V1.159 P1 Task 4.
  *
- * "新建 era" entry gating contract (V1.160 P1 T2 — F-001 / R-V1159P1-001
- * closed: the V1.160 P1 T1 backend create-on-absent path made `patch-entity`
- * create when the minted entity id is absent, so the create entry is LIVE
- * behind `showCreateEra={activeLayer === 'brief'}`; spec §3.3.3 V1.159
- * amendment "Create entry" visibility is restored):
- *
  *   1. empty_era_data_shows_v1_123_empty_state — no `block_type=era`
  *      entities → the V1.123 Brief empty-state panel (title + CTA) renders
  *      and the "新建 era" button is VISIBLE on the empty Brief panel (the
@@ -145,9 +139,6 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
-    // complete works enumeration) must RESOLVE: an unresolved / failed read is
-    // no longer rendered as "no bound Works". An empty page = this World has
-    // no bound Works.
     listWorks: vi.fn().mockResolvedValue({
       items: [],
       pagination: { limit: 20, has_more: false },
@@ -187,9 +178,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('empty_era_data_shows_v1_123_empty_state', async () => {
-    // (title + Narrative CTA) renders when the user switches to Brief. The
-    // "新建 era" create entry IS rendered on the empty panel (V1.160 P1 T2 —
-    // F-001 / R-V1159P1-001 closed; the create-first-era path, T4 DoD).
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eventsOnlyGraph()),
     });
@@ -208,9 +196,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('flat_eras_render_as_depth_0_bands', () => {
-    // Brief-accent color and NO type badge (V1.156 flat rendering
-    // backward compatible — spec §3.3.3 "Unknown or absent era_type falls
-    // back to the default Brief accent").
     const tree = buildEraTree(
       [
         eraEntity({ key_block_id: 'kb-era-1', canonical_name: 'First Age' }),
@@ -224,14 +209,12 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     expect(screen.getAllByTestId('brief-time-band')).toHaveLength(2);
     expect(container.querySelectorAll('[data-depth="0"]')).toHaveLength(2);
     expect(container.querySelectorAll('[data-depth="1"]')).toHaveLength(0);
-    // resolves it to transparent), so assert the declared inline value.
     expect(bandOf(container, 'kb-era-1').style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
     expect(bandOf(container, 'kb-era-2').style.backgroundColor).toBe('var(--color-canvas-layer-brief-accent)');
     expect(screen.queryByTestId('brief-time-band-type-badge')).toBeNull();
   });
 
   it('mixed_typed_untyped_render_correctly', () => {
-    // badge; the untyped era keeps the default color and no badge.
     const tree = buildEraTree(
       [
         typedEra('kb-kingdom', 'Bronze Kingdom', 'kingdom'),
@@ -255,7 +238,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('partial_nesting_orphans_and_nested', () => {
-    // orphan root (Third Age) — both shapes render in one forest.
     const tree = buildEraTree(
       [
         eraEntity({ key_block_id: 'kb-kingdom', canonical_name: 'Bronze Kingdom' }),
@@ -289,9 +271,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('create_era_entry_visible_on_brief_empty_state', async () => {
-    // entry renders on the Brief empty panel — the create-first-era path
-    // (T4 DoD). The empty panel keeps its V1.123 copy + Narrative CTA, and
-    // the create entry sits in the header chrome above it.
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eventsOnlyGraph()),
     });
@@ -310,8 +289,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
   });
 
   it('create_era_entry_brief_layer_only', async () => {
-    // on Brief, hidden on Narrative and Moment (Work-Brief stays a
-    // read-only projection per spec §3.3.3).
     const user = userEvent.setup();
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eraGraph()),
@@ -332,7 +309,6 @@ describe('Brief empty-state + backward-compat (V1.159 P1 T4)', () => {
     });
     expect(screen.queryByTestId('timeline-create-era-entry')).toBeNull();
 
-    // authoring affordance).
     await user.click(screen.getByTestId('timeline-layer-tab-moment'));
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(

@@ -40,9 +40,6 @@ export function validateStartupBind(config: ResolvedServiceConfig): void {
       'non-loopback connections require --allow-remote',
     );
   }
-  // LAN dev is supported: every authenticated remote request is admitted
-  // without TLS material (access spec §3.1), and a remote bind still requires
-  // an API key below.
   if (!config.apiKey) {
     throw new HttpError(401, 'auth_required', 'remote bind requires NEXUS42_DAEMON_API_KEY');
   }

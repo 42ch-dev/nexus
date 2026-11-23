@@ -227,9 +227,6 @@ fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<Knowled
         serde_json::to_value(record.block_type).map_err(|error| CoreError::Internal {
             category: format!("{CHARACTER_WIRE_INVALID_PREFIX}: {error}"),
         })?;
-    // family — native `holder_entry_id` / `disclosure`, no `creator_only`, and
-    // `owner` staying the narrative `KnowledgeOwnerRef` container. Both
-    // governance members are absent for an in-scope shared entry.
     let mut value = serde_json::Map::new();
     value.insert("entry_id".into(), serde_json::json!(record.entry_id));
     value.insert("owner".into(), owner);
@@ -260,8 +257,6 @@ fn knowledge_item_from_record(record: &KnowledgeEntryRecord) -> CoreWire<Knowled
 mod v1191_holder_public_tests {
     use super::{knowledge_item_from_record, KnowledgeEntryRecord};
     use nexus_contracts::BlockType;
-
-    // daemon item family exactly — native governance pair, no legacy boolean.
 
     #[test]
     fn v1191_holder_public_bridge_item_projects_the_native_governance_pair() {
@@ -658,7 +653,6 @@ impl NativeCore {
         .await
     }
 
-    /// read: a foreign/unknown actor ref rejects before any storage effect.
     #[napi]
     pub async fn actor_knowledge_view(
         &self,
@@ -695,7 +689,6 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let (req, raw) = decode_with_raw::<AddKnowledgeEntryRequest>(request_json, "request")?;
-        // member is a request-shape concern, so it stays at the adapter.
         let summary_present = raw.contains_key("summary");
         self.json_call(principal_handle, async move |core, principal| {
             let stored = core
@@ -793,8 +786,6 @@ impl NativeCore {
             None
         };
         let summary_patch = knowledge_summary_patch(&raw, &req)?;
-        // same expected_revision CAS; the core owns admission of the identity
-        // it names.
         let audience = nexus_core::authored_patch_audience(req.audience.as_ref())
             .map_err(|e| Error::from_reason(e.to_string()))?;
         self.json_call(principal_handle, async move |core, principal| {
@@ -837,8 +828,6 @@ impl NativeCore {
         .await
     }
 
-    /// environment was opened with.
-    ///
     /// Home control is admitted on the service-only shell as well: the first-run
     /// flow (create creator → select the pre-created workspace) runs before any
     /// full core can be published, and the home entry already owns the
@@ -975,8 +964,6 @@ impl NativeCore {
             .iter()
             .find(|item| item.creator_id == creator_id && item.workspace_slug == workspace_slug)
             .map(|item| item.creative_root.clone())
-            // root; the retained response omits the field instead of naming
-            // an empty path.
             .filter(|root| !root.is_empty());
         let operational_dir = nexus_home_layout::operational_workspace_dir(
             home.user_home(),
@@ -1204,8 +1191,6 @@ impl NativeCore {
         .await
     }
 
-    /// must be the natively minted active creator; a mismatch is the retained
-    /// 403 (the same equality guard the Creator list/count routes keep).
     #[napi]
     pub async fn create_pending_review(
         &self,

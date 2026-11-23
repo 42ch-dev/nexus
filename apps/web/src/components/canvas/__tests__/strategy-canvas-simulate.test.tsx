@@ -196,7 +196,6 @@ describe('StrategyCanvas — Simulate action', () => {
     irDocument = servedIrDocument({ id: STRATEGY_ID, entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Simulate…' }));
 
-    // banner stays visible from the held snapshot's own staleness.
     await waitFor(() => expect(screen.getByTestId('approve-stale')).toBeInTheDocument());
     expect(screen.getByText('Running the static simulation…')).toBeInTheDocument();
 

@@ -139,19 +139,12 @@ pub fn apply_hygiene(
             continue;
         }
         let row = {
-            // for the rest of the pass — `parse_carrier` must not clone
-            // replacement templates out of the carrier (R2-6).
             let summary = body.summary.take();
             let Some(carrier) = body.attributes.as_ref().and_then(|a| a.get("hygiene")) else {
                 body.summary = summary;
                 out.push(entry);
                 continue;
             };
-            // MAX_HYGIENE_TRANSFORMS (elements beyond the cap are never
-            // read; the unread tail is counted into `skipped` with one
-            // degradation note at the parse site), so the apply loop below
-            // never sees more than the cap — no apply-time truncation
-            // needed, and the regex work per transform is bounded too.
             let (transforms, parse_notes, malformed) = parse_carrier(carrier);
             let mut row = HygieneTraceEntry {
                 entry_id: entry.entry_id.clone(),
@@ -161,11 +154,6 @@ pub fn apply_hygiene(
             };
             if let Some(summary) = summary {
                 let mut text = summary;
-                // the first pass. Unlike the activation engine's match-only
-                // scan cap, this cap alters the emitted text, so the
-                // truncation is recorded as a per-entry trace note
-                // (mirroring the output-cap note below) — the emitted text
-                // never changes silently.
                 if text.chars().count() > MAX_HYGIENE_INPUT_CHARS {
                     row.notes.push(format!(
                         "hygiene input over {MAX_HYGIENE_INPUT_CHARS} chars truncated"
@@ -183,7 +171,6 @@ pub fn apply_hygiene(
                 }
                 body.summary = Some(text);
             } else {
-                // no-match (nothing to scan).
                 row.skipped += transforms.len();
             }
             row
@@ -238,9 +225,6 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
             note: Some("invalid regex".to_string()),
         };
     };
-    // at a time with a char budget and a shared piece-visit budget. Absent
-    // capture refs expand to empty and must still consume the visit budget
-    // or a `$9`.repeat(N) template over many matches is unbounded CPU.
     let mut applied = 0;
     let mut out = String::new();
     let mut out_chars = 0usize;
@@ -250,17 +234,12 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
     let mut piece_budget = MAX_HYGIENE_OUTPUT_CHARS;
     for caps in re.captures_iter(text) {
         let m = caps.get(0).expect("capture 0 always present");
-        // so a WorkLimit with no replacement output can revert to "match
-        // left as-is" — the tail append then re-emits the prefix and the
-        // original matched text verbatim.
         let prefix_len = out.len();
         let prefix_chars = out_chars;
         if !append_capped(&mut out, &mut out_chars, &text[last_end..m.start()]) {
             truncated = true;
             break;
         }
-        // the expansion produced no output, `out_chars` is unchanged from
-        // here.
         let match_start_chars = out_chars;
         match expand_replacement(
             t.replacement,
@@ -275,7 +254,6 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
             }
             ExpansionOutcome::Partial => {
                 applied += 1;
-                // append must resume after it, never re-emit the prefix.
                 last_end = m.end();
                 truncated = true;
                 break;
@@ -286,15 +264,9 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
             }
             ExpansionOutcome::WorkLimit => {
                 if out_chars == match_start_chars {
-                    // degrade to "match left as-is" — revert to the state
-                    // before the unmatched prefix and do not advance
-                    // `last_end`, so the tail append re-emits the original
-                    // matched text (and any trailing literal) verbatim.
                     out.truncate(prefix_len);
                     out_chars = prefix_chars;
                 } else {
-                    // exhausted mid-expansion): the partially-replaced
-                    // text stands in, and the match is consumed.
                     last_end = m.end();
                 }
                 work_limited = true;
@@ -344,8 +316,6 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
 /// malformed elements before the halt point plus every element beyond it
 /// (never read, counted via the serde-known array length — G-1).
 fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec<String>, usize) {
-    // without filling the valid cap — a persisted carrier with a huge
-    // malformed prefix costs bounded parse work per assembly.
     const SCAN_BUDGET: usize = MAX_HYGIENE_TRANSFORMS * 8;
     let Some(items) = carrier.as_array() else {
         return (
@@ -354,11 +324,6 @@ fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec
             0,
         );
     };
-    // MAX_HYGIENE_TRANSFORMS successfully-parsed transforms are never read
-    // (no object/field visit, no diagnostic, no allocation), and the scan
-    // itself halts after a fixed visited-element budget — a persisted
-    // carrier with a huge malformed prefix neither scans the whole array
-    // nor allocates one note per malformed element.
     let mut transforms = Vec::with_capacity(MAX_HYGIENE_TRANSFORMS.min(items.len()));
     let mut notes = Vec::new();
     let mut malformed = 0;
@@ -392,11 +357,6 @@ fn parse_carrier(carrier: &serde_json::Value) -> (Vec<HygieneTransform<'_>>, Vec
             description,
         });
     }
-    // `skipped` total — the array length is already known from serde, so
-    // the count needs no further iteration. Malformed diagnostics
-    // aggregate into ONE note carrying the count of SCANNED malformed
-    // elements (the unread tail is the halt note's subject, never a
-    // per-element diagnostic).
     let beyond = items.len().saturating_sub(scanned);
     let scanned_malformed = malformed;
     malformed += beyond;
@@ -473,14 +433,6 @@ impl<'a> ReplacementCursor<'a> {
             return ReplacementPiece::Literal("$");
         }
         if after.as_bytes().first() == Some(&b'{') {
-            // REPLACEMENT_SCAN_WINDOW_CHARS chars — a `${name` whose closing
-            // `}` sits beyond the window is a literal `$` (the name can
-            // never resolve: the pattern is capped at
-            // MAX_HYGIENE_PATTERN_CHARS, far below the window), and the tail
-            // is emitted as literal pieces, truncated by append_capped —
-            // never a whole-rest scan per match. A `}` in-window is found
-            // at the same index as the old whole-rest `find`, so the slices
-            // are byte-identical.
             let mut end = None;
             for (idx, ch) in after.char_indices().take(REPLACEMENT_SCAN_WINDOW_CHARS) {
                 if ch == '}' {
@@ -495,12 +447,6 @@ impl<'a> ReplacementCursor<'a> {
             self.rest = after;
             return ReplacementPiece::Literal("$");
         }
-        // (`[0-9A-Za-z_]`), so `take` on `bytes()` is a char-boundary-safe
-        // window. A run that exceeds the window is truncated to it: the
-        // truncated name can never resolve (the pattern is capped at
-        // MAX_HYGIENE_PATTERN_CHARS, far below the window), so it expands
-        // to empty and the tail is emitted as literal pieces, truncated by
-        // append_capped — never a whole-rest scan per match.
         let run = after
             .bytes()
             .take(REPLACEMENT_SCAN_WINDOW_CHARS)
@@ -522,16 +468,6 @@ impl<'a> Iterator for ReplacementCursor<'a> {
         if self.rest.is_empty() {
             return None;
         }
-        // REPLACEMENT_SCAN_WINDOW_CHARS chars — a huge literal template
-        // (no `$`) costs O(budget) scan work per piece, not O(authored
-        // length). The scan stops at the first `$` or the window edge,
-        // whichever comes first, so a backref-heavy template (`$0$0…`)
-        // still costs O(1) per piece. A `$` at the current position is
-        // parsed by [`Self::reference_piece`]; otherwise the window is a
-        // prefix of `rest`, so `&self.rest[..i]` / `&self.rest[i..]` are
-        // byte-identical to the old whole-rest slices, and a window with no
-        // `$` is one literal piece with `rest` advanced past it
-        // (append_capped applies the output bound either way).
         let mut window_end = self.rest.len();
         let mut dollar_at = None;
         for (idx, ch) in self.rest.char_indices().take(REPLACEMENT_SCAN_WINDOW_CHARS) {
@@ -619,14 +555,6 @@ fn expand_replacement(
             };
         }
     }
-    // piece is still pending at budget 0. When the template ends EXACTLY at
-    // the boundary (e.g. 65,536 absent-group refs), the whole template was
-    // processed — plain Applied — but no replacement content was emitted
-    // AND the shared piece budget is now fully consumed: the caller would
-    // consume the match's text with nothing in its place while every later
-    // match degrades to "left as-is". Report WorkLimit so the R10-1 revert
-    // applies (the match is re-emitted verbatim); the pass is work-truncated
-    // either way and the work note still fires.
     if *piece_budget == 0 && *out_chars == start {
         ExpansionOutcome::WorkLimit
     } else {
@@ -642,9 +570,6 @@ fn append_capped(out: &mut String, out_chars: &mut usize, seg: &str) -> bool {
         return false;
     }
     let remaining = MAX_HYGIENE_OUTPUT_CHARS - *out_chars;
-    // the whole authored segment — so a huge replacement literal costs
-    // O(budget) work per append, not O(authored length). `chars()` is
-    // lazy: nothing beyond the take-bound is visited or materialized.
     let seg_chars = seg.chars().take(remaining + 1).count();
     if seg_chars > remaining {
         out.push_str(truncate_chars(seg, remaining));
@@ -819,11 +744,6 @@ mod tests {
 
     #[test]
     fn many_matches_large_replacement_bounded_by_output_cap() {
-        // expansion before the output-cap check — a pattern matching many
-        // positions with a large replacement could exhaust memory. The
-        // expansion must be built incrementally with a char budget: the
-        // pass stops at the cap, records the truncation note, and keeps
-        // what was built (bounded, no OOM).
         let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
         let big_replacement = "b".repeat(MAX_HYGIENE_OUTPUT_CHARS);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -832,7 +752,6 @@ mod tests {
             &serde_json::json!([{ "pattern": "a", "replacement": big_replacement }]),
         )]);
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
-        // pass stops there instead of expanding every match.
         assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
         assert_eq!(trace[0].applied, 1);
         assert_eq!(trace[0].skipped, 0);
@@ -842,9 +761,6 @@ mod tests {
 
     #[test]
     fn many_small_matches_stop_at_output_cap() {
-        // builder applies matches until the running total reaches the cap,
-        // then stops — the emitted text is capped and the truncation is
-        // recorded (never silently changed).
         let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
@@ -853,7 +769,6 @@ mod tests {
         )]);
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
         assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
-        // matches, and the remaining matches are not expanded.
         assert_eq!(trace[0].applied, MAX_HYGIENE_OUTPUT_CHARS / 2);
         assert_eq!(trace[0].skipped, 0);
         assert_eq!(trace[0].notes.len(), 1);
@@ -862,12 +777,6 @@ mod tests {
 
     #[test]
     fn huge_replacement_literal_append_capped_by_output_budget() {
-        // FULL scan of the authored replacement before the cap decision, so
-        // one match against a huge literal cost O(authored length) per
-        // assembly. The cap decision must scan only up to `remaining + 1`
-        // chars. The observable contract is unchanged: the output is capped
-        // at the budget, the kept prefix is the literal's head, and the
-        // truncation is recorded.
         let big_replacement = "x".repeat(1_000_000);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
@@ -885,13 +794,6 @@ mod tests {
 
     #[test]
     fn replacement_cursor_scan_window_bounded() {
-        // over the ENTIRE remaining template — a huge literal replacement
-        // (no `$` at all) cost O(authored length) scan work per match before
-        // the output cap ran. The scan is now bounded to a char-boundary-safe
-        // window of MAX_HYGIENE_OUTPUT_CHARS + 1 chars: a literal template
-        // yields window-sized pieces, never one piece spanning the whole
-        // template, and the tail stays reachable in further window-sized
-        // pieces (nothing is dropped).
         let template = "x".repeat(1_000_000);
         let mut cursor = ReplacementCursor::new(&template);
         for _ in 0..2 {
@@ -921,9 +823,6 @@ mod tests {
 
     #[test]
     fn first_dollar_beyond_scan_window_defers_to_truncation() {
-        // defer it — the window literal exhausts the output budget first, so
-        // the emitted output is the budget-capped prefix of the literal with
-        // the truncation note, exactly as before the window bound.
         let mut template = "a".repeat(MAX_HYGIENE_OUTPUT_CHARS + 1);
         template.push_str("${0}");
         template.push_str(&"b".repeat(100));
@@ -943,7 +842,6 @@ mod tests {
 
     #[test]
     fn in_window_dollar_still_expands() {
-        // expanded — the window bound must not hide in-window references.
         let mut template = "a".repeat(MAX_HYGIENE_OUTPUT_CHARS - 10);
         template.push_str("${0}");
         template.push_str(&"b".repeat(100));
@@ -953,7 +851,6 @@ mod tests {
             &serde_json::json!([{ "pattern": "x", "replacement": template }]),
         )]);
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
-        // remaining budget is truncated.
         let mut expected = "a".repeat(MAX_HYGIENE_OUTPUT_CHARS - 10);
         expected.push('x');
         expected.push_str(&"b".repeat(9));
@@ -967,9 +864,6 @@ mod tests {
 
     #[test]
     fn multibyte_template_crossing_scan_window_no_panic() {
-        // UTF-8 char straddling the window edge must be kept whole (no panic
-        // on the `rest` re-slice) and the emitted output stays the
-        // budget-capped prefix with the truncation note.
         let mut template = "a".repeat(MAX_HYGIENE_OUTPUT_CHARS);
         template.push('é'); // 2-byte char: the last char of the window
         template.push_str(&"b".repeat(100));
@@ -989,14 +883,6 @@ mod tests {
 
     #[test]
     fn reference_piece_braced_scan_window_bounded() {
-        // remaining template for the closing brace — a `$` followed by `{`
-        // and a huge non-`}` run cost O(authored length) scan work per
-        // match. The search is now bounded to the char-safe window: a `$`
-        // whose closing `}` sits beyond the window is a literal `$` (the
-        // name can never resolve — the pattern is capped at
-        // MAX_HYGIENE_PATTERN_CHARS, far below the window) and the tail is
-        // emitted as window-sized literal pieces, never one piece spanning
-        // the whole template.
         let mut template = "${".to_string();
         template.push_str(&"a".repeat(1_000_000));
         template.push('}'); // closing brace beyond the scan window
@@ -1030,13 +916,6 @@ mod tests {
 
     #[test]
     fn reference_piece_name_run_scan_window_bounded() {
-        // remaining template for the `[0-9A-Za-z_]` run — a `$` followed by
-        // a huge name run cost O(authored length) scan work per match. The
-        // scan is now bounded to the char-safe window: the name is truncated
-        // to the window (a name that long can never resolve — the pattern
-        // is capped at MAX_HYGIENE_PATTERN_CHARS, far below the window) and
-        // the tail is emitted as window-sized literal pieces, never one
-        // piece spanning the whole template.
         let mut template = "$".to_string();
         template.push_str(&"a".repeat(1_000_000));
         let mut cursor = ReplacementCursor::new(&template);
@@ -1067,7 +946,6 @@ mod tests {
                 other => panic!("expected literal piece, got {other:?}"),
             }
         }
-        // the covered chars are the name piece + the literal tail.
         assert_eq!(
             total + 3 * REPLACEMENT_SCAN_WINDOW_CHARS + 1,
             template.chars().count(),
@@ -1077,10 +955,6 @@ mod tests {
 
     #[test]
     fn braced_name_without_closing_brace_bounded() {
-        // and the `{aaa…` tail is emitted as literal pieces, truncated at
-        // the output budget — no panic, bounded pieces, and the emitted
-        // output is identical to the pre-bound behavior (the `$` was
-        // already literal when no `}` exists anywhere).
         let mut template = "${".to_string();
         template.push_str(&"a".repeat(1_000_000));
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -1101,10 +975,6 @@ mod tests {
 
     #[test]
     fn huge_bare_name_run_bounded() {
-        // name is truncated to the window (it can never resolve: the
-        // pattern is capped at MAX_HYGIENE_PATTERN_CHARS, far below the
-        // window) and the tail is emitted as literal pieces, truncated at
-        // the output budget — no panic, bounded pieces.
         let mut template = "$".to_string();
         template.push_str(&"a".repeat(1_000_000));
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -1123,8 +993,6 @@ mod tests {
 
     #[test]
     fn oversized_input_truncated_with_note() {
-        // a per-entry trace note records the degradation — the emitted text
-        // must never change silently (mirrors the output-cap note).
         let mut big_input = "x".repeat(MAX_HYGIENE_INPUT_CHARS);
         big_input.push_str(" dragon"); // tail beyond the cap
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -1133,7 +1001,6 @@ mod tests {
             &serde_json::json!([{ "pattern": "dragon", "replacement": "wyrm" }]),
         )]);
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
-        // truncated text and the summary is capped.
         assert_eq!(summary.chars().count(), MAX_HYGIENE_INPUT_CHARS);
         assert_eq!(trace[0].applied, 0);
         assert_eq!(trace[0].skipped, 1); // no-match on the capped text
@@ -1144,7 +1011,6 @@ mod tests {
 
     #[test]
     fn oversized_input_transform_matching_prefix_still_applies() {
-        // is recorded alongside the applied replacements.
         let mut big_input = "dragon".to_string();
         big_input.push_str(&"x".repeat(MAX_HYGIENE_INPUT_CHARS));
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -1233,7 +1099,6 @@ mod tests {
             &serde_json::json!(carrier),
         )]);
         let out_summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
-        // untouched (its transforms were never parsed or executed).
         let expected = (0..total)
             .map(|i| {
                 if i < MAX_HYGIENE_TRANSFORMS {
@@ -1254,11 +1119,6 @@ mod tests {
 
     #[test]
     fn parse_carrier_stops_collecting_at_cap() {
-        // beyond the first MAX_HYGIENE_TRANSFORMS successfully-parsed
-        // transforms are never read — no per-element diagnostic. The
-        // serde-known array length accounts for the unread tail in the
-        // returned degraded count, and one collective note records the
-        // degradation.
         let carrier: Vec<serde_json::Value> = (0..MAX_HYGIENE_TRANSFORMS)
             .map(|i| {
                 serde_json::json!({
@@ -1271,8 +1131,6 @@ mod tests {
         let parsed = serde_json::json!(carrier);
         let (transforms, notes, malformed) = parse_carrier(&parsed);
         assert_eq!(transforms.len(), MAX_HYGIENE_TRANSFORMS);
-        // length arithmetic, exactly one collective note, no per-element
-        // malformed diagnostics.
         assert_eq!(malformed, 8);
         assert_eq!(notes.len(), 1);
         assert!(notes[0].contains("transforms beyond"));
@@ -1280,10 +1138,6 @@ mod tests {
 
     #[test]
     fn malformed_elements_beyond_cap_count_once_without_per_element_notes() {
-        // individually diagnosed — parsing stops at the cap and the unread
-        // tail is counted into `skipped` via the array length. The old
-        // parse-everything behavior emitted one diagnostic note per
-        // malformed element beyond the cap.
         let carrier: Vec<serde_json::Value> = (0..MAX_HYGIENE_TRANSFORMS)
             .map(|i| {
                 serde_json::json!({
@@ -1291,10 +1145,7 @@ mod tests {
                     "replacement": format!("b{i}"),
                 })
             })
-            .chain(
-                // `skipped` collectively, never read.
-                (0..4).map(|i| serde_json::json!({ "pattern": format!("a{i}") })),
-            )
+            .chain((0..4).map(|i| serde_json::json!({ "pattern": format!("a{i}") })))
             .collect();
         let summary = (0..MAX_HYGIENE_TRANSFORMS)
             .map(|i| format!("a{i}"))
@@ -1312,7 +1163,6 @@ mod tests {
             .join(" ");
         assert_eq!(out_summary, expected);
         assert_eq!(trace[0].applied, MAX_HYGIENE_TRANSFORMS);
-        // collective degradation note.
         assert_eq!(trace[0].skipped, 4);
         assert_eq!(
             trace[0].notes.len(),
@@ -1325,11 +1175,6 @@ mod tests {
 
     #[test]
     fn malformed_before_cap_and_beyond_tail_account_together() {
-        // their skipped slots (they were never executable) but their
-        // diagnostics aggregate into a single count note; the unread tail
-        // beyond the cap is counted into `skipped` via length arithmetic.
-        // Total skipped stays malformed + beyond — identical accounting to
-        // the old apply-time slice, now computed from the parse site.
         let summary = (0..MAX_HYGIENE_TRANSFORMS + 2)
             .map(|i| format!("a{i}"))
             .collect::<Vec<_>>()
@@ -1349,7 +1194,6 @@ mod tests {
             &serde_json::json!(carrier),
         )]);
         let out_summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
-        // last two valid transforms sit beyond the cap and never ran.
         let expected = (0..MAX_HYGIENE_TRANSFORMS)
             .map(|i| format!("b{i}"))
             .chain((MAX_HYGIENE_TRANSFORMS..MAX_HYGIENE_TRANSFORMS + 2).map(|i| format!("a{i}")))
@@ -1371,7 +1215,6 @@ mod tests {
 
     #[test]
     fn huge_malformed_prefix_aggregates_notes_and_hard_stops() {
-        // counts into `skipped` via the serde-known array length.
         let total = 100_000;
         let carrier: Vec<serde_json::Value> = (0..total).map(|_| serde_json::json!(17)).collect();
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -1403,8 +1246,6 @@ mod tests {
 
     #[test]
     fn malformed_before_cap_aggregates_into_one_note() {
-        // aggregated note with a count — never one note per element. Their
-        // skipped slots are unchanged.
         let carrier: Vec<serde_json::Value> = (0..5)
             .map(|i| serde_json::json!({ "pattern": format!("a{i}") })) // malformed: no replacement
             .collect();
@@ -1419,10 +1260,6 @@ mod tests {
 
     #[test]
     fn scan_budget_boundary_is_exactly_scan_budget_elements() {
-        // budget is EXCEEDED. Exactly 8 x MAX_HYGIENE_TRANSFORMS malformed
-        // elements is still in budget (scanned fully, one aggregated note);
-        // one more element trips the scan-budget note and the unread tail
-        // still counts toward `skipped`.
         let in_budget: Vec<serde_json::Value> = (0..MAX_HYGIENE_TRANSFORMS * 8)
             .map(|_| serde_json::json!(17))
             .collect();
@@ -1449,7 +1286,6 @@ mod tests {
 
     #[test]
     fn transforms_at_cap_apply_without_note() {
-        // degradation — all apply, no cap note.
         let total = MAX_HYGIENE_TRANSFORMS;
         let summary = (0..total)
             .map(|i| format!("a{i}"))
@@ -1520,8 +1356,6 @@ mod tests {
             &serde_json::json!([{ "pattern": "^(a+)$", "replacement": "$0$0" }]),
         )]);
         let summary = out[0].body.as_ref().unwrap().summary.as_deref().unwrap();
-        // at the cap with the full first copy (the second copy would
-        // breach the budget).
         assert_eq!(summary.chars().count(), MAX_HYGIENE_OUTPUT_CHARS);
         assert_eq!(trace[0].applied, 1);
         assert!(
@@ -1533,9 +1367,6 @@ mod tests {
 
     #[test]
     fn many_backrefs_into_large_capture_stay_bounded() {
-        // capture spanning most of the input must not materialize a piece
-        // vector (or the full expansion) before the budget check. Streaming
-        // parse stops after the first `$0` fills the cap.
         let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
         let template = "$0".repeat(100_000);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -1555,9 +1386,6 @@ mod tests {
 
     #[test]
     fn multi_match_backrefs_stop_at_output_cap() {
-        // cap and record the truncation (the many-small-matches contract,
-        // now with `$0` substitution). Each "a" → "aa" adds one char, so
-        // the cap is hit after half the matches.
         let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
@@ -1574,8 +1402,6 @@ mod tests {
 
     #[test]
     fn backrefs_substitute_like_regex_expand() {
-        // the segment expansion must produce the same output the regex
-        // crate's `expand` produced.
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
             "the hero slays the dragon",
@@ -1593,7 +1419,6 @@ mod tests {
 
     #[test]
     fn absent_group_refs_expand_to_empty() {
-        // groups expand to the empty string, and a lone `$` is literal.
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
             "x",
@@ -1607,10 +1432,6 @@ mod tests {
 
     #[test]
     fn absent_group_refs_over_many_matches_honor_piece_budget() {
-        // consume the output-char budget, so `$9`.repeat(N) over a long
-        // input scanned the whole template per match (unbounded CPU). The
-        // shared piece-visit budget stops the pass; the original text is
-        // kept when nothing was applied.
         let input = "a".repeat(MAX_HYGIENE_INPUT_CHARS);
         let template = "$9".repeat(100_000);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
@@ -1662,10 +1483,6 @@ mod tests {
 
     #[test]
     fn partial_expansion_after_unmatched_prefix_does_not_duplicate_prefix() {
-        // after a non-empty unmatched prefix was appended, the Partial
-        // break must not re-emit the prefix. The match is consumed
-        // (partially replaced), so the emitted text is the prefix plus the
-        // partial expansion — exactly once.
         let big_replacement = "y".repeat(MAX_HYGIENE_OUTPUT_CHARS);
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
@@ -1710,11 +1527,6 @@ mod tests {
 
     #[test]
     fn piece_budget_exhausted_after_output_keeps_partial_text() {
-        // replacement output was produced (a literal piece followed by
-        // 65,536 absent-group refs and a literal tail), `expand_replacement`
-        // reports Partial — the partially-replaced text stands in, the
-        // match is consumed, and the tail is dropped with the truncation
-        // note (the existing Partial contract, unchanged by R10-1).
         let template = format!("Y{}LITERAL", "${9}".repeat(MAX_HYGIENE_OUTPUT_CHARS));
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
@@ -1738,10 +1550,6 @@ mod tests {
 
     #[test]
     fn work_limit_after_applied_match_keeps_later_match_verbatim() {
-        // already applied — the WorkLimit match is left as-is (re-emitted
-        // verbatim by the tail append) while the applied matches stand.
-        // The old code advanced `last_end` past the WorkLimit match and
-        // dropped its text (`Aa` → `A`).
         let template = format!("A{}", "$9".repeat(MAX_HYGIENE_OUTPUT_CHARS - 1));
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(
             "kb_1",
@@ -1764,9 +1572,6 @@ mod tests {
 
     #[test]
     fn unmatched_span_after_near_cap_replacement_does_not_overflow() {
-        // span before a later match must still honor the cap. Growing
-        // `out_chars` past the cap and subtracting later panics in
-        // overflow-checking builds and wraps (over-cap emit) in release.
         let nearly_full = "b".repeat(MAX_HYGIENE_OUTPUT_CHARS - 8);
         let unmatched = "c".repeat(64);
         let input = format!("X{unmatched}X");
@@ -1787,7 +1592,6 @@ mod tests {
 
     #[test]
     fn unmatched_tail_after_expanding_replacement_is_capped() {
-        // tail that would otherwise push the emit one char over the cap.
         let tail = "a".repeat(MAX_HYGIENE_INPUT_CHARS - 1);
         let input = format!("X{tail}");
         let (out, trace) = apply_hygiene(vec![entry_with_hygiene(

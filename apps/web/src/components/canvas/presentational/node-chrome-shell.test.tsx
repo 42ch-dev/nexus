@@ -25,14 +25,11 @@ const EXTRACT_SOURCE_PATH = path.resolve(__dirname, 'node-chrome-shell.tsx');
 describe('NodeChromeShell presentational boundary', () => {
   it('does not import @xyflow/react (no RF types leak into the chrome extract)', () => {
     const source = readFileSync(EXTRACT_SOURCE_PATH, 'utf8');
-    // *mentions* `@xyflow/react` to describe the boundary — that is fine; only
-    // an actual import would violate the invariant.
     expect(source).not.toMatch(/(?:import|require)\s*[^'"]*['"]@xyflow\/react['"]/);
   });
 
   it('does not import RF-specific symbols (NodeProps / Handle / Position)', () => {
     const source = readFileSync(EXTRACT_SOURCE_PATH, 'utf8');
-    // which all come from that module).
     const importLines = source.split('\n').filter((l) => /^\s*import\b/.test(l));
     for (const line of importLines) {
       expect(line).not.toContain('@xyflow/react');
@@ -47,10 +44,6 @@ describe('NodeChromeShell rendering', () => {
     expect(shell.className).toContain('rounded-card');
     expect(shell.className).toContain('bg-canvas-node-fill');
     expect(shell.className).toContain('shadow-card');
-    // `min-w-canvas-node-default` utility (DESIGN.md
-    // components.canvas.node-width.default) instead of the raw `min-w-[176px]`
-    // arbitrary value — same rendered 176px, but token-named so P3 can lift
-    // canvas node geometry in one place.
     expect(shell.className).toContain('min-w-canvas-node-default');
   });
 
@@ -58,12 +51,8 @@ describe('NodeChromeShell rendering', () => {
     const { container } = render(<NodeChromeShell>body</NodeChromeShell>);
     const cls = container.firstElementChild!.className;
     expect(cls).toContain('shadow-card');
-    // dragging 4).
     expect(cls).toContain('hover:shadow-elevation-2');
-    // forwards the dragging prop without a class-name branch.
     expect(cls).toContain('data-[dragging=true]:shadow-elevation-4');
-    // border-color so the selection border flip animates alongside the
-    // elevation tiers (the old transition-shadow dropped border-color).
     expect(cls).toContain('transition-[box-shadow,border-color]');
     expect(cls).toContain('duration-state');
     expect(cls).toContain('ease-standard');
@@ -96,8 +85,6 @@ describe('NodeChromeShell rendering', () => {
   it('applies the two-layer selection ring when selected (no status)', () => {
     const { container } = render(<NodeChromeShell selected>body</NodeChromeShell>);
     const cls = container.firstElementChild!.className;
-    // ring with a 2px background-color offset pairs the canvas-focus token
-    // with the global focus-ring shape (DESIGN.md §Component Primitives).
     expect(cls).toContain('ring-2');
     expect(cls).toContain('ring-canvas-node-border-selected');
     expect(cls).toContain('ring-offset-2');
@@ -105,8 +92,6 @@ describe('NodeChromeShell rendering', () => {
   });
 
   it('omits the two-layer selection ring when a status overlay is active', () => {
-    // selection. The selected border class still applies so selection state
-    // stays legible alongside the status halo.
     const { container } = render(
       <NodeChromeShell selected status="current">body</NodeChromeShell>,
     );
@@ -139,7 +124,6 @@ describe('NodeChromeShell rendering', () => {
     const namedCls = render(<NodeChromeShell accent="strategy">body</NodeChromeShell>)
       .container.firstElementChild!.className;
     expect(namedCls).toContain('border-l-canvas-strategy-accent');
-    // strategy surface so existing call sites render unchanged.
     expect(trueCls).toContain('border-l-canvas-strategy-accent');
   });
 
@@ -170,8 +154,6 @@ describe('NodeChromeShell rendering', () => {
       <NodeChromeShell className="min-w-canvas-node-outline-scene-beat">body</NodeChromeShell>,
     );
     const cls = container.firstElementChild!.className;
-    // (packages/nexus-ui/src/lib/cn.ts): the caller's scene-beat utility wins,
-    // the default `min-w-canvas-node-default` is dropped.
     expect(cls).toContain('min-w-canvas-node-outline-scene-beat');
     expect(cls).not.toContain('min-w-canvas-node-default');
   });

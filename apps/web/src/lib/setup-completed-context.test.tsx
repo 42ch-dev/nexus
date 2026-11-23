@@ -96,7 +96,6 @@ describe('SetupCompletedProvider', () => {
       { client: statusClient(() => Promise.reject(new Error('daemon down'))) },
     );
 
-    // silently claim an initialized shell when the service cannot be reached.
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
     expect(screen.getByTestId('completed')).toHaveTextContent('false');
   });

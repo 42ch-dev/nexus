@@ -1189,8 +1189,6 @@ async fn edit_character(
             "edit requires at least one mutable field (--display-name, --image-uri, --clear-image-uri, --persona, or --clear-persona)".into(),
         ));
     }
-    // keeps the stored value, an explicit `--clear-*` clears it, and a supplied
-    // value sets it. Persona is stored as a JSON object string.
     let persona_json = match persona {
         Some(raw) => Some(serde_json::Value::Object(parse_persona(Some(raw))?).to_string()),
         None => None,
@@ -1300,7 +1298,6 @@ async fn transition_character(
         .transition_character(principal, request)
         .await
         .map_err(map_core_error)?;
-    // detail envelope is the retained CLI projection of the same fields.
     let character = serde_json::to_value(resp.character)?;
     let detail = CharacterDetail {
         character: serde_json::from_value::<DetailCharacter>(character)?,
@@ -1368,7 +1365,6 @@ async fn edit_binding(
             "use either --world-sheet-entry-id or --clear-world-sheet, not both".into(),
         ));
     }
-    // a supplied entry id sets it, and an omitted member keeps it.
     let sheet_patch = if clear_world_sheet {
         FieldPatch::Clear
     } else {
@@ -1739,9 +1735,6 @@ async fn add_knowledge(
     if let Some(text) = load_bounded_summary_text(summary, summary_file)? {
         body["summary"] = serde_json::Value::String(text);
     }
-    // this leaf: the raw member presence drives the core's `summary_present`
-    // bit, so a World-owned create carrying the member is refused by the core
-    // exactly as the daemon adapter refused it.
     let summary_present = body.get("summary").is_some();
     let req: AddKnowledgeEntryRequest = serde_json::from_value(body)?;
     let stored = core
@@ -1808,7 +1801,6 @@ async fn edit_knowledge(
                 .into(),
         ));
     }
-    // the stored summary, `--clear-summary` clears it, a supplied text sets it.
     let summary_text = load_bounded_summary_text(summary, summary_file)?;
     let summary_patch = if clear_summary {
         FieldPatch::Clear
@@ -1817,8 +1809,6 @@ async fn edit_knowledge(
             .as_deref()
             .map_or(FieldPatch::Keep, FieldPatch::Set)
     };
-    // like the native bridge: the CLI never supplies a holder id, and the core
-    // resolves the permitted identity against stored state under the CAS.
     let audience_wire: Option<UpdateKnowledgeEntryRequestAudience> = audience
         .map(serde_json::from_value)
         .transpose()
@@ -1946,8 +1936,6 @@ async fn view_knowledge(
         body["cursor"] = serde_json::Value::String(c);
     }
     let req: ViewRequest = serde_json::from_value(body)?;
-    // Creator viewpoint is the management review, a Character viewpoint stays
-    // the strict holder-filtered selection. This leaf selects neither.
     let query = ActorKnowledgeViewQuery {
         world_id: req.world_id.to_string(),
         binding_id: req.binding_id.as_ref().map(|id| id.as_str().to_string()),
@@ -1968,8 +1956,6 @@ async fn view_knowledge(
     }
     let mut lines: Vec<String> = Vec::with_capacity(resp.items.len() + 1);
     for item in &resp.items {
-        // the retired `creator_only` boolean — shared is the *absence* of
-        // disclosure.
         let governance = item
             .disclosure
             .as_ref()
@@ -2372,7 +2358,6 @@ async fn tom_show(
     if let Some(c) = cursor {
         body["cursor"] = serde_json::Value::String(c);
     }
-    // forwards them and never re-derives the keyset order.
     let query: ListCharacterTomQuery = serde_json::from_value(body)?;
     let resp = core
         .list_character_tom(principal, character_id.to_string(), query)
@@ -2433,8 +2418,6 @@ mod holder_public_tests {
     use super::{audience_wire, refuse_legacy_creator_only_flag, refuse_world_owned_summary};
     use std::path::Path;
 
-    // `creator character knowledge` authoring commands.
-
     #[test]
     fn v1191_holder_public_audience_flag_maps_the_frozen_wire_object() {
         assert_eq!(audience_wire(None, None).unwrap(), None);
@@ -2462,7 +2445,6 @@ mod holder_public_tests {
 
     #[test]
     fn v1191_holder_public_legacy_creator_only_flag_is_refused_by_presence() {
-        // an absent flag is accepted.
         for present in [Some(true), Some(false)] {
             let err = refuse_legacy_creator_only_flag(present).unwrap_err();
             assert!(

@@ -201,10 +201,6 @@ fn review_result_record_ids(
     issued_space: &str,
     issued_key: &str,
 ) -> CoreResult<Vec<String>> {
-    // peer-authored bytes (`space_id`, `idempotency_key`, `result.outcome`,
-    // `record_ids`) including private markers and newlines, and the pipeline
-    // logs the very `Display` this helper returns - so no peer field is ever
-    // interpolated into a category or message.
     let malformed = |reason: &'static str| internal_err("memory_review_receipt", reason);
     let action = decision
         .get("action")
@@ -452,12 +448,6 @@ fn pagination_info(limit: u32, has_more: bool, next_cursor: Option<&str>) -> ser
     })
 }
 
-// `MemoryPort` the open pinned ([`CoreService::memory_binding`]) instead of
-// the legacy tables. This block is the existing-DTO/error adapter: a handler
-// keeps its retained request/response shape (compass D5) while the adapter
-// records the legacy page/keyset/offset semantics on top of provider reads and
-// maps a port refusal back onto the core error taxonomy.
-//
 // The provider projects the unmigrated legacy rows through one merged read
 // (the NXM-5 Task 1 bridge), so a handler serves migrated and not-yet-migrated
 // content alike. Legacy metadata rides in `content.structured.nexus_legacy`,
@@ -481,8 +471,6 @@ fn memory_reject(reject: &SpokeReject) -> CoreError {
             field: "memory".to_string(),
             reason: reject.message.clone(),
         },
-        // legacy promotion path already renders (409 at the HTTP adapters), so
-        // the same stale-revision answer reads the same on either path.
         SpokeRejectCode::RevisionConflict => CoreError::ActorConflict {
             code: "version_mismatch".to_string(),
             message: reject.message.clone(),
@@ -533,7 +521,6 @@ fn remote_refusal(reject: &SpokeReject) -> CoreError {
         .filter(|code| SpokeRejectCode::try_from_str(code).is_some())
         .map(str::to_string);
     CoreError::MemoryProviderRefused {
-        // consumers already match on the local branch (I-000204).
         conflict_code: (outcome == RemoteOutcome::Definite
             && reject.code == SpokeRejectCode::RevisionConflict)
             .then(|| "version_mismatch".to_string()),
@@ -582,8 +569,6 @@ const fn memory_refusal_family(code: SpokeRejectCode) -> MemoryProviderRefusal {
         | SpokeRejectCode::ImportConflict
         | SpokeRejectCode::SpaceFrozen
         | SpokeRejectCode::SubjectFenced => MemoryProviderRefusal::Conflict,
-        // code outside the capture contract's clean refusals: the outcome may
-        // not be settled, so callers must not read it as a definite failure.
         _ => MemoryProviderRefusal::Unavailable,
     }
 }
@@ -1018,12 +1003,6 @@ impl MemoryAdapter {
                 None => break,
             }
         }
-        // (`ORDER BY created_at DESC, pending_id DESC`), and mixed legacy
-        // formats do not parse into that order: a whole-second `…00Z` row
-        // outranks a `…00.900Z` one as text while the instant order puts the
-        // fractional row first (same distinction as the fragment selection,
-        // NXM-7 fix 4). The legacy column is served verbatim, so its text is
-        // the queue key.
         rows.sort_by(|left, right| {
             right
                 .created_at
@@ -1127,8 +1106,6 @@ impl MemoryAdapter {
             }
         }
         if let Some(want) = want {
-            // drops that page's remainder: the bound is the caller's, not the
-            // provider's page size (fix round 4, finding F2).
             rows.truncate(want);
         }
         Ok(rows)
@@ -1314,11 +1291,6 @@ impl MemoryAdapter {
             .await
         {
             SpokeResult::Ok(_) => Ok(true),
-            // `Ok` receipt above means this dismissal consumed the row: a
-            // candidate the review drain already promoted or fragmented is
-            // `CandidateConsumed`, an absent row is `NotFound`, and a lost CAS
-            // is `RevisionConflict` — all three are the retained not-found
-            // answer, never dismissal success (fix round 4, finding F3).
             SpokeResult::Reject(reject)
                 if self.proves(
                     &reject,
@@ -1364,9 +1336,6 @@ impl MemoryAdapter {
             "expected_revision": revision,
             "idempotency_key": format!("e4dismiss-native:{candidate_id}"),
         }))?;
-        // answer with an older, still schema-valid receipt for another
-        // candidate or key, and releasing on it would stop counting a pending
-        // candidate as live.
         let issued_space = request.space_id.as_str().to_string();
         let issued_key = request.idempotency_key.as_str().to_string();
         match self
@@ -1377,7 +1346,6 @@ impl MemoryAdapter {
         {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                // still live, so the binding stays protected.
                 let released =
                     dismiss_result_candidate_id(&body, &issued_space, &issued_key, candidate_id)?;
                 self.record_remote_object(
@@ -1432,7 +1400,6 @@ impl MemoryAdapter {
         let Some(row) = self.matched_pending_row(&candidate, pending_id) else {
             return Ok(false);
         };
-        // dismissal acknowledges; a shared-scope candidate carries none.
         let binding_id = candidate
             .pointer("/capture_scope/context_id")
             .and_then(Value::as_str);
@@ -1495,13 +1462,11 @@ impl MemoryAdapter {
             "space_id": self.binding.space_id(),
             "candidate_id": candidate_id,
             "expected_revision": expected_revision,
-            // exactly the records this decision asked the provider to create.
             "decision": decision.clone(),
             "idempotency_key": idempotency_key("review", candidate_id)?,
         }))?;
         if self.is_local() {
             let local = self.binding.local()?;
-            // local review always has one.
             let section = section.ok_or_else(|| {
                 internal_err(
                     "memory_review_section",
@@ -1516,13 +1481,7 @@ impl MemoryAdapter {
                 SpokeResult::Reject(reject) => Err(self.refuse(&reject)),
             };
         }
-        // settle, and that candidate need not carry a Core capture admission or
-        // candidate fact (an independent signed writer can have created it).
-        // Admit this one attempt before the RPC under the same per-attempt
-        // namespace, then settle its facts and its retirement together.
         let attempt = self.admit_remote_review_attempt(binding_id).await?;
-        // answer with an older, still schema-valid receipt whose result matches
-        // in shape but belongs to another key (and a different namespace).
         let issued_space = request.space_id.as_str().to_string();
         let issued_key = request.idempotency_key.as_str().to_string();
         match self
@@ -1533,12 +1492,8 @@ impl MemoryAdapter {
         {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                // decision (no ids, a short id list, a mismatched outcome). Only
-                // a consistent committed result may settle; otherwise the
-                // attempt keeps its admission and the binding stays protected.
                 let record_ids =
                     review_result_record_ids(&decision, &body, &issued_space, &issued_key)?;
-                // in place, so the binding stays protected.
                 self.record_remote_review(
                     attempt.as_deref(),
                     binding_id,
@@ -1584,9 +1539,6 @@ impl MemoryAdapter {
     async fn memory_by_slug(&self, creator_id: &str, slug: &str) -> CoreResult<Option<Value>> {
         let record_id = legacy::memory_long_term_record_id(creator_id, slug);
         let stored = self.record(&record_id).await?;
-        // the creator's own listing surface, where a deleted memory is absent.
-        // Anything the deterministic id does not serve falls through to the
-        // authored-kind read of provider rows, which excludes tombstones.
         if stored
             .as_ref()
             .is_some_and(|record| record.get("tombstone").is_none())
@@ -1846,12 +1798,6 @@ impl MemoryAdapter {
         match result {
             SpokeResult::Ok(receipt) => {
                 if !self.is_local() {
-                    // dependency. Only a receipt that proves THIS promotion —
-                    // this space, key, record and the requested shared
-                    // placement — may release it; otherwise another live
-                    // record's protection would be cleared (or this record's
-                    // released while its real promotion is unknown), so the
-                    // mismatch returns with the fact untouched.
                     let body = serde_json::to_value(&receipt).map_err(wire_err)?;
                     let promoted = promote_result_record_id(&body, &issued_space, &key, record_id)?;
                     self.record_remote_object(
@@ -1865,14 +1811,9 @@ impl MemoryAdapter {
                 Ok(())
             }
             SpokeResult::Reject(reject) => Err(match reject.code {
-                // remote `NotFound` with a missing or unknown outcome stays an
-                // honest unknown failure.
                 SpokeRejectCode::NotFound if self.proves(&reject, &[SpokeRejectCode::NotFound]) => {
                     not_found("character memory fragment", &format!("'{record_id}'"))
                 }
-                // definite stale-revision conflict reaches the same
-                // `version_mismatch` contract through the safe carrier in
-                // `self.refuse` (static text + classification metadata).
                 SpokeRejectCode::RevisionConflict if self.is_local() => CoreError::ActorConflict {
                     code: "version_mismatch".to_string(),
                     message: format!("fragment revision mismatch: {}", reject.message),
@@ -1924,11 +1865,6 @@ fn idempotency_key(op: &str, object_id: &str) -> CoreResult<String> {
     }
 }
 
-// both hold the bearer's [`MemoryDisposition`] section: the drain across its
-// consumed-check and classification, the dismissal across its consume. The
-// step-point below lets a regression drive the exact interleaving a dismissal
-// would need and observe the section is not available to it.
-
 /// A step-point inside a review drain's disposition section (test builds only).
 #[cfg(feature = "test-hooks")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1979,8 +1915,6 @@ impl CoreService {
 
     /// Park at `at` when a test armed that step-point.
     async fn park_memory_review(&self, at: MemoryReviewPause) {
-        // every step-point, and taking a later one's rendezvous here would drop
-        // it before the drain reached it.
         let armed = {
             let mut slot = self
                 .inner
@@ -2141,14 +2075,6 @@ fn creator_world_id(record: &Value) -> Option<String> {
         })
 }
 
-// (`creator soul …`) leaves used to reach the bearer files directly. They are
-// provider clients now: a Creator's long-term memories are the `nexus.*`
-// records the nine-kind bijection names (D-7), and `SOUL.md` is the one
-// authored `personality` profile (§6.8, D-12). The bridge projects both from
-// the unmigrated files, so one read path serves migrated and not-yet-migrated
-// content alike (D6); every write lands on the provider, never on the legacy
-// surface.
-//
 // The authored identity the CLI renders — the memory slug, its `memory_id` and
 // the authored kind — rides in `content.structured.nexus_legacy`, the same
 // block the bridge projects, so one rendered row reads the same before and
@@ -2194,7 +2120,6 @@ fn creator_memory_key(op: &str, identity: &str, body: &str) -> String {
         "body": body,
     })) {
         SpokeResult::Ok(digest) => format!("e4memory:{digest}"),
-        // total rather than reporting an unreachable interior failure.
         SpokeResult::Reject(_) => format!("e4memory:{op}:{identity}"),
     }
 }
@@ -2295,9 +2220,6 @@ fn creator_memory_content(
     body: &str,
     source_session_ids: &[String],
 ) -> Value {
-    // no per-attempt timestamp: a retried write must reach the same receipt
-    // payload (NXM-6 fix round 1, finding F4). Readers fall back to the record's
-    // timestamp, which is the same instant for a row this family authored.
     json!({
         "text": body,
         "structured": { "nexus_legacy": {
@@ -2452,10 +2374,6 @@ impl CoreService {
             .unwrap_or("unknown")
             .to_string();
         let raw_digest = request.raw_digest.as_str().to_string();
-        // candidate `created_at` is what the retained DTO then serves (a pending
-        // row falls back to it), so a retried capture — the CLI omits the flag —
-        // reaches the same receipt payload instead of regenerating a different
-        // one and failing as `IDEMPOTENCY_CONFLICT` (NXM-6 fix round 1, F4).
         let created_at = request.created_at.as_deref();
         validate_capture_fields(
             &pending_id,
@@ -2566,8 +2484,6 @@ impl CoreService {
         {
             return Ok(false);
         }
-        // delete of the same slug is a new record, not a replay of the first
-        // create's receipt (NXM-6 fix round 1, finding F4).
         let memory_id = mint_creator_memory_id();
         let content = creator_memory_content(slug, kind, &memory_id, body, &[]);
         memory
@@ -2616,8 +2532,6 @@ impl CoreService {
         }
         let (memory_id, kind, source_session_ids) = creator_memory_identity(&record);
         let content = creator_memory_content(slug, &kind, &memory_id, body, &source_session_ids);
-        // — so a repeated edit after an intervening one is a new mutation, while
-        // repeating this exact edit reaches the same receipt (finding F4).
         let identity = format!("{}@{}", revision.record_id, revision.revision);
         match memory
             .update_memory_record(
@@ -2653,7 +2567,6 @@ impl CoreService {
             return Ok(false);
         };
         let revision = MemoryRevision::of(&record)?;
-        // new mutation, not a replay of the first record's tombstone (F4).
         let identity = format!("delete:{}@{}", revision.record_id, revision.revision);
         match memory
             .delete_memory_record(
@@ -2700,7 +2613,6 @@ impl CoreService {
     ) -> CoreResult<()> {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
-        // mutations, so the revision is part of the key (F4).
         let identity = expected_revision.map_or_else(
             || "profile@new".to_string(),
             |revision| format!("profile@{revision}"),
@@ -2737,9 +2649,6 @@ impl CoreService {
             .map_err(|error| internal_err("soul_parse", error))?;
         let (markdown, processed) = experience_markdown(&memory.memory_records().await?);
         soul.set_experience(markdown.clone());
-        // the rendered section — so a repeated refresh after the revision moved
-        // is a new mutation instead of an `IDEMPOTENCY_CONFLICT` on the old key
-        // (NXM-6 fix round 1, finding F4).
         let revision = profile["revision"].as_u64();
         let identity = format!(
             "profile@{}",
@@ -2789,7 +2698,6 @@ impl CoreService {
                 personality,
                 &[],
             );
-            // repeated push after an intervening write is a new mutation (F4).
             let identity = format!("{}@{}", revision.record_id, revision.revision);
             memory
                 .update_memory_record(
@@ -2801,8 +2709,6 @@ impl CoreService {
                 .await?;
             memory_id
         } else {
-            // the memory was deleted creates a new record instead of replaying
-            // the deleted one's receipt (F4).
             let memory_id = mint_creator_memory_id();
             let content = creator_memory_content(
                 PERSONALITY_MEMORY_SLUG,
@@ -2862,8 +2768,6 @@ impl CoreService {
     ) -> CoreResult<CaptureCharacterPendingReviewResponse> {
         self.verify_principal(principal)?;
         let binding_id = optional_str(request.binding_id.as_ref());
-        // the daemon handler admitted it before local-db (a foreign Character
-        // is 404 even for a malformed body).
         let _lease = self
             .acquire_actor_activity(
                 principal,
@@ -2879,9 +2783,6 @@ impl CoreService {
             .unwrap_or("unknown")
             .to_string();
         let raw_digest = request.raw_digest.as_str().to_string();
-        // candidate instant is what the pending DTO then serves, so a retried
-        // capture reaches the same receipt instead of regenerating a different
-        // payload (the Creator arm's F4 rule).
         let created_at = request.created_at.map(|instant| instant.to_rfc3339());
 
         validate_capture_input(&request, &raw_digest)?;
@@ -2889,10 +2790,6 @@ impl CoreService {
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        // check runs inside the provider's own write transaction (D15), and a
-        // nonlocal capture commits its own durable admission before the RPC
-        // (D18). `remove_binding` takes the same write lock, so it cannot delete
-        // the binding between the check and the candidate write.
         let binding = binding_id.map(|binding| CaptureBinding {
             owner_creator: principal.creator_id(),
             character: &character_id,
@@ -2917,14 +2814,11 @@ impl CoreService {
                 "text": raw_digest.as_str(),
                 "structured": { "nexus_legacy": origin },
             },
-            // capture is a context placement on that binding, a shared capture
-            // carries none.
             "capture_scope": binding_id.map_or_else(
                 || json!({ "visibility": "shared" }),
                 |binding| json!({ "visibility": "context", "context_id": binding }),
             ),
             "source_context_ids": binding_id.iter().collect::<Vec<_>>(),
-            // capture: every accepted digest must reach the queue.
             "kind_hint": task_kind_to_memory_kind(&task_kind),
             "idempotency_key": character_capture_key(&pending_id)?,
         }))?;
@@ -2940,13 +2834,6 @@ impl CoreService {
                 Err(error) => return Err(map_local_db_error(error)),
             }
         } else {
-            // capture op stores the candidate under its own minted id. A
-            // binding-local capture first commits its own durable admission
-            // (D18, §5.1) in the same short writer transaction as the Nexus
-            // provenance admission, before the RPC; only this attempt's
-            // definite result retires it and publishes the candidate
-            // references the provider returned. A shared-scope capture carries
-            // no binding dependency and takes no admission.
             match binding_id {
                 Some(binding_id) => {
                     self.capture_remote_binding_scoped(
@@ -3008,7 +2895,6 @@ impl CoreService {
         capture: spoke_schemas::MemoryCaptureRequest,
     ) -> CoreResult<()> {
         let binding = &memory.binding;
-        // be admitted: fail closed instead of recording under another identity.
         let Some(client_identity) = binding.client_identity() else {
             return Err(CoreError::Internal {
                 category: "memory_remote_identity_missing".to_string(),
@@ -3029,9 +2915,6 @@ impl CoreService {
         let mut admission = nexus_local_db::begin_immediate(&self.inner.pool)
             .await
             .map_err(map_local_db_error)?;
-        // owned active World when the attempt becomes durable — the same
-        // admission the local provider's write transaction performs, in the same
-        // writer transaction that makes the unknown attempt durable.
         nexus_local_db::require_valid_provenance_tx(
             &mut admission,
             principal.creator_id(),
@@ -3050,15 +2933,11 @@ impl CoreService {
         .map_err(map_local_db_error)?;
         admission.commit().await.map_err(sqlx_internal)?;
 
-        // answer with an older, still schema-valid receipt whose result belongs
-        // to another key (and another namespace), and publishing its objects
-        // while retiring this admission would leave this capture unprotected.
         let issued_space = capture.space_id.as_str().to_string();
         let issued_key = capture.idempotency_key.as_str().to_string();
         match binding.port().capture(&memory.principal, capture).await {
             SpokeResult::Ok(receipt) => {
                 let body = serde_json::to_value(&receipt).map_err(wire_err)?;
-                // place, so the binding stays unremovable.
                 let candidate_ids =
                     capture_result_candidate_ids(&body, &issued_space, &issued_key)?;
                 let published_at = now_iso();
@@ -3088,13 +2967,6 @@ impl CoreService {
                 Ok(())
             }
             SpokeResult::Reject(reject) => {
-                // effect retires its admission. `OUTCOME_UNCERTAIN` (including a
-                // response-projection failure after commit), a retryable class,
-                // a missing/unknown class or a contradictory code all keep it;
-                // a local settlement failure keeps it too. The provider outcome
-                // then surfaces through the shared remote-refusal policy: its
-                // whitelisted code, wire code and retry class survive, its peer
-                // text does not (I-000202).
                 if let Err(error) = self
                     .settle_remote_capture_reject(&admission_id, &namespace, &reject)
                     .await
@@ -3156,7 +3028,6 @@ impl CoreService {
         offset: u32,
     ) -> CoreResult<ListCharacterPendingReviewsResponse> {
         self.verify_principal(principal)?;
-        // precedes the provider read.
         let _admission = MemoryPipelineCtx::character_read(
             &self.inner.pool,
             principal.creator_id(),
@@ -3265,8 +3136,6 @@ impl CoreService {
         let missing = || not_found("pending review", &format!("'{pending_id}'"));
         let pending = pending_now(&memory, &candidate_id).await?;
         if memory.is_local() {
-            // and consumes it in the same guarded transaction, so a row that was
-            // pending can only answer through that dismissal.
             if pending {
                 if !memory.dismiss_legacy(&candidate_id).await? {
                     return Err(missing());
@@ -3281,16 +3150,11 @@ impl CoreService {
                 .dismiss_provider_candidate(&candidate_id, &pending_id)
                 .await?
         {
-            // holds under this shaped id is an ordinary provider candidate,
-            // and the standard revision check runs only after its subject and
-            // retained pending identity match this bearer (I-000197).
             return map_wire(json!({
                 "success": true,
                 "pending_id": pending_id,
             }));
         }
-        // id: address it through the row itself, exactly as the Creator
-        // dismissal does (NXM-16).
         if let Some(row) = memory
             .pending_rows()
             .await?
@@ -3354,9 +3218,6 @@ impl CoreService {
         );
         let start = usize::try_from(offset).unwrap_or(usize::MAX);
         let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
-        // classified fragment past the page proves `has_more`. The walk stops
-        // there, so it never reads or converts the whole collection, and a row
-        // it never reaches cannot fail the page.
         let mut skipped = 0usize;
         let mut page: Vec<CharacterMemoryFragmentInfo> = Vec::new();
         let mut has_more = false;
@@ -3396,7 +3257,6 @@ impl CoreService {
                 None => break,
             }
         }
-        // `has_more` describe fragments only.
         let next_cursor = has_more.then(|| format!("v1:{}", offset.saturating_add(limit)));
         map_wire(json!({
             "fragments": page,
@@ -3456,12 +3316,7 @@ impl CoreService {
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
-        // same-target promotion is a §7.0.4 no-op, so the adapter refuses an
-        // already-shared fragment itself.
         let absent = || not_found("character memory fragment", &format!("'{fragment_id}'"));
-        // fragment is promotable at all: the DTO serves the legacy
-        // `fragment_id` while the provider names that row by its external id
-        // (R4-F1).
         let current = memory
             .character_fragment(&fragment_id)
             .await?
@@ -3470,18 +3325,9 @@ impl CoreService {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        // Character's own and a Nexus Character fragment. The read alone is
-        // authorized by the principal's grants, which also cover every other
-        // Character it owns, so the owner and family are checked here — before
-        // any mutation.
         if current["subject_id"].as_str() != Some(memory.subject_id()) {
             return Err(absent());
         }
-        // record with no proven Nexus origin keeps the retained non-fragment
-        // answer, a record whose required identity is gone while Nexus still holds
-        // positive origin evidence (its own metadata, or this binding's fact for
-        // it) fails honestly, and only a representable fragment reaches the
-        // promotion below.
         let current_binding = current
             .pointer("/scope/context_id")
             .and_then(Value::as_str)
@@ -3498,15 +3344,7 @@ impl CoreService {
             }
             CharacterFragmentFamily::Damaged => return Err(damaged_character_fragment()),
         };
-        // binding-local its own scope names it; once the promotion committed it
-        // names the target, and its provenance is a client claim that need not
-        // name the placement at all — so the promotion's transaction recorded the
-        // old binding and a retry reads that recovery row instead of guessing
-        // (R4-F3 round 2).
         let Some(source_binding) = current_binding else {
-            // outstanding: finish it before answering the stable conflict, so a
-            // retry never leaves the shared fragment behind a stale cache. A
-            // remote binding has no local narrative cache or journal to settle.
             if memory.is_local() {
                 let binding = memory.soul_invalidation_binding(&record_id).await?;
                 self.invalidate_character_soul_narratives(&character_id, binding.as_deref())
@@ -3525,12 +3363,6 @@ impl CoreService {
                 invalid_input("expected_revision must be a non-negative fragment revision")
             })?;
         let provider_revision = u64::try_from(provider_revision).unwrap_or(u64::MAX);
-        // revision: a caller whose expected revision is not the one this record
-        // was read at would otherwise promote a revision whose content was never
-        // validated (a concurrent replacement could slip through the CAS). That
-        // stale read is the retained `version_mismatch`, written before any
-        // provider call — the provider's own CAS stays the authority for a record
-        // that advances after this read.
         let stored_revision = current["revision"].as_u64().unwrap_or(1);
         if stored_revision != provider_revision {
             return Err(CoreError::ActorConflict {
@@ -3541,11 +3373,6 @@ impl CoreService {
                 ),
             });
         }
-        // authorized record at the CAS revision, BEFORE the provider mutation,
-        // and it is also the response value. The promotion commits exactly the
-        // placement it requests (shared) and the CAS proves the record was at
-        // `stored_revision`, so the transaction leaves `stored_revision + 1` —
-        // the revision the DTO exposes as `stored_revision`.
         let fragment = character_fragment_from_provider(
             &current,
             &character_id,
@@ -3556,17 +3383,11 @@ impl CoreService {
         memory
             .promote_fragment(&record_id, stored_revision, source_binding.as_str())
             .await?;
-        // (shared + the old binding) are invalidated. The cache and the
-        // invalidation journal are local-provider state, so a remote binding
-        // settles neither.
         if memory.is_local() {
             self.invalidate_character_soul_narratives(&character_id, Some(source_binding.as_str()))
                 .await?;
             memory.finish_soul_invalidation(&record_id).await?;
         }
-        // serialization of the record and no post-commit read remain, so an
-        // intervening writer cannot turn this promotion into a projection
-        // failure.
         map_wire(json!({ "fragment": fragment }))
     }
 
@@ -3590,7 +3411,6 @@ impl CoreService {
         character_id: &str,
         binding_id: Option<&str>,
     ) -> CoreResult<()> {
-        // regression can prove the retry still finishes the invalidation.
         #[cfg(feature = "test-hooks")]
         if self
             .inner
@@ -3635,7 +3455,6 @@ impl CoreService {
     ) -> CoreResult<ReviewCharacterMemoryResponse> {
         self.verify_principal(principal)?;
         let binding_id = optional_str(request.binding_id.as_ref());
-        // activity context — with its per-Character lease — across the batch.
         let ctx = MemoryPipelineCtx::character_write(
             self.acquire_actor_activity(
                 principal,
@@ -3648,8 +3467,6 @@ impl CoreService {
             &character_id,
             binding_id,
         )?;
-        // the provider read serves pending candidates only, so a row a
-        // dismissal consumed is no longer queued at all.
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
@@ -3659,15 +3476,9 @@ impl CoreService {
             .into_iter()
             .filter(|row| pending_row_in_scope(row, binding_id))
             .collect();
-        // the extra row proves more exist.
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
         let more_in_db = pending.len() > batch_limit;
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
-        // selects the slice. This re-check runs inside the bearer's disposition
-        // section when the binding is local (a remote binding relies on its
-        // candidate CAS), so a dismissal can neither commit between it and the
-        // classification below nor be classified after it: one that already
-        // committed is observed here and its row is dropped.
         #[cfg(feature = "test-hooks")]
         self.park_memory_review(MemoryReviewPause::AfterFetchCheck)
             .await;
@@ -4073,21 +3884,14 @@ impl CoreService {
         self.verify_principal(principal)?;
         let memory = self.creator_memory_writer(principal).await?;
         let candidate_id = legacy::pending_review_candidate_id(&pending_id);
-        // (before the reroute the row was deleted, so a repeat dismissal found
-        // nothing). The authoritative decision is still the guarded dismissal
-        // below; this read only keeps that answer.
         let pending = pending_now(&memory, &candidate_id).await?;
         let dismissed = if memory.is_local() {
-            // consumes it in the same guarded transaction.
             if pending {
                 memory.dismiss_legacy(&candidate_id).await?
             } else {
                 false
             }
         } else {
-            // addresses an ordinary provider candidate there, and the standard
-            // revision check runs only after its subject and retained pending
-            // identity match this bearer (I-000197).
             pending
                 && memory
                     .dismiss_provider_candidate(&candidate_id, &pending_id)
@@ -4099,9 +3903,6 @@ impl CoreService {
                 pending_id,
             });
         }
-        // provider-native: its candidate id is minted, so the retained
-        // `pending_id` addresses it through the row itself instead of the
-        // bridge's deterministic id.
         if let Some(row) = memory
             .pending_rows()
             .await?
@@ -4121,10 +3922,6 @@ impl CoreService {
         if memory.is_local() {
             return Err(self.pending_review_refusal(principal, &pending_id).await?);
         }
-        // provider's "nothing pending" is the whole answer: the local ownership
-        // lookup is not consulted here, and a remote miss can neither read
-        // legacy rows nor surface an unrelated local ownership 403 or local
-        // storage error.
         Err(CoreError::NotFound {
             resource: format!("pending review '{pending_id}' not found"),
         })
@@ -4195,7 +3992,6 @@ impl CoreService {
         }
         let memory = self.creator_memory(principal).await?;
         let filter: Option<Vec<String>> = world_id.as_ref().map(|world| vec![world.clone()]);
-        // whole set; an unfiltered read needs only its own page.
         let want = keyword.is_none().then_some(limit);
         let records = memory
             .records(
@@ -4208,8 +4004,6 @@ impl CoreService {
         let mut fragments = Vec::new();
         for record in &records {
             if let Some(keyword) = keyword.as_deref() {
-                // case-insensitive for ASCII: a mixed-case keyword must not
-                // hide the fragment a lowercase one finds.
                 if !record_keywords(record)
                     .iter()
                     .any(|value| value.eq_ignore_ascii_case(keyword))
@@ -4253,19 +4047,11 @@ impl CoreService {
                 ),
             });
         }
-        // the provider read serves pending candidates only, so a row a
-        // dismissal consumed is no longer queued at all.
         let memory = self.creator_memory_writer(principal).await?;
         let pending = memory.pending_rows().await?;
-        // the extra row proves more exist.
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
         let more_in_db = pending.len() > batch_limit;
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
-        // selects the slice. This re-check runs inside the bearer's disposition
-        // section when the binding is local (a remote binding relies on its
-        // candidate CAS), so a dismissal can neither commit between it and the
-        // classification below nor be classified after it: one that already
-        // committed is observed here and its row is dropped.
         #[cfg(feature = "test-hooks")]
         self.park_memory_review(MemoryReviewPause::AfterFetchCheck)
             .await;
@@ -4285,7 +4071,6 @@ impl CoreService {
                 candidate_id: row.candidate_id.clone(),
                 expected_revision: row.revision,
                 input: row.review_input(principal.creator_id()),
-                // capture is coerced to a fragment.
                 binding_local: false,
             })
             .collect();
@@ -4299,8 +4084,6 @@ impl CoreService {
         .await?;
         drop(section);
 
-        // may not be fully drained (more rows in the DB, the budget expired
-        // mid-batch, or any fetched row remained pending).
         let deadline_stopped = batch.processed < processing_slice;
         let has_more = more_in_db || deadline_stopped || batch.any_row_remained_pending;
         batch.has_more = has_more;
@@ -4507,10 +4290,6 @@ impl CharacterTomService {
         viewer_character_id: &str,
         query: CharacterTomListQuery,
     ) -> CoreResult<CharacterTomPage> {
-        // stored bindings and carriers with the owner + stored binding tuple,
-        // not liveness. No L2 subject-reactivation requirement on historical
-        // rows. Foreign/missing rows and a missing/foreign World still fail
-        // closed (indistinguishable).
         self.admit_viewer_retained(
             caller_creator_id,
             viewer_character_id,
@@ -4520,8 +4299,6 @@ impl CharacterTomService {
         .await?;
         let cursor = Self::decode_cursor(&query.cursor)?;
         let order_filter = query.order;
-        // lengths, and modules JSON validity are enforced with compile-time SQL
-        // before any `modules_json` text is parsed or materialized into records.
         let mut admitted_ids: Vec<String> = Vec::new();
         for owner in [
             KnowledgeOwnerRef::character(viewer_character_id),
@@ -4531,12 +4308,7 @@ impl CharacterTomService {
             let admitted = self.probe_scope_carriers(&owner).await?;
             admitted_ids.extend(admitted.into_iter().map(|c| c.key_block_id));
         }
-        // carrier-id snapshot — never an owner-scope rescan — so carriers
-        // inserted/changed after the probe cannot enter the result (fix round 4).
         let recorded = self.carrier_recorded_at_map(&admitted_ids).await?;
-        // owner-scope rescan (QC fix round 1, F-001). Status/ownership drift,
-        // invalid `modules_json`, and oversized belief arrays discovered here
-        // fail closed instead of entering or silently dropping rows.
         let carriers = self
             .materialize_admitted_carriers(&admitted_ids, viewer_character_id, &query.binding_id)
             .await?;
@@ -4602,9 +4374,6 @@ impl CharacterTomService {
             self.require_active_subject_binding(caller_creator_id, subject, &input.world_id)
                 .await?;
         }
-        // value is type/length/validity checked via compile-time SQL before any
-        // `get_knowledge_entry` / serde parse. Invalid text, a present non-array
-        // `belief`, or an oversized array fail closed without mutation.
         let probe = self
             .probe_carrier(&input.carrier_entry_id)
             .await?
@@ -4624,8 +4393,6 @@ impl CharacterTomService {
                 _ => return Err(not_found("carrier_entry", &input.carrier_entry_id)),
             },
         }
-        // `i64::MAX` input can overflow it, so reject that single value
-        // deterministically.
         if input.expected_revision == i64::MAX {
             return Err(invalid_input(
                 "expected_revision exceeds the CAS increment domain",
@@ -4927,8 +4694,6 @@ impl CharacterTomService {
                     Some(serde_json::from_str::<Value>(text).map_err(|_| invalid_modules_json())?)
                 }
             };
-            // carrier admitted by the probe but appended before this read must
-            // still fail closed instead of materializing oversized work.
             if carrier_belief_elements(modules.as_ref())?.len() > MAX_BELIEF_ROWS_PER_CARRIER {
                 return Err(corpus_exceeded("belief rows per carrier"));
             }
@@ -4996,7 +4761,6 @@ impl CharacterTomService {
         .fetch_all(&self.pool)
         .await
         .map_err(sqlx_internal)?;
-        // `json_each` id snapshot — never a scope rescan.
         Ok(rows
             .into_iter()
             .map(|row| (row.carrier_entry_id, row.occurred_at))
@@ -5221,7 +4985,6 @@ impl CharacterTomService {
         if row.is_some() {
             return Ok(row);
         }
-        // absent. Each check is a separate typed COUNT query.
         if self
             .carrier_violation_count(carrier_entry_id, ViolationKind::InvalidJson)
             .await?
@@ -5363,8 +5126,6 @@ fn append_belief_row(modules: &mut Value, row: &BeliefPropositionRaw) -> CoreRes
     }
     let belief = obj.entry("belief").or_insert_with(|| json!([]));
     let rows = belief.as_array_mut().expect("checked is_array above");
-    // per-carrier cap — a carrier at the cap rejects here, before any CAS or
-    // MindState write, so the corpus can never become un-listable.
     if rows.len() >= MAX_BELIEF_ROWS_PER_CARRIER {
         return Err(corpus_exceeded("belief rows per carrier"));
     }
@@ -5485,8 +5246,6 @@ impl CoreService {
         let expected_revision = i64::try_from(request.expected_revision)
             .map_err(|_| invalid_input("expected_revision is out of range"))?;
         let input = record_input_from_request(&request, expected_revision)?;
-        // across the CAS transaction (404 foreign/missing, 409 archived
-        // `character_inactive`).
         let _lease = self
             .acquire_actor_activity(
                 principal,
@@ -5791,9 +5550,7 @@ mod tests {
     /// space grant and return the provider candidate id addressing it.
     async fn foreign_candidate(memory: &MemoryAdapter) -> String {
         const FOREIGN_CREATOR: &str = "ctr_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        // shared-scope, so the space-wide grant admits the capture and the read.
         let foreign_subject = legacy::creator_subject_id(FOREIGN_CREATOR);
-        // (the space-wide grant then covers the candidate operation).
         memory
             .ok(memory
                 .binding
@@ -5898,7 +5655,6 @@ mod tests {
 
         let foreign_candidate_id = foreign_candidate(&memory).await;
 
-        // CAS even though the provider grant allows the operation there.
         assert!(
             !memory
                 .dismiss_provider_candidate(&foreign_candidate_id, "pend_identity_foreign")
@@ -5916,7 +5672,6 @@ mod tests {
             "the refused dismissal mutated nothing"
         );
 
-        // pending id: refused before the CAS as well.
         assert!(
             !memory
                 .dismiss_provider_candidate(&own.candidate_id, "pend_identity_other")
@@ -6384,7 +6139,6 @@ mod tests {
     /// peer-controlled text.
     #[test]
     fn remote_refusal_keeps_classification_and_drops_peer_text() {
-        // an unknown outcome, never a definite failure.
         let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::InternalError,
             Some("terminal"),
@@ -6407,7 +6161,6 @@ mod tests {
         assert_eq!(family, MemoryProviderRefusal::Forbidden);
         assert_eq!(conflict_code.as_deref(), None);
 
-        // and unknown peer strings never pass through.
         let (code, wire_code, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::InvalidInput,
             Some("uncertain"),
@@ -6419,7 +6172,6 @@ mod tests {
         assert_eq!(family, MemoryProviderRefusal::Unavailable);
         assert_eq!(conflict_code.as_deref(), None);
 
-        // `version_mismatch` code (I-000204) ...
         let (code, _, retry_class, family, conflict_code) = refusal_fields(
             SpokeRejectCode::RevisionConflict,
             Some("terminal"),

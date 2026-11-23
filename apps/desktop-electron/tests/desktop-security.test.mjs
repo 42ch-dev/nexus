@@ -241,13 +241,10 @@ test('response envelope helpers honor the 1 MiB bound on the COMPLETE serialized
   assert.doesNotThrow(() => desktopOk(requestId, fits));
   const oneOver = 'x'.repeat(MAX_REQUEST_BYTES - overhead + 1);
   assert.throws(() => desktopOk(requestId, oneOver), (err) => errorCode(err) === 'internal');
-  // trimming over-long messages (including JSON escaping overhead).
   const hugeMessage = 'e'.repeat(MAX_REQUEST_BYTES * 2);
   const boundedFailure = desktopErr(requestId, 'internal', hugeMessage);
   assert.equal(boundedFailure.ok, false);
   assert.equal(boundedFailure.error.code, 'internal');
-  // prefix of the input, much smaller than the original, with the COMPLETE
-  // serialized frame inside the frozen 1 MiB response bound.
   assert.ok(boundedFailure.error.message.length > 0);
   assert.ok(hugeMessage.startsWith(boundedFailure.error.message));
   assert.ok(boundedFailure.error.message.length < hugeMessage.length);
@@ -263,9 +260,6 @@ test('runtime metadata is nonsecret and http(s)-only', () => {
   expectCode(() => parseDesktopRuntimeMetadata({ localEndpoint: 'http://x', apiKey: 'k' }), 'invalid_input');
 });
 
-// http(s) endpoint grammar shared by the IPC validator, the connection store
-// and the CSP origin boundary.
-
 test('endpoint grammar accepts concrete root http(s) services and returns the exact origin', () => {
   assert.equal(
     connectionEndpointOrigin('https://daemon.example.com:8443'),
@@ -275,7 +269,6 @@ test('endpoint grammar accepts concrete root http(s) services and returns the ex
   assert.equal(connectionEndpointOrigin('http://[::1]:8420'), 'http://[::1]:8420');
   assert.equal(connectionEndpointOrigin('https://[2001:db8::1]:9000'), 'https://[2001:db8::1]:9000');
   assert.equal(connectionEndpointOrigin('https://daemon.example.com/'), 'https://daemon.example.com');
-  // bytes, so host case and an explicit DEFAULT port stay supported.
   assert.equal(
     connectionEndpointOrigin('https://Daemon.Example.com:8443'),
     'https://daemon.example.com:8443',
@@ -297,7 +290,6 @@ test('endpoint grammar rejects opaque/null origins, wildcard host, userinfo, pad
     'https://*.example.com',
     'http://user:pass@daemon.example.com:8443',
     'http://user@daemon.example.com',
-    // query/fragment/userinfo/path fields can see them (L2 fix 1).
     'https://daemon.example.com?',
     'https://daemon.example.com#',
     'http://@daemon.example.com',
@@ -390,9 +382,6 @@ test('registered IPC path rejects events once main moves to a newer generation',
   assert.doesNotThrow(() =>
     assertDesktopEventSender(view, { generation: 7, getCurrentGeneration: () => 7 }),
   );
-  // registration left installed must now reject with stale_sender — the check
-  // compares the registration's bound generation against the LIVE source,
-  // not a closure constant against itself.
   expectCode(
     () => assertDesktopEventSender(view, { generation: 7, getCurrentGeneration: () => 8 }),
     'stale_sender',
@@ -401,13 +390,11 @@ test('registered IPC path rejects events once main moves to a newer generation',
 
 test('registered IPC path fails closed without a live generation source', () => {
   const view = (({ generation: _ignored, ...rest }) => rest)(VALID_SENDER);
-  // check would degenerate to comparing a closure constant to itself.
   expectCode(() => assertDesktopEventSender(view, { generation: 7 }), 'invalid_input');
   expectCode(() => assertDesktopEventSender(view, {}), 'invalid_input');
 });
 
 test('registerDesktopIpc rejects registration without a live generation source', async () => {
-  // plain Node: P0-T7 must supply getCurrentGeneration when wiring main.
   const handlers = new Proxy({}, { get: () => async () => null });
   await assert.rejects(
     registerDesktopIpc({}, handlers, { generation: 7 }),
@@ -485,7 +472,6 @@ test('queued aggregate byte cap rejects overflow with busy', async () => {
   for (let i = 0; i < 32; i += 1) {
     releases.push(await admission.admit(1));
   }
-  // overflow needs prior queued bytes.
   const smallQueued = admission.admit(1);
   assert.equal(await admission.admit(MAX_REQUEST_BYTES), null); // 1 byte + 1 MiB > cap
   releases.forEach((release) => release());
@@ -669,11 +655,6 @@ test('desktopError carries a machine-readable code', () => {
   assert.equal(errorCode(err), 'invalid_origin');
   assert.equal(errorCode(new Error('plain')), 'internal');
 });
-
-// locally (it compiles CommonJS and cannot import the ESM contract — see
-// preload.ts header). The lock below extracts the COMPILED preload's mirror
-// values and asserts structural equality against the canonical
-// DESKTOP_BRIDGE_MANIFEST, so drift on EITHER side fails the test.
 
 /** Evaluate a mirrored numeric const expression (digits, +, *, parens only). */
 function evalConstExpr(expr) {

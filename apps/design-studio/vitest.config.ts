@@ -15,16 +15,12 @@ export default defineConfig({
   oxc: { target: 'esnext' },
   resolve: {
     alias: {
-      // general `@` -> design-studio/src alias catches it (matches vite.config.ts).
       '@/lib/utils': path.resolve(import.meta.dirname, '../web/src/lib/utils'),
       '@/lib/status-variant': path.resolve(
         import.meta.dirname,
         '../web/src/lib/status-variant',
       ),
-      // instance (matches vite.config.ts).
       '@web-locales/en': path.resolve(import.meta.dirname, '../web/src/locales/en'),
-      // apps/web UI primitives via @/components/ui/*. Mirror that alias so
-      // Studio tests can import the presentational module without duplicating it.
       '@/components/ui': path.resolve(import.meta.dirname, '../web/src/components/ui'),
       '@': path.resolve(import.meta.dirname, './src'),
       '@web-ui': path.resolve(import.meta.dirname, '../web/src/components/ui'),

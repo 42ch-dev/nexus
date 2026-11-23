@@ -161,7 +161,6 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
     .await
     .unwrap();
 
-    // claim it is finalized — DB must win per §4.5.3).
     nexus_local_db::work_chapters::seed_chapters(
         &pool,
         work_id,
@@ -203,8 +202,6 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
         .await
         .unwrap();
 
-    // re-synced → counts as both updated and resynced.
-    // ch02: new row from file → counts as created.
     assert_eq!(report.created, 1, "ch02 file should create one new DB row");
     assert_eq!(
         report.updated, 1,

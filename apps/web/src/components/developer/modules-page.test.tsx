@@ -97,7 +97,6 @@ describe('ModulesPage', () => {
           max_wall_time_ms: 5000,
         }),
       ),
-      // Runs history queries fire on mount and must be handled.
       http.get('/v1/daemon/narrative/worlds', () =>
         HttpResponse.json({ worlds: [] }),
       ),
@@ -295,9 +294,6 @@ const RUN_9: RunSummary = {
 };
 
 /**
- * mutable runs store so Accept/Discard flips the row the table shows after the
- * hooks' invalidation refetches.
- *
  * Failure shape mirrors the live daemon (qc2 W-001 fix): `POST /run` never
  * returns 200-with-status=failed — on compute failure the daemon persists a
  * Failed row, then returns the canonical error envelope (422 sandbox / 500
@@ -390,7 +386,6 @@ function runStudioJourney(
           has_more: false,
         });
       }
-      // chrome tests exercise the real request path.
       const url = new URL(request.url);
       const status = url.searchParams.get('status');
       const worldId = url.searchParams.get('world_id');
@@ -446,8 +441,6 @@ function runStudioJourney(
       );
       return HttpResponse.json({ run_id: runId, status: 'discarded' });
     }),
-    // required, terminal states only (`applied|discarded|failed`), returns
-    // `{ deleted }`.
     http.delete('/v1/daemon/compute/runs', ({ request }) => {
       state.deleteCalls += 1;
       state.lastDeleteUrl = request.url;
@@ -491,10 +484,6 @@ async function openRunStudio(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText('Run Studio');
 }
 
-/**
- * picker is awaited to become enabled before selecting (the same convention as
- * run-studio.test.tsx) instead of racing the query.
- */
 async function selectWorld(user: UserEvent) {
   await waitFor(() => expect(screen.getByTestId('run-studio-world')).toBeEnabled());
   await user.selectOptions(screen.getByTestId('run-studio-world'), 'w1');
@@ -579,8 +568,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await fillBasicCombatForm(user);
     await user.click(screen.getByTestId('run-studio-run'));
 
-    // and the daemon-recorded Failed row appears in Runs via the list refetch
-    // — the inspector does not auto-open; the author opens the row.
     await waitFor(() =>
       expect(
         within(screen.getByTestId('runs-table-row-run_fail')).getByText('Failed'),
@@ -735,7 +722,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     await openRunStudio(user);
     await screen.findByTestId('runs-table-row-run_clear_applied');
 
-    // required by the daemon — no silent world-wide purge).
     const clearButton = screen.getByTestId('run-runs-clear');
     expect(clearButton).toBeDisabled();
 
@@ -748,7 +734,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
     expect(state.deleteCalls).toBe(0);
     expect(screen.getByTestId('runs-table-row-run_clear_applied')).toBeInTheDocument();
 
-    // list refresh: terminal rows gone, needs-review row kept.
     await user.click(screen.getByTestId('run-runs-clear'));
     await screen.findByRole('heading', { name: 'Clear history for this World?' });
     await user.click(screen.getByRole('button', { name: 'Clear history' }));
@@ -783,8 +768,6 @@ describe('ModulesPage Run Studio (V1.147 P1 T3)', () => {
 });
 
 describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
-  // deep link (module + run) and the Timeline Run Module entry (`world`
-  // pre-fill) land here from `/modules`.
   function renderDeepLinked(initialUrl = '/modules?module=basic-combat&run=run_9&world=w1') {
     return renderInApp(<ModulesPageBody />, {
       client: client(),
@@ -837,7 +820,6 @@ describe('ModulesPage deep-link selection (V1.147 P2 T3)', () => {
     renderDeepLinked();
 
     await screen.findByText('Basic Combat');
-    // worlds list resolves async; the pre-fill state is set on mount).
     await screen.findByTestId('run-studio');
     await waitFor(() =>
       expect(screen.getByTestId('run-studio-world')).toHaveValue('w1'),
@@ -885,10 +867,6 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
     host_functions: ['scout_read'],
   };
 
-  /**
-   * in-router search-params navigation while `ModulesPageBody` stays mounted
-   * (real `MemoryRouter` — same pattern as `canvas-nav-commands.test.tsx`).
-   */
   function NavigateButton({ to }: { to: string }): ReactElement {
     const navigate = useNavigate();
     return (
@@ -955,8 +933,6 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
 
     await screen.findByText('Nexus Team');
 
-    // back/forward) — the detail panel must follow the URL, not stay on the
-    // stale module while the Run Studio opens a new run in its context.
     await user.click(screen.getByRole('button', { name: /scouting-party/ }));
 
     await screen.findByText('Scout Team');
@@ -980,7 +956,6 @@ describe('ModulesPage deep-link re-sync (V1.147 PR #194)', () => {
     await screen.findByText('Nexus Team');
     expect(screen.getByTestId('run-studio')).toBeInTheDocument();
 
-    // must clear and the list placeholder return.
     await user.click(screen.getByRole('button', { name: /go-\/modules$/ }));
 
     await screen.findByText('Select a module');

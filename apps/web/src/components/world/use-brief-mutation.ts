@@ -1,7 +1,4 @@
 /**
- * create-on-absent `patch-entity` write for the era KnowledgeEntry that backs
- * the Brief layer (`POST .../kb/patch-entity`, architect-confirmed contract):
- *
  *   - Create: the client mints `entity_id` (`kb_<uuid>`), sends
  *     `expected_version: 0`, and patches
  *     `{ title, block_type: 'era', body: { attributes: { world_summary } } }`.
@@ -41,9 +38,6 @@ export interface SaveBriefInput {
 }
 
 export interface UseSaveBriefOptions {
-  /**
-   * layer renders the announce UI (`世界已就绪` card + toast) here.
-   */
   onFirstUnlock?: () => void;
 }
 
@@ -83,8 +77,6 @@ function patchEdit(
   return client.worldKbPatchEntity(worldId, {
     entity_id: entity.entityId,
     expected_version: entity.version,
-    // existing top-level key and attribute, upsert only `world_summary`.
-    // The canonical title stays untouched on edit.
     patch: {
       body: { ...existingBody, attributes: { ...existingAttrs, world_summary: text } },
     },
@@ -101,8 +93,6 @@ export function useSaveBrief(worldId: string, opts: UseSaveBriefOptions = {}) {
         try {
           return await patchEdit(client, worldId, entity, text);
         } catch (error) {
-          // editor picks up the fresh revision, then rethrow for the inline
-          // retry copy.
           if (isWorldKbConflictError(error)) {
             await qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId) });
           }
@@ -117,14 +107,10 @@ export function useSaveBrief(worldId: string, opts: UseSaveBriefOptions = {}) {
       }
     },
     onSuccess: async () => {
-      // activation survives a tab close in the refetch window. The
-      // first-transition gate keeps edit re-saves silent (D8/D17); any save
-      // can be the first transition (an era may predate the Brief).
       if (creatorId && !isUnlocked(creatorId, 'work')) {
         unlock(creatorId, 'work');
         opts.onFirstUnlock?.();
       }
-      // after save without an empty-state flash.
       await qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId) });
     },
   });

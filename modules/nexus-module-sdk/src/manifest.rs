@@ -131,14 +131,6 @@ impl ModuleManifest {
             }
         }
 
-        // structurally by the `HostFunction` enum (serde rejects unknown
-        // names at parse time), so no runtime check is needed here.
-
-        // becomes a directory name under `dist/<id>/` (build) and
-        // `~/.nexus42/modules/<id>/` (install), so a traversal id must fail
-        // validation. Mirrors `nexus-home-layout::validate_run_id_safe`
-        // (inlined — the SDK's closed dependency list, AR-1, forbids the
-        // nexus-home-layout dep; the mirrored tests pin both sides).
         if self.module_id.contains('/')
             || self.module_id.contains('\\')
             || self.module_id.contains("..")
@@ -333,7 +325,6 @@ mod tests {
 
     #[test]
     fn validate_rejects_path_traversal_module_id() {
-        // guard (same corpus as nexus-module-manifest).
         for bad in ["../evil", "a/b", "a\\b", "a..b", "a\u{0}b"] {
             let mut m = valid_manifest();
             m.module_id = bad.to_string();

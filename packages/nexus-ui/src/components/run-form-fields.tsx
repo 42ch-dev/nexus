@@ -7,10 +7,6 @@ import { Input } from './input';
 import { Label } from './label';
 import { Select } from './select';
 
-/**
- * `schemas.invocation.properties.*`). Structural — compatible with the
- * generated ModuleDetail manifest shape without importing wire DTOs.
- */
 export interface InvocationSchemaProperty {
   type?: string | string[];
   enum?: unknown[];
@@ -23,9 +19,6 @@ export interface InvocationSchemaProperty {
   [keyword: string]: unknown;
 }
 
-/**
- * `schemas.invocation`).
- */
 export interface InvocationSchema {
   type?: string;
   properties?: Record<string, InvocationSchemaProperty>;

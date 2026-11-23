@@ -1,6 +1,4 @@
 /**
- * (V1.195 P0-T7; spec `current-host-contracts.md` §3.3 / W5, S0-3).
- *
  * Steer is two sequential calls, not one transaction: the Idea is appended to
  * the schedule's core context first, and only a committed append is followed by
  * the `resume` signal. So a refused append must send no resume at all, and a
@@ -54,10 +52,6 @@ function listResponse(coreContextVersion: number) {
   };
 }
 
-/**
- * schedule row shows (the surface the partial-failure refresh must not leave
- * stale).
- */
 function SteerHarness() {
   const schedules = usePresetSchedules('preset-1');
   const steer = useSteerStrategy();
@@ -276,8 +270,6 @@ describe('useSteerStrategy — append before resume (W5 / S0-3)', () => {
       }),
       http.post(SIGNAL_PATH, () => {
         order.push('resume');
-        // refusal: status 409, public `code` is the generic class, and the
-        // coded conflict rides in `details.wire_code`.
         return HttpResponse.json(
           {
             success: false,
@@ -300,7 +292,6 @@ describe('useSteerStrategy — append before resume (W5 / S0-3)', () => {
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('error'));
     expect(order).toEqual(['append', 'resume']);
     expect(screen.queryByText('Idea sent to Preset')).not.toBeInTheDocument();
-    // version the append actually committed.
     expect(
       await screen.findByText(
         (content) => content.includes('core context version 2') && content.includes('state conflict'),

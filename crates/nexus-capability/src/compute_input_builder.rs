@@ -262,7 +262,6 @@ impl ComputeInputBuilder {
             .map(|entry| (entry.entry_id.clone(), entry))
             .collect();
 
-        // refusal names exactly the parameter the module asked for.
         for ref_id in &referenced_entry_ids {
             let Some(ref_entry) = admitted.remove(ref_id) else {
                 return Err(ComputeBuildError::ReferencedEntryNotFound(format!(

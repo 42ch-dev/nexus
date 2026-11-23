@@ -172,7 +172,6 @@ async fn delete_creator_in_tx(
     if in_use > 0 {
         return Err(LocalDbError::actor_in_use());
     }
-    // transaction, so a refusal anywhere leaves both rows untouched.
     sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ? AND creator_id = ?")
         .bind(&holder_entry_id)
         .bind(creator_id)
@@ -327,7 +326,6 @@ mod tests {
         assert_eq!(row.1, "Local Materializer");
         assert_eq!(row.2, "active");
         assert_eq!(row.4, "{}");
-        // `chrono::Utc::now().to_rfc3339()`.
         chrono::DateTime::parse_from_rfc3339(&row.3).expect("cached_at must be RFC3339");
     }
 

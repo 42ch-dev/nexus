@@ -156,7 +156,6 @@ test('the service-served SPA is admitted same-origin on a LAN-style Host', async
       }),
     },
   });
-  // its Origin is exactly the Host it connected to.
   const lanHost = '192.168.50.7:8421';
   const body = JSON.stringify({ creator_id: 'ctr_a', workspace_slug: 'default' });
   const accepted = await request(`${server.url}/v1/daemon/workspace/active`, {

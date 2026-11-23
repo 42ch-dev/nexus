@@ -89,11 +89,6 @@ export function WorldFindingsPanel({ worldId }: { worldId: string }) {
   );
 }
 
-/**
- * string verbatim) + title + shortened target entry id. Expanded (read-only
- * toggle): full description, full target entry id, created timestamp. No
- * interactive affordance writes — `aria-expanded` toggles display only.
- */
 function WorldFindingRow({ finding }: { finding: WorldFinding }) {
   const { t } = useTranslation('worldFindings');
   const [expanded, setExpanded] = useState(false);

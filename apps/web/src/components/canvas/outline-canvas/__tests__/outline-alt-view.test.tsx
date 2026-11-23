@@ -1,6 +1,4 @@
 /**
- * (FB-C1-004, V1.108 P0 T3).
- *
  * Unit-tested in isolation with richer data than the orchestrator mock so the
  * timeline list, multiple volumes, unassigned chapters, and empty states are
  * all covered.

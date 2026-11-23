@@ -129,17 +129,12 @@ impl ResearchScheduleFixture {
     async fn insert(self, pool: &SqlitePool) {
         let now = chrono::Utc::now().timestamp();
 
-        // seed for this research schedule (work_id, fl_e_stage, creative_brief,
-        // inspiration_log, work_ref, …) — never an empty map. Built via
-        // `build_schedule_for_stage` so the frozen input matches the canonical
-        // request a stage advance would produce.
         let fields = research_work_fields(self.work_id, "fixture");
         let input: serde_json::Map<String, serde_json::Value> =
             build_schedule_for_stage("research", self.creator_id, &fields)
                 .and_then(|req| req.input)
                 .and_then(|v| v.as_object().cloned())
                 .unwrap_or_default();
-        // (manifest + referenced template bytes) — never a zero placeholder.
         let source = nexus_preset::embedded_source_identity("research")
             .expect("research preset must carry an embedded source identity");
         let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
@@ -159,7 +154,6 @@ impl ResearchScheduleFixture {
         let descriptor_bytes =
             serde_json::to_vec(&descriptor).expect("research fixture descriptor must serialize");
 
-        // record commit in ONE transaction.
         let mut tx = nexus_local_db::begin_immediate(pool)
             .await
             .expect("research fixture: begin immediate tx");
@@ -188,7 +182,6 @@ impl ResearchScheduleFixture {
         .await
         .unwrap_or_else(|e| panic!("ResearchScheduleFixture::insert failed: {e}"));
 
-        // record is durable (the row's `current_core_context_version` stays 0).
         let seed_text = serde_json::to_string(&input).unwrap_or_default();
         auto_chain::seed_core_context_version(&mut tx, self.schedule_id, &seed_text)
             .await
@@ -307,8 +300,6 @@ async fn research_preset_loads_and_structurally_valid() {
         "research state machine must be the documented 4-state chain",
     );
 
-    // graph_complete gates the inner extraction graph. This is the contract the
-    // hermetic lifecycle test below stubs at its boundary.
     let scanning = &loaded.manifest.states[0];
     assert!(
         matches!(scanning.exit_when, Some(ExitWhen::LlmJudge { .. })),
@@ -400,12 +391,6 @@ async fn research_schedule_request_preset_input_contract() {
         "inspiration_log seeded",
     );
 
-    // workspace, so their VALUES are NOT seeded here (the schedule-row seed
-    // leaves them empty). N-10/N-14: `build_preset_input` guarantees every key
-    // a preset references is present — strict-mode template rendering fails on
-    // MISSING keys — so the research preset's runtime-resolved keys are seeded
-    // as empty strings, not omitted. This documents the boundary between the
-    // hermetic schedule-row contract and the runtime ACP-dependent paths.
     assert!(
         input.get("references_dir").is_some() && input.get("output_dir").is_some(),
         "references_dir/output_dir are present as empty-string seed keys \
@@ -477,7 +462,6 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
     let (_dir, pool) = test_pool().await;
     let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
 
-    // terminal hook exercises the real `find_work_for_driver` path.
     let mut work = research_ready_work("wrk_e2e", "e2e-survey");
     work.current_stage = "research".to_string();
     work.stage_status = "active".to_string();
@@ -526,7 +510,6 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
         "supervisor reports the research schedule as Completed",
     );
 
-    // terminal path ran the full UPDATE, not just a status flag flip.
     let terminated_at: Option<i64> =
         sqlx::query_scalar("SELECT terminated_at FROM creator_schedules WHERE schedule_id = ?")
             .bind("sch_research_e2e_001")

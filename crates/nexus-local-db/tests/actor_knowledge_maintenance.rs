@@ -135,11 +135,6 @@ async fn foreign_path_returns_none_without_leaking() {
     seed(&pool).await;
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", Some(r#"{"summary":"hi"}"#)).await;
-    // Character's registry holder, so a foreign requested owner is refused
-    // with the same `ActorNotFound` a missing Character yields — the refused
-    // class still reveals no row and no holder fact. This assertion was left
-    // on the pre-T6 `Option::None` shape when C1 landed; it is aligned here
-    // while the read path's test file is in scope.
     let refused = get_actor_knowledge_entry(&pool, OTHER, &chr, &entry)
         .await
         .unwrap_err();
@@ -1045,7 +1040,6 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
     assert_eq!(stored_pair(&pool, &entry).await, (None, None, 2));
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 2);
 
-    // neither revision may move.
     let before = row_snapshot(&pool, &entry).await;
     let unchanged = author_actor_knowledge_entry(
         &pool,
@@ -1205,7 +1199,6 @@ async fn v1191_audience_cas_unregistered_holder_refuses_with_zero_mutation() {
     let (chr, _) = seed_character(&pool).await;
     let entry = insert_character_ke(&pool, &chr, "fact", None).await;
     let before = row_snapshot(&pool, &entry).await;
-    // fail closed instead of admitting a silently derived holder id.
     sqlx::query("DELETE FROM knowledge_holders WHERE character_id = ?")
         .bind(&chr)
         .execute(&pool)
@@ -1344,7 +1337,6 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
         "an unbound Character is not a permitted World-row audience, got {err:?}"
     );
 
-    // though its binding row is untouched — the refusal is decided in-tx.
     transition_character(&pool, OWNER, &chr, 0, CharacterStatus::Archived)
         .await
         .unwrap();
@@ -1387,7 +1379,6 @@ async fn v1191_audience_cas_ordinary_content_patch_preserves_governance() {
     .await
     .unwrap();
 
-    // material content edit still bumps the owning Character's revision.
     let updated = update_actor_knowledge_entry(
         &pool,
         OWNER,
@@ -1633,7 +1624,6 @@ async fn t4_primitive_delete_honours_caller_transaction() {
         "refusal removed nothing"
     );
 
-    // rolls it back and the row survives.
     let entry = insert_character_ke(&pool, &chr, "doomed", None).await;
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let deleted = delete_actor_knowledge_in_tx(&mut tx, &entry, &chr, 0)

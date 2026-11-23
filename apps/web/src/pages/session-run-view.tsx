@@ -1,7 +1,4 @@
 /**
- * (compass D7; audit DIR-03): one orchestration root run's retained/live event
- * stream, rendered read-only from {@link useRunObservation}.
- *
  * The three author-visible states (Product Scope state table) are rendered
  * honestly from the hook's frame stream and its replay/live boundary:
  *
@@ -104,19 +101,10 @@ function observedRunId(frames: WorkflowObservationFrame[]): string | null {
 /** Frames the event list renders: data frames plus the inline gap marker. */
 type ListedFrame = Exclude<WorkflowObservationFrame, { kind: 'history_unavailable' }>;
 
-/**
- * the history-unavailable notice above the list, not by a row. The predicate
- * keeps the narrowing at the call site instead of casting the frame shape.
- */
 function listed(frames: WorkflowObservationFrame[]): ListedFrame[] {
   return frames.filter((frame): frame is ListedFrame => frame.kind !== 'history_unavailable');
 }
 
-/**
- * end: the server holds no history for this run (a restart, or an evicted event
- * ring), so the frames below are only what this view had already retained.
- * Warning surface, matching the shared inline-banner convention.
- */
 function HistoryUnavailableNotice() {
   const { t } = useTranslation('sessions');
 
@@ -191,8 +179,6 @@ function EventRow({ frame }: { frame: ListedFrame }) {
 }
 
 /**
- * live tail as two separately labeled sections.
- *
  * `historyUnavailable` (the hook recorded the server's `history_unavailable`
  * close) is not an ordinary end: the notice says the server history is gone and
  * the frames this view already held stay on screen below it.
@@ -211,8 +197,6 @@ function RunStream({
   const streamOpen = phase !== 'terminal' && phase !== 'error';
 
   if (phase === 'error') {
-    // deterministic — the hook never auto-retries it, so the view must not
-    // offer to either. Transport failures do get the reconnect affordance.
     const retryable = !(error instanceof NexusClientError && error.status >= 400);
     return (
       <div className="flex flex-col gap-4">
@@ -307,8 +291,6 @@ export function SessionRunViewPage() {
   if (!sessionId) return <NotFoundPage />;
 
   const runId = observedRunId(observation.events);
-  // frames are only what this view already held, so the badge states the loss
-  // instead of reporting a plain ending.
   const historyUnavailable = observation.events.some(
     (frame) => frame.kind === 'history_unavailable',
   );

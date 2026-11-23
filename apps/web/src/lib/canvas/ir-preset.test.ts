@@ -1,6 +1,3 @@
-/**
- * (`PresetState`/`ParsedPreset`) without any YAML.
- */
 import { describe, expect, it } from 'vitest';
 
 import { candidateDocument } from '@/test/simulation-fixture';

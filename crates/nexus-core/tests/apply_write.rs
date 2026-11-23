@@ -82,7 +82,6 @@ async fn setup() -> Setup {
     std::fs::write(home.join("config.toml"), "active_creator_id = \"test_creator\"\n[active_workspace_slug_by_creator]\n\"test_creator\" = \"default\"\n").unwrap();
     let core = CoreService::open(CoreOpenOptions {
         user_home: tmp.path().to_path_buf(),
-        // one), and it is admitted for the apply tables too.
         access: CoreAccess::EngineOwner,
         memory: None,
     })
@@ -233,7 +232,6 @@ fn unbuildable_documents(base: &nexus_workflow_ir::WorkflowDocument) -> [Unbuild
                 "draft",
             ),
         },
-        // refuses it: the id is not `<inner_graph>/<step>`.
         Unbuildable {
             tag: "unprojectable",
             document: with_draft_kind(base, nexus_workflow_ir::WorkflowNodeKind::InnerStep),
@@ -396,8 +394,6 @@ async fn an_unknown_content_hash_is_the_typed_not_found_and_writes_nothing() {
 #[tokio::test]
 async fn an_embedded_preset_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
-    // document and a schedule. Only the source is wrong, so without the guard this apply would
-    // succeed and record a row the schedule intake never reads.
     let (_, hash, _) = seed_approval(&setup, EMBEDDED_PRESET, 1).await;
     seed_schedule(setup.core.pool(), EMBEDDED_PRESET).await;
 
@@ -439,7 +435,6 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
     let (approval_id, stored_hash, document) = seed_approval(&setup, STRATEGY, 1).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
 
-    // only thing that can catch the move is the recomputation apply performs.
     let edited = with_version(&document, 7);
     let edited_hash = nexus_workflow_ir::content_hash(&edited).unwrap();
     sqlx::query("UPDATE strategy_approvals SET document_json = ? WHERE approval_id = ?")
@@ -476,8 +471,6 @@ async fn a_document_edited_after_approval_is_the_typed_hash_change_and_writes_no
 #[tokio::test]
 async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_nothing() {
     let setup = setup().await;
-    // only thing its apply can trip on — exactly the applies that used to land and fail at their
-    // first run.
     seed_schedule(setup.core.pool(), STRATEGY).await;
     let base = setup
         .core
@@ -501,7 +494,6 @@ async fn every_document_the_builder_refuses_is_the_typed_refusal_and_writes_noth
             .unwrap_err();
 
         assert_eq!(reason(&error), "document_unbuildable", "{tag}: {error:?}");
-        // document with the same `IrOuterGraphError`, and apply carries its text through.
         let carried = refusal(&error)["builder_reason"]
             .as_str()
             .unwrap_or_else(|| panic!("{tag}: the refusal carries no builder_reason: {error:?}"));
@@ -531,8 +523,6 @@ async fn an_unbuildable_document_outranks_the_missing_schedule() {
         .unwrap()
         .document;
     let [Unbuildable { tag, document, .. }, ..] = unbuildable_documents(&base);
-    // wins. The premise is asserted so a fixture that grows a schedule reddens here instead of
-    // silently testing nothing.
     assert_eq!(
         schedule_rows(setup.core.pool()).await,
         0,
@@ -678,7 +668,6 @@ async fn two_concurrent_applies_of_one_approval_leave_exactly_one_current_row() 
 #[tokio::test]
 async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_revision() {
     let setup = setup().await;
-    // must not decide newness (compass D11).
     let (older_approval, older_hash) =
         seed_revision_approval(&setup, STRATEGY, 2, "2026-02-01T00:00:00+00:00").await;
     let (newer_approval, _) =
@@ -706,7 +695,6 @@ async fn the_status_read_reports_the_current_apply_and_the_highest_candidate_rev
     assert_eq!(newest.approval_id, newer_approval);
     assert_eq!(newest.candidate_revision, 5);
 
-    // the live (older) approval is still listed — nothing is hidden once it has been applied.
     let approvals = setup
         .core
         .strategy_approvals(&setup.principal, STRATEGY)
@@ -743,8 +731,6 @@ async fn a_strategy_with_no_apply_reports_a_null_current_apply() {
             .map(|newest| newest.approval_id),
         Some(approval_id)
     );
-    // document replay, so "no document" can never be confused with "the document does not
-    // replay".
     assert!(approved_only.applied_document.is_none());
     assert!(approved_only.applied_document_refusal.is_none());
 
@@ -812,7 +798,6 @@ async fn the_status_read_returns_the_document_the_current_apply_installed() {
         .expect("the approval is applied");
     assert_eq!(current.approval_id, approval_id);
 
-    // the identity the status reports beside it.
     let applied = status
         .applied_document
         .as_ref()
@@ -851,7 +836,6 @@ async fn a_current_apply_whose_document_no_longer_verifies_reports_a_refusal_not
         "the apply row is still current; only its document stopped replaying"
     );
 
-    // document (or into both-null, as if nothing were applied) fails here.
     assert!(
         status.applied_document.is_none(),
         "the changed bytes must never be handed out as the applied document"
@@ -903,7 +887,6 @@ async fn an_apply_naming_an_absent_approval_row_is_an_error_response_not_a_refus
         .unwrap();
     forget_approval_row(&setup, &approval_id).await;
 
-    // the empty state's fields and a body carrying this as `applied_document_refusal` fail here.
     let error = setup
         .core
         .strategy_applied(&setup.principal, STRATEGY)
@@ -1012,7 +995,6 @@ async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() 
     let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
     let (other_approval, other_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
-    // read, while the guard refuses on the older one because it is still successor-less.
     insert_successorless_row(
         &setup,
         "apl_older_approval",
@@ -1206,7 +1188,6 @@ async fn a_pinned_body_edited_under_an_unchanged_version_refuses_apply_naming_bo
     );
     let recorded = pattern_hashes(&setup.home)[PINNED_PACKAGE].clone();
     let base = candidate_document(&setup).await;
-    // refusal also proves the pin check runs BEFORE buildability.
     let document = pinned_document(&base, PINNED_PACKAGE, &recorded, true);
     let pins = serde_json::json!([{
         "id": PINNED_PACKAGE,
@@ -1254,7 +1235,6 @@ async fn an_unchanged_pin_snapshot_with_a_nested_pin_still_applies() {
         &fragment(NESTED_PACKAGE, "nested bytes"),
     );
     let nested = pattern_hashes(&setup.home)[NESTED_PACKAGE].clone();
-    // the applied document never names — the case array equality on the document alone misses.
     let mut outer = fragment(PINNED_PACKAGE, "original bytes");
     outer["nests"] = serde_json::json!([{
         "id": "nested-nest",
@@ -1303,7 +1283,6 @@ async fn a_hashless_carrier_over_a_moved_pin_refuses_an_empty_snapshot() {
         &fragment(NESTED_PACKAGE, "nested bytes"),
     );
     let nested = pattern_hashes(&setup.home)[NESTED_PACKAGE].clone();
-    // outer document names a hash to compare.
     let mut outer = fragment(PINNED_PACKAGE, "original bytes");
     outer["nests"] = serde_json::json!([{
         "id": "nested-nest",
@@ -1355,7 +1334,6 @@ async fn a_hashless_carrier_over_a_moved_pin_refuses_an_empty_snapshot() {
 #[tokio::test]
 async fn a_document_with_no_recorded_pin_never_reads_the_patterns_root() {
     let setup = setup().await;
-    // admitted apply is proof the pin shortcut never touched the root.
     std::fs::write(setup.home.join("patterns"), "not a directory").unwrap();
     let (_, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
     seed_schedule(setup.core.pool(), STRATEGY).await;
@@ -1383,7 +1361,6 @@ async fn an_undecodable_or_document_inconsistent_pin_snapshot_is_unverifiable() 
     let base = candidate_document(&setup).await;
     let document = pinned_document(&base, PINNED_PACKAGE, &recorded, false);
     let inconsistent_document = with_version(&document, 2);
-    // records no pin beside a document that pins something.
     let (_, undecodable_hash) = seed_pinned_approval(
         &setup,
         "pins-undecodable",

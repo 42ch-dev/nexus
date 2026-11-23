@@ -81,8 +81,6 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
             );
         }
 
-        // narrative_timeline_events. Pass fork_id as branch_id to the
-        // same production read primitive used by ScopeQueryPort.
         let rows = match list_timeline_events_scoped(
             &pool,
             &world_id,
@@ -101,18 +99,11 @@ impl ForkTimelineQueryPort for NexusAdapter<'_> {
             }
         };
 
-        // typed nexus fields into extensions.nexus (spec §7.1).
         let wire: Vec<TimelineEvent> = rows.into_iter().map(Into::into).collect();
         SpokeResult::Ok(wire)
     }
 }
 
-//
-// `impl<T: BaselinePorts + ForkTimelineQueryPort> ForkPorts for T`
-// (spoke-operations src/adapter/ports.rs:135-142) auto-satisfies
-// ForkPorts → as_fork_timeline → Some(self).
-
-/// `scope_query_port.rs` and `knowledge_entry_port.rs`).
 fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) -> SpokeResult<T> {
     let details_map = match details {
         Value::Object(map) => Some(map),
@@ -251,8 +242,6 @@ mod tests {
 
         let adapter = NexusAdapter::new_host(pool);
 
-        // but the world does exist. Per Decision 3: an empty event list
-        // for a real world IS Ok(vec![]).
         let scope = fork_scope(&world_id, "fbk_empty", &[]);
         let events = match adapter.list_fork_timeline_events(&scope).await {
             SpokeResult::Ok(v) => v,
@@ -362,7 +351,6 @@ mod tests {
                 Some("fbk_main"),
                 "branch_id matches fork filter"
             );
-            // in the V1.143 conversion (spec §7.1 field table).
             assert!(
                 ns.get("event_type").and_then(Value::as_str).is_some(),
                 "event_type in extensions.nexus"
@@ -424,7 +412,6 @@ mod tests {
         }
     }
 
-    /// and the `ForkPorts` blanket.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn nexus_adapter_satisfies_fork_ports() {
         fn accepts_fork_timeline_port(_: &dyn ForkTimelineQueryPort) {}

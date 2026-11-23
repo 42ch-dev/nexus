@@ -1,6 +1,4 @@
 /**
- * to the shared `CanvasSurfaceAdapter` abstraction via `useCanvasSurface()`).
- *
  * Thin composition root that coordinates graph read, candidate read, entity
  * promotion, and conflict resolution. Implementation detail lives in split
  * modules under `world-kb/`: header, inspector panel, conflict hosts, graph
@@ -47,33 +45,13 @@ import {
 export type { EntityField } from './world-kb-canvas-types';
 export { patchFromForm } from './world-kb-canvas-utils';
 
-/**
- * `R-V176QC3-S001`). The prior path fanned out every suggestion at once via
- * `Promise.allSettled(rels.map(...))`, which for suggestions accumulated across
- * rescans produced an unbounded burst of concurrent requests plus repeated
- * graph invalidations. Promotions now run in bounded batches; each batch is
- * awaited before the next starts, and every outcome is still collected so the
- * failed-count warning stays accurate. A future server-side bulk-promote route
- * can replace this entirely.
- */
 const PROMOTE_BATCH_SIZE = 5;
 
 export interface WorldKbCanvasProps {
   worldId: string;
-  /**
-   * external writer (direct CLI) invalidates/refetches the graph + candidates.
-   * Off by default — the production World KB page never enables it, so the
-   * default product never depends on the development-only proof route.
-   */
   watchCoreChanges?: boolean;
 }
 
-/**
- * true, so the default `WorldKbCanvas` never calls (or imports at render) the
- * development-only hook — keeping existing tests' module mocks and standalone
- * renders isolated. The hook is still called unconditionally WITHIN this
- * component (correct hook order for the opt-in path).
- */
 function WorldKbChangesWatch({ worldId }: { worldId: string }) {
   useWorldKbChangesWatch(worldId, true);
   return null;
@@ -84,10 +62,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
   const prefersReducedMotion = useReducedMotionPreference();
   const [showList, setShowList] = useState<boolean>(prefersReducedMotion);
 
-  // the Suggested triage pane is open (list view + Suggested tab). The confirmed
-  // graph (default, incl. graph mode) excludes `needs_review` rows so a world
-  // with many extraction suggestions does not flood the canvas on load. The
-  // active-tab signal is lifted from the alt-view via `onActiveTabChange`.
   const [altTab, setAltTab] = useState<'entities' | 'relationships' | 'suggested'>('entities');
   const includeSuggested = showList && altTab === 'suggested';
 
@@ -123,10 +97,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
     relationships,
   });
 
-  // confidence below the threshold are hidden; manual edges (no confidence)
-  // and suggested (needs_review) edges always show. Stored in the 0.0–1.0
-  // range (matching confidence values + the compass Phase 2b bands); default
-  // 0.0 = show all.
   const [confidenceThreshold, setConfidenceThreshold] = useState(0);
 
   const surfaceQuery = useMemo<CanvasSurfaceQueryResult<WorldKbSurfaceGraph>>(() => {
@@ -201,8 +171,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
-  // through onNodesChange). Resolve it to a World KB selection so the inspector
-  // updates from graph clicks just like alt-view row activation.
   useEffect(() => {
     if (showList) return;
     const selected = surface.selectedNode;
@@ -262,8 +230,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
         canvasState.bumpReseed();
       },
       onError: (error) => {
-        // global onError already refetches the graph to canonical state; here we
-        // clear the selection so the inspector does not keep editing a stale row.
         if (isWorldKbConflictError(error)) {
           if (
             canvasState.selection?.kind === 'relationship' &&
@@ -276,7 +242,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
     });
   };
 
-  // existing patch-relationship update route — no second promotion state machine.
   const onPromoteSuggestion = (rel: WorldKbRelationshipProjection) => {
     patchRelationship.mutate(
       {
@@ -302,12 +267,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
   const onPromoteAllSuggestions = async (
     rels: WorldKbRelationshipProjection[],
   ): Promise<{ succeeded: number; failed: number }> => {
-    // LAST submitted call — earlier promotions' errors are silently dropped.
-    // mutateAsync + Promise.allSettled ensures every outcome is observed.
-    //
-    // qc3 S-QC3-001: instead of fanning out every suggestion concurrently, the
-    // promotions run in bounded batches of `PROMOTE_BATCH_SIZE` so a large
-    // suggestion set does not fire an unbounded burst of concurrent PATCHes.
     const results: PromiseSettledResult<unknown>[] = [];
     for (let i = 0; i < rels.length; i += PROMOTE_BATCH_SIZE) {
       const batch = rels.slice(i, i + PROMOTE_BATCH_SIZE);
@@ -344,7 +303,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
     return { succeeded, failed };
   };
 
-  // stable, so useCanvasSurface's projection memo survives state changes.
   ctxRef.current = {
     worldId,
     selection: canvasState.selection,
@@ -375,12 +333,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
   const entryCount = (graph.data?.entities.length ?? 0) + candidateItems.length;
   const lastFetched = graph.dataUpdatedAt ? formatRelative(graph.dataUpdatedAt) : '—';
 
-  // projection lands; mounting CanvasShell in that tick runs `fitView` against
-  // empty nodes and never refits when the nodes arrive, leaving entities
-  // offscreen. When there IS something to project but the surface has not yet
-  // produced nodes, hold on the existing LoadingState for that one tick so
-  // CanvasShell first mounts with measured nonempty nodes. A genuinely empty
-  // World (no entities/candidates) still renders the canvas normally.
   const hasProjectableContent = confirmedEntities.length > 0 || candidateItems.length > 0;
   const graphPendingProjection = !showList && hasProjectableContent && surface.nodes.length === 0;
 
@@ -430,8 +382,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
           onConnect={handleConnect}
           summaryText={surface.summaryText}
           ariaLabel={t('worldKb.graphAriaLabel')}
-          // minimap with its own accent token, not the shell's strategy
-          // default.
           minimapAccent="var(--color-canvas-worldkb-accent)"
         >
           <div className="pointer-events-none absolute inset-0" />

@@ -177,9 +177,6 @@ export function generateCoreSliceClient(outDir?: string): void {
   fs.writeFileSync(outPath, lines.join('\n'));
   logger.success(`Generated CoreSliceClient → ${outPath}`);
 
-  // so the ts-gen subdir barrel cannot emit it. Append the re-export here,
-  // after the barrel exists and idempotently, so `@42ch/nexus-contracts` can
-  // satisfy the locked `NexusClient extends CoreSliceClient` contract.
   const barrelPath = path.join(path.dirname(outPath), 'index.ts');
   const exportLine = "export type { CoreSliceClient } from './CoreSliceClient';";
   const barrel = fs.readFileSync(barrelPath, 'utf8');

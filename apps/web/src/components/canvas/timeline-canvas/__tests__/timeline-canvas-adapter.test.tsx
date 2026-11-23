@@ -1,19 +1,6 @@
 /**
  * TimelineCanvasAdapter — V1.122 P1 T2.
  *
- * `iterations/v1.122/specs/timeline-canvas-architecture.md` §2-§7:
- *   - `projectGraph` projects `entities[block_type=event]` onto the when-axis
- *     (sorted by `body.attributes.occurred_at` when present; clustered in a
- *     temporal-unknown group otherwise) and other entities as Context clusters.
- *   - `relationships[]` are projected verbatim via `WorldKbEdgeData` — no
- *     `ForeshadowEdge` / `RealizesEdge` / `ForkFromEdge` introduced.
- *   - `summarizeGraph` includes the architect-locked ordering disclaimer
- *     whenever event entities are rendered (lexical string sort is never
- *     canonical chronology); omitted only for zero-event graphs.
- *   - The adapter does NOT invoke any write endpoint — write-boundary wiring
- *     belongs to T4. The negative assertion future-proofs T2 against T4
- *     write calls accidentally firing from a T2 code path.
- *
  * The architect-locked DTO reuse (WorldKbGraphResponse single source,
  * wire_contracts_changed: false) is implicit in every fixture below: every
  * input is a plain `WorldKbGraphResponse` shape; every node data is a plain
@@ -81,10 +68,6 @@ function anchor(
   } as WorldKbSourceAnchorProjection;
 }
 
-/**
- * fails loudly the moment any T2 code path accidentally invokes one. T4 will
- * wire the legitimate `worldKbPatchEntity` write path; T2 must stay read-only.
- */
 function makeMockClient() {
   return {
     getWorldKbGraph: vi.fn(),
@@ -228,7 +211,6 @@ describe('TimelineCanvasAdapter.projectGraph — entity projection', () => {
     const datedNode = nodes.find((n) => n.id === 'entity:kb-event-dated')!;
     expect(undatedNode.data.occurredAtHint).toBeUndefined();
     expect(datedNode.data.occurredAtHint).toBe('1042-03-01T00:00:00Z');
-    // visually distinct from the chronologically-positioned events.
     expect(undatedNode.position.y).toBeGreaterThan(0);
     expect(datedNode.position.y).toBe(0);
   });
@@ -260,11 +242,6 @@ describe('TimelineCanvasAdapter.projectGraph — entity projection', () => {
   });
 
   it('registers the V1.122 timeline-event + timeline-key-block node types and NO fork marker', () => {
-    // (the Brief-era node type per architect §2.3). V1.147 P2 T3 update: the
-    // registry also includes `timeline-compute-result` (merged compute log
-    // events). The V1.122 invariant under test — "no fork marker ever
-    // registers" — is preserved by the `.not.toContain('fork'…)` assertions
-    // below.
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const keys = Object.keys(adapter.nodeTypes);
     expect(keys).toContain('timeline-event');
@@ -296,7 +273,6 @@ describe('TimelineCanvasAdapter.projectGraph — entity projection', () => {
     const { nodes } = adapter.projectGraph(graph);
 
     const node = nodes[0] as Node<TimelineNodeData>;
-    // projection (it ships on WorldKbEntityProjection); badges render in T3.
     expect(node.data.source_anchor_count).toBe(2);
   });
 });
@@ -344,8 +320,6 @@ describe('TimelineCanvasAdapter.projectGraph — relationship edges (verbatim Wo
 
   it('does NOT introduce Foreshadow / Realizes / ForkFrom edge types', () => {
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
-    // register non-Work-scoped types. It MUST NOT register the forbidden
-    // Work-outline-only kinds.
     const registered = adapter.edgeTypes ? Object.keys(adapter.edgeTypes) : [];
     for (const forbidden of ['foreshadow', 'realizes', 'fork-from', 'forkFrom']) {
       expect(registered).not.toContain(forbidden);
@@ -388,7 +362,6 @@ describe('TimelineCanvasAdapter.projectGraph — relationship edges (verbatim Wo
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const { edges } = adapter.projectGraph(graph);
 
-    // verbatim reuse of the V1.74 projection, not a Timeline-specific rule.
     expect(edges).toHaveLength(2);
     const sourceIds = edges.map((e) => e.source).sort();
     const targetIds = edges.map((e) => e.target).sort();
@@ -428,7 +401,6 @@ describe('TimelineCanvasAdapter.summarizeGraph — honest temporal disclaimer', 
   });
 
   it('omits the disclaimer when only non-event (context) entities exist', () => {
-    // of context entities alone must NOT trigger the disclaimer.
     const character = entity({
       key_block_id: 'kb-char-1',
       block_type: 'character',
@@ -476,9 +448,6 @@ describe('TimelineCanvasAdapter.summarizeGraph — honest temporal disclaimer', 
   });
 
   it('includes the disclaimer for freeform (non-date) occurred_at strings like "Spring 1042"', () => {
-    // temporal signals. A graph whose when-axis renders "Spring 1042",
-    // "10", and "2" lexically must still carry the disclaimer — the
-    // left-to-right order is string sorting, not chronology.
     const spring = entity({
       key_block_id: 'kb-event-spring',
       block_type: 'event',
@@ -606,8 +575,6 @@ describe('TimelineCanvasAdapter — T2 write-boundary isolation', () => {
 
   it('adaptConflict returns null for V1.122 P1 T2 (conflict UX is T4 scope)', () => {
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
-    // WorldKbValidationError 422) is wired in T4. The stub MUST return null
-    // so the orchestrator's conflict modal stays closed until T4 lands.
     expect(adapter.adaptConflict?.(new Error('simulated 409'))).toBeNull();
   });
 });

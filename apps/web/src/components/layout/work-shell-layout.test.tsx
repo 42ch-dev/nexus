@@ -92,7 +92,6 @@ describe('WorkShellLayout', () => {
     });
 
     const rail = screen.getByTestId('work-shell-rail-desktop');
-    // right rail shares the sheet width token (V1.121 P2 T1).
     expect(rail).toHaveClass('w-sheet');
     expect(rail).toHaveClass('lg:flex');
   });

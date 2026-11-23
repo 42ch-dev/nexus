@@ -90,8 +90,6 @@ fn compute_validate_pairing_mismatch_exits_three() {
 
 #[test]
 fn compute_validate_wasm_absent_hash_exits_three() {
-    // `wasm_sha256` cannot be paired, so it must fail with the pairing exit
-    // code (3) and a field-level `wasm_sha256` error, not silently pass.
     let dir = tempfile::tempdir().expect("tempdir");
     let manifest = write_manifest(dir.path(), "basic-combat", &json!({}));
     let wasm = dir.path().join("module.wasm");
@@ -112,8 +110,6 @@ fn compute_validate_wasm_absent_hash_exits_three() {
 
 #[test]
 fn compute_validate_rejects_path_traversal_module_id() {
-    // the id becomes a directory name under dist/ and the module store.
-    // The JSON verdict carries a field-level `module_id` error (exit 2).
     let dir = tempfile::tempdir().expect("tempdir");
     let manifest = write_manifest(dir.path(), "../evil", &json!({}));
 
@@ -173,7 +169,6 @@ fn compute_install_rejects_absent_hash() {
 
 #[test]
 fn output_flag_rejects_non_text_json_values() {
-    // rejects anything else before command dispatch (exit 2).
     let dir = tempfile::tempdir().expect("tempdir");
     let manifest = write_manifest(dir.path(), "basic-combat", &json!({}));
 

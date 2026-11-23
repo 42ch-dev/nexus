@@ -581,7 +581,6 @@ fn now_utc() -> String {
 /// Falls back to `unknown-date` if the input does not contain a `-` (should
 /// not happen for `chrono::Utc::now().to_rfc3339()` output).
 fn now_utc_date(ts: &str) -> String {
-    // look like a date, else fall back.
     if ts.len() >= 10 && ts.as_bytes()[4] == b'-' {
         ts[..10].to_string()
     } else {
@@ -614,7 +613,6 @@ mod tests {
     #[test]
     fn render_unset_total_shows_unset() {
         let out = render_volume_outline("wrk_1", "n", "T", 1, 2, None, "2026-06-18T10:00:00Z");
-        // (only in metadata), so just assert no tokens remain.
         assert!(!out.contains("{{"));
     }
 

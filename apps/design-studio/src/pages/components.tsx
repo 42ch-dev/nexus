@@ -218,8 +218,6 @@ function DomainBadgeSection() {
     { value: 'published', variant: 'preset' as const },
   ];
 
-  // content scan picks up every token class — mirrors production
-  // `findingStatusClasses` in apps/web/src/components/status-badge.tsx.
   const findingItems = [
     {
       value: 'open',
@@ -253,7 +251,6 @@ function DomainBadgeSection() {
     },
   ];
 
-  // apps/web/src/components/memory/task-kind-badge.tsx.
   const taskKindItems = [
     {
       value: 'brainstorm',

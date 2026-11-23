@@ -1,6 +1,4 @@
 /**
- * `onboarding-v3.html` S2).
- *
  * Scan states: loading
  * (Next disabled), ready (rows + recommended preselected), empty and error
  * (recoverable through the install guide / manual launch command).
@@ -27,10 +25,6 @@ const INSTALL_TARGETS: InstallTarget[] = [
 const LINK_CLASS =
   'self-start text-label-14 font-medium text-brand-deep-blue transition-colors duration-state ease-standard hover:opacity-80 dark:text-blue-700 dark:hover:opacity-100';
 
-/**
- * system-browser opener so the agent page never loads inside the app webview;
- * the browser build uses a normal new-tab link.
- */
 function InstallLink({ target, desktop }: { target: InstallTarget; desktop: DesktopCapabilities | null }) {
   if (!desktop) {
     return (
@@ -71,7 +65,6 @@ export function StepAgent({ onBack, onNext }: StepAgentProps) {
   const canContinue = !scanning && selection.canContinue;
 
   async function advance() {
-    // so the user can retry (commit() surfaces the error toast).
     if (await selection.commit()) onNext();
   }
 

@@ -34,8 +34,6 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
   const workChain = { coarseLayer: 'narrative', fineLayer: 'moment' } as const;
 
   it('World Timeline: zoom-IN past 0.70 while on Brief → swap to Narrative', () => {
-    // threshold swaps the World Timeline from Brief (coarse) to Narrative
-    // (fine) — closer reading distance.
     const result = computeSemanticZoomTransition({
       currentLayer: 'brief',
       currentZoom: 0.75,
@@ -45,8 +43,6 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
   });
 
   it('World Timeline: zoom-OUT past 0.55 while on Narrative → swap to Brief', () => {
-    // Timeline from Narrative (fine) back to Brief (coarse) — whole-world
-    // reading distance.
     const result = computeSemanticZoomTransition({
       currentLayer: 'narrative',
       currentZoom: 0.5,
@@ -56,8 +52,6 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
   });
 
   it('Work Timeline: zoom-IN past 0.70 while on Narrative → swap to Moment', () => {
-    // threshold swaps the Work Timeline from Narrative (coarse) to Moment
-    // (fine) — scene-level reading distance.
     const result = computeSemanticZoomTransition({
       currentLayer: 'narrative',
       currentZoom: 0.71,
@@ -76,9 +70,6 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
   });
 
   it('Hysteresis band: zoom values BETWEEN 0.55 and 0.70 do NOT trigger a swap (no flicker)', () => {
-    // clear overshoot both ways so layers do not flicker at the boundary."
-    // The 0.15-unit band (0.55–0.70) is the no-swap zone — both layers
-    // stay put when zoom dwells between the thresholds.
     expect(
       computeSemanticZoomTransition({
         currentLayer: 'brief',
@@ -105,8 +96,6 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
   });
 
   it('Default thresholds: exact threshold values do NOT trigger a swap (strict inequality)', () => {
-    // coarse layer. zoom = 0.55 exactly is NOT < 0.55 → no swap on fine
-    // layer. This avoids floating-point edge cases at the boundary.
     expect(
       computeSemanticZoomTransition({
         currentLayer: 'brief',
@@ -125,8 +114,6 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
   });
 
   it('Layer outside the chain returns null (defensive — future-proof for a fourth layer)', () => {
-    // passes it without updating the chain, the hook MUST no-op rather
-    // than silently swap to an arbitrary layer.
     expect(
       computeSemanticZoomTransition({
         currentLayer: 'future-layer' as never,
@@ -154,8 +141,6 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
   });
 
   it('Custom thresholds override the defaults (per-surface tuning)', () => {
-    // the override verbatim (e.g. a future accessibility mode widens the
-    // hysteresis band to 0.40–0.85 for users with fine-motor variance).
     const result = computeSemanticZoomTransition({
       currentLayer: 'brief',
       currentZoom: 0.6, // would NOT swap under defaults
@@ -172,18 +157,11 @@ describe('computeSemanticZoomTransition — pure threshold logic (P4 Task 3)', (
 });
 
 describe('useSemanticZoom — React hook (P4 Task 3)', () => {
-  // called (Rules of Hooks) — even when `getZoom` overrides the value, the
-  // hook still reads from RF's store. The provider's store is enough for
-  // the hook to mount cleanly in jsdom; no real `<ReactFlow>` graph needed.
   const wrapper = ({ children }: { children: ReactNode }) => (
     <ReactFlowProvider>{children}</ReactFlowProvider>
   );
 
   it('skips the FIRST observation so initial-mount zoom does not fire a swap (regression: Brief at zoom 1.0 must NOT immediately swap to Narrative)', () => {
-    // changes, not on initial mount. RF's default viewport zoom is 1.0;
-    // on a Brief (coarse) surface entry, 1.0 > 0.70 would immediately
-    // swap to Narrative if the hook fired on mount. The hook MUST skip
-    // the first observation and treat it as the baseline.
     let zoom = 0.5; // below threshold on mount
     const onLayerChange = vi.fn();
     const { rerender } = renderHook(
@@ -205,8 +183,6 @@ describe('useSemanticZoom — React hook (P4 Task 3)', () => {
   });
 
   it('does NOT fire on mount even when the initial zoom exceeds the threshold', () => {
-    // (which exceeds the 0.70 zoom-in threshold) MUST NOT immediately
-    // swap to Narrative. The hook records the mount zoom as baseline.
     const zoom = 1.0;
     const onLayerChange = vi.fn();
     renderHook(
@@ -223,8 +199,6 @@ describe('useSemanticZoom — React hook (P4 Task 3)', () => {
   });
 
   it('fires onLayerChange when zoom crosses the zoom-IN threshold (Brief → Narrative)', () => {
-    // rerenders without driving a real RF viewport. Production wires to
-    // `useViewport()` (smoke test below).
     let zoom = 0.5;
     const onLayerChange = vi.fn();
     const { rerender } = renderHook(
@@ -294,9 +268,6 @@ describe('useSemanticZoom — React hook (P4 Task 3)', () => {
   });
 
   it('does NOT re-fire when the zoom value is unchanged across re-renders (no parent-render false positives)', () => {
-    // change in the orchestrator), the hook's effect may re-run with the
-    // same zoom value. The hook MUST no-op in that case so unrelated
-    // orchestrator re-renders do not trigger phantom layer swaps.
     const zoom = 0.4;
     const onLayerChange = vi.fn();
     const { rerender } = renderHook(
@@ -318,9 +289,6 @@ describe('useSemanticZoom — React hook (P4 Task 3)', () => {
   });
 
   it('uses React Flow useViewport() when getZoom is omitted (production path smoke)', () => {
-    // a ReactFlowProvider. The hook records the initial viewport (zoom=0
-    // in jsdom since RF has no real graph) as baseline and does not fire
-    // any swap.
     const onLayerChange = vi.fn();
 
     const { result } = renderHook(

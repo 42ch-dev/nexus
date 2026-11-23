@@ -1,6 +1,4 @@
 /**
- * baseline (p4 T2 / `R-V1203P2QC1-S001`).
- *
  * The holder vocabulary and the `modules.mental` / `modules.belief` builders
  * moved out of the React component module; these cases pin their
  * inputs/outputs at the new lower-layer home, so the move stays

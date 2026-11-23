@@ -262,8 +262,6 @@ impl HostPromptExecutor {
             phase,
             host_session_id,
             operation_id,
-            // durable shape (identical fields; this crate persists the
-            // fingerprint without importing provider crates).
             process_identity: process_identity.map(|pi| {
                 nexus_session_storage::run_state::OwnedProcessIdentity {
                     pid: pi.pid,
@@ -282,10 +280,6 @@ impl HostPromptExecutor {
             )
             .await
             .map_err(|e| match e {
-                // transition, a newer step, or a concurrent same-anchor
-                // operation won since admission — the prompt must not
-                // launch and the caller sees the same typed cancellation a
-                // post-fence cancellation produces.
                 StorageError::RevisionMismatch { .. }
                 | StorageError::TerminalState(_)
                 | StorageError::SessionNotFound(_) => CapabilityError::Cancelled,
@@ -351,7 +345,6 @@ impl HostPromptExecutor {
         ),
         CapabilityError,
     > {
-        // touching the per-key creation lock.
         {
             let sessions = self.sessions.read().await;
             if let Some(session) = sessions.get(key) {
@@ -371,8 +364,6 @@ impl HostPromptExecutor {
         };
         let _guard = key_lock.lock().await;
 
-        // published while we waited, or the request was cancelled in the
-        // window — either way no second spawn.
         {
             let sessions = self.sessions.read().await;
             if let Some(session) = sessions.get(key) {
@@ -480,24 +471,13 @@ impl HostPromptExecutor {
 impl PromptExecutor for HostPromptExecutor {
     #[allow(clippy::too_many_lines)] // the full prompt lifecycle is one sequential flow; per-phase helpers would re-enter shared state
     async fn execute(&self, request: PromptRequest) -> Result<PromptResult, CapabilityError> {
-        //    before any external effect when the binding is missing.
         let (creator_id, workspace_root, provider_id, model) = self
             .resolve_run_metadata(&request.run_id, request.agent_ref.as_deref())
             .await?;
 
-        //     guard is held from BEFORE the durable Dispatching claim
-        //     through the external exec admission and the stream drain, so
-        //     concurrent same-run prompts cannot overlap in the
-        //     Active-CAS→exec window and a cancellation cannot race a
-        //     successor's launch or cleanup.
         let op_lock = self.run_op_lock(&request.run_id);
         let _op_guard = op_lock.lock().await;
 
-        //    a pre-cancelled request, a terminal run, or a run with
-        //    `cancel_requested` refuses here — no durable intent write, no
-        //    Host session launch, no prompt. The returned anchor
-        //    (revision + step marker) linearizes the intent persistence
-        //    with the engine's control transitions.
         let (expected_revision, expected_step) = self
             .admission_fence(&request.run_id, &request.cancellation)
             .await?;
@@ -511,21 +491,9 @@ impl PromptExecutor for HostPromptExecutor {
             role,
         };
 
-        //    BEFORE any external session launch (A5). The Host op id is part
-        //    of the durable Active intent and is ready before `exec`
-        //    regardless of session creation latency; the attempt id names
-        //    this operation's durable `in_flight` ownership.
         let attempt_id = uuid::Uuid::new_v4().to_string();
         let op_id = HostOperationId::new();
 
-        //    (A2/A5), revision-fenced on the admission anchor AND CLAIMING
-        //    the empty `in_flight` slot with this attempt's id (ownership
-        //    CAS: the claim succeeds only while the slot is empty or already
-        //    owned by this attempt): a crash after the effect but before the
-        //    result checkpoint leaves the run interrupted, never
-        //    auto-replayed. A control transition, a still-owning earlier
-        //    operation, or a concurrent same-anchor operation that advanced
-        //    the state since admission fails the CAS here.
         self.persist_attempt(
             &request.run_id,
             &request.task_id,
@@ -540,8 +508,6 @@ impl PromptExecutor for HostPromptExecutor {
         )
         .await?;
 
-        //    key; the re-check and cancellation fence run under the key
-        //    lock, immediately before the external spawn).
         let host_session_result = self
             .host_session(
                 &key,
@@ -553,18 +519,9 @@ impl PromptExecutor for HostPromptExecutor {
             )
             .await;
 
-        //    is the second revision fence, immediately before `exec`: it
-        //    CASes on the same admission anchor AND on this operation's own
-        //    attempt id, so a cancellation/control transition that passed
-        //    the earlier fences still fails here and the prompt is never
-        //    launched — and a concurrent same-anchor prompt can never
-        //    replace this operation's durable marker.
         let (host_session_id, process_identity, created_by_us) = match host_session_result {
             Ok(triple) => triple,
             Err(e) => {
-                // launch failure, EOF). Any session created by this request
-                // is shut down and evicted (A5 — no leaked owned session),
-                // and the durable attempt ownership + marker are dropped.
                 self.clear_attempt(
                     &request.run_id,
                     expected_revision,
@@ -587,11 +544,6 @@ impl PromptExecutor for HostPromptExecutor {
             .await;
             return Err(CapabilityError::Cancelled);
         }
-        // operation's own attempt id. A failure means a concurrent
-        // cancellation/control transition won (or the ownership CAS failed):
-        // no prompt may launch, and the session THIS request created is shut
-        // down and evicted so no successor reuses a session whose owned
-        // process may be gone (A5 bounded cleanup — no leaked Host session).
         let active_fence = self
             .persist_attempt(
                 &request.run_id,
@@ -617,14 +569,8 @@ impl PromptExecutor for HostPromptExecutor {
             .await;
             return Err(e);
         }
-        // this request's operation; if the operation is later abandoned the
-        // session stays for serial reuse, never leaked.
         let _ = created_by_us;
 
-        //    permission scope (A1). The orchestration scope type converts to
-        //    the Host's own scope type (identical fields; the Host cannot
-        //    depend on orchestration).
-        //
         //    M-001: workflow prompt execution must fail closed unless it
         //    carries a narrowing scope. `RequestPolicy` maps to `None` (no
         //    narrowing scope) — for workflow prompts that would let the
@@ -651,8 +597,6 @@ impl PromptExecutor for HostPromptExecutor {
                 allow_destructive: scope.allow_destructive,
             })
         } else {
-            // scope) refuses for workflow prompt execution — fail
-            // closed before the external Host effect.
             self.cleanup_created_session(&key, created_by_us).await;
             self.clear_attempt(
                 &request.run_id,
@@ -693,20 +637,11 @@ impl PromptExecutor for HostPromptExecutor {
         }
         .map_err(|e| CapabilityError::TransientExternal(format!("host exec failed: {e}")))?;
 
-        //    to the coordinator cancellation token concurrently (A5).
         let mut full_text = String::new();
         let mut stream = std::pin::pin!(stream);
         let cancel = request.cancellation.clone();
-        // Host operation is cancelled and the stream is drained until its
-        // terminal event (bounded by provider timeouts). Consuming the
-        // terminal event lets the Host's wrapped stream transition the
-        // session Cancelling → Ready, so step 9's bounded shutdown can
-        // remove the session — no leaked Host session.
         let mut cancel_triggered = false;
         let mut cancel_unconfirmed = false;
-        // (`<root>:child:<uuid>`, recursively) while the SSE ring belongs to
-        // the driven ROOT run — resolve through the owning root so the
-        // OpStarted/content/OpFinished lifecycle lands on that ring.
         let run_event_sink = if let Some(sinks) = &self.run_event_sinks {
             crate::run_events::sink_for_run(sinks, &request.run_id).await
         } else {
@@ -717,14 +652,6 @@ impl PromptExecutor for HostPromptExecutor {
                 biased;
                 () = cancel.cancelled(), if !cancel_triggered => {
                     cancel_triggered = true;
-                    // the configured shutdown timeout. A provider that fails
-                    // or blocks `cancel` must not leave `execute` (and the
-                    // engine's `finalize_run`) waiting indefinitely: on
-                    // timeout/error the cooperative drain is abandoned and
-                    // the run proceeds to the bounded owned-session/process
-                    // cleanup path below, retaining an honest
-                    // `Interrupted` disposition when cleanup cannot be
-                    // confirmed — never a false successful cancellation.
                     let cancel_result = tokio::time::timeout(
                         self.timeouts.shutdown_duration(),
                         self.host.cancel(op_id.clone()),
@@ -811,7 +738,6 @@ impl PromptExecutor for HostPromptExecutor {
                             )));
                         }
                         None => {
-                            // (A1: only MessageDelta + EndTurn succeeds).
                             if cancel_triggered {
                                 break Err(CapabilityError::Cancelled);
                             }
@@ -824,13 +750,6 @@ impl PromptExecutor for HostPromptExecutor {
             }
         };
 
-        //    lifecycle (A5): shutdown drains and reaps the owned process,
-        //    and the executor's session map entry is evicted so a later
-        //    admission never reuses a session whose owned process is gone.
-        //    I-002: the entry is evicted ONLY on a confirmed shutdown; on
-        //    timeout/error the Host still owns the session, so the entry is
-        //    kept for a later `finalize_run` retry to reap.
-        //
         //    P1 (rereview-4): the post-cancel stream drain is bounded by the
         //    same shutdown timeout. A provider that ignores cancellation and
         //    never emits a terminal event must not leave `execute` (and the
@@ -883,11 +802,6 @@ impl PromptExecutor for HostPromptExecutor {
             }
         }
 
-        //     and clear this operation's durable `in_flight` marker so the
-        //     next admitted operation of the same run claims an empty slot
-        //     (sequential same-run capability callers). A successful graph
-        //     step's `commit_transition` also clears the marker — this is
-        //     idempotent (fence misses are benign).
         self.clear_attempt(
             &request.run_id,
             expected_revision,
@@ -906,15 +820,9 @@ impl PromptExecutor for HostPromptExecutor {
     /// cleanup is confirmed; `Err` means cleanup-unconfirmed (the run
     /// must remain non-terminal/actionable).
     async fn finalize_run(&self, run_id: &str) -> Result<(), CapabilityError> {
-        // operation's own cleanup (step 9) must complete before we shut
-        // down its session, and no new operation may admit after the run
-        // is terminal (the admission fence refuses terminal runs).
         let op_lock = self.run_op_lock(run_id);
         let _op_guard = op_lock.lock().await;
 
-        // entries are evicted ONLY after their shutdown is confirmed; on
-        // timeout/error the Host still owns the session, so the entry is
-        // kept for a later retry to reap.
         let sessions: Vec<(HostSessionKey, CachedHostSession)> = {
             let map = self.sessions.read().await;
             map.iter()
@@ -1126,10 +1034,6 @@ mod tests {
                     return Err(nexus_agent_host::HostError::internal("unused"));
                 }
             };
-            // the operation is cancelled (the executor's out-of-band Host
-            // cancel) or released by the test. This is the deterministic
-            // blocking ACP-shaped stream the executor drains concurrently
-            // with the coordinator cancellation token (Finding 3, round 4).
             let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
             self.active_ops
                 .lock()
@@ -1148,13 +1052,9 @@ mod tests {
 
         async fn cancel(&self, op_id: nexus_agent_host::HostOperationId) -> HostResult<()> {
             self.cancels.fetch_add(1, Ordering::SeqCst);
-            // the executor's bounded cancel must still return within the
-            // shutdown timeout.
             if self.block_cancel.load(Ordering::SeqCst) > 0 {
                 std::future::pending::<()>().await;
             }
-            // observes the terminal `OpFinished(Cancelled)` event — the
-            // bounded stream/operation termination the cancel path awaits.
             let removed = self.active_ops.lock().expect("active_ops").remove(&op_id);
             if let Some((_, release)) = removed {
                 let _ = release.send(());
@@ -1179,8 +1079,6 @@ mod tests {
             &self,
             session_id: nexus_agent_host::HostSessionId,
         ) -> HostResult<()> {
-            // be confirmed — the run must stay `Interrupted`, never falsely
-            // `Cancelled`.
             if self.fail_shutdown_forever.load(Ordering::SeqCst) > 0 {
                 return Err(nexus_agent_host::HostError::internal(
                     "injected permanent shutdown failure",
@@ -1291,15 +1189,12 @@ mod tests {
             .await
             .expect("start session");
 
-        // the executor's session map holds a real Host session row).
         let host_session_id = nexus_agent_host::HostSessionId::new();
         host.seed_session(host_session_id.clone());
         executor
             .seed_cached_session_for_test(&session_id.0, "default", host_session_id.clone())
             .await;
 
-        // R+1): the cancel fence must reload, re-fence, and still reach the
-        // Host teardown.
         let record = store
             .load_run(&session_id)
             .await
@@ -1328,7 +1223,6 @@ mod tests {
             .await
             .expect("mark_step_in_flight wins the CAS");
 
-        // real executor's finalize_run shuts down the owned Host session.
         engine
             .signal(
                 &session_id,
@@ -1401,8 +1295,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // real executor's `resolve_run_metadata` admits the prompt (the
-        // engine start seam leaves bindings empty).
         let record = store
             .load_run(&session_id)
             .await
@@ -1426,8 +1318,6 @@ mod tests {
         .await
         .expect("patch descriptor binding");
 
-        // R+1): the step is durably in flight when the prompt admits and
-        // when the cancel lands.
         let record = store
             .load_run(&session_id)
             .await
@@ -1456,8 +1346,6 @@ mod tests {
             .await
             .expect("mark_step_in_flight wins the CAS");
 
-        // stream. The operation admits (revision R+1 + step marker), the
-        // Host session is created, and the Host operation parks.
         let token = {
             let cancels = session_cancels
                 .read()
@@ -1483,7 +1371,6 @@ mod tests {
                 .await
         });
 
-        // live) — the operation is made active immediately before Cancel.
         let mut attempts = 0;
         while host.active_op_count() == 0 {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -1492,10 +1379,6 @@ mod tests {
         }
         assert_eq!(host.active_op_count(), 1, "exactly one active operation");
 
-        // executor observes it, calls HostFacade::cancel, drains the stream
-        // to its terminal event, shuts down the owned session, and returns
-        // Cancelled; the engine's finalize_run confirms the reap and the
-        // run settles Cancelled.
         engine
             .signal(
                 &session_id,
@@ -1594,7 +1477,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // real executor's `resolve_run_metadata` admits the prompt.
         let record = store
             .load_run(&session_id)
             .await
@@ -1646,7 +1528,6 @@ mod tests {
             .await
             .expect("mark_step_in_flight wins the CAS");
 
-        // stream; the Host operation parks.
         let token = {
             let cancels = session_cancels
                 .read()
@@ -1680,13 +1561,9 @@ mod tests {
         }
         assert_eq!(host.active_op_count(), 1, "exactly one active operation");
 
-        // `shutdown_session` always fails — cleanup can never be confirmed.
         host.block_cancel_forever();
         host.fail_shutdown_forever();
 
-        // (the configured shutdown timeout bounds the cancel request, the
-        // drain is abandoned, and the failing shutdown keeps the run
-        // Interrupted — never a false successful Cancelled).
         let cancel_start = std::time::Instant::now();
         let signal_result = engine
             .signal(
@@ -1710,7 +1587,6 @@ mod tests {
             "the Host cancel effect must be attempted exactly once"
         );
 
-        // the bound — never stuck behind the blocking provider.
         let execute_result = execute_handle.await.expect("execute task joined");
         assert!(
             matches!(
@@ -1720,7 +1596,6 @@ mod tests {
             "execute must return the typed cancellation, got {execute_result:?}"
         );
 
-        // a later `finalize_run` retry (I-002), never reported reaped.
         assert_eq!(
             host.shutdowns.load(Ordering::SeqCst),
             0,
@@ -1732,7 +1607,6 @@ mod tests {
             "the owned Host session must be retained (cleanup unconfirmed)"
         );
 
-        // unconfirmed-cleanup failure — never a false successful Cancelled.
         let final_record = store
             .load_run(&session_id)
             .await
@@ -1828,7 +1702,6 @@ mod tests {
             .await
             .expect("spawn grandchild");
 
-        // a human wait — no active operation to observe a fired token).
         let child_host_session = nexus_agent_host::HostSessionId::new();
         let grandchild_host_session = nexus_agent_host::HostSessionId::new();
         host.seed_session(child_host_session.clone());
@@ -1844,7 +1717,6 @@ mod tests {
             )
             .await;
 
-        // grandchild — every owned Host session is shut down and reaped.
         engine
             .signal(
                 &session_id,
@@ -1922,7 +1794,6 @@ mod tests {
             .await;
         host.fail_next_shutdowns(1);
 
-        // child's cached session is retained for retry.
         let err = engine
             .signal(
                 &session_id,
@@ -1949,7 +1820,6 @@ mod tests {
             "the child's Host session must be retained after the failed shutdown"
         );
 
-        // session is reaped.
         engine
             .signal(
                 &session_id,

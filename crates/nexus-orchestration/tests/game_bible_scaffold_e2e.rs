@@ -273,7 +273,6 @@ async fn bootstrap_game_bible_idempotent() {
     );
 
     assert_eq!(files1_count, 13, "first run: 13 files");
-    // in files_created. The exact count may vary; this tests idempotent success.
     assert!(
         !output2["scaffold_root"].is_null(),
         "second run should return scaffold_root"

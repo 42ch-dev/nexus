@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /**
- * v1220 P3-T2 with create.
- *
  * `POST /v1/daemon/workspaces` forwards to the core create capability; the
  * core's typed refusals map through the shared error fold (`workspace_conflict`
  * → 409, `invalid_input` → 400). The real composer and HTTP server run over a
@@ -76,7 +74,6 @@ async function startServer(stubState) {
       port: 0,
       allowRemote: false,
     });
-    // workspace and only the set-active handler may flip it in place.
     const service = {
       startedAt: new Date().toISOString(),
       tlsFingerprint: null,
@@ -142,7 +139,6 @@ function stubState() {
           workspace_slug: request.workspace_slug,
         };
       },
-      // refusals so the transport fold (409/400) is what gets exercised.
       async createWorkspace(request) {
         state.createdRequest = request;
         if (request.workspace_slug === 'duplicate') {
@@ -413,7 +409,6 @@ function seedWorkspaceHome() {
       }),
     );
   }
-  // `creative_root` instead of naming an empty path (D25).
   mkdirSync(join(workspacesRoot, 'third'), { recursive: true });
   writeFileSync(
     join(workspacesRoot, 'third', 'meta.json'),
@@ -475,7 +470,6 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
       workspace_slug: 'second',
     });
 
-    // initialized the chosen workspace DB (never a route-level side effect).
     const after = await jsonFetch(`${service.url}/v1/daemon/workspace`);
     assert.equal(after.status, 200, after.text);
     assert.equal(after.payload.workspace_slug, 'second');
@@ -486,7 +480,6 @@ describe('workspace-http native binding (v1219 shell Task 4)', () => {
     assert.equal(status.status, 200, status.text);
     assert.equal(status.payload.workspace_initialized, true);
 
-    // optional field (the client must not display an empty path).
     const bare = await jsonFetch(`${service.url}/v1/daemon/workspace/active`, {
       method: 'POST',
       body: { workspace_slug: 'third' },
@@ -538,7 +531,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
   let service;
 
   before(async () => {
-    // service opens the status-only shell, exactly the first-run case.
     home = mkdtempSync(join(tmpdir(), 'nexus-workspace-shell-'));
     tempDirs.push(home);
     const { startService } = await import(join(serviceRoot, 'dist/index.js'));
@@ -576,7 +568,6 @@ describe('workspace-http service-only shell (v1219 shell Task 4 fix round 2)', (
     const creatorId = created.payload.creator_id;
     assert.match(creatorId, /^ctr_local[a-zA-Z0-9]+$/);
 
-    // enrichment cache), not degraded to the creator id.
     const listed = await jsonFetch(`${service.url}/v1/daemon/creators`);
     assert.equal(listed.status, 200, listed.text);
     assert.deepEqual(

@@ -22,10 +22,6 @@ export interface ServiceCore {
   startedAt: string;
   /** False for the status-only profile: no principal, no KB/host/provider effects. */
   workspaceInitialized: boolean;
-  /**
-   * selects. Catalog membership, Host liveness or an unrelated available
-   * provider never substitutes for the selected providers' own probes.
-   */
   providerReady: boolean;
   /** HTTP-side session/operation mirror for JS-provider inspect paths (not a second HostManager). */
   providerRegistry: ProviderRegistry;
@@ -34,28 +30,14 @@ export interface ServiceCore {
   /** Selected identity of an initialized core; null on the uninitialized shell. */
   creatorId: string | null;
   workspaceSlug: string | null;
-  /**
-   * epoch, null on the uninitialized shell, and 0 when the profile owns no
-   * execution engine (the domain-only profile, or a selected workspace that
-   * cannot host a hosted owner). 0 is the core's own "no engine epoch"
-   * sentinel, never a synthesized epoch.
-   */
   engineEpoch: number | null;
 }
 
-/**
- * is the established `p:<generation>:<creator_id>:<workspace_slug>` encoding
- * produced by the native core (`EnvState::encode_principal`); the identity
- * still originates in Rust — this only reads it for the discovery record and
- * the instance-bound stop comparison. A malformed handle is a native contract
- * break and fails the open loudly instead of publishing a lying record.
- */
 function parsePrincipalIdentity(handle: string): { creatorId: string; workspaceSlug: string } {
   if (!handle.startsWith('p:')) {
     throw new HttpError(500, 'internal', 'native principal identity unreadable');
   }
   const parts = handle.slice(2).split(':');
-  // exactly generation, creator id and workspace slug.
   if (parts.length !== 3 || !/^\d+$/.test(parts[0])) {
     throw new HttpError(500, 'internal', 'native principal identity unreadable');
   }
@@ -119,8 +101,6 @@ export async function openServiceCore(
     );
   }
 
-  // home opens the full core, a missing profile opens the status-only shell so
-  // `/runtime/status` can report the existing uninitialized state.
   const openOptions = {
     user_home: config.home,
     access,
@@ -131,9 +111,6 @@ export async function openServiceCore(
   let workspaceInitialized = false;
   let identity: { creatorId: string; workspaceSlug: string } | null = null;
   try {
-    // native principal resolves. A typed `uninitialized` rejection is the
-    // status-only profile, not a startup failure; anything else aborts before
-    // the listener binds.
     const principal = await core.activePrincipal();
     identity = parsePrincipalIdentity(principal);
     workspaceInitialized = true;
@@ -165,18 +142,9 @@ export async function openServiceCore(
   if (identity) {
     try {
       if (config.domainOnly) {
-        // no provider runtime edge, so nothing can make it "provider ready"
-        // and there is no engine epoch to report.
         providerReady = true;
         engineEpoch = 0;
       } else {
-        // computed and before the record is published. The native factory
-        // composes the complete owner (selected-root workspace ports and
-        // startup recovery, prompt executor, catalog, run-event registry,
-        // cancellation map, scheduler) and reports the ACTUAL epoch plus the
-        // native-owned selected-provider readiness — never a default. A pre-IA
-        // home has no admission pin yet; the helper selects the canonical
-        // workspace once and retries before readiness is published.
         const owner = await startExecutionOwnerWithCompensation(core, identity);
         engineEpoch = owner.engine_epoch ?? 0;
         providerReady = owner.provider_ready;

@@ -1,7 +1,4 @@
 /**
- * (FB-C1-004, V1.108 P0 T3; V1.109 C2 T3 — Scene/Beat nested rows FB-C2-003;
- * V1.115 T1 — client-side sort controls R-V1108P0QC1-M001).
- *
  * Mirrors `strategy-alt-view.tsx`: every canvas must have a list/tree
  * companion so the outline is understandable without spatial navigation.
  * This renders:
@@ -40,15 +37,9 @@ import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
 export interface OutlineAltViewProps {
   outline: WorkOutline;
   chapters: ChapterSummary[];
-  /**
-   * rows nest under their parent chapter and Beat rows nest under their parent
-   * scene. Empty/undefined on real Works — chapters then render with zero
-   * scene/beat children (honest empty chrome).
-   */
   sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
-// on every mount (never persisted). Lists are small and un-paginated.
 type ChapterSortKey = 'volume' | 'number';
 type SortDir = 'asc' | 'desc';
 
@@ -77,7 +68,6 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
 
   const [chapterSortKey, setChapterSortKey] = useState<ChapterSortKey>('volume');
   const [chapterSortDir, setChapterSortDir] = useState<SortDir>('asc');
-  // ascending is the declared timeline order.
   const [eventSortDir, setEventSortDir] = useState<SortDir>('asc');
 
   const volumeLabelByChapter = new Map<number, string>();
@@ -88,9 +78,6 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
 
   const isFlatNumber = chapterSortKey === 'number';
 
-  // bucket. Chapter order WITHIN a volume stays the declared order (sorting by
-  // volume is about group order, not intra-group order). Copies are taken so
-  // the outline prop is never mutated.
   const volumesInOrder =
     chapterSortKey === 'volume' && chapterSortDir === 'desc'
       ? [...outline.volumes].reverse()

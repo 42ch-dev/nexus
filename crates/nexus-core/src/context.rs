@@ -101,8 +101,6 @@ fn map_narrative_write_error(e: nexus_local_db::narrative_write::NarrativeWriteE
     }
 }
 
-/// `assemble_moment_with_directive` at run/assemble wiring sites. Cannot live
-/// in `nexus-local-db` (dependency cycle with MCA).
 #[derive(Debug, Clone)]
 pub struct LocalDirectiveStore {
     pool: SqlitePool,
@@ -209,13 +207,11 @@ async fn resolve_active_row(
     if let Some(work_id) = work_id {
         match get_active_for_work(pool, creator_id, work_id).await {
             Ok(Some(row)) => return Some(row),
-            // World override (QC2-F2).
             Err(e) => {
                 tracing::warn!(creator_id, work_id, error = %e,
                     "moment directive: work-scoped read failed; resolving to no directive");
                 return None;
             }
-            // through to the World override.
             Ok(None) => {}
         }
         match get_work(pool, creator_id, work_id).await {
@@ -254,8 +250,6 @@ async fn resolve_active_row(
 /// warning (failures degrade to "no directive", never fail the assembly).
 fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
     if row.body.trim().is_empty() {
-        // still count as an injection — skip it, and because `load_active`
-        // returns `None` the post-injection TTL decrement never runs.
         tracing::warn!(directive_id = %row.directive_id,
             "moment directive row has an empty body; skipping injection");
         return None;
@@ -276,11 +270,6 @@ fn map_to_active_directive(row: MomentDirectiveRow) -> Option<ActiveDirective> {
         insert_depth,
         ttl_kind,
         clear_on_scene_change: row.clear_on_scene_change,
-        // to MCA for the inspector packet — status/metadata only, never the
-        // body (AC-I3). `ttl_remaining` is `i64` on the row; only non-
-        // negative values surface (an active row's TTL never goes negative).
-        // `u64` matches the wire input width (NonZeroU64) so counts above
-        // u32::MAX render instead of silently nulling (QC3-S-1).
         ttl_remaining: u64::try_from(row.ttl_remaining).ok(),
         status: row.status,
         scope_kind: row.scope_kind,
@@ -328,39 +317,26 @@ async fn after_injection_lifecycle(
         }
     }
 
-    // is the chapter delta since this work's last injecting assemble — see
-    // `decrement_ttl_by` in `nexus-local-db` for the write-failure threat
-    // model (R-V1150P2-005 accepted: atomic via RETURNING; a write failure
-    // on local-only SQLite indicates a broken DB, not a lost-update window).
     let (burn, chapter_anchor) = match (row.ttl_kind.as_str(), work_id) {
-        ("chapters", Some(work_id)) => {
-            match get_work(pool, &row.creator_id, work_id).await {
-                Ok(Some(work)) if is_novel_profile(work.work_profile.as_deref()) => {
-                    let chapter = i64::from(work.current_chapter);
-                    let burn = match get_chapter_anchor(pool, directive_id, work_id).await {
-                        // never negative — a chapter rewind does not refund TTL.
-                        Ok(Some(last)) => i64::max(0, chapter - last),
-                        // only, no burn (R-V1150P2-004).
-                        Ok(None) => 0,
-                        // fallback (burn 1, keep the directive moving toward
-                        // expiry) — never fail the assembly (QC2-F2).
-                        Err(e) => {
-                            tracing::warn!(directive_id, work_id, error = %e,
+        ("chapters", Some(work_id)) => match get_work(pool, &row.creator_id, work_id).await {
+            Ok(Some(work)) if is_novel_profile(work.work_profile.as_deref()) => {
+                let chapter = i64::from(work.current_chapter);
+                let burn = match get_chapter_anchor(pool, directive_id, work_id).await {
+                    Ok(Some(last)) => i64::max(0, chapter - last),
+                    Ok(None) => 0,
+                    Err(e) => {
+                        tracing::warn!(directive_id, work_id, error = %e,
                                 "moment directive: chapter anchor read failed; burning 1");
-                            1
-                        }
-                    };
-                    (burn, Some((work_id, chapter)))
-                }
-                // `generations` (documented, not silent — spec §3.3).
-                _ => (1, None),
+                        1
+                    }
+                };
+                (burn, Some((work_id, chapter)))
             }
-        }
+            _ => (1, None),
+        },
         _ => (1, None),
     };
 
-    // re-reads the row and re-attempts; if the directive expires at 0, the
-    // anchors are already recorded for DF-76 inspection.
     if let Err(e) = update_lifecycle_anchor(pool, directive_id, event_id, now_ms()).await {
         tracing::warn!(directive_id, error = %e, "moment directive anchor update failed");
     }
@@ -419,7 +395,6 @@ impl CoreService {
             return Err(invalid_input("scope.id", "must be non-empty"));
         }
 
-        // leaks directive state — 403, not 404.
         let owned = match req.scope.kind {
             MomentDirectiveRequestScopeKind::Work => {
                 is_work_owned(pool, creator_id, scope_id).await?
@@ -471,8 +446,6 @@ async fn set(
             "must be non-empty (after trimming whitespace)",
         ));
     }
-    // by construction; the signed cast mirrors the CLI's `i64 --ttl-*` flags).
-    // Wire name `ttl_remaining` per the spec §5 H5 lock (W-3 / QC1-F-001).
     let (Some(ttl_kind), Some(ttl_count)) = (req.ttl_kind, req.ttl_remaining) else {
         return Err(invalid_input(
             "ttl_kind",
@@ -505,8 +478,6 @@ async fn set(
     } else {
         match set_active(pool, &new).await {
             Ok(row) => row,
-            // rejects a second active row — surface as 409, mirroring the
-            // CLI's "--replace required" message (no silent overwrite).
             Err(LocalDbError::Sqlx(sqlx::Error::Database(db_err)))
                 if db_err.is_unique_violation() =>
             {
@@ -540,8 +511,6 @@ async fn show(
     let row = if kind == scope_kind::WORK {
         match get_active_for_work(pool, creator_id, scope_id).await {
             Ok(Some(row)) => Some(row),
-            // override (the ownership gate already verified the Work, so
-            // `get_work` resolves; a worldless Work has no override).
             Ok(None) => {
                 let world_id = get_work(pool, creator_id, scope_id)
                     .await
@@ -648,8 +617,6 @@ impl CoreService {
         let pool = &self.inner.pool;
         let creator_id = principal.creator_id();
 
-        // leaks assembly behavior — 403, not 404, so world existence stays
-        // unobservable to other creators.
         let owned = narrative_write::is_world_owned(pool, creator_id, req.world_id.as_str())
             .await
             .map_err(map_narrative_write_error)?;
@@ -660,12 +627,6 @@ impl CoreService {
             });
         }
 
-        // own binding must agree with the request World. Otherwise a Work
-        // bound to World B passed alongside owned World A would resolve B's
-        // World override into A's assembly — the packet would show a
-        // directive whose scope_id does not match the request world_id. A
-        // worldless or unknown Work resolves no override and stays legal
-        // (matches the CLI).
         if let Some(work_id) = req.work_id.as_deref() {
             let work = get_work(pool, creator_id, work_id)
                 .await
@@ -686,10 +647,6 @@ impl CoreService {
             }
         }
 
-        // the CLI-only knobs: the active creator + world are always threaded;
-        // work + generation stage only when the request carries them. Stage-0
-        // stays the empty default — this is an observation surface and the
-        // packet never renders stage-0 content (spec §2).
         let mut request = MomentRequest::new(Stage0Assembly::default())
             .with_world(req.world_id.as_str())
             .with_creator(creator_id);
@@ -697,9 +654,6 @@ impl CoreService {
             request = request.with_work(work_id);
         }
         if let Some(stage) = req.generation_stage.as_ref() {
-            // GenerationStage), so parse is total here; the `else` arm is
-            // defensive against future schema drift — unknown degrades to
-            // unspecified (all slots on), matching the CLI.
             if let Some(gs) = GenerationStage::parse(&stage.to_string()) {
                 request = request.with_generation_stage(gs);
             } else {
@@ -710,19 +664,6 @@ impl CoreService {
             }
         }
 
-        // edges for relation-hop expansion — without them the inspector
-        // packet would omit hopped entries that the CLI assembly includes.
-        // Best-effort like the CLI: a storage-read failure degrades to
-        // activation-only (no hop pass, no panic), and an empty confirmed
-        // graph yields `None` (P0 activation-only behavior). The CLI only
-        // caps the hop budget when the caller passes `--max-tokens`;
-        // `MomentInspectRequest` carries no such knob, so the cap stays
-        // unset — MCA's `hop_budget_tokens` then runs the hop pass
-        // depth+cycle-only, identical to a default CLI invocation.
-        // Durable §4.2/§5.1: the inspect packet is a **preview** input, so it
-        // reads the owned World under the admitted Creator's ActorView — the
-        // exact Creator holder plus the owned containers — never the Creator
-        // management review, and never an unscoped adapter.
         let view_scope = self
             .creator_view_read_scope(principal, req.world_id.as_str())
             .await?;
@@ -735,19 +676,11 @@ impl CoreService {
             request = request.with_hop_edges(edges);
         }
 
-        // + a **read-only** directive store (W-001 / QC2-W-001 + QC3-W-1):
-        // the packet's `moment_directive` section reflects the active
-        // directive (Work scope → World override fallback) without running
-        // the post-injection lifecycle. None active ⇒ byte-equivalent to
-        // plain `assemble_moment` (AC-I1b). Per-domain failures degrade to
-        // omitted sections, they never reject.
         let narrative = SqliteNarrativeGateway::new(pool.clone());
         let kb = SpokeBackedKbStore::new(pool.clone(), view_scope.clone());
         let directives = ReadOnlyDirectiveStore::new(pool.clone());
         let ctx = assemble_moment_with_directive(&request, &narrative, &kb, &directives).await;
 
-        // boundary (validates the builder output against the wire contract —
-        // `moment_directive` carries status/metadata only, AC-I3).
         let packet = build_inspector_packet(&ctx);
         let resp: MomentInspectResponse =
             serde_json::from_value(packet).map_err(|e| CoreError::Internal {
@@ -783,8 +716,6 @@ impl CoreService {
         viewpoint: &ActorViewpoint,
     ) -> CoreResult<CoreActorContext> {
         self.verify_principal(principal)?;
-        // bounded KnowledgeView) — the single Actor-truth path; the serializable
-        // projection below carries no authority.
         let admitted = crate::actors::CoreActorAdmission::new(self.inner.pool.clone())
             .admit(principal.creator_id(), actor.clone(), viewpoint.clone())
             .await?;

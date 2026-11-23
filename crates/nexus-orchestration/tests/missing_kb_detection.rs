@@ -124,8 +124,6 @@ async fn seed_world(pool: &SqlitePool) {
 
 async fn insert_novel_writing_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
-    // finalize-time detection is admitted under (`current_session_id` FK), so
-    // the run row is seeded with it.
     let run_id = format!("run_{schedule_id}");
     // SAFETY: test-only INSERT into orchestration_sessions (the FK target of
     // `creator_schedules.current_session_id`).
@@ -152,7 +150,6 @@ async fn insert_novel_writing_schedule(pool: &SqlitePool, schedule_id: &str, wor
     )
     .bind(schedule_id)
     .bind(CREATOR)
-    // default session, so the fixture seeds the real one.
     .bind(&run_id)
     .bind(format!("missing-{work_id}"))
     .bind(now)

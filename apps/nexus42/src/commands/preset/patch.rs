@@ -345,7 +345,6 @@ async fn patch_transition(
     transition_kind: Option<TransitionKindArg>,
     json: bool,
 ) -> Result<String> {
-    // scripts fail fast with named messages (PL-5).
     match op {
         TransitionOpArg::Create => {
             if new_target.is_none() {

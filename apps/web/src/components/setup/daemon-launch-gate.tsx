@@ -63,7 +63,6 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<TransportErrorKind | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
-  // controller (re-subscribe + status poll). Never bumped on cancel/failure.
   const [resetNonce, setResetNonce] = useState(0);
 
   useEffect(() => {
@@ -100,7 +99,6 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       if (status.state === 'running') {
         markReady();
       } else if (status.state === 'starting' || status.state === 'stopped') {
-        // call startDaemon from the renderer.
         setDaemonReady(false);
         setErrorMessage(null);
         setErrorKind(null);
@@ -111,10 +109,6 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       }
     }
 
-    /**
-     * attach races can observe `running`. When status IPC is unavailable, keep
-     * waiting; timeout surfaces the error UX.
-     */
     async function probeForReady() {
       try {
         await client.health();
@@ -216,14 +210,11 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   }, [client, desktop, t, resetNonce]);
 
   function retry() {
-    // keeps owning the service. The re-mounted gate consumes the controller's
-    // real readiness (status subscribe/poll); no startDaemon, no main rerun.
     window.location.reload();
   }
 
   async function resetLocalDatabase() {
     if (!desktop) return;
-    // attempt clears the splash error while the native dialog is up.
     const prevErrorMessage = errorMessage;
     const prevErrorKind = errorKind;
     setResetBusy(true);
@@ -232,21 +223,15 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     try {
       const outcome = await desktop.resetLocalDatabase();
       if (outcome.status !== 'confirmed') {
-        // recovery with the pre-attempt error restored — no success reload,
-        // no wait rerun.
         setResetBusy(false);
         setErrorMessage(prevErrorMessage);
         setErrorKind(prevErrorKind);
         return;
       }
-      // emits real status transitions. Re-enter the wait against the live
-      // subscription — a renderer reload would not rerun main, so recovery
-      // truth comes from the controller, not from navigation.
       setResetBusy(false);
       setResetNonce((n) => n + 1);
     } catch (err) {
       setResetBusy(false);
-      // existing subscription, and never show a success reload.
       setErrorMessage(toErrorMessage(err) || t('error.resetDatabaseFailed'));
       setErrorKind(kindForErrorState('unknown'));
     }

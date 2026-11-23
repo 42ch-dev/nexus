@@ -38,11 +38,6 @@ import type { EraTreeNode } from './brief-era-tree';
 export interface BriefTimeBandsProps {
   /** The era forest from `buildEraTree()` (Task 1). */
   tree: EraTreeNode[];
-  /**
-   * content is activated; the adapter routes it through the existing
-   * React Flow selection flow so the era inspector opens (selection-only —
-   * the time bands perform no writes).
-   */
   onSelectEra?: (eraId: string) => void;
 }
 
@@ -59,7 +54,6 @@ const INDENT_UNIT_PX = 24;
  * once it lands — no component shape change needed.
  */
 const ERA_TYPE_COLORS: Readonly<Record<string, string>> = {
-  // epoch) off the `--color-canvas-layer-brief-accent` spine.
   kingdom: 'var(--color-amber-900)',
   age: 'var(--color-amber-800)',
   epoch: 'var(--color-amber-700)',
@@ -95,10 +89,6 @@ export function BriefTimeBands({ tree, onSelectEra }: BriefTimeBandsProps) {
     () => new Set(),
   );
 
-  // is owned by the V1.123 Brief empty-state panel in `timeline-canvas.tsx`
-  // (`isBriefEmpty` gates it upstream, so this branch is defense-in-depth
-  // for direct callers): the renderer must not fabricate a band surface for
-  // a zero-node tree.
   if (tree.length === 0) return null;
 
   const toggle = (eraId: string): void => {

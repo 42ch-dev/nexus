@@ -63,8 +63,6 @@ export function FindingsPage() {
   const updateFinding = useUpdateFinding();
   const batchUpdate = useBatchUpdateFindings();
 
-  // useUpdateFinding), so the inspector reflects in-flight mutations without a
-  // separate detail fetch. Falls back to null if the row paginated out.
   const selected: FindingDetailResponse | null = useMemo(
     () => rows.find((f) => f.finding_id === selectedId) ?? null,
     [rows, selectedId],

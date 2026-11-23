@@ -72,7 +72,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
     let db_path = workspace_state_db_path(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
     let creative_root = fixture.home.path().join("creative");
 
-    // `local_root` — the same key the CLI's own workspace registration writes.
     std::fs::create_dir_all(&creative_root).expect("materialize creative root");
     std::fs::write(
         operational_workspace_dir(fixture.home.path(), &creator_id, WORKSPACE_SLUG)
@@ -88,8 +87,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
     )
     .expect("write meta.json");
 
-    // the core seam, which owns the ids, the ownership rows and the Work
-    // directory.
     let core = CoreService::open(CoreOpenOptions {
         user_home: fixture.home.path().to_path_buf(),
         access: CoreAccess::DirectWriter,
@@ -130,7 +127,6 @@ async fn fresh_env(finding_count: usize) -> FindingsEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // are creator-scoped, exactly as the findings reads require.
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("workspace pool")

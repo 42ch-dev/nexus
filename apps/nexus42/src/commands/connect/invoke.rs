@@ -466,9 +466,6 @@ pub(crate) fn build_handler_with_limits(
 ) -> (Arc<InvokeHandlerV2>, Arc<Semaphore>, Arc<Semaphore>) {
     let lane = Arc::new(Semaphore::new(limits.max_concurrent_invokes));
     let lane_for_handler = Arc::clone(&lane);
-    // the wasmtime epoch watchdog is engine-global, so concurrent compute
-    // calls would trap each other at the shortest budget (the daemon's
-    // compute_runs.rs W-2 permit is the same shape).
     let compute_serializer = Arc::new(Semaphore::new(1));
     let serializer_for_handler = Arc::clone(&compute_serializer);
     let ports_for_handler = Arc::new(ports);
@@ -535,14 +532,6 @@ fn dispatch(
     op: &str,
     payload: Value,
 ) -> Result<Value, ErrorEnvelope> {
-    //    serving gate — the manifest-honesty machine check
-    //    (`n_c1_manifest_served_ops_match_dispatch_both_directions`)
-    //    verifies the manifest against this const, so dispatch MUST read it
-    //    too, or the check would bind to a declaration-only table. Anything
-    //    outside the const (incl. `project`) is refused unconditionally,
-    //    regardless of payload shape (N-C0 refusal contract extends); a
-    //    match arm for an op that is not in `SERVED_OPS` is unreachable by
-    //    construction.
     if !SERVED_OPS.contains(&op) {
         return Err(unsupported(
             op,
@@ -551,9 +540,6 @@ fn dispatch(
         ));
     }
 
-    //    `SERVED_OPS` set; the `_` tail below is unreachable for served ops
-    //    (the gate refused everything else) and stays as a defensive
-    //    fallthrough.
     let route = match op {
         "upsert" => Route::Upsert,
         "promote" => Route::Promote,
@@ -561,8 +547,6 @@ fn dispatch(
         "check" => Route::Check,
         "assemble" => Route::Assemble,
         "compute" => Route::Compute,
-        // `tools.nexus.*` ids in `LOCAL_TOOL_OPS` reach this arm — the
-        // step-1 gate refused every other `tools.*` string.
         "tools.nexus.list_observed_peers" | "tools.nexus.list_modules" => Route::Tool,
         _ => {
             return Err(unsupported(
@@ -573,18 +557,7 @@ fn dispatch(
         }
     };
 
-    //    `peer` argument; spoke-connect 0.9.2 `InvokeHandlerV2` — see
-    //    module docs). Spec §5.1 lock: the payload's
-    //    `extensions.nexus.peer_id` is informational only — present ⇒ it
-    //    MUST equal the session peer (hard deny on mismatch, unparseable,
-    //    or >128-char claim — the parse cap below mirrors the spoke
-    //    session-core 128-char decode input cap; fail-closed, zero side
-    //    effects); absent ⇒ fine. The legacy payload-carried identity path
-    //    is removed (clean cutover, no dual registration).
     if let Some(claim) = payload.pointer("/extensions/nexus/peer_id") {
-        // work, mirroring the spoke session-core 128-char decode input cap
-        // (libp2p-identity's `FromStr` bs58-decodes without a length bound).
-        // Oversized claims share the identity-deny path below.
         let matches_session_peer = claim
             .as_str()
             .filter(|raw| raw.len() <= 128)
@@ -598,17 +571,10 @@ fn dispatch(
         }
     }
 
-    //    peer.
     if !scope.allows_op(peer, op) {
         return Err(denied(&format!("op {op} is not in this peer's op_scope")));
     }
 
-    //     needs the caller's operator-stored grant, resolved by the
-    //     authenticated session peer. The lookup reads the allowlist row of
-    //     THIS peer — a payload can neither carry nor select a grant, and a
-    //     peer can never reach another peer's grant. Absence ⇒ no KE
-    //     operation, whatever the scopes say. Host-level tools are not KE
-    //     operations (their exact op-scope allowlist is the whole gate).
     let grant = if route == Route::Tool {
         None
     } else {
@@ -620,14 +586,6 @@ fn dispatch(
         })?)
     };
 
-    //    scoped exactly like writes): every target world in the payload
-    //    must be in the peer's `world_scope`. Strictness (fix loop,
-    //    Important): EVERY entry/relation must carry a parseable
-    //    `extensions.nexus.world_id` (writes) / `scope.scope_id` (reads) —
-    //    a payload where any carrier is missing denies the WHOLE payload
-    //    (no filter-and-continue; that shape let a mixed payload pass the
-    //    gate and fail later as a partial write).
-    //
     //    Host-level tools are the V1.173 exception (DF-84, AR-49): the
     //    locked `S` tools (`tools.nexus.list_observed_peers` /
     //    `tools.nexus.list_modules`) are host-local adapter reads with an
@@ -653,10 +611,6 @@ fn dispatch(
                 "world {world} is not in this peer's world_scope"
             )));
         }
-        //     narrow/match the granted World/binding viewpoint — a raw
-        //     selector can never re-point the invoke at another Actor's
-        //     world. The granted world is the stored allowlist value, so
-        //     this is a pure comparison (no I/O on the event loop).
         if let Some(grant) = grant {
             if let Some(world) = worlds
                 .iter()
@@ -671,9 +625,6 @@ fn dispatch(
         }
     }
 
-    //    collection entries OR 2 MiB serialized request bytes, whichever
-    //    is reached first. Checked before the bridge so an over-cap
-    //    request never consumes a lane permit or reaches the orchestrator.
     let entries = payload_collection_entries(route, &payload);
     if entries > limits.max_collection_entries {
         return Err(payload_too_large(&format!(
@@ -691,14 +642,6 @@ fn dispatch(
         )));
     }
 
-    //    orchestrators are native async fn but this closure is sync on the
-    //    node's event loop, so the call moves to the per-process
-    //    `spawn_blocking` lane capped by [`BridgeLimits`]. The handler runs
-    //    inside an entered tokio context (the node's event-loop task),
-    //    where `Handle::block_on` panics — the lane closure's own
-    //    `block_on` is legal because blocking-pool threads are outside any
-    //    async execution context.
-    //
     // 8. Stored-world gate (fix loop, Critical — defense-in-depth), inside
     //    the lane closure before the orchestrator: every targeted existing
     //    row's stored world_id is verified against the payload-claimed
@@ -756,8 +699,6 @@ fn dispatch(
 /// A grant that no longer resolves denies the invoke before any gate or
 /// orchestrator call — zero side effects.
 #[expect(clippy::too_many_arguments)]
-// scope, ports, serializer, caller, op, grant, payload, permit, deadline,
-// limits); bundling them would obscure the explicit fail-closed ordering.
 #[expect(clippy::result_large_err)]
 #[expect(clippy::too_many_lines)] // the numbered fail-closed pipeline (adapter selection, receipt metadata, authorization gates, receipt read, execution prerequisites, acquire, effect, settle) reads as one sequence
 fn run_in_lane(
@@ -784,10 +725,6 @@ fn run_in_lane(
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let result = tokio::runtime::Handle::current().block_on(async {
-            // through the selection the caller's stored grant resolves to
-            // *now*; the two host-level tools run through the host adapter
-            // (their exact op-scope allowlist is their whole gate, and every
-            // KE port on the host adapter fails closed).
             let adapter_for_lane = match grant_for_lane.as_ref() {
                 None => ports_for_lane.host_adapter(),
                 Some(grant) => match grant
@@ -798,11 +735,6 @@ fn run_in_lane(
                     Err(e) => return Err(denied(&e.to_string())),
                 },
             };
-            // non-idempotent writes only: the caller-supplied `operation_id`
-            // is envelope metadata of the durable receipt contract, NOT part
-            // of the route request (`operation_id` + `request_fingerprint`),
-            // so it is consumed and stripped BEFORE any typed preflight — the
-            // generated route requests are strict and carry no such field.
             let mut payload = payload;
             let write_receipt = if is_live_write(route) {
                 Some(prepare_write_receipt(
@@ -815,12 +747,6 @@ fn run_in_lane(
                 None
             };
 
-            // set): upsert holder narrowing, the compute gate set (stored
-            // world + grant viewpoint + module identity + module scope +
-            // module-id pin), or the stored-world gate for the other writes.
-            // Compute hands back the gated module id so the execution-only
-            // prerequisite can run LATER — after the receipt read — instead of
-            // blocking an authorized terminal replay.
             let gated_module_id = if route == Route::Upsert {
                 verify_upsert_holder_narrowing(
                     &payload,
@@ -845,12 +771,6 @@ fn run_in_lane(
                 None
             };
 
-            // conflict precedence included). An already-answered operation is
-            // answered from its receipt HERE, before any execution-only
-            // prerequisite is required: an authorized terminal replay must
-            // not depend on a module still being installed, and ambiguity
-            // answers the typed refusal.
-            //
             // The §B.3 live-owner signal comes from this process's in-flight
             // registry, not from an unconditional assumption: a `running`
             // receipt this process is executing right now is the typed Busy
@@ -866,16 +786,10 @@ fn run_in_lane(
                 }
             }
 
-            // written yet, so a refusal here leaves no `running` receipt
-            // behind: a module that is not installed is refused exactly as
-            // before, and the durable answer of an ALREADY finished operation
-            // was served in step 8d.
             if let Some(module_id) = &gated_module_id {
                 verify_compute_module_installed(&adapter_for_lane, module_id)?;
             }
 
-            // run the effect (this call is the acquirer). A racing replay is
-            // answered from the stored receipt instead.
             let mut acquired_receipt = None;
             let mut commit_watermark: Option<i64> = None;
             if let Some(metadata) = &write_receipt {
@@ -884,7 +798,6 @@ fn run_in_lane(
                 {
                     return Ok(answer);
                 }
-                // arriving while it runs gets the §B.3 Busy answer.
                 in_flight.register(&metadata.operation_id);
                 commit_watermark = write_commit_watermark(ports_for_lane.pool()).await;
                 acquired_receipt = Some(metadata.clone());
@@ -901,10 +814,6 @@ fn run_in_lane(
             .await;
 
             if let Some(metadata) = &acquired_receipt {
-                // upsert orchestrator commits each entry over an unbound
-                // per-invoke port, so a later entry's rejection can follow
-                // an earlier entry's commit. Observe the durable outbox
-                // instead of inferring.
                 let effect_committed = match &result {
                     Ok(_) => true,
                     Err(_) => write_effect_committed(ports_for_lane.pool(), commit_watermark).await,
@@ -912,9 +821,6 @@ fn run_in_lane(
                 let settled =
                     settle_write_receipt(ports_for_lane.pool(), result, effect_committed, metadata)
                         .await;
-                // later re-drive classifies the receipt by its stored status
-                // (terminal ⇒ answered; `running` ⇒ unknown owner ⇒
-                // `uncertain`) instead of claiming live ownership.
                 in_flight.release(&metadata.operation_id);
                 settled
             } else {
@@ -924,12 +830,6 @@ fn run_in_lane(
         let _ = tx.send(result);
     });
     match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
-        // orchestrator result is serialized and measured AFTER the lane
-        // returns and BEFORE the invoke result is handed back to the
-        // peer. An over-cap response maps to the locked
-        // `response_too_large` envelope instead of surfacing as a hard
-        // codec failure on the peer (the reference peer's inbound-response
-        // codec cap is 10 MiB — this cap fails gracefully well under it).
         Ok(result) => enforce_response_cap(result, limits.max_response_bytes),
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(deadline_exceeded()),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(bridge_fault(
@@ -960,7 +860,6 @@ fn verify_upsert_holder_narrowing(
     holder: Option<&str>,
 ) -> Result<(), ErrorEnvelope> {
     let Some(entries) = payload.get("knowledge_entries").and_then(Value::as_array) else {
-        // is nothing to narrow here.
         return Ok(());
     };
     for entry in entries {
@@ -968,13 +867,9 @@ fn verify_upsert_holder_narrowing(
             .get("entry_id")
             .and_then(Value::as_str)
             .unwrap_or("<unnamed>");
-        // optional nonempty string), so both are handled by the `None` arm.
         match entry.get("owner").filter(|value| !value.is_null()) {
             Some(Value::String(owner)) if Some(owner.as_str()) == holder => {}
-            // value the wire type cannot carry — is a refused assignment.
             Some(_) => return Err(holder_assignment_denied(entry_id, "owner")),
-            // `owner-private` without an owner is refused (wire contract +
-            // §9: a private row belongs to a holder).
             None => {
                 if entry.get("disclosure").and_then(Value::as_str) == Some(DISCLOSURE_OWNER_PRIVATE)
                 {
@@ -1258,8 +1153,6 @@ fn prepare_write_receipt(
     payload: &mut Value,
 ) -> Result<WriteReceiptMetadata, ErrorEnvelope> {
     let session = peer.to_string();
-    // not part of the request: extract and shape-validate it, then strip it so
-    // neither the canonical document nor the strict typed route request sees it.
     let caller_id = match payload.get(operation_id::OPERATION_ID_FIELD) {
         None => None,
         Some(Value::String(id)) => {
@@ -1270,12 +1163,6 @@ fn prepare_write_receipt(
         Some(_) => return Err(invalid_operation_id("args.operation_id must be a string")),
     };
     strip_caller_operation_id(payload);
-    // session, action and args — so a caller-supplied id used verbatim in a
-    // workspace-global primary key can never let a different caller/session
-    // (or a changed grant actor) with identical arguments replay another
-    // owner's receipt; that is the typed `operation_id_conflict` instead. One
-    // canonical serialization and one digest yield BOTH the id (§B.1) and the
-    // fingerprint (§B.2).
     let identity = operation_id::resolve_operation_identity(&OperationScope {
         actor: grant.map_or("", PeerGrant::actor_id),
         session: &session,
@@ -1327,18 +1214,11 @@ async fn read_write_receipt(
     metadata: &WriteReceiptMetadata,
     owner_is_live: bool,
 ) -> Result<Option<Value>, ErrorEnvelope> {
-    // process is running the effect right now (see [`InFlightWrites`]). It is
-    // never assumed: a `running` receipt left by a previous process must stay
-    // `uncertain`, not claim a live owner the host cannot see.
     let decision = match recover(pool, &metadata.operation_id, owner_is_live).await {
         Ok(decision) => decision,
         Err(err) => return Err(receipt_store_fault(&err)),
     };
 
-    // canonical request is not a replay of this call — the id is owned by
-    // another logical operation, and §B.1 refuses that typed rather than
-    // silently deduping it. This is decided before §B.3's status-based answer
-    // (the store's frozen `recover` classifies by receipt status alone).
     if let Some(stored) = decision_receipt(&decision) {
         if !stored.matches_fingerprint(&metadata.fingerprint) {
             return Err(operation_id_conflict_envelope(&metadata.operation_id));
@@ -1350,7 +1230,6 @@ async fn read_write_receipt(
         RecoveryDecision::AnswerFromReceipt(receipt) => {
             Ok(Some(answer_from_receipt(&receipt, &metadata.subject_id)?))
         }
-        // owner, `uncertain` an unknown one.
         RecoveryDecision::InProgress(receipt) => Err(operation_in_progress_envelope(
             &receipt.operation_id,
             &metadata.subject_id,
@@ -1586,14 +1465,6 @@ fn reject_settlement_payload(envelope: &ErrorEnvelope, effect_committed: bool) -
 /// fails fast with `invoke_deadline_exceeded` instead of holding its lane
 /// permit on an unbounded serializer backlog (Greptile P1).
 #[expect(clippy::result_large_err)]
-// Only the `connect-host` build unifies the `spoke-operations` assemble surface
-// whose `current_view_policy: Option<&dyn CurrentViewPolicy>` parameter
-// (spoke-operations-0.16.0/src/assemble.rs:181,247) is not `Sync`; nexus always
-// passes `None` and never names the trait. No `Send` bound applies to this
-// future: its only poll site is `run_in_lane`'s
-// `tokio::task::spawn_blocking` + `Handle::current().block_on` block, and the
-// handle exported upward is the sync `InvokeHandlerV2` closure built by
-// `build_handler_with_limits` (spawned as a closure, never as this future).
 #[expect(
     clippy::future_not_send,
     reason = "polled only by run_in_lane's spawn_blocking + Handle::current().block_on block and exported only as the sync InvokeHandlerV2 closure, so no Send bound is applied to it"
@@ -1637,15 +1508,6 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
-        // DIRECTLY into the spoke wire types; the request scope is the
-        // schema's `scope` object (world-scoped by the step-5 gate).
-        // `run_checker` is the production baseline no-op evaluator — the
-        // V1.148 daemon-route cutover shape (zero findings). V1.166 AR-1:
-        // the call crosses `orchestrate_check_world_scoped` — empty
-        // `rule_refs` auto-include the scope world's `status=active` rules
-        // and foreign-world / embedded rules reject BEFORE spoke
-        // orchestration (fail closed, zero side effects). `scope_id` is
-        // cloned because the request itself moves into the wrapper.
         Route::Check => {
             let request: CheckRequest = match serde_json::from_value(payload) {
                 Ok(request) => request,
@@ -1671,25 +1533,11 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
-        // `ComputeRequest` / `ComputeResponse` (no third wrapper; the
-        // V1.147 generated `RunRequest` / `RunResponse` HTTP pair is the
-        // reference mapping only). The read-only lock, world gate, module
-        // identity and module_scope gates ran in
-        // [`verify_compute_authorization`], and the host-local store gate in
-        // [`verify_compute_module_installed`], before this point — zero WASM
-        // execution on denial. The serializer permit is held across the whole
-        // orchestration (one compute invocation at a time, spec §2.4).
         Route::Compute => {
             let request: ComputeRequest = match serde_json::from_value(payload) {
                 Ok(request) => request,
                 Err(error) => return Err(map_reject(&invalid_payload("compute", &error))),
             };
-            // (Greptile P1): the lane permit and the serializer permit
-            // share ONE deadline, so a compute queued on the serializer
-            // past its budget fails fast with invoke_deadline_exceeded and
-            // the lane permit is released when this closure returns —
-            // unrelated ops are served instead of starved by a compute
-            // backlog.
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             let serializer = Arc::clone(compute_serializer);
             let _permit = match tokio::time::timeout(remaining, serializer.acquire_owned()).await {
@@ -1706,12 +1554,6 @@ async fn route_orchestrator(
                 SpokeResult::Reject(reject) => Err(map_reject(&reject)),
             }
         }
-        // (host-level, world-gate-skipped). The payload shape is the spoke
-        // tool-invoke convention: `{ "arguments": <object> }` → success
-        // `{ "result": <object> }`. A missing / non-object `arguments`
-        // member is `invalid_input` BEFORE any adapter I/O (zero side
-        // effects). Handlers are adapter reads only — no daemon HTTP, no
-        // `ToolInvokePort`, no second lane.
         Route::Tool => route_tool(adapter, op, payload).await,
     }
 }
@@ -1748,10 +1590,6 @@ async fn route_tool(
             "\"arguments\" must be an object matching the tool descriptor input",
         ));
     }
-    // "additionalProperties": false }` (spec §2.1 C-1/C-2) — the only
-    // legal argument is an EMPTY object, so a non-empty object is a
-    // schema violation and fails `invalid_input` before any adapter read
-    // (the served behavior matches the advertised input contract).
     if !arguments
         .as_object()
         .expect("is_object checked above")
@@ -1766,9 +1604,6 @@ async fn route_tool(
     match op {
         "tools.nexus.list_observed_peers" => tool_list_observed_peers(adapter).await,
         "tools.nexus.list_modules" => tool_list_modules(adapter).await,
-        // (and from `Route::Tool` above) — the routing sweep
-        // `n_c1_every_served_op_advertised_by_the_const_actually_routes`
-        // is the loud guard that catches it.
         other => Err(bridge_fault(&format!(
             "served tool op {other:?} has no handler arm (dispatch/tool route drift)"
         ))),
@@ -1838,8 +1673,6 @@ async fn tool_list_modules(adapter: &NexusAdapter<'static>) -> Result<Value, Err
         let Some(id) = id.to_str() else {
             continue;
         };
-        // `is_safe_module_id` guard — same single source as the compute
-        // store gate and the adapter loader).
         if id.starts_with('_') || id.starts_with('.') || !is_safe_module_id(id) {
             continue;
         }
@@ -1892,13 +1725,6 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
             let scope_id = payload.pointer("/scope/scope_id")?.as_str()?;
             Some(vec![scope_id.to_string()])
         }
-        // the stored entry's `extensions.nexus.world_id`, resolved inside
-        // the lane by verify_compute_authorization. Dispatch skips the raw world
-        // gate for this route; this arm is unreachable and exists only for
-        // match exhaustiveness.
-        // Host-level tools (V1.173, AR-49): no world carrier exists (empty
-        // input object) and dispatch skips the world gate for this route;
-        // this arm is unreachable and exists only for match exhaustiveness.
         Route::Compute | Route::Tool => None,
     }
 }
@@ -1921,7 +1747,6 @@ fn payload_world_ids(route: Route, payload: &Value) -> Option<Vec<String>> {
 /// `list_timeline_events`), so a payload could otherwise carry far more
 /// than 500 logical collection entries under the byte cap.
 fn payload_collection_entries(route: Route, payload: &Value) -> usize {
-    // gate runs before any typed parse.
     let scope_array_len = |field: &str| {
         payload
             .pointer(&format!("/scope/{field}"))
@@ -1958,16 +1783,10 @@ fn payload_collection_entries(route: Route, payload: &Value) -> usize {
                 + scope_array_len("entry_types")
                 + scope_array_len("timeline_event_ids")
         }
-        // surface (the session state is staged out-of-band); its key count
-        // bounds the payload's logical entry amplification. The response
-        // cap additionally bounds the merged-state output.
         Route::Compute => payload
             .get("computable")
             .and_then(Value::as_object)
             .map_or(0, Map::len),
-        // `arguments` object (payload shape `{ "arguments": <object> }`),
-        // so the logical batch surface is one — the byte cap still bounds
-        // oversized argument objects.
         Route::Tool => usize::from(payload.get("arguments").is_some()),
     }
 }
@@ -2002,12 +1821,9 @@ async fn verify_stored_worlds(
             if let Some(entries) = payload.get("knowledge_entries").and_then(Value::as_array) {
                 for entry in entries {
                     let Some(entry_id) = entry.get("entry_id").and_then(Value::as_str) else {
-                        // parse rejects the payload later.
                         continue;
                     };
                     let Some(claimed) = world_id_of(entry) else {
-                        // denied any payload with an entry lacking the id.
-                        // Fail closed rather than skip the check.
                         return Err(denied(
                             "entry missing extensions.nexus.world_id; cannot verify stored world",
                         ));
@@ -2050,18 +1866,6 @@ async fn verify_stored_worlds(
                         SpokeResult::Reject(reject)
                             if reject.code == SpokeRejectCode::RelationNotFound =>
                         {
-                            // no relation row exists yet, so the stored-row
-                            // check above is a no-op — but the INSERT's FKs
-                            // are single-column on `key_block_id` (world-
-                            // agnostic), so a new world-A relation could
-                            // legally reference world-B entries. Endpoints
-                            // are immutable on the update path (the update
-                            // port carries no endpoint fields), so this
-                            // create-path check is what closes the
-                            // cross-world-edge gap: require each endpoint's
-                            // stored world to equal the claimed world;
-                            // mismatch or missing endpoint denies the whole
-                            // payload with zero insert.
                             for endpoint in ["from_id", "to_id"] {
                                 let Some(endpoint_id) =
                                     relation.get(endpoint).and_then(Value::as_str)
@@ -2079,13 +1883,6 @@ async fn verify_stored_worlds(
                 }
             }
         }
-        // `check` / `assemble` reach storage only through the
-        // orchestrators' own world-scoped `ScopeQueryPort` reads (world
-        // gate verified `scope.scope_id` at step 5), and `compute` runs its
-        // own gate set ([`verify_compute_authorization`] — stored-world + module
-        // gates, spec §2).
-        // Host-level tools (V1.173) are adapter reads that target no
-        // stored row by id.
         Route::Check | Route::Assemble | Route::Compute | Route::Tool => {}
     }
     Ok(())
@@ -2172,13 +1969,6 @@ async fn verify_compute_authorization(
         return Err(settle_not_enabled());
     }
 
-    //    `extensions.nexus.world_id` (spec §2.2 — no wire carrier). A
-    //    MISSING entry is a client-input error — the request names its
-    //    `entry_id` on the wire — mapped to the defined `invalid_input`
-    //    envelope (P2 QC fix wave FW-3; the generic reject table would have
-    //    read `KnowledgeEntryNotFound` as `internal_error`). A stored entry
-    //    without a world id cannot be verified ⇒ denied like a payload
-    //    without a world carrier.
     let entry = match adapter.get_knowledge_entry(&request.entry_id).await {
         SpokeResult::Ok(entry) => entry,
         SpokeResult::Reject(reject) if reject.code == SpokeRejectCode::KnowledgeEntryNotFound => {
@@ -2197,9 +1987,6 @@ async fn verify_compute_authorization(
             "world {world} is not in this peer's world_scope"
         )));
     }
-    //     granted World/binding viewpoint — compute has no wire world, so
-    //     this is the only place the grant intersection can be enforced. A
-    //     peer cannot compute an entry outside its granted Actor.
     if let Some(grant) = grant {
         if world != grant.world_id() {
             return Err(denied(&format!(
@@ -2211,12 +1998,6 @@ async fn verify_compute_authorization(
         }
     }
 
-    //    → entry body.computable). The adapter marks the missing-module-name
-    //    reject with the `module_identity_missing` details marker
-    //    (P2 QC fix wave FW-5 — classified by marker, never by message
-    //    text); the marker reject ⇒ defined `module_not_found`. Any other
-    //    reject (missing session / storage fault) maps through the locked
-    //    table.
     let module_id = match adapter
         .resolve_compute_module_id(&request.session_id, &request.entry_id)
         .await
@@ -2228,26 +2009,10 @@ async fn verify_compute_authorization(
         SpokeResult::Reject(reject) => return Err(map_reject(&reject)),
     };
 
-    //    `module_scope` denies ALL compute; a resolved module outside the
-    //    list is denied before any WASM execution.
     if !scope.allows_module(peer, &module_id) {
         return Err(module_not_scoped(Some(&module_id)));
     }
 
-    // and lives in `verify_compute_module_installed` — see the doc above.)
-
-    //    fix wave FW-1): the adapter's `ComputablePort` merges
-    //    request.computable over the session state before re-resolving the
-    //    module id, so a request-carried `computable.module_id` that
-    //    differs from the gated id would execute an unscoped module. The
-    //    dynamic computable map may carry any invocation params EXCEPT a
-    //    conflicting module identity. ANY `module_id` key must be a JSON
-    //    string EQUAL to the gated id — a differing string OR a non-string
-    //    value (42 / {} / null) is denied `module_not_scoped` before any
-    //    WASM execution. (The non-string cases matter because the
-    //    execution-time merge shadows the session-staged id with whatever
-    //    value the key carries — the old as_str-only pin let them bypass
-    //    while still shadowing.)
     if request.computable.contains_key("module_id") {
         match request.computable.get("module_id").and_then(Value::as_str) {
             Some(override_id) if override_id == module_id => {}
@@ -2650,11 +2415,6 @@ fn bridge_fault(reason: &str) -> ErrorEnvelope {
 /// marker ([`is_module_identity_missing_reject`]) — the marked reject maps
 /// to `module_not_found`, never through this table.
 fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
-    // world mismatch must surface as `world_conflict` — never collapsed into
-    // `revision_conflict` / `stored_revision_stale`. The adapter carries the
-    // classification on the `InternalError` carrier with a `world_conflict:
-    // true` details marker; remap before the code table so the fixed wire
-    // spelling wins.
     if is_world_conflict_reject(reject) {
         return ErrorEnvelope {
             code: "world_conflict".to_string(),
@@ -2667,7 +2427,6 @@ fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
         SpokeRejectCode::KnowledgeEntryAlreadyExists => "knowledge_entry_already_exists",
         SpokeRejectCode::StoredRevisionStale => "stored_revision_stale",
         SpokeRejectCode::RevisionConflict => "revision_conflict",
-        // spoke InvalidInput → 400 class; the Connect envelope equivalent).
         SpokeRejectCode::InvalidInput | SpokeRejectCode::InvalidPacketInput => "invalid_input",
         _ => "internal_error",
     };
@@ -2675,7 +2434,6 @@ fn map_reject(reject: &SpokeReject) -> ErrorEnvelope {
     if let Some(extra) = &reject.details {
         details.extend(extra.clone());
     }
-    // client can distinguish a validation reject from a server fault.
     if code == "internal_error" && reject.code != SpokeRejectCode::InternalError {
         details.insert(
             "reject_code".to_string(),
@@ -2822,10 +2580,6 @@ mod tests {
         .execute(&pool)
         .await
         .expect("world seed");
-        // owned by `CREATOR`, each with its own binding into `WORLD_A`, plus
-        // the holder registry rows the admission resolves. Two Characters are
-        // what makes cross-actor narrowing observable (a Character grant may
-        // not write into its sibling's container).
         for character in [CHARACTER, SIBLING_CHARACTER] {
             sqlx::query(
                 "INSERT OR IGNORE INTO characters \
@@ -2855,7 +2609,6 @@ mod tests {
             .await
             .expect("binding seed");
         }
-        // subjects — never hand-written registry state).
         sqlx::query(
             "INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)",
         )
@@ -3056,7 +2809,6 @@ mod tests {
         let peer = fixed_keypair(17).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["compute", "upsert"]);
         let (temp, pool) = test_engine_pool().await;
-        // `<id>/manifest.json` under a hermetic `~/.nexus42/modules/`.
         let modules_dir = tempfile::tempdir().expect("modules tempdir");
         let basic_combat_dir = modules_dir.path().join("basic-combat");
         std::fs::create_dir_all(&basic_combat_dir).expect("mkdir module store dir");
@@ -3071,9 +2823,6 @@ mod tests {
         )
         .expect("write module manifest");
         let ports = ConnectPorts::new(pool.clone(), Some(modules_dir.path().to_path_buf()));
-        // (the serializer wait is the only thing the test exercises). The
-        // entry is written through the granted Actor's scoped adapter — the
-        // production write path (v1.191 P1 T14, durable §9).
         let selection = granted_selection(&scope, &peer, &pool).await;
         let staging = ports.scoped_adapter(selection);
         let entry: nexus_spoke_adapter::KnowledgeEntry =
@@ -3103,15 +2852,6 @@ mod tests {
     async fn saturated_lane_returns_invoke_busy_then_recovers() {
         let (handler, lane, _serializer, peer, _temp) = test_handler(BridgeLimits {
             max_concurrent_invokes: 1,
-            // asserted semantics do not depend on this value: `invoke_busy`
-            // still fires only once the *held* permit outlives the budget
-            // (the acquire wait consumes the same budget), and the
-            // post-release serve is bounded by the outcome, not the clock.
-            // A 50 ms budget made the recovery call flaky under CI load —
-            // its result wait (`recv_timeout`) could expire before the
-            // blocking-lane upsert returned. A seconds-scale budget keeps
-            // `max_concurrent_invokes: 1` and both assertions intact. (The
-            // zero-budget deadline-simulation path is a separate test.)
             invoke_deadline: Duration::from_secs(5),
             ..BridgeLimits::default()
         })
@@ -3179,7 +2919,6 @@ mod tests {
                 }),
             )
         });
-        // permit; the waiter must be woken and served.
         tokio::time::sleep(Duration::from_millis(100)).await;
         drop(held);
         let served = invoke.await.expect("invoke task completes");
@@ -3205,7 +2944,6 @@ mod tests {
                 ..BridgeLimits::default()
             })
             .await;
-        // permit so a queued compute cannot proceed.
         let _serializer_held = serializer
             .try_acquire_owned()
             .expect("test holds the compute serializer");
@@ -3220,8 +2958,6 @@ mod tests {
             "computable": {},
         });
         let invoke = tokio::spawn(async move { handler_for_task(&peer, "compute", payload) });
-        // acquires the lane, passes the P2 compute gates, and queues on
-        // the held serializer until its per-invoke budget expires.
         tokio::time::sleep(Duration::from_millis(100)).await;
         drop(held_lane);
 
@@ -3235,9 +2971,6 @@ mod tests {
             Ok(_) => panic!("a serializer-queued compute past its budget must fail fast"),
         }
 
-        // served immediately after it. Pre-fix, the still-queued compute
-        // held the only lane permit and this upsert would have returned
-        // invoke_busy after its own budget.
         let served = handler(
             &peer,
             "upsert",
@@ -3430,7 +3163,6 @@ mod tests {
         let (_temp, ports) = test_ports().await;
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
-        // misses the typed wire's required fields (parse rejects).
         let payload = serde_json::json!({
             "knowledge_entries": [{
                 "extensions": { "nexus": { "world_id": WORLD_A } },
@@ -3455,8 +3187,6 @@ mod tests {
         let peer = fixed_keypair(14).public().to_peer_id();
         let scope = scoped_scope_for(peer, &["check"]);
         let (_temp, pool) = test_pool().await;
-        // (`WORLD_A`) — `spoke_rules.world_id` has no FK, so a bare foreign
-        // world id is a valid seed.
         let foreign_row = nexus_local_db::spoke_rules::SpokeRuleRow {
             rule_id: "rul_foreign_world".to_string(),
             world_id: "wld_foreign_rules".to_string(),
@@ -3558,7 +3288,6 @@ mod tests {
             "actualWorld rides through to the envelope details"
         );
 
-        // world-conflict branch must not widen their mapping.
         let rev_reject = SpokeReject {
             code: SpokeRejectCode::RevisionConflict,
             message: "expected base ahead of store".to_string(),
@@ -3614,7 +3343,6 @@ mod tests {
             }
         }
         drop(held);
-        // round-trips normally afterwards.
         let served = handler(
             &peer,
             "upsert",
@@ -3649,9 +3377,6 @@ mod tests {
         let ports = ConnectPorts::new(pool.clone(), None);
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
-        // fail as `internal_error` (closed-pool query) — the
-        // `invalid_input` assertions below pin the error to the argument
-        // gate and prove zero adapter I/O.
         pool.close().await;
         for (label, payload) in [
             ("missing arguments", serde_json::json!({ "extensions": {} })),
@@ -3686,8 +3411,6 @@ mod tests {
         drop(temp);
     }
 
-    /// granted holder (the write path resolves the holder server-side; the
-    /// payload only names it).
     #[tokio::test(flavor = "multi_thread")]
     async fn v1191_holder_connect_granted_private_write_lands_on_the_granted_holder() {
         let peer = fixed_keypair(31).public().to_peer_id();
@@ -3822,7 +3545,6 @@ mod tests {
             Ok(served) => panic!("extract must never be served, got {served}"),
         }
 
-        // run on the host adapter, which serves them without any grant.
         for op in LOCAL_TOOL_OPS {
             let served = handler(&peer, op, serde_json::json!({ "arguments": {} }))
                 .unwrap_or_else(|e| panic!("{op} must be served without a grant: {e:?}"));
@@ -3896,7 +3618,6 @@ mod tests {
         let (handler, _lane, _serializer) =
             build_handler_with_limits(scope, ports, BridgeLimits::default());
 
-        // Actor is allowed to send.
         let served = handler(
             &peer,
             "check",
@@ -3955,7 +3676,6 @@ mod tests {
         )
         .expect("the grant resolves while its holder row exists");
 
-        // admission resolves) — the grant now resolves to nothing.
         sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ?")
             .bind(creator_holder())
             .execute(&pool)
@@ -4010,8 +3730,6 @@ mod tests {
         let (sibling_handler, _lane2, _serializer2) =
             build_handler_with_limits(sibling_scope, ports, BridgeLimits::default());
 
-        // authorized for the container, so only the governance axes can keep
-        // it from a foreign Actor.
         let mut entry = entry_fixture("kb_owner_private", WORLD_A);
         entry["owner"] = Value::String(creator_holder());
         entry["disclosure"] = Value::String(DISCLOSURE_OWNER_PRIVATE.to_string());
@@ -4028,7 +3746,6 @@ mod tests {
                 .contains("kb_owner_private")
         };
 
-        // resolved holder as viewpoint, is served the private row.
         let owner_view = owner_handler(
             &owner_peer,
             "assemble",
@@ -4060,7 +3777,6 @@ mod tests {
             }
         }
 
-        // private row (the character-private axis cannot see it).
         for scope in [
             serde_json::json!({ "scope_id": WORLD_A, "viewpoint": character_holder(CHARACTER) }),
             serde_json::json!({ "scope_id": WORLD_A }),
@@ -4088,7 +3804,6 @@ mod tests {
         let peer = fixed_keypair(39).public().to_peer_id();
         let scope = allowlist_for(peer, &["upsert", "assemble"], Some(foreign_creator_grant()));
         let (temp, pool) = test_pool().await;
-        // workspace: its grant points at WORLD_A, which it does not own.
         sqlx::query(
             "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
              VALUES (?, 'foreign creator', 'active', 'now', '{}')",
@@ -4171,7 +3886,6 @@ mod tests {
         handler(&peer, "upsert", payload()).expect("an active binding admits the write");
         handler(&peer, "check", check()).expect("the read half is served");
 
-        // read, but it is no longer a live write admission.
         sqlx::query("UPDATE actor_world_bindings SET status = 'inactive' WHERE binding_id = ?")
             .bind(BINDING)
             .execute(&pool)
@@ -4253,7 +3967,6 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // v1.207 P3 — the §B.3 durable-operation handshake on the Connect writes
-    /// receipt rows are observable next to the invoke.
     async fn receipt_handler(
         peer: PeerId,
     ) -> (
@@ -4505,7 +4218,6 @@ mod tests {
                 .await
                 .expect("entry row");
 
-        // authenticated session — a different logical call.
         match handler_b(&peer_b, "upsert", payload.clone()) {
             Err(envelope) => assert_eq!(
                 envelope.code, "operation_id_conflict",
@@ -4529,7 +4241,6 @@ mod tests {
             "the refused call created no receipt for peer B"
         );
 
-        // refuses the same scope difference with the same typed error.
         let err = nexus_local_db::operation_receipts::begin_operation(
             &pool,
             &operation_id,
@@ -4551,9 +4262,6 @@ mod tests {
     // -----------------------------------------------------------------------
     // F3 — compute receipt metadata precedes the typed preflight, and an
     // authorized terminal replay needs no execution environment
-    /// `operation_id` is not a malformed payload — the §B.1 metadata is
-    /// consumed and stripped BEFORE the strict typed compute preflight, and the
-    /// id is used verbatim for the receipt.
     #[tokio::test(flavor = "multi_thread")]
     async fn compute_accepts_a_caller_supplied_operation_id() {
         let (handler, _lane, _serializer, peer, _temp, _modules_dir, pool) =
@@ -4566,8 +4274,6 @@ mod tests {
             "computable": {},
         });
 
-        // but it must NEVER be read as a malformed payload, and it must have
-        // taken the supplied id into the receipt contract.
         if let Err(envelope) = handler(&peer, "compute", payload) {
             assert_ne!(
                 envelope.code, "invalid_input",
@@ -4600,7 +4306,6 @@ mod tests {
             "computable": {},
         });
 
-        // must be served from).
         nexus_local_db::operation_receipts::begin_operation(
             &pool,
             &operation_id,
@@ -4619,7 +4324,6 @@ mod tests {
         .await
         .expect("settle the receipt terminally");
 
-        // host-local store.
         std::fs::remove_dir_all(modules_dir.path().join("basic-combat"))
             .expect("remove the module from the store");
         assert!(
@@ -4645,18 +4349,11 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // F4 — a rejected write is never assumed effect-free
-    /// upsert orchestrator commits each entry over an unbound per-invoke port,
-    /// so a batch whose first entry lands and whose second is refused leaves a
-    /// durable partial effect. This pins (1) that the durable-outbox
-    /// observation sees it, (2) that the settled receipt marks it, and (3) that
-    /// a settlement fault after a committed effect is the typed
-    /// effect-committed / not-retryable answer with the operation identity.
     #[tokio::test(flavor = "multi_thread")]
     async fn partial_upsert_commit_is_observed_and_a_settlement_fault_is_not_retryable() {
         let peer = fixed_keypair(46).public().to_peer_id();
         let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
 
-        // which the orchestrator refuses AFTER A has already committed.
         let mut first = entry_fixture("kb_partial_a", WORLD_A);
         first["canonical_name"] = Value::String("Uniqueness Probe".to_string());
         let mut second = entry_fixture("kb_partial_b", WORLD_A);
@@ -4730,8 +4427,6 @@ mod tests {
             not_retryable.message
         );
 
-        // original refusal verbatim (`metadata`'s id owns no receipt row, so
-        // the settlement itself fails).
         let original = uncertain_envelope("op_00000000000000000000000000000000", &subject_id);
         let expected_code = original.code.clone();
         let kept = settle_write_receipt(&pool, Err(original), false, &metadata)
@@ -4753,7 +4448,6 @@ mod tests {
         let peer = fixed_keypair(47).public().to_peer_id();
         let (handler, pool, _in_flight, _temp) = receipt_handler(peer).await;
 
-        // reports NO committed effect.
         let watermark = write_commit_watermark(&pool)
             .await
             .expect("the outbox commit counter is readable");
@@ -4771,7 +4465,6 @@ mod tests {
             "the committed mutation is observed"
         );
 
-        // what the outbox's bounded retention does.
         let pruned = sqlx::query("DELETE FROM core_changes WHERE sequence > ?")
             .bind(watermark)
             .execute(&pool)
@@ -4790,8 +4483,6 @@ mod tests {
                 .expect("count");
         assert_eq!(remaining, 0, "the row evidence is gone");
 
-        // reported, so the settlement-fault path keeps the typed
-        // not-retryable guarantee.
         assert!(
             write_effect_committed(&pool, Some(watermark)).await,
             "pruned row evidence must never read as 'no effect committed'"
@@ -4804,10 +4495,6 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // QC1-W001 — §B.3's Busy/in-progress answer vs the uncertain one
-    /// owner is KNOWN to be live (this process is running it) is the typed Busy
-    /// answer, while a `running` receipt with no live owner known — what a
-    /// restart or a previous process leaves behind — stays `uncertain`. Neither
-    /// re-applies the effect.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_live_owner_answers_busy_and_an_unknown_owner_uncertain() {
         let peer = fixed_keypair(48).public().to_peer_id();
@@ -4843,7 +4530,6 @@ mod tests {
             Ok(served) => panic!("a live owner must answer Busy, got {served}"),
         }
 
-        // restart): `uncertain`, never Busy and never a re-apply.
         in_flight.release(&operation_id);
         match handler(&peer, "upsert", payload) {
             Err(envelope) => assert_eq!(
@@ -4880,7 +4566,6 @@ mod tests {
             subject_id: subject_id.clone(),
             fingerprint: "fp-racing-winner".to_string(),
         };
-        // effect right now.
         nexus_local_db::operation_receipts::begin_operation(
             &pool,
             &metadata.operation_id,

@@ -103,9 +103,6 @@ async fn seed_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
     .execute(pool)
     .await
     .expect("world seed");
-    // Creator's holder registry row, so a workspace that can serve KE
-    // operations has one (the real materialization path provisions it with
-    // the Creator).
     sqlx::query(
         "INSERT OR IGNORE INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)",
     )
@@ -448,13 +445,6 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
     );
     assert_ne!(session.session_id(), "");
 
-    // get-manifest op). Assert the exact N-C0 baseline + N-C1 extension +
-    // V1.173 served-tools field contract (the single shared builder now
-    // advertises the delivered N-C2 read-half slice + the user-locked set
-    // `S`): `capabilities[]` = baseline 3 ++ `LOCAL_TOOL_OPS`,
-    // `extensions.nexus.served_ops` = 6 core ++ `LOCAL_TOOL_OPS`, and the
-    // wire carries a non-empty `tools` member (the V1.169 omit-empty pin
-    // flipped for `S`, AR-51 — T3 pins the exact post-T1 lists).
     let wire = serde_json::to_value(session.remote_manifest()).expect("manifest serializes");
     assert_eq!(wire["host_id"], serde_json::json!(TEST_HOST_ID));
     assert_eq!(wire["schema_version"], serde_json::json!(1));
@@ -504,7 +494,6 @@ async fn allowlisted_peer_handshakes_and_reads_nexus_manifest() {
         "the user-locked set S must be advertised as 2 tool descriptors"
     );
 
-    // by the same builder → all six in local-manifest order).
     assert_eq!(
         session.negotiated_capabilities(),
         &[
@@ -558,7 +547,6 @@ fn n_c1_manifest_served_ops_match_dispatch_both_directions() {
         .map(|op| op.as_str().expect("served op is a string").to_string())
         .collect::<Vec<_>>();
 
-    //     the dispatch.
     for op in &advertised {
         assert!(
             super::invoke::SERVED_OPS.contains(&op.as_str()),
@@ -584,9 +572,6 @@ fn n_c1_manifest_served_ops_match_dispatch_both_directions() {
         "advertised served_ops must equal the dispatch served-op table exactly"
     );
 
-    // user-locked tool set `S` in BOTH directions — every `S` tool has a
-    // dispatch arm (it is in `SERVED_OPS`, hence routed) AND is advertised
-    // (capabilities[] + served_ops + a wire `tools` descriptor, AR-48/51).
     for op in nexus_spoke_adapter::manifest::LOCAL_TOOL_OPS {
         assert!(
             super::invoke::SERVED_OPS.contains(&op),
@@ -644,7 +629,6 @@ async fn non_allowlisted_peer_is_rejected_at_handshake() {
         "unexpected rejection error: {err:?}"
     );
 
-    // expect_err above). The allowlisted peer is unaffected.
     let peer = start(peer_config(peer_key, vec![host_peer])).await;
     let session = peer
         .connect(host.listen_addrs()[0].clone())
@@ -680,14 +664,6 @@ async fn every_core_op_and_garbage_op_is_refused_without_side_effects() {
         .await
         .expect("allowlisted handshake");
 
-    // §3.2 coverage). The last three are the 0.15.1 `spoke-memory` family:
-    // one representative op per capability flag (`spoke-memory`,
-    // `-reflection`, `-transfer`). Upstream knows their requirement rows, but
-    // the node gate (no invoke handler configured here, and the capability
-    // gate below it) answers every deny with `op_unsupported` — the
-    // `capability_missing` code belongs to the optional remote responder
-    // face, which nexus does not wire. Pinning the family as refused without
-    // side effects is the contract that keeps memory UNCONSUMED.
     let ops = [
         "upsert",
         "promote",
@@ -710,8 +686,6 @@ async fn every_core_op_and_garbage_op_is_refused_without_side_effects() {
         assert_op_unsupported(&session, op).await;
     }
 
-    // still answered (op_unsupported again, not session_not_found), proving
-    // the refusal path is the crate default and the session stays usable.
     assert_eq!(session.next_sequence(), ops.len() as u64);
     assert_op_unsupported(&session, "check").await;
     assert_eq!(session.next_sequence(), ops.len() as u64 + 1);
@@ -757,7 +731,6 @@ async fn capability_token_gate_authorizes_and_ops_stay_refused() {
     let host = start(host_cfg).await;
     let peer_node = start(peer_cfg).await;
 
-    // part of session establishment when the policy is active).
     let session = peer_node
         .connect(host.listen_addrs()[0].clone())
         .await
@@ -788,7 +761,6 @@ async fn token_required_host_rejects_tokenless_peer_then_accepts_valid_auth() {
     let host_peer = host_key.public().to_peer_id();
     let peer_peer = peer_key.public().to_peer_id();
 
-    // policy and NO provider (it cannot answer the host's challenge).
     let mut host_cfg = host_config(host_key, vec![peer_peer]);
     host_cfg.trusted_issuers = vec![issuer_peer];
     host_cfg.require_capability_token = true;
@@ -812,7 +784,6 @@ async fn token_required_host_rejects_tokenless_peer_then_accepts_valid_auth() {
         other => panic!("expected auth_failed wire error, got {other:?}"),
     }
 
-    // the invoke is still refused (op_unsupported; N-C0 dispatch is closed).
     let auth = token_proof(
         &issuer_secret,
         &peer_peer.to_string(),
@@ -828,10 +799,6 @@ async fn token_required_host_rejects_tokenless_peer_then_accepts_valid_auth() {
         other => panic!("expected op_unsupported after valid auth, got {other:?}"),
     }
 
-    // invoke). 0.9.1 `issue_capability_token` fail-fast refuses `exp` within
-    // the clock-skew window of its `now` argument, so the fixture backdates
-    // the issuance time two hours: the mint-time guards pass, but the token's
-    // `exp = now + 3600` lands an hour in the past of the verifier's clock.
     let expired = token_proof(
         &issuer_secret,
         &peer_peer.to_string(),
@@ -875,7 +842,6 @@ async fn cli_wiring_starts_a_node_with_persisted_identity_and_allowlist() {
     )
     .expect("write allowlist");
 
-    // boot out of the real `~/.nexus42` config).
     let db_path = temp.path().join("workspace").join("state.db");
     let (config, host_id, allowlist_len, _) = super::build_host_config(
         home,
@@ -963,7 +929,6 @@ async fn n_c3_two_node_bidirectional_outbound_records_dialed_peer_manifests() {
     std::fs::create_dir_all(&home_a).expect("mkdir host-a");
     std::fs::create_dir_all(&home_b).expect("mkdir host-b");
 
-    // other before boot (the CLI boot generates the key create-once).
     let peer_a = identity::load_or_create_identity(&home_a)
         .expect("identity A")
         .public()
@@ -1004,7 +969,6 @@ async fn n_c3_two_node_bidirectional_outbound_records_dialed_peer_manifests() {
         "B's store starts empty"
     );
 
-    // A's store (the production wiring at the observation point).
     let session_ab = node_a
         .connect(node_b.listen_addrs()[0].clone())
         .await
@@ -1094,9 +1058,6 @@ async fn connect_dial_records_dialed_peer_manifest() {
     std::fs::create_dir_all(&home_a).expect("mkdir host-a");
     std::fs::create_dir_all(&home_b).expect("mkdir host-b");
 
-    // (the dialer) and A's `dial_host` boot allowlists B — the session
-    // allowlist is mutual, so a dial without `--allow-peer <B>` is refused
-    // at the handshake.
     let peer_a = identity::load_or_create_identity(&home_a)
         .expect("identity A")
         .public()
@@ -1117,7 +1078,6 @@ async fn connect_dial_records_dialed_peer_manifest() {
     let node_b = start(config_b).await;
     let b_addr = node_b.listen_addrs()[0].to_string();
 
-    // boots A, dials B, records B's manifest — all inside `dial_host`.
     let db_a = home_a.join("workspace").join("state.db");
     super::dial_host(&home_a, &b_addr, &[peer_b.to_string()], Some(&db_a))
         .await
@@ -1165,7 +1125,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     let peer_peer = peer_key.public().to_peer_id();
     let outsider_peer = outsider_key.public().to_peer_id();
 
-    // adapter's put paths can persist).
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
         .await
@@ -1173,8 +1132,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     seed_world(&pool, "ctr_test", WORLD_A).await;
     seed_world(&pool, "ctr_test", WORLD_B).await;
 
-    // ops; `outsider` is allowlisted via the CLI overlay only (no scope ⇒
-    // handshake-ok but every write denied — fail-closed).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -1182,7 +1139,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -1220,7 +1176,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     let peer_claim = serde_json::json!(peer_peer.to_string());
     let outsider_claim = serde_json::json!(outsider_peer.to_string());
 
-    // WORLD_A; the response carries the post-create revision (Some(1)).
     let upsert = session
         .invoke(
             "upsert",
@@ -1246,7 +1201,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     .expect("read persisted row");
     assert_eq!(stored_rev, Some(1), "entry persisted in the workspace DB");
 
-    // the revision match and bumps the persisted revision to 2.
     let updated = session
         .invoke(
             "upsert",
@@ -1268,8 +1222,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     .expect("read persisted row");
     assert_eq!(stored_rev, Some(2), "CAS update persisted revision 2");
 
-    // the locked `stored_revision_stale` envelope code (retry-safe) and the
-    // stored row is untouched.
     match session
         .invoke(
             "upsert",
@@ -1286,7 +1238,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
         other => panic!("stale upsert must reject with stored_revision_stale, got {other:?}"),
     }
 
-    // maps to the locked `revision_conflict` envelope code.
     match session
         .invoke(
             "upsert",
@@ -1357,7 +1308,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     .expect("count relation rows");
     assert_eq!(rel_count, 1, "relation persisted in the workspace DB");
 
-    // `op_unsupported` and the entry is NOT persisted (zero side effects).
     match session
         .invoke(
             "upsert",
@@ -1382,8 +1332,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
             .expect("check for leaked row");
     assert!(leaked.is_none(), "wrong-world entry must not be persisted");
 
-    // scope in the file) is handshake-allowlisted but every write is
-    // refused — fail-closed.
     match outsider_session
         .invoke(
             "upsert",
@@ -1408,7 +1356,6 @@ async fn n_c1_peer_upserts_promotes_relates_with_world_scoping() {
     //    through the op-scope gate (op_unsupported — fail-closed).
     assert_op_unsupported(&session, "compute").await;
 
-    // still round-trips afterwards.
     let after = session
         .invoke(
             "upsert",
@@ -1459,16 +1406,12 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
     let peer_peer = peer_key.public().to_peer_id();
     let spoofed_peer = spoofed_key.public().to_peer_id();
 
-    // can persist).
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
         .await
         .expect("workspace DB initializes");
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // must carry real write scope, or the legacy payload-trusting dispatch
-    // would deny the invoke for scope reasons and the test could not tell
-    // "denied because spoofed" apart from "denied because B has no scope".
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -1477,7 +1420,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
             {
                 "peer_id": peer_peer.to_string(),
                 "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -1488,7 +1430,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
             {
                 "peer_id": spoofed_peer.to_string(),
                 "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -1517,8 +1458,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         .await
         .expect("session peer handshake");
 
-    //    payload claiming the OTHER scoped peer (B). Must be denied with
-    //    `op_unsupported` and ZERO side effects — no row persisted.
     let spoofed_claim = serde_json::json!(spoofed_peer.to_string());
     match session
         .invoke(
@@ -1552,7 +1491,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         "spoofed invoke must have zero side effects (no row persisted)"
     );
 
-    //     not a PeerId string — same hard deny, zero side effects.
     let non_string = session
         .invoke(
             "upsert",
@@ -1585,8 +1523,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         "unparseable payload peer_id must be denied, got {unparseable:?}"
     );
 
-    //     (mirrors the spoke session-core 128-char decode input cap) before
-    //     any decode work; zero side effects.
     let oversized = session
         .invoke(
             "upsert",
@@ -1603,7 +1539,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         "oversized payload peer_id must be denied, got {oversized:?}"
     );
 
-    //     denied invokes may persist a row.
     for denied_id in ["kb_s1b", "kb_s1c", "kb_s1d"] {
         let leaked: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
@@ -1619,8 +1554,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         );
     }
 
-    //    peer_id, still served under A's scope (the branch the 0.9.1-shaped
-    //    payload-identity dispatch could not serve at all).
     let claimless = session
         .invoke(
             "upsert",
@@ -1638,7 +1571,6 @@ async fn n_c1_session_peer_identity_denies_spoofed_payload_claim_and_serves_clai
         "kb_s2"
     );
 
-    //    payload identity keep working — spec §5.1).
     let peer_claim = serde_json::json!(peer_peer.to_string());
     let matching = session
         .invoke(
@@ -1689,9 +1621,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
     seed_world(&pool, "ctr_test", WORLD_A).await;
     seed_world(&pool, "ctr_test", WORLD_B).await;
 
-    // confirmed entry (update target), a provisional entry (promote target),
-    // and a relation between them. Revisions are 1 — the value a hostile
-    // peer learns from OCC reject details (`actualRevision`/`storeRevision`).
     seed_key_block(&pool, "kb_b_update", WORLD_B, "Banished", "confirmed", 1).await;
     seed_key_block(&pool, "kb_b_promote", WORLD_B, "Seer", "provisional", 1).await;
     // SAFETY: test-only static INSERT with bind params against the known
@@ -1716,7 +1645,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -1745,7 +1673,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         .expect("scoped peer handshake");
     let peer_claim = serde_json::json!(peer_peer.to_string());
 
-    //    replayed while the payload claims WORLD_A.
     match session
         .invoke(
             "upsert",
@@ -1763,12 +1690,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         .await
     {
         Err(InvokeError::Wire(envelope)) => {
-            // grant-resolved SCOPED adapter, whose container admission cannot
-            // see a stored row in the foreign world at all (the scope filter
-            // hides it), so a write-class refusal may surface as the
-            // client-input family instead of the scope family. Both are
-            // fail-closed refusals with zero mutation (asserted below); the
-            // filter is NOT bypassed to restore the old code.
             assert!(
                 matches!(envelope.code.as_str(), "op_unsupported" | "invalid_input"),
                 "cross-world update must be denied (fail-closed family): got {envelope:?}"
@@ -1794,19 +1715,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         .await
     {
         Err(InvokeError::Wire(envelope)) => {
-            // grant-resolved SCOPED adapter, whose container admission cannot
-            // see a stored row in the foreign world at all (the scope filter
-            // hides it), so a write-class refusal may surface as the
-            // client-input family instead of the scope family. Both are
-            // fail-closed refusals with zero mutation (asserted below); the
-            // filter is NOT bypassed to restore the old code.
-            // The promote create-path is denied by the scoped admission, and
-            // the residual collision with the hidden foreign row surfaces
-            // through the adapter's *unmapped* UNIQUE carrier
-            // (`internal_error`) — a pre-existing adapter mapping gap reported
-            // to T15 (the row itself is never mutated, asserted below). The
-            // test pins "denied, zero mutation", not a code that is still
-            // being reconciled.
             assert!(
                 matches!(
                     envelope.code.as_str(),
@@ -1818,7 +1726,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         other => panic!("cross-world promote must be denied, got {other:?}"),
     }
 
-    //    claims WORLD_A with the stored revision replayed).
     match session
         .invoke(
             "relate",
@@ -1838,12 +1745,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         .await
     {
         Err(InvokeError::Wire(envelope)) => {
-            // grant-resolved SCOPED adapter, whose container admission cannot
-            // see a stored row in the foreign world at all (the scope filter
-            // hides it), so a write-class refusal may surface as the
-            // client-input family instead of the scope family. Both are
-            // fail-closed refusals with zero mutation (asserted below); the
-            // filter is NOT bypassed to restore the old code.
             assert!(
                 matches!(envelope.code.as_str(), "op_unsupported" | "invalid_input"),
                 "cross-world relate must be denied (fail-closed family): got {envelope:?}"
@@ -1852,7 +1753,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         other => panic!("cross-world relate must be denied, got {other:?}"),
     }
 
-    // revision, same status).
     let row: (String, i64, String) = sqlx::query_as(
         "SELECT world_id, revision, status FROM kb_key_blocks WHERE key_block_id = ?",
     )
@@ -1889,7 +1789,6 @@ async fn n_c1_cross_world_update_promote_and_relate_are_denied_with_zero_mutatio
         "world-B relation must be untouched"
     );
 
-    //    world-A write still round-trips afterwards.
     let after = session
         .invoke(
             "upsert",
@@ -1942,7 +1841,6 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -1971,7 +1869,6 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
         .expect("scoped peer handshake");
     let peer_claim = serde_json::json!(peer_peer.to_string());
 
-    // except `extensions.nexus.world_id` is absent.
     let worldless = serde_json::json!({
         "schema_version": 1,
         "entry_id": "kb_m2",
@@ -2005,7 +1902,6 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
         other => panic!("mixed payload must be denied, got {other:?}"),
     }
 
-    // before the denial (whole-payload gate, no partial write).
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id IN ('kb_m1', 'kb_m2')",
     )
@@ -2030,7 +1926,6 @@ async fn n_c1_mixed_payload_missing_world_id_denies_whole_payload() {
 #[tokio::test(flavor = "multi_thread")]
 #[expect(clippy::too_many_lines)] // one routing sweep over SERVED_OPS; the per-op payload fixtures stay linear
 async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
-    // (the loop's compute arm reaches WASM execution).
     const WORLD_A: &str = "wld_loop1";
 
     let _guard = network_test_guard().await;
@@ -2043,9 +1938,6 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // allowlist file is built from the const itself), so the loop below can
-    // only fail if a served op does not route. The module_scope allowlists
-    // basic-combat for the compute arm (P2: compute is a served op).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -2053,7 +1945,6 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -2066,14 +1957,9 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
     )
     .expect("write allowlist");
 
-    // arm can round-trip (spec §2.1 — never peer-supplied bytes). When the
-    // wasm target is absent there are no embedded bytes to install and the
-    // compute arm is excluded from the loop (the cfg-gated round-trip test
-    // covers it wherever the target exists).
     let mut loop_ops: Vec<&str> = super::invoke::SERVED_OPS.to_vec();
     if nexus_wasm_host::embedded_module_bytes("basic-combat").is_some() {
         install_test_module(home, "basic-combat");
-        // is not a served op; the session row is the staging surface).
         nexus_local_db::compute_session::insert_compute_session(
             &pool,
             "ses_loop_compute",
@@ -2108,10 +1994,6 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
         .expect("scoped peer handshake");
     let peer_claim = serde_json::json!(peer_peer.to_string());
 
-    // pre-create the pair it references before the loop; the loop itself
-    // then only uses fresh ids (order-independent of the const's iteration).
-    // The pair is seeded with combat attributes so the compute arm's WASM
-    // invocation passes the module's manifest input validation.
     let pair = session
         .invoke(
             "upsert",
@@ -2130,9 +2012,6 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
         "kb_loop_pair_1"
     );
 
-    // a dispatch match arm. A removed arm surfaces here as the `op_unsupported`
-    // refusal (the gate passes the op, the match falls through) and fails
-    // the invoke — the exact drift the const-binding prevents.
     for op in loop_ops {
         let payload = match op {
             "upsert" => serde_json::json!({
@@ -2181,14 +2060,6 @@ async fn n_c1_every_served_op_advertised_by_the_const_actually_routes() {
                 },
                 "settle": false,
             }),
-            // through `Route::Tool` — host-level tools take the spoke
-            // tool-invoke payload shape (`{ "arguments": <object> }`) and
-            // skip the world-scope gate (AR-49), so the empty-object
-            // arguments round-trip through the handler arms
-            // (`{ "result": ... }`). `list_observed_peers` reads the
-            // empty `peer_hosts` store → `{ "peers": [] }`;
-            // `list_modules` reads the hermetic home's module store
-            // (missing dir → `{ "modules": [] }`).
             "tools.nexus.list_observed_peers" | "tools.nexus.list_modules" => serde_json::json!({
                 "extensions": { "nexus": { "peer_id": peer_claim } },
                 "arguments": {},
@@ -2241,8 +2112,6 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
     seed_world(&pool, "ctr_test", WORLD_A).await;
     seed_world(&pool, "ctr_test", WORLD_B).await;
 
-    // WORLD_B (the peer is scoped to WORLD_A only — the world-B entries
-    // must be unreachable as relation endpoints).
     seed_key_block(&pool, "kb_a_e1", WORLD_A, "Mira", "confirmed", 1).await;
     seed_key_block(&pool, "kb_a_e2", WORLD_A, "Ashford", "confirmed", 1).await;
     seed_key_block(&pool, "kb_b_e1", WORLD_B, "Banished", "confirmed", 1).await;
@@ -2255,7 +2124,6 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -2311,7 +2179,6 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
         other => panic!("cross-world relate create must be denied, got {other:?}"),
     }
 
-    //    endpoints must be verified, not just the first.
     match session
         .invoke(
             "relate",
@@ -2328,7 +2195,6 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
         other => panic!("mixed-world relate create must be denied, got {other:?}"),
     }
 
-    //    as an FK/`internal_error` id-existence oracle.
     match session
         .invoke(
             "relate",
@@ -2354,8 +2220,6 @@ async fn n_c1_relate_create_rejects_foreign_world_endpoints() {
     .expect("count relation rows");
     assert_eq!(count, 0, "denied relates must insert zero rows");
 
-    //    denials consumed sequences but the session stays usable and the
-    //    legitimate create path is not over-blocked.
     let ok = session
         .invoke("relate", relate_payload("rel_new_a", "kb_a_e1", "kb_a_e2"))
         .await
@@ -2403,7 +2267,6 @@ async fn n_c2_peer_runs_check_over_connect() {
     let peer_key = fixed_keypair(70);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // ports and the finding-persist path).
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
         .await
@@ -2417,7 +2280,6 @@ async fn n_c2_peer_runs_check_over_connect() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -2446,7 +2308,6 @@ async fn n_c2_peer_runs_check_over_connect() {
         .expect("scoped peer handshake");
     let peer_claim = serde_json::json!(peer_peer.to_string());
 
-    // (list_knowledge_entries / list_timeline_events) run against data.
     session
         .invoke(
             "upsert",
@@ -2458,8 +2319,6 @@ async fn n_c2_peer_runs_check_over_connect() {
         .await
         .expect("seed entry for the check");
 
-    // the schema's scope object, not an ad-hoc world field); the baseline
-    // checker produces zero findings.
     let checked = session
         .invoke(
             "check",
@@ -2511,7 +2370,6 @@ async fn n_c2_peer_runs_assemble_over_connect() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -2554,7 +2412,6 @@ async fn n_c2_peer_runs_assemble_over_connect() {
         .await
         .expect("seed entries for the assemble");
 
-    // and the orchestrator-derived packet id (scope-anchored).
     let assembled = session
         .invoke(
             "assemble",
@@ -2576,7 +2433,6 @@ async fn n_c2_peer_runs_assemble_over_connect() {
         .expect("packet entries array");
     assert_eq!(entries.len(), 2, "both seeded entries assembled");
 
-    // truncates, not the wire).
     let truncated = session
         .invoke(
             "assemble",
@@ -2633,7 +2489,6 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -2662,7 +2517,6 @@ async fn n_c2_check_and_assemble_wrong_world_and_absent_scope_denied() {
         .expect("scoped peer handshake");
     let peer_claim = serde_json::json!(peer_peer.to_string());
 
-    //    WORLD_A ⇒ denied before the orchestrator (zero side effects).
     match session
         .invoke(
             "check",
@@ -2800,7 +2654,6 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -2828,24 +2681,10 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
         .await
         .expect("scoped peer handshake");
 
-    // op_scope / payload shape. `tools.math.add` is refused by the
-    // SPOKE-side dispatch gate (layer 1): the 0.11.1 core rule requires
-    // the exact op string as a negotiated capability, and the host
-    // negotiates only the user-locked set `S` — an id outside `S` is not
-    // in any hello `capabilities[]`, so the gate answers the
-    // op_unsupported wire envelope before the nexus handler runs.
-    // 0.15.1 lockstep: the additive `spoke-memory` family is UNCONSUMED — a
-    // representative op is refused by the same gate below the nexus handler
-    // (requirement row known upstream, capability not negotiated), so op_scope
-    // and payload shape are irrelevant and no memory semantics are emulated
-    // locally (MEM-R019 posture, upstream C-002).
     for op in ["project", "garbage-op", "tools.math.add", "memory.describe"] {
         assert_op_unsupported(&session, op).await;
     }
 
-    // served-op gate and fails the typed ComputeRequest parse — mapped to
-    // the locked `invalid_input` envelope, not `op_unsupported` (pins the
-    // gate admits compute; the parse is the next gate).
     match session
         .invoke("compute", serde_json::json!({ "extensions": {} }))
         .await
@@ -2857,7 +2696,6 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
         other => panic!("malformed compute expected invalid_input, got {other:?}"),
     }
 
-    // still round-trips afterwards.
     let served = session
         .invoke(
             "check",
@@ -2891,7 +2729,6 @@ async fn n_c2_refusal_matrix_project_and_unknown_ops() {
 #[tokio::test(flavor = "multi_thread")]
 #[expect(clippy::too_many_lines)] // AR-102: linear fail-closed scenario steps by design; extraction refactors are out of scope for this plan
 async fn n_c2_peer_runs_compute_over_connect() {
-    // `^wld_[a-zA-Z0-9]+$` (underscores are rejected by the wire type).
     const WORLD_A: &str = "wld_rt1";
 
     let _guard = network_test_guard().await;
@@ -2900,15 +2737,12 @@ async fn n_c2_peer_runs_compute_over_connect() {
     let peer_key = fixed_keypair(80);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // installed under `~/.nexus42/modules/` (host-local store, fail-closed).
     install_test_module(home, "basic-combat");
 
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // `module_scope` allowlisting basic-combat (architect lock, spec §6.1 —
-    // missing/empty module_scope denies ALL compute).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -2916,7 +2750,6 @@ async fn n_c2_peer_runs_compute_over_connect() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -2946,7 +2779,6 @@ async fn n_c2_peer_runs_compute_over_connect() {
         .expect("scoped peer handshake");
     let peer_claim = serde_json::json!(peer_peer.to_string());
 
-    // attributes and would fail the module's manifest input validation).
     session
         .invoke(
             "upsert",
@@ -2961,8 +2793,6 @@ async fn n_c2_peer_runs_compute_over_connect() {
         .await
         .expect("seed combatants");
 
-    // session row is the out-of-band staging surface; `module_id` lives in
-    // the staged state per the locked resolution precedence, spec §2.2).
     let state = serde_json::json!({
         "module_id": "basic-combat",
         "attacker_id": "kb_atk",
@@ -2978,7 +2808,6 @@ async fn n_c2_peer_runs_compute_over_connect() {
     .await
     .expect("stage compute session");
 
-    // response's merged computable state (30 HP − 15 damage = 15).
     let computed = session
         .invoke(
             "compute",
@@ -3044,14 +2873,11 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
     let peer_key = fixed_keypair(81);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // still exists, so the not-installed denial is reachable.
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
     seed_world(&pool, "ctr_test", WORLD_B).await;
 
-    // `module_scope` allowlisting basic-combat — which is NOT installed in
-    // this hermetic home (fail-closed: the gate must deny before execution).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -3059,7 +2885,6 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -3102,12 +2927,6 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         .await
         .expect("seed same-world combatant");
 
-    // directly — the peer cannot write there). The stored entry is read
-    // through the caller's admitted selection, and a row that selection does
-    // not admit is indistinguishable from an absent one (durable
-    // `holder-governance.md` §4.2), so the denial is the client-input family
-    // (`invalid_input`, the same code a missing `entry_id` produces) — never
-    // an id-existence oracle for a foreign world.
     seed_key_block(&pool, "kb_cmp_b", WORLD_B, "Banished", "confirmed", 1).await;
     nexus_local_db::compute_session::insert_compute_session(
         &pool,
@@ -3138,8 +2957,6 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         other => panic!("wrong-world compute must be denied, got {other:?}"),
     }
 
-    // and the entry has no `body.computable` — the locked resolution
-    // precedence finds no module identity ⇒ defined module_not_found.
     nexus_local_db::compute_session::insert_compute_session(
         &pool,
         "ses_no_module",
@@ -3168,8 +2985,6 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         other => panic!("missing-module compute must be denied, got {other:?}"),
     }
 
-    // module_scope, but the host-local store under ~/.nexus42/modules/ does
-    // not contain it ⇒ defined module_not_found (never peer-supplied bytes).
     nexus_local_db::compute_session::insert_compute_session(
         &pool,
         "ses_uninstalled",
@@ -3198,8 +3013,6 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         other => panic!("uninstalled-module compute must be denied, got {other:?}"),
     }
 
-    // spec §5 / §6.5 — the compute settlement helper is NOT enabled on the
-    // N-C2 surface). The gate fires before any module/WASM work.
     match session
         .invoke(
             "compute",
@@ -3220,7 +3033,6 @@ async fn n_c2_compute_wrong_world_missing_module_uninstalled_and_settle_denied()
         other => panic!("settle:true compute must be rejected, got {other:?}"),
     }
 
-    // staged session rows still carry their original state_json.
     let stored: Option<String> =
         sqlx::query_scalar("SELECT state_json FROM compute_sessions WHERE session_id = ?")
             .bind("ses_uninstalled")
@@ -3269,8 +3081,6 @@ async fn n_c2_compute_unscoped_module_denied() {
     let pool = compute_fixture_pool(&db_path).await;
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // V1.154 file shape without the new field — backward-compatible parse,
-    // fail-closed semantics: no module access).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -3278,7 +3088,6 @@ async fn n_c2_compute_unscoped_module_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -3386,7 +3195,6 @@ async fn n_c2_compute_request_module_override_denied() {
     let peer_key = fixed_keypair(83);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // execute real WASM under the unscoped id.
     install_test_module(home, "basic-combat");
     install_test_module_as(home, "basic-combat-alt", "basic-combat");
 
@@ -3401,7 +3209,6 @@ async fn n_c2_compute_request_module_override_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -3445,7 +3252,6 @@ async fn n_c2_compute_request_module_override_denied() {
         .await
         .expect("seed combatants");
 
-    // invocation the module needs)...
     nexus_local_db::compute_session::insert_compute_session(
         &pool,
         "ses_pin",
@@ -3460,7 +3266,6 @@ async fn n_c2_compute_request_module_override_denied() {
     .await
     .expect("stage session");
 
-    // installed-but-unscoped module id. The pin must deny.
     match session
         .invoke(
             "compute",
@@ -3481,11 +3286,6 @@ async fn n_c2_compute_request_module_override_denied() {
         other => panic!("module override must be denied, got {other:?}"),
     }
 
-    // (42 / {} / null) must ALSO be denied `module_not_scoped` — the old
-    // as_str-only pin let them bypass while the execution-time merge still
-    // shadowed the session-staged id with the non-string value. Key
-    // presence is the pin trigger; the value must be a JSON string EQUAL to
-    // the gated id, else deny (zero side effects — asserted below).
     for (label, override_value) in [
         ("number", serde_json::json!(42)),
         ("object", serde_json::json!({})),
@@ -3514,7 +3314,6 @@ async fn n_c2_compute_request_module_override_denied() {
         }
     }
 
-    // denials above — string-differ + 42 / {} / null — must not advance it).
     let stored: Option<String> =
         sqlx::query_scalar("SELECT state_json FROM compute_sessions WHERE session_id = ?")
             .bind("ses_pin")
@@ -3533,7 +3332,6 @@ async fn n_c2_compute_request_module_override_denied() {
         "the denied overrides must not advance session state (order-insensitive)"
     );
 
-    // proves the pin compares, it does not blanket-ban computable.module_id.
     let served = session
         .invoke(
             "compute",
@@ -3577,7 +3375,6 @@ async fn n_c2_compute_missing_entry_denied_invalid_input() {
         .expect("workspace DB initializes");
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // at the stored-entry gate, before module resolution.
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -3585,7 +3382,6 @@ async fn n_c2_compute_missing_entry_denied_invalid_input() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -3695,7 +3491,6 @@ fn invoke_compute_executes_only_inside_the_bounded_lane() {
     );
 }
 
-/// a hermetic home — the T2 file `build_config`/`build_host_config` read.
 fn write_token_config(home: &std::path::Path, body: &str) {
     let dir = home.join(".nexus42").join("connect");
     std::fs::create_dir_all(&dir).expect("create connect dir");
@@ -3721,14 +3516,12 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
     let peer_key = fixed_keypair(90);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // ports the handler would hit — proving they are never reached).
     let db_path = temp.path().join("workspace").join("state.db");
     let pool = crate::db::Schema::init(&db_path)
         .await
         .expect("workspace DB initializes");
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // allowlist is not the reason the invoke below is denied.
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -3736,7 +3529,6 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -3748,7 +3540,6 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
     )
     .expect("write allowlist");
 
-    // the host requires a capability token from the trusted issuer.
     let issuer_secret = [51u8; 32];
     let issuer_peer = issuer_peer_id(&issuer_secret);
     write_token_config(
@@ -3781,7 +3572,6 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
     let host_peer = config.identity.public().to_peer_id();
     let host = start(config).await;
 
-    // answer the host's challenge, so its session carries no grant.
     let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
     let session = peer_node
         .connect(host.listen_addrs()[0].clone())
@@ -3792,8 +3582,6 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
         "tokenless session carries no token grant"
     );
 
-    // `evaluate_invoke_token_gate` answers `auth_failed` before the nexus
-    // handler runs.
     let peer_claim = serde_json::json!(peer_peer.to_string());
     match session
         .invoke(
@@ -3815,7 +3603,6 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
         other => panic!("expected auth_failed wire error, got {other:?}"),
     }
 
-    // kb_key_blocks row was persisted.
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
         .bind(WORLD_A)
         .fetch_one(&pool)
@@ -3823,7 +3610,6 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
         .expect("count key blocks");
     assert_eq!(rows, 0, "a denied invoke must persist zero rows");
 
-    // answered (auth_failed again, not session_not_found).
     match session
         .invoke("check", serde_json::json!({ "extensions": {} }))
         .await
@@ -3868,7 +3654,6 @@ async fn config_require_token_valid_token_peer_invokes_green() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -3880,8 +3665,6 @@ async fn config_require_token_valid_token_peer_invokes_green() {
     )
     .expect("write allowlist");
 
-    // provider block loads at boot (`~/.nexus42/connect/issuer.key`, the
-    // CLI creation path — the provider boot is fail-closed without it).
     let issuer_key = super::token::load_or_create_issuer_key(home).expect("issuer key created");
     let issuer_id = super::token::issuer_peer_id(&issuer_key).expect("issuer peer id");
     let issuer_secret = super::token::issuer_secret_bytes(&issuer_key).expect("issuer secret");
@@ -3911,9 +3694,6 @@ async fn config_require_token_valid_token_peer_invokes_green() {
     let host_peer = config.identity.public().to_peer_id();
     let host = start(config).await;
 
-    // with provider-minted `spoke-baseline` tokens (the required capability
-    // for the served baseline ops). Both sessions are token-authorized
-    // before connect() completes.
     let mut peer_cfg = peer_config(peer_key, vec![host_peer]);
     peer_cfg.trusted_issuers = vec![issuer_id];
     peer_cfg.require_capability_token = true;
@@ -3933,7 +3713,6 @@ async fn config_require_token_valid_token_peer_invokes_green() {
         "dialer session must complete the token challenge"
     );
 
-    // side effects visible in the workspace DB)…
     let peer_claim = serde_json::json!(peer_peer.to_string());
     let upserted = session
         .invoke(
@@ -4004,7 +3783,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
         .expect("workspace DB initializes");
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // NOT compute (no `compute` in op_scope).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -4012,7 +3790,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -4024,8 +3801,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
     )
     .expect("write allowlist");
 
-    // provider block lets the host answer the peer's own challenge, so both
-    // sessions are token-authorized before the first invoke (no gate race).
     let issuer_key = super::token::load_or_create_issuer_key(home).expect("issuer key created");
     let issuer_id = super::token::issuer_peer_id(&issuer_key).expect("issuer peer id");
     let issuer_secret = super::token::issuer_secret_bytes(&issuer_key).expect("issuer secret");
@@ -4051,7 +3826,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
     let host_peer = config.identity.public().to_peer_id();
     let host = start(config).await;
 
-    // allowlist scope grants.
     let mut peer_cfg = peer_config(peer_key, vec![host_peer]);
     peer_cfg.trusted_issuers = vec![issuer_id];
     peer_cfg.require_capability_token = true;
@@ -4071,10 +3845,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
         "the l2-computable token must complete the challenge"
     );
 
-    // advertise it) and the token grants it — the spoke op-dispatch gate
-    // would pass. The nexus PeerScope op-scope gate is the next boundary:
-    // compute is NOT in the peer's op_scope, so the invoke is denied with
-    // the `op denied:` refusal family (NOT the spoke gate's message).
     let peer_claim = serde_json::json!(peer_peer.to_string());
     match session
         .invoke(
@@ -4105,7 +3875,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
         other => panic!("compute must be denied by PeerScope, got {other:?}"),
     }
 
-    // by the never-invoked handler path, and the session stays usable.
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
         .bind(WORLD_A)
         .fetch_one(&pool)
@@ -4113,7 +3882,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
         .expect("count key blocks");
     assert_eq!(rows, 0, "the denied compute must persist zero rows");
 
-    // green for the same token-authorized session.
     let served = session
         .invoke(
             "upsert",
@@ -4139,17 +3907,6 @@ async fn token_cannot_widen_peer_scope_l2_computable_compute_denied() {
     peer_node.shutdown().await.expect("peer shuts down");
 }
 
-/// includes a served tool id can invoke it; a peer that does NOT advertise
-/// the tool id (but the host does) is refused at the spoke core gate —
-/// negotiation is the intersection, host advertisement alone is not
-/// enough. Both peers are allowlisted with the FULL served-op scope, so
-/// the refusal cannot come from the nexus `PeerScope` gate: only the spoke
-/// dispatch gate (required capability == the op string ∉ negotiated) can
-/// refuse. The absent peer's session negotiates the baseline 3 only; the
-/// same host serves the tool green to the advertising peer. Zero side
-/// effects on the refusal are structural (the spoke gate answers before
-/// the nexus handler runs); the seeded observed-peer store is left
-/// untouched and a served op round-trips afterwards.
 #[tokio::test(flavor = "multi_thread")]
 #[expect(clippy::too_many_lines)] // two-node authz scenario; the per-peer steps stay linear
 async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
@@ -4169,8 +3926,6 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
         .expect("workspace DB initializes");
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // the allowlist is not the lever in this test (the only difference
-    // between the two sessions is the peer's own hello capabilities[]).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -4179,7 +3934,6 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
             {
                 "peer_id": absent_peer.to_string(),
                 "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -4190,7 +3944,6 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
             {
                 "peer_id": control_peer.to_string(),
                 "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -4213,9 +3966,6 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
     .expect("host config builds");
     let host_peer = config.identity.public().to_peer_id();
 
-    // observable content — the absent peer must never see it (its invoke
-    // is refused at the spoke gate, zero adapter I/O), while the
-    // advertising peer round-trips it green.
     let observed = match build_local_host_manifest("observed-peer-uuid-0000") {
         SpokeResult::Ok(m) => m,
         SpokeResult::Reject(r) => panic!("observed manifest build rejected: {r:?}"),
@@ -4227,7 +3977,6 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
 
     let host = start(config).await;
 
-    // never negotiate.
     let absent_cfg = peer_config_with_manifest(
         absent_peer_key,
         vec![host_peer],
@@ -4273,9 +4022,6 @@ async fn served_tool_invoke_requires_peer_to_advertise_the_capability() {
         other => panic!("expected the spoke op_unsupported refusal, got {other:?}"),
     }
 
-    //     the tool ids) → the tool round-trips green and reads the seeded
-    //     observation — proving host advertisement + peer advertisement
-    //     together authorize.
     let control_node = start(peer_config(control_peer_key, vec![host_peer])).await;
     let control_session = control_node
         .connect(host.listen_addrs()[0].clone())
@@ -4355,7 +4101,6 @@ async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -4367,8 +4112,6 @@ async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
     )
     .expect("write allowlist");
 
-    // trusted issuer and enable the mint-on-demand provider (both sessions
-    // complete the challenge before the first invoke).
     let issuer_key = super::token::load_or_create_issuer_key(home).expect("issuer key created");
     let issuer_id = super::token::issuer_peer_id(&issuer_key).expect("issuer peer id");
     let issuer_secret = super::token::issuer_secret_bytes(&issuer_key).expect("issuer secret");
@@ -4394,8 +4137,6 @@ async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
     let host_peer = config.identity.public().to_peer_id();
     let host = start(config).await;
 
-    // tool id — but its own hello `capabilities[]` omits it, so the
-    // negotiated intersection never contains it.
     let mut peer_cfg = peer_config_with_manifest(
         peer_key,
         vec![host_peer],
@@ -4426,7 +4167,6 @@ async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
         "negotiation is the intersection — the peer's own hello lacks the tool id"
     );
 
-    // spoke gate refuses (AND semantics), before any nexus handler I/O.
     match session
         .invoke(
             "tools.nexus.list_modules",
@@ -4448,7 +4188,6 @@ async fn tool_token_grant_never_substitutes_for_missing_negotiation() {
         other => panic!("expected the spoke op_unsupported refusal, got {other:?}"),
     }
 
-    // peer negotiated still round-trips green.
     let checked = session
         .invoke(
             "check",
@@ -4487,7 +4226,6 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
     let peer_key = fixed_keypair(98);
     let peer_peer = peer_key.public().to_peer_id();
 
-    // in its op_scope (absent scope entry ⇒ fail-closed).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -4495,7 +4233,6 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
         serde_json::json!({ "peer_ids": [{
             "peer_id": peer_peer.to_string(),
             "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -4517,7 +4254,6 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
     .expect("host config builds");
     let host_peer = config.identity.public().to_peer_id();
 
-    // denial must leave the store untouched.
     let observed_host = match build_local_host_manifest("observed-peer-uuid-0001") {
         SpokeResult::Ok(m) => m,
         SpokeResult::Reject(r) => panic!("observed manifest build rejected: {r:?}"),
@@ -4528,8 +4264,6 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
     }
 
     let host = start(config).await;
-    // so the spoke core gate passes — the denial can only come from the
-    // nexus PeerScope op_scope gate.
     let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
     let session = peer_node
         .connect(host.listen_addrs()[0].clone())
@@ -4564,7 +4298,6 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
         other => panic!("expected the nexus op_scope denial, got {other:?}"),
     }
 
-    // still exactly the seeded row.
     let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM peer_hosts")
         .fetch_one(&pool)
         .await
@@ -4587,10 +4320,6 @@ async fn served_tool_op_scope_miss_denies_with_zero_adapter_io() {
     peer_node.shutdown().await.expect("peer shuts down");
 }
 
-/// network lock, handshake timeout ≥ 10 s) completes the integrator
-/// journey for EVERY tool in `S` ([`LOCAL_TOOL_OPS`]) through the real
-/// host boot (`build_host_config` — the `connect start` shape):
-///
 /// 1. **Discover** — the peer reads the host manifest off the signed
 ///    hello: `tools[]` carries one descriptor per served tool with
 ///    `op == capability_id == <tool id>` and the locked input/output
@@ -4618,7 +4347,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
 
-    // (`build_host_config`); only the dialing peers use fixed seeds.
     let peer_key = fixed_keypair(100);
     let absent_key = fixed_keypair(101);
     let peer_peer = peer_key.public().to_peer_id();
@@ -4630,8 +4358,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
         .expect("workspace DB initializes");
     seed_world(&pool, "ctr_test", WORLD_A).await;
 
-    // copy: the operator must allowlist each `tools.nexus.*` op, or the
-    // nexus PeerScope gate refuses after the spoke gate passes).
     let allow_path = nexus_home_layout::connect_allowlist_path(home);
     std::fs::create_dir_all(allow_path.parent().expect("parent dir")).expect("mkdir");
     std::fs::write(
@@ -4640,7 +4366,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
             {
                 "peer_id": peer_peer.to_string(),
                 "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -4651,7 +4376,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
             {
                 "peer_id": absent_peer.to_string(),
                 "world_scope": [WORLD_A],
-            // this test's world as the granted viewpoint.
             "grant": {
                 "creator_id": "ctr_test",
                 "actor": { "kind": "creator", "id": "ctr_test" },
@@ -4675,7 +4399,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
     let host_peer = config.identity.public().to_peer_id();
     let host = start(config).await;
 
-    //     host manifest and negotiates every served tool id.
     let peer_node = start(peer_config(peer_key, vec![host_peer])).await;
     let session = peer_node
         .connect(host.listen_addrs()[0].clone())
@@ -4738,7 +4461,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
         );
     }
 
-    //     non-empty half round-trips the real state.
     let observed = match build_local_host_manifest("observed-host-uuid-0004") {
         SpokeResult::Ok(m) => m,
         SpokeResult::Reject(r) => panic!("observed manifest build rejected: {r:?}"),
@@ -4750,7 +4472,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
     let module_id = "basic-combat";
     let modules_dir = nexus_home_layout::user_modules_dir(home).join(module_id);
     std::fs::create_dir_all(&modules_dir).expect("mkdir module store dir");
-    // is deterministic and needs no wasm target.
     std::fs::write(modules_dir.join(format!("{module_id}.wasm")), b"dummy").expect("write wasm");
     std::fs::write(modules_dir.join("manifest.json"), b"{}").expect("write manifest");
 
@@ -4784,9 +4505,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
         "the green C-2 read lists the installed module (id only, never bytes)"
     );
 
-    //     tool ids is refused at the spoke core gate with zero handler I/O
-    //     (host advertisement alone is not enough) and the session stays
-    //     usable for a scoped baseline op.
     let absent_node = start(peer_config_with_manifest(
         absent_key,
         vec![host_peer],
@@ -4834,9 +4552,6 @@ async fn ac_v173_1_two_node_interop_for_each_served_tool() {
         .expect("absent peer shuts down");
 }
 
-/// test-installed `BEFORE UPDATE` trigger over `operation_receipts` that aborts
-/// every terminal transition with `TEST_SETTLE_FAULT`.
-///
 /// Why this seam instead of the brief's pre-seeded-conflicting-terminal-row:
 /// the store's settlement UPDATE is gated on `WHERE operation_id = ? AND
 /// status = 'running'`, so a pre-seeded terminal row makes the statement match
@@ -4997,7 +4712,6 @@ async fn connect_live_write_settlement_fault_answers_the_committed_effect_refusa
     let refused = session.invoke("upsert", payload.clone()).await;
     assert_effect_committed_refusal(refused, OPERATION_ID, &subject_id);
 
-    //    is not a rollback.
     let stored_rev: Option<i64> = sqlx::query_scalar(
         "SELECT revision FROM kb_key_blocks WHERE world_id = ? AND key_block_id = ?",
     )
@@ -5012,7 +4726,6 @@ async fn connect_live_write_settlement_fault_answers_the_committed_effect_refusa
         "the committed effect must survive the settlement fault"
     );
 
-    //    acquirer wrote, with neither terminal payload nor stamp.
     let receipt = nexus_local_db::operation_receipts::get_operation_receipt(&pool, OPERATION_ID)
         .await
         .expect("receipt read")
@@ -5026,8 +4739,6 @@ async fn connect_live_write_settlement_fault_answers_the_committed_effect_refusa
     assert!(receipt.terminal_at.is_none());
     assert!(receipt.result_json.is_none() && receipt.error_json.is_none());
 
-    //    `uncertain` answer (a `running` receipt with no in-process owner) — and
-    //    the effect is never re-applied.
     sqlx::query("DROP TRIGGER test_settle_fault")
         .execute(&pool)
         .await

@@ -126,7 +126,6 @@ fn every_embedded_preset_round_trips_the_contract_fields() {
         "embedded preset(s) whose export does not reproduce their source manifest:\n{}",
         failures.join("\n")
     );
-    // that ever failed; the two counts keep each half of the contract exercised.
     assert!(
         world_bound > 0,
         "no embedded preset declares `preset.world_binding`"
@@ -207,7 +206,6 @@ states:
         "context_update payload shapes changed through the IR"
     );
 
-    // fixture edit cannot quietly drop the one that regressed.
     let op = |state: &str| {
         source[&format!("states.{state}.context_update")]
             .get("op")
@@ -228,8 +226,6 @@ states:
         Some(&Value::Null),
         "explicit null patch"
     );
-    // unconditional reverse map would invent `patch: null` here and the equality above would
-    // still pass if the fixture echoed that null back.
     assert_eq!(
         exported["states.unpatched.context_update"]
             .get("op")

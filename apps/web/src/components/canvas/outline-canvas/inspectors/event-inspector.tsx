@@ -1,7 +1,4 @@
 /**
- * `R-V172P0-QC1-002`; V1.108 P0 T4 foreshadow authoring — FB-C1-005;
- * V1.200 DR-26 cross-surface World-event binding authoring).
- *
  * Renders the Work timeline: existing events with attach-to-chapter and
  * remove affordances, plus the "Add Event" composer, the foreshadow
  * link/unlink authoring controls, and the World-event bind/unbind control.
@@ -25,16 +22,7 @@ interface TimelinePanelProps {
   outline: WorkOutline;
   selectedChapterId: number | null;
   baseRevision: number;
-  /**
-   * write lands, so the bind drafts below are cleared on success alone
-   * (V1.200 DR-26 round 2 — a 409/422 refusal keeps the typed draft).
-   */
   onPatchTimeline: (request: TimelinePatchEventRequest, onSuccess?: () => void) => void;
-  /**
-   * World-event binding control renders **disabled, never hidden**: the core
-   * refuses both `bind_world_event` and `unbind_world_event` without a bound
-   * World, so the affordance stays visible and carries the refusal reason.
-   */
   boundWorldId?: string;
 }
 
@@ -44,9 +32,6 @@ interface WorldEventOption {
   name: string;
 }
 
-/**
- * picker's selection and the manual World-event-ID field.
- */
 type WorldEventDraftControl = 'picker' | 'manual';
 
 /**
@@ -101,21 +86,11 @@ function TimelinePanelView({
   const [worldEventTargetByEvent, setWorldEventTargetByEvent] = useState<Record<string, string>>({});
   const [manualWorldEventByEvent, setManualWorldEventByEvent] = useState<Record<string, string>>({});
 
-  // is not a draft tag: a manual `A → B → A` retype reads as untouched, and a
-  // picker draft can equal an independently typed manual one. Every draft
-  // mutation bumps its generation, so a resolving bind can tell whether the
-  // draft it was issued against is still the draft in the field.
   const draftGenerationRef = useRef<Record<WorldEventDraftControl, Record<string, number>>>({
     picker: {},
     manual: {},
   });
 
-  // and the Work can be re-bound to another World while the write is in flight.
-  // The drafts survive that transition (R3), so the completion of a former
-  // World's bind must not consume a draft now shown under the newly bound
-  // World. Every draft generation is bumped on a `boundWorldId` change: the
-  // counters stay monotonic, so an old issuance can never collide with a draft
-  // (re-)authored in the new World.
   const previousBoundWorldIdRef = useRef(boundWorldId);
 
   useEffect(() => {
@@ -128,9 +103,6 @@ function TimelinePanelView({
         byEvent[eventId] += 1;
       }
     }
-    // carry into the newly bound World (the picker no longer offers it and
-    // Bind has no valid referent). The manual field is free-form World-event
-    // ID text, not World data, so its draft is preserved.
     setWorldEventTargetByEvent({});
   }, [boundWorldId]);
 
@@ -167,8 +139,6 @@ function TimelinePanelView({
     return map;
   }, [outline.timeline_events]);
 
-  // canonical name when the (possibly capped) graph read carries it and falls
-  // back to the raw `key_block_id` otherwise.
   const worldEventNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const option of worldEventOptions) {
@@ -224,10 +194,6 @@ function TimelinePanelView({
   ) {
     const trimmedId = worldEventId.trim();
     if (!trimmedId) return;
-    // the request tag is that control's draft generation. The write is still
-    // cleared only once it lands (the success-only pattern the scene/beat
-    // drafts use); a typed 422/409 refusal keeps the draft for retry, and the
-    // 409 conflict modal still opens through the orchestrator's `onError`.
     const issuedGeneration = draftGenerationRef.current[control][eventId] ?? 0;
     onPatchTimeline(
       {
@@ -237,10 +203,6 @@ function TimelinePanelView({
         event_id: eventId,
         world_event_id: trimmedId,
       },
-      // against: the originating control, and only while its generation is
-      // unchanged (a re-typed draft is a newer generation and survives). The
-      // other control's draft was never part of this request, so an unrelated
-      // bind's success must leave it alone.
       () => {
         if ((draftGenerationRef.current[control][eventId] ?? 0) !== issuedGeneration) {
           return;

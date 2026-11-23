@@ -1,6 +1,3 @@
-/**
- * gate recovery view.
- */
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { Routes, Route } from 'react-router';

@@ -94,7 +94,6 @@ export function PatternPickerDialog({
                 package: { id: chosen.id, version: chosen.version },
               })
                 .then(() => onOpenChange(false))
-                // state; the picker only stays open for the retry.
                 .catch(() => {});
             }}
           >

@@ -171,7 +171,6 @@ async fn character_memory_lifecycle_json_and_human_parity() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["pending_id"], "pend_cli_1");
 
-    // binding scope is drained explicitly afterwards.
     let out = cli_ok(
         &actor,
         &[
@@ -352,7 +351,6 @@ async fn character_memory_fail_closed_no_mutation() {
     ]);
     assert!(!out.status.success(), "cross-character binding accepted");
 
-    // transition, then its write verbs deny (reads may retain).
     cli_ok(
         &actor,
         &[

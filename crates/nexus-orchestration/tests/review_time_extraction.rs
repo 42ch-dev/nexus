@@ -81,8 +81,6 @@ async fn seed_world(pool: &SqlitePool) {
 /// Seed a `creator_schedules` row for a `novel-review-master` run.
 async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
-    // review-time extraction is admitted under (`current_session_id` FK), so the
-    // run row is seeded with it.
     let run_id = format!("run_{schedule_id}");
     // SAFETY: test-only INSERT into orchestration_sessions (the FK target of
     // `creator_schedules.current_session_id`).
@@ -110,8 +108,6 @@ async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, wor
     )
     .bind(schedule_id)
     .bind(CREATOR)
-    // schedule's stored production run identity; extraction refuses an empty
-    // one instead of inventing a default session.
     .bind(&run_id)
     .bind(format!("kb-extract-{work_id}"))
     .bind(now)
@@ -129,8 +125,6 @@ async fn seed_chapter_with_body(
     chapter: i32,
     body_rel_path: &str,
 ) {
-    // with ISO-8601 strings in production (SQLite type affinity stores them as
-    // TEXT); match that so the DAO's String decode succeeds.
     let now = "2026-06-18T10:00:00Z";
     // SAFETY: test-only INSERT into work_chapters.
     sqlx::query(
@@ -299,9 +293,6 @@ async fn missing_workspace_dir_is_noop() {
     assert_eq!(count, 0, "missing workspace_dir must be a safe no-op");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════
-
 /// An executor that reports the run identity it was invoked with and answers a
 /// fixed extraction payload.
 struct MockReviewExtract {
@@ -389,7 +380,6 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
     seed_chapter_with_body(&pool, "wrk_t13_ok", 3, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_t13_ok", "wrk_t13_ok").await;
 
-    // entity-existence prerequisite).
     nexus_local_db::kb_store::seed::knowledge_entry(
         &pool,
         "kb_t13_aria",
@@ -459,7 +449,6 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
         Some("Lin Xia drew her blade.")
     );
 
-    // resolved against exactly those entities.
     let relationships = relationship_rows(&pool).await;
     assert_eq!(relationships.len(), 1, "one suggestion: {relationships:?}");
     assert_eq!(relationships[0].source_entity_id, "kb_t13_aria");
@@ -560,7 +549,6 @@ async fn v1191_extract_review_hook_stale_target_writes_nothing() {
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia was here.");
     seed_chapter_with_body(&pool, "wrk_t13_stale", 1, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_t13_stale", "wrk_t13_stale").await;
-    // seeded first), so the hook's stored-state recheck must refuse.
     let other_world = "wld_t13_other";
     nexus_local_db::kb_store::seed::world(
         &pool,
@@ -810,7 +798,6 @@ async fn v1191_extract_review_hook_post_callback_cancel_writes_nothing() {
     });
     let registry = review_registry("sch_t13_late", executor.clone());
 
-    // the hook future on the timeout — after the model has answered.
     let mut blocker = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query("UPDATE kb_extract_jobs SET status = status WHERE creator_id = ?")
         .bind(CREATOR)

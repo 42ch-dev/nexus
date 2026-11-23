@@ -285,23 +285,11 @@ export interface NativeCore {
     cursor?: string,
   ): Promise<WorldKbCandidatesResponse>;
   hostQuery(request: CoreHostQuery): Promise<CoreHostQueryResponse>;
-  /**
-   * native serde document and is owned by the service wire type; this facade
-   * only crosses the JSON buffer, exactly like `hostQuery`.
-   */
   getAgentHostConfig(): Promise<unknown>;
   saveAgentHostConfig(config: unknown): Promise<void>;
-  /**
-   * owner, re-read the config document, re-probe, and establish a fresh owner.
-   * Returns the same `{ engine_epoch, provider_ready }` facts as
-   * `startExecutionOwner`.
-   */
   restartExecutionOwner(): Promise<unknown>;
   /** The live orchestration capability registry rows (`{ items }`). */
   listCapabilities(): Promise<unknown>;
-  /**
-   * ones included with their reason. Read-only: it never writes or creates the root.
-   */
   listPatterns(principal: PrincipalHandle): Promise<PatternSummary[]>;
   changes(principal: PrincipalHandle, request: CoreChangesRequest): Promise<CoreChangesResponse>;
   providerCall(request: ProviderCall): Promise<ProviderReply>;
@@ -645,9 +633,6 @@ export interface NativeCore {
   getActiveWorkspace(): Promise<ActiveWorkspaceResponse>;
   selectWorkspace(request: SetActiveWorkspaceRequest): Promise<SetActiveWorkspaceResponse>;
   createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse>;
-  /**
-   * admission/publication as the startup open; idempotent once published.
-   */
   promoteCore(): Promise<void>;
   logoutCreator(creatorId: string): Promise<LogoutResponse>;
   captureCharacterPendingReview(
@@ -729,12 +714,6 @@ export interface NativeCore {
     principal: PrincipalHandle,
     request: MomentDirectiveRequest,
   ): Promise<MomentDirectiveResponse>;
-  /**
-   * facts to publish: `engine_epoch` is the actual established owner's epoch,
-   * or `null` when this profile's selected workspace cannot host an owner
-   * (no registered creative root); `provider_ready` is the native-owned
-   * readiness of the providers this host configuration selects.
-   */
   startExecutionOwner(): Promise<{ engine_epoch: number | null; provider_ready: boolean }>;
   listPresets(principal: PrincipalHandle): Promise<ListPresetsResponse>;
   getPreset(principal: PrincipalHandle, presetId: string): Promise<GetPresetResponse>;
@@ -785,19 +764,11 @@ export interface NativeCore {
     strategyId: string,
     request: StrategyComposeRequest,
   ): Promise<StrategyComposeResponse>;
-  /**
-   * `GenerateRequest` contract. Lint exhaustion is the native `invalid_input` carrying the D20
-   * payload under `details`, so a caller reads it through the same error envelope as everything
-   * else.
-   */
   generateStrategy(
     principal: PrincipalHandle,
     strategyId: string,
     request: StrategyGenerateRequest,
   ): Promise<StrategyGenerateResponse>;
-  /**
-   * owner's admission pipeline, dispatch and audit are the spine's, not this facade's.
-   */
   executeTool(principal: PrincipalHandle, request: ToolsApi): Promise<CoreToolExecuteResponse>;
   approveStrategy(
     principal: PrincipalHandle,
@@ -834,11 +805,6 @@ export interface NativeCore {
     scheduleId: string,
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse>;
-  /**
-   * the SAME established owner as the mutations. Every list/read is scoped to
-   * the principal's stored creator and answers with the generated public DTO;
-   * a foreign or absent identity closes with the same not-found refusal.
-   */
   listSchedules(principal: PrincipalHandle, query: ListSchedulesQuery): Promise<ListSchedulesResponse>;
   inspectSchedule(
     principal: PrincipalHandle,
@@ -857,17 +823,6 @@ export interface NativeCore {
     scheduleId: string,
     request: EditCoreContextRequest,
   ): Promise<EditCoreContextResponse>;
-  /**
-   * owner as the control surface. `subscribeWorkflowEvents` authorizes the
-   * run's STORED root ownership before opening the bounded ring subscription
-   * and returns the opaque environment-local token; `nextWorkflowEvents`
-   * takes one bounded batch of already-encoded frames (`id`/`event`/`data`
-   * verbatim, `<= 16` frames / 1 MiB, `closed` when the stream ended);
-   * `releaseWorkflowEvents` frees the run's subscriber permit and must be
-   * called on every disconnect path. A released/foreign token refuses, and an
-   * unresumable history answers the single `history_unavailable` control
-   * frame instead of an error.
-   */
   subscribeWorkflowEvents(
     principal: PrincipalHandle,
     request: CoreWorkflowSubscribeRequest,
@@ -877,16 +832,6 @@ export interface NativeCore {
     subscriptionId: string,
   ): Promise<CoreWorkflowEventBatch>;
   releaseWorkflowEvents(principal: PrincipalHandle, subscriptionId: string): Promise<void>;
-  /**
-   * control surface uses. Discovery/detail read the compiled-in module
-   * registry (the invocation schema Run Studio renders comes from the shipped
-   * manifest, never from TS); run/detail/history/discard/clear delegate to the
-   * existing compute authority, so the World-ownership gate, the one
-   * transactional accept with its CAS, the effect-free discard and the
-   * World-scoped terminal clear are the core's semantics, not a second
-   * implementation. The WASM engine/cache/serializer are the ONE bundle the
-   * hosted factory installed at boot — no caller can supply or replace them.
-   */
   listComputeModules(principal: PrincipalHandle): Promise<ListModulesResponse>;
   getComputeModule(principal: PrincipalHandle, moduleId: string): Promise<ModuleDetail>;
   computeRun(principal: PrincipalHandle, request: RunRequest): Promise<RunResponse>;
@@ -970,9 +915,6 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
     async nextProviderEvents(operationId, maxEvents, maxBytes) {
       return parseJsonBuffer(await inner.nextProviderEvents(operationId, maxEvents, maxBytes));
     },
-    // re-parses each buffer into the same generated DTO (`deny_unknown_fields`),
-    // so the schema stays the shape authority — no handwritten shape table
-    // (the same rule the domain surface below documents).
     async hostCreateSession(principal, request) {
       return parseJsonBuffer(
         await inner.hostCreateSession(principal, encodeWireBuffer(request, undefined, 'request')),
@@ -1008,11 +950,6 @@ function wrapCore(inner: NativeCoreBinding): NativeCore {
   };
 }
 
-/**
- * that carries the pre-existing methods. The `Pick` gives every wrapper
- * method its parameter types from the one interface declaration — no second
- * signature table.
- */
 type DomainSurface = Pick<
   NativeCore,
   | 'narrativeListWorlds'

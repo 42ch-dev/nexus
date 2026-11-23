@@ -83,8 +83,6 @@ impl MemoryProviderBinding {
             space_id,
             authority_host_id,
             authority_generation,
-            // request: the original client ceiling still bounds every page, so
-            // a wider provider never makes this client ask for more.
             max_page_size: max_page_size.min(nexus_memory_provider::policy::MAX_PAGE_SIZE_BOUND),
             port: Arc::clone(&adapter) as Arc<dyn MemoryPort + Send + Sync>,
             local: None,

@@ -309,7 +309,6 @@ describe('WorldRulesSection — populated', () => {
 
     expect(screen.getByTestId('world-rules-add-rule')).toHaveTextContent('Add rule');
 
-    // stays expand-only (T2 lock: Edit lives inside the expanded row).
     expect(screen.queryByTestId('world-rule-edit')).not.toBeInTheDocument();
     expect(screen.queryByTestId('world-rule-deactivate')).not.toBeInTheDocument();
 

@@ -64,8 +64,6 @@ fn write_trio(root: &Path, name: &str, module_id: &str, wasm_bytes: &[u8]) -> st
 
 #[test]
 fn capability_group_is_hidden_from_root_help() {
-    // top-level Commands entry (the word `capability` legitimately appears
-    // in the `acp` description).
     let output = nexus42()
         .arg("--help")
         .assert()
@@ -208,7 +206,6 @@ fn capability_validate_rejects_underscore_leading_first_segment_exits_two() {
 #[test]
 fn capability_validate_pairing_mismatch_exits_three() {
     let dir = tempfile::tempdir().expect("tempdir");
-    // different one → descriptor-vs-manifest mismatch (exit 3).
     let wasm_bytes = b"wasm module bytes";
     let real_sha = sha256_hex(wasm_bytes);
     let module_dir = dir.path().join("module");
@@ -295,8 +292,6 @@ fn write_module_id_mismatch_trio(
 
 #[test]
 fn capability_validate_module_id_mismatch_exits_two_with_json() {
-    // validation failure (exit 2) — hashes alone cannot pair the trio.
-    // `--json` must carry the field-level error with BOTH ids.
     let dir = tempfile::tempdir().expect("tempdir");
     let (descriptor, module_dir) = write_module_id_mismatch_trio(dir.path(), "demo.pull");
 
@@ -318,7 +313,6 @@ fn capability_validate_module_id_mismatch_exits_two_with_json() {
 
 #[test]
 fn capability_install_rejects_module_id_mismatch_exits_two_no_dir() {
-    // `<name>/` dir appears under `~/.nexus42/capabilities/`.
     let dir = tempfile::tempdir().expect("tempdir");
     let (descriptor, module_dir) = write_module_id_mismatch_trio(dir.path(), "demo.pull");
 

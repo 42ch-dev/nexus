@@ -235,11 +235,6 @@ impl PeerGrant {
         pool: &sqlx::SqlitePool,
         admission: GrantAdmission,
     ) -> Result<nexus_knowledge::world_kb::KnowledgeReadScope> {
-        // the granted subject and binding to be ACTIVE, resolved from storage
-        // on this invoke. The guards are the core's own liveness authority —
-        // the retained-read resolution below is reused for the containers and
-        // the holder, so there is one container derivation and one liveness
-        // source.
         if admission == GrantAdmission::LiveWrite {
             self.require_live(pool).await?;
         }
@@ -542,7 +537,6 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = nexus_home_layout::connect_allowlist_path(temp.path());
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
-        // silently produce an empty (fail-closed) allowlist.
         std::fs::write(&path, r#"{ "peer_ids": [], "peerIds": ["12D3KooWxxxx"] }"#).expect("write");
 
         let err = load(temp.path(), &[]).expect_err("unknown field rejected");
@@ -557,8 +551,6 @@ mod tests {
         assert!(matches!(err, CliError::Config(_)), "got {err:?}");
     }
 
-    /// listed world and denied on every other world; ops outside its
-    /// `op_scope` are denied too.
     #[test]
     fn scoped_peer_allowed_on_listed_world_denied_on_other_world() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -649,7 +641,6 @@ mod tests {
         );
     }
 
-    /// listed module and denied every other module.
     #[test]
     fn scoped_peer_allowed_on_listed_module_denied_on_other_modules() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -806,7 +797,6 @@ mod tests {
         );
     }
 
-    /// and exposes the granted World viewpoint.
     #[test]
     fn v1191_holder_connect_grant_is_peer_bound() {
         let temp = tempfile::tempdir().expect("tempdir");

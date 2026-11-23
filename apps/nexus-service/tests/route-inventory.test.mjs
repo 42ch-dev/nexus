@@ -9,14 +9,6 @@ import { after, before, describe, test } from 'node:test';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
-/**
- * the retained route inventory is reconciled against the daemon create_router
- * surface. The mounted set must exactly match the normalized live inventory,
- * and dispatch security classes must be observed through REAL handler
- * denials/successes (unguarded reachable without a key, guarded rejected
- * without one) — never through source-string inspection.
- */
-
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-service-inventory-'));
   const seed = spawnSync(
@@ -244,8 +236,6 @@ describe('route-inventory (P5-T5)', () => {
       LIVE_INVENTORY.map(([m, p, tier, family]) => `${m} ${p} ${tier} ${family}`),
     );
 
-    // standalone service owns, derived from create_router + the P0–P4 family
-    // producers. Every mounted identity must be in the set and vice versa.
     const mounted = DOMAIN_ROUTES.map((route) => ({
       method: route.method,
       path: route.pattern.source.replace(/\\\//g, '/').replace(/^\^|\$$/g, ''),
@@ -256,39 +246,24 @@ describe('route-inventory (P5-T5)', () => {
       mounted.map((r) => `${r.method} ${r.path} ${r.tier} ${r.family}`),
     );
 
-    // routed (family), so a hand-written branch leaking outside the composer
-    // would show up as a mounted-but-not-dispatched identity. Probe: a
-    // composer-routed tier2 identity 404s on a missing resource (reached the
-    // handler), while a non-composer identity would 501 route_not_migrated.
     const probeMissing = await jsonFetch(`${baseUrl}/v1/daemon/works/work_missing`);
     assert.equal(probeMissing.status, 404, probeMissing.text);
     assert.notEqual(probeMissing.payload.error.code, 'route_not_migrated');
 
-    // are crossed from the composed route through `wrapDomainSurface` into the
-    // napi export. A drifted export name is a TypeError at handler time (a 500),
-    // so these two probes — and not a suite that replaces `service.core` — are
-    // what falsifies the name.
     const missingStrategy = '/v1/daemon/strategies/strategy_missing';
     const appliedStatus = await jsonFetch(`${baseUrl}${missingStrategy}/applied`);
     assert.equal(appliedStatus.status, 200, appliedStatus.text);
     assert.deepEqual(appliedStatus.payload, {
       current_apply: null,
       newest_approval: null,
-      // both null for a strategy with no apply.
       applied_document: null,
       applied_document_refusal: null,
     });
 
-    // export the Apply target list mounts.
     const approvals = await jsonFetch(`${baseUrl}${missingStrategy}/approvals`);
     assert.equal(approvals.status, 200, approvals.text);
     assert.deepEqual(approvals.payload, { items: [] });
 
-    // real user preset to reach the approval lookup: the scaffold surface writes
-    // that bundle, and the unknown hash is then the handler's own refusal. An
-    // unknown hash needs a different request, so it is a client error and keeps
-    // `invalid_input`; only the already-applied / changed-bytes refusals publish
-    // a conflict code under 409.
     const scaffolded = await jsonFetch(`${baseUrl}/v1/daemon/presets`, {
       method: 'POST',
       body: { name: 'route-inventory-apply' },
@@ -320,17 +295,11 @@ describe('route-inventory (P5-T5)', () => {
     const status = await jsonFetch(`${baseUrl}/v1/daemon/runtime/status`);
     assert.equal(status.status, 200, status.text);
 
-    // missing key BEFORE any handler runs — a real transport denial, and the
-    // same identity succeeds once the request is admitted (domainOnly shell
-    // still answers guarded reads).
     const guardedIdentity = ['GET', '/v1/daemon/works'];
 
-    // through and the creator-tier handler runs.
     const guardedOk = await jsonFetch(`${baseUrl}${guardedIdentity[1]}`);
     assert.equal(guardedOk.status, 200, guardedOk.text);
 
-    // must be denied by transport admission — verified against the same
-    // composer, so the tier field is behavior, not a string.
     await service.close();
     const previous = process.env.NEXUS42_DAEMON_API_KEY;
     process.env.NEXUS42_DAEMON_API_KEY = 'inventory-secret';

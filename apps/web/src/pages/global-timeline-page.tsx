@@ -1,6 +1,4 @@
 /**
- * (V1.123 P3 Task 1).
- *
  * Renders {@link GlobalTimelineView} — recent Timeline activity composed
  * client-side across all Worlds. The page is thin so the view can be tested
  * in isolation. Per-World Timeline entry stays at

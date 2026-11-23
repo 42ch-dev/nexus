@@ -316,7 +316,6 @@ fn tree_snapshot(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
 #[serial_test::serial]
 async fn first_scaffolds_land_bytes_through_the_real_port() {
     let fx = fixture().await;
-    // cwd elsewhere so a non-port write cannot masquerade as a hit.
     let _cwd = CwdGuard::enter(fx.cwd.path());
 
     let essay_id = "wrk_prod_essay";
@@ -329,7 +328,6 @@ async fn first_scaffolds_land_bytes_through_the_real_port() {
             .expect("works row");
     }
 
-    // is exactly what the production registry arms use.
     let essay = EssayProjectScaffold::with_pool((*fx.pool).clone())
         .with_workspace_executor(Some(Arc::clone(&fx.executor)));
     assert_first_scaffold_lands(
@@ -413,7 +411,6 @@ async fn a_reinit_preserves_an_existing_canonical_novel_file() {
         .await
         .expect("works row");
 
-    // idempotency check must see THIS tree, not a cwd-relative one.
     let work_dir = fx.root.path().join("Works").join("prod-novel-keep");
     std::fs::create_dir_all(&work_dir).expect("work dir");
     std::fs::write(work_dir.join("README.md"), "# user edits\n").expect("user readme");
@@ -455,7 +452,6 @@ async fn a_later_port_refusal_restores_the_canonical_tree() {
         .await
         .expect("works row");
 
-    // commit refuses: rollback must restore/remove the same canonical tree.
     let work_dir = fx.root.path().join("Works").join("prod-essay-rollback");
     std::fs::create_dir_all(&work_dir).expect("work dir");
     std::fs::write(work_dir.join("README.md"), "ORIGINAL\n").expect("original readme");
@@ -516,7 +512,6 @@ async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
         .await
         .expect("works row with a stored ref");
 
-    // the port's lookup key: only the stored ref resolves this Work's row.
     let novel = NovelProjectScaffold::with_pool((*fx.pool).clone())
         .with_workspace_executor(Some(Arc::clone(&fx.executor)));
     novel
@@ -561,7 +556,6 @@ async fn a_partial_reinit_uses_the_stored_ref_through_the_real_port() {
 #[serial_test::serial]
 async fn simulated_scaffold_records_without_touching_work_tree() {
     let fx = simulated_fixture().await;
-    // elsewhere so a cwd-relative write cannot masquerade as a hit.
     let _cwd = CwdGuard::enter(fx.cwd.path());
 
     let work_id = "wrk_sim_novel";
@@ -602,7 +596,6 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
         "the existing chapter bytes are untouched"
     );
 
-    // commit order.
     let recorded = fx
         .executor
         .recorded_work_artifact_mutations()
@@ -672,7 +665,6 @@ impl WorkspaceExecutor for RecordingThenDbLoss {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        // follow it.
         let last = input.rel_child == "AGENTS.md";
         let recorded = self.inner.commit_work_artifact(input).await?;
         if last {

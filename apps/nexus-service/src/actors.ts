@@ -1,11 +1,3 @@
-/**
- * authority), the admitted-actor KnowledgeView, and the Creator home family.
- * Every operation is a thin translation over the native family surface — the
- * stored Principal is minted natively, ownership/CAS/effects stay in the
- * single Rust core authority, and the wire shapes are the schema-owned
- * generated DTOs (`schemas/daemon-api/characters/…`, `…/actor-knowledge/…`,
- * `…/creators/…`).
- */
 import type {
   AddCharacterBindingRequest,
   ListCharactersResponse,
@@ -179,8 +171,6 @@ function assertKnowledgeAudienceKeys(audience: unknown): void {
   const allowed = Object.hasOwn(KNOWLEDGE_AUDIENCE_KEYS, kind)
     ? KNOWLEDGE_AUDIENCE_KEYS[kind]
     : undefined;
-  // string-keyed mirror of the generated union, so a silent skip would let a
-  // future arm cross this boundary with only the Rust gate behind it.
   if (allowed === undefined) {
     throw new HttpError(400, 'invalid_input', 'audience kind is not allowed');
   }

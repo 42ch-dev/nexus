@@ -238,7 +238,6 @@ impl AckObservedTransport {
 #[async_trait::async_trait]
 impl Transport for AckObservedTransport {
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
-        // once the socket accepted the bytes.
         let result = self.inner.send(envelope).await;
         if result.is_ok() {
             self.observation.record_ack_response(envelope);
@@ -415,7 +414,6 @@ async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
     let handler: ToolHandler = Arc::new(move |arguments: Value| -> HandlerFuture {
         let tx = tx.clone();
         Box::pin(async move {
-            // sends the next batch (v1.207 ack-gated delivery).
             let _ = tx.send(arguments).await;
             SpokeResult::Ok(json!({}))
         })
@@ -438,8 +436,6 @@ async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
                 if reject.code == SpokeRejectCode::CapabilityPortMissing
                     && attempt < SUBSCRIBE_ATTEMPTS =>
             {
-                // established-poll tick after the handshake, so the first
-                // invoke can land before registration.
                 tokio::time::sleep(SUBSCRIBE_RETRY_DELAY).await;
             }
             SpokeResult::Reject(reject) => {
@@ -484,8 +480,6 @@ async fn run(args: Args, identity_seed: [u8; 32]) -> Result<(), Failure> {
         }
     }
 
-    // the response and writes it in its own task afterwards. Do not claim (or
-    // exit on) acknowledgment until that write completed.
     if let Some(request_id) = wait_for_ack_write(&observation, args.timeout()).await {
         println!("ACK_SENT request_id={request_id} (signed ack response written to the lane)");
     } else {

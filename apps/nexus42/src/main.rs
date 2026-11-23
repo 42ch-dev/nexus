@@ -15,14 +15,8 @@ use std::path::Path;
 
 fn main() {
     let cli = Cli::parse();
-    // stdout — logging must go to stderr there, so the writer decision
-    // happens before the subscriber is initialized.
     init_logging(cli.verbose(), cli.is_data_output());
 
-    // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent
-    // `getenv` on a live multi-threaded runtime.
-    // Logging is already initialized so join_paths failures surface as warnings.
-    // v1.193 P2-T2: the helper lives with the provider-discovery owner.
     nexus_agent_host::discovery::path_enrichment::apply_process_path_enrichment();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -50,13 +44,10 @@ fn main() {
         ) {
             76
         } else if let nexus42::errors::CliError::ComputeExit { code, .. } = e {
-            // vocabulary (1 build, 2 validation, 3 sha mismatch, 4 module).
             code
         } else {
             1
         };
-        // to stdout, and `std::process::exit` skips the normal stdout
-        // teardown; piped consumers would lose the buffered tail.
         let _ = std::io::Write::flush(&mut std::io::stdout());
         std::process::exit(code);
     }
@@ -108,8 +99,6 @@ async fn async_main(cli: Cli) -> Result<()> {
             match nexus_cloud_sync::device_id::get_or_create_device_id(&raw_home) {
                 Ok(device_id) => config.device_id = device_id,
                 Err(e) => {
-                    // IP-based rate limiting when X-Device-ID is absent.
-                    // Still visible to the user so they understand degraded mode.
                     eprintln!(
                         "nexus42: device identity unavailable — {e} (platform rate-limit will use IP-based identification)"
                     );
@@ -200,7 +189,6 @@ mod tests {
     fn unreadable_config_warning_still_names_the_path() {
         let nexus = tempfile::TempDir::new().expect("tempdir");
         let config_path = CliConfig::path_in(nexus.path());
-        // attached, so this exercises the path-less error class.
         std::fs::write(&config_path, [0xff, 0xfe]).expect("write config");
 
         let (config, warning) = load_at(nexus.path());

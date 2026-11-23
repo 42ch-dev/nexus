@@ -1,6 +1,4 @@
 /**
- * redacted store).
- *
  * The config shape is a client-side only data model — it is never sent to the
  * daemon as a wire payload. Storage backends differ by platform:
  *   - Web SPA: localStorage (trust boundary equals the SPA itself); the actual
@@ -22,12 +20,6 @@ import {
 export interface ConnectionConfig {
   /** Full daemon URL including protocol and port. */
   endpointUrl: string;
-  /**
-   * the desktop store never returns the persisted key (redacted load), so a
-   * desktop-saved config carries `hasApiKey` instead and an omitted `apiKey`
-   * on save means "keep the stored credential". The browser backend requires
-   * the actual key.
-   */
   apiKey?: string;
   /** Whether a credential is persisted for this endpoint (desktop redacted load). */
   hasApiKey?: boolean;
@@ -123,12 +115,6 @@ class DesktopConnectionStorage implements ConnectionStorage {
   }
 }
 
-/**
- * requires. The browser localStorage record must carry the actual key —
- * an active keyless remote record would otherwise build an unauthenticated
- * remote BrowserClient. (The desktop redacted shape is constructed from the
- * typed bridge result, never from this validator.)
- */
 function isValidWebConnectionConfig(value: unknown): value is ConnectionConfig {
   if (value === null || typeof value !== 'object') return false;
   const c = value as Record<string, unknown>;

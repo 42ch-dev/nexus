@@ -31,9 +31,6 @@ export interface NexusLogoProps {
   /** Accessible label. Defaults to the product name. */
   label?: string;
   className?: string;
-  /**
-   * marks and the wordmark preserve their intrinsic ratios.
-   */
   size?: number;
   /** When false, prevents native browser image drag (e.g. titlebar chrome). */
   draggable?: boolean;

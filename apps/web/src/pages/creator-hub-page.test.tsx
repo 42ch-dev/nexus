@@ -85,9 +85,6 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     ).not.toBeInTheDocument();
   });
 
-  // hosted by the creator hub itself (CreatorCreatePanel, unchanged from the
-  // sidebar era) — exactly one inline-create panel, and the legacy Sidebar
-  // shell panel is no longer mounted on this route.
   it('shows the create panel hosted on the creator hub (shell cutover)', async () => {
     renderCreatorHubFlow({ works: [], worlds: [] });
 
@@ -102,8 +99,6 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
   });
 
   it('reaches the Inspiration Pool from the /works landing surface', async () => {
-    // mounts under `/works/:workId` — a creator with zero Works could never
-    // reach `/works/inspiration`.
     renderCreatorHubFlow({ works: [], worlds: [] });
 
     const link = await screen.findByTestId('creator-hub-inspiration-link');
@@ -309,7 +304,6 @@ describe('CreatorHubPage browse IA (V1.135 P0)', () => {
     expect(screen.queryByTestId('creator-hub-controller')).not.toBeInTheDocument();
   });
 
-  // world app surface at the index (Brief default), not the Timeline.
   it('navigates to the world app surface index when a world card is clicked', async () => {
     renderCreatorHubFlow({
       works: [],

@@ -268,7 +268,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (
   });
 
   it('projects an explicitly injected empty fixture verbatim even when the canonical arrays carry data', () => {
-    // empty) wins; it is never an automatic empty-data fallback.
     const g = outline({
       scenes: [{ scene_id: 'scn_a', chapter_id: 1, title: 'Opening', status: 'drafted' }],
       beats: [],
@@ -288,8 +287,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Moment projection (
 
     const { edges } = projectWorkTimelineGraph(g, 'moment', fx);
 
-    // spatially by the vertical stack; explicit realizes_event light links
-    // (beat → Narrative event) are P4 polish.
     expect(edges).toEqual([]);
   });
 });
@@ -314,9 +311,6 @@ describe('WorkTimelineCanvasAdapter — Moment projection reads fixture from ctx
   it('registers Moment scene + beat node types alongside the Narrative event node (Task 3 registry extension)', () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
 
-    // Moment scene + beat nodes. V1.126 P1 adds directedAxisSpine.
-    // V1.156 P2 T1 adds the reused World Timeline `timeline-brief-era` node
-    // (Work-Brief layer — no new node component family).
     expect(Object.keys(adapter.nodeTypes).sort()).toEqual([
       'directedAxisSpine',
       'timeline-brief-era',
@@ -354,8 +348,6 @@ function makeWorkClient(outlineData: WorkOutline): NexusClient {
 }
 
 describe('WorkTimelineCanvas — canonical Moment carrier (V1.200 DR-26)', () => {
-  // carries one Narrative event (a real Work with scenes has a populated
-  // outline); the Moment layer then owns the scene/beat projection.
   const baseOutline = outline({
     timeline_events: [{ event_id: 'evt-1', title: 'Inciting Incident', realizes_chapter_id: 1 }],
   });
@@ -373,8 +365,6 @@ describe('WorkTimelineCanvas — canonical Moment carrier (V1.200 DR-26)', () =>
       expect(screen.getByTestId('work-timeline-moment-empty-state')).toBeInTheDocument();
     });
 
-    // outline-mutation invalidation / refetch). No `sceneBeatFixture` prop is
-    // ever passed from production.
     vi.mocked(client.getWorkOutline).mockResolvedValue(
       outline({
         ...baseOutline,
@@ -386,7 +376,6 @@ describe('WorkTimelineCanvas — canonical Moment carrier (V1.200 DR-26)', () =>
       await queryClient.invalidateQueries({ queryKey: ['outline'] });
     });
 
-    // carries the persisted title — still on the Moment layer.
     await waitFor(() => {
       expect(screen.queryByTestId('work-timeline-moment-empty-state')).toBeNull();
     });

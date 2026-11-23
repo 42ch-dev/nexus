@@ -1,7 +1,3 @@
-/**
- * candidate that changes after the run turns the trajectory stale. A refused
- * simulate is its own `failed` state, never `idle`.
- */
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
@@ -76,7 +72,6 @@ describe('useSimulationTrajectory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
 
-    // equal, so the trajectory in hand still describes the preset.
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
     expect(posts).toHaveBeenCalledTimes(1);
@@ -84,9 +79,7 @@ describe('useSimulationTrajectory', () => {
     doc = servedIrDocument({ id: 'novel-writing', entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
 
-    // readiness; the stale banner comes from `isStale`, not from `status`.
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('running'));
-    // wait can resolve before the re-walk has been issued at all.
     await waitFor(() => expect(posts).toHaveBeenCalledTimes(2));
     expect(posts).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
@@ -112,12 +105,10 @@ describe('useSimulationTrajectory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));
 
-    // fails: the moved-on mark outlives the refused walk.
     doc = servedIrDocument({ id: 'novel-writing', entry: 'routing' });
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('failed'));
 
-    // walked and the trajectory is fresh again, not pinned at stale.
     doc = servedIrDocument({ id: 'novel-writing' });
     fireEvent.click(screen.getByRole('button', { name: 'Walk preset' }));
     await waitFor(() => expect(screen.getByTestId('preset-status')).toHaveTextContent('ready'));

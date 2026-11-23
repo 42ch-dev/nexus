@@ -232,13 +232,8 @@ fn fixture_pids(log: &[serde_json::Value]) -> Vec<u32> {
         .collect()
 }
 
-// split by platform; the call sites stay shared. The Windows form is a REAL
-// probe, never a constant stub: a `false` stub would let every `!process_alive`
-// leak assertion below pass vacuously, and a `true` stub would false-fail the
-// un-gated post-ready test.
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    // awaiting reap); non-zero (ESRCH) means it is gone.
     std::process::Command::new("kill")
         .arg("-0")
         .arg(pid.to_string())
@@ -248,10 +243,6 @@ fn process_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn process_alive(pid: u32) -> bool {
-    // match; a no-match run prints a localized INFO line instead, which is
-    // never CSV-shaped, so comparing the CSV PID column is
-    // localization-independent. `tasklist` exits 0 either way, so the OUTPUT
-    // is parsed, never the exit status.
     let output = std::process::Command::new("tasklist")
         .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
         .output()
@@ -277,7 +268,6 @@ fn process_alive(pid: u32) -> bool {
 /// no-match run, or empty output — yields `None`. Kept pure so the known-live
 /// semantics are unit-testable without Windows.
 fn tasklist_csv_pid(line: &str) -> Option<String> {
-    // localized INFO line does not, so reject anything else before splitting.
     let line = line.trim_start();
     if !line.starts_with('"') {
         return None;
@@ -474,7 +464,6 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
             );
         }
     }
-    // accepted Windows reason.
     assert!(
         check_route_handshake(
             &["_spawn".to_string()],
@@ -486,7 +475,6 @@ fn route_handshake_rejects_ordinary_failure_despite_receipts() {
         .is_err(),
         "a startup-only receipt must be rejected"
     );
-    // sealed provisioning fails closed) is accepted.
     assert!(
         check_route_handshake(
             &receipts,
@@ -673,9 +661,6 @@ async fn dsh_probe_binds_verified_cwd_for_ordinary_recipe() {
     let req_log = tmp.path().join("dsh.jsonl");
     let dsh_home = tmp.path().join("dsh-home");
 
-    // so a probe that fell back to the ambient directory would be detectable
-    // without changing process-global state (mutating cwd corrupts sibling
-    // tests running in the same binary).
     let ambient = std::env::current_dir().expect("cwd");
     let provider = dsh_cwd_probe_provider(tmp.path(), &cwd, &req_log, &dsh_home);
 
@@ -790,8 +775,6 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
     )
     .expect("constructor ok");
 
-    // manager maps that to unavailable); a completed probe reports unavailable
-    // health. Either way the provider must NOT be reported ready.
     match provider.probe(probe_request(&cwd, 1_200)).await {
         Ok(health) => assert!(
             !health.available,
@@ -804,9 +787,6 @@ async fn dsh_probe_initialize_timeout_is_unavailable_with_no_live_child() {
         ),
     }
 
-    // pids to appear and then for every one of them to be reaped, under a
-    // generous bound. Asserting eventual reaping (not a fixed sleep) keeps this
-    // decidable under parallel test load.
     let mut pids: Vec<u32> = Vec::new();
     for _ in 0..100 {
         pids = spawn_records(&read_log(&req_log))
@@ -880,8 +860,6 @@ async fn claude_version_probe_applies_configured_environment() {
         Some("--version"),
         "the probe must run the version handshake: {log:?}"
     );
-    // short form (RUNNER~1) or a `\\?\` verbatim form, which both canonicalize
-    // to the long absolute path (register row R-V1202-P1T3-001).
     let recorded_cwd = std::fs::canonicalize(log[0]["cwd"].as_str().expect("cwd recorded"))
         .expect("the recorded cwd must canonicalize");
     let expected_cwd = std::fs::canonicalize(&cwd).expect("canonical cwd");
@@ -901,8 +879,6 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
     let cwd = tmp.path().join("creator-ws");
     std::fs::create_dir_all(&cwd).expect("cwd");
 
-    // is an ABSOLUTE python interpreter so the pid record cannot be lost to a
-    // shell redirection race or an isolated PATH.
     let pid_file = tmp.path().join("hang.pid");
     let hang = tmp.path().join("hanging-claude");
     std::fs::write(
@@ -924,7 +900,6 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
         timeouts(),
     );
 
-    // its pid before the deadline kills it; the handshake itself stays hung.
     let health = provider
         .probe(probe_request(&cwd, 2_000))
         .await
@@ -939,7 +914,6 @@ async fn claude_probe_timeout_is_unavailable_without_leaking_a_child() {
         "the failure must state the timeout (or unconfirmed close), got: {message}"
     );
 
-    // race the child's own startup.
     let mut recorded = None;
     for _ in 0..40 {
         if let Ok(text) = std::fs::read_to_string(&pid_file) {
@@ -988,7 +962,6 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     )
     .expect("valid ACP recipe");
 
-    // budget on the owned close (the old defect reported a timeout here).
     let health = provider
         .probe(probe_request(&creator_ws, 10_000))
         .await
@@ -1002,8 +975,6 @@ async fn acp_probe_runs_in_the_verified_owner_workspace() {
     let starts: Vec<&serde_json::Value> = log.iter().filter(|e| e["event"] == "start").collect();
     assert_eq!(starts.len(), 1, "one probe child: {log:?}");
     let expected = std::fs::canonicalize(&creator_ws).expect("canonical");
-    // form that only matches after canonicalization (register row
-    // R-V1202-P1T3-001).
     let recorded = std::fs::canonicalize(starts[0]["cwd"].as_str().expect("cwd recorded"))
         .expect("the recorded cwd must canonicalize");
     assert_eq!(
@@ -1072,7 +1043,6 @@ async fn catalog_health_and_admission_agree_on_suppressed_and_missing_providers(
         "a disabled provider must not appear: {:?}",
         catalog.entries
     );
-    // so the safety guarantee is availability, not absence.
     assert!(
         catalog
             .entries
@@ -1157,10 +1127,6 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         })
         .await;
     let launch_err = launch.expect_err("a post-ready launch failure must surface");
-    // be confirmed once the child dies during session creation
-    // (`launch_failed` vs `cleanup_unconfirmed`). The invariant that matters —
-    // and that the manager acts on — is the launch-class classification, so
-    // assert that directly via the library's own predicate.
     assert!(
         nexus_agent_host::core::readiness::is_launch_class_failure(&launch_err),
         "the failure must be a TYPED launch-class error, got category '{}': {launch_err}",
@@ -1204,12 +1170,6 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
     let prompt_log = tmp.path().join("acp-prompt.jsonl");
     let manager2 = HostManager::new();
     let mut config2 = host_start_config(&workspace_root, Some(owner(&workspace_root)));
-    // `AgentHostConfig.timeouts`: `HostManager::start` materializes the
-    // discovered provider adapters from the EMBEDDED host config's timeouts,
-    // while the `HostStartConfig.timeouts` copy only feeds the start probe
-    // budget (`initialize_ms`). Configuring the deadline on the start config
-    // alone would leave the provider on the 180s default, and the blocked
-    // prompt would outlive the 3s drain bound below.
     let prompt_deadline = TimeoutConfig {
         prompt_ms: 500,
         ..TimeoutConfig::default()
@@ -1232,8 +1192,6 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         timeouts: prompt_deadline.clone(),
         ..AgentHostConfig::default()
     });
-    // mirroring the daemon/core-node constructors so the two timeout sources
-    // never silently diverge.
     config2.timeouts = prompt_deadline;
     manager2.start(config2).await.expect("host start");
 
@@ -1250,8 +1208,6 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
         .await
         .expect("session created on the probed provider");
 
-    // forever, so the provider's OWN prompt deadline must elapse and the
-    // stream must terminate with a real timeout OpFailed.
     let mut stream = manager2
         .exec(
             session.id.clone(),
@@ -1279,11 +1235,6 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
                 }
             }
         };
-        // deadline and far below the 180s crate default, so reaching the
-        // terminal event here is itself the evidence that the CONFIGURED
-        // deadline was the one enforced — an ignored `prompt_ms` would still be
-        // pending. (No assertion on the diagnostic's wording: that would pin
-        // source text rather than behavior.)
         tokio::time::timeout(std::time::Duration::from_secs(3), drain)
             .await
             .expect("the configured 500ms prompt deadline must elapse within 3s (default is 180s)");
@@ -1296,7 +1247,6 @@ async fn post_ready_launch_failure_invalidates_while_prompt_timeout_stays_ready(
 proving the configured prompt deadline elapsed"
     );
 
-    // stays ready and remains admissible.
     let after = manager2.provider_catalog().await.expect("catalog");
     let still_ready = after
         .find(&ProviderId::new("mock-acp"))
@@ -1309,7 +1259,6 @@ proving the configured prompt deadline elapsed"
          healthy (blanket timeout invalidation would break this)"
     );
 
-    // outlived them.
     manager.shutdown().await.expect("manager shutdown");
     manager2.shutdown().await.expect("manager2 shutdown");
 

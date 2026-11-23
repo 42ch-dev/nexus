@@ -287,7 +287,6 @@ mod tests {
 
     #[test]
     fn source_chain_is_preserved() {
-        // must stay reachable through `std::error::Error::source()`.
         let err = AcpError::connection_io(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
             "pipe broken",

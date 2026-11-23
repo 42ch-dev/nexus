@@ -106,9 +106,6 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
             .map_or(rest, |end| &rest[end + "\n---\n".len()..])
     });
 
-    // as top-level vars; the preset wires `preset.input.X` → prompt var
-    // `X`. For this test we pass a flat context with both fields at the
-    // top level (matching how the capability inject_prompt wires vars).
     let mut ctx = serde_json::Map::new();
     if let Some(obj) = preset_input.as_object() {
         for (k, v) in obj {
@@ -212,9 +209,6 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     .await
     .expect("enqueue_auto_chain_schedule should succeed for produce stage");
 
-    // `open_findings_block`. The handler-level tests assert the full
-    // request shape; here we re-derive the block from the DAO + builder
-    // and assert the rendered outline prompt contains it.
     let stored: Option<String> =
         sqlx::query_scalar("SELECT preset_id FROM creator_schedules WHERE schedule_id = ?")
             .bind(&schedule_id)
@@ -305,7 +299,6 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
 
     let _ = schedule_id;
 
-    // template guard omits the section.
     let open_findings = findings::list_open_findings_for_chapter(&pool, CREATOR, WORK, 1)
         .await
         .unwrap();
@@ -362,7 +355,6 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
 fn novel_writing_persists_open_findings_block_to_preset_input() {
     let work = novel_work("wrk_fc_w1_some", "fc-w1-novel-some");
 
-    // emits for a chapter with open findings).
     let known_block = "## Open findings (chapter 01)\n\n- [blocker] World rule break\n";
 
     let req = auto_chain::build_auto_chain_schedule(
@@ -385,9 +377,6 @@ fn novel_writing_persists_open_findings_block_to_preset_input() {
         .as_ref()
         .expect("AddScheduleRequest.input must be set for produce stage");
 
-    // appear unchanged in the preset input JSON. Catches regressions where
-    // `build_auto_chain_schedule` drops the param, or `build_preset_input`
-    // removes/empties/replaces the key.
     assert_eq!(
         input["open_findings_block"].as_str(),
         Some(known_block),
@@ -489,7 +478,6 @@ async fn actionable_set_includes_triaged_and_excludes_in_review() {
         "V1.49 F6 actionable set must be open + triaged; got {returned:?}"
     );
 
-    // is the SSOT for the actionable set). `in_review` must NOT appear.
     let block = build_open_findings_block(&got, "01");
     assert!(
         block.contains("open-seed"),

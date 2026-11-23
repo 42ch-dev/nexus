@@ -125,9 +125,6 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
     force: bool,
     synthesizer: impl FnOnce() -> Option<S>,
 ) -> CoreResult<ReflectOutcome> {
-    // narrative), so a read-only context is rejected up-front — before the
-    // insufficient-data early return, which would otherwise let a read ctx
-    // "succeed" on a forced request.
     if force {
         ctx.bearer_for_write()?;
     }
@@ -172,18 +169,11 @@ pub async fn reflect_bearer_soul<S: SoulNarrativeSynthesizer>(
         return Ok(outcome_ungenerated(&fragment_stats));
     }
 
-    //    gate was taken up-front (a read-only context never reaches here) and
-    //    the provider factory is invoked only NOW — after the ownership /
-    //    activity admission and the insufficient-data gate — so an
-    //    unauthorized or under-gate request never touches provider state.
-    //    A missing provider is the retained truthful 503 — no background
-    //    synthesis and no empty success.
     let signals = bearer_recent_fragment_signals(memory, ctx).await?;
     let input = build_soul_narrative_synthesis_input(&signals, &fragment_stats);
 
     let top_keywords = input.top_keywords.clone();
 
-    // the synthesis await and its consumption below.
     let synth = synthesizer();
     let synth = synth.as_ref().ok_or_else(|| {
         CoreError::ServiceUnavailable("capability registry not available".to_string())
@@ -691,7 +681,6 @@ pub async fn load_character_mind_projection(
         owner_creator_id,
         character_id,
     };
-    // no bearer and is refused before it reaches the provider.
     bearer.validate().map_err(|e| CoreError::InvalidInput {
         field: "character_id".to_string(),
         reason: e.to_string(),
@@ -707,10 +696,8 @@ pub async fn load_character_mind_projection(
     )
     .await?;
 
-    // that document, and the provider serves a migrated one the same way.
     let soul = read.personality().await?;
 
-    // plus, when a binding is selected, that binding's own records.
     let selection = binding_id.map_or_else(
         || serde_json::json!({ "mode": "shared_only" }),
         |binding| {
@@ -722,11 +709,6 @@ pub async fn load_character_mind_projection(
         },
     );
 
-    // are read independently at the legacy per-scope `LIMIT` — the same pair of
-    // legacy reads, so neither scope's content is traded against the other's.
-    // Each read is kind-filtered, so unrelated kinds (events, the derived
-    // narrative cache) occupy no page and no page budget can truncate a
-    // family: a scope serves its newest records or its complete set.
     let shared_fragments =
         projection_fragments(&read, serde_json::json!({ "mode": "shared_only" })).await?;
     let binding_fragments = match binding_id {
@@ -744,10 +726,6 @@ pub async fn load_character_mind_projection(
         None => Vec::new(),
     };
 
-    // admitted scopes — the RAW `created_at` TEXT (`created_at DESC`) then
-    // `fragment_id DESC` — rendered with the keywords the legacy column carried.
-    // The text key, not the parsed instant, is what the legacy query ordered by
-    // (fix round 4, finding R4-F1).
     let mut fragments = shared_fragments;
     fragments.extend(binding_fragments);
     fragments.sort_by(|left, right| {
@@ -769,11 +747,6 @@ pub async fn load_character_mind_projection(
         )
         .collect();
 
-    // order — the order the legacy file listing served — BEFORE the projection's
-    // 20-entry bound, so provider recency can never decide which memories the
-    // legacy slug-head selection kept. They join below the fragment block and
-    // fill only the remaining Character-mind capacity, so they never crowd out
-    // binding-local fragments.
     let authored_kinds: Vec<String> = policy::NEXUS_MEMORY_KINDS
         .iter()
         .map(|kind| policy::namespaced_record_kind(kind))
@@ -855,7 +828,6 @@ pub async fn load_character_mind_projection_with_tom(
     )
     .await?;
     let service = CharacterTomService::new(pool.clone());
-    // L1-heavy corpus can never crowd the L2 rows out of a mixed page.
     let mut tom_l1 = Vec::new();
     let mut tom_l2 = Vec::new();
     for (order, slot) in [(1_i64, &mut tom_l1), (2_i64, &mut tom_l2)] {
@@ -1053,9 +1025,6 @@ impl CoreService {
         self.verify_principal(principal)?;
         let binding_id = request.binding_id.as_ref().map(|id| id.as_str());
         let pool = &self.inner.pool;
-        // must never create a cache/file or call the synthesizer (§11.2). A
-        // forced reflect persists a synthesized narrative: it requires
-        // activity, held across every effect.
         let ctx = if request.force_regenerate {
             let lease = self
                 .acquire_actor_activity(

@@ -60,9 +60,6 @@ pub use sync::{SyncPull, SyncPush};
 pub use timeline::TimelineEventAppend;
 pub use workspace::{WorkspaceCommit, WorkspaceOpen};
 pub use world::{WorldDeltaApply, WorldDeltaPropose, WorldStateQuery};
-// — world_refs_validate is exposed as a library function but not registered
-// as a Capability in the builtins registry; it is called directly by daemon
-// handlers. Acceptable until capability registration is unified.
 pub use world_refs_validate::{
     validate_world_refs, ValidationStage, WorldRefFinding, WorldRefSeverity,
     WorldRefsValidationParams, WorldRefsValidationResult,

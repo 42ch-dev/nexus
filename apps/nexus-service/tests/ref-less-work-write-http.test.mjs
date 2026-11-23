@@ -7,12 +7,6 @@ import { spawnSync } from 'node:child_process';
 import { after, before, describe, test } from 'node:test';
 
 /**
- * `outline/patch`, `chapters/{n}/patch`, `timeline/patch` — refuse a Work whose
- * `work_ref` and `story_ref` are both NULL with HTTP 400 `invalid_input` and the
- * stable discriminator `error.details.field = "work_ref_missing"`, never a 500.
- * The T1 direct proof covers the domain layer only; the wire status/code proof
- * lands here per the T1 L2 review reconciliation (2026-10-10).
- *
  * This is a self-contained file per the `apps/nexus-service/tests/` convention
  * (no shared fixture module exists; every sibling file seeds + starts its own
  * bounded service). It mirrors the `domain-http.test.mjs` server fixture but
@@ -76,7 +70,6 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
       stdio: 'inherit',
     });
     assert.equal(build.status, 0);
-    // so register a real creative root (the refusal itself fabricates no path).
     creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-ref-less-creative-'));
     const workspaceDir = join(
       home,
@@ -106,7 +99,6 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
     assert.equal(created.status, 201, created.text);
     const workId = created.payload.work_id;
 
-    // refusal, not a missing/blocked route.
     const read = await jsonFetch(`${baseUrl}/v1/daemon/works/${workId}/outline`);
     assert.equal(read.status, 200, read.text);
     assert.equal(read.payload.outline_revision, 0);
@@ -160,7 +152,6 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
     assert.equal(created.status, 201, created.text);
     const workId = created.payload.work_id;
 
-    // control proves the route keeps working once a ref exists.
     const storiesDir = join(creativeRoot, 'Works', workRef, 'Stories');
     mkdirSync(storiesDir, { recursive: true });
     writeFileSync(

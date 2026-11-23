@@ -132,9 +132,6 @@ impl Capability for ScriptSectionStatusUpdate {
         let scripts_dir = work_dir.join("Scripts");
         let section_full_path = scripts_dir.join(&inp.section_path);
 
-        // canonicalize resolves symlinks + ".." segments; the starts_with check ensures
-        // the resolved path is within Scripts/. This also subsumes the existence check
-        // (canonicalize fails on non-existent paths).
         let scripts_dir_canonical = std::fs::canonicalize(&scripts_dir).map_err(|e| {
             CapabilityError::InputInvalid(format!("cannot resolve scripts dir: {e}"))
         })?;
@@ -151,9 +148,6 @@ impl Capability for ScriptSectionStatusUpdate {
             )));
         }
 
-        // read-modify-write against concurrent manual edits or other CLI
-        // processes (R-V167P2-QC3-S1). On non-Unix platforms the lock is a
-        // no-op at compile time because the crate is macOS-only in V1.66+.
         #[cfg(unix)]
         {
             let work_dir = scripts_dir_canonical

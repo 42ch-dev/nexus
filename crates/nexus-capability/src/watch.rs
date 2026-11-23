@@ -90,9 +90,6 @@ pub const USER_CAP_WATCH_INTERVAL: Duration = Duration::from_secs(1);
 ///   (AR-91 #3).
 #[must_use]
 pub fn scan_dir_digest(dir: &Path) -> DigestPoll {
-    // read failure (EACCES, EMFILE, ENOTDIR, …) is a transient unreadable
-    // dir and must NOT be treated as a deletion (I-1) — the watcher keeps
-    // last-good unchanged.
     let read = match std::fs::read_dir(dir) {
         Ok(read) => read,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return DigestPoll::Missing,
@@ -102,7 +99,6 @@ pub fn scan_dir_digest(dir: &Path) -> DigestPoll {
     entries.sort_by_key(std::fs::DirEntry::file_name);
     let mut tree = serde_json::Map::new();
     for entry in entries {
-        // scan skips them too.
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
@@ -233,9 +229,6 @@ fn rebuild_registry_inner(
     )>,
     #[cfg(not(feature = "wasm"))] _executor: (),
 ) -> (CapabilityRegistry, ScanOutcome) {
-    // from constructed handler objects: the watcher rebuild gates against
-    // the preset catalog's canonical names, so a builtin declared without a
-    // handler object still cannot be claimed by a user capability.
     let builtin_names: HashSet<&str> = nexus_preset::capability_catalog::builtin_names().collect();
     #[cfg(feature = "wasm")]
     let scan = match executor {
@@ -253,17 +246,9 @@ fn rebuild_registry_inner(
     let outcome = ScanOutcome {
         admitted: merged.clone(),
         skipped: scan.skipped,
-        // transient — the merge keeps last-good for every name it did not
-        // re-admit, so an incomplete scan never reads as deletions.
         transient: scan.transient,
-        // admitted (carried last-good entries have no fresh stats — theirs
-        // were captured at their own admission). The boot site derives the
-        // watcher baseline only from the boot outcome, where admitted ==
-        // scan-admitted, so the baseline is complete by construction.
         admitted_stats: scan.admitted_stats,
     };
-    // constructors' `append_user_caps`, so a change to the append (extra
-    // index/logging) lands in one place.
     reg.append_user_cap_entries(&merged);
     (reg, outcome)
 }
@@ -297,7 +282,6 @@ pub fn merge_user_caps(scan: &ScanOutcome, mirror: &[UserCapability]) -> Vec<Use
         if seen.contains(cap.name()) {
             continue;
         }
-        // entry instead of dropping it as if deleted (W-3).
         if scan.transient || skipped_names.contains(cap.name()) {
             merged.push(cap.clone());
         }
@@ -341,8 +325,6 @@ where
     S: FnMut() -> SF,
     SF: Future<Output = ()> + Send,
 {
-    // a comparison, not a baseline establishment. An `Unreadable` poll
-    // never disturbs it (I-1); `Missing`/`Tree` after it rescan on change.
     let mut last_digest: Option<DigestPoll> = Some(initial_digest);
     let mut rescans = 0usize;
     let mut unreadable_warned = false;
@@ -353,8 +335,6 @@ where
         let digest = poll().await;
         match &digest {
             DigestPoll::Unreadable(message) => {
-                // last-good unchanged — no rescan, no swap, baseline intact
-                // (I-1). Log once per error-state, not every tick.
                 if !unreadable_warned {
                     tracing::warn!(
                         error = %message,
@@ -373,9 +353,6 @@ where
             tokio::time::sleep(interval).await;
             continue;
         }
-        // first poll when it differs from the boot scan's digest (W-B).
-        // `last_digest` is always `Some` after seeding; `Unreadable` polls
-        // never reach this point (they `continue` above).
         rescan().await;
         rescans += 1;
         last_digest = Some(digest);
@@ -469,9 +446,6 @@ mod tests {
 
     #[test]
     fn digest_present_but_unreadable_path_is_not_missing() {
-        // regular file → ENOTDIR; EACCES/EMFILE hit the same non-NotFound
-        // branch) must NOT be conflated with a missing dir (I-1) — the
-        // watcher keeps last-good on `Unreadable`.
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("capabilities");
         std::fs::write(&path, b"not a directory").unwrap();
@@ -564,7 +538,6 @@ mod tests {
         let deps = test_deps();
         let (_, boot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &[]);
         let mirror = boot_outcome.admitted;
-        // NOT duplicate it (new entry wins, mirror copy dropped).
         let (reg, hot_outcome) = rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
         assert_eq!(
             hot_outcome.skipped,
@@ -575,9 +548,6 @@ mod tests {
     }
     #[test]
     fn merge_transient_scan_carries_unmatched_last_good() {
-        // outcome transient — the merge keeps last-good for EVERY name the
-        // scan did not re-admit, instead of dropping it as if the dir had
-        // been deleted (I-1 consistency with the digest's Unreadable case).
         let tmp = tempfile::tempdir().unwrap();
         write_capability_dir(tmp.path(), "demo.pull");
         write_capability_dir(tmp.path(), "gone.cap");
@@ -586,8 +556,6 @@ mod tests {
         let mirror = boot_outcome.admitted;
         assert_eq!(mirror.len(), 2, "both names admitted at boot");
 
-        // transient — gone.cap was never observed, so it must NOT be
-        // dropped as a deletion.
         let scan = ScanOutcome {
             admitted: vec![mirror[0].clone()],
             skipped: Vec::new(),
@@ -666,7 +634,6 @@ mod tests {
 
         let holder = CapabilityRegistryHolder::new();
         holder.swap(std::sync::Arc::new(reg));
-        // then break the trio on disk and swap.
         let held = holder.get().expect("registry present before swap");
         std::fs::write(tmp.path().join("demo.pull/capability.json"), "{ not json").unwrap();
         let (reg2, outcome2) = rebuild_registry_with_merge(&deps, tmp.path(), &mirror);
@@ -677,9 +644,6 @@ mod tests {
         );
         holder.swap(std::sync::Arc::new(reg2));
 
-        // invocation completes honestly against the held snapshot's own row
-        // (engine-less arm → the AR-44 stub contract; the executable lookup
-        // misses because the row has no binding in this build — C3 contract).
         assert!(
             held.get("demo.pull").is_none() && held.is_reserved_only("demo.pull"),
             "the snapshot keeps the name: describable, reserved, not executable"
@@ -756,9 +720,6 @@ mod tests {
             "the builtin compute name is reserved too, also without a binding here"
         );
 
-        // the name exists only as a reservation — the dispatch discriminator
-        // (a workflow dispatch of this name returns WorkerUnavailable BEFORE
-        // any effect; enforced at the orchestration dispatch sites).
         let gen1 = holder.get().expect("live generation with the admitted row");
         assert!(
             gen1.get("demo.compute").is_none(),
@@ -773,15 +734,12 @@ mod tests {
             "iter is runnable-only too"
         );
 
-        // executor (the CapabilityCatalog reads the descriptor surface).
         assert_eq!(
             CapabilityCatalog::input_schema(&gen1, "demo.compute"),
             Some(GEN_ONE_SCHEMA),
             "known metadata resolves without constructing an executor"
         );
 
-        // the typed worker refusal — exactly the refusal workflow dispatch
-        // produces for this name, before any effect.
         let stored_row = gen1
             .capabilities
             .iter()
@@ -794,7 +752,6 @@ mod tests {
             "the unbound invocation refuses with WorkerUnavailable, got {err:?}"
         );
 
-        //    generation exactly as an in-flight dispatch would hold it.
         let gen1_retained = holder.get().expect("generation before the replacement");
         write_trio_with_schema(
             tmp.path(),
@@ -814,8 +771,6 @@ mod tests {
             Some(GEN_TWO_SCHEMA),
             "the swapped-in metadata is the new generation's"
         );
-        // resolves only its OWN row — the swapped-in entry is unreachable
-        // through it.
         assert_eq!(
             CapabilityCatalog::input_schema(&gen1_retained, "demo.compute"),
             Some(GEN_ONE_SCHEMA),
@@ -885,7 +840,6 @@ mod tests {
             "publication has not happened while the reservation is already in place"
         );
 
-        // fixture admits without a binding) and the reservation already holds.
         holder.publish_generation(std::sync::Arc::new(reg1));
         let live = holder.get().expect("published generation");
         assert!(
@@ -958,12 +912,6 @@ mod tests {
         let deps = deps.clone();
         let mirror = std::sync::Arc::clone(mirror);
         let on_poll = std::sync::Arc::new(on_poll);
-        // production boot site computes (the state the mirror was built
-        // from) — the first poll compares against it. Production derives
-        // the baseline from admission-time stat snapshots captured inside
-        // the scan (`digest_from_admitted`); this helper's scan dirs admit
-        // every written trio, so `scan_dir_digest` and the scan-derived
-        // digest agree here.
         let boot_digest = scan_dir_digest(&scan_dir);
         watch_loop_inner(
             Duration::from_millis(5),
@@ -995,8 +943,6 @@ mod tests {
     #[tokio::test]
     async fn unchanged_digest_and_missing_dir_produce_no_rescans() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        // assert no-op stability when the first poll equals the seed —
-        // exactly the production steady state.
         let tree = DigestPoll::Tree(serde_json::json!({"a.cap": {"capability.json": [12, 34]}}));
         let tick = AtomicUsize::new(0);
         let mut rescans = 0;
@@ -1050,9 +996,6 @@ mod tests {
             || {
                 tick.fetch_add(1, Ordering::Relaxed);
                 async {
-                    // no-op tick — a shared-only capture (AtomicUsize) so
-                    // the future has no escaping mutable borrow and stays
-                    // Send.
                     if tick.load(Ordering::Relaxed) <= 2 {
                         baseline.clone()
                     } else {
@@ -1073,10 +1016,6 @@ mod tests {
 
     #[tokio::test]
     async fn boot_to_first_poll_change_is_detected() {
-        // scan's digest as its initial baseline, so an on-disk change
-        // between the boot scan and the FIRST poll (a complete trio written
-        // in that window) triggers a rebuild — it is NOT absorbed as the
-        // baseline.
         use std::sync::atomic::{AtomicUsize, Ordering};
         let boot_state = DigestPoll::Tree(serde_json::json!({"a.cap": {}}));
         let changed_on_disk = DigestPoll::Tree(serde_json::json!({"a.cap": {}, "b.cap": {}}));
@@ -1105,8 +1044,6 @@ mod tests {
 
     #[tokio::test]
     async fn unreadable_poll_keeps_last_good_no_rescan() {
-        // deletion. The baseline survives, no rescan fires, and the
-        // registry generation (the last-good) is untouched.
         use std::sync::atomic::{AtomicUsize, Ordering};
         let baseline = DigestPoll::Tree(serde_json::json!({"a.cap": {}}));
         let tick = AtomicUsize::new(0);
@@ -1137,9 +1074,6 @@ mod tests {
 
     #[tokio::test]
     async fn unreadable_scan_dir_keeps_last_good_registry() {
-        // scan dir (replaced by a regular file → ENOTDIR, the same
-        // non-NotFound branch as EACCES/EMFILE) keeps the last-good registry
-        // generation: no rescan, no swap, no name drop, mirror untouched.
         use std::sync::atomic::{AtomicUsize, Ordering};
         let tmp = tempfile::tempdir().unwrap();
         let scan_dir = tmp.path().join("caps");
@@ -1154,9 +1088,6 @@ mod tests {
         let ticks = AtomicUsize::new(0);
         let rescans = AtomicUsize::new(0);
 
-        // scan dir is replaced by a present regular file: every later
-        // read_dir fails with a non-NotFound error → Unreadable, and the
-        // watcher must keep last-good (no rescan, no swap).
         let scans = run_real_watch(
             &scan_dir,
             &holder,
@@ -1190,11 +1121,6 @@ mod tests {
 
     #[tokio::test]
     async fn digest_ok_then_rescan_unreadable_keeps_last_good() {
-        // by a FAILED rescan (top-level non-NotFound `read_dir` error —
-        // EACCES/EMFILE race) must NOT read as deletions. The scan marks
-        // its outcome transient, so the merge carries every unmatched
-        // last-good entry instead of dropping it as if the dir had been
-        // deleted.
         let tmp = tempfile::tempdir().unwrap();
         let scan_dir = tmp.path().join("caps");
         std::fs::create_dir_all(&scan_dir).unwrap();
@@ -1207,13 +1133,9 @@ mod tests {
             std::sync::Arc::new(std::sync::Mutex::new(boot_outcome.admitted));
         assert_eq!(mirror.lock().unwrap().len(), 1, "one name admitted at boot");
 
-        // branch as EACCES/EMFILE) AFTER the digest poll succeeded.
         std::fs::remove_dir_all(&scan_dir).unwrap();
         std::fs::write(&scan_dir, b"transiently unreadable").unwrap();
 
-        // failure; the rescan then runs against the unreadable dir. The
-        // poll digest diverges from the baseline exactly once, so exactly
-        // one rescan fires.
         let baseline =
             DigestPoll::Tree(serde_json::json!({"demo.pull": {"capability.json": [12, 34]}}));
         let changed = DigestPoll::Tree(
@@ -1256,11 +1178,6 @@ mod tests {
 
     #[tokio::test]
     async fn baseline_derived_from_scan_outcome_detects_between_scan_and_digest_write() {
-        // the boot scan and the boot digest computation must NOT be
-        // absorbed into the watcher's baseline. The baseline is derived
-        // from what the scan actually ADMITTED, so the first poll sees
-        // the new trio and rescans — the capability becomes dispatchable
-        // without another fs change.
         let tmp = tempfile::tempdir().unwrap();
         let scan_dir = tmp.path().join("caps");
         std::fs::create_dir_all(&scan_dir).unwrap();
@@ -1277,9 +1194,6 @@ mod tests {
             "alpha.cap admitted at boot"
         );
 
-        // AFTER the boot scan admitted alpha.cap but BEFORE the baseline
-        // is derived. The scan-outcome-derived baseline must NOT contain
-        // it.
         write_capability_dir(&scan_dir, "beta.cap");
         let baseline = digest_from_admitted(&boot_outcome);
         let DigestPoll::Tree(baseline_tree) = &baseline else {
@@ -1345,11 +1259,6 @@ mod tests {
 
     #[tokio::test]
     async fn baseline_from_admission_stats_detects_edit_between_scan_and_digest() {
-        // between the boot scan and the baseline derivation must NOT be
-        // absorbed into the baseline. The baseline is built from
-        // admission-time stat snapshots captured INSIDE the scan, so the
-        // first poll sees the edited disk state and rescans — the stale
-        // pre-edit capability is never served past the first poll.
         let tmp = tempfile::tempdir().unwrap();
         let scan_dir = tmp.path().join("caps");
         std::fs::create_dir_all(&scan_dir).unwrap();
@@ -1366,10 +1275,6 @@ mod tests {
             "alpha.cap admitted at boot"
         );
 
-        // content (a longer wasm + matching shas) AFTER the boot scan
-        // admitted it but BEFORE the baseline is derived. The
-        // admission-time baseline must reflect the PRE-edit state, so the
-        // first poll diverges.
         rewrite_capability_dir(&scan_dir, "alpha.cap");
         let baseline = digest_from_admitted(&boot_outcome);
         let DigestPoll::Tree(baseline_tree) = &baseline else {
@@ -1425,7 +1330,6 @@ mod tests {
             scans, 1,
             "first poll diverges from the admission-time baseline → exactly one rescan"
         );
-        // pre-edit capability is not served past the first poll.
         let new_sha = crate::test_support::sha256_hex(b"fake module bytes, now longer");
         let live_mirror = mirror.lock().unwrap();
         assert_eq!(
@@ -1479,8 +1383,6 @@ mod tests {
 
     #[tokio::test]
     async fn deleted_scan_dir_drops_user_cap_names() {
-        // removal contract — exactly one rescan, and the merge drops the
-        // name from the swapped registry.
         let tmp = tempfile::tempdir().unwrap();
         let scan_dir = tmp.path().join("caps");
         std::fs::create_dir_all(&scan_dir).unwrap();
@@ -1494,9 +1396,6 @@ mod tests {
         let ticks = AtomicUsize::new(0);
         let rescans = AtomicUsize::new(0);
 
-        // baseline and one no-op tick): Missing after Tree → exactly one
-        // rescan, and the rebuild-with-merge drops the name (removal
-        // contract).
         let scans = run_real_watch(
             &scan_dir,
             &holder,

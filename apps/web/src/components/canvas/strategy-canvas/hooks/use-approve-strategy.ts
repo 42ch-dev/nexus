@@ -64,7 +64,6 @@ export function useApproveStrategy(presetId: string) {
           trajectory: args.trajectory,
         });
         setState({ kind: 'approved', snapshot });
-        // and the approval list gains the just-frozen target as its first row.
         void queryClient.invalidateQueries({ queryKey: queryKeys.strategies.applied(presetId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.strategies.approvals(presetId) });
         return snapshot;

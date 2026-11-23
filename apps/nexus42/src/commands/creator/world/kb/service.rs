@@ -184,7 +184,6 @@ pub async fn run_entity_patch(
     };
 
     let core = open_direct_core(config).await?;
-    // writer is closed before this command reports.
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
         core.patch_world_kb_entity(&principal, world_id.clone(), req)

@@ -1,7 +1,4 @@
 /**
- * T2, compass D24/D27; shared by the creator AI-partner step and the developer
- * agent/workspace step).
- *
  * Discovery reuses the daemon scan (`POST /v1/daemon/agent-host/scan`, filter
  * `installed`) resolved through the existing catalog helpers. The selected
  * profile is persisted as `{ name, launchCommand? }` — the same snapshot the
@@ -55,7 +52,6 @@ function matchChoice(choices: AgentChoice[], profile: AgentProfile): AgentChoice
 }
 
 function profileOfChoice(choice: AgentChoice): AgentProfile {
-  // matches a saved profile against `AgentScanEntry.name`.
   const launchCommand = choice.item.launchCommand?.trim();
   return {
     name: choice.entry.name,
@@ -101,8 +97,6 @@ export function useAgentSelection(): AgentSelection {
   const recommendedId = choices.find((choice) => choice.entry.installed)?.pickerId ?? null;
 
   const saved = savedProfile.data;
-  // whenever it arrives, until the user explicitly picks a row. A read that
-  // settled without a profile (error or `null`) must not hold the step.
   const profileSettled = savedProfile.isFetched;
   const profilePending = savedProfile.isLoading;
   const scanSettled = !scan.isLoading;
@@ -111,11 +105,6 @@ export function useAgentSelection(): AgentSelection {
   const [manual, setManual] = useState('');
   const userPicked = useRef(false);
 
-  // settled. A row-backed profile re-selects its row; a saved command that
-  // differs from the row's own is a manual override and must come back into
-  // the field so a later commit does not overwrite it. With zero scan rows
-  // (empty/error) the saved command is the only usable path, so it still fills
-  // the field and lets the step continue.
   useEffect(() => {
     if (userPicked.current || !profileSettled || !scanSettled || !saved) return;
     const match = matchChoice(choices, saved);
@@ -130,9 +119,6 @@ export function useAgentSelection(): AgentSelection {
     setManual(saved.launchCommand ?? '');
   }, [choices, saved, profileSettled, scanSettled]);
 
-  // scan-recommended default must not be committed as an intermediate choice.
-  // A read that settled without a profile (error or `null`) releases the gate —
-  // only an actually-arrived saved profile overrides the scan default.
   const selectedId = pickedId ?? (profilePending ? null : recommendedId);
   const selectedChoice = choices.find((choice) => choice.pickerId === selectedId) ?? null;
 
@@ -155,7 +141,6 @@ export function useAgentSelection(): AgentSelection {
         return true;
       })
       .catch((error) => {
-        // does not double-report — advance retries the same write.
         console.error('setAgentProfile failed', error);
         return false;
       });

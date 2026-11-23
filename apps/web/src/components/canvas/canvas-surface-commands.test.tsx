@@ -1,6 +1,4 @@
 /**
- * surface (V1.111 P0 T4).
- *
  * Unlike {@link CanvasNavCommands} (which lives in `RootLayout`), the
  * surface-switch (graph↔list toggle) and node-create commands are registered
  * INSIDE each canvas component because their handlers close over per-surface
@@ -25,16 +23,10 @@ import { ClientProvider } from '@/lib/client-context';
 import { EntranceProvider } from '@/lib/entrance-context';
 import { noopClient } from '@/test/test-providers';
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 vi.mock('@/components/canvas/canvas-shell', () => ({
   CanvasShell: () => null,
   useNodeChangeHandler: () => () => {},
 }));
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 const outlineMocks = vi.hoisted(() => ({
   outline: {
@@ -43,7 +35,6 @@ const outlineMocks = vi.hoisted(() => ({
       outline_revision: 1,
       volumes: [],
       timeline_events: [],
-      // `scenes` / `beats` required on the wire; this stale mock omitted them).
       foreshadows: [],
       scenes: [],
       beats: [],
@@ -96,7 +87,6 @@ vi.mock('@/lib/canvas/use-outline-data', async (orig) => {
 vi.mock('@/lib/nexus/query-keys', () => ({
   queryKeys: {
     chapters: { outlines: () => ['ch', 'out'] },
-    // suite's partial key mock has to carry both families it evaluates on mount.
     strategies: {
       applied: (id: string) => ['strategies', 'applied', id],
       approvals: (id: string) => ['strategies', 'approvals', id],
@@ -136,9 +126,6 @@ vi.mock('@/components/canvas/outline-canvas/conflict-modal', () => ({
 vi.mock('@/components/canvas/outline-canvas/outline-nodes', () => ({
   outlineNodeTypes: {},
 }));
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 const strategyMocks = vi.hoisted(() => ({
   graphQuery: {
@@ -218,7 +205,6 @@ vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
 vi.mock('@/components/canvas/strategy-alt-view', () => ({
   StrategyAltView: () => null,
 }));
-// commands, so it stays inert.
 vi.mock('@/lib/canvas/use-simulation-trajectory', () => ({
   useSimulationTrajectory: () => ({
     status: 'idle',
@@ -234,9 +220,6 @@ vi.mock('@/components/canvas/strategy-nodes', () => ({
 vi.mock('@/components/canvas/idea-input', () => ({
   IdeaInput: () => null,
 }));
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 const worldKbMocks = vi.hoisted(() => ({
   graph: {
@@ -321,9 +304,6 @@ vi.mock('@/components/canvas/world-kb/world-kb-canvas-utils', () => ({
 }));
 vi.mock('@/components/canvas/world-kb/types', () => ({}));
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 function findById(id: string): Command | undefined {
   return getCommands().find((c) => c.id === id);
 }
@@ -354,10 +334,6 @@ afterEach(() => {
   clearCommands();
 });
 
-// ---------------------------------------------------------------------------
-// surface registers; structural creation is a Compose operation.
-// ---------------------------------------------------------------------------
-
 describe('StrategyCanvas — palette commands', () => {
   it('registers the toggle-view command on mount', async () => {
     const { StrategyCanvas } = await import('@/components/canvas/strategy-canvas');
@@ -379,8 +355,6 @@ describe('StrategyCanvas — palette commands', () => {
   });
 
   it('toggle handler flips aria-pressed across repeated invocations', async () => {
-    // uses setShowAlt(v => !v) so it never closes over a stale boolean — two
-    // invocations must flip true then false, not true then true.
     const { StrategyCanvas } = await import('@/components/canvas/strategy-canvas');
     const { container } = render(withProviders(<StrategyCanvas presetId="p1" />));
 
@@ -399,10 +373,6 @@ describe('StrategyCanvas — palette commands', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
   });
 });
-
-// ---------------------------------------------------------------------------
-// chapter-creation entrypoint (structure panel is select/move only).
-// ---------------------------------------------------------------------------
 
 describe('OutlineCanvas — palette commands', () => {
   it('registers ONLY a toggle-view command (no node-create)', async () => {
@@ -443,11 +413,6 @@ describe('OutlineCanvas — palette commands', () => {
     expect(getCommands()).toEqual([]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// clean canvas-level creation button (relationships are created via graph
-// edge-drag or alt-view row action, both of which require entity context).
-// ---------------------------------------------------------------------------
 
 describe('WorldKbCanvas — palette commands', () => {
   it('registers ONLY a toggle-view command (no node-create)', async () => {

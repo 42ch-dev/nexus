@@ -75,17 +75,13 @@ pub fn load_or_create_issuer_key(home: &Path) -> Result<Keypair> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // can never leave a partial key file behind.
     let keypair = Keypair::generate_ed25519();
     let encoded = keypair
         .to_protobuf_encoding()
         .map_err(|e| CliError::Config(format!("issuer key serialization failed: {e}")))?;
 
-    // and the write (same pattern as the identity key): create-once, never
-    // overwrite — a second issue reuses the persisted key.
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    // applies (best available).
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -255,8 +251,6 @@ pub fn issue_token(
     iss: Option<&str>,
     now: u64,
 ) -> Result<CapabilityTokenProof> {
-    // filesystem side effect (the key file is created only on a valid
-    // issue, not on flag misuse).
     if sub.trim().is_empty() {
         return Err(CliError::Config(
             "--sub must be a non-empty peer id (the subject who may present the token)".into(),
@@ -544,7 +538,6 @@ mod tests {
 
     #[test]
     fn exp_within_clock_skew_rejected_at_issue() {
-        // verifier would deterministically reject.
         let home = temp_home();
         let caps = vec!["spoke-baseline".to_string()];
         let err = issue_token(
@@ -645,7 +638,6 @@ mod tests {
 
     #[test]
     fn empty_sub_rejected() {
-        // must be a usage error, not an inert token.
         let home = temp_home();
         let caps = vec!["spoke-baseline".to_string()];
         for bad in ["", "   ", "\t"] {
@@ -700,9 +692,6 @@ mod tests {
 
     #[test]
     fn token_from_untrusted_issuer_rejected_through_verify_path() {
-        // must be rejected through the verify path. Mint with a second
-        // (untrusted) issuer key and verify against the trusted issuer's
-        // whitelist — a regressed issuer-whitelist wiring would fail this.
         let trusted_home = temp_home();
         let trusted_iss = issuer_of(trusted_home.path());
 

@@ -91,12 +91,6 @@ fn render_template(tmpl: &ScriptTemplate) -> String {
     )
 }
 
-// overwrite (existed before, original content saved). On rollback (Drop):
-//   - Temp files are cleaned up
-//   - Overwritten files are restored from snapshot
-//   - Created files are deleted
-//   - Created directories are removed (reverse order)
-//
 // Writes commit through the Work artifact port; rollback (Drop) restores or
 // removes what this run wrote.
 
@@ -321,9 +315,6 @@ impl Capability for ScriptProjectScaffold {
         let logs_write_dir = logs_dir.join("write");
         let logs_review_dir = logs_dir.join("review");
 
-        // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL. Only the ref is claimed here; the
-        // profile lands with the finished scaffold, and a failure restores it.
         let mut claim = claim_work_ref(
             self.pool.as_ref(),
             &inp.creator_id,
@@ -636,10 +627,7 @@ mod tests {
 
         let final_path = work_dir.join("template.md");
 
-        // but don't rename it. This simulates the temp+rename pattern
-        // where the rename hasn't happened yet.
         let mut tx = ScaffoldTransaction::new();
-        // directly pushing a temp that won't get renamed
         let tmp_path = final_path.with_extension("tmp");
         std::fs::write(&tmp_path, "partial content").expect("write temp");
         tx.temp_files.push(tmp_path.clone());

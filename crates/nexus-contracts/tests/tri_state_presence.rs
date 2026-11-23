@@ -28,7 +28,6 @@ fn update_finding_rule_suggestion_keeps_all_three_states() {
     assert_eq!(keep.rule_suggestion, None);
     assert_eq!(keep.status.as_deref(), Some("triaged"));
 
-    // state a plain Option<T> carrier erases.
     let clear: UpdateFindingRequest =
         serde_json::from_str(r#"{"rule_suggestion":null}"#).expect("clear parses");
     assert_eq!(clear.rule_suggestion, Some(serde_json::Value::Null));

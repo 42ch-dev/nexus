@@ -54,7 +54,6 @@ pub fn memory_path(home: &Path, bearer: MemoryBearerRef<'_>, slug: &str) -> Path
 /// Returns [`MemoryError`] on a permission, I/O, or malformed-path failure.
 pub fn list_memories(home: &Path, bearer: MemoryBearerRef<'_>) -> Result<Vec<String>, MemoryError> {
     let dir = bearer.validated_long_term_memory_dir(home)?;
-    // errors must surface to the caller.
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -353,7 +352,6 @@ mod tests {
     fn list_memories_propagates_non_notfound_read_error() {
         let home = fake_home();
         cleanup(&home);
-        // failure must propagate rather than be treated as absence.
         let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::remove_dir(&dir).unwrap();
@@ -393,7 +391,6 @@ mod tests {
         let dir = memory_dir(&home, MemoryBearerRef::Creator("ctr_test"));
         std::fs::create_dir_all(&dir).unwrap();
 
-        // than silently drop the entry.
         #[cfg(unix)]
         std::os::unix::fs::symlink("loop_self", dir.join("loop_self")).unwrap();
 

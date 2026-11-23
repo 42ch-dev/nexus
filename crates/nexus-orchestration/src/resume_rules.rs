@@ -119,13 +119,9 @@ pub const fn classify_recovery(
         }
         _ => {}
     }
-    //    corrupt/unsupported and non-replayable — this precedes interrupted
-    //    evidence, including an explicit `interrupted` status (A7 rule 2).
     let Some(state) = state else {
         return RecoveryClass::Unreadable;
     };
-    //    explicit interrupted status, unresolved cancel, a dispatching/
-    //    active in-flight prompt, or an unfinished step mark.
     if matches!(status, SessionStatus::Interrupted)
         || state.cancel_requested
         || state.in_flight.is_some()
@@ -133,15 +129,9 @@ pub const fn classify_recovery(
     {
         return RecoveryClass::Interrupted;
     }
-    //    token-bearing wait is a human wait even when live converge/merge
-    //    join keys exist (a scheduler join park must be represented without
-    //    a human wait token).
     if state.wait.is_some() {
         return RecoveryClass::HumanWait;
     }
-    //    parked converge/merge chain (bounded join resume); a tokenless
-    //    bare wait stays conservatively human-wait-shaped and is never
-    //    advanced at boot.
     if matches!(status, SessionStatus::WaitingForInput) {
         return if gate_park_live {
             RecoveryClass::ConvergeMerge
@@ -388,11 +378,6 @@ mod tests {
         assert!(!is_converge_merge_chain(&cleared));
     }
 
-    // authoritative scheduler-park evidence. A genuine manual wait reached
-    // through labeled/conditional routing carries broad join keys but NO
-    // marker for its own state — `gate_park_live` must return false there,
-    // while a parked merge/converge gate carries a live marker for the
-    // CURRENT task.
     #[test]
     fn gate_park_marker_is_current_task_authoritative() {
         let parked = data(&json!({
@@ -401,10 +386,8 @@ mod tests {
             "_join_wait_start_join": 1
         }));
         assert!(gate_park_live(&parked, "join"));
-        // gate — the marker names the gate state, not this task.
         assert!(!gate_park_live(&parked, "manual_wait_state"));
 
-        // state: never classified as a scheduler park.
         let manual_with_joins = data(&json!({
             "_converge_arrivals_manual_wait_state": ["pred"],
             "_merge_manual_wait_state": ["go"],
@@ -417,7 +400,6 @@ mod tests {
 
         let plain = data(&json!({"_creator_id": "c"}));
         assert!(!gate_park_live(&plain, "join"));
-        // current task is live regardless of other stale keys.
         let marked_with_stale = data(&json!({
             "_gate_park_manual_wait_state": true,
             "_converge_arrivals_other": ["x"],
@@ -560,13 +542,10 @@ mod tests {
             classify_recovery(&WaitingForInput, Some(&state(None, false, true)), false),
             RecoveryClass::HumanWait
         );
-        // token-bearing wait is HumanWait even in a chain-shaped context
-        // (scheduler joins must be represented without a human wait token).
         assert_eq!(
             classify_recovery(&WaitingForInput, Some(&state(None, false, true)), true),
             RecoveryClass::HumanWait
         );
-        // resume (bounded re-drive only).
         assert_eq!(
             classify_recovery(&WaitingForInput, Some(&state(None, false, false)), true),
             RecoveryClass::ConvergeMerge
@@ -576,8 +555,6 @@ mod tests {
     #[test]
     fn a7_terminal_status_wins_even_when_state_absent_or_corrupt() {
         use nexus_session_storage::SessionStatus::*;
-        // (A7 rule 1 beats rule 2) — lookup stays authoritative without a
-        // live runner.
         for status in [Completed, Failed, Cancelled] {
             assert_eq!(
                 classify_recovery(&status, None, false),
@@ -590,8 +567,6 @@ mod tests {
     #[test]
     fn a7_corrupt_state_precedes_interrupted_status() {
         use nexus_session_storage::SessionStatus::Interrupted;
-        // (interrupted evidence): `Interrupted` status + missing state blob
-        // is Unreadable, not Interrupted.
         assert_eq!(
             classify_recovery(&Interrupted, None, false),
             RecoveryClass::Unreadable

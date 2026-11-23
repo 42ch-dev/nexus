@@ -1,7 +1,4 @@
 /**
- * `/worlds/:worldId`. Header (name + `世界 · 时间线`) + layer tabs
- * (Brief / Narrative / Moment) riding the `?layer=` URL convention.
- *
  * Brief-layer read model = the era `KnowledgeEntry` projection over the World
  * KB graph (`useWorldKbGraph`; architect-confirmed data contract) — NOT the
  * timeline-era endpoints (those belong to the Narrative layer). The Brief
@@ -105,18 +102,6 @@ function WorldAppSurface({ worldId }: { worldId: string }) {
 }
 
 /**
- * empty state → inline editor → saved card flow. The Brief read model is the
- * era KnowledgeEntry projection; an era with a non-empty `world_summary` is
- * the saved Brief (renders as {@link BriefCard}), otherwise the empty state
- * with the `+ 写 Brief` action. Eras without a summary keep the T1 plain list
- * item. The `世界已就绪` follow-up card announces the Work unlock after the
- * just-saved session only (T2 review gating); the mutation owns the sole
- * `unlock` call site (D8/D17), and the side checklist tracks the 3-step
- * onboarding progress. Leaving edit mode is safe without a flash because
- * {@link useSaveBrief} awaits the graph invalidation inside `onSuccess` — by
- * the time the editor's `mutateAsync` resolves, the eras prop already
- * contains the saved entity.
- *
  * Edit target snapshot (QC fix wave): captured at edit entry so a mid-edit
  * era deletion cannot flip the editor from the OCC patch path to a create.
  * While the era still exists in the graph, the observed version/body track
@@ -137,8 +122,6 @@ function BriefLayer({ worldId, eras }: { worldId: string; eras: WorldKbEntityPro
   const { t } = useTranslation('worlds');
   const { toast } = useToast();
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
-  // a revisit with an existing Brief, or an edit re-save after the unlock,
-  // does not re-announce.
   const [justSaved, setJustSaved] = useState(false);
 
   const withSummary = eras.filter((era) => eraSummary(era) !== null);

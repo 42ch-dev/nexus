@@ -165,8 +165,6 @@ pub fn scan_path_in(
             continue;
         }
 
-        // `nexus-core` derives `installed` from the resolved executable, never
-        // from this message text.
         let acp = !acp_args.is_empty();
         let capabilities = if acp {
             CapabilityDescriptor::acp_full()
@@ -221,13 +219,6 @@ pub fn scan_path_in(
                 candidate("path candidate; bounded probe required"),
             );
         } else if cmd == "dsh" {
-            // present even when `dsh` is not on PATH — same catalog row,
-            // same fields. The override is VALIDATED through the same
-            // Nexus-owned resolution chain as launch/boot (fix wave): an
-            // invalid override yields an unavailable row with a safe
-            // static reason, never a healthy row the provider cannot
-            // launch. Only reached when the PATH lookup missed, so the
-            // two routes can never duplicate the row.
             let mut routed = false;
             if let Some(env_bin) = std::env::var_os("DSH_RUNTIME_BIN") {
                 if !env_bin.to_string_lossy().trim().is_empty() {
@@ -244,16 +235,12 @@ pub fn scan_path_in(
                 }
             }
             if !routed {
-                // dsh entry still shows up (disabled) in the UI.
                 push_row(
                     cmd.to_string(),
                     unavailable(format!("{cmd} not found on PATH")),
                 );
             }
         } else {
-            // still gets a row so the UI renders it disabled. The launch
-            // command stays the bare name; the daemon's executable check
-            // resolves it as not installed, so it is never spawned.
             push_row(
                 cmd.to_string(),
                 unavailable(format!("{cmd} not found on PATH")),
@@ -315,7 +302,6 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
         return Some(path);
     }
 
-    // for environments where `which` may not find a command that exists.
     let search_dirs: Vec<PathBuf> = if path_dirs.is_empty() {
         std::env::var_os("PATH").map_or_default(|p| std::env::split_paths(&p).collect())
     } else {
@@ -324,7 +310,6 @@ fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
 
     for dir in search_dirs {
         let candidate = dir.join(command);
-        // this, so the manual fallback must too.
         if is_executable_file(&candidate) {
             return Some(candidate);
         }
@@ -374,10 +359,6 @@ pub fn scan_custom_path(
             message: Some(message),
         };
 
-        // carries the AR-6 narrower descriptor. The `DSH_RUNTIME_BIN`
-        // env route is intentionally absent here — this helper is the
-        // custom-PATH test seam and stays deterministic against the
-        // process environment.
         let acp = !acp_args.is_empty();
         let capabilities = if acp {
             CapabilityDescriptor::acp_full()
@@ -415,13 +396,9 @@ pub fn scan_custom_path(
                 source: DiscoverySource::PathScan,
                 trust: TrustLevel::LocalPath,
                 capabilities,
-                // executable on a scanned dir is a candidate, not readiness.
                 health: candidate("path candidate; bounded probe required"),
             });
         } else {
-            // route stays intentionally absent here): a missing target is an
-            // unavailable row whose message never carries the "path
-            // candidate" installed marker.
             entries.push(ProviderCatalogEntry {
                 provider_id: pid.clone(),
                 display_name,
@@ -539,12 +516,6 @@ mod tests {
             "suppressed ID should be skipped"
         );
     }
-
-    // `PROCESS_ENV_LOCK` (lib.rs `test_support`), which ALSO serializes
-    // against the python-fixture spawn tests in claude/codex/dsh: the
-    // fixtures' `#!/usr/bin/env python3` shebang resolves python3 through
-    // the process PATH, so a concurrently isolated PATH kills the child
-    // (flaky stream_closed / missing-REQ_LOG failures).
 
     /// RAII guard that replaces `PATH` with a single directory on construction
     /// and restores the previous value on drop. Ensures the test genuinely
@@ -676,18 +647,13 @@ mod tests {
         set_executable(&omp_path);
         set_executable(&hermes_path);
 
-        // codex/claude/dsh that might be installed on the host
-        // (qc1 W-002).
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        // row (the PATH route wins; the env route only fires on a miss).
         let _env_guard = DshEnvGuard::set("/opt/dsh/dsh");
 
         let config = AgentHostConfig::default();
         let entries = scan_path_in(&config, &[], &[temp_dir.path().to_path_buf()])
             .expect("scan_path_in should succeed");
 
-        // or not — the UI renders the whole priority list and disables the
-        // not-installed entries.
         assert_eq!(
             entries.len(),
             KNOWN_COMMANDS.len(),
@@ -711,8 +677,6 @@ mod tests {
             assert_eq!(entry.protocol_kind, ProtocolKind::NativeCli);
             assert_eq!(entry.source, DiscoverySource::PathScan);
             assert_eq!(entry.trust, TrustLevel::LocalPath);
-            // available until a bounded probe proves it, so discovery must not
-            // claim readiness.
             assert!(
                 !entry.health.available,
                 "a PATH candidate is unavailable until probed: {entry:?}"
@@ -727,7 +691,6 @@ mod tests {
             );
         }
 
-        // servers — the stubbed row must carry the ACP launch strategy.
         for (id, cmd) in [("omp", "omp"), ("hermes", "hermes")] {
             let entry = by_id(id);
             assert_eq!(entry.protocol_kind, ProtocolKind::Acp, "{id}");
@@ -758,7 +721,6 @@ mod tests {
             );
         }
 
-        // message that NEVER carries the "path candidate" installed marker.
         let not_installed: Vec<&str> = entries
             .iter()
             .filter(|e| {
@@ -786,9 +748,6 @@ mod tests {
             );
         }
 
-        // message-level streaming (proven on actual dsh in v1.188 P1 T3)
-        // but no cancellation; claude/codex keep the broader native CLI
-        // descriptor.
         {
             let dsh = by_id("dsh-native");
             assert!(
@@ -884,8 +843,6 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let _path_guard = PathGuard::isolate(temp_dir.path());
-        // Windows, where it would be rejected as a relative path before ever
-        // reaching the executability check this test targets.
         #[cfg(windows)]
         let missing_override = r"C:\definitely\missing\dsh-runtime";
         #[cfg(unix)]
@@ -999,7 +956,6 @@ mod tests {
 
     #[test]
     fn known_commands_mapping() {
-        // never by table position: the roster is append-ordered by feature.
         let by_command = |cmd: &str| {
             KNOWN_COMMANDS
                 .iter()
@@ -1051,7 +1007,6 @@ mod tests {
         let found = find_command(&[], "sh")
             .or_else(|| find_command(&[], "cmd"))
             .or_else(|| find_command(&[], "ls"));
-        // But we don't hard-assert because unusual containers may lack all of them
         if let Some(path) = &found {
             assert!(
                 path.is_absolute(),
@@ -1059,7 +1014,6 @@ mod tests {
                 path.display()
             );
         }
-        // thing is that the function didn't panic or hang.
     }
 
     /// Windows-only (Gap A, v1.202 p1 T1): `find_command` must resolve a
@@ -1097,8 +1051,6 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
-        // precedes `.CMD` in the canonical PATHEXT order, so the priority
-        // assertion is deterministic.
         let both_dir = temp_dir.path().join("both-bin");
         std::fs::create_dir_all(&both_dir).expect("create both-bin dir");
         let exe_stub = both_dir.join("claude.exe");
@@ -1106,12 +1058,6 @@ mod tests {
         std::fs::write(&exe_stub, "MZ stub payload").expect("write claude.exe stub");
         std::fs::write(&cmd_stub, "@echo off\r\necho stub\r\n").expect("write claude.cmd stub");
 
-        // with a synthetic entry that carries a double quote. `find_command`
-        // reaches `which::which_in` only when `join_paths` accepts the list;
-        // on Windows `join_paths` rejects any entry containing `"` (the
-        // rejected character is `"` on Windows, `:` on Unix), so this list is
-        // rejected and the primary route is skipped. The quote-bearing path is
-        // never created — it only has to poison the join.
         let fallback_dir = temp_dir.path().join("fallback-bin");
         std::fs::create_dir_all(&fallback_dir).expect("create fallback-bin dir");
         let fallback_stub = fallback_dir.join("claude.cmd");
@@ -1125,8 +1071,6 @@ mod tests {
             "the quote-bearing entry must stay synthetic: {}",
             quoted_entry.display()
         );
-        // `find_command` would take the `which_in` branch and the test would
-        // pass without ever executing the manual PATHEXT loop it targets.
         assert!(
             std::env::join_paths(&search_dirs).is_err(),
             "a quote-bearing entry must make join_paths fail on Windows, so \
@@ -1134,8 +1078,6 @@ mod tests {
         );
 
         let _pathext_guard = PathextGuard::set(".COM;.EXE;.BAT;.CMD");
-        // real `claude` installed on the runner (same rationale as qc1 W-002);
-        // every resolution below therefore comes from the scanned `path_dirs`.
         let empty_dir = temp_dir.path().join("empty-path");
         std::fs::create_dir_all(&empty_dir).expect("create empty-path dir");
         let _path_guard = PathGuard::isolate(&empty_dir);
@@ -1153,7 +1095,6 @@ mod tests {
             "resolution must come from the scanned stub dir: {}",
             resolved_exe.display()
         );
-        // extension case-insensitively: the `.EXE` stub must outrank `.CMD`.
         assert_eq!(
             resolved_exe
                 .file_name()
@@ -1173,9 +1114,6 @@ mod tests {
             resolved_exe.display()
         );
 
-        // `search_dirs`, so `which_in` is skipped; the isolated PATH makes the
-        // second `which()` call miss; the loop resolves `claude.cmd` from the
-        // valid entry.
         let resolved_fallback = find_command(&search_dirs, "claude")
             .expect("the manual PATHEXT fallback must resolve claude.cmd");
         assert_eq!(

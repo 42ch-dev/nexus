@@ -324,7 +324,6 @@ async fn world_sheet_rejects_merged_deprecated_and_private() {
             "sheet {sheet} status {status} should fail, got {err:?}"
         );
     }
-    // governance pair — a governed (disclosed) World sheet is not linkable.
     seed_private_sheet(&pool, "kb_private", WORLD_A).await;
     let err = create_character_with_initial_binding(
         &pool,
@@ -1084,7 +1083,6 @@ async fn binding_update_rejects_invalid_world_sheets() {
             "sheet {sheet} should fail, got {err:?}"
         );
     }
-    // governance pair — a governed sheet is rejected on relink as well.
     seed_private_sheet(&pool, "kb_private", WORLD_A).await;
     let err = update_actor_world_binding(
         &pool,
@@ -1756,7 +1754,6 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_without_provisioning
     seed_creator_and_worlds(&pool).await;
     let character_id = seed_character(&pool, "Ava").await;
 
-    // only reachable way to break the subject+holder invariant).
     sqlx::query("DELETE FROM knowledge_holders WHERE character_id = ?")
         .bind(&character_id)
         .execute(&pool)
@@ -1772,7 +1769,6 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_without_provisioning
             if reason.contains("never provisions")),
         "expected holder_state_invalid, got {err:?}"
     );
-    // become a second (minted) holder.
     assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 0);
     assert!(
         resolve_subject_holder(&pool, &HolderSubject::Character(character_id.clone()))
@@ -1781,7 +1777,6 @@ async fn v1191_holder_lifecycle_missing_registry_read_fails_without_provisioning
             .is_none()
     );
 
-    // identity that has no holder.
     assert!(matches!(
         update_character(
             &pool,
@@ -1851,7 +1846,6 @@ async fn v1191_holder_lifecycle_referenced_character_delete_refuses_without_muta
         .is_some());
     assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 1);
 
-    // refuses deletion even after the binding is gone.
     sqlx::query("DELETE FROM actor_world_bindings WHERE character_id = ?")
         .bind(&character_id)
         .execute(&pool)
@@ -1879,7 +1873,6 @@ async fn v1191_holder_lifecycle_referenced_character_delete_refuses_without_muta
     ));
     assert_eq!(holder_rows(&pool, "character_id", &character_id).await, 1);
 
-    // governance pair).
     sqlx::query("DELETE FROM kb_key_blocks WHERE key_block_id = 'kb_private'")
         .execute(&pool)
         .await
@@ -1919,8 +1912,6 @@ async fn v1191_holder_lifecycle_unreferenced_character_delete_removes_subject_an
         .await
         .unwrap();
 
-    // the unreferenced state is constructed directly (a Character whose
-    // bindings and retained rows are gone) to exercise the removal path.
     sqlx::query("DELETE FROM actor_world_bindings WHERE character_id = ?")
         .bind(&character_id)
         .execute(&pool)
@@ -1946,7 +1937,6 @@ async fn v1191_holder_lifecycle_referenced_creator_delete_refuses_and_unreferenc
     seed_creator_and_worlds(&pool).await;
     let holder = require_creator_holder(&pool, OWNER).await.unwrap();
 
-    // refuses first, so governed rows cannot be dropped silently.
     assert!(matches!(
         delete_creator(&pool, OWNER).await.unwrap_err(),
         LocalDbError::ActorContractConflict {
@@ -2030,7 +2020,6 @@ async fn v1191_holder_lifecycle_referenced_creator_delete_refuses_and_unreferenc
 async fn v1191_holder_lifecycle_creator_guard_covers_every_creator_scoped_table() {
     let (pool, _dir) = fresh_pool().await;
 
-    // from the migrated schema (never a hand-kept copy).
     let tables: Vec<String> = sqlx::query_scalar(
         "SELECT m.name FROM sqlite_master m \
          WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' \

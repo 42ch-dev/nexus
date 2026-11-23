@@ -47,9 +47,6 @@ pub fn validate_slug_name(slug: &str) -> Result<(), &'static str> {
     if slug.ends_with(char::is_whitespace) {
         return Err("must not end with whitespace");
     }
-    // and ignores everything after the first dot when resolving the device, so
-    // the comparison is on the part before it. A dot in the tail is otherwise
-    // legal (`my.con`).
     let stem = slug.split_once('.').map_or(slug, |(stem, _extension)| stem);
     if RESERVED_NAMES
         .iter()
@@ -89,7 +86,6 @@ mod tests {
             ("a\nb", "must not contain control characters"),
             ("novel.", "must not end with '.'"),
             ("novel ", "must not end with whitespace"),
-            // whitespace rule Windows silently strips.
             ("novel\t", "must not contain control characters"),
             ("con", "must not be a reserved device name"),
             ("CON", "must not be a reserved device name"),

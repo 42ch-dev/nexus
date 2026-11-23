@@ -234,10 +234,6 @@ impl AgentSpawner {
             .stderr(Stdio::inherit())
             .kill_on_drop(kill_on_drop);
 
-        // process-group leader (PGID == child PID), so the owned process tree
-        // — including any descendants the agent spawns — can be signalled and
-        // reaped as one unit, guarded by the owned child's liveness. A reused
-        // or unowned PID/group is never signalled.
         #[cfg(unix)]
         {
             cmd.process_group(0);
@@ -315,15 +311,9 @@ fn read_start_tick(pid: u32) -> Option<u64> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
     let pid = Pid::from_u32(pid);
-    // OS). Fail closed: no system snapshot → no birth token → cleanup
-    // unconfirmed (verify refuses; capture yields None deterministically).
     let Ok(mut system) = System::new() else {
         return None;
     };
-    // else. `ProcessesToUpdate::Some` keeps the refresh bounded to one
-    // process, `ProcessRefreshKind::nothing()` rules out every optional
-    // field (PID / PPID / name / start time are always reported), and
-    // `without_tasks()` avoids enumerating the process' threads.
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid]),
         true,
@@ -617,7 +607,6 @@ impl ManagedAcpProcess {
             "Initiating owned ACP process-tree shutdown"
         );
 
-        // already sent the ACP session/cancel notification).
         let wait_result = timeout(grace, self.child_mut()?.wait()).await;
         match wait_result {
             Ok(Ok(status)) => {
@@ -649,13 +638,7 @@ impl ManagedAcpProcess {
         {
             use nix::sys::signal::Signal;
 
-            // (PGID == birth PID), NOT the live child id: after the leader is
-            // reaped, the birth identity still identifies the owned group.
-            // Every signal re-validates the birth token (PID + OS start
-            // time); a missing or invalidated token means cleanup is
-            // UNCONFIRMED — the group is never signalled on a PID alone.
             let Some(birth) = self.birth.clone() else {
-                // the leader and report unconfirmed cleanup, never signal.
                 let status = self
                     .child_mut()?
                     .wait()
@@ -672,9 +655,6 @@ impl ManagedAcpProcess {
             };
             let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
 
-            // the whole owned group is quiescent (guarded by the birth
-            // token's numeric identity) before claiming success; survivors
-            // are still SIGKILLed as a unit.
             if self.child_mut()?.id().is_none() {
                 if Self::wait_group_quiescent(pgrp, grace).await {
                     let status = self
@@ -707,7 +687,6 @@ impl ManagedAcpProcess {
                     agent_id = %self.agent_id,
                     "birth token invalidated or SIGTERM failed; owned group not signalled"
                 );
-                // cleanup is not confirmed.
                 if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
                     let _ = self.child_mut()?.wait().await;
                     return Err(AcpError::cleanup_unconfirmed(
@@ -719,8 +698,6 @@ impl ManagedAcpProcess {
             let wait_result = timeout(grace, self.child_mut()?.wait()).await;
             match wait_result {
                 Ok(Ok(status)) => {
-                    // confirmed when the WHOLE owned group is quiescent: a
-                    // descendant that ignored SIGTERM must be SIGKILLed.
                     if Self::wait_group_quiescent(pgrp, grace).await {
                         tracing::info!(
                             agent_id = %self.agent_id,
@@ -888,7 +865,6 @@ impl ManagedAcpProcess {
     // Single linear teardown sequence; see `shutdown`.
     #[allow(clippy::too_many_lines)]
     pub async fn terminate(mut self, grace: Duration) -> AcpResult<()> {
-        // teardown on the already-reaped handle after this consumes self.
         let mut child = self.child.take().ok_or_else(|| {
             AcpError::agent_crashed(
                 None,
@@ -901,11 +877,6 @@ impl ManagedAcpProcess {
         {
             use nix::sys::signal::Signal;
             let Some(birth) = self.birth.clone() else {
-                // the leader if it is already dead and report unconfirmed
-                // cleanup, never signal. Every wait is bounded, and a
-                // deadline expiry hands the child to the non-signalling
-                // reaper instead of dropping it: dropping would fire
-                // kill_on_drop and turn the refusal into an implicit kill.
                 match timeout(grace, child.wait()).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
@@ -926,11 +897,6 @@ impl ManagedAcpProcess {
             };
             let pgrp = nix::unistd::Pid::from_raw(birth.pid.cast_signed());
 
-            // a zombie leader's start time stays readable (Linux), the
-            // SIGTERM reaches live descendants even though the leader already
-            // exited. A refusal means identity cannot be proven — the
-            // dead-but-unreaped-leader case — handled by reap-on-sight below;
-            // an unprovable identity is never signalled twice.
             let sigterm_sent = Self::signal_group_guarded(&birth, Signal::SIGTERM);
             if sigterm_sent {
                 tracing::debug!(
@@ -940,14 +906,6 @@ impl ManagedAcpProcess {
 
                 #[cfg(target_os = "linux")]
                 {
-                    // safe `waitid(WEXITED | WNOWAIT | WNOHANG)` leaves the
-                    // zombie unreaped; bounded by the cleanup deadline).
-                    // Reaping here would invalidate the birth token and
-                    // permanently disable the SIGKILL escalation — the
-                    // group leak this ordering prevents. A probe failure
-                    // surfaces immediately; deadline expiry only means the
-                    // leader ignored SIGTERM and is escalated while its
-                    // identity verifies below.
                     let observed = tokio::time::timeout(grace, async {
                         loop {
                             match nix::sys::wait::waitid(
@@ -969,11 +927,6 @@ impl ManagedAcpProcess {
                         return Err(e);
                     }
 
-                    // lethal for SIGTERM-ignoring survivors, a no-op for the
-                    // leader zombie and already-dead members. The leader's
-                    // own zombie keeps `killpg(_, 0)` non-ESRCH, so proving
-                    // group quiescence BEFORE the reap is impossible — the
-                    // quiescence check after the reap proves the outcome.
                     if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
                         if timeout(grace, child.wait()).await.is_err() {
                             Self::hand_to_reaper(child);
@@ -983,7 +936,6 @@ impl ManagedAcpProcess {
                         ));
                     }
 
-                    // group gone.
                     let status = match timeout(grace, child.wait()).await {
                         Ok(Ok(status)) => status,
                         Ok(Err(e)) => return Err(AcpError::cleanup_unconfirmed(e.to_string())),
@@ -1009,19 +961,9 @@ impl ManagedAcpProcess {
 
                 #[cfg(not(target_os = "linux"))]
                 {
-                    // `waitid` only on Linux/FreeBSD, and once the leader
-                    // exits its zombie identity is unreadable here, so an
-                    // escalation after exit is impossible. This is not the
-                    // intended ordering — it is the best safe ordering this
-                    // platform allows: graceful leader exit (bounded), then
-                    // quiescence; survivors are refused (honest
-                    // CleanupUnconfirmed), and a leader still alive past the
-                    // grace still gets its guarded SIGKILL while provable.
                     let wait_result = timeout(grace, child.wait()).await;
                     match wait_result {
                         Ok(Ok(_)) => {
-                            // descendants, and the identity to signal them
-                            // is gone on this platform.
                             if Self::wait_group_quiescent(pgrp, grace).await {
                                 tracing::info!(
                                     agent_id = %self.agent_id,
@@ -1038,8 +980,6 @@ impl ManagedAcpProcess {
                             ));
                         }
                         Err(_) => {
-                            // identity provable: guarded SIGKILL, bounded
-                            // reap, quiescence.
                             tracing::warn!(
                                 agent_id = %self.agent_id,
                                 "Owned ACP process did not exit after group SIGTERM, proceeding to SIGKILL"
@@ -1090,14 +1030,6 @@ impl ManagedAcpProcess {
                 agent_id = %self.agent_id,
                 "birth token invalidated or SIGTERM failed; owned group not signalled"
             );
-            // dead-but-unreaped-leader case, or an invalidated token — and
-            // an unprovable identity is never signalled in any form. Reap a
-            // leader that already exited (zombie) so an already-dead tree is
-            // confirmed gone (the observed macOS CI launch-failure case)
-            // instead of misreported, then let bounded waits and the
-            // quiescence check decide. All waits are bounded; a deadline
-            // expiry hands the live child to the non-signalling reaper, so
-            // the refusal neither kills it nor leaves it unreaped.
             let _ = child.try_wait();
             match timeout(grace, child.wait()).await {
                 Ok(Ok(_)) => {}
@@ -1147,8 +1079,6 @@ impl Drop for ManagedAcpProcess {
         let agent_path = self.agent_path.clone();
         let birth = self.birth.clone();
 
-        // handle and run the full bounded terminate sequence (guarded
-        // SIGTERM → SIGKILL → reap → group quiescence).
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let owned = Self {
@@ -1168,7 +1098,6 @@ impl Drop for ManagedAcpProcess {
             return;
         }
 
-        // (birth-validated) and reap the leader with a bounded wait loop.
         #[cfg(unix)]
         {
             use nix::sys::signal::Signal;
@@ -1200,8 +1129,6 @@ impl Drop for ManagedAcpProcess {
                     );
                 }
             }
-            // bound expires; a still-running leader is left for the OS
-            // reaper (it was SIGKILLed above).
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
             loop {
                 match child.try_wait() {
@@ -1596,7 +1523,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn birth_token_unavailable_pid_fails_closed() {
-        // macOS at 99998), so this PID can never name a live process.
         let unavailable = i32::MAX.cast_unsigned();
         assert!(
             ProcessBirthToken::capture(unavailable).is_none(),
@@ -1642,7 +1568,6 @@ mod tests {
             "even SIGKILL must be refused for a recycled birth token"
         );
 
-        // described by its true birth token.
         assert!(
             killpg(pgrp, None).is_ok(),
             "the owned group must be untouched"
@@ -1665,11 +1590,6 @@ mod tests {
         use tokio::io::AsyncBufReadExt;
 
         let spawner = AgentSpawner::new(PathBuf::from("/tmp"));
-        // owned process group without being the leader itself. The leader's
-        // TERM trap reaps that descendant before exiting, so the end state is
-        // observable without depending on when the OS reaps an orphan.
-        // stderr is dropped inside the fixture: the shell's job-control notice
-        // for the signalled background job is not part of this contract.
         let script = "exec 2>/dev/null; sleep 300 & echo $!; \
                       trap \"wait; exit 0\" TERM; while :; do sleep 0.05; done";
         let (child, _stdin, stdout) = spawner
@@ -1763,10 +1683,6 @@ mod tests {
         nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
             .expect("SIGKILL the owned child");
 
-        // exit status waitable (zombie) while nobody has reaped it, so tokio
-        // still owns the zombie below. The bound turns a wrong assumption
-        // into a failed test instead of a hang; the interval keeps the poll
-        // cheap without papering over the state check.
         await_zombie_state(leader).await;
 
         assert!(
@@ -1777,8 +1693,6 @@ mod tests {
             proc.birth().is_some(),
             "the spawn-time birth token must have been captured"
         );
-        // the pre-fix signalling path must refuse regardless of whether the
-        // OS still reports a zombie's start time (Linux can, macOS cannot).
         proc.birth = Some(ProcessBirthToken {
             pid: leader,
             start_tick: u64::MAX,
@@ -1874,7 +1788,6 @@ mod tests {
             .expect("spawn grouped fixture");
         let leader = child.id().expect("leader pid");
         let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
-        // whole owned group (leader + descendant) on every exit path.
         let _guard = KillGroupOnDrop(leader_pid);
         let descendant = read_descendant_pid(stdout).await;
         let descendant_pid = nix::unistd::Pid::from_raw(descendant.cast_signed());
@@ -1937,13 +1850,10 @@ mod tests {
             "the SIGTERM-ignoring descendant must be alive before teardown"
         );
 
-        // ignores the signal, so this burns the full window) and the SIGKILL
-        // wait.
         proc.terminate(Duration::from_secs(1))
             .await
             .expect("SIGKILL escalation must reap a SIGTERM-ignoring group");
 
-        // AND SIGKILLed the trap-protected descendant.
         assert!(
             ManagedAcpProcess::wait_group_quiescent(leader_pid, Duration::from_secs(5)).await,
             "the whole owned group must be gone after the SIGKILL escalation"
@@ -2004,7 +1914,6 @@ mod tests {
             "the survivor must be untouched by a refused signal"
         );
 
-        // fire-and-forget signal (the guard above covers failure paths).
         let _ = nix::sys::signal::kill(descendant_pid, nix::sys::signal::Signal::SIGKILL);
         let gone = tokio::time::timeout(Duration::from_secs(5), async {
             while nix::sys::signal::kill(descendant_pid, None).is_ok() {
@@ -2038,8 +1947,6 @@ mod tests {
             child,
             PathBuf::from("/bin/sleep"),
         );
-        // handle after the refusal, so this guard is what kills the leader on
-        // every failure path.
         let _guard = KillGroupOnDrop(leader_pid);
         proc.birth = Some(ProcessBirthToken {
             pid: leader,
@@ -2066,10 +1973,6 @@ mod tests {
             "the refused teardown must not have killed the leader"
         );
 
-        // forgotten — a detached reaper waits for the exit. Kill the fixture
-        // explicitly and prove the reap: a zombie still answers `kill(pid, 0)`
-        // (so it would stay `Ok` forever without an owner), while ESRCH means
-        // the reaper collected it.
         nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
             .expect("SIGKILL the refused live fixture");
         let reaped = tokio::time::timeout(Duration::from_secs(5), async {
@@ -2091,7 +1994,6 @@ mod tests {
     #[cfg(unix)]
     #[test] // sync: it owns the inner runtime whose shutdown is under test
     fn refused_child_survives_reaper_runtime_shutdown() {
-        // spawned on — and torn down with — this dedicated runtime.
         let inner = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -2107,7 +2009,6 @@ mod tests {
                 child,
                 PathBuf::from("/bin/sleep"),
             );
-            // deadline and hands the child to the reaper.
             proc.birth = Some(ProcessBirthToken {
                 pid: leader,
                 start_tick: u64::MAX,
@@ -2133,8 +2034,6 @@ mod tests {
             "the refusal must be typed as a liveness failure: {err}"
         );
 
-        // the runtime down cancels that task. A `kill_on_drop` child would be
-        // killed right here.
         inner.shutdown_timeout(Duration::from_secs(5));
 
         assert_survives_without_signal(leader, "the runtime shutdown of the reaper");
@@ -2151,7 +2050,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn reaper_without_runtime_never_signals_and_reaps_the_child() {
-        // out of that runtime's context (a plain test thread).
         let inner = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -2167,13 +2065,10 @@ mod tests {
         });
         let leader_pid = nix::unistd::Pid::from_raw(leader.cast_signed());
 
-        // deliver `kill_on_drop`'s SIGKILL) and its pid is reaped off-thread.
         ManagedAcpProcess::hand_to_reaper(child);
 
         assert_survives_without_signal(leader, "the reaper's no-runtime fallback");
 
-        // the fallback's `waitpid` thread, i.e. it reaps rather than leaving a
-        // zombie.
         nix::sys::signal::kill(leader_pid, nix::sys::signal::Signal::SIGKILL)
             .expect("SIGKILL the fixture");
         let deadline = std::time::Instant::now() + Duration::from_secs(5);

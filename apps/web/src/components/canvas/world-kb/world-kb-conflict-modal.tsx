@@ -142,10 +142,6 @@ export function WorldKbPromoteConflictModal({
   onDismiss,
 }: WorldKbPromoteConflictModalProps) {
   const { t } = useTranslation('canvas');
-  // action is intentionally non-overlapping with the canonical action: "reapply"
-  // means "redo my decision against the new version", not "clobber the same
-  // field". Distinct ids keep ConflictModalBase's overlap guard from disabling
-  // Reapply my decision (compass §1.1 A6 promote variant action tray).
   const serverChanges: ConflictField<'canonical-promotion'>[] = [
     {
       id: 'canonical-promotion',
@@ -214,10 +210,6 @@ export function WorldKbPromoteConflictModal({
   );
 }
 
-/**
- * the conflict body. The base modal renders the description inline, so this
- * returns a React node rather than a templated string.
- */
 function bold(value: string): React.ReactNode {
   return <strong className="font-semibold">{value}</strong>;
 }

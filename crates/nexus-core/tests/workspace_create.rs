@@ -107,7 +107,6 @@ async fn create_adopts_empty_dir_and_refuses_foreign_content() {
         .expect("adopt empty dir");
     assert_eq!(created.creative_root, adopted.display().to_string());
 
-    // it is still adopted instead of returning a confusing conflict.
     let finder = user_home.join("finder-root");
     std::fs::create_dir_all(&finder).unwrap();
     std::fs::write(finder.join(".DS_Store"), b"finder metadata").unwrap();
@@ -228,7 +227,6 @@ async fn create_refuses_invalid_slug_name_and_override() {
         "unexpected: {control:?}"
     );
 
-    // trailing dot would silently vanish from the directory name on Windows.
     for slug in ["con", "CON", "prn", "aux", "nul", "com1", "COM9", "lpt9"] {
         let err = svc
             .create_workspace(request(&creator_id, slug, Some("Bad"), None))
@@ -256,7 +254,6 @@ async fn create_refuses_invalid_slug_name_and_override() {
         "unexpected: {trailing_dot:?}"
     );
 
-    // would silently name the same directory as `"novel"`.
     let trailing_space = svc
         .create_workspace(request(&creator_id, "novel ", Some("Bad"), None))
         .await

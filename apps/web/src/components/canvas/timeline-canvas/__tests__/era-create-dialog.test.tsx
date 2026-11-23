@@ -1,8 +1,4 @@
 /**
- * P1 T2 — F-001 / R-V1159P1-001 closed: the V1.160 P1 T1 backend
- * create-on-absent path makes `patch-entity` create the era when the minted
- * entity id is absent, so the create dialog path is LIVE).
- *
  * Coverage:
  *   1. creates_era_without_parent  — patch-entity called with the correct
  *      create payload (minted id, expected_version 0, era patch); no
@@ -311,13 +307,11 @@ describe('EraCreateDialog', () => {
 
     expect(patchRelationshipMutateAsync).toHaveBeenCalledTimes(1);
 
-    // would mint a fresh entity id → duplicate era).
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
     await waitFor(() => {
       expect(props.onSuccess).toHaveBeenCalledWith('kb-new-1');
     });
 
-    // surfaced as a warning toast instead.
     expect(screen.queryByTestId('era-create-dialog-error')).toBeNull();
     await waitFor(() => {
       expect(
@@ -355,7 +349,6 @@ describe('EraCreateDialog', () => {
 
 describe('TimelineCanvas — Brief create entry + T2-M2 fix', () => {
   it('shows the New era entry on the Brief layer and opens the dialog', async () => {
-    // renders the "新建 era" button in the header chrome.
     renderInApp(<TimelineCanvas worldId="world-7" />, {
       client: makeMockClient(eraGraph),
     });

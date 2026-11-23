@@ -164,8 +164,6 @@ impl<B: McpBackend> ServerHandler for McpBridgeHandler<B> {
         _context: RequestContext<RoleServer>,
     ) -> std::result::Result<ListToolsResult, McpError> {
         let rows = self.backend.list_tools().await?;
-        // rows BEFORE the row→Tool mapping. Absent policy ⇒ identity
-        // (byte-identical current behavior).
         let tools: Vec<Tool> = rows
             .into_iter()
             .filter(|row| self.policy.is_visible(&row.id))
@@ -361,7 +359,6 @@ mod tests {
     #[test]
     fn unroutable_classification_is_typed_not_textual() {
         assert!(is_unroutable("not_supported", None));
-        // even when the message text contains the unroutable substring.
         assert!(!is_unroutable("not_supported", Some("op_unsupported")));
         assert!(!is_unroutable("invalid_input", None));
         assert!(!is_unroutable("internal", None));
@@ -522,9 +519,6 @@ mod tests {
 
     #[tokio::test]
     async fn absent_policy_list_tools_is_byte_identical_to_unfiltered() {
-        // byte-identical to the pre-seam behavior — every catalog row
-        // listed, in order, schemas verbatim. The golden JSON pins the
-        // exact wire shape (camelCase keys; absent `_meta`/`nextCursor`).
         let rows = vec![
             CatalogRow {
                 id: "nexus.workspace.info".to_owned(),
@@ -569,9 +563,6 @@ mod tests {
 
     #[tokio::test]
     async fn absent_policy_call_tool_dispatches_to_backend_unchanged() {
-        // dispatch every call to the backend exactly as before — the
-        // backend is invoked with the caller's name + arguments and the
-        // outcome maps identically (success → structured content).
         let backend = GoldenBackend::new(Vec::new());
         let running = serve_handler(McpBridgeHandler {
             backend: backend.clone(),
@@ -602,9 +593,6 @@ mod tests {
 
     #[tokio::test]
     async fn present_policy_list_tools_filters_to_visible_subset() {
-        // the operator-configured subset — unlisted rows are dropped
-        // BEFORE the row→Tool mapping, listed rows keep their verbatim
-        // schemas.
         let rows = vec![
             CatalogRow {
                 id: "nexus.workspace.info".to_owned(),
@@ -643,9 +631,6 @@ mod tests {
 
     #[tokio::test]
     async fn present_policy_hidden_tool_call_short_circuits_before_backend() {
-        // the visibility seam BEFORE the backend — the backend is never
-        // invoked, and the refusal is a distinct `tool_not_authorized` protocol
-        // error (not success, not a silent no-op, not unroutable).
         let backend = GoldenBackend::new(Vec::new());
         let running = serve_handler(McpBridgeHandler {
             backend: backend.clone(),
@@ -677,9 +662,6 @@ mod tests {
 
     #[test]
     fn map_outcome_visible_but_denied_is_typed_refusal() {
-        // the authz spine (admission_pipeline Forbidden / peer deny wire
-        // code) maps to an executed-but-failed `CallToolResult::error`
-        // naming the spine code — never a silent drop, never a 500.
         let result = map_outcome(ToolCallOutcome::ExecutedError {
             code: "forbidden".to_owned(),
             message: "Forbidden: fs/* tools require an active workspace with defined bounds"
@@ -770,7 +752,6 @@ mod tests {
             async move {
                 calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 entered.notify_one();
-                // exactly one release per in-flight call.
                 releases
                     .acquire()
                     .await
@@ -902,7 +883,6 @@ mod tests {
             "the first call reached the backend"
         );
 
-        // cancellation before anything below is released.
         write_wire_line(
             &mut write,
             r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2,"reason":"probe"}}"#,
@@ -910,14 +890,9 @@ mod tests {
         .await;
         ping_barrier(&mut write, &mut lines, 9).await;
 
-        // finish — the backend signals from inside the handler future.
         backend.release_one();
         backend.exited.notified().await;
 
-        // single FIFO sink before this ping is even written, so reading the
-        // ping's answer proves the sink proxy has already handled it. If the
-        // cancelled response were delivered instead of dropped, it would be the
-        // line read here and the id assertion fails.
         ping_barrier(&mut write, &mut lines, 10).await;
 
         write_wire_line(

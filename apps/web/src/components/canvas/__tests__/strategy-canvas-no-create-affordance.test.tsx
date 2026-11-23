@@ -1,6 +1,4 @@
 /**
- * (canvas-legacy-affordances Task 4).
- *
  * Both shapes the canvas can render are read-only: the applied document and the
  * Compose working document. Neither may offer edge creation, transition
  * creation or an inspector save — the deleted YAML-authoring entry points must
@@ -31,7 +29,6 @@ import { renderInApp } from '@/test/test-providers';
 const shellProps = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
 vi.mock('@/components/canvas/canvas-shell', () => ({
-  // selected node renders; the props are what the shell would wire.
   CanvasShell: (props: { children?: React.ReactNode } & Record<string, unknown>) => {
     shellProps.current = props;
     return <>{props.children}</>;
@@ -52,7 +49,6 @@ const SESSIONS_PATH = '/v1/daemon/orchestration/sessions';
 const SCHEDULES_PATH = '/v1/daemon/orchestration/schedules';
 
 const SEED = servedIrDocument({ id: STRATEGY_ID });
-// (state, transition, prompt) are rendered and asserted.
 const DOCUMENT: WorkflowDocument = {
   ...SEED,
   nodes: SEED.nodes.map((node) =>
@@ -91,11 +87,9 @@ function expectCanvasOffersNoCreateRoute(container: HTMLElement) {
   fireEvent.keyDown(window, { key: 'N', shiftKey: true });
   expect(canvas.queryByText('Create Transition')).not.toBeInTheDocument();
 
-  // graph↔list toggle (the create-transition command is gone, not hidden).
   expect(canvas.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
   expect(getCommands().map((command) => command.id)).toEqual(['strategy.toggle-view']);
 
-  // no save control anywhere in the canvas.
   act(() => {
     (shellProps.current.onNodesChange as (changes: NodeChangeset) => void)(
       new NodeChangeset([{ id: 'draft', type: 'select', selected: true }]),

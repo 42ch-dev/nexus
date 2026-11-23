@@ -40,8 +40,6 @@ use nexus_home_layout::device_id::get_or_create_device_id;
 #[async_trait]
 impl HostManifestPort for NexusAdapter<'_> {
     async fn get_host_capability_manifest(&self) -> SpokeResult<HostCapabilityManifest> {
-        // `local_manifest` (P3 T3) calls the same function with the same
-        // device-id host_id — one capability list, one extensions.nexus block.
         let host_id = match &self.host_id {
             Some(id) => id.clone(),
             None => {
@@ -170,7 +168,6 @@ fn resolve_device_id_from_standard_home() -> SpokeResult<String> {
             "cannot resolve home directory for device-id".into(),
         ));
     };
-    // itself (canonical `~/.nexus42/device-id`; device_id_path contract).
     match get_or_create_device_id(&home) {
         Ok(id) => SpokeResult::Ok(id),
         Err(e) => SpokeResult::Reject(reject_internal(format!("device-id unavailable: {e}"))),
@@ -282,10 +279,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn self_manifest_reports_injected_host_id_and_n_c1_contract() {
-        // satisfy the adapter struct shape. Use an in-memory pool with
-        // migrations so the adapter construction path mirrors the other
-        // ports. The host id is injected so the test stays hermetic — no
-        // reads/writes against the real `~/.nexus42`.
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
@@ -298,8 +291,6 @@ mod tests {
         };
 
         assert_eq!(manifest.host_id.as_str(), "test-host-uuid-0000");
-        // the compute role is advertised only when the `compute` feature owns
-        // the engine (the honesty rule the builder enforces).
         assert_eq!(
             manifest.roles,
             crate::manifest::LOCAL_ROLES
@@ -308,8 +299,6 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
         );
-        // S — capabilities = baseline 3 ++ LOCAL_TOOL_OPS (the serving
-        // host negotiates the tool ids; AR-48).
         assert_eq!(
             manifest.capabilities,
             crate::manifest::LOCAL_CAPABILITIES
@@ -326,8 +315,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["nexus".to_string()]
         );
-        // read-half block is present on the port surface too (product draft
-        // §4.3 item 9).
         let nexus_ext = manifest
             .extensions
             .get(&"nexus".parse().expect("locked key parses"))
@@ -534,8 +521,6 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let adapter = NexusAdapter::new_host(pool);
-        // an oversized id is constructible, so the adapter's own gate is the
-        // fail-closed boundary (mirrors the storage cap).
         let huge = "h".repeat(nexus_local_db::MAX_HOST_ID_CHARS + 1);
         let manifest = match crate::manifest::build_local_host_manifest(&huge) {
             SpokeResult::Ok(m) => m,
@@ -615,7 +600,6 @@ mod tests {
             Some(TEST_PEER_ID),
             "last_peer_id round-trips through the adapter read (R-V1155P0-001)"
         );
-        // recorded (chrono::Utc::now().to_rfc3339() — repo convention).
         assert!(
             chrono::DateTime::parse_from_rfc3339(&observed[0].last_seen).is_ok(),
             "last_seen is an RFC 3339 timestamp: {}",
@@ -639,9 +623,6 @@ mod tests {
         let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
-        // primitives validate JSON on insert, so only raw SQL can plant a
-        // corrupt row — exactly the storage-corruption scenario the
-        // InternalError contract exists for).
         sqlx::query(
             "INSERT INTO peer_hosts (host_id, manifest_json, last_seen) \
              VALUES ('corrupt-peer', '{not-json', '2026-08-08T00:00:00Z')",

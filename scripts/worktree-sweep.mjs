@@ -1,12 +1,5 @@
 #!/usr/bin/env node
 /**
- * and guard/check modes, plus the guarded `--apply` half (P1-T3).
- *
- *   node scripts/worktree-sweep.mjs \
- *     --repo <absolute-main-root> --harness <absolute-control-harness> \
- *     --workflow <id> --inventory <absolute-json> \
- *     [--apply | --check-exit <track-id> | --check-convergence]
- *
  * Authority, deliberately narrow:
  *   * The inventory is a NON-authoritative ownership receipt for one scheduling checkpoint.
  *     The workflow snapshot stays the only claim source, and `mstar-harness worktree cleanup`
@@ -108,18 +101,7 @@ const WORKFLOW_ID = /^[A-Za-z0-9._-]+$/;
 
 const ENGINE_BINARY = 'mstar-harness';
 const ENGINE_TIMEOUT_MS = 30_000;
-/**
- * git 2.54): `git worktree remove` refuses a worktree whose index holds a tracked submodule
- * gitlink, and the refusal survives both `git submodule deinit --all` and dropping that gitlink
- * from the doomed worktree's index. `deinit` additionally unregisters the submodule in the SHARED
- * superproject config, so it is never invoked here.
- */
 const ENGINE_SUBMODULE_REFUSAL = 'working trees containing submodules cannot be moved or removed';
-/**
- * ignored-only build-output footprint whose exact paths and sizes were enumerated — the second
- * measured cleanup obstacle (PM, 2026-09-25); any tracked or untracked non-ignored dirt keeps it a
- * refusal.
- */
 const ENGINE_DIRTY_REFUSAL = 'cleanup.refuse.dirty-worktree';
 const CAPTURE_LIMIT = 64 * 1024;
 const GIT_BUFFER = 4 * 1024 * 1024;
@@ -215,21 +197,6 @@ async function canonicalAlias(root, target) {
   return { tail: null, unreadable: null };
 }
 
-/**
- * first — a receipt may spell the temp root through a system alias (`/var/...` versus canonical
- * `/private/var/...` on Darwin, or any `TMPDIR` form that traverses a link) while `tmpdir()` is not
- * canonical on every platform — and only then are the candidate's existing components below the
- * root `lstat`ed one segment at a time, so a linked parent is never traversed to reach a location
- * the receipt never described, and a `..`-free resolved prefix is all that can be claimed.
- * A `..` component is refused outright: `resolve()` removes it lexically, without consulting the
- * filesystem, while the receipt is measured and reported by its own spelling, where the kernel
- * resolves a `..` following a link against that link's target — so a receipt carrying `..` cannot
- * be decided and used as one location, and is never normalized into one.
- * `within` is false for a receipt that is not a plain descendant of the root; `unreadable` carries
- * the failure code when the walk itself cannot be completed (a non-`ENOENT` failure), which the
- * caller must refuse as an unreadable fact rather than as a stale claim — and which a deeper
- * `ENOENT` never is: the tail simply does not exist yet.
- */
 async function canonicalWithin(parent, child) {
   const root = await pathKey(parent);
   if (child.split(sep).includes('..')) return { within: false, unreadable: null };
@@ -255,15 +222,6 @@ function refusal(code, detail, exitCode) {
   return { code, detail, exit_code: exitCode };
 }
 
-/**
- * action-time gate: a reclaimable feature checkout is `<repoRoot>/.worktrees/<name>` — its parent
- * is literally the repository root's own `.worktrees` directory, not merely a directory of that
- * name somewhere else on the disk. Both sides are compared canonically so an alias of the
- * repository root (or of its `.worktrees` directory) still matches, and the parent is canonicalized
- * even when the leaf is absent, so an idempotent retry of the same path compares equal.
- * A misspelled parent is refused before anything is described as deletable; nothing else here is
- * a preference or a warning.
- */
 async function canonicalWorktreeShape(path, repoRoot) {
   const parent = dirname(path);
   if (basename(parent) !== '.worktrees') {
@@ -277,22 +235,10 @@ async function canonicalWorktreeShape(path, repoRoot) {
   return { ok: true, detail: null };
 }
 
-/**
- * canonical parent implies. A path that exists canonicalises as a whole; an absent one (the
- * idempotent-retry case) still matches when its existing parent is spelled through a link — the
- * `/var` versus `/private/var` shape — because both spellings are compared against both sides.
- */
 async function ownershipSpellings(path) {
   return unique([await pathKey(path), join(await pathKey(dirname(path)), basename(path))]);
 }
 
-/**
- * record proves the path (the worktree is not a listed linked checkout of this repository) the
- * workflow snapshot itself is the only ownership evidence there is: the plan row the receipt pairs
- * with must retain exactly this worktree path (its `metadata.worktree_path` or its execution
- * lease's). A branch claim is not path ownership, and an unknown ownership fact refuses instead of
- * becoming inventory authority.
- */
 async function retainedOwnership(track, declaration) {
   const plan = declaration.plans.find(candidate => candidate.id === track.plan_id) ?? null;
   if (plan === null) {
@@ -309,10 +255,6 @@ async function retainedOwnership(track, declaration) {
   return { proven: true, detail: null };
 }
 
-/**
- * is not authoritative, but a producer receipt that changed or vanished between the planning pass
- * and a deletion is a changed fact like any other, so it is read again there rather than trusted.
- */
 async function receiptOf(path, trackId) {
   const read = await readInventory(path);
   if (read.error !== undefined) return { error: `the ownership receipt can no longer be read (${read.error})` };
@@ -331,8 +273,6 @@ function cap(text) {
 
 
 function parseArgs(argv) {
-  // other token it is an invalid invocation (exit 2) instead of silently
-  // swallowing a misspelled required flag beside it.
   if (argv.length === 1 && (argv[0] === '-h' || argv[0] === '--help')) {
     return { apply: false, checkExit: null, checkConvergence: false, help: true };
   }
@@ -528,11 +468,6 @@ async function pathBytes(path) {
   return { exists: true, is_symlink: false, bytes: total, unreadable };
 }
 
-/**
- * many initialized submodule checkouts point at a gitdir that does not resolve. The second fact
- * is the diagnosis for this repository's linked checkouts; the first is what makes a non-forced
- * `git worktree remove` inadmissible here.
- */
 async function submoduleState(worktreePath, environment) {
   const staged = await runGit(['ls-files', '--stage'], worktreePath, environment);
   if (staged.exit_code !== 0) {
@@ -581,21 +516,11 @@ function cacheRootFrom(environment) {
   return { path: join(homedir(), '.cache') };
 }
 
-/**
- * checkout's canonical `nexus-target` is spelled by the callers that mean it, so no checkout is ever
- * mapped onto another's cache — not even `iteration-*`.
- */
 function expectedTargetFor(cacheRoot, worktreePath) {
   return join(cacheRoot, `${FEATURE_TARGET_PREFIX}${basename(worktreePath)}`);
 }
 
 
-/**
- * (`killed` + `signal`) or terminated by any signal is the tool's own timeout path and is labelled
- * `timeout`; a named failure (`ENOENT`, `EACCES`, `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`, …) keeps its
- * own code; only a child that failed with nothing else known is a `spawn-failed`. Every
- * classification is fail-closed, and none of them is ever read as a successful call.
- */
 function spawnFailureOf(error) {
   if (typeof error.code === 'number') return null;
   if (nonEmptyString(error.code)) return String(error.code);
@@ -744,13 +669,6 @@ function branchClaimers(declaration, branch) {
   return claimers;
 }
 
-/**
- * declares, its integration branch, its integration checkout, and each declared plan worktree —
- * plus the feature target that worktree's `.envrc` mapping implies, so a collision cannot hide
- * behind a different spelling of the same path. The projection is derived from the declarations
- * alone and is made from whatever read produced them, so the planning pass and the pre-mutation
- * re-read apply one rule.
- */
 async function foreignClaimsOf(siblings, cacheRoot) {
   const branches = new Map();
   const paths = new Map();
@@ -764,8 +682,6 @@ async function foreignClaimsOf(siblings, cacheRoot) {
     if (sibling.integration_worktree_path !== undefined) {
       paths.set(await pathKey(sibling.integration_worktree_path), sibling.id);
     }
-    // is a foreign claim even while that worktree is gone: a path a sibling plan still claims must
-    // never read as free just because the branch happens to be claimed locally as well.
     for (const plan of sibling.plans) {
       for (const worktreePath of plan.worktreePaths) {
         for (const claimed of [worktreePath, expectedTargetFor(cacheRoot, worktreePath)]) {
@@ -778,10 +694,6 @@ async function foreignClaimsOf(siblings, cacheRoot) {
   return { branches, paths };
 }
 
-/**
- * feature target. The wording is the planning pass's own, so a claim reported before a mutation and
- * the same claim reported by the dry run read as one rule; `null` means no sibling claims it.
- */
 async function foreignClaimOn(claims, track, targetKey) {
   const branchOwner = claims.branches.get(track.branch);
   if (branchOwner !== undefined) return `branch ${track.branch} is claimed by foreign workflow ${branchOwner}`;
@@ -827,9 +739,6 @@ function validateScheduling(raw, refuse) {
   };
 }
 
-/**
- * operator sees the whole refusal set; any refusal withholds proposals and engine invocations.
- */
 async function reconcileInventory({ raw, workflowId, declaration, foreignClaims, worktrees, mainRoot, cacheRoot, tempRoot }) {
   const refusals = [];
   const refuse = (code, detail, exitCode = EXIT_INVALID) => refusals.push(refusal(code, detail, exitCode));
@@ -920,8 +829,6 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
       seen[field].set(value, entry.track_id);
     }
 
-    // one of them is wrong, and the completed one would otherwise propose reclaiming a path an
-    // active or foreign track still claims.
     for (const temporary of entry.temporary_paths) {
       const key = await pathKey(temporary);
       const previous = seen.temporary.get(key);
@@ -958,10 +865,8 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
     if (worktree === null) {
       const onDisk = await describePath(entry.worktree);
       if (onDisk.unreadable !== null) {
-        // from here: the fact refusal below is what withholds every proposal for this inventory.
         refuse('sweeper.refuse.path-unreadable', `track ${entry.track_id} worktree ${entry.worktree} cannot be read (${onDisk.unreadable})`, EXIT_FACTS);
       } else {
-        // can never propose a path that `--apply` would refuse.
         const shape = await canonicalWorktreeShape(entry.worktree, mainRoot);
         if (!shape.ok) {
           refuse('sweeper.refuse.non-canonical-worktree', `track ${entry.track_id} worktree ${entry.worktree} is not a reclaimable feature path: ${shape.detail}`);
@@ -1019,10 +924,6 @@ async function reconcileInventory({ raw, workflowId, declaration, foreignClaims,
 }
 
 
-/**
- * same shape the dry run already records for the engine probe. Nothing here rewrites or summarises
- * what a command did.
- */
 async function runRecorded(file, args, cwd, environment) {
   const record = { argv: [file, ...args], exit_code: null, spawn_error: null, stdout: '', stderr: '', truncated: false };
   try {
@@ -1075,14 +976,6 @@ async function engineDecision(record, worktreeKey) {
 }
 
 
-/**
- * containment decision is not a durable fact — a symlink component's target is resolved by the
- * kernel in a single step — so the current system temp root and the receipt's own identity are
- * re-read here: the temp root must still canonicalise to the same root, the receipt must still be
- * an unlinked path inside it (the same prefix-sequence rule the dry run applied), must not have
- * moved into the cache or the repository, and must not be a symlink. Any changed, unreadable or
- * ambiguous fact is a refusal; a receipt that is already gone is idempotent, not a deletion.
- */
 async function reverifyTemporary(path, { tempRootKey, cacheRoot, mainRoot }) {
   const currentRoot = await pathKey(tmpdir());
   if (currentRoot !== tempRootKey) {
@@ -1108,11 +1001,6 @@ async function reverifyTemporary(path, { tempRootKey, cacheRoot, mainRoot }) {
   return { ok: true, absent: !probe.exists, reason: null, detail: null };
 }
 
-/**
- * canonicalise to the planned root, the path must still be exactly the `.envrc`-derived target for
- * this worktree's basename, must still be an unlinked path inside that root, must never be the
- * shared canonical cache, and must not be a symlink.
- */
 async function reverifyOwnedTarget(path, { expectedPath, cacheRootKey, environment }) {
   const resolution = cacheRootFrom(environment);
   if (resolution.error !== undefined) {
@@ -1145,15 +1033,6 @@ async function reverifyOwnedTarget(path, { expectedPath, cacheRootKey, environme
   return { ok: true, absent: !probe.exists, reason: null, detail: null };
 }
 
-/**
- * documented non-force route: it must still be a linked worktree of THIS repository, on the
- * declared branch, at the one canonical `<repoRoot>/.worktrees/<name>` path — decided by the same
- * predicate the dry run applies — whose `.worktrees` parent is a readable real directory, and must
- * not be the main or a protected checkout. A path that exists without being a registered linked
- * worktree is refused rather than removed. The result also reports whether a live Git record was
- * found (`worktree_listed`), which is what tells the authorization re-read whether the path's
- * ownership still rests on that record or must come from the snapshot.
- */
 async function reverifyWorktree(path, { branch, worktreeKey, repoRoot, mainRoot, protectedKeys, environment }) {
   const probe = await describePath(path);
   if (probe.unreadable !== null) {
@@ -1205,10 +1084,6 @@ function releaseProof(track, declaration) {
   return { released: true, code: null, detail: null };
 }
 
-/**
- * no longer exists is already gone and cannot protect anything; an unresolvable evidence ref is a
- * fact gap and refuses.
- */
 async function mergeProof(track, declaration, repoRoot, environment) {
   const evidenceBase = declaration.integration_branch ?? declaration.base_branch;
   if (!nonEmptyString(evidenceBase)) {
@@ -1246,22 +1121,6 @@ async function engineSubmoduleRefusal(record, worktreePath, worktreeKey) {
   return null;
 }
 
-/**
- * it. The measurement is taken HERE, against the worktree as it stands: the tracked tree must be
- * clean (`git status --porcelain --untracked-files=no`), every porcelain record must be an ignored
- * one (a `?? ` untracked non-ignored path, or any other record, is real dirt), and at least one
- * ignored path must be listed. Each listed path is then measured, and a path that vanished between
- * the enumeration and its measurement is NOT a zero-byte footprint — `bytes: 0` with
- * `exists: false` is an unmeasured fact, so it fails closed instead of certifying evidence the tool
- * cannot vouch for.
- * The enumeration uses `-z` because that is the only porcelain spelling in which Git never
- * C-quotes a pathname: the bytes after the `<XY> ` separator ARE the path. The line-oriented form
- * quotes a name carrying a special character (`!! "we\"ird.log"`, and even a trailing space), so a
- * parser reading it would silently enumerate a different, nonexistent path; here a spelling that
- * still looks C-quoted is refused as undecodable rather than measured. Paths are never trimmed,
- * because leading and trailing spaces belong to the name.
- * Returns `{ ok: true, footprint }` or `{ ok: false, detail }` naming the fact that failed.
- */
 async function measureIgnoredOnlyFootprint(track, context) {
   const dirty = await runGit(['status', '--porcelain', '--untracked-files=no'], track.worktree_path, context.environment);
   if (dirty.exit_code !== 0) {
@@ -1278,8 +1137,6 @@ async function measureIgnoredOnlyFootprint(track, context) {
   const ignored = [];
   for (const record of status.stdout.split('\0')) {
     if (record === '') continue;
-    // tracked change. Directory-level reporting keeps this enumeration proportional to the number of
-    // ignored roots Git itself reports.
     if (!record.startsWith('!! ')) {
       return { ok: false, detail: `${track.worktree_path} carries a non-ignored porcelain entry ${JSON.stringify(record)}, which is real dirt` };
     }
@@ -1295,7 +1152,6 @@ async function measureIgnoredOnlyFootprint(track, context) {
   const paths = [];
   let total = 0;
   for (const relative of sorted(ignored)) {
-    // itself, spelled the way the walk and the evidence expect it.
     const path = join(track.worktree_path, relative.endsWith(sep) ? relative.slice(0, -1) : relative);
     const measured = await pathBytes(path);
     if (measured.unreadable !== null || measured.is_symlink || !measured.exists) {
@@ -1307,13 +1163,6 @@ async function measureIgnoredOnlyFootprint(track, context) {
   return { ok: true, footprint: { paths, total_bytes: total } };
 }
 
-/**
- * worktree after the engine refused it. `git status --porcelain --untracked-files=normal` reports
- * tracked modifications and untracked, non-ignored paths — the two shapes the ignored-only
- * classification also treats as real dirt — and never an ignored build output, so the documented
- * ignored-output route keeps working. Any porcelain record is a change; a status that cannot be
- * read is a fact gap and refuses, never a clean tree.
- */
 async function measureWorktreeChanges(track, context) {
   const status = await runGit(['status', '--porcelain', '-z', '--untracked-files=normal'], track.worktree_path, context.environment);
   if (status.exit_code !== 0) {
@@ -1334,12 +1183,6 @@ function prunableWorktreeNames(text) {
   return names;
 }
 
-/**
- * track's record. A dry run that would also drop a foreign stale entry is retained and reported
- * instead of silently pruning someone else's record. Returns whether this step completed, so a
- * prune refusal stops the steps after it instead of letting them run on a repository this tool has
- * just declined to touch.
- */
 async function pruneScopedWorktree({ name, context, actions }) {
   const dry = await runRecorded('git', ['worktree', 'prune', '--dry-run', '--verbose'], context.repoRoot, context.environment);
   context.commands.push(dry);
@@ -1370,12 +1213,6 @@ async function pruneScopedWorktree({ name, context, actions }) {
   return true;
 }
 
-/**
- * instead of trusting the command's wording. `rm -rf` runs with the exact path and no wildcard.
- * The result reports whether this step COMPLETED (removed, or already idempotent-absent) and whether
- * it attempted a mutation, so the caller can stop the track's remaining mutations at the first step
- * that did not complete; the refusal row it appended names that step and what it refused.
- */
 async function reclaimOwnedPath({ path, kind, context, actions, reverify }) {
   const check = await reverify();
   if (!check.ok) {
@@ -1399,14 +1236,6 @@ async function reclaimOwnedPath({ path, kind, context, actions, reverify }) {
   return { completed: true, mutated: true };
 }
 
-/**
- * that is purely an ignored build-output footprint): report the refusal it was entered for truthfully
- * with its evidence, re-run the full gate immediately before removing the exact worktree path, run
- * the scoped prune check and re-observe. A fact that changed since the engine's refusal leaves the
- * refusal standing and mutates nothing. The branch is handed back to the engine afterwards; it stays
- * the only mechanism allowed to delete a branch, and it declines to act on a path whose worktree
- * record is gone rather than forcing anything.
- */
 async function nonForceWorktreeRemoval({ track, context, actions, gate, refusal }) {
   const path = track.worktree_path;
   const blocked = addAction(actions, 'engine-worktree-removal', path, 'blocked', refusal.reason, refusal.detail);
@@ -1430,7 +1259,6 @@ async function nonForceWorktreeRemoval({ track, context, actions, gate, refusal 
     return;
   }
   addAction(actions, 'fallback-worktree-removal', path, 'executed', 'sweeper.executed.non-force-remove');
-  // declined to, so the branch handover after it does not run either.
   if (!(await pruneScopedWorktree({ name: basename(path), context, actions }))) return;
 
   const release = await invokeEngine({
@@ -1455,9 +1283,6 @@ async function nonForceWorktreeRemoval({ track, context, actions, gate, refusal 
     return;
   }
   if (branchRef.exit_code === 1 && branchRef.stdout.trim() === '' && branchRef.stderr.trim() === '') {
-    // removed nothing, so the row is the idempotent-absent verdict used everywhere else, never a
-    // claim that this run executed the release (the raw command records in commands[] stay as the
-    // evidence of what was actually run).
     addAction(actions, 'engine-branch-removal', track.branch, 'absent', 'sweeper.absent.idempotent');
     return;
   }
@@ -1465,12 +1290,6 @@ async function nonForceWorktreeRemoval({ track, context, actions, gate, refusal 
   addAction(actions, 'engine-branch-removal', track.branch, 'refuse', 'sweeper.refuse.git-unreadable', detail);
 }
 
-/**
- * `engine-worktree-removal` → fallback → `prune` → `engine-branch-removal`) is preserved in `--apply`
- * even though the worktree's identity is re-verified before anything is reclaimed: the report is
- * ordered by the contract, the mutations by their safety gate. The sort is stable, so rows of one
- * kind keep the order they were produced in.
- */
 const ACTION_KIND_ORDER = ['reclaim-target', 'reclaim-temporary', 'engine-worktree-removal', 'fallback-worktree-removal', 'prune', 'engine-branch-removal', 'reclaim-footprint', 'protected'];
 
 function orderActions(actions) {
@@ -1481,17 +1300,10 @@ function orderActions(actions) {
   return [...actions].sort((a, b) => rank(a) - rank(b)).map((action, index) => ({ ...action, order: index + 1 }));
 }
 
-/**
- * authorization: the snapshot release, the repository ancestry, the installed engine's own permit
- * and every exact path are re-proved here, immediately before each mutating action. A guard that
- * fails returns a refusal action with the fact that failed and mutates nothing, so a dirty, active,
- * leased, unmerged or ambiguously shaped slice keeps every byte.
- */
 async function applyTrack(fact, context) {
   const { track } = fact;
   const actions = [];
   const engineRecords = [];
-  // refusal leaves the planning facts untouched and needs no re-read.
   const refuseAll = (code, detail) => {
     addAction(actions, 'reclaim-footprint', track.worktree_path, 'refuse', code, detail);
     return { actions, engineRecords, applied: false };
@@ -1504,12 +1316,7 @@ async function applyTrack(fact, context) {
   if (track.producer_stopped !== true) {
     return refuseAll('sweeper.refuse.producer-running', `track ${track.track_id} holds no producer-stopped receipt, so its footprint is not a reclaimable slice`);
   }
-  // deletion to authorize.
   const reclaimable = fact.target.exists === true || fact.temporary_paths.some(temporary => temporary.exists === true);
-  // idempotent-retry case) there is no live Git record to prove the path, so the snapshot row this
-  // receipt pairs with must retain exactly this path; the branch claim already checked at
-  // reconciliation is not path ownership and never authorizes a deletion on its own. A track with
-  // nothing left to delete is not refused: there is no deletion to authorize.
   if (reclaimable && fact.worktree.listed === false && fact.ownership.proven !== true) {
     return refuseAll('sweeper.refuse.unproven-ownership', `track ${track.track_id} is not reclaimable: no live Git record proves its worktree and ${fact.ownership.detail}`);
   }
@@ -1518,11 +1325,6 @@ async function applyTrack(fact, context) {
   const merge = await mergeProof(track, context.declaration, context.repoRoot, context.environment);
   if (!merge.merged) return refuseAll(merge.code, merge.detail);
 
-  // or receipt removal, the engine handover, and the non-force fallback removal — and re-proves the
-  // whole footprint: this exact worktree is still a linked `<dir>/.worktrees/<name>` checkout of
-  // this repository on its declared branch and is neither main nor protected, and this exact
-  // `.envrc`-derived target is still an owned, non-symlink, in-root path inside the planned cache
-  // root. A fact that changed since the planning pass aborts that step and every later one.
   const worktreeGate = () => reverifyWorktree(track.worktree_path, {
     branch: track.branch,
     worktreeKey: track.worktree_key,
@@ -1541,7 +1343,6 @@ async function applyTrack(fact, context) {
     if (!worktreeCheck.ok) return worktreeCheck;
     const targetCheck = await targetGate();
     if (!targetCheck.ok) return targetCheck;
-    // separately so each caller can read the one it is about to mutate.
     return {
       ok: true,
       worktree_absent: worktreeCheck.absent,
@@ -1562,13 +1363,6 @@ async function applyTrack(fact, context) {
     return { ok: true, absent: footprint.target_absent, worktree_listed: footprint.worktree_listed, reason: null, detail: null };
   };
   /**
-   * planning pass proved the release, the ancestry and the producer receipt once, before the engine
-   * probe; those are facts of one moment, so each of them is read from disk again here: the
-   * snapshot's plan status and execution lease, the branch/plan claim pair, the retained-path
-   * ownership (whenever no live Git record proves the worktree at that moment), the repository's own
-   * ancestry, and the producer/state the receipt declares. Any changed, missing or unreadable fact
-   * aborts that step — and every later one — fail-closed, with zero further mutation.
-   *
    * The sibling declarations are re-read in the same breath, because the plan's foreign-claim
    * projection is a fact of the planning pass too: a peer that claims this track's branch, worktree
    * or target only AFTER the inventory was reconciled is not in that projection, and the step about
@@ -1579,7 +1373,6 @@ async function applyTrack(fact, context) {
     if (declarations.error !== undefined) {
       return { ok: false, reason: 'sweeper.refuse.snapshot-unreadable', detail: `the workflow declaration can no longer be read (${declarations.error})` };
     }
-    // this step exactly as it withholds every proposal in the planning pass.
     const unreadableSibling = (declarations.unreadable ?? [])[0] ?? null;
     if (unreadableSibling !== null) {
       return { ok: false, reason: 'sweeper.refuse.sibling-snapshot-unreadable', detail: `sibling workflow ${unreadableSibling.workflow_id}: ${unreadableSibling.detail} — its claims are unknown, so this step is withheld` };
@@ -1623,26 +1416,15 @@ async function applyTrack(fact, context) {
     }
     return { ok: true, reason: null, detail: null };
   };
-  /**
-   * are read again in the same breath, so the fact that permits the mutation is read as late as the
-   * path it applies to.
-   */
   const authorized = gate => async () => {
     const check = await gate();
     if (!check.ok) return check;
-    // idempotent success it is, and a changed fact is reported by the step that would act on it.
     if (check.absent === true || check.worktree_absent === true) return check;
     const listed = check.worktree_listed ?? fact.worktree.listed;
     const facts = await authorizationGate(listed);
     if (!facts.ok) return { ok: false, absent: false, reason: facts.reason, detail: facts.detail };
     return check;
   };
-  // measurement of one moment, never a standing permission: this gate re-derives it immediately
-  // before the fallback removal — the same exact worktree/target identity, the engine asked again,
-  // and the whole dirt classification measured again — and requires it to still hold. Real dirt that
-  // arrived after the first classification, an engine row that is no longer precisely
-  // `cleanup.refuse.dirty-worktree`, or an enumeration/cache that cannot be vouched for aborts the
-  // removal fail-closed, reporting the facts measured here.
   const ignoredOnlyGate = async () => {
     const footprint = await footprintGate();
     if (!footprint.ok || footprint.worktree_absent) return footprint;
@@ -1673,11 +1455,6 @@ async function applyTrack(fact, context) {
     }
     return { ok: true, worktree_absent: false, target_absent: footprint.target_absent, worktree_listed: footprint.worktree_listed, reason: null, detail: null };
   };
-  // engine refused AS IT STOOD — never a standing permission to delete whatever is there now. This
-  // gate re-proves the same identity and authorization facts AND measures the working tree again,
-  // immediately before its `rm -rf`: a tracked modification or an untracked non-ignored path that
-  // arrived after the refusal aborts the removal with zero mutation, the same discipline the
-  // ignored-only route applies to its own classification.
   const submoduleFallbackGate = async () => {
     const footprint = await footprintGate();
     if (!footprint.ok || footprint.worktree_absent) return footprint;
@@ -1688,13 +1465,6 @@ async function applyTrack(fact, context) {
     return { ok: true, worktree_absent: false, target_absent: footprint.target_absent, worktree_listed: footprint.worktree_listed, reason: null, detail: null };
   };
 
-  // refusal, so a leased, unmerged or genuinely dirty worktree loses nothing. The one measured
-  // exception is the dirt row when the dirt the engine reports is an ignored-only build-output
-  // footprint: that refusal is reported verbatim and routed around through the documented exact-path
-  // route below, never treated as a silent pass. The footprint is classified here, before anything is
-  // reclaimed, so a dirt-only refusal that is NOT ignored-only still mutates nothing — and because a
-  // classification is only true of the moment it was measured, it is re-derived again immediately
-  // before the fallback removal (see `ignoredOnlyGate`) rather than carried as a permission.
   let ignoredOnly = null;
   if (fact.worktree.listed) {
     const probe = await invokeEngine({
@@ -1733,9 +1503,6 @@ async function applyTrack(fact, context) {
     }
   }
 
-  // primary removal cannot be lawfully attempted the whole track is refused with zero mutation,
-  // instead of half-reclaiming a slice whose worktree has to stay. The worktree and the branch
-  // remain the engine's decision, and only this re-verified exact path is ever handed over.
   let worktreeRemains = false;
   if (!fact.worktree.listed) {
     addAction(actions, 'engine-worktree-removal', track.worktree_path, 'absent', 'sweeper.absent.idempotent');
@@ -1773,8 +1540,6 @@ async function applyTrack(fact, context) {
   }
   if (!worktreeRemains) return { actions, engineRecords, applied: true };
 
-  // a worktree, so a fact that changed after the check above — a re-acquired lease, a moved branch,
-  // a withdrawn producer receipt, or a path whose ownership no longer holds — must stop the handover.
   const beforeEngine = await authorized(footprintGate)();
   if (!beforeEngine.ok) {
     addAction(actions, 'engine-worktree-removal', track.worktree_path, 'refuse', beforeEngine.reason, beforeEngine.detail);
@@ -1799,9 +1564,6 @@ async function applyTrack(fact, context) {
     addAction(actions, 'engine-worktree-removal', track.worktree_path, 'refuse', 'sweeper.refuse.engine-unavailable', `engine cleanup --apply could not be executed (${applied.spawn_error})`);
     return { actions, engineRecords, applied: true };
   }
-  // re-observing this exact worktree path, which is also what guards the route below. The target is
-  // deliberately not re-proved here — the next mutation is the fallback removal, and the gate run
-  // immediately inside it re-proves the whole footprint, target included.
   const afterEngine = await worktreeGate();
   if (!afterEngine.ok) {
     addAction(actions, 'engine-worktree-removal', track.worktree_path, 'refuse', afterEngine.reason, afterEngine.detail);
@@ -1809,9 +1571,6 @@ async function applyTrack(fact, context) {
   }
   if (!afterEngine.absent) {
     const refusal = await engineSubmoduleRefusal(applied, track.worktree_path, track.worktree_key);
-    // and only when the local measurement agrees that this exact worktree carries submodule gitlinks.
-    // Like the ignored-only route, it re-measures the checkout immediately before its own `rm -rf`:
-    // what the engine refused is the worktree it saw, not whatever has arrived since.
     if (refusal !== null && fact.worktree.submodule_gitlinks > 0) {
       await nonForceWorktreeRemoval({
         track,
@@ -1830,7 +1589,6 @@ async function applyTrack(fact, context) {
         track,
         context,
         actions,
-        // classification — and the authorization facts with it — again, immediately before its `rm -rf`.
         gate: authorized(ignoredOnlyGate),
         refusal: {
           reason: 'sweeper.blocked.ignored-outputs',
@@ -1870,9 +1628,6 @@ function exitReasons(track) {
   }
   if (track.state !== 'completed') reasons.push({ code: 'sweeper.check.track-not-completed', detail: `track ${track.track_id} is ${track.state}` });
   if (track.producer_stopped !== true) reasons.push({ code: 'sweeper.check.producer-running', detail: `track ${track.track_id} holds no producer-stopped receipt` });
-  // has unreclaimed state left, even when its worktree, target and receipts are already gone. The
-  // sweeper never deletes a branch itself — it reports the residual so the exit is not read as a
-  // completed reclamation.
   if (track.state === 'completed') {
     if (track.worktree.branch_unreadable !== null) {
       reasons.push({ code: 'sweeper.check.branch-unreadable', detail: `track ${track.track_id} branch ${track.branch} cannot be read (${track.worktree.branch_unreadable})` });
@@ -1914,10 +1669,6 @@ function buildTrackActions(fact, decision) {
     addAction(actions, 'protected', track.worktree_path, 'protected', 'sweeper.protected.track-active');
     return actions;
   }
-  // absent, the receipt's path is owned only if the snapshot row retains it; with no such proof the
-  // dry run reports the refusal it would get from `--apply` instead of proposing a footprint whose
-  // ownership rests on a branch claim alone. A track with nothing left to delete is not refused —
-  // there is no proposal to withhold and no deletion to authorize.
   const reclaimable = fact.target.exists === true || fact.temporary_paths.some(temporary => temporary.exists === true);
   if (reclaimable && fact.worktree.listed === false && fact.ownership.proven !== true) {
     addAction(
@@ -1943,10 +1694,6 @@ function buildTrackActions(fact, decision) {
   }
   if (fact.worktree.listed) {
     if (fact.worktree.removal_blocked_by_submodules) {
-      // survives `git submodule deinit --all` (PM measurement on Git 2.54). The engine's raw
-      // dry-run row is still recorded above as evidence; the action is reported as blocked so no
-      // caller can read permission out of it, no forced or shared-config-mutating shortcut is
-      // taken, and the worktree's `submodule_unresolved_pointers` fact carries the diagnosis.
       addAction(actions, 'engine-worktree-removal', fact.worktree.path, 'blocked', 'sweeper.blocked.submodule-gitlinks');
     } else {
       const resolved = decision ?? { verdict: 'refuse', reason: 'sweeper.refuse.engine-no-plan' };
@@ -1961,10 +1708,6 @@ function buildTrackActions(fact, decision) {
 }
 
 /**
- * exact target footprint and every temporary receipt. Unreadable facts are returned as refusals,
- * never as absence, so no caller can certify an unmeasured footprint as gone. `--apply` re-runs
- * this after its mutations instead of replaying the planned action list.
- *
  * Path ownership is decided here, on the facts this pass measured: a listed linked worktree of this
  * repository on the claimed branch is owned by that record, and an absent one is owned only when the
  * snapshot row this receipt pairs with retains that exact path.
@@ -1989,9 +1732,6 @@ async function observeTrack(track, { repoRoot, environment, declaration }) {
   const listed = track.listed_worktree;
   let dirtyTracked = null;
   let submodules = { gitlinks: 0, unresolved: 0 };
-  // exists has not been fully reclaimed, so its presence (and the unreadability of that fact) is
-  // measured here rather than only inferred from an apply action list. Only `ENOENT`-equivalent git
-  // outcomes prove absence; anything else is unreadable and fails closed.
   const branchRef = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${track.branch}`], repoRoot, environment);
   let branchPresent;
   let branchUnreadable = null;
@@ -2039,11 +1779,6 @@ async function observeTrack(track, { repoRoot, environment, declaration }) {
   };
 }
 
-/**
- * planned listing is a stale fact, so the post-run observation must read the repository again. A
- * listing that cannot be read keeps the last known record, which then fails the exit gate rather
- * than reading as an absent footprint.
- */
 async function refreshListedWorktree(track, repoRoot, environment) {
   const listing = await runGit(['worktree', 'list', '--porcelain'], repoRoot, environment);
   if (listing.exit_code !== 0) return track.listed_worktree;
@@ -2104,8 +1839,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     });
   refusals.push(...reconciliation.refusals);
 
-  // owns the target `.envrc` resolves for IT — the main checkout the canonical cache, the
-  // integration checkout its own `nexus-target-<basename>`. No two checkouts share a cache.
   const canonicalTarget = join(cacheRoot, CANONICAL_TARGET_NAME);
   const protectedCheckouts = [];
   if (mainRoot !== null) {
@@ -2158,7 +1891,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       refuse('sweeper.refuse.cache-unreadable', `cache root ${cacheRoot} unreadable (${cacheEntries.error})`);
     }
   }
-  // checkout now owns its own suffixed cache, so it is claimed, not an unclaimed footprint).
   const ownedTargetKeys = new Set(await Promise.all([
     ...trackFacts.map(fact => pathKey(fact.target.path)),
     ...protectedCheckouts.map(checkout => pathKey(checkout.target)),
@@ -2167,7 +1899,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     if (!name.startsWith(FEATURE_TARGET_PREFIX)) continue;
     const path = join(cacheRoot, name);
     const measured = await pathBytes(path);
-    // incomplete, so it is refused rather than reported as capacity the host still owns.
     if (measured.unreadable !== null) {
       refuse('sweeper.refuse.path-unreadable', `feature target ${path} cannot be measured (${measured.unreadable})`);
     }
@@ -2180,11 +1911,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       kind: integrationNamed ? 'iteration-named-feature-target' : 'feature-target',
       bytes: measured.bytes,
       is_symlink: measured.is_symlink,
-      // reasons must COUNT it. This integration checkout's own cache is claimed above; an unclaimed
-      // `nexus-target-iteration-*` names a checkout this workflow does not record — another
-      // iteration's live integration cache, or one left behind — so it is never a deletion
-      // candidate, but it is still an unclaimed footprint, and reporting it as `protected` must not
-      // read as evidence that the cache converged. Both spellings are leftovers; neither is proposed.
       verdict: integrationNamed ? 'protected' : 'unknown',
       leftover: true,
       reason: integrationNamed ? 'sweeper.unknown.integration-named' : 'sweeper.unknown.unclaimed-feature-target',
@@ -2205,8 +1931,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       bytes: null,
       is_symlink: false,
       verdict: integrationNamed ? 'protected' : 'unknown',
-      // worktree is, so it is not counted a second time here; the cache loop above has no such row,
-      // which is why an unclaimed iteration-named target is counted there.
       leftover: !integrationNamed,
       reason: integrationNamed ? 'sweeper.unknown.integration-named' : 'sweeper.unknown.unclaimed-worktree',
     });
@@ -2245,9 +1969,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
     watermarks,
   };
 
-  // a listed worktree and records the raw rows verbatim. `--apply` instead re-proves each requested
-  // track and acts only on the exact paths it re-verified that moment; every fact it touched is
-  // re-observed afterwards rather than replayed from the planned action list.
   const commands = [];
   const decisions = new Map();
   const engineRecords = new Map();
@@ -2280,7 +2001,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
         fact.worktree = observed.fact.worktree;
         fact.ownership = observed.fact.ownership;
       }
-      // scoped artifact after the run. Active peers are protected, never "requested".
       const refused = outcome.actions.some(action => action.verdict === 'refuse');
       if (refused || (fact.track.state === 'completed' && exitReasons(projectTrackFact(fact)).length > 0)) applyIncomplete = true;
     }
@@ -2325,8 +2045,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       worktree: fact.worktree,
       target: fact.target,
       temporary_paths: fact.temporary_paths,
-      // the independent ownership fact this round added: a live Git record, the snapshot row's
-      // retained path, or nothing — and nothing means this track's footprint is never deleted.
       ownership: track.claim === null
         ? null
         : {
@@ -2352,8 +2070,6 @@ export async function sweepWorktreeInventory(options, environment = process.env)
       : [
         ...sorted(tracks, track => track.track_id).flatMap(track => exitReasons(track)),
         ...extraWorktrees.map(worktree => ({ code: 'sweeper.check.worktree-extra', detail: `Git still lists non-protected worktree ${worktree.path}` })),
-        // not: `leftover` is what decides, so a `protected` entry that still remains — an unclaimed
-        // `nexus-target-iteration-*` cache — fails convergence instead of passing as clean.
         ...unknownPaths.filter(entry => entry.leftover === true).map(entry => ({ code: 'sweeper.check.unknown-path', detail: `unclaimed footprint ${entry.path} remains` })),
       ];
     checks = { mode, track_id: mode === 'check-exit' ? options.checkExit : null, passed: reasons.length === 0, reasons };

@@ -371,7 +371,6 @@ describe('world-kb-http provider readiness (P4-T1)', () => {
 
   before(async () => {
     home = seedHome();
-    // a time, so this runs after the domain-only fixture service has closed.
     service = await startService({
       home,
       host: '127.0.0.1',
@@ -390,7 +389,6 @@ describe('world-kb-http provider readiness (P4-T1)', () => {
     const status = await jsonFetch(`${service.url}/v1/daemon/runtime/status`);
     assert.equal(status.status, 200);
     assert.equal(status.payload.workspace_initialized, true);
-    // availability probe succeeded, so the profile is degraded.
     assert.equal(status.payload.runtime_mode, 'provider_degraded');
     assert.equal(status.payload.acp.tool_execution_enabled, false);
 
@@ -463,7 +461,6 @@ describe('world-kb-http uninitialized profile (P4-T1)', () => {
     assert.equal(patch.status, 409);
     assert.equal(patch.payload.error.code, 'uninitialized');
 
-    // (same body as an absent host) instead of deadlocking first-run setup.
     const host = await jsonFetch(`${service.url}/v1/daemon/agent-host/health`);
     assert.equal(host.status, 200);
     assert.equal(host.payload.running, false);
@@ -713,7 +710,6 @@ describe('world-kb-http close owner (P4-T1)', () => {
 
     const report = await close();
     assert.equal(report.state, 'closed');
-    // 250ms listener teardown; concurrency puts both in the first turn.
     assert.ok(coreStart !== null, 'native close must be invoked');
     assert.ok(coreStart < 100, `native close started ${coreStart}ms in, not immediately`);
     assert.ok(teardownStart < 100, `listener teardown started ${teardownStart}ms in`);
@@ -815,7 +811,6 @@ describe('world-kb-http lifecycle (P4-T1)', () => {
   test('close settles within the deadline while a request is still in flight', async () => {
     const local = await startDomainService(home, 18_451);
     const port = Number(local.url.split(':')[2]);
-    // parked in the body read, so the socket is genuinely active.
     const socket = net.connect({ host: '127.0.0.1', port });
     socket.on('error', () => undefined);
     await new Promise((resolve) => socket.on('connect', resolve));

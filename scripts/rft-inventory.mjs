@@ -604,14 +604,6 @@ export async function collectInventory({ baseline, inventoriesDir }) {
   note('wrappers-and-presets', 'Args wrappers and unregistered KbDaemonCommand do not add public paths; cfg(test) parser wrappers are excluded. creator run is one dynamic manifest entry, not a hardcoded preset tree.');
   note('historical-destinations', 'Scouts assign contradictory historical RFT keys. All current rows use rust-core-service-boundary §7.5; Works list/status/use remain RFT-08 basic reads.');
 
-  // `nexus-daemon-runtime` crate (its `create_router` route table, handlers,
-  // middleware, capability registry and boot tasks), the app-only
-  // `basic-cli` / `legacy-cli` / `web-embed` / `connect-client` /
-  // `embedded-mcp` selectors and the `nexus42 daemon` command group. Those
-  // rows can no longer be collected from this tree; the retained surfaces are
-  // the direct-core CLI, the Connect-only `nexus-runtime` and the core
-  // library MCP/peer features. Historical route/handler rows stay in the
-  // baseline inventories' evidence.
   note('daemon-surface-retired', 'Rust daemon route/handler/middleware/capability/boot rows were removed with the nexus-daemon-runtime crate in v1.193 P2; the executable clap cohorts and the retained schema declarations are the current boundary SSOT.');
   add(row('external-consumer', 'packages/nexus-contracts/package.json', 'external-consumer-unknown', { support_state: 'external-consumer-unknown', retirement_gate: 'Third-party consumers of @42ch/nexus-contracts must be identified before any wire/semver break; the local HTTP host has been the Electron/TS service since v1.193 P2' }));
 

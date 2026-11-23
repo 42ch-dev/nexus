@@ -223,7 +223,6 @@ impl PublishFlock {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        // unwinding task has already released the lease.
         tokio::task::spawn_blocking(move || (work(), self))
             .await
             .map(|(out, lease)| (lease, out))
@@ -479,8 +478,6 @@ fn write_staged(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::
     }
     let staged_path = staged(&target, receipt_id);
     std::fs::write(&staged_path, effect.content.as_bytes())?;
-    // on disk before the journal's recovery bytes are cleared, or a power loss
-    // loses the file while recovery still sees the intent as applied.
     sync_path(&staged_path)?;
     Ok(staged_path)
 }
@@ -557,7 +554,6 @@ pub fn publish(root: &Path, receipt_id: &str, effect: &FileEffect) -> std::io::R
         ));
     }
     install(&staged_path, &target, receipt_id, effect)?;
-    // after the installed file and its directory entry are durable.
     sync_path(&target)
 }
 
@@ -622,8 +618,6 @@ where
     if taken {
         let bytes = std::fs::read(&scratch)?;
         if matches_digest(&bytes, &effect.digest) {
-            // bytes ARE this intent's content, so they go back to the target —
-            // dropping them would report success with the projection absent.
             match restore(&scratch, target) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -639,8 +633,6 @@ where
             return Ok(());
         }
         if !obsolete(&bytes, effect) {
-            // landed meanwhile. If even that is impossible the bytes stay at the
-            // scratch path — preserved, never deleted.
             let _ = restore(&scratch, target);
             return Err(std::io::Error::other(format!(
                 "{} holds content this intent did not produce",
@@ -660,10 +652,6 @@ where
         Err(error) => return Err(error),
     }
     let _ = std::fs::remove_file(staged_path);
-    // concurrent attempt of this same receipt left inside its own swap is
-    // obsolete too. A failure here leaves obsolete bytes on disk, so it is
-    // reported and the intent stays unsettled for a later pass to re-attempt
-    // instead of being marked applied.
     drop_obsolete_scratch(&scratch, effect, seam)?;
     Ok(())
 }
@@ -760,11 +748,6 @@ where
     let scratch = displaced(&target, receipt_id);
     match std::fs::read(&target) {
         Ok(bytes) if matches_digest(&bytes, &effect.digest) => {
-            // already consistent, so the stale staged copy and the scratch an
-            // interrupted displacement left (a superseded predecessor, or a
-            // duplicate of this content) are dropped. A cleanup that fails is
-            // reported: the deleted body is still on disk, so the intent may
-            // not be marked applied — the next pass retries the removal.
             let _ = std::fs::remove_file(&staged_path);
             return match drop_obsolete_scratch(&scratch, effect, seam) {
                 Ok(()) => durable_published(&target),
@@ -788,16 +771,12 @@ where
             return Settled::Quarantined(format!("target read failed: {error}"));
         }
     }
-    // superseded — or the intent's own bytes, when the crash landed after the
-    // link. Verified against the intent's own digests, it completes the intent
-    // without rewriting the journaled content.
     if std::fs::read(&scratch).is_ok_and(|bytes| matches_digest(&bytes, &effect.digest)) {
         match restore(&scratch, &target) {
             Ok(()) => {
                 let _ = std::fs::remove_file(&staged_path);
                 return durable_published(&target);
             }
-            // ownership rule below decides.
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => {
                 return Settled::Quarantined(format!("scratch restore failed: {error}"));
@@ -807,7 +786,6 @@ where
     let staged_bytes = std::fs::read(&staged_path).ok();
     let staged_path = match staged_bytes {
         Some(bytes) if matches_digest(&bytes, &effect.digest) => staged_path,
-        // journaled bytes, verify what was written, and publish that.
         _ => match write_staged(root, receipt_id, effect) {
             Ok(path) => path,
             Err(error) => return Settled::Quarantined(format!("regeneration failed: {error}")),
@@ -946,7 +924,6 @@ mod tests {
         stage(root, "rcp_b", &second).unwrap();
         let staged_path = staged(&target, "rcp_b");
 
-        // verified, at the point the old protocol removed the target.
         let error = install_verifying(&staged_path, &target, "rcp_b", &second, &|point| {
             if point == Point::AfterDisplacement {
                 std::fs::write(&target, "foreign\n").unwrap();
@@ -989,7 +966,6 @@ mod tests {
         stage(root, "rcp_a", &first).unwrap();
         publish(root, "rcp_a", &first).unwrap();
 
-        // swap that displaces it has to put those bytes back.
         stage(root, "rcp_a", &first).unwrap();
         publish(root, "rcp_a", &first).unwrap();
 
@@ -1134,7 +1110,6 @@ mod tests {
             "the deleted body is still on disk, so the intent may not settle"
         );
 
-        // removes the body and only then settles the intent.
         assert!(matches!(settle(root, "rcp_b", &second), Settled::Published));
         assert!(
             !displaced(&target, "rcp_b").exists(),
@@ -1159,7 +1134,6 @@ mod tests {
         let second = effect("records/rec_x.md".to_string(), "two\n".to_string())
             .unwrap()
             .over(Some(first.digest));
-        // target, the deleted body at the receipt's scratch name.
         std::fs::write(&target, "two\n").unwrap();
         let scratch = displaced(&target, "rcp_b");
         std::fs::write(&scratch, "one\n").unwrap();

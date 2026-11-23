@@ -194,9 +194,6 @@ pub async fn kb_rescan(config: &CliConfig, target: &str, dry_run: bool, json: bo
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
-    // migrates — and therefore creates — the selected workspace, so a selection
-    // that names no materialized workspace must be refused instead of having one
-    // created for it.
     crate::core::require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
@@ -338,9 +335,6 @@ pub async fn kb_rescan_work(
         .as_deref()
         .ok_or(CliError::CreatorNotSelected)?
         .to_string();
-    // migrates — and therefore creates — the selected workspace, so a selection
-    // that names no materialized workspace must be refused instead of having one
-    // created for it.
     crate::core::require_materialized_workspace(config)?;
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
@@ -417,8 +411,6 @@ pub async fn kb_rescan_work_hermetic(
         .list_by_world(&world_id)
         .await
         .map_err(|e| CliError::Other(format!("Failed to list world KnowledgeEntries: {e}")))?;
-    // `WHERE status NOT IN ('deleted', 'merged', 'deprecated')` (nexus-kb
-    // extract_sync); replicated here because that helper is crate-private.
     let active_kb_names: std::collections::HashSet<String> = old_kb_rows
         .iter()
         .filter(|kb| !matches!(kb.status.as_str(), "deleted" | "merged" | "deprecated"))
@@ -434,7 +426,6 @@ pub async fn kb_rescan_work_hermetic(
         })
         .collect();
 
-    // upsert classification). Loaded once across the whole work.
     let existing_for_work =
         nexus_local_db::kb_extract_job::list_pending_for_world(pool, &world_id, None)
             .await
@@ -575,11 +566,6 @@ async fn sync_work_candidates(
         } else {
             agg.block_type.as_str()
         };
-        // for the versioned CAS path (kb_extract_jobs.version column +
-        // cas_update helper) once T-B P1 ships. The advisory lock acquired
-        // above is the cross-process guard; CAS will be the per-row optimistic
-        // guard. Single call-site swap — see docs/specs/architecture/world-kb-runtime-architecture.md
-        // §5.5.1 "T-B P1 CAS hook".
         let outcome = if dry_run {
             preview_work_candidate_outcome(existing_for_work, agg)
         } else {
@@ -608,7 +594,6 @@ async fn sync_work_candidates(
         }
     }
 
-    // longer appears in any chapter's aggregate.
     let new_names: std::collections::HashSet<String> = aggregates
         .iter()
         .map(|a| a.canonical_name.to_ascii_lowercase())

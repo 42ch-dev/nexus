@@ -71,13 +71,8 @@ pub fn load_or_create_identity_at(path: &Path) -> Result<[u8; 32], IdentityError
         })?;
     }
 
-    // and the write (same pattern as the connect-host identity helper).
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    // create-with-mode) so the seed is never observable at a permissive
-    // mode — even if the process crashes between open and write. umask can
-    // only tighten bits, never loosen them. On non-unix the platform
-    // default applies (best available).
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;

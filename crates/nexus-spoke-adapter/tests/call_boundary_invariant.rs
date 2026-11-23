@@ -75,8 +75,6 @@ fn count_spoke_operations_calls(text: &str) -> usize {
     let mut from = 0usize;
     while let Some(relative) = text[from..].find(SPOKE_OPERATIONS_PREFIX) {
         let after_prefix = from + relative + SPOKE_OPERATIONS_PREFIX.len();
-        // whether the tail matches — the prefix cannot overlap itself, so
-        // there is no risk of double-counting or looping forever.
         from = after_prefix;
 
         let tail = &text[after_prefix..];
@@ -99,7 +97,6 @@ fn count_spoke_operations_calls(text: &str) -> usize {
             }
         }
 
-        // is all Rust source whitespace here).
         let mut after_ws = cursor;
         while after_ws < tail_bytes.len() && tail_bytes[after_ws].is_ascii_whitespace() {
             after_ws += 1;
@@ -152,8 +149,6 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
     const KEYWORDS: [&str; 5] = ["match", "if", "for", "while", "loop"];
     let bytes = line.as_bytes();
 
-    // extracted to a shared helper) to match the existing style in
-    // [`count_spoke_operations_calls`] and keep the matcher self-contained.
     let is_ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
 
     for keyword in KEYWORDS {
@@ -161,8 +156,6 @@ fn contains_control_flow_keyword_at_boundary(line: &str) -> bool {
         while let Some(relative) = line[from..].find(keyword) {
             let start = from + relative;
             let end = start + keyword.len();
-            // guaranteed (each keyword is non-empty) and overlapping
-            // matches are not double-counted.
             from = end;
 
             let left_boundary_ok = start == 0 || !is_ident_byte(bytes[start - 1]);
@@ -223,8 +216,6 @@ fn helper_contains_control_flow_keyword_at_boundary_semantics() {
     assert!(!contains_control_flow_keyword_at_boundary(
         "items.for_each(|i| take(i));"
     ));
-    // `_` after `for` is an identifier byte, so the right boundary fails
-    // and the helper correctly does NOT trigger.
 
     assert!(!contains_control_flow_keyword_at_boundary("let x = 1 + 2;"));
     assert!(!contains_control_flow_keyword_at_boundary(

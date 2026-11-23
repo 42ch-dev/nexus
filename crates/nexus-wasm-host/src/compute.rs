@@ -87,12 +87,6 @@ impl WasmEngine {
         input_bytes: &[u8],
         sandbox: ResolvedSandbox,
     ) -> Result<ComputeOutput> {
-        // instantiation-time `StoreLimits` refusal is a formatted string
-        // ("memory minimum size of N pages exceeds memory limits"), so the
-        // class cannot be recovered by downcasting. Compare every declared
-        // linear memory's minimum against this invocation's cap instead — a
-        // module that starts above the cap can never be instantiated within it,
-        // so the refusal is decided before the store is built.
         if declared_memory_minimum_exceeds_cap(&module.module, sandbox.max_memory_bytes) {
             return Err(ComputeError::MemoryCapExceeded);
         }
@@ -223,8 +217,6 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                 .or_else(|| kb.get("block_type").and_then(Value::as_str))
                 .unwrap_or("");
             let result = kb_attrs.get(block_type).map_or_else(
-                // DECLARES key_block_attributes, an unresolvable or
-                // reject fail-closed instead of silently skipping the entry.
                 || {
                     Err(ComputeError::ManifestValidationFailed {
                         path: format!("key_blocks[{i}]"),
@@ -341,8 +333,6 @@ fn collect_entry_failure(
             });
         }
         Err(other) => {
-            // ManifestValidationFailed); keep the failure honest if that
-            // ever changes.
             entry_failures.push(EntryValidationFailure {
                 entry_id,
                 reason: other.to_string(),
@@ -940,8 +930,6 @@ mod tests {
 
     #[test]
     fn declared_schemas_reject_unknown_key_block_type() {
-        // key_block_attributes, an entry whose type is not covered by the
-        // silently skipping validation.
         let schemas = ModuleSchemas {
             key_block_attributes: Some([("monster".to_string(), json!({"type": "object"}))].into()),
             ..Default::default()
@@ -969,7 +957,6 @@ mod tests {
 
     #[test]
     fn all_invalid_entries_reported_without_silent_skip() {
-        // entry is reported (entry id + reason), never silently skipped.
         let schemas = make_schemas();
         let input = json!({
             "key_blocks": [
@@ -1003,8 +990,6 @@ mod tests {
 
     #[test]
     fn statless_entry_failure_reason_carries_field_path() {
-        // attribute) surfaces an honest per-entry failure with the failing
-        // field path, instead of a generic internal error.
         let schemas = make_schemas();
         let input = json!({
             "key_blocks": [{
@@ -1035,8 +1020,6 @@ mod tests {
 
     #[test]
     fn no_declared_key_block_schema_means_no_validation() {
-        // key_block schema map (None), entries of any type pass untouched
-        // (fixtures and schema-less modules keep working).
         let schemas = ModuleSchemas {
             key_block_attributes: None,
             key_block_state: None,

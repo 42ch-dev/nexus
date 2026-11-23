@@ -199,8 +199,6 @@ impl<K: KbStore> InMemoryNarrativeGateway<K> {
 
 #[allow(clippy::future_not_send)]
 #[allow(clippy::significant_drop_tightening)]
-// by trait contract (the trait is async for eventual storage backends, see
-// the trait docs) and perform no real async I/O — toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
 impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
     // Note: significant_drop_tightening is allowed because project_world_state

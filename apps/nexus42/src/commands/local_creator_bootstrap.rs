@@ -142,10 +142,6 @@ pub(crate) async fn bootstrap_local_creator(name: Option<String>) -> Result<()> 
     // route through this seam (AR-89 #1).
     let trimmed_name = validate_display_name(name.as_deref())?;
 
-    // already exists we read it through a `mode=ro` pool (no migrations, no
-    // seed-version writes) so a fully-converged no-op never writes
-    // `workspace_meta` keys. The writable `open_global_db` (Schema::init) is
-    // used only on mint legs that actually insert a row.
     if let Some(trimmed) = trimmed_name {
         let matches = if global_db_path()?.exists() {
             let read_only_pool = open_global_db_read_only().await?;
@@ -220,9 +216,6 @@ async fn mint_and_materialize(
     pool: &nexus_local_db::SqlitePool,
     trimmed_name: Option<&str>,
 ) -> Result<()> {
-    // store 1, so a refused bootstrap (a dangling config link, the I-000304
-    // refusal) persists nothing instead of leaving a minted, unselected
-    // identity row.
     preflight_config_document()?;
     let identity = LocalIdentity::create_persistent(trimmed_name);
     if let Err(err) = create_local_identity(
@@ -234,9 +227,6 @@ async fn mint_and_materialize(
     )
     .await
     {
-        // rejected this INSERT — a concurrent process minted the same name
-        // between our 0-match read and this insert (TOCTOU). Surface the same
-        // honest collision the 2+ decision-tree leg produces.
         if let nexus_local_db::LocalDbError::Sqlx(sqlx::Error::Database(db_err)) = &err {
             if db_err.is_unique_violation() {
                 let display_name = identity
@@ -258,7 +248,6 @@ async fn mint_and_materialize(
         Ok(config.clone())
     })?;
 
-    // per-creator+workspace db `creator world create` FK-prechecks.
     let db_path = crate::config::resolve_state_db_path(&cli_config)?;
     let workspace_pool = crate::db::Schema::init(&db_path).await?;
     let row_display_name = identity
@@ -301,15 +290,10 @@ async fn converge_identity(row: &nexus_local_db::LocalIdentityRow) -> Result<()>
     // identity, not the currently-active one.
     let db_path = crate::config::resolve_state_db_path(&cli_config)?;
 
-    // per-creator+workspace db already exists, verify the `creators` row
-    // through a `mode=ro` pool (no migrations, no seed-version writes) and
-    // return without touching `Schema::init` when the row is present + active.
     if db_path.exists() {
         let read_only_pool = nexus_local_db::open_pool_read_only(&db_path)
             .await
             .map_err(CliError::from)?;
-        // compile-time macro (SQLX_OFFLINE=true drift gate) — the runtime
-        // `query_scalar` form is unchecked against the schema.
         let row_exists: i64 = sqlx::query_scalar!(
             "SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ? AND status = 'active')",
             creator_id
@@ -332,9 +316,6 @@ async fn converge_identity(row: &nexus_local_db::LocalIdentityRow) -> Result<()>
     .fetch_one(&workspace_pool)
     .await?;
     let repaired = row_exists == 0;
-    // workspace-row write (no `cached_at` churn). Write only when the row is
-    // missing (repair) or a different identity is being activated (session
-    // selection).
     if repaired || !already_active {
         nexus_local_db::ensure_creator_row(&workspace_pool, creator_id, &row_display_name).await?;
     }
@@ -589,7 +570,6 @@ mod tests {
         assert_eq!(identities.len(), 1);
         let id = identities[0].creator_id.clone();
 
-        // must leave it untouched (read-only verification).
         let config = CliConfig::load().expect("reload config");
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
         let workspace_pool = crate::db::Schema::init(&db_path)
@@ -638,9 +618,6 @@ mod tests {
         assert!(global_path.exists(), "global db materialized");
         assert!(workspace_path.exists(), "workspace db materialized");
 
-        // writable pool alive past the handle drop, so the first mint's
-        // freshly-written pages can still sit in `-wal`; without this the
-        // later deferred checkpoint would be miscounted as a no-op write.
         for db_path in [&global_path, &workspace_path] {
             let pool = nexus_local_db::open_pool(db_path)
                 .await
@@ -679,9 +656,6 @@ mod tests {
             "no-op must not write the workspace db"
         );
 
-        // (a deferred checkpoint could fold them in later) — a no-op must
-        // also leave both `-wal` files absent or zero-size after the
-        // TRUNCATE checkpoint + re-run.
         for db_path in [&global_path, &workspace_path] {
             let wal_path = db_path.with_extension("db-wal");
             match std::fs::metadata(&wal_path) {
@@ -724,7 +698,6 @@ mod tests {
         .await
         .expect("seed alice");
 
-        // collision (a case-folded key would match 2 rows and error).
         bootstrap_local_creator(Some("Alice".to_string()))
             .await
             .expect("exact-case match converges");
@@ -786,8 +759,6 @@ mod tests {
         assert_eq!(identities.len(), 1);
         let id = identities[0].creator_id.clone();
 
-        // holder registry row that commit with it (v1.191 P1 T4; the holder
-        // references the subject, so it goes first).
         let config = CliConfig::load().expect("reload config");
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
         let workspace_pool = crate::db::Schema::init(&db_path)
@@ -831,7 +802,6 @@ mod tests {
     async fn bootstrap_local_creator_single_match_activates_matched_identity() {
         let _home = crate::testutil::isolated_home();
 
-        // persistent identity.
         bootstrap_local_creator(Some("Target Name".to_string()))
             .await
             .expect("mint target");
@@ -885,7 +855,6 @@ mod tests {
         assert_eq!(identities.len(), 1);
         let active_id = identities[0].creator_id.clone();
 
-        // registry row that commits with it (v1.191 P1 T4).
         let config = CliConfig::load().expect("reload config");
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
         let workspace_pool = crate::db::Schema::init(&db_path)

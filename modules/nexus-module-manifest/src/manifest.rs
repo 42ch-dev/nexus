@@ -187,17 +187,6 @@ impl ModuleManifest {
             }
         }
 
-        // structurally by the `HostFunction` enum (serde rejects unknown
-        // names at parse time), so no runtime check is needed here.
-
-        // directory name under `dist/<id>/` (build) and
-        // `~/.nexus42/modules/<id>/` (install, the daemon's warm_dir scan
-        // contract), so a traversal id must fail validation — `validate`
-        // must not report `valid: true` for an id the authoring loop cannot
-        // stage. Mirrors `nexus-home-layout::validate_run_id_safe`; neither
-        // this crate nor the SDK mirror can depend on nexus-home-layout
-        // (closed dependency list, AR-1), so the check is inlined and the
-        // mirrored tests below pin both sides.
         if self.module_id.contains('/')
             || self.module_id.contains('\\')
             || self.module_id.contains("..")
@@ -382,7 +371,6 @@ mod tests {
 
     #[test]
     fn wasm_sha256_field_is_backward_compat_absent() {
-        // verification is skipped (legacy stat-fence fallback).
         let json = r#"{
             "module_id": "legacy-mod",
             "name": "Legacy Module",
@@ -583,7 +571,6 @@ mod tests {
 
     #[test]
     fn validate_rejects_path_traversal_module_id() {
-        // traversal values must fail validation, not just the CLI guard.
         for bad in ["../evil", "a/b", "a\\b", "a..b", "a\u{0}b"] {
             let mut m = valid_manifest();
             m.module_id = bad.to_string();

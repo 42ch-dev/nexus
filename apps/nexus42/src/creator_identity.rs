@@ -101,8 +101,6 @@ pub fn save_creator_identity_cache(cache: &CreatorIdentityCache) -> Result<()> {
     let _lock_guard = AdvisoryLock::acquire(&lock_path);
 
     let json = serde_json::to_string_pretty(cache)?;
-    // threads/processes write concurrently. Each writer gets its own tmp file
-    // so one thread's rename cannot remove another's tmp prematurely.
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());

@@ -1,10 +1,4 @@
 /**
- * control journey over the P3 `ExecutionHandle` authority — add/signal, the
- * durable schedule list/inspect reads, the durable run list/detail reads and
- * the core-context edit. The handle is the single execution owner established
- * on the native side: this surface never starts a second scheduler, never
- * reads SQL itself and never owns domain terminal truth.
- *
  * Query forwarding is the schema's, not the transport's: the generated DTO
  * travels to the native decoder, which is where an unknown key or a bad value
  * becomes a typed refusal. `limit` is the one key that needs a transport-side

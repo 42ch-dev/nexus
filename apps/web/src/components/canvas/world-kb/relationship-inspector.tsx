@@ -1,6 +1,4 @@
 /**
- * via `world_kb.patch_relationship` (V1.74 A6).
- *
  * Supports core taxonomy + custom_label escape hatch, symmetric toggle,
  * confidence (display-only), and optional source-anchor grounding. Exposes
  * 409 conflicts to the parent canvas for the KB-flavored conflict modal and
@@ -115,9 +113,6 @@ export function RelationshipInspector({
     patchRelationship.mutate(buildRelationshipRemoveRequest(relationship), {
       onSuccess: () => onSaved?.(),
       onError: (error) => {
-        // already removed). The hook's global onError refetches the graph to
-        // canonical state; here we dismiss the inspector since the stale row is
-        // no longer editable.
         if (isWorldKbConflictError(error)) {
           onSaved?.();
         }

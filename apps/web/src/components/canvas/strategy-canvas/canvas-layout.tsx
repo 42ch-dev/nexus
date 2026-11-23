@@ -1,6 +1,4 @@
 /**
- * live-session banner) and footer (idea input + steering artifacts).
- *
  * Extracted so the orchestrator stays under the 200-line limit
  * (R-V171P0-QC1-006).
  */
@@ -27,20 +25,9 @@ export function CanvasHeader({
   activeSession: { current_task_id?: string; status: string } | null | undefined;
   showAlt: boolean;
   setShowAlt: (v: boolean) => void;
-  /**
-   * candidate, or the installed preset read) and opens the disclosure that
-   * renders the simulation limit.
-   */
   onSimulate?: () => void;
-  /**
-   * **Add pattern…** entry point that opens the pattern picker (nest).
-   */
   staging?: boolean;
   onAddPattern?: () => void;
-  /**
-   * this state. Compose opens on the strategy's candidate document, so the
-   * hint under the header says what that entry does and does not continue.
-   */
   onEditApplied?: () => void;
 }) {
   const { t } = useTranslation('canvas');

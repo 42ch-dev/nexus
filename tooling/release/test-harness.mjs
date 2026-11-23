@@ -90,10 +90,6 @@ export function expectedMemberLockVersions(repoRoot, productVersion) {
 const fixtureContractLiteralsByRepo = new Map();
 
 /**
- * snapshot when there is one (see {@link createTempRepo}); a root that is not
- * a fixture (the real repository) has no snapshot, so its own manifests are the
- * source.
- *
  * @param {string} repoRoot
  * @returns {Map<string, string>}
  */
@@ -234,7 +230,6 @@ export function createTempRepo(options = {}) {
   const contractNames = new Set(contractEntries.map((entry) => entry.name));
   const manifests = collectCrateManifests(sourceRoot);
   for (const entry of contractEntries) {
-    // nor path dependencies, so the carrier is what makes them fixture input.
     if (!manifests.includes(entry.manifest)) {
       manifests.push(entry.manifest);
     }
@@ -260,8 +255,6 @@ export function createTempRepo(options = {}) {
 
   pinFixtureVersion(dir, version, contractNames);
 
-  // reads that lock, so the fixture must carry the same shape with the pinned
-  // literal in the row.
   for (const entry of contractEntries) {
     const ownLock = posix.join(posix.dirname(entry.manifest), CARGO_LOCK_PATH);
     if (ownLock === CARGO_LOCK_PATH || !existsSync(join(sourceRoot, ownLock))) {
@@ -284,7 +277,6 @@ export function createTempRepo(options = {}) {
     writeFileSync(dest, contents, "utf8");
   }
 
-  // `expectedMemberLockVersions` never reads a version the defect wrote.
   /** @type {Map<string, string>} */
   const contractLiterals = new Map();
   for (const entry of contractEntries) {
@@ -305,10 +297,6 @@ export function createTempRepo(options = {}) {
 }
 
 /**
- * their independent literal form, so their `[package].version` is pinned rather
- * than inherited; a `version` requirement on a contract path dependency must
- * follow, or Cargo refuses to resolve the literal against the path package.
- *
  * @param {string} contents
  * @param {string} manifestPath
  * @param {Set<string>} contractNames
@@ -318,7 +306,6 @@ export function createTempRepo(options = {}) {
 function pinFixtureManifest(contents, manifestPath, contractNames, version) {
   let pinned = contents;
   if (contractNames.has(parseCargoPackageName(contents, manifestPath))) {
-    // the package version (`version.workspace = true` does not match).
     pinned = pinned.replace(/^version\s*=\s*"[^"]*"/m, `version = "${version}"`);
   }
   for (const name of contractNames) {

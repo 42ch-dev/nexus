@@ -497,7 +497,6 @@ async fn dsh_mid_stream_tool_call_conforms() {
         .await
         .expect("execute");
     let events = collect(stream).await;
-    // normalized surface never surfaces tool calls (AR-6).
     assert!(
         !events.iter().any(|e| matches!(e, HostEvent::ToolCall(_))),
         "dsh has no tool surface (AR-6): {events:?}"
@@ -556,7 +555,6 @@ async fn dsh_cancel_is_honest_noop() {
         .await
         .expect("execute");
 
-    // assistant/message units into MessageDelta before the terminal.
     let first = stream.next().await.expect("first event").expect("ok");
     assert!(matches!(first, HostEvent::OpStarted(_)));
 
@@ -572,8 +570,6 @@ async fn dsh_cancel_is_honest_noop() {
         "the turn must complete normally — dsh cancel is a documented no-op \
          (AR-6), the fixture is NOT terminated: {events:?}"
     );
-    // normal _spawn + initialize + session/prompt sequence (no cancel RPC
-    // exists).
     let log_content = std::fs::read_to_string(&log).unwrap_or_default();
     assert!(
         log_content.contains("session/prompt"),
@@ -643,5 +639,4 @@ async fn dsh_partial_then_fail_conforms_with_one_terminal() {
         ),
         "{events:?}"
     );
-    // neutral runner's closed error_category set is unchanged in P1.
 }

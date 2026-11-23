@@ -143,8 +143,6 @@ struct FieldNamesCapture(Arc<Mutex<Vec<CapturedEvent>>>);
 struct FieldNameCollector(Vec<String>);
 
 impl Visit for FieldNameCollector {
-    // implementing only `record_debug` covers every field type (`?` Debug,
-    // `%` Display, str, i64, …).
     fn record_debug(&mut self, field: &Field, _value: &dyn std::fmt::Debug) {
         self.0.push(field.name().to_string());
     }
@@ -334,7 +332,6 @@ async fn missing_report_falls_back_to_placeholder_finding() {
     assert_eq!(f.kind, "craft");
     assert_eq!(f.severity, "info");
     assert_eq!(f.target_executor, "none");
-    // came from the fallback rather than the parsed path.
     assert!(
         f.description.contains("V1.47 P0: synthesized finding"),
         "placeholder body must carry the V1.47 synthesis marker"
@@ -390,8 +387,6 @@ Adequate; no actionable issues this pass.
 #[serial_test::serial]
 #[tokio::test]
 async fn large_report_falls_back_to_placeholder() {
-    // `MAX_REVIEW_REPORT_BYTES` constant in `auto_chain.rs`; if that constant
-    // changes, bump this fixture to match (the assert! below guards it).
     const CAP_BYTES: usize = 256 * 1024;
     let (_dir, pool) = test_pool().await;
     let work = novel_work("wrk_large", "large-novel", 3, 5);
@@ -618,8 +613,6 @@ async fn fallback_warn_includes_chapter_field() {
          (persisted_count = {persisted_count}); got none"
     );
 
-    // `info!` from `persist_placeholder_finding` also carries `schedule_id`
-    // but is not a fallback warn, so filter on level to isolate the warns.
     let warn_events: Vec<&CapturedEvent> = events
         .iter()
         .filter(|e| e.level == tracing::Level::WARN)

@@ -215,9 +215,6 @@ impl std::error::Error for CliError {
     }
 }
 
-// V1.51 T-B P1: added VersionConflict arm (+8 lines). The enum has ~20
-// variants with user-facing suggestion text; splitting would scatter the
-// display logic without reducing the variant count.
 #[allow(clippy::too_many_lines)]
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -334,8 +331,6 @@ impl fmt::Display for CliError {
                 )
             }
 
-            // daemon route emitted (`[world_kb_conflict]` + named fields), so
-            // the CLI contract is preserved across the transport change.
             Self::WorldKbConflict {
                 current_version,
                 expected_version,
@@ -450,9 +445,6 @@ impl From<nexus_creator_memory::errors::MemoryError> for CliError {
 #[cfg(feature = "cli")]
 impl From<reqwest::Error> for CliError {
     fn from(err: reqwest::Error) -> Self {
-        // fold retired with the daemon client. Remaining reqwest callers are
-        // platform/cloud clients, whose connection failures are ordinary
-        // network errors — never daemon-start guidance.
         Self::Network(err)
     }
 }

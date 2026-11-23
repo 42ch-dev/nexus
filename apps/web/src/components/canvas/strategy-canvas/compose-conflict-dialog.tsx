@@ -1,9 +1,3 @@
-/**
- * `base_revision` is the typed 409 `strategy_candidate_conflict`. The rendered
- * graph is unchanged and nothing auto-retries. Reload reads the canonical
- * candidate at the revision the daemon holds, so the user reapplies the op
- * against current bytes.
- */
 import { useTranslation } from 'react-i18next';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';

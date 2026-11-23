@@ -35,10 +35,6 @@ export function isReleaseSemVer(version) {
 }
 
 /**
- * forbids leading zeros, string length then lexicographic order is a lossless
- * numeric ordering: arbitrarily long components (beyond `Number.MAX_SAFE_INTEGER`)
- * stay distinct and correctly ordered. The same rule orders the suffix `N`.
- *
  * @typedef {{ label: "alpha" | "rc"; num: string }} ParsedPrerelease
  * @typedef {{ major: string; minor: string; patch: string; prerelease: ParsedPrerelease | null }} ParsedSemVer
  */

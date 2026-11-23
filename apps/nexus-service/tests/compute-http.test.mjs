@@ -17,10 +17,6 @@ const MODULE = 'basic-combat';
 const FOREIGN_WORLD = 'wld_foreign';
 
 /**
- * current-host contracts §5 (C1–C8) over the real service, the real native
- * addon, the real hosted execution owner and the REAL WASM module the factory
- * warmed at boot.
- *
  * Every observation below crosses HTTP into Rust: the module list/detail are
  * the compiled-in registry manifests (the invocation schema Run Studio renders
  * is the shipped one, never a TS shape), the run reaches the actual WASM
@@ -39,9 +35,6 @@ function seededHome() {
     { cwd: root, stdio: 'inherit' },
   );
   assert.equal(seed.status, 0, seed.stderr?.toString());
-  // `nexus42 creator workspace create --creative-root <abs>` writes, and what
-  // lets this profile establish the hosted execution owner (and therefore the
-  // WASM runtime the Compute family drives).
   const creativeRoot = join(home, 'creative-root');
   mkdirSync(creativeRoot, { recursive: true });
   writeFileSync(
@@ -77,12 +70,6 @@ async function createWorld(baseUrl, title) {
   return created.payload.world_id;
 }
 
-/**
- * patch route (`expected_version: 0` on an absent entity IS the create path).
- * The body carries exactly what the `basic-combat` manifest declares:
- * immutable combat params in `attributes` and the mutable runtime state in
- * `state.character`.
- */
 async function stageCombatant(baseUrl, worldId, entityId, name, stats) {
   const staged = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${worldId}/kb/patch-entity`, {
     method: 'POST',
@@ -140,10 +127,6 @@ async function runModule(baseUrl, worldId, attackerId, defenderId) {
   });
 }
 
-/**
- * the retained `kb_<hex>` convention, so the per-World suffix is taken from the
- * World's own hex uuid.
- */
 function combatantIds(worldId) {
   const suffix = worldId.replace(/[^0-9a-f]/g, '').slice(-12);
   return { attackerId: `kb_a${suffix}`, defenderId: `kb_d${suffix}` };
@@ -261,10 +244,6 @@ describe('compute-http (v1.195 P2-T3)', () => {
     const runId = run.payload.run_id;
     assert.ok(runId?.startsWith('run_'), `a real run id: ${run.text}`);
     const proposals = run.payload.proposals;
-    // freeform `battle_report` is typed to its `kind` discriminator (its
-    // remaining members are declared `additionalProperties: true` and are NOT
-    // part of the generated DTO), so the module's real arithmetic is proven by
-    // the typed state delta and the module-authored event summary below.
     assert.equal(proposals.battle_report.kind, 'combat');
     assert.equal(proposals.state_delta.length, 1);
     assert.equal(proposals.state_delta[0].op, 'sub');
@@ -338,8 +317,6 @@ describe('compute-http (v1.195 P2-T3)', () => {
       `the event names the entities it moved: ${JSON.stringify(timeline[0])}`,
     );
 
-    // exactly as the other `CoreError::Coded` refusals cross this boundary
-    // (the P0 workflow-conflict selectors assert the same pair).
     const second = await jsonFetch(`${baseUrl}/v1/daemon/compute/runs/${runId}/accept`, {
       method: 'POST',
       body: {},
@@ -361,11 +338,6 @@ describe('compute-http (v1.195 P2-T3)', () => {
   });
 
   test('compute lifecycle: a schema-invalid run persists as a failed row with its input detail', async () => {
-    // body structurally (novel category/attributes shape), not against the
-    // module manifest, and the core's ComputeInputBuilder does not read the
-    // manifest schema either — so this input passes assembly and fails at the
-    // WASM authority's own input validation, i.e. AFTER the run row exists.
-    //
     // The violation deliberately lives in `body.state`, not in
     // `body.attributes`: the delivered `ComputeInput.key_blocks` carries the
     // spoke ERC721 attributes ARRAY, which the manifest declares as an accepted
@@ -398,7 +370,6 @@ describe('compute-http (v1.195 P2-T3)', () => {
     );
     assert.equal(entries.every((entry) => typeof entry.reason === 'string'), true, refused.text);
 
-    // the failed filter and its detail keeps the same input detail.
     const failedList = await jsonFetch(
       `${baseUrl}/v1/daemon/compute/runs?world_id=${worldId}&status=failed`,
     );
@@ -475,7 +446,6 @@ describe('compute-http (v1.195 P2-T3)', () => {
     assert.equal(badStatus.status, 400, badStatus.text);
     assert.equal(badStatus.payload.error.code, 'invalid_input', badStatus.text);
 
-    // never a fabricated row.
     const foreignHistory = await jsonFetch(
       `${baseUrl}/v1/daemon/compute/runs?world_id=${FOREIGN_WORLD}`,
     );

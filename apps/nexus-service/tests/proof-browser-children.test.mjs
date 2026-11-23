@@ -9,12 +9,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const scriptRoot = join(__dirname, '..', 'scripts');
 
 /**
- * bookkeeping, and adapter restore gate (`scripts/proof-browser.mjs`). The
- * orchestrator is a dependency-free single-file script, so these tests
- * extract its real helpers verbatim (stable section anchors) into throwaway
- * modules and drive them against real child processes / controllable process
- * seams — no copy of the logic, no mocks of the logic itself.
- *
  * Contracts under test:
  * - a child that emits `exit` while its piped stdio is still open must stay
  *   in the set scanned by `drainExitedChildrenForEvidence` until its `close`
@@ -50,16 +44,9 @@ const modulePath = join(workDir, 'child-lifecycle.mjs');
 writeFileSync(modulePath, moduleSource);
 const lifecycle = await import(modulePath);
 
-// `requireRestoredAdapterBuild` / `assertRestoredAdapterBaseline` functions.
-// Their process seams (spawnSync, readiness probes, page evaluate) are
-// injected as controllable fakes so the gate DECISIONS are driven without
-// running pnpm or a browser.
 const gateWorkDir = mkdtempSync(join(tmpdir(), 'proof-browser-gate-'));
 const gateModulePath = join(gateWorkDir, 'adapter-restore-gate.mjs');
 const gateModuleSource = [
-  // at call time, so each test can install its own after the module import.
-  // A value snapshot (`const spawnSync = globalThis.__rftSpawnSync`) would
-  // capture `undefined` at import and every gate call would fail.
   'const spawnSync = (...args) => globalThis.__rftSpawnSync(...args);',
   'const repoRoot = globalThis.__rftRepoRoot;',
   'const waitForHttpOk = (...args) => globalThis.__rftWaitForHttpOk(...args);',
@@ -90,8 +77,6 @@ after(() => {
   rmSync(gateWorkDir, { recursive: true, force: true });
 });
 
-// stdout (so `close` cannot fire), then exits — the exact exit-before-close
-// window. The descendant appends the trailing bytes after our `exit` and dies.
 const exitBeforeCloseScript = `
 const { spawn } = require('node:child_process');
 process.stdout.write('pre-exit-marker');
@@ -184,7 +169,6 @@ describe('proof-browser bounded child stop and cleanup', () => {
     assert.ok(child.__error, 'the spawn error must be captured on the child');
     assert.ok(!lifecycle.trackedChildren.has(child), 'a spawn-errored child must leave the tracked set');
 
-    // wait for that exit forever.
     const startedAt = Date.now();
     await lifecycle.stopChild(child);
     await lifecycle.cleanupChildren();

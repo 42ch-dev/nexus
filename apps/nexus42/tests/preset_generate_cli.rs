@@ -195,7 +195,6 @@ async fn generate_prints_a_summary_and_reserves_json_for_the_flag() {
         serde_json::from_str(&stdout(&output)).expect("--json prints one JSON object");
     assert_eq!(printed["new_revision"], 1, "a first candidate inserts at 1");
     assert_eq!(printed["document"]["id"], STRATEGY);
-    // a live strategy, and the semantic warnings travel with it.
     assert_eq!(printed["document"]["state"], "candidate");
     assert_eq!(printed["document"]["revision"], 1);
     assert_eq!(printed["document"]["provenance"]["source"], "generate");
@@ -227,7 +226,6 @@ async fn generate_renders_the_whole_lint_exhausted_payload() {
         "a lint-failing request is a non-zero exit"
     );
     let rendered = stderr(&output);
-    // `persisted` flag, each violation's kind/location/observed/correction, and the message.
     for fragment in [
         "lint_exhausted",
         "after 1 round(s)",
@@ -279,7 +277,6 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
     let fixture = fixture().await;
     let request = write_request(&fixture, "request.json", &legal_request());
 
-    // carries the document forward; without it the verb prints the summary for a human.
     let output = fixture
         .command()
         .args([
@@ -359,7 +356,6 @@ async fn a_generated_candidate_completes_validate_simulate_approve_apply() {
         .expect("the approved snapshot applies");
     assert_eq!(applied.content_hash, approved_hash);
 
-    // document the generation produced.
     let status = core
         .strategy_applied(&principal, STRATEGY)
         .await

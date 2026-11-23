@@ -3,10 +3,6 @@ import { cn } from '../lib/cn';
 import { Label } from './label';
 import { Select } from './select';
 
-/**
- * KnowledgeEntry in the selected World). Caller maps domain entries into
- * this shape; the picker never queries data itself.
- */
 export interface EntityPickerEntry {
   id: string;
   title: string;

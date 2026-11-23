@@ -106,7 +106,6 @@ pub async fn record_peer_manifest(
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure.
 pub async fn list_peer_manifests(pool: &SqlitePool) -> Result<Vec<PeerHostRow>, LocalDbError> {
-    // nullable (sqlx 0.8.6), the non-null coercion matches the `String` field.
     let rows = sqlx::query_as!(
         PeerHostRow,
         "SELECT host_id as \"host_id!\", manifest_json, last_seen, last_peer_id \

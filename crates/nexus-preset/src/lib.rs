@@ -79,7 +79,6 @@ pub fn load_embedded_preset(
         })?;
 
     let mut loaded = load_preset_from_str(yaml, caps)?;
-    // over the manifest + every referenced asset from the compiled-in tree.
     loaded.source_identity = Some(loader::preset_source_identity(
         &loaded.manifest,
         None,
@@ -203,13 +202,11 @@ pub fn required_prompt_roles(
     for state in &manifest.states {
         if let Some(exit_when) = &state.exit_when {
             if matches!(exit_when, ExitWhen::LlmJudge { .. }) {
-                // role binding at prompt time.
                 required.insert("default".to_string());
             }
         }
         for action in &state.enter {
             if let EnterAction::InnerGraph { name } = action {
-                // agent references; the built graph mirrors it.
                 if let Some(ig) = manifest.inner_graphs.as_ref().and_then(|igs| igs.get(name)) {
                     for node in &ig.nodes {
                         if matches!(node.kind, GraphNodeKind::AcpPrompt) {
@@ -447,7 +444,6 @@ mod tests {
                 "`{id}` declares another id than its catalog name"
             );
 
-            // (`essay` declaring `essay-init`) would leave its templates unresolvable.
             let document = workflow_ir::import_preset_manifest(&loaded.manifest)
                 .expect("embedded preset projects into IR");
             assert_eq!(
@@ -861,7 +857,6 @@ states:
             "expected 2 embedded prompt files for novel-chapter-review, got {prompt_count}"
         );
 
-        // via `EnterAction::Capability { args: { prompt_file: ... } }`.
         let prompt_refs: Vec<String> = loaded
             .manifest
             .states
@@ -1034,7 +1029,6 @@ states:
             "kb-extract must still be present"
         );
 
-        // soul-experience-refresh + novel-chapter-review + memory-augmented = 6
         assert!(
             presets.len() >= 6,
             "expected at least 6 embedded presets, got {}: {presets:?}",
@@ -1042,7 +1036,6 @@ states:
         );
     }
 
-    /// in the embedded presets directory.
     fn check_embedded_asset_existence(
         preset_id: &str,
         manifest: &manifest::PresetManifest,
@@ -1083,16 +1076,10 @@ states:
                 }
             };
 
-            // consistency, id match, inner graph refs; A4: capability compat).
             let semantic_result = validation::validate_preset_semantic(&loaded.manifest, &caps);
             for d in &semantic_result.diagnostics {
                 match d.severity {
                     validation::DiagnosticSeverity::Error => {
-                        // (prompt_file, vars) that don't appear in
-                        // creator.inject_prompt's input_schema because the
-                        // engine resolves them before calling the capability.
-                        // Only downgrade creator.inject_prompt drift; all
-                        // other CapabilityArgDrift errors are real.
                         if d.category == validation::DiagnosticCategory::CapabilityArgDrift
                             && d.message.contains("capability 'creator.inject_prompt'")
                         {
@@ -1179,9 +1166,6 @@ states:
 
     #[test]
     fn memory_augmented_rule_exit_is_explicit_always_true() {
-        // is the explicit always-true form. ExitWhen::Rule is a unit variant
-        // whose contract is "transition as soon as enter action completes".
-        // This test locks that contract.
         let caps = BuiltinCapabilityCatalog;
         let loaded = load_embedded_preset("memory-augmented", &caps).unwrap();
 
@@ -1245,9 +1229,6 @@ states:
 
     #[test]
     fn unknown_capability_arg_drift_is_not_downgraded() {
-        // scoped to creator.inject_prompt only. A synthetic preset that omits
-        // a required arg for a different capability must still surface as an
-        // error (not silently downgraded to a warning).
         let yaml = r#"
 preset:
   id: drift-probe
@@ -1274,8 +1255,6 @@ states:
         let caps = BuiltinCapabilityCatalog;
         let result = validation::validate_preset_semantic(&manifest, &caps);
 
-        // CapabilityArgDrift. Must NOT be downgraded (only creator.inject_prompt
-        // gets the downgrade).
         let has_drift_error = result.errors().any(|d| {
             d.category == validation::DiagnosticCategory::CapabilityArgDrift
                 && d.message.contains("capability 'kb.extract_work'")

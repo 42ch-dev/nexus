@@ -13,16 +13,10 @@ import { ToastProvider, Toaster, useToast } from '@/lib/use-toast';
 import { NexusClientError } from '@/lib/nexus';
 import './index.css';
 
-/**
- * surfaces a single toast parsed from the shared ErrorResponse. Mutations own
- * their own error callbacks (they invalidate caches + name the changed object),
- * so this default only catches read-path failures.
- */
 function useQueryErrorToast() {
   const { toast } = useToast();
   const { t } = useTranslation('common');
   return (error: unknown) => {
-    // toasting it per query is the I-000059 toast storm.
     if (error instanceof NexusClientError && error.status === 401) return;
     const description =
       error instanceof NexusClientError
@@ -37,25 +31,16 @@ function useQueryErrorToast() {
 function AppProviders({ children }: { children: React.ReactNode }) {
   const onError = useQueryErrorToast();
 
-  // locale), so the ONE client below reads the latest one through this ref
-  // instead of being rebuilt to capture it.
   const queryErrorHandlerRef = useRef(onError);
   useEffect(() => {
     queryErrorHandlerRef.current = onError;
   });
 
-  // it on every re-render of this provider — and this provider consumes
-  // `useToast()`, whose context value changes on every toast, so any toast
-  // swapped the client. A swapped client silently breaks every already-mounted
-  // mutation closure: `invalidateQueries` then targets a cache that no longer
-  // backs the mounted query (observed: Clear-history deleted the rows on the
-  // server while the Runs table kept rendering them).
   const [queryClient] = useState(
     () =>
       new QueryClient({
         defaultOptions: {
           queries: {
-            // retries on a daemon that may legitimately be down during setup.
             retry: 1,
             refetchOnWindowFocus: false,
             staleTime: 15_000,

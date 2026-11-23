@@ -469,8 +469,6 @@ async fn unrepresentable_expected_revision_is_refused_not_wrapped() {
         .unwrap()
         .to_string();
 
-    // rather than cast it into a negative revision that addresses a different
-    // row revision.
     let overflow = actor.cli(&[
         "creator",
         "character",
@@ -848,7 +846,6 @@ async fn knowledge_show_edit_remove_summary_journey() {
     assert!(clear_body["summary"].is_null());
     let rev3 = clear_body["item"]["revision"].as_u64().unwrap();
 
-    // now stale: the CAS must refuse it instead of deleting the row.
     let stale = actor.cli(&[
         "creator",
         "character",
@@ -917,10 +914,6 @@ async fn summary_file_over_byte_limit_rejects_via_metadata_precheck() {
         oversized.to_str().unwrap(),
     ]);
     assert!(!out.status.success(), "expected failure: {}", stderr(&out));
-    // `read_file_bounded` (`cannot read …` is the read failure), so naming the
-    // metadata size is direct evidence of the precheck path. The v1.193
-    // direct-core seam admits the writer before this leaf validates, so the
-    // refusal is no longer observable as a start-to-error elapsed time.
     let err = stderr(&out);
     assert!(
         err.contains("exceeding the 65536-byte limit"),
@@ -1008,7 +1001,6 @@ async fn knowledge_add_world_owner_rejects_summary_at_cli_layer() {
         );
     }
 
-    // without a summary still lands.
     let allowed = actor.cli(
         &base
             .iter()

@@ -215,11 +215,6 @@ function workspacePackageDir(name) {
   return null;
 }
 
-/**
- * package, and every non-optional dependency the packed loader declares. Any
- * dependency that is not a workspace package is an error — this proof never
- * reaches the registry.
- */
 function buildInstallSet(packDir, receipt) {
   const set = new Map();
   for (const entry of receipt.packages) {
@@ -268,12 +263,6 @@ function writeDenyShims(projDir) {
 }
 
 /**
- * and rustup entry point, the rustup/cargo toolchain directories are dropped
- * from PATH, the toolchain env vars are removed, and CC/CXX/AR/LD are pointed
- * at the shims so a build tool that honours them is denied as well. Any
- * attempt to build is recorded in the deny log, so "no compiler ran" is
- * measured, not asserted.
- *
  * Only rustup/cargo directories are dropped: `/usr/bin` and `/bin` carry the
  * system compiler *and* the interpreter the ACP fixture needs, so those stay
  * in PATH with the shims shadowing them by precedence.
@@ -830,9 +819,6 @@ if (!positiveUnusable) {
     happy.close,
   );
   const cancel = positiveResult.stages?.cancel ?? {};
-  // echoing the cancelled operation through the same session, plus a measured
-  // duration. The reply and any error are retained so a non-ok or interrupted
-  // cancel is visible in the evidence instead of passing as a timing sample.
   record(
     'provider_cancel_accepted',
     cancel.cancel_accepted === true && typeof cancel.cancel_ms === 'number',

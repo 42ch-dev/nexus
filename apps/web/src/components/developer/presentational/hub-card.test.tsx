@@ -36,7 +36,6 @@ describe('HubCard', () => {
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
   });
 
-  // (mono short id) and `error` for a `failed` session; the markup is unchanged.
   it('accepts a node title and an error pill', () => {
     renderInApp(
       <HubCard

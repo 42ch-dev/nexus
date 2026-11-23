@@ -25,9 +25,6 @@ const AGENTS: AgentScanEntry[] = [
   },
 ];
 
-/**
- * serves what `saveAgentProfile` persisted, so a remount reads it back.
- */
 function makeClient(
   scanAgents: NexusClient['scanAgents'],
   saved: AgentProfile | null = null,
@@ -142,8 +139,6 @@ describe('StepAgent (creator AI partner)', () => {
         agents: [
           {
             name: 'Claude Code',
-            // the saved profile must keep the scan entry name so the badge
-            // resolver matches it.
             registry_agent_id: 'claude-native',
             launch_command: '/usr/local/bin/claude',
             installed: true,
@@ -188,7 +183,6 @@ describe('StepAgent (creator AI partner)', () => {
 
     renderStep(client);
 
-    // pending, and Continue stays blocked (no intermediate default).
     expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute(
       'aria-checked',
       'false',
@@ -209,7 +203,6 @@ describe('StepAgent (creator AI partner)', () => {
   });
 
   it('restores the daemon-global profile for any active creator', async () => {
-    // active creator does not scope or hide it.
     const client = makeClient(() => Promise.resolve({ agents: AGENTS }), {
       name: 'Codex CLI',
       launch_command: '/usr/local/bin/codex',

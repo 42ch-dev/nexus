@@ -19,11 +19,6 @@ import { DESKTOP_STATUS_CHANNEL, assertDesktopStatusFrame } from '../dist/deskto
 import { DESKTOP_SERVICE_PORT, buildDesktopServiceOptions, resolveDesktopServicePort } from '../dist/env.js';
 import { DesktopServiceController, SERVICE_CLOSE_BUDGET_MS } from '../dist/service-controller.js';
 
-/**
- * (T1: `apps/nexus-service/package.json`). The stub below mirrors it and the
- * controller is asserted to surface exactly it, so the fixture tracks the real
- * release version instead of a drifting literal.
- */
 const SERVICE_VERSION = (() => {
   const manifest = JSON.parse(
     readFileSync(new URL('../../nexus-service/package.json', import.meta.url), 'utf8'),
@@ -107,7 +102,6 @@ async function startStubService({ lazy = false, bindPort = 0 } = {}) {
       }
       if (req.method === 'GET' && req.url === '/v1/daemon/runtime/discovery') {
         if (stopMode === 'error_after_stop') {
-          // record: not proof that the instance released the port.
           send(503, { error: { code: 'busy', message: 'service is shutting down' } });
           return;
         }
@@ -220,11 +214,6 @@ function reply(child, message, ok, payload) {
   });
 }
 
-/**
- * the handle, reset. Replies are emitted on the request's own microtask turn;
- * listener/teardown work that needs real I/O runs behind it, exactly as a real
- * process boundary would.
- */
 function healthyUtility({ home, service, counter }) {
   return (child, message) => {
     if (message.operation === 'start') {
@@ -277,7 +266,6 @@ function testClock() {
         parked.push({ resolve });
       } else {
         now += ms;
-        // that is already queued, and real I/O still progresses.
         setImmediate(() => resolve());
       }
       return promise;
@@ -780,7 +768,6 @@ test('an owner lost after an unconfirmed close keeps the interrupted diagnostic'
     'the lost owner keeps an interrupted diagnostic',
   );
 
-  // real instead of being refused by the retained-close fence.
   const failure = await controller.start().then(
     () => null,
     (error) => error,
@@ -855,8 +842,6 @@ test('a failed reset shows the concrete error and never claims recovery', async 
 
 test('keepForQuit hands an owned service to an independent owner after a confirmed close', async () => {
   const home = tempHome();
-  // given `ServiceOptions.port`), so the owned start and the detached handoff
-  // both publish this session's trusted endpoint.
   const port = await freePort();
   const service = await startStubService({ lazy: true, bindPort: port });
   const clock = testClock();
@@ -961,8 +946,6 @@ test('a record published for another home is never adopted, and is never probed'
   const home = tempHome();
   const foreignHome = tempHome();
   const service = await startStubService();
-  // instance/home/endpoint/epoch) on this session's trusted port: the identity
-  // check alone would pass, so only the trusted-home binding can refuse it.
   const record = makeRecord({ home: foreignHome, origin: service.url, instanceId: 'inst-foreign', readiness: 'ready' });
   service.setRecord(record);
   writeRecord(home, record);
@@ -1045,8 +1028,6 @@ test('a symlinked discovery record leaf is refused, not followed', async () => {
   const recorded = spawnRecorder(() => {});
   const controller = makeController({ home, port: service.port, spawnUtility: recorded.spawn, clock });
 
-  // owner is spawned: the listener on this session's endpoint cannot prove the
-  // identity a planted record would claim.
   await assert.rejects(
     controller.start(),
     /does not provide matching authenticated service discovery/,
@@ -1070,7 +1051,6 @@ test('an unrelated discovery error after the stop ack never counts as port relea
   await controller.start();
   assert.equal(controller.getStatus().detail, 'attached to an independent service');
 
-  // guarded route with a transient error instead of its record.
   service.setStopMode('error_after_stop');
   await assert.rejects(controller.stopExplicit(), /did not release/);
   const failed = controller.getStatus();
@@ -1099,7 +1079,6 @@ test('frozen stop() takes no arguments and leaves an attached service running; s
   await controller.start();
   assert.equal(controller.getStatus().detail, 'attached to an independent service');
 
-  // leaves the independent owner running and sends it nothing (row 8).
   await controller.stop();
   assert.equal(service.requests.some((entry) => entry.url === '/v1/daemon/runtime/stop'), false);
   assert.equal(service.stopping, false);
@@ -1128,7 +1107,6 @@ test('a guarded answer from a different instance counts as release (successor ow
   await controller.start();
   assert.equal(controller.getStatus().detail, 'attached to an independent service');
 
-  // the same endpoint: that positively proves the stopped instance released it.
   service.setSuccessor(makeRecord({ home, origin: service.url, instanceId: 'inst-successor', readiness: 'ready' }));
   service.setStopMode('successor');
   await controller.stopExplicit();

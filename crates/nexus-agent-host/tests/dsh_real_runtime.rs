@@ -745,8 +745,6 @@ async fn with_confirmed_teardown<Fut: Future<Output = ()>>(
             if leaked.is_empty() {
                 std::panic::resume_unwind(panic);
             }
-            // never continue quietly) with the original panic message
-            // attached to the cleanup diagnostics.
             let original = panic
                 .downcast_ref::<&'static str>()
                 .map(|s| (*s).to_string())
@@ -822,7 +820,6 @@ fn hostile_bodies_create_their_evidence_when_directly_run() {
         .expect("numeric pid");
     assert!(pid_alive(pid), "the bounded background process is alive");
     assert!(hostile_token_alive(&markers.process_token));
-    // observed death.
     let _ = Command::new("kill").arg(pid.to_string()).status();
     let deadline = Instant::now() + Duration::from_secs(5);
     while pid_alive(pid) && Instant::now() < deadline {
@@ -917,7 +914,6 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
             )
             .await;
 
-            // one OpStarted, the final text delta, one OpFinished(EndTurn).
             assert!(
                 matches!(events.first(), Some(HostEvent::OpStarted(_))),
                 "events: {events:?}"
@@ -935,7 +931,6 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
                 "the bounded final completion ends the turn: {events:?}"
             );
 
-            // tool-call responses, then the bounded final completion.
             let records = proxy.records();
             assert_eq!(
                 records.len(),
@@ -980,8 +975,6 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
     };
     with_confirmed_teardown(&provider, handle, &baseline, body).await;
 
-    // shutdown, separately prove the dispatch-level rejections and the
-    // absence of every side effect (file, pid file, live process).
     let records = proxy.records();
     for (index, tool) in [
         (1usize, "shell"),
@@ -1001,8 +994,6 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
     markers.assert_all_absent();
     assert_no_stray_dsh_children(&baseline, "sealed deny_all shutdown");
 
-    // provider initializes the ordinary recipe at launch); the sealed
-    // switch booted a runtime that never touched the poisoned layers.
     let dsh_home = std::fs::canonicalize(root.path().join("dsh-home")).expect("canonical home");
     let poison = poison_log_entries(&root);
     assert_eq!(
@@ -1023,7 +1014,6 @@ async fn real_dsh_sealed_deny_all_rejects_unsolicited_tools_without_side_effects
         );
     }
 
-    // subtree holds no remaining lease).
     let nexus_dir = dsh_home.join("nexus");
     let lease_remains = nexus_dir.exists()
         && std::fs::read_dir(&nexus_dir)
@@ -1135,9 +1125,6 @@ async fn real_dsh_missing_plugin_package_fails_closed() {
         proxy.records().is_empty(),
         "no model call ever happened on the failed launch"
     );
-    // observed reaped and no Nexus sealed lease survives; this arm fails
-    // closed if cleanup is unconfirmed (strays are killed, then the test
-    // fails loudly).
     assert_no_stray_dsh_children(&baseline, "missing plugin package launch");
     let nexus_dir = root.path().join("dsh-home").join("nexus");
     let lease_remains = nexus_dir.exists()
@@ -1311,7 +1298,6 @@ fn real_dsh_runtime_identity_is_recorded() {
         .to_string();
     assert!(!cli_version.is_empty(), "a version string is recorded");
 
-    // `lib/bin.js`; its `package.json` is two directories up.
     let canonical = std::fs::canonicalize(&dsh_bin).expect("canonical dsh");
     let package_json_path = canonical
         .parent()
@@ -1421,7 +1407,6 @@ fn real_dsh_runtime_identity_is_recorded() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
-    // reaped pid.
     guard.disarm();
 
     eprintln!(

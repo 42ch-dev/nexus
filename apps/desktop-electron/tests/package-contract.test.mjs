@@ -17,11 +17,6 @@ import {
   resolveOutputRoot,
 } from '../scripts/package-contract.mjs';
 
-/**
- * packaging preflight pins equal to the root and Electron app manifests. The
- * native-compatibility and receipt fixtures below mirror it so they track the
- * real release version instead of a drifting literal.
- */
 const PRODUCT_VERSION = (() => {
   const manifest = JSON.parse(
     readFileSync(new URL('../resources/product.json', import.meta.url), 'utf8'),

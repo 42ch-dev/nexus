@@ -277,7 +277,6 @@ impl Capability for NovelProjectScaffold {
                 inp.total_volumes, inp.total_planned_chapters
             )));
         }
-        // use the raw input fields.
         let mut inp = ScaffoldInput {
             creator_id: inp.creator_id,
             work_id: inp.work_id,
@@ -345,9 +344,6 @@ impl Capability for NovelProjectScaffold {
             inp.world_id.clone()
         };
 
-        // When using create_world, the FK check happens inside the tx (below).
-        // When using a pre-existing world_id, validate now (outside tx) for early
-        // rejection, then re-verify inside the tx for atomicity.
         if let (Some(world_id), Some(pool)) = (pre_existing_world_id.as_deref(), self.pool.as_ref())
         {
             // SAFETY: simple SELECT against known narrative_worlds schema.
@@ -374,10 +370,6 @@ impl Capability for NovelProjectScaffold {
         let executor = require_executor(self.executor.as_ref())?;
         let (workspace_root, works_dir) = resolve_works_dirs(executor, &self.works_root)?;
 
-        // row, so the ref must already be there when the first byte lands — a
-        // first scaffold still has it NULL. A partial re-init that does not
-        // select `work_ref` keeps the stored value instead of overwriting it;
-        // the prior value is restored if the scaffold fails.
         let requested_ref = inp
             .fields_changed
             .as_ref()
@@ -390,14 +382,11 @@ impl Capability for NovelProjectScaffold {
             requested_ref,
         )
         .await?;
-        // port resolves the Work by the stored ref, not the requested one.
         inp.work_ref = claim.effective().to_string();
         let root = works_dir.join(&inp.work_ref);
 
         let result = async {
 
-        // `txn`. On any `?` propagation before `txn.commit()`, the Drop
-        // impl removes only the files/dirs THIS invocation created.
         let mut txn = ScaffoldTransaction::new(executor.records_work_artifacts());
 
         txn.create_dir(&root)?;
@@ -549,11 +538,6 @@ impl Capability for NovelProjectScaffold {
         )
         .await?;
 
-        // transaction. If either step fails, both roll back atomically.
-        // V1.40 (QC2 W-01 / QC3 W-1): create_world is also inside this
-        // transaction, so no orphan world rows can remain on failure.
-        // The FS-side ScaffoldTransaction still handles filesystem rollback
-        // independently (FS and DB rollback are separate concerns).
         let chapters_seeded = if let Some(pool) = &self.pool {
             let now = chrono::Utc::now().to_rfc3339();
             let mut tx = pool
@@ -614,9 +598,6 @@ impl Capability for NovelProjectScaffold {
                 .map_err(|e| CapabilityError::Internal(format!("seed_chapters_tx: {e}")))?;
             }
 
-            // those columns (re-init). When absent, PATCH all (initial
-            // bootstrap). The `current_chapter = 0` reset is part of the
-            // initial bootstrap shape and is suppressed on partial re-init.
             let changed: Option<std::collections::HashSet<&str>> =
                 inp.fields_changed.as_ref().map(|v| {
                     v.iter()
@@ -739,8 +720,6 @@ impl Capability for NovelProjectScaffold {
     }
 }
 
-/// (idempotent per T6).
-///
 /// On rollback, only files this call actually wrote (return value `true`)
 /// will be removed; pre-existing files are preserved.
 async fn write_file_idem(
@@ -761,11 +740,6 @@ async fn write_file_idem(
     Ok(true)
 }
 
-// render, chapter seed, works PATCH) returns an error before `commit()` is
-// called, the guard's `Drop` impl removes only the files and directories
-// THIS invocation created. Files/dirs that pre-existed (e.g. re-init over
-// a partially-scaffolded tree) are left untouched.
-//
 // Cross-call DB atomicity (seed_chapters + patch_work in a single SQL
 // transaction) requires transaction-aware variants of those helpers in
 // nexus-local-db and is tracked as a follow-up under R-V133P1-09. The
@@ -820,13 +794,9 @@ impl ScaffoldTransaction {
 
 impl Drop for ScaffoldTransaction {
     fn drop(&mut self) {
-        // intended writes, so every registered path may be an entry this run
-        // never created (a dangling symlink passes the `exists()` check as
-        // absent). Rolling back would delete the user's own tree.
         if self.committed || self.recording {
             return;
         }
-        // is inconsistent, the next idempotent re-init will reconcile.
         for f in &self.files_created {
             if let Err(e) = std::fs::remove_file(f) {
                 tracing::warn!(
@@ -887,7 +857,6 @@ mod tests {
 
     #[test]
     fn render_template_strict_mode_rejects_unbound_var() {
-        // instead of silently producing literal "{{...}}" in the output.
         let tmpl = "Hello {{name}}, Ref: {{work_ref}}";
         let err = render_template(tmpl, &[("work_ref", "abc")]).expect_err("must error");
         let msg = format!("{err}");

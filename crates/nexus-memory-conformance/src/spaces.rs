@@ -712,14 +712,10 @@ impl FixtureMemoryProvider {
     ) -> Result<SpacePage, SpokeReject> {
         checked(validate_memory_spaces_list(request, MAX_PAGE_SIZE))?;
         if request.cursor.is_some() {
-            // issued for this op: a presented one cannot be valid (§7.0.7).
             return Err(cursor_invalid(
                 "memory.spaces.list serves one space and issues no cursor",
             ));
         }
-        // visibility decision and the pending count all come from the same
-        // snapshot, so a concurrent revoke or status change cannot be combined
-        // with state it was never authorized against (MEM-R026).
         let mut transaction = self
             .store()
             .pool()
@@ -844,7 +840,6 @@ impl FixtureMemoryProvider {
             principal_id,
             space_id,
             now,
-            // space, so a context-limited admin never controls it (§7.3/§7.4).
             &whole_scope_requirement("admin", None),
         )?;
         require_revision(expected_revision, space.revision)?;
@@ -937,7 +932,6 @@ impl FixtureMemoryProvider {
         })?;
         let created = inserted.rows_affected() == 1;
         let subject = fetch_subject(conn, &request.space_id, &request.subject_id).await?;
-        // refuses the write path that ensure fronts.
         if subject.status != "active" {
             return Err(subject_fenced(&subject.subject_id, "subject"));
         }
@@ -960,9 +954,6 @@ impl FixtureMemoryProvider {
         now: DateTime<Utc>,
     ) -> Result<Subject, SpokeReject> {
         self.require_served_space(&request.space_id)?;
-        // authorization decision and the returned subject are one snapshot, so
-        // a concurrent revoke cannot pair an old grant with changed state
-        // (MEM-R026).
         let mut transaction = self
             .store()
             .pool()
@@ -1025,9 +1016,6 @@ impl FixtureMemoryProvider {
         let space = fetch_space(conn, &request.space_id).await?;
         require_admitted("memory.subjects.fence", &space)?;
         let grants = load_grants(conn, &request.space_id).await?;
-        // every placement context of the subject, so it needs unrestricted
-        // coverage of that subject; a context target needs that one placement
-        // context (§6.5/§7.7).
         let required = match &request.target {
             Target::Subject => whole_scope_requirement("admin", Some(request.subject_id.as_str())),
             Target::Context(context_id) => GrantRequirement {
@@ -1064,7 +1052,6 @@ impl FixtureMemoryProvider {
                     None
                 } else {
                     fenced_contexts.push(context_id.as_str().to_owned());
-                    // a subject-level fence would otherwise be cleared.
                     Some(status.as_str())
                 }
             }
@@ -1080,8 +1067,6 @@ impl FixtureMemoryProvider {
                     _ => None,
                 }
             }
-            // INVALID_INPUT before this table runs; the arm only keeps the
-            // transition table exhaustive.
             (Target::Context(_), Action::Archive) => None,
         };
         let Some(next_status) = next_status else {
@@ -1160,7 +1145,6 @@ impl FixtureMemoryProvider {
             .iter()
             .map(grant_to_wire)
             .collect::<Result<Vec<_>, _>>()?;
-        // every placement context, so a context-limited admin never gets one.
         let admin = is_authorized(
             &grants,
             principal_id,
@@ -1168,8 +1152,6 @@ impl FixtureMemoryProvider {
             now,
             &whole_scope_requirement("admin", request.subject_id.as_deref().map(String::as_str)),
         );
-        // selector, so a non-admin may not name any principal — not even
-        // itself. Self view is the selector-omitted path.
         if !admin && request.principal_id.is_some() {
             return Err(not_authorized(
                 "only an admin grant may name a principal explicitly",
@@ -1192,10 +1174,6 @@ impl FixtureMemoryProvider {
             })
             .collect();
 
-        // engine policy as well as the selection, so any grant or lifecycle
-        // change in the space invalidates it even when the page's rows did not
-        // move. The marker is read on the same connection, inside the same
-        // snapshot as the authorization and the rows above.
         let snapshot = snapshot_marker(conn, &request.space_id).await?;
         let binding_digest = match jcs_sha256_hex(&json!({
             "principal": principal_id,
@@ -1376,7 +1354,6 @@ impl FixtureMemoryProvider {
         let space = fetch_space(conn, &request.space_id).await?;
         require_admitted("memory.grants.revoke", &space)?;
         let grants = load_grant_rows(conn, &request.space_id).await?;
-        // grant ids for existence.
         if !grants.iter().any(|grant| {
             grant_is_valid(grant, principal_id, &request.space_id, now)
                 && grant
@@ -1392,10 +1369,6 @@ impl FixtureMemoryProvider {
             .iter()
             .map(grant_to_wire)
             .collect::<Result<Vec<_>, _>>()?;
-        // grant through the full `grants.list` view, so an absent id tells it
-        // nothing it could not list. Every narrower admin must not be able to
-        // tell an absent id from a grant outside its coverage, so both answer
-        // the one refusal below.
         let sees_every_grant = is_authorized(
             &grants_wire,
             principal_id,
@@ -1416,10 +1389,6 @@ impl FixtureMemoryProvider {
                 grant_not_revocable()
             });
         };
-        // coverage, so the admin grant must cover the target's subject, its
-        // placement contexts, its shared-visibility facet and — when the target
-        // is unrestricted — be unrestricted itself. `subject_all` is the
-        // published evaluator's only unrestricted-only facet.
         let required = GrantRequirement {
             capability: "admin",
             subject_id: target.subject_id.as_deref(),
@@ -1827,7 +1796,6 @@ mod tests {
         assert_eq!(space.pending_receipts, 0);
         assert!(page.next_cursor.is_none());
 
-        // an empty page rather than an existence probe.
         let hidden = scenario
             .provider
             .spaces_list(OTHER, &spaces_list_request(None, None), now())
@@ -1947,7 +1915,6 @@ mod tests {
         assert!(revoked.revoked);
         assert_eq!(revoked.revision, 2);
 
-        // no-op success and does not bump the revision (§7.0.4).
         let no_op = scenario
             .provider
             .spaces_freeze(OPERATOR, &freeze_request(&space_id, 2), now())
@@ -2093,7 +2060,6 @@ mod tests {
             .expect("reads stay admitted on a fenced subject");
         assert_eq!(fenced.status.to_string(), "fenced");
 
-        // subject fence.
         let context_fenced = scenario
             .provider
             .subjects_fence(
@@ -2348,7 +2314,6 @@ mod tests {
             .await
             .expect("issuance inside the granter coverage");
         assert_eq!(issued.revision, 1);
-        // it just issued by that id.
         let listed = scenario
             .provider
             .grants_list(
@@ -2498,7 +2463,6 @@ mod tests {
         assert_eq!(subject.fenced_contexts, vec!["ctx-a".to_owned()]);
         assert_eq!(subject.revision.get(), 2);
 
-        // still rejects writes.
         let grants = reopened
             .provider
             .grants_list(
@@ -2979,7 +2943,6 @@ mod tests {
 
     async fn context_admin_revokes_its_own_coverage_grant(scenario: &Scenario) {
         let space_id = scenario.space_id.clone();
-        // takes effect at the holder's next admission.
         let in_scope_grant = scenario
             .provider
             .grants_grant(
@@ -3061,7 +3024,6 @@ mod tests {
             .expect("first page");
         let cursor = first.next_cursor.expect("a bounded page issues a cursor");
 
-        // together with its snapshot bump.
         let mut transaction = scenario
             .provider
             .store()
@@ -3258,7 +3220,6 @@ mod tests {
             .next_cursor
             .expect("a bounded self view issues a cursor");
 
-        // outstanding cursor is invalidated.
         scenario
             .provider
             .grants_grant(
@@ -3351,7 +3312,6 @@ mod tests {
             .await
             .expect("operator ensures subject-one");
 
-        // subject, so the ctx-a-only admin is refused both.
         for action in ["fence", "archive"] {
             assert_eq!(
                 reject_code(
@@ -3377,7 +3337,6 @@ mod tests {
         assert_eq!(untouched.fenced_contexts, Vec::<String>::new());
         assert_eq!(untouched.revision.get(), 1);
 
-        // the refusals leave the space untouched.
         assert_eq!(
             reject_code(
                 scenario
@@ -3407,7 +3366,6 @@ mod tests {
 
     async fn ctx_restricted_admin_has_no_full_grant_view(scenario: &Scenario) {
         let space_id = scenario.space_id.clone();
-        // list is its own self view, and naming the ctx-b grantee is refused.
         let self_view = scenario
             .provider
             .grants_list(
@@ -3436,7 +3394,6 @@ mod tests {
 
     async fn full_coverage_admits_the_whole_target(scenario: &Scenario) {
         let space_id = scenario.space_id.clone();
-        // subject-scoped admin controls its whole subject...
         scenario
             .provider
             .grants_grant(
@@ -3469,7 +3426,6 @@ mod tests {
         assert_eq!(unfenced.status, "active");
         assert_eq!(unfenced.revision, 3);
 
-        // space and sees every grant.
         let frozen = scenario
             .provider
             .spaces_freeze(OPERATOR, &freeze_request(&space_id, 1), now())
@@ -3507,7 +3463,6 @@ mod tests {
         let (own_admin_id, client_grant, other_grant, other_two_grant) =
             seed_grants_for_the_page_snapshot(&scenario, &space_id).await;
 
-        // read inside it.
         let mut snapshot = scenario
             .provider
             .store()
@@ -3533,8 +3488,6 @@ mod tests {
 
         commit_grants_after_the_snapshot(&scenario, &space_id, &other_grant, &own_admin_id).await;
 
-        // that produced the cursor, so the committed changes cannot be paired
-        // with it.
         let second = scenario
             .provider
             .grants_list_in_tx(
@@ -3557,8 +3510,6 @@ mod tests {
         );
         snapshot.commit().await.expect("close the read snapshot");
 
-        // revoke is visible: the lister has lost admin, so the unselected list
-        // degrades to its own self view.
         assert_eq!(
             reject_code(
                 scenario
@@ -3757,7 +3708,6 @@ mod tests {
 
     async fn refused_probes_are_indistinguishable(scenario: &Scenario, foreign: &GrantIssued) {
         let space_id = scenario.space_id.clone();
-        // the provider state, including the snapshot marker, untouched.
         let first = scenario
             .provider
             .grants_list(
@@ -3772,7 +3722,6 @@ mod tests {
             .clone()
             .expect("a bounded self view issues a cursor");
 
-        // must be indistinguishable through code, details and message.
         let hidden = refusal(
             scenario
                 .provider
@@ -3862,7 +3811,6 @@ mod tests {
 
     async fn scoped_revokes_stay_legitimate(scenario: &Scenario, in_scope: &GrantIssued) {
         let space_id = scenario.space_id.clone();
-        // already-revoked no-op.
         let revoked = scenario
             .provider
             .grants_revoke(
@@ -3885,7 +3833,6 @@ mod tests {
             .expect("revoking an already revoked grant is a no-op success");
         assert_eq!(repeated.revision, 2);
 
-        // missing id: it can list the whole set anyway, so nothing new leaks.
         assert_eq!(
             reject_code(
                 scenario
@@ -4118,7 +4065,6 @@ mod tests {
             )
             .await
             .expect("client grant");
-        // own pool, so it never sees the reader's TEMP view or collation.
         let writer = FixtureMemoryProvider::open(&scenario.path)
             .await
             .expect("second real WAL provider");
@@ -4139,8 +4085,6 @@ mod tests {
             panic!("spaces.list finished before the interleave point: {value:?}");
         }
 
-        // revoke and the freeze commit together. No committed snapshot ever
-        // combines the old active status with the new pending count.
         let transition: Result<(), String> = async {
             let mut transaction = writer
                 .store()
@@ -4184,8 +4128,6 @@ mod tests {
         let page = read.await.expect("spaces.list completes");
         transition.expect("the interleaved commit must succeed");
 
-        // was still authorized, the space was still active and the drain
-        // barrier had not yet counted the pending receipt.
         let space = visible_space(&page);
         let wire = serde_json::to_value(space).expect("space wire value");
         assert_eq!(
@@ -4203,7 +4145,6 @@ mod tests {
             "a pending receipt committed after the snapshot must not be paired with the snapshot's authorization"
         );
 
-        // above distinguishes the mixed combination from a valid old version.
         assert_post_transition_space_view(&scenario).await;
     }
 
@@ -4271,8 +4212,6 @@ mod tests {
             panic!("subjects.get finished before the interleave point: {value:?}");
         }
 
-        // the second connection: no snapshot ever pairs the old grant with the
-        // fenced subject.
         let transition: Result<(), String> = async {
             let mut transaction = writer
                 .store()
@@ -4315,7 +4254,6 @@ mod tests {
         );
         assert_eq!(subject.revision.get(), 1);
 
-        // fenced and the revoked caller is no longer authorized.
         let after = scenario
             .provider
             .subjects_get(OPERATOR, &get_request(&space_id, subject_id), now())

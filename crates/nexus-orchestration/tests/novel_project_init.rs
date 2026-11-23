@@ -14,9 +14,6 @@ use std::path::Path;
 
 use nexus_capability::{Capability, CapabilityError, WorkspaceExecutor};
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Test executor: commits Work bytes at the target the production port builds
 /// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
 /// checks the core port performs.
@@ -123,9 +120,6 @@ fn scaffold_input(
     obj
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
     let (dir, pool) = test_pool().await;
@@ -213,9 +207,6 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn t7b_idempotent_reinit_preserves_existing_files() {
     let (dir, pool) = test_pool().await;
@@ -257,9 +248,6 @@ async fn t7b_idempotent_reinit_preserves_existing_files() {
         "T6/T7b: existing files must not be overwritten on re-init"
     );
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn t7c_work_chapters_rows_seeded_correctly() {
@@ -339,9 +327,6 @@ async fn t7c_work_chapters_rows_seeded_correctly() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn t7d_works_patch_world_id_existing() {
     let (dir, pool) = test_pool().await;
@@ -385,7 +370,6 @@ async fn t7d_works_patch_world_id_existing() {
 
 #[tokio::test]
 async fn t7d_works_patch_world_id_none_worldless_rejected() {
-    // must fail-closed with a remediation message.
     let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7d_none").await;
 
@@ -411,9 +395,6 @@ async fn t7d_works_patch_world_id_none_worldless_rejected() {
 
 #[tokio::test]
 async fn t7d_works_patch_world_id_new_placeholder() {
-    // verifies that a world_id string (simulating what a future
-    // `creator world create` command would return) is correctly set on
-    // the works table.
     let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7d_new").await;
 
@@ -421,7 +402,6 @@ async fn t7d_works_patch_world_id_new_placeholder() {
     let cap = make_cap(pool.clone(), &works_root);
 
     let new_world_id = "wld_newly_created_456";
-    // `creator world create` would persist before binding the Work.
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         new_world_id,
@@ -454,9 +434,6 @@ async fn t7d_works_patch_world_id_new_placeholder() {
     );
     assert_eq!(work.work_profile.as_deref(), Some("novel"));
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
@@ -501,9 +478,6 @@ async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-//
 // The novel-writing gate (§5.3.2) requires:
 //   - work_profile == novel
 //   - work_ref non-null
@@ -597,14 +571,8 @@ async fn t7e_gate_pass_init_enables_novel_writing_filesystem_gates() {
     //     the previous_preset gate.
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[test]
 fn t7e_stage_advance_produce_passes_when_intake_complete() {
-    // passes when the Work is at intake complete with intake_status complete.
-    // This is a synchronous gate check (stage_gates.rs) — not the full
-    // preset gate evaluator.
     use nexus_local_db::work_stage::{check_stage_advance, WorkStageState};
 
     let work = WorkStageState {
@@ -638,9 +606,6 @@ fn t7e_stage_advance_produce_passes_when_intake_complete() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-//
 // Verifies that the scaffold capability rejects untrusted grill-me values
 // that would break filesystem path semantics (path traversal, separators,
 // uppercase, oversize) or exceed the documented chapter-count range.
@@ -743,12 +708,8 @@ async fn t7a_bis_chapters_bounds_accepted() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn t7f_partial_reinit_only_updates_listed_fields() {
-    // `work_ref` or `total_planned_chapters`.
     let (dir, pool) = test_pool().await;
     insert_test_work(&pool, "wrk_t7f").await;
     let works_root = dir.path().join("Works");
@@ -782,7 +743,6 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
     assert_eq!(after_initial.total_planned_chapters, Some(5));
     assert_eq!(after_initial.world_id.as_deref(), Some("wld_t7f_initial"));
 
-    // chapter count in the input to verify they are NOT applied to the DB.
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_new_xyz",
@@ -825,14 +785,8 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
-    // in `works` AND a world_id that does not exist in `narrative_worlds`.
-    // V1.40: the world_id FK check fires before seed_chapters, so we get
-    // a world_id-not-found error. Either way, the FS scaffold must be rolled back.
     let (dir, pool) = test_pool().await;
 
     let works_root = dir.path().join("Works");
@@ -865,12 +819,7 @@ async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
         "F2: ScaffoldTransaction must have removed the partial scaffold at {}",
         scaffold_root.display()
     );
-    // harness or pre-existing — only the work_ref subtree is owned by
-    // this invocation.
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// AC1: Single-volume regression — existing Works get volume=1 without user action.
 #[tokio::test]

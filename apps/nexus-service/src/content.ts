@@ -1,11 +1,3 @@
-/**
- * outline/timeline structure patches (P1-T2 authority). Path arguments stay
- * explicit route parameters, `ChapterContentQuery` stays a query (never a
- * body), per-Work locks, published/finalized rules, hash/CAS and path/symlink
- * confinement stay in the single Rust core authority, and the wire shapes are
- * the schema-owned generated DTOs (`schemas/daemon-api/works/chapters/…`,
- * `schemas/daemon-api/canvas/outline/…`).
- */
 import type {
   ChapterBody,
   ChapterContentQuery,
@@ -168,7 +160,6 @@ export function patchTimelineEvent(
 export const CONTENT_ROUTES: readonly DomainRoute[] = [
   {
     method: 'GET',
-    // has always sent) the list WITHOUT a trailing slash.
     pattern: /^\/v1\/daemon\/works\/([^/]+)\/chapters$/,
     tier: 'tier2',
     family: 'content',

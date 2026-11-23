@@ -472,10 +472,6 @@ describe('EntityInspector — modules.mental editing (v1.203 P2 O1)', () => {
 });
 
 describe('EntityInspector — plan QC fix 1 (QC1-F002: legal unknown __proto__ key round-trips)', () => {
-  /**
-   * `__proto__` (accepted under PD-13). Seeded through JSON.parse — an object
-   * literal would have different `__proto__` syntax semantics.
-   */
   const entityWithProtoKey: WorldKbEntityProjection = {
     key_block_id: 'kb-bo',
     world_id: 'w-1',
@@ -504,7 +500,6 @@ describe('EntityInspector — plan QC fix 1 (QC1-F002: legal unknown __proto__ k
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
     const call = callsOf(client.worldKbPatchEntity)[0];
     const mental = call[1].patch.modules!.mental as Record<string, unknown>;
-    // by the inherited prototype setter — and serializes back verbatim.
     expect(Object.prototype.hasOwnProperty.call(mental, '__proto__')).toBe(true);
     expect(mental.__proto__).toEqual({ future: 'keep' });
     expect(mental.goals).toEqual(['new']);

@@ -187,8 +187,6 @@ readline.createInterface({input: process.stdin}).on('line', (line) => {
       } },
     });
 
-    // session/new occurs after initialize's retained 10ms settle, exhausting
-    // the 1ms deadline before cleanup; neither child may be signalled blindly.
     const failed = await Promise.all([
       provider.call(request('one', 1)), provider.call(request('two', 1)),
     ]);

@@ -34,23 +34,11 @@ export interface ForkCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   worldId: string;
-  /**
-   * (`undefined` → the World's root branch; a `fbk_…` id → the fork branch
-   * the canvas is showing). The daemon requires it; the orchestrator
-   * derives it from the picked event's own `branch_id`, so it is always
-   * defined when a fork point has been picked.
-   */
   parentBranchId: string | undefined;
   /** The picked timeline event id (the fork point). */
   forkedFromEventId: string;
   /** Event title of the fork point, shown as a read-only reference line. */
   forkPointLabel?: string;
-  /**
-   * `branch_id` + parent + fork-point + `created_at`; the response does NOT
-   * echo the label) plus the trimmed label the author typed (undefined when
-   * the label was omitted). The orchestrator lands on the forked branch
-   * (PD-6) and uses the label for the success notice.
-   */
   onSuccess?: (response: CreateForkResponse, label?: string) => void;
 }
 
@@ -80,17 +68,12 @@ export function ForkCreateDialog({
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    // disabled while pending, but Enter-key implicit submission (the label
-    // Input) and a fast double-click before the isPending re-render
-    // commits can still fire `submit` — this guarantees exactly ONE POST
-    // per flow.
     if (createFork.isPending) return;
     if (!forkedFromEventId) {
       setError(t('timeline.forkCreateDialog.missingForkPoint'));
       return;
     }
     if (!parentBranchId) {
-      // carries its branch_id; this branch is unreachable in practice.
       setError(t('timeline.forkCreateDialog.missingBranchContext'));
       return;
     }
@@ -110,11 +93,8 @@ export function ForkCreateDialog({
       onSuccess?.(response, trimmedLabel.length > 0 ? trimmedLabel : undefined);
     } catch (err) {
       if (isForkInvalidInputError(err)) {
-        // (no branch switch); the author can pick another fork point.
         setError(t('timeline.forkCreateDialog.invalidForkPoint'));
       } else {
-        // error toast; mirror a generic inline message so the dialog never
-        // closes silently on failure (era-create-dialog convention).
         setError(t('timeline.forkCreateDialog.genericError'));
       }
     }

@@ -47,18 +47,11 @@ export interface ConnectionStoreDeps {
   /** safeStorage adapter (inject a stub in headless tests). */
   storage: SecureStorageAdapter;
   /**
-   * (`nexus42` / `connection_config`) or the old app-data
-   * `connection_config.json` and returns the raw legacy JSON string. Must
-   * never log or return the secret anywhere else.
-   *
    * The import runs only when {@link cleanupLegacy} is supplied too: a
    * migration that cannot remove the plaintext originals is never performed.
    */
   readLegacy?: () => Promise<string | null>;
   /**
-   * app-data JSON); an already-absent source counts as removed. Injected by
-   * the host so this module keeps no keychain/platform knowledge.
-   *
    * Best-effort: it is called only after the encrypted store is persisted and
    * readable, and again on every open of an authoritative encrypted store, so
    * an interrupted cleanup is finished by the ordinary reopen. A refusal is
@@ -66,15 +59,7 @@ export interface ConnectionStoreDeps {
    * blocks activation or rolls the store back.
    */
   cleanupLegacy?: () => Promise<void>;
-  /**
-   * removal failure is observable in tests; any failure other than a
-   * confirmed-absent file makes {@link ConnectionStore.delete} throw.
-   */
   removeFile?: (filePath: string) => void;
-  /**
-   * only so a regression can hold one publication open and overlap two
-   * mutations; every production path uses the native publisher.
-   */
   publish?: PublishDocument;
 }
 
@@ -114,8 +99,6 @@ async function atomicWrite(
     mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
     await publish(filePath, contents);
   } catch (err) {
-    // the absolute target path and the whole CoreError envelope, and the store's
-    // failures reach logs a user can read.
     const error = err as { code?: unknown; details?: { code?: unknown } } | null;
     const wire = error?.details?.code ?? error?.code;
     const detail = typeof wire === 'string' ? wire : 'target refused';
@@ -139,30 +122,18 @@ const CLEARED_MARKER_NAME = 'connection-config.cleared';
  * injection authority for the network policy and never crosses IPC.
  */
 export class ConnectionStore {
-  /**
-   * read → derive → publish → state-update sequence inside it, so the previous
-   * state they derive from is the state the earlier mutation committed.
-   */
   private tail: Promise<unknown> = Promise.resolve();
 
   private constructor(
     private readonly deps: ConnectionStoreDeps,
     private state: StoredFile | null,
     /**
-     * cleanup attempt, or null when there was nothing to remove or the
-     * removal succeeded — i.e. non-null means this open did NOT end with the
-     * legacy plaintext sources removed.
-     *
      * Cleanup is best-effort by contract: the encrypted store is already
      * authoritative, so a refusal is reported here instead of failing the
      * open, and the next open retries it.
      */
     readonly legacyCleanupFailure: Error | null = null,
     /**
-     * last open, or null when the open ended healthy or found no store file
-     * at all. Non-null means an existing store was present but could not be
-     * activated; its bytes stay on disk for the user to recover.
-     *
      * Tri-state: `openFailure === null && state === null` → fresh install
      * (no diagnostic); `openFailure !== null` → unreadable/corrupt
      * (diagnostic); otherwise the store is healthy. Reported by the host;
@@ -182,11 +153,6 @@ export class ConnectionStore {
   }
 
   /**
-   * tombstone is present, and the paired legacy source is configured,
-   * performs the one-time import in one order: validate → encrypt → persist
-   * → remove both legacy originals → publish. A parse/URL/encrypt/persist
-   * failure removes nothing, so the plaintext sources stay recoverable.
-   *
    * The removal itself is best-effort: a refusal never fails the open (the
    * encrypted store is already persisted and readable), preserves both the
    * ciphertext and the remaining legacy source, and is reported as
@@ -206,10 +172,6 @@ export class ConnectionStore {
     try {
       state = ConnectionStore.readFile(deps);
     } catch (err) {
-      // rewritten, and never replaced by the legacy material. The typed
-      // classification is retained in `openFailure` so the host can surface
-      // it; the inactive-store return contract and the on-disk bytes are
-      // unchanged.
       return new ConnectionStore(deps, null, null, err as Error);
     }
     let cleared = false;
@@ -225,7 +187,6 @@ export class ConnectionStore {
       if (legacy !== null) {
         const imported = ConnectionStore.importLegacy(deps, legacy);
         if (imported !== null) {
-          // readable; no failure above can have removed either original.
           await ConnectionStore.persist(deps, imported);
           cleanupFailure = await ConnectionStore.removeLegacy(deps);
           state = imported;
@@ -237,12 +198,6 @@ export class ConnectionStore {
     return new ConnectionStore(deps, state, cleanupFailure);
   }
 
-  /**
-   * every other read failure is an existing-but-unreadable store and is kept
-   * distinct so it can never be mistaken for a fresh install. A stored
-   * endpoint must satisfy the shared root-service grammar before it is
-   * activated.
-   */
   private static readFile(deps: ConnectionStoreDeps): StoredFile | null {
     let raw: string;
     try {
@@ -270,7 +225,6 @@ export class ConnectionStore {
       );
     }
     if (parsed.credential !== undefined) {
-      // decrypted — the store stays recoverable rather than half-loaded.
       try {
         deps.storage.decryptString(decodeCredential(parsed.credential));
       } catch {
@@ -333,11 +287,6 @@ export class ConnectionStore {
   }
 
   /**
-   * sanitized structured `legacy_credential_cleanup_failed` error. It is
-   * reached ONLY once the encrypted store is persisted and readable (or was
-   * already authoritative), so a refusal never rolls the store back, never
-   * fails the open and never writes plaintext.
-   *
    * The returned error is the caller-visible signal that this open did not
    * end with the plaintext originals removed — so a migration with a refused
    * cleanup is never reported as clean — and the next open retries.
@@ -350,7 +299,6 @@ export class ConnectionStore {
       await deps.cleanupLegacy?.();
       return null;
     } catch (err) {
-      // adapter's own message may carry command output or the secret.
       const code = (err as { code?: unknown } | null)?.code;
       const detail =
         typeof code === 'number' && Number.isInteger(code)
@@ -371,11 +319,6 @@ export class ConnectionStore {
     return this.state ? { ...this.state.config } : null;
   }
 
-  /**
-   * exact origin plus plaintext key ONLY for main-process network policy
-   * use; never invoke this on a renderer path. Null when the config is
-   * inactive or has no credential.
-   */
   getAuth(): { endpointOrigin: string; apiKey: string } | null {
     const state = this.state;
     if (state?.config.active !== true || !state?.credential) {
@@ -443,11 +386,6 @@ export class ConnectionStore {
   }
 
   /**
-   * the store so a later {@link ConnectionStore.open} sees the marker and
-   * never re-imports the legacy material (D-18): clear is a deliberate user
-   * action and must not be undone by the still-present legacy key. The
-   * marker is non-secret.
-   *
    * The marker is published BEFORE the store file is removed. The opposite
    * order leaves neither store nor tombstone when the marker publication is
    * refused, and the next open then re-imports the legacy material — a clear

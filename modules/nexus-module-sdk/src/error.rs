@@ -39,14 +39,11 @@ impl ModuleError {
 /// `out_ptr` must point into the module's own linear memory, reserved by the
 /// host via `alloc`; the input and output buffers are separate allocations,
 /// so the ranges never overlap.
-// `-2` sentinel.
 #[allow(clippy::result_unit_err)]
 pub fn write_output(out_ptr: u32, out_cap: u32, bytes: &[u8]) -> Result<usize, ()> {
     if bytes.len() > out_cap as usize {
         return Err(());
     }
-    // host via `alloc`. The ranges are non-overlapping (input and output
-    // buffers are separate allocations).
     unsafe {
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr as *mut u8, bytes.len());
     }
@@ -75,9 +72,4 @@ mod tests {
         assert_eq!(&buf, &[0u8; 4]);
     }
 
-    // memory) is only meaningful on wasm32, where pointers ARE u32 linear
-    // addresses — a host pointer truncated to u32 is invalid memory. The copy
-    // itself is a std primitive; the interesting logic (capacity check before
-    // copy) is covered above, and the full write path is exercised by the
-    // real-host integration tests on wasm32 modules.
 }

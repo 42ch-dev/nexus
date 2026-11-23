@@ -94,7 +94,6 @@ async fn fresh_env() -> ReadingEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // child must not be handed a home another writer still holds.
     release_retained_writer_guards(&db_path);
 
     ReadingEnv { fixture, work_id }
@@ -336,7 +335,6 @@ async fn progress_get_unknown_work_surfaces_core_error() {
     );
 }
 
-// splitting it would hide the cross-verb state transitions it pins.
 #[allow(clippy::too_many_lines)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn annotation_lifecycle_round_trip() {

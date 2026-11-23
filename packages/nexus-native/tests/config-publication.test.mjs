@@ -46,10 +46,6 @@ function wireCode(error) {
   return parseNativeCoreError(error)?.code ?? null;
 }
 
-/**
- * when it belongs to no other group. Without one a staged-and-renamed file
- * always inherits the process egid, so a captured-group assertion cannot fail.
- */
 function foreignGroup() {
   const egid = process.getegid?.();
   return process.getgroups?.().find((gid) => gid !== egid) ?? null;
@@ -74,7 +70,6 @@ describe('native config publication (real binding)', () => {
     await assert.rejects(publishDocument('config.toml', 'name = "x"\n'), (error) =>
       /absolute path/.test(error.message),
     );
-    // `invalid_input` envelope rather than a filesystem guess.
     const binding = loadNativeBinding();
     const error = await binding.publishDocument('config.toml', 'name = "x"\n').then(
       () => null,
@@ -97,8 +92,6 @@ describe('native config publication (real binding)', () => {
 
       assert.ok(error, 'a write-denied target must be refused');
       assert.equal(wireCode(error), 'forbidden');
-      // even serialised, and a message-only assertion would pass a regression
-      // that moved the contents into it.
       assert.deepEqual(
         parseNativeCoreError(error)?.details ?? {},
         {},

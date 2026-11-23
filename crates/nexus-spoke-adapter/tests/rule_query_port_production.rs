@@ -165,7 +165,6 @@ async fn list_rules_returns_exactly_requested_rules_across_worlds() {
         "world B rule must not be returned when not requested"
     );
 
-    // (full field map is covered by the unit tests).
     let rule_a1 = rules.iter().find(|r| r.rule_id == "rule_a1").unwrap();
     assert_eq!(rule_a1.canonical_name.to_string(), "Rule rule_a1");
     assert_eq!(rule_a1.schema_version.get(), 1);
@@ -189,9 +188,6 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     let (pool, dir) = fresh_pool().await;
     seed_rule(&pool, "rule_a1", "wld_a").await;
 
-    // `world_rules_json` contains a rule-shaped object carrying the SAME
-    // requested id (`rule_phantom`). If `list_rules` consulted this store,
-    // the phantom would come back.
     seed_world_with_rules_bait(
         &pool,
         "wld_a",
@@ -199,10 +195,6 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
     )
     .await;
 
-    // P2 Layer 2 location) carrying an accepted rule suggestion for the same
-    // phantom id. `NexusAdapter` holds only a `SqlitePool` — it has no
-    // filesystem path — so this documents that the boundary cannot observe
-    // Work-side rule findings at all.
     let work_agents_md = dir
         .path()
         .join("Works")
@@ -217,7 +209,6 @@ async fn list_rules_does_not_fabricate_from_work_side_rule_sources() {
 
     let adapter = scoped(pool);
 
-    // comes back.
     let rules = unwrap_ok(
         adapter
             .list_rules(&["rule_a1".to_string(), "rule_phantom".to_string()])
@@ -247,9 +238,6 @@ async fn list_rules_duplicate_refs_are_deduplicated() {
     seed_rule(&pool, "rule_a2", "wld_a").await;
 
     let adapter = scoped(pool);
-    // `get_spoke_rules_by_ids` doc contract ("duplicate ids in the input are
-    // deduplicated; one row per distinct `rule_id`") holds end-to-end through
-    // the production port.
     let rules = unwrap_ok(
         adapter
             .list_rules(&[

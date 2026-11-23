@@ -370,7 +370,6 @@ impl HostManager {
                     message: Some(safe_provider_message(&error)),
                 },
             };
-            // is not representable, and clamping is truthful for telemetry.
             let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
             self.publish_probe_result(&identity, health, latency_ms)
                 .await;
@@ -439,8 +438,6 @@ impl crate::HostFacade for HostManager {
                             expected_dir.display()
                         )));
                     }
-                    // raw-path swap between validation and read cannot change
-                    // what is loaded.
                     resolved_config_path = canonical_config;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -512,7 +509,6 @@ impl crate::HostFacade for HostManager {
         };
         let provider_count = registered_ids.len();
 
-        // but only if no custom policy was set via `with_admission()`.
         if !self.admission_custom {
             *self.admission.write().await =
                 AdmissionPolicy::from_config(&host_config, registered_ids);
@@ -562,15 +558,12 @@ impl crate::HostFacade for HostManager {
         })?;
         drop(providers);
 
-        // and against the verified Creator workspace root (A5 owner/cwd isolation).
         let boundary = {
             let ws = self.workspace_root.read().await;
             ws.clone()
                 .ok_or_else(|| HostError::internal("workspace root not set — host not started"))?
         };
         let validated_cwd = crate::config::validate_workspace_path_under(&request.cwd, &boundary)?;
-        // profile switch or foreign workspace must never retarget an existing
-        // run (A5: owner_workspace_mismatch).
         let owner_workspace =
             crate::config::validate_workspace_path_under(&request.owner.workspace_root, &boundary)?;
         if !validated_cwd.starts_with(&owner_workspace) {
@@ -684,8 +677,6 @@ impl crate::HostFacade for HostManager {
             sessions.transition_to_busy(&session_id, op_id.clone())?;
         }
 
-        // the session is stuck in Busy — transition back to Ready before
-        // propagating the error (QC3 F-001 defense-in-depth).
         let stream = match adapter.execute(&handle, op).await {
             Ok(s) => s,
             Err(e) => {
@@ -694,12 +685,6 @@ impl crate::HostFacade for HostManager {
                     .write()
                     .await
                     .transition_busy_to_ready(&session_id, &op_id);
-                // a confirmed-close failure on the first denied prompt, or a
-                // lazy child setup failure) is the same launch-class failure
-                // `create_session` already handles: the candidate is no longer
-                // ready, so invalidate it. Ordinary prompt/content timeouts are
-                // excluded by the category+stage gate inside
-                // `is_launch_class_failure`.
                 if is_launch_class_failure(&e) {
                     self.invalidate_provider(&provider_id, safe_provider_message(&e))
                         .await;
@@ -725,11 +710,6 @@ impl crate::HostFacade for HostManager {
                         let _ = tx.send(event.clone());
                     }
                     if let Ok(HostEvent::OpFinished(_) | HostEvent::OpFailed(_)) = &result {
-                        // (both keyed by this op) back to Ready. During a
-                        // cancellation the session stays Cancelling until the
-                        // stream itself emits its terminal event — a
-                        // subsequent exec cannot overlap the still-owning
-                        // ACP read loop (A5 "reuse serially").
                         let mut sess = sessions.write().await;
                         match sess.get(&sid).map(|s| s.state.clone()) {
                             Some(crate::core::session::SessionState::Busy(op)) if op == oid => {
@@ -781,8 +761,6 @@ impl crate::HostFacade for HostManager {
 
         adapter.cancel(&handle, op_id).await?;
 
-        // return the session to Ready. A cancel failure leaves the session
-        // Cancelling; the stream's own timeout/EOF guarantee a terminal.
         Ok(())
     }
 
@@ -824,10 +802,6 @@ impl crate::HostFacade for HostManager {
             session_ids = session_ids_raw;
         }
 
-        // then call shutdown outside the lock to avoid holding it across .await points.
-        // Use the actual negotiated capabilities from the session registry (QC2 F-004).
-        // If a session has no registry entry, skip it rather than fabricating
-        // full capabilities (QC2 F-004 fix: no acp_full() fallback).
         let shutdown_tasks: Vec<(Arc<dyn ProviderAdapter>, ManagedSessionHandle)> = {
             let sessions = self.sessions.read().await;
             let providers = self.providers.read().await;
@@ -888,7 +862,6 @@ impl crate::HostFacade for HostManager {
             }
         }
 
-        // registry — EXCEPT sessions whose cleanup is unconfirmed.
         {
             let mut sessions = self.sessions.write().await;
             for session_id in &session_ids {
@@ -923,7 +896,6 @@ impl crate::HostFacade for HostManager {
             }
         }
 
-        // unconfirmed sessions keep their ownership mapping for reconciliation.
         {
             let mut session_providers = self.session_providers.write().await;
             for session_id in &session_ids {
@@ -972,9 +944,6 @@ impl crate::HostFacade for HostManager {
             |c| c.timeouts.shutdown_duration(),
         );
 
-        // failure/timeout means the exact owned process was not confirmed
-        // reaped: the session must remain visibly interrupted (A5), never be
-        // marked/removed as cleanly stopped.
         let cleanup_unconfirmed =
             match tokio::time::timeout(shutdown_timeout, adapter.shutdown(handle)).await {
                 Ok(Ok(())) => {
@@ -1004,7 +973,6 @@ impl crate::HostFacade for HostManager {
             };
 
         if cleanup_unconfirmed {
-            // not be reported as cleanly stopped while cleanup is unconfirmed.
             let mut sessions = self.sessions.write().await;
             let already_recoverable = matches!(
                 sessions.get(&session_id).map(|current| &current.state),
@@ -1065,7 +1033,6 @@ impl crate::HostFacade for HostManager {
                 health: entry.health.clone(),
             })
             .collect();
-        // than holding it to the end of scope.
         drop(providers);
         Ok(crate::discovery::ProviderCatalog { entries })
     }
@@ -1440,15 +1407,11 @@ mod tests {
 
     #[tokio::test]
     async fn absent_optional_config_path_returns_defaults() {
-        // `load_config_from_path` supplies defaults.
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let config_path = temp_dir.path().join("absent-config.toml");
         let cfg = HostStartConfig {
             config_path,
             workspace_root: temp_dir.path().to_path_buf(),
-            // boundary: `start_config()` defaults to `/tmp`, which is outside
-            // this temp boundary (and on macOS canonicalizes to
-            // `/private/tmp`). Align the fixture's owner with the boundary.
             probe_owner: Some(test_owner_for(temp_dir.path().to_path_buf())),
             ..start_config()
         };
@@ -1506,7 +1469,6 @@ mod tests {
 
         let temp_dir = tempfile::tempdir().expect("temp dir");
 
-        // canonicalization (validate_workspace_path contract).
         let parentdir = HostStartConfig {
             config_path: temp_dir.path().join("cfg").join("..").join("escape.toml"),
             ..start_config()
@@ -1526,8 +1488,6 @@ mod tests {
             .expect_err("ParentDir component rejected");
         assert!(matches!(err, HostError::PolicyDenied { .. }), "got {err:?}");
 
-        // dir must be rejected. Staging the escape needs `symlink(2)`, which a
-        // Windows test cannot create portably, so this case is a unix proof.
         #[cfg(unix)]
         {
             let outside = temp_dir.path().join("outside-config.toml");
@@ -1784,7 +1744,6 @@ mod tests {
             .await
             .expect("create");
 
-        // an error and the owned session must remain visible for recovery.
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), manager.shutdown())
             .await
             .expect("shutdown should not hang");
@@ -1805,7 +1764,6 @@ mod tests {
             crate::core::session::SessionState::ErrorRecoverable
         );
 
-        // and preserves the same recoverable ownership state.
         let retry_error = manager
             .shutdown()
             .await
@@ -2434,9 +2392,6 @@ mod tests {
 
     #[tokio::test]
     async fn exec_launch_class_failure_invalidates_provider() {
-        // lazy child-setup failure) must invalidate the SAME candidate health
-        // `create_session` does, so a later admission cannot keep using a
-        // provider that is no longer ready.
         let manager = HostManager::new();
         let category = exec_probe_then_fail(
             &manager,
@@ -2458,9 +2413,6 @@ mod tests {
 
     #[tokio::test]
     async fn exec_content_timeout_keeps_provider_ready() {
-        // failure. A provider that initialized successfully must stay ready —
-        // blanket-classifying every `operation_timeout` would tear down a
-        // working recipe.
         let manager = HostManager::new();
         let category = exec_probe_then_fail(
             &manager,
@@ -2482,7 +2434,6 @@ mod tests {
 
     #[tokio::test]
     async fn launch_stage_timeout_is_launch_class() {
-        // boundary is launch-class.
         let launch_stage = HostError::timeout("launch", "initialize handshake timed out");
         assert!(is_launch_class_failure(&launch_stage));
         let init_stage = HostError::timeout("initialize", "init timed out");
@@ -2494,8 +2445,6 @@ mod tests {
 
     #[tokio::test]
     async fn restart_without_probe_owner_invalidates_previously_healthy_entries() {
-        // `available = true`. Re-starting it with NO verified owner must clear
-        // EVERY row (not only rows already unavailable), including latency.
         let manager = HostManager::new();
         manager
             .register_provider(

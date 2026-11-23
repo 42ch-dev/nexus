@@ -34,8 +34,6 @@ pub use error::{ConnectError, ConnectResult};
 #[cfg(feature = "peer-tools")]
 pub mod peer_tools;
 
-// client shares with the peer-tools stack. Everything below keeps its
-// existing Connect cohort gate.
 #[cfg(feature = "transport")]
 pub mod ws_transport;
 
@@ -47,8 +45,6 @@ pub mod config;
 pub mod events;
 #[cfg(feature = "connect-host")]
 pub mod identity;
-// with the rmcp-bearing `connect-client` cohort, never in the Connect-host
-// product cohort.
 #[cfg(feature = "connect-client")]
 pub mod mcp_bridge;
 #[cfg(feature = "embedded-mcp")]

@@ -391,8 +391,6 @@ impl<'a> NexusAdapter<'a> {
     }
 }
 
-/// marker instead of sniffing the message (same pattern as
-/// `module_identity_missing` / `world_conflict`).
 const READ_SCOPE_MISSING_MARKER: &str = "read_scope_missing";
 
 /// The fail-closed reject a KE-bearing port produces on a host-only adapter
@@ -473,8 +471,6 @@ mod tests {
         accepts_rule_query_port(&adapter);
         accepts_host_manifest_port(&adapter);
 
-        // scope; the KE-bearing ones are compiled for the type but fail closed
-        // at runtime (proved in `tests/adapter_surface.rs`).
         accepts_rule_query_port(&host);
         accepts_host_manifest_port(&host);
         accepts_fork_timeline_port(&host);

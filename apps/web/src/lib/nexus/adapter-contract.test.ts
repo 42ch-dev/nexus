@@ -34,11 +34,6 @@ import { useHandlers } from '@/test/msw-server';
 import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
 
 
-/**
- * `fetch`; the desktop adapter + desktop-capabilities own `window.nexusDesktop` +
- * the loopback `fetch`. Everything else must go through the `NexusClient` /
- * `DesktopCapabilities` interfaces.
- */
 const ADAPTER_IMPLS = new Set([
   '/src/lib/nexus/browser-client.ts',
   '/src/lib/nexus/desktop-client.ts',
@@ -57,10 +52,6 @@ const sources = import.meta.glob('/src/**/*.{ts,tsx}', {
 const isTestArtifact = (path: string): boolean =>
   /\.(test|spec)\.(ts|tsx)$/.test(path) || path.startsWith('/src/test/');
 
-/**
- * `.refetch(`, `prefetch(`, `useFetch(`, and property access on unrelated
- * objects — only a bare `fetch(` (optionally with whitespace) matches.
- */
 const DIRECT_FETCH_CALL = /(?<![\w$])fetch\s*\(/;
 
 describe('NexusClient adapter contract guard', () => {
@@ -99,8 +90,6 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     const client = new DesktopClient({ port: 8421, fetchImpl });
     expect(client.port).toBe(8421);
     await client.health();
-    // browser-tab BrowserClient uses relative `/v1/daemon/*`). Vite `:5173`
-    // is the exception (same-origin + preview proxy); tests use a non-Vite origin.
     expect(captured.url).toBe('http://localhost:8421/v1/daemon/runtime/health');
   });
 
@@ -121,14 +110,6 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     };
     const client = new DesktopClient({ fetchImpl });
     const workId = 'w1';
-    // (health + 42 data method invocations here). The three preset methods
-    // (getPreset/updatePreset/deletePreset) were promoted in V1.67 G2
-    // (R-V167P1-QC3-S1), the four outline+timeline methods
-    // (getWorkOutline/patchOutlineStructure/patchOutlineChapter/patchTimelineEvent)
-    // were promoted in V1.72 Track A, the five memory methods in V1.78, and the
-    // seven reading-depth methods in V1.89 — they must all hit the same
-    // transport as the rest of the surface, not silently no-op. (V1.75 A6
-    // removed the V1.65 `putChapterOutline` PUT method.)
     await client.health();
     await client.listWorks();
     await client.getWork(workId);
@@ -140,8 +121,6 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     await client.inspectSchedule('sch1');
     await client.listCapabilities();
     await client.listFindings(workId);
-    // the types + daemon routes already existed; these exercise the TS
-    // surface (v1.190 P5-T1 renamed getFinding → getWorkFinding).
     await client.getWorkFinding(workId, 'f1');
     await client.updateFinding(workId, 'f1', { status: 'triaged' });
     await client.listPresets();
@@ -173,16 +152,11 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
       base_revision: 1,
       operation: 'add_event',
     });
-    // routes already shipped; these exercise the new TS surface). The memory
-    // surface is creator-scoped; the active creator id rides as a query/body
-    // param, so the path portion stays under /v1/daemon/memory/*.
     await client.listPendingReviews('c1');
     await client.countPendingReviews('c1');
     await client.deletePendingReview('p1', 'c1');
     await client.reviewMemory({ creator_id: 'c1' });
     await client.listMemoryFragments('c1');
-    // putReadingProgress/deleteReadingProgress/listReadingAnnotations/
-    // createReadingAnnotation/patchReadingAnnotation/deleteReadingAnnotation).
     await client.getReadingProgress(workId, 1);
     await client.putReadingProgress({ work_id: workId, chapter: 1, scroll_progress: 5000 });
     await client.deleteReadingProgress(workId, 1);
@@ -197,14 +171,9 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     });
     await client.patchReadingAnnotation('a1', { color: 'blue', note: 'note' });
     await client.deleteReadingAnnotation('a1');
-    // findings panel (T1) + rules section (T2). Both are plain GETs through
-    // the shared transport; pinning them here keeps the parity set complete
-    // even though DesktopClient inherits them via `extends BrowserClient`.
     await client.listWorldFindings(workId);
     await client.listWorldRules(workId);
 
-    // browser client). If a method silently no-op'd or threw — as the V1.65
-    // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/daemon/'))).toBe(true);
     expect(seen.size).toBe(43);
@@ -239,8 +208,6 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
 
 describe('BrowserClient adapter contract', () => {
   it('delegates transport to the injected fetchImpl (diagnostics seam)', async () => {
-    // locals: property reads are not narrowed, so the captured values are
-    // visible after the awaited call.
     const captured: { url?: string; init?: RequestInit } = {};
     const fetchImpl: typeof fetch = (input, init) => {
       captured.url = String(input);
@@ -287,7 +254,6 @@ describe('BrowserClient adapter contract', () => {
     );
 
     const client = new BrowserClient();
-    // request URL must carry no query string.
     await client.listWorks({ cursor: '' });
     expect(captured.url!.includes('?')).toBe(false);
   });
@@ -312,8 +278,6 @@ describe('BrowserClient adapter contract', () => {
     await client.listWorldRules('w1', false);
     await client.listWorldRules('w1', true);
 
-    // or explicit-`false` call is byte-identical; only explicit inclusion adds
-    // the one key the daemon accepts.
     expect(seen[0]).not.toContain('?');
     expect(seen[1]).not.toContain('?');
     expect(new URL(seen[2]).searchParams.get('include_archived')).toBe('true');
@@ -361,8 +325,6 @@ describe('BrowserClient adapter contract', () => {
   });
 
   it('covers the preset adapter surface (list/scaffold/validate/reload)', async () => {
-    // suffixes; msw's path-to-regexp would read those as params, so match them
-    // with regexes (deterministic, no param-name collision).
     useHandlers(
       http.get('/v1/daemon/presets', () =>
         HttpResponse.json({ embedded: [], system: [], user: [{ name: 'user/foo' }] }),
@@ -394,11 +356,6 @@ describe('BrowserClient adapter contract', () => {
   });
 
   it('routes the V1.67 G2 preset methods to the {id} path with the right verb (get/update/delete)', async () => {
-    // deletePreset) target `/v1/daemon/presets/{id}` with GET/PATCH/DELETE and
-    // URL-encode the id into the path. Pinned here via the `fetchImpl` seam
-    // (this file owns the adapter boundary — fetchImpl injection + path
-    // serialization + 204 handling) rather than in browser-client.test.ts,
-    // which owns the behavioral response shapes. R-V167P1-QC3-S1.
     const seen: { method: string; url: string; body?: unknown }[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       seen.push({
@@ -420,7 +377,6 @@ describe('BrowserClient adapter contract', () => {
     await client.updatePreset('user/foo', { yaml: 'name: x\n' });
     await expect(client.deletePreset('user/foo')).resolves.toBeUndefined();
 
-    // carries the YAML body; DELETE emits no body.
     expect(seen).toEqual([
       { method: 'GET', url: '/v1/daemon/presets/user%2Ffoo' },
       { method: 'PATCH', url: '/v1/daemon/presets/user%2Ffoo', body: { yaml: 'name: x\n' } },
@@ -449,7 +405,6 @@ describe('BrowserClient adapter contract', () => {
 
 describe('NexusClientError contract (adapter surface)', () => {
   it('is the error type every adapter failure throws', () => {
-    // queries.ts useErrorToast) stable across both client implementations.
     const err = NexusClientError.fromBody(500, {
       success: false,
       error: { code: 'internal', message: 'boom' },
@@ -461,18 +416,6 @@ describe('NexusClientError contract (adapter surface)', () => {
 });
 
 
-/**
- * three methods to the `NexusClient` interface. This guard fails — at compile
- * time or runtime — if the interface and either adapter implementation drift
- * on those methods:
- *  - Compile-time: the `satisfies readonly (keyof NexusClient)[]` constraint
- *    makes a future interface removal/rename a type error in this file.
- *  - Runtime: the tests below make a missing adapter implementation a test
- *    failure. (`class BrowserClient implements NexusClient` already enforces
- *    presence at compile time; the runtime check pins it against this curated
- *    list so a future override that drops a method is caught by the suite, not
- *    just tsc.)
- */
 const PRESET_METHODS = [
   'getPreset',
   'updatePreset',
@@ -488,9 +431,6 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
   });
 
   it('DesktopClient implements every preset method on the NexusClient interface', () => {
-    // the inheritance is not accidentally broken by a future override that
-    // drops a preset method. The methods are never invoked here, so the
-    // fetchImpl is a defensive stub only.
     const client = new DesktopClient({
       fetchImpl: async () =>
         new Response(JSON.stringify({ ok: true }), {
@@ -505,14 +445,6 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
 });
 
 
-/**
- * to the `NexusClient` interface. v1.190 P5-T1 renamed the work-scoped method
- * to `getWorkFinding` (the bare `getFinding` is now the canonical
- * creator-scoped `GET /v1/daemon/findings/{finding_id}` from the generated
- * `CoreSliceClient`). This guard mirrors the preset-method guard: it fails at
- * compile time (the `satisfies` constraint) if the interface drops a method,
- * and at runtime if an adapter implementation is missing it.
- */
 const FINDINGS_METHODS = [
   'getWorkFinding',
   'updateFinding',
@@ -541,9 +473,6 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
   });
 
   it('getWorkFinding / updateFinding route to the {finding_id} path with GET / PATCH', async () => {
-    // `/v1/daemon/works/{work_id}/findings/{finding_id}` with GET/PATCH and
-    // URL-encode both path params. Pinned via the fetchImpl seam (this file owns
-    // the adapter boundary — fetchImpl injection + path serialization).
     const seen: { method: string; url: string; body?: unknown }[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       seen.push({
@@ -607,14 +536,6 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
 });
 
 
-/**
- * `NexusClient` interface (`listPendingReviews` / `countPendingReviews` /
- * `deletePendingReview` / `reviewMemory` / `listMemoryFragments`). This guard
- * mirrors the preset + findings parity guards: it fails at compile time (the
- * `satisfies` constraint) if the interface drops any method, and at runtime if
- * an adapter implementation is missing it. `createPendingReview` is
- * intentionally absent (CLI/producer-only — compass D-UX LOCKED).
- */
 const MEMORY_METHODS = [
   'listPendingReviews',
   'countPendingReviews',
@@ -646,10 +567,6 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
   });
 
   it('routes the memory methods to the right verb + path + creator_id param', async () => {
-    // delete encodes the pending_id path param AND the creator_id query param;
-    // review carries creator_id in the JSON body. Pinned via the fetchImpl seam
-    // (this file owns the adapter boundary — fetchImpl injection + path/query
-    // serialization + body shape).
     const seen: { method: string; url: string; body?: unknown }[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       seen.push({
@@ -677,9 +594,6 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
     await client.listMemoryFragments('c1', { keyword: 'kw', limit: 10 });
     await client.reflectSoulNarrative({ creator_id: 'c1', force_regenerate: true });
 
-    // query string; delete encodes the pending_id path segment and adds the
-    // creator_id query param; review sends creator_id in the JSON body.
-    // reflect sends creator_id (+optional force_regenerate) in the JSON body.
     expect(seen).toEqual([
       { method: 'GET', url: '/v1/daemon/memory/pending-review?limit=5&cursor=cur&creator_id=c1' },
       { method: 'GET', url: '/v1/daemon/memory/pending-review/count?creator_id=c1' },
@@ -696,14 +610,6 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
 });
 
 
-/**
- * `NexusClient` interface (`getReadingProgress` / `putReadingProgress` /
- * `deleteReadingProgress` / `listReadingAnnotations` / `createReadingAnnotation` /
- * `patchReadingAnnotation` / `deleteReadingAnnotation`). This guard mirrors the
- * preset + findings + memory parity guards: it fails at compile time (the
- * `satisfies` constraint) if the interface drops any method, and at runtime if
- * an adapter implementation is missing it.
- */
 const READING_METHODS = [
   'getReadingProgress',
   'putReadingProgress',
@@ -794,13 +700,6 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
 });
 
 
-/**
- * interface (`runCompute` / `acceptRun` / `discardRun` / `listRuns` /
- * `getRun`); the V1.147 P2 clear-runs promotion added `clearRuns`. This guard
- * mirrors the preset + findings + memory + reading parity guards: it fails at
- * compile time (the `satisfies` constraint) if the interface drops any method,
- * and at runtime if an adapter implementation is missing it.
- */
 const COMPUTE_RUN_METHODS = [
   'runCompute',
   'acceptRun',

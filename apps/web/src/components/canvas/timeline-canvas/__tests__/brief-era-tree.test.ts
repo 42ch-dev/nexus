@@ -33,7 +33,6 @@ function eraEntity(
     version: 1,
     key_block_id,
     canonical_name,
-    // `body.attributes`. era_type is added per-fixture when needed.
     body:
       body ??
       ({
@@ -224,7 +223,6 @@ describe('buildEraTree', () => {
       eraEntity({
         key_block_id: 'era-empty',
         canonical_name: 'Empty-Typed Age',
-        // readString convention).
         body: { attributes: { era_type: '' } },
       }),
       eraEntity({

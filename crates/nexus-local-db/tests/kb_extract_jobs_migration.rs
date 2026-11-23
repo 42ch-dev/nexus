@@ -62,7 +62,6 @@ async fn forward_migration_adds_promotion_columns() {
 async fn promotion_status_defaults_to_pending_with_check_constraint() {
     let (pool, _dir) = fresh_pool().await;
 
-    // defaults to 'pending'.
     let job = nexus_local_db::enqueue_extract_job(&pool, "ctr_1", "wrk_1", "kb_a", "wld_1")
         .await
         .unwrap();
@@ -274,7 +273,6 @@ async fn pending_list_uses_world_id_covering_index() {
     use nexus_local_db::kb_extract_job::insert_pending;
     let (pool, _dir) = fresh_pool().await;
 
-    // EXPLAIN QUERY PLAN, but mirrors a realistic state).
     insert_pending(
         &pool,
         "ctr_1",

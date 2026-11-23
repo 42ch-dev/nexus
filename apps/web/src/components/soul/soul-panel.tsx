@@ -95,7 +95,6 @@ export function SoulPanel({
       {buckets.length >= 2 ? (
         <TemporalDrift buckets={buckets} />
       ) : (
-        // rather than a single-point timeline that would look broken.
         <KeywordFrequency
           counts={aggregateKeywordFrequency(fragments)}
           selectedKeyword={selectedKeyword}

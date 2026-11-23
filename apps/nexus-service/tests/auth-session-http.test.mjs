@@ -75,7 +75,6 @@ async function startServer({ keyed = false, clock } = {}) {
       port: 0,
       allowRemote: false,
     });
-    // unguarded and would answer 200 with or without credentials.
     const service = {
       startedAt: new Date().toISOString(),
       tlsFingerprint: null,

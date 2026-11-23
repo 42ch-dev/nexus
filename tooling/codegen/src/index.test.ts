@@ -14,14 +14,12 @@ describe('runCodegen run lock', () => {
     const previousDeref = process.env.NEXUS_DEREF_SCHEMAS_DIR;
     process.env.NEXUS_DEREF_SCHEMAS_DIR = deref;
 
-    // directory — prep clears it before either generator runs.
     const lockDir = `${resolvePrepPaths().localizedDir}.lock`;
     expect(fs.existsSync(lockDir)).toBe(false);
     fs.mkdirSync(lockDir, { recursive: true });
     fs.writeFileSync(path.join(lockDir, 'owner'), `${process.pid}:competing:0\n`);
     try {
       await expect(runCodegen()).rejects.toThrow(/another codegen run/);
-      // clear are still intact.
       expect(fs.existsSync(path.join(deref, 'sentinel.schema.json'))).toBe(true);
     } finally {
       fs.rmSync(lockDir, { recursive: true, force: true });

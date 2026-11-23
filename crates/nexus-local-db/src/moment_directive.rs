@@ -257,9 +257,6 @@ pub async fn get_by_id(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // the macro needs the non-null coercion for the `String` field;
-        // `clear_on_scene_change: bool` — the column is INTEGER, the struct
-        // field is `bool` (explicit decode override).
         "SELECT directive_id as \"directive_id!\",
                 creator_id, scope_kind, scope_id, body, insert_depth,
                 ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",
@@ -359,7 +356,6 @@ pub async fn decrement_ttl_by(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET ttl_remaining = MAX(ttl_remaining - ?, 0),
              status = CASE WHEN ttl_remaining <= ? THEN 'expired' ELSE status END,
@@ -401,7 +397,6 @@ pub async fn clear_on_scene_change(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // quirk + INTEGER→bool decode override).
         "UPDATE moment_directives
          SET status = 'expired', expires_at = ?, updated_at = ?
          WHERE directive_id = ? AND status = 'active'
@@ -512,7 +507,6 @@ async fn get_active_by_scope(
 ) -> Result<Option<MomentDirectiveRow>, LocalDbError> {
     let row = sqlx::query_as!(
         MomentDirectiveRow,
-        // quirk + INTEGER→bool decode override).
         "SELECT directive_id as \"directive_id!\",
                 creator_id, scope_kind, scope_id, body, insert_depth,
                 ttl_kind, ttl_remaining, clear_on_scene_change as \"clear_on_scene_change: bool\",

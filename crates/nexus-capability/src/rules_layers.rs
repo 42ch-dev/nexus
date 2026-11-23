@@ -171,7 +171,6 @@ fn emit_hunks(script: &[(u8, &str)]) -> String {
 
         let a_count = a_prefix[hunk_end_excl] - a_prefix[hunk_start];
         let b_count = b_prefix[hunk_end_excl] - b_prefix[hunk_start];
-        // before the hunk per diff convention.
         let a_start = if a_count == 0 {
             a_prefix[hunk_start]
         } else {
@@ -258,7 +257,6 @@ pub async fn append_rule_suggestion(
     timestamp_rfc3339: &str,
 ) -> Result<AppendOutcome, CapabilityError> {
     let agents_md_path = agents_md_path(workspace_root, work_ref);
-    // real error, not an absent file.
     let existing = match std::fs::read_to_string(&agents_md_path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => render_default_agents_md(work_ref),
@@ -556,7 +554,6 @@ mod tests {
 
         let diff = diff_agents_md_vs_scaffold(&current, "neon-river");
 
-        // reset would discard them → they must appear as `-` (removed) lines.
         assert!(
             diff.contains("-<!-- finding_id: fnd_01HMV -->"),
             "diff:\n{diff}"

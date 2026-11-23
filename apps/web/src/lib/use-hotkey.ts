@@ -1,6 +1,4 @@
 /**
- * component (FB-CP-001, V1.111 P0 T2).
- *
  * Architect lock (plan `## Architecture locks` item 3):
  *   `useHotkey(key, handler, opts?: { preventDefault?: boolean })`
  *
@@ -65,7 +63,6 @@ export function useHotkey(
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
       if (mod && !(event.metaKey || event.ctrlKey)) return;
-      // an incidental Ctrl+K (only `mod+k` should match that chord).
       if (!mod && (event.metaKey || event.ctrlKey)) return;
       if (event.key.toLowerCase() !== baseKey) return;
       if (isHotkeyTargetIgnored(document.activeElement)) return;
@@ -78,11 +75,6 @@ export function useHotkey(
   }, [mod, baseKey, preventDefault]);
 }
 
-/**
- * other `<token>+<key>` form is treated as a literal key name (and will simply
- * fail to match `event.key`, surfacing as a no-op). Documented, not validated
- * — the sole caller (`'mod+k'`) is correct.
- */
 function parseDescriptor(descriptor: string): { mod: boolean; baseKey: string } {
   const lower = descriptor.toLowerCase();
   if (lower.startsWith('mod+')) {
@@ -108,7 +100,6 @@ export function isHotkeyTargetIgnored(element: Element | null): boolean {
   if (element === null) return false;
   const tag = element.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
-  // attribute-based so it is robust across jsdom and real browsers.
   if (element.closest('[contenteditable],[data-command-palette-ignore]')) {
     return true;
   }

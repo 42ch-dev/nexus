@@ -488,7 +488,6 @@ fn check_labeled_edge_duplicates(document: &WorkflowDocument, result: &mut Valid
         }
     }
 
-    // no two source states share the same label targeting the same merge node.
     let mut merge_labels: HashMap<(&str, &str), &str> = HashMap::new();
     for (i, node) in outer_states(document) {
         for (k, edge) in labeled_edges(document, &node.id).enumerate() {
@@ -608,9 +607,6 @@ fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut Validati
 /// and `system_prompt_file` references.
 pub(crate) fn collect_asset_file_references(manifest: &PresetManifest) -> Vec<(String, String)> {
     let mut refs: Vec<(String, String)> = Vec::new();
-
-    // are already collected by loader::collect_template_file_entries, but that's private.
-    // We re-collect here for independence.
 
     for (i, state) in manifest.states.iter().enumerate() {
         if let Some(ExitWhen::LlmJudge {
@@ -883,7 +879,6 @@ fn check_capability_arg_compatibility(
     caps: &dyn CapabilityCatalog,
     result: &mut ValidationResult,
 ) {
-    // richer diagnostics).
     for (i, req_cap) in document.meta.requires_capabilities.iter().enumerate() {
         if caps.input_schema(req_cap).is_none() {
             result.diagnostics.push(ValidationDiagnostic {
@@ -1832,8 +1827,6 @@ pub const STAGE_PRESET_ALLOWLIST: &[(&str, &[&str])] = &[
     ("intake", &["creative-brief-intake"]),
     ("research", &["research"]),
     ("produce", &["novel-writing"]),
-    // single definition with the supervisor terminal guard and the
-    // `persist_review_findings_for_schedule` findings hook.
     (
         "review",
         &[crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID],

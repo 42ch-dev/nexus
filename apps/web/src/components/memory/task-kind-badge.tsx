@@ -1,6 +1,4 @@
 /**
- * `memory-task-kind-*`).
- *
  * `task_kind` is a free-form string on the wire (the contract does not constrain
  * it), so the badge maps the five known values (`brainstorm` / `outline` /
  * `chapter` / `research` / `unknown`) to distinct color accents via the
@@ -25,9 +23,6 @@ export const KNOWN_TASK_KINDS: readonly KnownTaskKind[] = [
   'unknown',
 ];
 
-/**
- * `memory-task-kind-*` via the projected token classes.
- */
 function taskKindClasses(taskKind: string | undefined | null): string {
   switch (taskKind as KnownTaskKind) {
     case 'brainstorm':

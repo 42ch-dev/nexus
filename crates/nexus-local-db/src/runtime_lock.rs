@@ -86,7 +86,6 @@ pub async fn acquire_runtime_lock(
     ttl_secs: i64,
     force_stale: bool,
 ) -> Result<AcquireResult, LocalDbError> {
-    // rival wrote and reports it as `Locked`.
     loop {
         let work = get_work(pool, creator_id, work_id).await?.ok_or_else(|| {
             LocalDbError::MissingVersionKey {
@@ -125,7 +124,6 @@ pub async fn acquire_runtime_lock(
                 holder: holder.to_string(),
             });
         }
-        // holder changed again).
     }
 }
 

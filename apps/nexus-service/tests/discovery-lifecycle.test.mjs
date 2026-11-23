@@ -42,7 +42,6 @@ function seedHome() {
 }
 
 function emptyHome() {
-  // service opens the explicit uninitialized shell.
   return track(mkdtempSync(join(tmpdir(), 'nexus-shell-')));
 }
 
@@ -187,8 +186,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
   });
 
   test('failed open never publishes ready', async () => {
-    // opens, the listener bind is then refused (unsafe parent), and nothing
-    // may be published or left behind.
     const home = seedHome();
     const blocker = join(home, 'blocker');
     writeFileSync(blocker, 'not a directory');
@@ -297,7 +294,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       assert.equal(owned.status, 200);
       assert.equal(owned.payload.status, 'stopping');
       stoppedThroughStopRoute = true;
-      // then the socket file is guaranteed gone with the listener.
       assert.equal(
         await waitFor(() => readRecord(home) === null),
         true,
@@ -412,8 +408,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       acquired_at: new Date().toISOString(),
       token: 'successor-live-token',
     });
-    // live lock the moment the stale one disappears — exactly what a racing
-    // successor does in the read-then-unlink window this suite pins.
     let planted = false;
     for (let i = 0; i < 4_000 && !planted; i += 1) {
       if (!existsSync(lockPath)) {
@@ -424,7 +418,6 @@ describe('discovery-lifecycle (P5-T4)', () => {
       }
     }
     if (!planted) {
-      // guarantee is exercised on this run; the start proceeds legitimately.
       await closeServiceBounded(await attempt);
       return;
     }

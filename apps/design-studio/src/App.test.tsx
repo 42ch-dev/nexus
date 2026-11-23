@@ -79,7 +79,6 @@ describe('App landing page', () => {
   it('renders navigation links for all five gallery sections', async () => {
     mockMatchMedia(false);
     await renderStudio();
-    // least one of each label exists.
     const expectedLabels = ['Tokens', 'Brand', 'Components', 'Voice', 'Surfaces'];
     for (const label of expectedLabels) {
       expect(screen.getAllByText(label).length).toBeGreaterThanOrEqual(1);
@@ -130,7 +129,6 @@ describe('Gallery section rendering', () => {
     async ({ route, heading }) => {
       mockMatchMedia(false);
       await renderStudio(route);
-      // verify at least one instance exists.
       expect(screen.getAllByText(heading).length).toBeGreaterThanOrEqual(1);
     },
   );
@@ -728,8 +726,6 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders Settings fixture sidebar with SSOT segmented pill tabs (FB-UI-002)', () => {
-    // tablist, not stale underline tabs. Default tab is Orchestrator so the
-    // Workspace profile selector is visible (V1.131 P2).
     const settingsShell = screen.getByTestId('settings-shell-chrome');
     const tablist = within(settingsShell).getByRole('tablist', {
       name: 'Primary navigation',
@@ -821,7 +817,6 @@ describe('Surfaces page — inspiration pool fixture', () => {
       level: 3,
     });
     expect(surfaceHeading).toHaveAttribute('id', 'surfaces-inspiration-pool');
-    // the hash lookup as the earlier node.
     expect(document.querySelectorAll('#surfaces-inspiration-pool')).toHaveLength(1);
     expect(
       within(fixtures)
@@ -844,7 +839,6 @@ describe('Surfaces page — sessions rail fixture', () => {
       level: 3,
     });
     expect(surfaceHeading).toHaveAttribute('id', 'surfaces-sessions-rail');
-    // the hash lookup as the earlier node.
     expect(document.querySelectorAll('#surfaces-sessions-rail')).toHaveLength(1);
   });
 });
@@ -862,17 +856,10 @@ describe('Surfaces page — capabilities rail fixture', () => {
       level: 3,
     });
     expect(surfaceHeading).toHaveAttribute('id', 'surfaces-caps-rail');
-    // the hash lookup as the earlier node.
     expect(document.querySelectorAll('#surfaces-caps-rail')).toHaveLength(1);
   });
 });
 
-/**
- * the first match, so a section reusing its heading's id steals the gallery
- * anchor. Sweeping every section route augments the three `v1.223` W5 rail
- * pins (pool / sessions / caps): those keep pinning their own pair, and this
- * assertion catches the whole class anywhere else.
- */
 function idCounts(): Map<string, number> {
   const counts = new Map<string, number>();
   for (const element of document.querySelectorAll<HTMLElement>('[id]')) {
@@ -893,10 +880,6 @@ const ARIA_REFERENCE_ATTRS = [
   'aria-describedby',
 ] as const;
 
-/**
- * to several lands on whichever node `getElementById` returns first — both are
- * broken for assistive tech, so every token must own exactly one id.
- */
 function ariaReferenceDiagnostics(route: string, counts = idCounts()): string[] {
   const dangling: string[] = [];
   for (const attr of ARIA_REFERENCE_ATTRS) {
@@ -926,7 +909,6 @@ describe('Surfaces page — route-level id integrity', () => {
     const problems: string[] = [];
     for (const { route, testId } of SURFACES_SECTION_ROUTES) {
       const { unmount } = await renderStudio(route);
-      // silently, so the sweep only counts a route once it has mounted.
       await screen.findByTestId(testId);
       problems.push(...pageIntegrityDiagnostics(route));
       unmount();
@@ -942,8 +924,6 @@ describe('Surfaces page — route-level id integrity', () => {
     mockMatchMedia(false);
     await renderStudio('/surfaces/shell');
     const hostRoot = await screen.findByTestId('settings-host-fixtures');
-    // never mounts Advanced — which stacks the resident Connection section a
-    // second time on the same route.
     fireEvent.click(
       within(hostRoot).getByTestId('settings-section-nav-advanced'),
     );
@@ -999,7 +979,6 @@ describe('Surfaces page — launch splash fixtures', () => {
     expect(blocks).toHaveLength(2);
     expect(screen.getByText('Local daemon is not running')).toBeInTheDocument();
     expect(screen.getByText('The daemon took too long to respond')).toBeInTheDocument();
-    // only on the third splash (timeout).
     expect(screen.getAllByRole('button', { name: 'Retry' }).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Reset')).toBeInTheDocument();
   });
@@ -1272,7 +1251,6 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
         /Manage your local agent, workspace, daemon connection, and setup options/i,
       ).length,
     ).toBeGreaterThanOrEqual(1);
-    // on /surfaces/setup).
     expect(
       within(hostRoot).queryByTestId('wizard-cta-row'),
     ).not.toBeInTheDocument();
@@ -1521,7 +1499,6 @@ describe('Components page — form-field composition fixture', () => {
   });
 
   it('does not show error message initially', () => {
-    // that our form-field error element (ff-name-error) is absent.
     expect(screen.queryByText('Name is required.')).not.toBeInTheDocument();
   });
 
@@ -1537,7 +1514,6 @@ describe('Components page — form-field composition fixture', () => {
   });
 
   it('renders required field indicator (*)', async () => {
-    // also render required markers.
     const emailLabel = document.querySelector('label[for="ff-email"]');
     expect(emailLabel).toBeInTheDocument();
     expect(emailLabel).toHaveTextContent('*');
@@ -1803,8 +1779,6 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
   it('mirrors strategy node kinds (state / join / terminal) with status + kind tags', async () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
 
-    // inspector aside heading (h3, read-only mirror of the selected node). The
-    // accent stripe lives on the state-node shell — target the span[title] copy.
     const stateHeading = shell.querySelector<HTMLSpanElement>(
       'span[title="Drafting"]',
     );
@@ -1957,10 +1931,6 @@ describe('Components page — display voice confinement (AC-P1-5)', () => {
   });
 
   it('confines the display voice to EmptyState headline opt-in', () => {
-    // UnavailableState (promoted States family, V1.148 P1), and
-    // EmptyCreateCard (V1.148 P1) carry font-display — interface components
-    // stay sans. ListStateContainer and ListDetailShell render the promoted
-    // EmptyState in their empty/no-selection branches.
     const allowedContainers = [
       'states-empty',
       'states-unavailable',
@@ -2004,8 +1974,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   });
 
   it('paints the outline accent spine on outline surface nodes (amber-700)', () => {
-    // prop through NodeChromeShell — the spine class targets the amber-700
-    // canvas-outline-accent token.
     const matrix = screen.getByTestId('canvas-node-matrix');
     const volumeTitle = within(matrix).getByText('Volume II — Journeys');
     const volumeShell = volumeTitle.closest('[class*="border-l-canvas-outline-accent"]');
@@ -2014,7 +1982,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
 
   it('paints the strategy accent spine on every strategy surface node', () => {
     const shell = screen.getByTestId('strategy-shell-chrome');
-    // selected drafting state) carry the strategy spine class.
     const spines = shell.querySelectorAll('[class*="border-l-canvas-strategy-accent"]');
     expect(spines.length).toBeGreaterThanOrEqual(3);
   });
@@ -2039,8 +2006,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
 
   it('mirrors v0.4 elevation + accent on World KB entity + source-anchor nodes', () => {
     const shell = screen.getByTestId('worldkb-shell-chrome');
-    // via the transition-shadow + hover:shadow-elevation-2 +
-    // data-[dragging=true]:shadow-elevation-4 class chain.
     const entityShells = shell.querySelectorAll(
       '[class*="hover:shadow-elevation-2"][class*="data-[dragging=true]:shadow-elevation-4"]',
     );
@@ -2059,7 +2024,6 @@ describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
   it('renders the per-surface accent spine matrix fixture', () => {
     const matrix = screen.getByTestId('canvas-node-v2-accents-matrix');
     expect(matrix).toBeInTheDocument();
-    // (row header + chip title) — assert on the chip title font-heading span.
     expect(matrix.querySelectorAll('.font-heading.text-copy-14').length).toBe(3);
 
     expect(
@@ -2230,9 +2194,6 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
   });
 
   it('V1.124 P1 - CSS-variable bindings: swatch styles reference the expected var(--color-*) names', () => {
-    // the correct CSS custom properties. jsdom cannot resolve the actual color
-    // values, but asserting the var() binding is present confirms the wiring
-    // between tokens.tsx entries and the CSS variable names in tokens.css.
     const groups = [
       { testId: 'canvas-token-group-4', vars: ['var(--color-canvas-timeline-accent)'] },
       {
