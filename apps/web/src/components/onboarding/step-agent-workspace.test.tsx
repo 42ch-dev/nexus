@@ -237,12 +237,33 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
     expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
 
     const customLaunch = await screen.findByLabelText(
-      'Custom launch command (required: no agent was found on this computer)',
+      'Custom launch command (required: no agent is available)',
     );
     expect(screen.queryByText(/Custom launch command \(optional/)).not.toBeInTheDocument();
 
     await user.type(customLaunch, 'my-agent --flag');
 
     expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled();
+  });
+
+  it('keeps the custom launch command required when the scan fails', async () => {
+    renderStep({
+      client: {
+        scanAgents: () => Promise.reject(new Error('daemon offline')),
+        getActiveWorkspace: () =>
+          Promise.resolve({
+            creator_id: 'creator-a',
+            workspace_slug: 'default',
+            operational_dir: '/tmp/nexus',
+          }),
+      } as unknown as NexusClient,
+    });
+
+    expect(await screen.findByText(/Could not scan this computer for AI/)).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Custom launch command (required: no agent is available)'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/no agent was found/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
   });
 });

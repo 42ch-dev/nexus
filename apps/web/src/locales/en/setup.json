@@ -224,7 +224,7 @@
       "rowInstalled": "ACP · Installed",
       "customLaunch": {
         "optionalLabel": "Custom launch command (optional, overrides the selected agent's default launch)",
-        "requiredLabel": "Custom launch command (required: no agent was found on this computer)",
+        "requiredLabel": "Custom launch command (required: no agent is available)",
         "placeholder": "e.g. claude --acp --model opus"
       },
       "workspaceRoot": "Workspace root",

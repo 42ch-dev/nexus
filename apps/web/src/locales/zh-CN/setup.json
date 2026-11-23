@@ -223,7 +223,7 @@
       "rowInstalled": "ACP · 已安装",
       "customLaunch": {
         "optionalLabel": "自定义启动命令（可选，覆盖选中 agent 的默认启动方式）",
-        "requiredLabel": "自定义启动命令（必填：本机没有找到可用的 agent）",
+        "requiredLabel": "自定义启动命令（必填：当前没有可用的 agent）",
         "placeholder": "例如：claude --acp --model opus"
       },
       "workspaceRoot": "工作区根目录",
