@@ -199,8 +199,6 @@ async fn list_world_rules(
             category: e.to_string(),
         })?;
 
-    // true`, response carries the first 500 (store order is
-    // canonical_name ASC, rule_id ASC).
     let truncated = rows.len() > WORLD_RULES_CAP;
     let rules = rows
         .into_iter()
@@ -309,8 +307,6 @@ fn constraint_field(member: &'static str) -> String {
 /// `created_at` = `updated_at` = now epoch; `schema_version` = 1.
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::too_many_lines)]
-// splitting would obscure the contract order it documents (works.rs
-// create_work precedent).
 async fn create_world_rule(
     pool: &sqlx::SqlitePool,
     world_id: String,
@@ -850,7 +846,6 @@ mod findings {
                 category: e.to_string(),
             })?;
 
-        // true`, response carries the newest 500 (store order is newest-first).
         let truncated = rows.len() > WORLD_FINDINGS_CAP;
         let findings = rows
             .into_iter()

@@ -911,9 +911,6 @@ fn lsof_line_endpoint_and_multiaddr_parse_real_listener_lines() {
         Some(("::1".to_string(), 62086))
     );
 
-    // always `(LISTEN)`) extracts no port from ANY real listener line, so
-    // it could never fail the no-HTTP assertion. If this guard trips, the
-    // assertion became vacuous again.
     for line in [
         "TCP 127.0.0.1:62488 (LISTEN)",
         "TCP *:62086 (LISTEN)",
@@ -1187,11 +1184,6 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         Ok(()),
         "the refusal must be the out-of-scope denial, not request validation:\n{stdout}\nstderr:\n{stderr}"
     );
-    //     the probe seeded both combatants over the served `upsert` and the
-    //     host's compute lane executed the installed deterministic module,
-    //     returning the staged 30 HP − (ATK 20 − DEF 5) = 15. The value is
-    //     parsed and compared exactly, so 150/1500 cannot satisfy it (the
-    //     neighbouring-value control above covers the matcher itself).
     #[cfg(not(nexus42_no_wasm_target))]
     assert_eq!(
         assert_compute_result(&stdout, COMPUTE_SESSION),

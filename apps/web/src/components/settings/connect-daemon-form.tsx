@@ -94,7 +94,6 @@ export function ConnectDaemonForm() {
     }
     const next: ConnectionConfig = {
       endpointUrl: normalizedUrl,
-      // the browser backend persists the entered key as before.
       apiKey: apiKey || undefined,
       label: label.trim() || endpointLabel(normalizedUrl),
       active: true,

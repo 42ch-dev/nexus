@@ -159,7 +159,6 @@ fn clear_step_effect_marker(root: &graph_flow::Session) {
     root.context.remove(EXTERNAL_EFFECT_MARKER);
 }
 
-// engine internals import them privately and consumers name the owner directly.
 use nexus_session_storage::{SessionId, SessionStatus, SessionSummary};
 
 /// Composite key that uniquely identifies a session within the engine.
@@ -2035,12 +2034,6 @@ impl EngineSharedState {
                                 step_in_flight: Some(root.current_task_id.clone()),
                                 ..RunStateV1::default()
                             };
-                            // the child rows remain as-is and the interrupted root is
-                            // terminal/non-replayable. Requiring a child CAS here would
-                            // block the interruption write on the same stale child that
-                            // caused the original failure, leaving the run non-terminal
-                            // and unknowingly replayable — exactly what must not happen
-                            // (Important 3).
                             let interrupted_checkpoint = RunCheckpoint {
                                 root: &root,
                                 children: &[],
@@ -2084,10 +2077,6 @@ impl EngineSharedState {
                                         pre_step_root: pre.clone(),
                                     });
                                 }
-                                // a newer control/terminal state legitimately
-                                // holds the row. Preserve the original commit
-                                // error as the truthful outcome; the winner is
-                                // untouched.
                                 Err(
                                     StorageError::RevisionMismatch { .. }
                                     | StorageError::TerminalState(_),
@@ -6379,11 +6368,6 @@ mod tests {
         );
     }
 
-    /// the run is waiting at revision R; Continue consumes the wait and
-    /// commits a NEWER root position/context at R+1; Cancel's phase-1 fence
-    /// loses the CAS, reloads the R+1 row/root, re-fences at R+2, and the
-    /// terminal Cancelled settlement must carry the NEWEST root — the
-    /// pre-Continue stale root must never clobber the winner's position.
     #[tokio::test]
     async fn cancel_settlement_keeps_continue_winner_root() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -7879,7 +7863,6 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        // root finalize succeeds, then the child's OWN finalize succeeds.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
             Err(CapabilityError::Internal("shutdown timeout".to_string())),
             Ok(()),

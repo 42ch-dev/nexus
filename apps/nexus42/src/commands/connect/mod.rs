@@ -880,8 +880,6 @@ mod tests {
             .as_ref()
             .expect("provider is Some when enabled");
 
-        // iss = issuer-derived id, sub = this node's peer id, aud = the
-        // challenger, capabilities = the host manifest capabilities.
         let challenger = "12D3KooWChallengerPeer";
         let proof_value = provider(challenger).expect("provider mints a proof");
         let proof: CapabilityTokenProof =

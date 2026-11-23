@@ -68,7 +68,6 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
 
   const [chapterSortKey, setChapterSortKey] = useState<ChapterSortKey>('volume');
   const [chapterSortDir, setChapterSortDir] = useState<SortDir>('asc');
-  // ascending is the declared timeline order.
   const [eventSortDir, setEventSortDir] = useState<SortDir>('asc');
 
   const volumeLabelByChapter = new Map<number, string>();

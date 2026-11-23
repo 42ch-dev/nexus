@@ -32,8 +32,6 @@ import { createDesktopConfig } from '../dist/desktop-config.js';
 const configPath = (home) => join(home, '.nexus42', 'config.toml');
 const agentPath = (home) => join(home, '.nexus42', 'agent-host', 'config.toml');
 const readText = (path) => readFileSync(path, 'utf8');
-// re-establish the plain-object shape these assertions pin, mirroring the
-// normalization at the product's own parse seam in src/desktop-config.ts.
 const toPlainToml = (value) =>
   Array.isArray(value)
     ? value.map(toPlainToml)

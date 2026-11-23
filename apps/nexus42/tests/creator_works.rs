@@ -832,9 +832,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // accept-and-close, so a probe is counted and never answered. The accept
-    // loop is deliberately local to this case — the frozen v1.193 P0-T2 case
-    // keeps its own copy rather than being reworked.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe listener");
     listener
         .set_nonblocking(true)

@@ -171,9 +171,6 @@ describe('DesktopClient transport parity (thin-over-BrowserClient)', () => {
     });
     await client.patchReadingAnnotation('a1', { color: 'blue', note: 'note' });
     await client.deleteReadingAnnotation('a1');
-    // findings panel (T1) + rules section (T2). Both are plain GETs through
-    // the shared transport; pinning them here keeps the parity set complete
-    // even though DesktopClient inherits them via `extends BrowserClient`.
     await client.listWorldFindings(workId);
     await client.listWorldRules(workId);
 
@@ -570,10 +567,6 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
   });
 
   it('routes the memory methods to the right verb + path + creator_id param', async () => {
-    // delete encodes the pending_id path param AND the creator_id query param;
-    // review carries creator_id in the JSON body. Pinned via the fetchImpl seam
-    // (this file owns the adapter boundary — fetchImpl injection + path/query
-    // serialization + body shape).
     const seen: { method: string; url: string; body?: unknown }[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       seen.push({

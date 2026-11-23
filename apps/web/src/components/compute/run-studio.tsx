@@ -206,10 +206,6 @@ export function RunStudio({
   const [clearTargetWorldId, setClearTargetWorldId] = useState<string | null>(null);
   const clearScopeWorldId = runWorldFilter !== '' ? runWorldFilter : null;
 
-  // runs reopened from history render from the detail query. Accept/Discard
-  // move the inspector onto the detail query so the status flip (Needs review
-  // → Applied/Discarded) renders from refetched data.
-  //
   // V1.147 P2 T3 — `initialRunId` deep-links the run inspector (compute node
   // "Open Run" → `/modules` run detail).
   const [latestRun, setLatestRun] = useState<RunResponse | null>(null);

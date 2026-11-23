@@ -1162,7 +1162,6 @@ function computeEventToTimelineNodeData(
 ): TimelineNodeData {
   const payload = buildComputeNodePayload(event, graphById, moduleNames);
   const data: TimelineNodeData = {
-    // compute nodes are NOT KB entities; the write path never sees them.
     key_block_id: `${COMPUTE_KEY_BLOCK_PREFIX}${event.id}`,
     world_id: worldId,
     block_type: 'event',

@@ -171,7 +171,6 @@ impl CodexNativeProvider {
         session_id: &HostSessionId,
         prompt_text: &str,
     ) -> HostResult<String> {
-        // every setup RPC then runs under the per-session lock only.
         let (state, cwd) = {
             let sessions = self.sessions.read().await;
             let native_session = sessions.get(session_id).ok_or_else(|| {

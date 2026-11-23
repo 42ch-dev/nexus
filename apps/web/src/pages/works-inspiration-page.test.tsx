@@ -158,7 +158,6 @@ describe('WorksInspirationPage', () => {
 
   it('keeps one promote in flight, so a second row cannot create a second Work', async () => {
     const promoteBodies: unknown[] = [];
-    // the neighboring suite uses the same deferred resolver.
     let releaseFirst: (() => void) | undefined;
     const firstGate = new Promise<void>((resolve) => {
       releaseFirst = resolve;

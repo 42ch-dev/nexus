@@ -1335,9 +1335,6 @@ mod tests {
         input.remove("schema_version");
         input.remove("world_ref");
         input.remove("narrative_state");
-        // re-express it on the capability input surface so the AR-37 mapping
-        // carries it into the compute envelope's world_ref (the module emits
-        // it on the timeline event, which the wire validates as `^wld_…$`).
         input.insert("worldId".to_string(), raw["world_ref"]["world_id"].clone());
         input.insert("attacker_id".to_string(), serde_json::json!("kb_atk"));
         input.insert("defender_id".to_string(), serde_json::json!("kb_def"));

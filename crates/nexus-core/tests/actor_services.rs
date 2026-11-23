@@ -1605,7 +1605,6 @@ async fn v1191_holder_visibility_actor_view_pages_skip_hidden_rows() {
             "{hidden} must not be paged into a Character ActorView"
         );
     }
-    // the same stored rows, a different resolved holder.
     let second = core
         .admit_actor_knowledge_view(
             &principal,
@@ -1755,8 +1754,6 @@ async fn v1191_holder_visibility_detail_hidden_equals_absent() {
         .expect("a shared row stays readable");
     assert_eq!(shared.canonical_name, "FirstCharacterShared");
 
-    // two refusals must be identical by this measure, so a hidden id cannot be
-    // distinguished from an absent one by the caller.
     let absent_id = "kb_never_written";
     let absent = core
         .actor_knowledge_entry(&principal, character_id.clone(), absent_id.to_string())

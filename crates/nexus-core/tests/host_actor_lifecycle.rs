@@ -1984,9 +1984,6 @@ async fn attached_host_close_accounts_for_an_admitted_execute() {
     );
     assert_eq!(port.call_count(), 0, "the race produced no provider effect");
 
-    // this fixture indexes the session without a Host create, so the Host
-    // plane refuses it — the accounted-for outcome the barrier must accept
-    // instead of a fabricated success.
     let settled = execute.await;
     assert!(
         settled.is_err(),

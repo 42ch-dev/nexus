@@ -1298,9 +1298,6 @@ impl MemoryStore {
         let at = timestamp(now);
         self.recover_journal(space_id).await;
         self.recover_reflections(space_id).await;
-        // opening the provider reclaims what has aged out, and does so in its
-        // own committed transaction so a provisioning failure cannot put an
-        // already-evicted body back either.
         self.reclaim_expired().await;
         let mut tx = begin_immediate(&self.pool).await?;
         sqlx::query(
@@ -5182,7 +5179,6 @@ impl MemoryStore {
                 .await?;
         } else {
             let generation = compose_generation(&snapshot, selection, filter, subject_id)?;
-            // absent optionals stay SQL NULL — never null-substituted.
             let reflection = NewReflection {
                 reflection_id: &generation.reflection_id,
                 space_id: ctx.space_id,

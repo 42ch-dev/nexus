@@ -929,9 +929,6 @@ impl ProviderPort for ProviderPortAdapter {
         max_events: u32,
         max_bytes: u32,
     ) -> ProviderResult<ProviderEventBatch> {
-        // the bounded-pull accounting itself lives in the shared
-        // [`ProviderEventReader`], so this port and the core Host observation
-        // cannot drift on limits, deferral or terminal delivery.
         let reader = self
             .operations
             .get(&operation_id)

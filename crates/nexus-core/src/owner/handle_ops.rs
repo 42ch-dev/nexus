@@ -2365,8 +2365,6 @@ impl ExecutionHandle {
                         field: "payload.operation".into(),
                         reason: "the allow operation must name the operation it grants".into(),
                     })?;
-                // it would sit in the allowlist forever and authorize nothing,
-                // so it is a validation refusal naming the field.
                 if !PEER_CONTROL_OPERATIONS.contains(&granted) {
                     return Err(CoreError::InvalidInput {
                         field: "payload.operation".into(),

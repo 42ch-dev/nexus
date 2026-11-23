@@ -1,10 +1,5 @@
 #!/usr/bin/env node
 /**
- *   node scripts/worktree-sweep.mjs \
- *     --repo <absolute-main-root> --harness <absolute-control-harness> \
- *     --workflow <id> --inventory <absolute-json> \
- *     [--apply | --check-exit <track-id> | --check-convergence]
- *
  * Authority, deliberately narrow:
  *   * The inventory is a NON-authoritative ownership receipt for one scheduling checkpoint.
  *     The workflow snapshot stays the only claim source, and `mstar-harness worktree cleanup`

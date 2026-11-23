@@ -1052,7 +1052,6 @@ impl FixtureMemoryProvider {
                     None
                 } else {
                     fenced_contexts.push(context_id.as_str().to_owned());
-                    // a subject-level fence would otherwise be cleared.
                     Some(status.as_str())
                 }
             }

@@ -489,8 +489,6 @@ describe('WorkTimelineCanvasAdapter.renderBriefTimeBands — V1.160 P2 T1 time-b
       'brief',
     );
 
-    // the Work adapter must ship it so the Work Brief layer can render
-    // the vertical time-band model.
     expect(typeof adapter.renderBriefTimeBands).toBe('function');
   });
 

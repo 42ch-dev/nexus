@@ -1070,7 +1070,6 @@ impl AcpSdkAdapter {
         let captured_clone = captured.clone();
         let sid = session_id.to_string();
 
-        // convert the v1 dispatch to the raw form first.
         let result = MatchDispatch::new(dispatch.into_raw())
             .if_notification(async move |notif: SessionNotification| {
                 let updates = Self::session_update_to_acp_updates(notif.update, &sid);

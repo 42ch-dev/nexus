@@ -858,7 +858,6 @@ async fn retained_fork_create_guards_and_lineage() {
     assert_eq!(lineage["fork_lineage"]["forked_from_event_id"], fork_point);
     assert_eq!(lineage["fork_lineage"]["label"], "alt-ending");
 
-    // an empty or over-long label never reaches the domain.
     for label in ["", &"x".repeat(201)] {
         assert!(
             serde_json::from_value::<CreateForkRequest>(json!({
@@ -1939,7 +1938,6 @@ async fn retained_world_rules_archive_terminal_lifecycle() {
             "the carrier is retained"
         );
 
-        // only updated_at moves.
         let (owner, created_at, updated_at, bag): (String, i64, i64, String) = sqlx::query_as(
             "SELECT world_id, created_at, updated_at, extensions_json FROM spoke_rules \
              WHERE rule_id = ?",
@@ -2717,7 +2715,6 @@ async fn retained_relationship_patch_validation_and_projection() {
         );
     }
 
-    // the stored row keeps the swapped endpoints of its reverse.
     let symmetric = fx
         .core
         .patch_world_kb_relationship(
@@ -3448,8 +3445,6 @@ async fn retained_promote_cas_details_and_candidate_walk() {
         )
         .await;
     }
-    // the losing transition must report the re-read version, not the stale
-    // expectation.
     seed_pending_candidate(&pool, "xj_cas_miss", "we_cas", world, "Racea").await;
     sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = 'xj_cas_miss'")
         .execute(&pool)

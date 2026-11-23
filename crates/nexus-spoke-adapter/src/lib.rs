@@ -101,8 +101,6 @@ pub use spoke_operations::{
 };
 pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
 pub use spoke_schemas;
-// the 4 existing wire types stay listed; the remaining names are the ops
-// envelopes + capability types the orchestrators accept/return.
 pub use spoke_schemas::{
     AssemblePacket, AssembleRequest, AssembleResponse, CheckRequest, CheckResponse, ComputeRequest,
     ComputeResponse, ExtractRequest, ExtractResponse, Finding, HostCapabilityManifest,

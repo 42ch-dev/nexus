@@ -538,7 +538,6 @@ test('raw-form endpoints are refused on the persisted load path and never re-imp
 
     assert.equal(await store.get(), null, `not activated: ${endpointUrl}`);
     assert.equal(store.getAuth(), null, `no auth authority: ${endpointUrl}`);
-    // its sanitized message must stay distinct from the malformed-shape branch.
     assert.equal(
       errorCode(store.openFailure),
       'secure_store_corrupt',

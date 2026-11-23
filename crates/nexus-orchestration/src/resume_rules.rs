@@ -122,8 +122,6 @@ pub const fn classify_recovery(
     let Some(state) = state else {
         return RecoveryClass::Unreadable;
     };
-    //    explicit interrupted status, unresolved cancel, a dispatching/
-    //    active in-flight prompt, or an unfinished step mark.
     if matches!(status, SessionStatus::Interrupted)
         || state.cancel_requested
         || state.in_flight.is_some()

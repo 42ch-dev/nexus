@@ -1040,7 +1040,6 @@ async fn v1191_audience_cas_shared_clears_pair_and_identical_reauthoring_is_a_no
     assert_eq!(stored_pair(&pool, &entry).await, (None, None, 2));
     assert_eq!(character_knowledge_revision(&pool, &chr).await, 2);
 
-    // neither revision may move.
     let before = row_snapshot(&pool, &entry).await;
     let unchanged = author_actor_knowledge_entry(
         &pool,

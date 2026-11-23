@@ -329,9 +329,6 @@ async function resolveBranchOid(repo, branch) {
 }
 
 /**
- * an existing release head is never force-reset — the replacement commit's
- * `expectedHeadOid` compare-and-swap is what moves it.
- *
  * @param {string} repo
  * @param {string} branch
  * @param {string} oid

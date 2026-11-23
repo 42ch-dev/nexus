@@ -197,9 +197,6 @@ pub struct SignalScheduleResponse {
     pub current_wait_id: Option<String>,
 }
 
-// the retired controls have no production consumer. Generated DeleteScheduleResponse
-// is a separate served wire contract and remains unchanged.
-
 /// Partial edit of schedule metadata (AR-29). Only `label` is updateable
 /// today; the `creator_schedules` table carries no other metadata columns.
 /// Status/core-context have dedicated endpoints (AR-31).

@@ -481,9 +481,6 @@ impl CoreService {
             return Err(PresetImportRefusal::ReservedId { strategy_id }.into_error());
         }
 
-        // approve compares the recorded trajectory with a recomputation over the stored document,
-        // so validating or simulating the revision-0 projection would store evidence that can
-        // never match.
         let mut document = imported.document;
         document.revision = 1;
         let packages = self.compose_packages()?;

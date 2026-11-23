@@ -896,7 +896,6 @@ impl crate::HostFacade for HostManager {
             }
         }
 
-        // unconfirmed sessions keep their ownership mapping for reconciliation.
         {
             let mut session_providers = self.session_providers.write().await;
             for session_id in &session_ids {

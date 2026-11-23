@@ -919,7 +919,6 @@ mod tests {
     async fn test_block_type_enum_rejects_unknown_variant() {
         let json = r#"{"block_type": "unknown_type"}"#;
         let result = serde_json::from_str::<serde_json::Value>(json);
-        // nexus-kb validation layer relies on the typed enum.
         assert!(result.is_ok());
         let bt_result = serde_json::from_value::<BlockType>(serde_json::json!("unknown_type"));
         assert!(bt_result.is_err());

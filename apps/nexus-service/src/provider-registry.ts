@@ -333,8 +333,6 @@ export class ProviderRegistry {
   }
 
   private disposeOperation(operationId: string): void {
-    // the reader would observe the closed hub mid-pull and lose the outcome it
-    // has in flight. Defer to that stream's detach instead.
     if ((this.attachedStreams.get(operationId) ?? 0) > 0) {
       this.retirePending.add(operationId);
       return;

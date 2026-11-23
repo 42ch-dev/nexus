@@ -1758,8 +1758,6 @@ async fn world_kb_contract_authored_module_dialect_validation() {
         assert_eq!(detail.validation_summary.errors, expected);
     }
 
-    // explicit-empty observers accepted, unknown inner keys verbatim, and an
-    // unrelated dialect key never gated.
     let accepted: WorldKbPatchEntityRequest = serde_json::from_value(serde_json::json!({
         "entity_id": "kb_dialect",
         "expected_version": 0,

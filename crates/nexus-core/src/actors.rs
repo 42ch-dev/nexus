@@ -499,8 +499,6 @@ pub async fn require_admitted_ownership(
             require_active_binding(pool, character_id, binding, &viewpoint.world_id).await?;
         }
     }
-    // admission is a normal read, so missing/corrupt registry state fails
-    // closed here instead of provisioning a holder.
     require_actor_holder(pool, caller_creator_id, actor).await?;
     Ok(())
 }

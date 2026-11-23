@@ -30,7 +30,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
-      // the specific alias keeps it out of design-studio/src (v1.223 W1).
       '@/lib/status-variant': path.resolve(__dirname, '../web/src/lib/status-variant'),
       '@web-locales/en': path.resolve(__dirname, '../web/src/locales/en'),
       '@/components/ui': path.resolve(__dirname, '../web/src/components/ui'),

@@ -1807,8 +1807,6 @@ async fn out_of_guard_writes_are_writer_fenced() {
         "expected WRITER_FENCED, got: {err}"
     );
 
-    // without a rowid alias there is no `INSERT OR REPLACE …(seq, …)` /
-    // `UPDATE … SET rowid` route around the delete guard (the must-fix).
     let err = sqlx::query("DELETE FROM memory_journal")
         .execute(&mut raw)
         .await

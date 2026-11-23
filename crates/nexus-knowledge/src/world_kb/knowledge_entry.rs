@@ -1564,7 +1564,6 @@ mod tests {
             context: Some("Neutral".into()),
         };
         assert!(validate_character_tom_belief_row(&base, viewer).is_err());
-        // no unreachable!/panic path — every value outside 1..=2 errors).
         for bad in [-2, -1, 0, 3, 4, i64::MIN, i64::MAX] {
             let row = BeliefPropositionRaw {
                 order: Some(bad),

@@ -296,8 +296,6 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const isBriefEmpty =
     !isEmpty && activeLayer === 'brief' && surface.nodes.length === 0;
 
-  // layer-feel §2.4 + §7 + plan Task 7: render an honest Moment-empty panel
-  // with a CTA back to Narrative instead of an empty spatial canvas.
   const isMomentEmpty =
     !isEmpty && activeLayer === 'moment' && surface.nodes.length === 0;
 

@@ -1581,8 +1581,6 @@ impl WorkflowRunCoordinator {
         )
         .await?;
 
-        // anything else → the core-context TEXT payload (the kind a bare seed
-        // is), bound under `core_context.text` at admission.
         let (input, core_context) = seed.map_or_else(
             || (serde_json::Map::new(), None),
             |seed_text| match serde_json::from_str::<serde_json::Value>(seed_text) {
@@ -4520,8 +4518,6 @@ mod tests {
     #[tokio::test]
     async fn resume_re_drives_converge_merge_chain_session() {
         let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
-        // the resume re-drives from THIS position (completed edges are not
-        // re-executed because current_task_id has advanced past them).
         seed_session(
             &storage,
             "test:parked-join",
@@ -5536,8 +5532,6 @@ mod tests {
             session_id: &SessionId,
         ) -> Result<Option<nexus_session_storage::run_state::RunRecord>, StorageError> {
             if self.fault == BoundaryFault::CorruptStateOnStepLoad && self.file_once() {
-                // the row becomes non-replayable, exactly like an outside
-                // writer or disk fault damaging it mid-run.
                 sqlx::query(
                     "UPDATE orchestration_sessions SET run_state_json = 'not-json' \
                  WHERE session_id = ?",

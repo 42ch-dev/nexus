@@ -831,7 +831,6 @@ mod tests {
 
     #[test]
     fn stage_gate_unspecified_keeps_all_slots_on() {
-        // every slot fills — current behavior (spec §4 row; AC-I1b anchor).
         for stage in [None, Some(GenerationStage::Unspecified)] {
             let gated = apply_stage_gate(mixed_matched_list(), stage);
             assert_eq!(

@@ -145,7 +145,6 @@ pub async fn run(cmd: ContextCommand, config: &CliConfig) -> Result<()> {
             )
             .await?;
 
-            // skip normal context output.
             let Some(ctx) = maybe_ctx else {
                 return Ok(());
             };

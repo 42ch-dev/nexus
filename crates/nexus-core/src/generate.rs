@@ -385,10 +385,6 @@ async fn correct(
              parse is an executor failure, not an exhaustion"
         ))
     })?;
-    // provenance is this generation's origin (the drift guard asserts it), the hash is bound at
-    // approval, and the IR and authored versions come from the contract. The field space stays the
-    // request's (D8): assets, signals, roles and initial_action are not a generate request's to add.
-    // `document.id`, `state` and `revision` are enforced by the CAS commit.
     document.content_hash = None;
     document.ir_version = IR_VERSION;
     document.version = 1;

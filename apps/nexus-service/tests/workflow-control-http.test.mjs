@@ -452,7 +452,6 @@ describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness
     try {
       writeFileSync(metaPath, JSON.stringify({ local_root: movedRoot }));
 
-      // the Host probe lane was bound to the root that was selected at open.
       let established = null;
       let refusal = null;
       try {

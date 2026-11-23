@@ -335,7 +335,6 @@ async fn progress_get_unknown_work_surfaces_core_error() {
     );
 }
 
-// splitting it would hide the cross-verb state transitions it pins.
 #[allow(clippy::too_many_lines)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn annotation_lifecycle_round_trip() {

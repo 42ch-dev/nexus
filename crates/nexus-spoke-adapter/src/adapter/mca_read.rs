@@ -516,7 +516,6 @@ mod tests {
         assert_eq!(sqlite_res.total_count, spoke_res.total_count);
         assert_eq!(sqlite_res.has_more, spoke_res.has_more);
         assert_eq!(sqlite_res.items.len(), spoke_res.items.len());
-        // they must match verbatim after the spoke round-trip.
         for (a, b) in sqlite_res.items.iter().zip(spoke_res.items.iter()) {
             assert_eq!(a.canonical_name, b.canonical_name);
             assert_eq!(a.block_type, b.block_type);

@@ -109,7 +109,6 @@ export const queryKeys = {
     // mounted by the default product UI (the route is development-only).
     changes: (worldId: string) => [...queryKeys.worldKb.all, 'changes', worldId] as const,
   },
-  // no mutation ever invalidates this key (the panel observes the route).
   worldFindings: {
     all: ['worldFindings'] as const,
     list: (worldId: string) => [...queryKeys.worldFindings.all, 'list', worldId] as const,

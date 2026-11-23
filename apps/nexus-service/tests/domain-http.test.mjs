@@ -70,7 +70,6 @@ describe('domain-http (P5-T1)', () => {
   });
 
   test('every assigned World/Work/content/knowledge route identity is mounted at its exact verb and tier', async () => {
-    // this asserts the composer inventory, not handler behavior.
     const { DOMAIN_ROUTES } = await import(join(serviceRoot, 'dist/routes.js'));
     const inventory = DOMAIN_ROUTES.map((route) => ({
       method: route.method,

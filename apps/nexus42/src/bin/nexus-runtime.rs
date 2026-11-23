@@ -146,10 +146,6 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
     let nexus_home = nexus_home_layout::nexus_root_from_home(home);
     nexus_home_layout::ensure_system_layout(&nexus_home).map_err(nexus42::errors::CliError::Io)?;
 
-    // persisted identity + device-id host_id + allowlist (fail-closed) +
-    // honest manifest + active-workspace WAL pool + per-process
-    // NexusAdapter + the invoke dispatch handler (writes, reads, compute,
-    // host-level tool reads).
     let (config, host_id, allowlist_len, _adapter) =
         connect::build_host_config(home, allow_peer, listen, None).await?;
 

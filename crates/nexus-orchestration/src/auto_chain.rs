@@ -415,7 +415,6 @@ async fn try_persist_parsed_findings(
                  falling back to V1.47 placeholder synthesis"
             );
         }
-        // qc3 W-3: `chapter` included on every fallback arm.
         Err(ReportLoadError::PathEscape {
             work_ref: ref escaped,
         }) => {

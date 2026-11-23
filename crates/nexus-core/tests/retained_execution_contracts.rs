@@ -3190,8 +3190,6 @@ async fn public_schedule_reads_and_context_are_owned() {
         );
     }
 
-    //       admission freezes the pointer's payload into the run, and the public
-    //       reads report that same run and version. ──
     let run_id = coordinator
         .admit_schedule(
             &schedule_id,
@@ -3392,11 +3390,6 @@ async fn public_schedule_reads_and_context_are_owned() {
     );
     assert!(!no_matches.pagination.has_more);
 
-    //       schedules `created_at` (newest first), sessions `session_id`
-    //       ascending. ──
-    // Ordering anchors that CONTRADICT the other list's default: a schedule far
-    // in the future/past, and two extra root runs whose `created_at` order is
-    // the reverse of their id order.
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind,
@@ -4364,10 +4357,6 @@ async fn public_resume_reconciles_the_paused_schedule_row() {
         resumed.status, "running",
         "the response carries the durable RUN status"
     );
-    // this gate can never be satisfied, so the honest post-resume outcome is
-    // the SAME run parking again — which only a driver that really stepped it
-    // can produce (without the re-drive the run would sit at `running` with no
-    // owner, and this wait would time out).
     wait_for_signalable_gate_park(pool.as_ref(), &run_id).await;
     assert_eq!(
         durable_record(pool.as_ref(), &run_id)

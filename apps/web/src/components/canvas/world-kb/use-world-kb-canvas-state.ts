@@ -135,8 +135,6 @@ export function buildEntityConflict(
   if (payload.dirtyFields.includes('aliases')) draftValues.aliases = payload.draft.aliasesText;
   if (payload.dirtyFields.includes('body')) draftValues.body = payload.draft.bodyText;
   if (payload.dirtyFields.includes('modules')) {
-    // the module editors write whole first-level values, so the JSON preview
-    // is the faithful representation of the pending edit.
     draftValues.modules = JSON.stringify({
       mental: payload.draft.mental,
       beliefs: payload.draft.beliefs,

@@ -54,7 +54,6 @@ export function useResumeFingerprintGate(
       return;
     }
 
-    // we have already confirmed it is a non-null remote config with a pin.
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const activeConfig = config!;
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion

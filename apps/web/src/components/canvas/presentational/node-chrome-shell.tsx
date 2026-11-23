@@ -85,10 +85,6 @@ export interface NodeChromeShellProps {
   dragging?: boolean;
   className?: string;
   style?: CSSProperties;
-  /**
-   * every node kind passes `aria-label`; before this prop existed it was
-   * silently dropped and the i18n strings were dead).
-   */
   'aria-label'?: string;
   children?: ReactNode;
 }

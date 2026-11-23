@@ -268,14 +268,6 @@ impl SessionStorage for SqliteSessionStorage {
         let session_id = session.id;
         let current_task_id = session.current_task_id;
 
-        // graph-flow 0.8 OCC contract (brief §3.2): an absent row inserts with
-        // the incremented graph_version; an existing row updates ONLY when it
-        // is re-stepable (`status IN ('running','paused')`) AND its stored
-        // graph_version still equals the incoming session version. A stale
-        // version or a protected durable status is a `SessionConflict`, not a
-        // successful no-op. Only cursor/context/timestamp/graph_version move
-        // here — never status, workflow revision, descriptor, ownership,
-        // execution format, or wait token.
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| {
@@ -1860,8 +1852,6 @@ fn child_run_record_from_row(
     parent_session_id: &SessionId,
     row: RunRow,
 ) -> Result<RunRecord, StorageError> {
-    // never coerce negative values to 0 or forward versions (>=2) to
-    // v1. Preserve the row verbatim (Important 4).
     if row.execution_version < 0 {
         return Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
@@ -3141,7 +3131,6 @@ mod tests {
 
         let rows = storage.list_checkpoint_rows().await.expect("list rows");
         assert_eq!(rows.len(), 200, "list bounded to 200 rows");
-        // the most recently seeded (highest id) row comes first.
         assert_eq!(rows[0].session_id, "sess-204");
         assert_eq!(rows[199].session_id, "sess-005");
         assert_eq!(

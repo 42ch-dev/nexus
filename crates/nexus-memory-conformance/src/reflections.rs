@@ -1276,8 +1276,6 @@ impl FixtureMemoryProvider {
             .await
             .map_err(|_| outcome_uncertain())?;
 
-        // an honest failure is a terminal `failed` receipt with an error
-        // envelope and retry class, and no cost is ever charged for it.
         let generation_failed = self.faults().trip(FaultPoint::GenerationFailure);
 
         let mut transaction = self.begin_write().await?;

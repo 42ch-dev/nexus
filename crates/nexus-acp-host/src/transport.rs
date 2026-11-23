@@ -906,14 +906,6 @@ impl ManagedAcpProcess {
 
                 #[cfg(target_os = "linux")]
                 {
-                    // safe `waitid(WEXITED | WNOWAIT | WNOHANG)` leaves the
-                    // zombie unreaped; bounded by the cleanup deadline).
-                    // Reaping here would invalidate the birth token and
-                    // permanently disable the SIGKILL escalation — the
-                    // group leak this ordering prevents. A probe failure
-                    // surfaces immediately; deadline expiry only means the
-                    // leader ignored SIGTERM and is escalated while its
-                    // identity verifies below.
                     let observed = tokio::time::timeout(grace, async {
                         loop {
                             match nix::sys::wait::waitid(
@@ -935,11 +927,6 @@ impl ManagedAcpProcess {
                         return Err(e);
                     }
 
-                    // lethal for SIGTERM-ignoring survivors, a no-op for the
-                    // leader zombie and already-dead members. The leader's
-                    // own zombie keeps `killpg(_, 0)` non-ESRCH, so proving
-                    // group quiescence BEFORE the reap is impossible — the
-                    // quiescence check after the reap proves the outcome.
                     if !Self::signal_group_guarded(&birth, Signal::SIGKILL) {
                         if timeout(grace, child.wait()).await.is_err() {
                             Self::hand_to_reaper(child);

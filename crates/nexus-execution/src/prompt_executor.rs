@@ -478,11 +478,6 @@ impl PromptExecutor for HostPromptExecutor {
         let op_lock = self.run_op_lock(&request.run_id);
         let _op_guard = op_lock.lock().await;
 
-        //    a pre-cancelled request, a terminal run, or a run with
-        //    `cancel_requested` refuses here — no durable intent write, no
-        //    Host session launch, no prompt. The returned anchor
-        //    (revision + step marker) linearizes the intent persistence
-        //    with the engine's control transitions.
         let (expected_revision, expected_step) = self
             .admission_fence(&request.run_id, &request.cancellation)
             .await?;
@@ -828,9 +823,6 @@ impl PromptExecutor for HostPromptExecutor {
         let op_lock = self.run_op_lock(run_id);
         let _op_guard = op_lock.lock().await;
 
-        // entries are evicted ONLY after their shutdown is confirmed; on
-        // timeout/error the Host still owns the session, so the entry is
-        // kept for a later retry to reap.
         let sessions: Vec<(HostSessionKey, CachedHostSession)> = {
             let map = self.sessions.read().await;
             map.iter()
@@ -1197,7 +1189,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // the executor's session map holds a real Host session row).
         let host_session_id = nexus_agent_host::HostSessionId::new();
         host.seed_session(host_session_id.clone());
         executor

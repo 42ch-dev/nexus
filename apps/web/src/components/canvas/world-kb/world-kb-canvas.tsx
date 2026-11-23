@@ -267,9 +267,6 @@ export function WorldKbCanvas({ worldId, watchCoreChanges = false }: WorldKbCanv
   const onPromoteAllSuggestions = async (
     rels: WorldKbRelationshipProjection[],
   ): Promise<{ succeeded: number; failed: number }> => {
-    // qc3 S-QC3-001: instead of fanning out every suggestion concurrently, the
-    // promotions run in bounded batches of `PROMOTE_BATCH_SIZE` so a large
-    // suggestion set does not fire an unbounded burst of concurrent PATCHes.
     const results: PromiseSettledResult<unknown>[] = [];
     for (let i = 0; i < rels.length; i += PROMOTE_BATCH_SIZE) {
       const batch = rels.slice(i, i + PROMOTE_BATCH_SIZE);

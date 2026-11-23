@@ -3594,7 +3594,6 @@ states:
 
         #[tokio::test]
         async fn parity_exit_when_rule_continues() {
-            // an unset `_rule` is the unit rule and always transitions.
             let parity =
                 Parity::scripted(&[("parity.record", serde_json::json!({"recorded": "plan"}))]);
             let (_, ir) = parity.compare(YAML_LINEAR, IR_LINEAR, &[], &[]).await;

@@ -639,8 +639,6 @@ impl NexusAdapter<'_> {
             extensions_nexus_json,
         };
 
-        // u64 → i64: revisions start at 1 and increment, so any realistic value
-        // fits; clamp defensively (a clamped value just fails the CAS → stale).
         let expected_i64 = i64::try_from(expected).unwrap_or(i64::MAX);
 
         let mut tx = match self.pool.begin().await {
@@ -1302,7 +1300,6 @@ mod tests {
         );
         assert_eq!(created.revision, Some(1));
 
-        // revision bumps 1 → 2. label + relation_type round-trip.
         let mut updated = created;
         updated.label = Some("Alice ↔ Bob (revised)".to_string());
         updated.relation_type = "opposes".to_string();
@@ -1319,8 +1316,6 @@ mod tests {
             "world_id is preserved across update"
         );
 
-        // revision bumps 2 → 3 — proves the revision-bump chain repeats,
-        // not a one-shot. Mutate the label again to distinguish the writes.
         let mut rev2_mut = rev2;
         rev2_mut.label = Some("Alice ↔ Bob (v3)".to_string());
         let rev3 = unwrap_ok(
@@ -1383,8 +1378,6 @@ mod tests {
         seed_world_and_endpoints(&pool).await;
 
         let adapter = scoped(pool);
-        // the relation-port CAS mapping collapses this to STORED_REVISION_STALE
-        // with storeRevision = null (V1.144 brief).
         match adapter
             .put_relation(spoke_relation("rel_absent", "kb_src", "kb_dst"), Some(3))
             .await

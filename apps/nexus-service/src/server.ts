@@ -45,9 +45,6 @@ export interface RunningService {
   readonly endpoint: CoreServiceDiscovery['endpoint'];
   /** The v1 discovery record published for this instance (§7). */
   readonly discovery: CoreServiceDiscovery;
-  /**
-   * null on the unix transport, where there is no HTTP URL to print.
-   */
   readonly bootstrapUrl: string | null;
   /** Same-process observability seam for scoped tests; not part of the wire API. */
   readonly service: ServiceCore;
@@ -57,13 +54,6 @@ export interface RunningService {
 /** Instance-bound operator stop endpoint (architecture §7). */
 const RUNTIME_STOP_PATH = '/v1/daemon/runtime/stop';
 
-/**
- * the closed v1 discovery record of *this* service instance, under the same
- * API-key/loopback admission as the operator stop path. A client compares it
- * against the private `<user_home>/.nexus42/run/service.json` record before
- * attaching, so the response is derived from this process's own state — never
- * read back from the replaceable published file.
- */
 const RUNTIME_DISCOVERY_PATH = '/v1/daemon/runtime/discovery';
 
 const AUTH_BOOTSTRAP_PATH = '/__bootstrap';
@@ -161,10 +151,6 @@ async function clearStaleUnixSocket(path: string): Promise<void> {
 /** The socket file itself is locked down to owner-only after a successful bind. */
 const SOCKET_MODE = 0o600;
 
-/**
- * the socket must live in a real 0700 directory, so a shared parent such as
- * `/tmp` can never host a keyless service socket.
- */
 function assertPrivateSocketParent(socketPath: string): void {
   const parent = dirname(socketPath);
   let stats;

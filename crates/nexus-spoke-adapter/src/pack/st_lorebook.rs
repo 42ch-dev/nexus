@@ -1479,8 +1479,6 @@ mod tests {
 
     #[test]
     fn both_key_and_keys_merge_keeps_key_order_and_dedupes() {
-        // case-insensitive duplicates are dropped keeping the first
-        // occurrence's original text.
         let lorebook = json!({
             "entries": [
                 {

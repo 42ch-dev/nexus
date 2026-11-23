@@ -477,7 +477,6 @@ fn verify_pairing(
         ));
     }
 
-    // fail closed (exit 3), mirroring admission gate 3.
     let Some(manifest_hash) = manifest.wasm_sha256.as_deref() else {
         return Err(fail_validation(
             descriptor_path,

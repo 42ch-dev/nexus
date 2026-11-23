@@ -164,8 +164,6 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
-    //     serde silently ignores unknown keys; warn so mis-placed sections
-    //     (e.g. `gates:` at root instead of under `preset:`) are surfaced.
     warn_unknown_top_level_keys(&yaml_value);
 
     let manifest: PresetManifest =

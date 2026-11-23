@@ -5015,7 +5015,6 @@ async fn engine_join_park_persists_paused_tokenless_with_live_join_keys() {
         .unwrap();
     storage.save(session).await.expect("save parked position");
 
-    // the store-wired engine must persist the SCHEDULER shape.
     let outcome = engine
         .run_step(&sid)
         .await

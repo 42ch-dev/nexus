@@ -732,7 +732,6 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
         vec!["Bind1Shared", "Bind1Private"]
     );
 
-    // the first World page of a 2-row window starts after two hidden rows.
     let first_page = store
         .list_by_owner_keyset(&world_owner, None, 2, &selection)
         .await

@@ -1221,12 +1221,6 @@ pub mod patch {
                 black_box(validate_authored_modules(black_box(&patch)));
             });
 
-            // the dispatch is measured directly. The real dispatch is compared
-            // against the removed copy shape instead of against absolute counts,
-            // so allocator/profile drift that moves both readings together does
-            // not flake while a copy re-appearing on the measured path still
-            // fails. An uninstalled counter reads 0 for both, which fails here
-            // too — the liveness check.
             assert!(
                 copied_payload.count_total > measured.count_total * COPY_MARGIN,
                 "the core dispatch copied the patch payload: {measured:?} vs whole-module copy {copied_payload:?}"

@@ -731,7 +731,6 @@ fn inspect_detail_cancelled_with_live_join_keys_is_not_resumable() {
     let ctx = chain_context();
     run_async(async {
         let pool = create_db(&db_path).await;
-        // live join keys + no typed failure persist, only status='cancelled'.
         seed_session(
             &pool,
             &SeedRow::new(

@@ -166,10 +166,6 @@ describe('execution-http (P5-T3)', () => {
       `an in-flight op orphaned by an orderly close settles as cancelled: ${settled.text}`,
     );
 
-    //    an in-flight journal row is pre-seeded into the workspace state DB
-    //    (the T1 `second_owner_and_restart_are_fenced` method — no close in
-    //    between), and the next open's settlement classifies it `interrupted`
-    //    and keeps it terminal-inspectable.
     const orphanId = crypto.randomUUID();
     const seed = spawnSync(
       'python3',

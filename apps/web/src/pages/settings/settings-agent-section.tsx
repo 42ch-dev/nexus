@@ -171,7 +171,6 @@ export function SettingsAgentSection() {
 
   useEffect(() => {
     if (didInitDefault) return;
-    // the error surface holds preselect until a refetch succeeds.
     if (scan.isLoading || scan.isError || saved.isLoading || saved.error) return;
     const scannedMaybe = scan.data?.agents;
     if (scannedMaybe === undefined) return;

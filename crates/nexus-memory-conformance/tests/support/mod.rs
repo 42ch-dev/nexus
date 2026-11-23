@@ -2720,7 +2720,6 @@ impl RawSession {
         let (addr, host) =
             spawn_expected_endpoint_listener(service, host_id, seed, &MEMORY_CAPABILITIES).await;
         let port = addr.port();
-        // a failure aborts and bounded-joins it before re-raising.
         let client_side = std::panic::AssertUnwindSafe(dial_raw_hello(
             addr,
             seed,

@@ -360,8 +360,6 @@ fn inject_tri_state_deserializers(rust: &str, type_name: &str, fields: &[String]
         let Some(attr_at) = body[..at].rfind("# [") else {
             continue;
         };
-        // a field that carries `deserialize_with` makes serde reject omission,
-        // so the presence-preserving attribute must carry `default` itself.
         let attribute = concat!(
             "# [serde (default , deserialize_with = ",
             "\"crate :: tristate :: deserialize_presence\")] ",

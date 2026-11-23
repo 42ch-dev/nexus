@@ -482,9 +482,6 @@ async function run() {
     return 0;
   } catch (error) {
     if (error instanceof RefusalError) return await refusal(worktree, error.message, mutation);
-    // the refusal object is still the only thing on stdout and the exit code is
-    // 1, never a bare stack with empty stdout. Invalid invocation is unaffected
-    // because parseArgs runs before this block and throws UsageError (exit 2).
     process.stderr.write(`init-worktree-submodules: unexpected failure: ${error?.stack ?? error}\n`);
     return await refusal(worktree, `unexpected operational failure: ${firstLine(error?.stack ?? error)}`, mutation);
   }

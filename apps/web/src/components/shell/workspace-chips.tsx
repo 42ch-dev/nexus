@@ -1,6 +1,4 @@
 /**
- * prototype `developer-shell-v1.html` screen 3).
- *
  * One chip per workspace `display_name`; the active chip reflects
  * `active_workspace_slug`. Switching calls set-active through the workspace
  * context (which invalidates workspace-scoped queries and toasts the § Copy

@@ -488,7 +488,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     const runId = admitted.schedule.current_session_id;
 
     if (parked) {
-      // only the committed gate park stays put.
       await waitFor(
         async () => {
           const first = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${runId}`);

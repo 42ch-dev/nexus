@@ -86,9 +86,6 @@ pub async fn creator_actor_view_scope(
     creator_id: &str,
     world_id: &str,
 ) -> Result<KnowledgeReadScope, LocalDbError> {
-    // a World still owned but paused/archived keeps its retained history
-    // readable. The World container is authorized only because the stored row
-    // says so — naming a foreign World never authorizes it.
     let stored: Option<String> =
         sqlx::query_scalar("SELECT owner_creator_id FROM narrative_worlds WHERE world_id = ?")
             .bind(world_id)

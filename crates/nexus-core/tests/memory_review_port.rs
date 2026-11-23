@@ -453,9 +453,6 @@ async fn creator_promote_writes_a_provider_record_and_leaves_the_legacy_queue_al
             .is_some_and(|text| text.starts_with("# UNTRUSTED:")),
         "the promoted body keeps the passthrough UNTRUSTED header: {content}"
     );
-    // the slug it derives from the pending row, so list/show/edit/delete reach
-    // it instead of a blank-slug row (fix round 1, Greptile
-    // `memory_pipeline.rs:441`).
     let slug = content["structured"]["nexus_legacy"]["slug"]
         .as_str()
         .expect("a promoted memory keeps an authored slug");

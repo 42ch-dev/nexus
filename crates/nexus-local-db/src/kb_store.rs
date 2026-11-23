@@ -1337,10 +1337,6 @@ impl KeyBlockRow {
                 self.actor_world_binding_id.clone().unwrap_or_default(),
             ),
             other => {
-                // but the extras merge only needs the namespace keys — a
-                // malformed kind rejects later in `to_record`. Use an empty
-                // World id so the merge is deterministic (never a fabricated
-                // character/binding id).
                 let _ = other;
                 KnowledgeOwnerRef::world(String::new())
             }

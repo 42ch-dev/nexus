@@ -2161,7 +2161,6 @@ async fn drain_character_operation(
                     break terminal;
                 }
             }
-            // the run ended without this operation's observed terminal.
             Some(Err(_)) | None => break CharacterTerminal::Fault,
         }
     };

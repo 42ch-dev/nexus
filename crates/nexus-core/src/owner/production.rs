@@ -720,8 +720,6 @@ mod tests {
             assert!(!fx.creative_root.join("escape.txt").exists());
             assert!(!other_root.join("escape.txt").exists());
 
-            // the session is opened by the bundle's executor and the commit is
-            // interrupted inside the authority's retained owner. ──
             let opened = executor
                 .open(WorkspaceOpenInput {
                     path: "notes".to_string(),
@@ -914,8 +912,6 @@ mod tests {
         std::fs::create_dir_all(&raw_root).expect("raw root parent");
         let target = raw_root.join(std::ffi::OsString::from_vec(b"creative-\xff\xfe".to_vec()));
         if let Err(error) = std::fs::create_dir(&target) {
-            // any other failure here means the fixture never ran, which is a
-            // failure of this test, not an unsupported-filesystem pass.
             assert!(
                 filesystem_rejects_non_utf8_names(&error),
                 "the non-UTF-8 root fixture could not be created for a reason other than the \

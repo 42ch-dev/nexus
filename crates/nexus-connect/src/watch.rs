@@ -670,8 +670,6 @@ mod tests {
     async fn unreadable_poll_keeps_last_good_and_warns_once_per_transition() {
         let baseline = DigestPoll::Tree(serde_json::json!({"daemon.json": "aa"}));
         let applies = Arc::new(AtomicUsize::new(0));
-        // no apply on the unreadable ticks, exactly ONE warn for the
-        // error-state transition, then the change applies normally.
         let stats = drive_loop(
             baseline,
             vec![

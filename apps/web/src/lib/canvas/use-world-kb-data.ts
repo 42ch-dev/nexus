@@ -115,7 +115,6 @@ export function usePromoteWorldKbCandidate(worldId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.all });
     },
     onError: (error) => {
-      // only surface non-conflict failures as toasts.
       if (!isWorldKbConflictError(error)) {
         errorToast(error, 'error.couldNotPromoteWorldKbCandidate');
       }

@@ -12,8 +12,6 @@ mod approve;
 mod atomic_write;
 mod changes;
 mod chronology;
-// the dependency direction is `nexus-core → nexus-connect`, never back, and
-// callers name the crate directly.
 mod compose;
 mod config_lock;
 mod content;

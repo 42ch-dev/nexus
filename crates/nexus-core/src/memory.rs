@@ -3467,8 +3467,6 @@ impl CoreService {
             &character_id,
             binding_id,
         )?;
-        // the provider read serves pending candidates only, so a row a
-        // dismissal consumed is no longer queued at all.
         let memory = self
             .character_memory_writer(principal, &character_id)
             .await?;
@@ -3478,7 +3476,6 @@ impl CoreService {
             .into_iter()
             .filter(|row| pending_row_in_scope(row, binding_id))
             .collect();
-        // the extra row proves more exist.
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
         let more_in_db = pending.len() > batch_limit;
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();
@@ -4050,11 +4047,8 @@ impl CoreService {
                 ),
             });
         }
-        // the provider read serves pending candidates only, so a row a
-        // dismissal consumed is no longer queued at all.
         let memory = self.creator_memory_writer(principal).await?;
         let pending = memory.pending_rows().await?;
-        // the extra row proves more exist.
         let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
         let more_in_db = pending.len() > batch_limit;
         let mut rows: Vec<PendingMemoryRow> = pending.into_iter().take(batch_limit).collect();

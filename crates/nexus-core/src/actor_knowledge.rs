@@ -956,7 +956,6 @@ impl CoreService {
                     .view_in_scope(&selection, query.cursor, query.limit)
                     .await
             }
-            // management review is never inherited by a Character view.
             AdmittedActor::Character { .. } => {
                 views.view(principal.creator_id(), actor, query).await
             }

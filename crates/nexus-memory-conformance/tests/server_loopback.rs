@@ -493,8 +493,6 @@ where
                     return Err(TransportError::Closed);
                 }
                 let sink = guard.as_mut().ok_or(TransportError::Closed)?;
-                // a `Pending` here is the stalled peer's native backpressure,
-                // observed while this send still holds the sink mutex.
                 let mut sending =
                     Box::pin(sink.send(Message::Binary(envelope.to_vec().into())));
                 let natively_pending =

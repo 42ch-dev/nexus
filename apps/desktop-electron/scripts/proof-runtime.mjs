@@ -1170,13 +1170,6 @@ async function collectSurvivors(app) {
   return [...bundle, ...trackedSurvivors];
 }
 
-/**
- * probe, launch, execute, a bounded drain that must observe at least one
- * `MessageDelta` and exactly one terminal (`OpFinished`/`OpFailed`), cancel,
- * and shutdown. A failed pull, a missing terminal event, or a failed shutdown
- * makes the whole operation fail — a dispatched request is not an observed
- * lifecycle (P3-T3 review I7).
- */
 async function runProviderOperation(app, home, index) {
   const op = { index, ok: false, steps: {}, drain: { batches: 0, events: 0, deltas: 0, terminals: [] } };
   try {
@@ -1551,8 +1544,6 @@ async function phaseLifecycle(ctx) {
     process.kill(victim.pid, 'SIGKILL');
     await waitForUtilityRecovery(app, 15_000);
     const afterKill = await app.cdp.evaluateJson(`window.nexusProof.getLifecycle()`, 30_000);
-    // record and reap any that outlived the owner so the run leaves no
-    // residual process behind.
     const trackedSurvivors = await waitForTrackedExit(app.trackedDescendants, 15_000);
     for (const entry of trackedSurvivors) {
       try {

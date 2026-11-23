@@ -361,9 +361,6 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
         "first terminal must create exactly 1 finding; got {n1}"
     );
 
-    // supervisor retry or double-fire). The schedule row was already flipped
-    // to 'completed' by the first call, so we reset it to 'running' to make
-    // the second on_schedule_terminal accept the transition.
     sqlx::query("UPDATE creator_schedules SET status = 'running' WHERE schedule_id = ?")
         .bind("sch_ac5_review")
         .execute(&pool)

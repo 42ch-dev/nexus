@@ -19,10 +19,6 @@ const AGENTS = [
   },
 ];
 
-/**
- * creator bootstrap → workspace selection → world creation, with the derived
- * gate re-probed after selection (`probe` entries) and no client-side marker.
- */
 function makeClient({
   initialized = true,
   worldFails = false,

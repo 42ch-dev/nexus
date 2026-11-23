@@ -626,7 +626,6 @@ async fn assert_close_releases(core: &CoreService, principal: &CorePrincipal) {
 async fn remote_open_pins_space_and_authority() {
     let fixture = Fixture::new().await;
 
-    // the static category is returned and no local provider appears.
     let uncredentialed = Env::new();
     assert_credential_refusal(&uncredentialed, &fixture.host_pubkey).await;
 
@@ -1351,7 +1350,6 @@ impl EnvelopeObserver {
         if state.pending.is_none() && !state.poisoned {
             state.pending = Some(observed);
         } else {
-            // keep neither observation and stay poisoned forever.
             state.pending = None;
             state.poisoned = true;
         }

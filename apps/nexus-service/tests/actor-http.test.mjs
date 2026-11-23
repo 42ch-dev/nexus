@@ -72,7 +72,6 @@ describe('actor-http (P5-T2)', () => {
   });
 
   test('every assigned Actor/memory/context route identity is mounted at its exact verb and tier', async () => {
-    // this asserts the composer inventory, not handler behavior.
     const { DOMAIN_ROUTES } = await import(join(serviceRoot, 'dist/routes.js'));
     const inventory = DOMAIN_ROUTES.map((route) => ({
       method: route.method,
@@ -821,7 +820,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(first.status, 200, first.text);
     assert.equal((await waitForCharacterOutcome(first.payload.operation_id)).run_status, 'succeeded');
 
-    // the next prompt re-reads it, retires the session in place and refuses.
     const patch = await jsonFetch(`/v1/daemon/worlds/${JOURNEY_WORLD}/kb/patch-entity`, {
       method: 'POST',
       body: { entity_id: 'kb_mod', expected_version: 0, patch: { title: 'Journey Updated Mod' } },
@@ -1026,7 +1024,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(session.status, 200, session.text);
     const sessionId = session.payload.session_id;
 
-    // no reservation, no provider work, no pending/captured result.
     const launchesBefore = readLog(acpLog).length;
     const refused = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
       method: 'POST',

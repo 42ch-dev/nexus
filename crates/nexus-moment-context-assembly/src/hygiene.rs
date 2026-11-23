@@ -264,10 +264,6 @@ fn apply_transform(text: &str, t: &HygieneTransform<'_>) -> TransformPass {
             }
             ExpansionOutcome::WorkLimit => {
                 if out_chars == match_start_chars {
-                    // degrade to "match left as-is" — revert to the state
-                    // before the unmatched prefix and do not advance
-                    // `last_end`, so the tail append re-emits the original
-                    // matched text (and any trailing literal) verbatim.
                     out.truncate(prefix_len);
                     out_chars = prefix_chars;
                 } else {

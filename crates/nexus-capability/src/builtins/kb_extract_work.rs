@@ -722,7 +722,6 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // the trusted target policy decides instead.
         let input = json!({
             "creator_id": CREATOR,
             "job_id": job_id,

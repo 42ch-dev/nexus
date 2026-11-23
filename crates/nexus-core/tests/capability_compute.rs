@@ -600,8 +600,6 @@ async fn aborted_accept_rolls_back_key_block_inserts() {
         .await
         .expect_err("the zero-row CAS must abort the accept");
 
-    // the insert (and the trigger's update) stayed inside the rolled-back
-    // transaction. These assertions are what a self-committing insert fails.
     let rows_after = kb_block_rows(f.core.pool()).await;
     assert_eq!(rows_after, rows_before, "the aborted accept left zero rows");
     assert!(!rows_after.iter().any(|id| id == "kb_sigil_race"));

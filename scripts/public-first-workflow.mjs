@@ -3668,9 +3668,6 @@ async function runJourney(options) {
       );
     }
     facts.steer.resumed = true;
-    // that is the observable proof that the deadline reroute ran, that the same
-    // schedule/root was re-driven, and that W5/W6 were exercised strictly
-    // before the final manual wait.
     const effectBoundary = await awaitEffectBoundary({
       readPlacement,
       runId,

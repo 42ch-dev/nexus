@@ -556,8 +556,6 @@ impl ProviderAdapter for ClaudeCliProvider {
                     Some(e.to_string()),
                 )
             })?;
-            // cancel/shutdown fall back to signalling it when the per-session
-            // lock is held by an in-flight frame read (B-2).
             let child_pid = child.id().unwrap_or(0);
             let mut client = AsyncClient::new(child).map_err(|e| {
                 HostError::launch_failed(

@@ -562,11 +562,6 @@ export interface NexusClient extends CoreSliceClient {
     request: EditCoreContextRequest,
   ): Promise<EditCoreContextResponse>;
 
-  /**
-   * canonical `items` key). Typed against the app-side camelCase mirror of the
-   * local DTO (`capability-info.ts`): the daemon serves `inputSchema` /
-   * `outputSchema` (AR-40), NOT the generated snake_case schema types.
-   */
   listCapabilities(query?: ListCapabilitiesQuery): Promise<CapabilityListResponse>;
 
   listFindings(workId: string, query?: ListFindingsQuery): Promise<ListFindingsResponse>;

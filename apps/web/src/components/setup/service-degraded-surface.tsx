@@ -78,8 +78,6 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
   const client = useNexusClient();
   const [catalog, setCatalog] = useState<AgentHostCatalogEntry[] | null>(null);
   const [scanEntries, setScanEntries] = useState<AgentScanEntry[]>([]);
-  // candidates stay selectable so a transient scan outage never locks the
-  // user out of the catalog.
   const [scanFailed, setScanFailed] = useState(false);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [savedProviders, setSavedProviders] = useState<
@@ -268,8 +266,6 @@ function ProviderSetupForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <ul className="flex max-h-56 list-none flex-col gap-1 overflow-y-auto p-0">
             {orderedCandidates.map((candidate) => {
               const configured = savedProviders.has(candidate.id);
-              // only the built-in trio has native launch adapters. Other
-              // native ids are detection-only: shown, never offered.
               const launchable =
                 candidate.protocol === 'acp' || SUPPORTED_NATIVE_LAUNCH[candidate.id] === true;
               const installState = scanFailed

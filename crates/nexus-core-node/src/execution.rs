@@ -408,8 +408,6 @@ impl NativeCore {
             .active_principal()
             .await
             .map_err(core_error::napi_error_from_domain)?;
-        // an admission without one keeps the owner-less shape (no fabricated
-        // readiness).
         let probe_owner = core.admission_creative_root().map(|root| {
             nexus_agent_host::capability::model::SessionOwner {
                 creator_id: principal.creator_id().to_string(),

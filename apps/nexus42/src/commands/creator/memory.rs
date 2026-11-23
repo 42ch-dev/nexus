@@ -555,8 +555,6 @@ async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
 }
 
 async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -> Result<()> {
-    // an interactive prompt must never hold the workspace writer, so an
-    // unattended prompt cannot stall a daemon (NXM-6 fix round 1, finding F6).
     let revision = with_read_only_core(config, async |core, principal| {
         let record = core
             .get_creator_memory(principal, slug)

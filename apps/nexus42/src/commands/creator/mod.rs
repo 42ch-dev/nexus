@@ -2318,8 +2318,6 @@ mod tests {
         .expect_err("platform register without a token must fail");
 
         let display = format!("{err}");
-        // exact match after trim — a copy regression that drops or rewrites any
-        // word must fail this test, not just the two exit names.
         assert_eq!(
             display.trim(),
             "Platform authentication required. Authenticate with `nexus42 platform auth login`, \

@@ -20,12 +20,6 @@ import {
 export interface ConnectionConfig {
   /** Full daemon URL including protocol and port. */
   endpointUrl: string;
-  /**
-   * the desktop store never returns the persisted key (redacted load), so a
-   * desktop-saved config carries `hasApiKey` instead and an omitted `apiKey`
-   * on save means "keep the stored credential". The browser backend requires
-   * the actual key.
-   */
   apiKey?: string;
   /** Whether a credential is persisted for this endpoint (desktop redacted load). */
   hasApiKey?: boolean;

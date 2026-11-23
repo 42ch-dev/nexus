@@ -425,7 +425,6 @@ impl NativeCore {
             auto_review_master_on_timeout: request.auto_review_master_on_timeout,
             auto_chain_interrupted: request.auto_chain_interrupted,
             work_profile: request.work_profile,
-            // no HTTP caller supplies it, and the core treats `None` as "untouched".
             schedule_ids: None,
         };
         self.json_call(principal_handle, async move |core, principal| {
@@ -977,7 +976,6 @@ impl NativeCore {
         };
         self.json_call(principal_handle, async move |core, principal| {
             let page = core.list_findings(&principal, work_id, domain).await?;
-            // only the carrier struct is non-Serializable.
             Ok(serde_json::json!({
                 "items": page.items,
                 "pagination": page.pagination,

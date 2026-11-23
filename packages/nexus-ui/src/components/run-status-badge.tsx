@@ -24,10 +24,6 @@ const STATUS_VARIANT = {
   discarded: 'neutral',
 } as const satisfies Record<RunStatus, 'neutral' | 'running' | 'queued' | 'warning' | 'error' | 'preset'>;
 
-/**
- * the label is caller-owned copy; the component only owns the status →
- * semantic-variant mapping.
- */
 export function RunStatusBadge({ status, label, className }: RunStatusBadgeProps) {
   return (
     <Badge

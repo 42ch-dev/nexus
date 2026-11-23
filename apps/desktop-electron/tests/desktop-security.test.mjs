@@ -472,7 +472,6 @@ test('queued aggregate byte cap rejects overflow with busy', async () => {
   for (let i = 0; i < 32; i += 1) {
     releases.push(await admission.admit(1));
   }
-  // overflow needs prior queued bytes.
   const smallQueued = admission.admit(1);
   assert.equal(await admission.admit(MAX_REQUEST_BYTES), null); // 1 byte + 1 MiB > cap
   releases.forEach((release) => release());

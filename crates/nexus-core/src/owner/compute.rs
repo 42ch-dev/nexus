@@ -1659,7 +1659,6 @@ fn answer_from_receipt(receipt: &OperationReceipt, owner_is_live: bool) -> CoreR
             &receipt.operation_id,
             "its receipt is still `running` and its owner cannot be confirmed",
         )),
-        // refusing honestly beats a panic if that invariant ever changes.
         RecoveryDecision::ApplyOnce => Err(CoreError::Internal {
             category: "operation receipt classification returned ApplyOnce for a stored receipt"
                 .to_string(),

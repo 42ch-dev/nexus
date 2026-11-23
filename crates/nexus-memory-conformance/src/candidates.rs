@@ -5702,7 +5702,6 @@ mod tests {
             "the invalidation is not faked by advancing the persistent marker"
         );
 
-        // only the surviving context's candidates remain.
         let fresh = scenario
             .provider
             .candidates_list(
@@ -5975,7 +5974,6 @@ mod tests {
             .expect("the unchanged continuation is accepted");
         assert_eq!(candidate_ids(&second), vec![older.clone()]);
 
-        // the visible set changed with no row, grant or marker change.
         let later = now + Duration::days(29) + Duration::hours(23);
         let marker_before = sqlx::query("SELECT marker FROM provider_snapshot WHERE space_id = ?")
             .bind(&scenario.space_id)

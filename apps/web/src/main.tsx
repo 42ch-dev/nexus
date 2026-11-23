@@ -17,7 +17,6 @@ function useQueryErrorToast() {
   const { toast } = useToast();
   const { t } = useTranslation('common');
   return (error: unknown) => {
-    // toasting it per query is the I-000059 toast storm.
     if (error instanceof NexusClientError && error.status === 401) return;
     const description =
       error instanceof NexusClientError

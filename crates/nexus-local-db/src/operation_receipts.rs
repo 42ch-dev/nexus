@@ -342,9 +342,6 @@ pub async fn begin_operation(
         Err(err) => return Err(db_err(err)),
     };
 
-    // exactly one racer inserted the `running` row (and owns the effect), the
-    // others inserted nothing and must answer from the stored receipt. Both
-    // sides then read the same stored row back.
     let acquired = inserted.rows_affected() == 1;
 
     let stored = get_operation_receipt(pool, operation_id)

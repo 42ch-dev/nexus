@@ -401,8 +401,6 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(wrongEpoch.status, 400);
     assert.equal(wrongEpoch.payload.error.details?.variant, 'history_unavailable');
     const lastId = events.at(-1)?.id;
-    // the bounded body read fails if the stream leaks open, and the body must
-    // carry no fabricated event or gap.
     const equal = await fetch(`${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}&cursor=${encodeURIComponent(lastId)}`, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(5_000) });
     assert.equal(equal.status, 200);
     assert.match(equal.headers.get('content-type') ?? '', /text\/event-stream/);
@@ -683,7 +681,6 @@ describe('security-stream (P4-T2)', () => {
     registry.settleOperationStatus(operationId, 'cancelled');
     assert.equal(registry.operationRecord(operationId).status, 'cancelled');
     assert.equal(registry.activeOperationCount(), 0, 'an accepted cancel is no longer charged as active');
-    // first terminal wins, matching the durable journal's one terminal.
     registry.finishOperation(operationId, { OpFinished: { session_id: sessionId, op_id: operationId, reason: 'end_turn' } }, null);
     const record = registry.operationRecord(operationId);
     assert.equal(record.status, 'cancelled', 'a late OpFinished must not overwrite the accepted cancel');
@@ -1381,7 +1378,6 @@ describe('security-stream (P4-T2)', () => {
         );
       }
 
-      // drop the mirror's session (and with it the operation record) and re-read.
       const cold = results.find((result) => result.row.provider === 'mock-acp-max-tokens');
       local.service.providerRegistry.removeSession(cold.sessionId);
       assert.equal(local.service.providerRegistry.operationRecord(cold.operationId), undefined, 'the mirror must be cold');

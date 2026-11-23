@@ -386,7 +386,6 @@ async fn assemble_harbor(
     let request = MomentRequest::new(stage0.clone())
         .with_world(WORLD_A_ID)
         .with_hop_edges(harbor_edges())
-        // budget semantics are unit-covered in activation.rs.
         .with_hop_max_tokens(100_000);
     assemble_moment(&request, narrative, kb).await
 }

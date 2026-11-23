@@ -139,8 +139,6 @@ describe('StepAgent (creator AI partner)', () => {
         agents: [
           {
             name: 'Claude Code',
-            // the saved profile must keep the scan entry name so the badge
-            // resolver matches it.
             registry_agent_id: 'claude-native',
             launch_command: '/usr/local/bin/claude',
             installed: true,

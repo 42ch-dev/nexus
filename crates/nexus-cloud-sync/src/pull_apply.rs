@@ -30,7 +30,6 @@ pub async fn apply_pull_response_to_outbox(
     let mut skipped_duplicate_bundles = 0usize;
 
     for envelope in &response.bundles {
-        // the outbox stores the canonical `Bundle`. Wire-equivalent (drift gate).
         let bundle: nexus_contracts::Bundle =
             serde_json::from_value(serde_json::to_value(envelope).unwrap_or_default())
                 .expect("pull envelope round-trips to Bundle");

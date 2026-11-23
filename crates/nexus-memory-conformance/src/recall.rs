@@ -653,8 +653,6 @@ impl FixtureMemoryProvider {
         let snapshot = snapshot_marker(conn, space_id).await?;
         let binding_digest = recall_binding(principal_id, space_id, subject_id, request, snapshot)?;
 
-        // reads on a merely fenced subject stay admitted. The exclusion is a
-        // row-set rule, so the cursor/budget path below stays single.
         let mut rows = load_recall_rows(conn, space_id, subject_id).await?;
         if subject == "archived" {
             rows.clear();
@@ -2113,7 +2111,6 @@ mod tests {
     }
 
     async fn context_limited_shared_facet_widens_the_read(scenario: &Scenario) {
-        // the shared facet is what widens it.
         scenario
             .grant(LIMITED, &["recall"], Some(&["ctx-a"]), None)
             .await;

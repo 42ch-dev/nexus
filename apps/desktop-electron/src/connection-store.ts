@@ -198,12 +198,6 @@ export class ConnectionStore {
     return new ConnectionStore(deps, state, cleanupFailure);
   }
 
-  /**
-   * every other read failure is an existing-but-unreadable store and is kept
-   * distinct so it can never be mistaken for a fresh install. A stored
-   * endpoint must satisfy the shared root-service grammar before it is
-   * activated.
-   */
   private static readFile(deps: ConnectionStoreDeps): StoredFile | null {
     let raw: string;
     try {

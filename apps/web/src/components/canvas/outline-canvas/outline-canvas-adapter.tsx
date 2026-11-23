@@ -121,12 +121,6 @@ export function createOutlineCanvasAdapter(
     },
 
     adaptConflict(_error) {
-      // the orchestrator captures them via `captureConflictState` and renders
-      // `OutlineConflictDialog` — a surface-specific modal whose props
-      // (`ConflictState`) do not match the shared `ConflictModalProps` shape
-      // (Strategy-specific: `ConflictModalDraft` / `canonicalState`). Returning
-      // null mirrors the World KB precedent; the conflict modal stays
-      // orchestrator-rendered (T1b concern).
       return null as ConflictModalProps | null;
     },
 

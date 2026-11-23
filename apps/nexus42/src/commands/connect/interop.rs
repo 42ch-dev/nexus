@@ -1078,7 +1078,6 @@ async fn connect_dial_records_dialed_peer_manifest() {
     let node_b = start(config_b).await;
     let b_addr = node_b.listen_addrs()[0].to_string();
 
-    // boots A, dials B, records B's manifest — all inside `dial_host`.
     let db_a = home_a.join("workspace").join("state.db");
     super::dial_host(&home_a, &b_addr, &[peer_b.to_string()], Some(&db_a))
         .await
@@ -3541,7 +3540,6 @@ async fn config_require_token_tokenless_peer_invoke_auth_failed_zero_side_effect
     )
     .expect("write allowlist");
 
-    // the host requires a capability token from the trusted issuer.
     let issuer_secret = [51u8; 32];
     let issuer_peer = issuer_peer_id(&issuer_secret);
     write_token_config(

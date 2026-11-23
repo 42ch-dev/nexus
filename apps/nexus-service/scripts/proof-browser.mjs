@@ -433,8 +433,6 @@ function resolveChromium() {
     }
   }
 
-  //    both `chrome-mac`/`chrome-mac-arm64` layouts and the `Chromium.app` /
-  //    `Google Chrome for Testing.app` binary names.
   const playwrightCache = join(home, 'Library/Caches/ms-playwright');
   const chromiumCandidates = [];
   if (existsSync(playwrightCache)) {
@@ -846,7 +844,6 @@ async function runBrowserInteractionProof(ctx) {
     `async (entityId) => window.__RFT_NATIVE_PROOF__.createEntityOnAbsent({ entity_id: entityId, expected_version: 0, patch: { title: 'Proof Entity', block_type: 'character' } }).then((r) => ({ ok: true, version: r.version, id: r.entity.key_block_id })).catch((e) => ({ ok: false, status: e.status ?? 0, code: e.code ?? null, message: String((e && e.message) || e) }))`,
     [CREATE_ENTITY],
   );
-  // the created id and version must match, else throw with the serialized body.
   if (!created?.ok || created.id !== CREATE_ENTITY || typeof created.version !== 'number') {
     throw new Error(`create-on-absent did not succeed: ${JSON.stringify(created)}`);
   }
@@ -992,11 +989,6 @@ async function runBrowserInteractionProof(ctx) {
     }
   }
 
-  // the CLI (already run above) wins the CAS; then a second CLI-only write lands
-  // while the browser is idle, and the canvas — which watches the durable
-  // `core_changes` outbox — must reflect the CLI's title in the rendered DOM
-  // without any browser-side mutation. This observes canonical state, not a
-  // promise resolution.
   const cliTitle = 'CLI-WATERMARK-VISIBLE';
   const canonicalBeforeCli = await callPage(
     client,
@@ -1178,8 +1170,6 @@ async function runInterruptedRestartCycles(ctx, serviceHandle, { cycles = LIFE_R
     } catch (err) {
       groupKillError = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     }
-    // the bound keeps this abrupt-restart proof finite even if inherited stdio
-    // delays `close`. Port release below remains the authoritative stop check.
     await Promise.race([handle.child.__closed ?? Promise.resolve(), sleep(5_000)]);
     const closedSettled = handle.child.__closeSettled === true;
     let groupSurvivors = survivingGroupRows(groupBefore, handle.child.pid);
@@ -1555,10 +1545,6 @@ async function runAdapterEditSample(ctx, sampleIndex) {
   const targetPath = resolve(repoRoot, 'packages/nexus-provider-acp/src/acp.ts');
   const edit = new TrackedEdit(targetPath).capture();
   const originalSource = edit.original.toString('utf8');
-  // prefix every agent-message-chunk text with a marker. The edited behavior is
-  // then asserted through the REAL provider vertical — a fresh browser-driven
-  // provider session must stream a MessageDelta whose text carries the marker
-  // (the baseline emits the raw fixture text).
   const marker = `RFTADAPTER${sampleIndex}:`;
   const editedSource = originalSource.replace(
     "    const text = record.content.text ?? '';\n    return { MessageDelta: { session_id: sessionId, op_id: opId, text } };",
@@ -1612,8 +1598,6 @@ async function runAdapterEditSample(ctx, sampleIndex) {
         restartMs = restarted.readyMs;
       });
       await waitForHttpOk(`${ctx.serviceUrl}/v1/daemon/runtime/health`, { timeoutMs: 30_000 });
-      // wait explicitly before the adapter evaluation so the failure is a real
-      // adapter defect, not a missing handle.
       await waitForPageCondition(
         ctx.client,
         'Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready)',

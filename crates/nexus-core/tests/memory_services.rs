@@ -3960,7 +3960,6 @@ async fn keyword_search_finds_a_fragment_past_the_former_scan_cap() {
 async fn read_only_core_serves_memory_reads_and_refuses_the_write() {
     let env = seed_env().await;
     seed_creator_pending_row(&env, "pend_read_only", None, "2026-01-01T00:00:01Z").await;
-    // the read-only core below serves the same read without writing anything.
     {
         let (core, principal) = open_core(&env).await;
         assert_eq!(

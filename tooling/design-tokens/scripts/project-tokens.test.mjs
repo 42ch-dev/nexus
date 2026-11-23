@@ -126,12 +126,6 @@ test('differing light/dark leaf paths are rejected', async () => {
 });
 
 test('projection emits known theme-specific, reference, and compound outputs', async () => {
-  // assert the exact projected CSS strings for (a) distinct theme-specific
-  // values, (b) an alias that resolves through a reference, and (c) a compound
-  // recipe that projects its resolved color member. Without snapshotting the
-  // whole fixture, these guard that a plausible compiler defect (defaulting a
-  // value, dropping a reference, leaking "{ref}" / "[object Object]") would
-  // change the emitted string and fail the test.
   const realPair = await loadDesignPair(process.cwd());
   const out = projectDesign(realPair);
   assert.ok(out.css.includes(':root {'));

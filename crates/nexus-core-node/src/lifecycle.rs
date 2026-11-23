@@ -2483,8 +2483,6 @@ mod tests {
         let authority = state.host_authority().expect("attached authority");
         let bridge = authority.manager().localset_bridge();
 
-        // the bounded inner join cannot settle inside the deadline, so the
-        // owner must be retained and handed to tracked cleanup.
         let blocked = bridge.clone();
         let blocker = tokio::spawn(async move {
             let _ = blocked

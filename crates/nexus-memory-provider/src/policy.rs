@@ -146,7 +146,6 @@ pub(super) fn classify(text: &str, kind_hint: Option<&str>) -> Classification {
             rationale_codes: vec!["empty_content"],
         };
     }
-    // classification then only confirms it.
     if kind_hint.is_some_and(|hint| !hint.is_empty()) {
         return Classification {
             disposition: "promote",

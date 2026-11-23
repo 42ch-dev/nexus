@@ -983,7 +983,6 @@ impl LocalSetBridge {
 
         let mut evidence = if let Some(control) = control {
             let (ack_tx, ack_rx) = oneshot::channel();
-            // a dead thread must fail fast rather than burn the whole budget.
             let sent = control.push(ControlMessage::Shutdown { ack: ack_tx })
                 && self.runtime_thread_alive();
             if sent {
@@ -1602,7 +1601,6 @@ fn run_localset_thread(
                     tokio::pin!(notified);
                     notified.as_mut().enable();
 
-                    // a close never waits behind queued requests.
                     if let Some((ack, evidence)) =
                         apply_control_messages(&control, &state_ref, &counters, &mut aborted_ids)
                     {

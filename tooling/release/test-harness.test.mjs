@@ -36,9 +36,6 @@ test("fixture repos pin the fixed baseline, not the repository version", () => {
 });
 
 test("fixture repos ignore the source repository version", () => {
-  // the fixture must still come out at the pinned baseline, which is what lets
-  // every test hard-code FIXTURE_BASELINE_VERSION / FIXTURE_TARGET_VERSION
-  // independently of the live release number.
   const source = createTempRepo({ version: "1.2.3" });
   try {
     assertFixtureVersion(source, "1.2.3");

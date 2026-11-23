@@ -1288,7 +1288,6 @@ pub async fn open_guarded_pool_with(
         guard.migration_epoch,
         guard.engine_epoch,
     );
-    // the locks outlive the guard until SQLite disposes the last connection.
     let pool = pool_with_context(&guard.db_path, context, Some(Arc::clone(guard)), options).await?;
     register_pool_handle(guard, &pool);
     Ok(pool)

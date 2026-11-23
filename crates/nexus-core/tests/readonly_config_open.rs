@@ -398,7 +398,6 @@ async fn a_failed_writer_open_releases_its_admission() {
             .expect("the stored remote selection refuses the writer open"),
     );
 
-    // a real writer open now proves that admission was released.
     service
         .clear_memory_provider_selection()
         .expect("restore the local default");

@@ -559,8 +559,6 @@ async fn c_113_recovering_objects_excluded_until_resolved_local() {
         "a recovering intent has no published projection"
     );
 
-    // the pending receipt and the intended record this commit created, read
-    // from the released store before anything reopens it.
     let db = workspace_state_db_path(&env.user_home, CREATOR, WORKSPACE);
     let original_receipt = store_scalar(
         &db,

@@ -1047,7 +1047,6 @@ async fn handle_reconcile_chapters(
 
         if !yes {
             if json {
-                // report that confirmation is required and write nothing.
                 return Ok((
                     resolved_id.clone(),
                     ReconcileOutcome::ConfirmationRequired(serde_json::json!({

@@ -536,7 +536,6 @@ async fn outline_patch(
         target_chapter_id: target_chapter
             .map(|n| parse_positive(n, "--target-chapter"))
             .transpose()?,
-        // the transport still requires the struct literal to name them.
         scene_id: None,
         beat_id: None,
         title: None,

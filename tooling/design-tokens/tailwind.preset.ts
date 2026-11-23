@@ -482,9 +482,6 @@ const preset: Partial<Config> = {
         card: 'var(--shadow-card)',
         popover: 'var(--shadow-popover)',
         modal: 'var(--shadow-modal)',
-        // legacy card/popover/modal keys above keep resolving via the alias chain.
-        // Flat keys: Tailwind v3 does not flatten nested boxShadow maps into
-        // dash-separated utilities (compile-verified).
         'elevation-0': 'var(--shadow-elevation-0)',
         'elevation-1': 'var(--shadow-elevation-1)',
         'elevation-2': 'var(--shadow-elevation-2)',
@@ -548,9 +545,6 @@ const preset: Partial<Config> = {
       maxHeight: {
         dialog: sv('dialog-max-height'),
       },
-      // registered here, applied to node components in P3 as min-w-canvas-node-*).
-      // Structural (non-color) tokens — referenced via the bare
-      // `--canvas-node-width-*` namespace, not the `--color-*` helper.
       minWidth: {
         'canvas-node-strategy-root': sv('canvas-node-width-strategy-root'),
         'canvas-node-strategy-primary': sv('canvas-node-width-strategy-primary'),

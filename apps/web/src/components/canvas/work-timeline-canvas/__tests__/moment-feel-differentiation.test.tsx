@@ -102,10 +102,6 @@ describe('WorkTimelineCanvas — Moment feel differentiation (V1.123 P2 Task 6)'
   });
 
   it('Moment projection stacks scenes vertically by chapter region (Y grows, X by chapter)', () => {
-    //   scene/beat cards + manuscript-anchor badges."
-    // Two scenes in different chapters → different X (chapter region) AND
-    // Y position reflecting the vertical stack. The exact metrics are
-    // adapter-internal; the contract is "X groups by chapter, Y stacks".
     const ctxRef = {
       current: {
         workId: 'work-1',

@@ -590,8 +590,6 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
         );
     }
 
-    // each record/candidate carries the legacy text and fields verbatim, and
-    // each bearer file's own bytes travel with its projection (P3-F3).
     let pool = plain_pool(&env).await;
     let records = contents(
         &pool,

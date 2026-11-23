@@ -197,8 +197,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     seed_creator(&pool, "ctr_e2e").await;
     seed_world(&pool, "ctr_e2e", "wld_e2e").await;
 
-    // basic-combat picks the first two character blocks → Hero attacks Villain.
-    // damage = max(0, 20 − 0) = 20 → Villain hp 120 → 100. Hero unchanged.
     let hero = seed_character(&pool, "wld_e2e", "Hero", 20, 5, 80, 80).await;
     let villain = seed_character(&pool, "wld_e2e", "Villain", 10, 0, 120, 120).await;
 

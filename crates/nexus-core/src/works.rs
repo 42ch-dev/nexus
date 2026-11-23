@@ -1715,9 +1715,6 @@ async fn reconcile_chapters(
     let workspace_root = std::path::Path::new(&workspace_path_str);
     let now = chrono::Utc::now().to_rfc3339();
 
-    // the unlocked diff walk in between is the stale-read window, so what is
-    // re-validated is exactly the caller's principal — its open generation, its
-    // on-disk creator/workspace selection, and the service's open state.
     let recheck = || service.verify_principal(principal);
 
     let port =

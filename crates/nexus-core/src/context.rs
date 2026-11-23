@@ -323,7 +323,6 @@ async fn after_injection_lifecycle(
                 Ok(Some(work)) if is_novel_profile(work.work_profile.as_deref()) => {
                     let chapter = i64::from(work.current_chapter);
                     let burn = match get_chapter_anchor(pool, directive_id, work_id).await {
-                        // never negative — a chapter rewind does not refund TTL.
                         Ok(Some(last)) => i64::max(0, chapter - last),
                         Ok(None) => 0,
                         Err(e) => {

@@ -399,7 +399,6 @@ impl Capability for LlmExtract {
                     bundle: admitted,
                 },
                 move |run_input| async move {
-                    // the orchestrator resolved it and the port handed it back.
                     let admitted_text = run_input.input["sources"][0]["text"]
                         .as_str()
                         .unwrap_or_default()

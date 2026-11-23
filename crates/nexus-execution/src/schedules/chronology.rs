@@ -108,7 +108,6 @@ pub fn spawn_auto_chronology_tick(
         );
 
         let mut ticker = tokio::time::interval(config.interval);
-        // avoids piling advance evaluations onto the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {

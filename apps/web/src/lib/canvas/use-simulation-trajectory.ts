@@ -140,8 +140,6 @@ export function useSimulationTrajectory(
     setError(null);
   }, []);
 
-  // the snapshot's own staleness (`isStale`) still drives the stale banner.
-  // A failed walk outranks staleness too: the error is the newer fact.
   const status: SimulationStatus = isRunning
     ? 'running'
     : error !== null

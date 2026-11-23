@@ -572,8 +572,6 @@ async fn apply_pending_migrations(
     }
     let table_name = migrator.table_name.as_ref();
 
-    // fail on a dirty (partially applied) migration, then validate applied
-    // versions/checksums against the source before applying anything new.
     conn.ensure_migrations_table(table_name).await?;
     if let Some(version) = conn.dirty_version(table_name).await? {
         return Err(sqlx::migrate::MigrateError::Dirty(version).into());

@@ -62,7 +62,6 @@ export function ValidatePresetDialog({
             : '',
       });
     } catch {
-      // the previous result (if any) stays on screen.
     }
   }
 

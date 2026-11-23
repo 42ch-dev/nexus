@@ -1866,18 +1866,6 @@ async fn verify_stored_worlds(
                         SpokeResult::Reject(reject)
                             if reject.code == SpokeRejectCode::RelationNotFound =>
                         {
-                            // no relation row exists yet, so the stored-row
-                            // check above is a no-op — but the INSERT's FKs
-                            // are single-column on `key_block_id` (world-
-                            // agnostic), so a new world-A relation could
-                            // legally reference world-B entries. Endpoints
-                            // are immutable on the update path (the update
-                            // port carries no endpoint fields), so this
-                            // create-path check is what closes the
-                            // cross-world-edge gap: require each endpoint's
-                            // stored world to equal the claimed world;
-                            // mismatch or missing endpoint denies the whole
-                            // payload with zero insert.
                             for endpoint in ["from_id", "to_id"] {
                                 let Some(endpoint_id) =
                                     relation.get(endpoint).and_then(Value::as_str)

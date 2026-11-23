@@ -407,8 +407,6 @@ fn nexus_ext_key() -> ExtensionKey {
 #[allow(clippy::fallible_impl_from)]
 impl From<TimelineEvent> for SpokeTimelineEvent {
     fn from(d: TimelineEvent) -> Self {
-        // spoke requires minLength 1; the fallback chain guarantees it.
-        // Scoped so the borrows end before any field moves below.
         let canonical_name = {
             let candidate = d
                 .title

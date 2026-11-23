@@ -459,7 +459,6 @@ async fn wait_run_harness_reunify(
                 return Some(harness);
             }
         }
-        // check the latch before registering a Notify waiter.
         if !active_run.load(Ordering::Acquire) {
             let mut guard = state.lock().await;
             return guard.harness.take();
@@ -1053,10 +1052,6 @@ fn provision_sealed_home_fd(child: &Path) -> Result<SealedLease, String> {
     let Some(leaf_name) = child.file_name().and_then(|name| name.to_str()) else {
         return Err("sealed dsh home leaf name is invalid".to_string());
     };
-    // create missing anchor-tail components; then ensure the `nexus`
-    // parent (a symlinked one is rejected no-follow) and exclusively
-    // create the owner-only leaf. The selected home and everything below
-    // it must be owned by the effective uid.
     let (canonical_home, missing) = canonical_anchor(home_dir)?;
     let mut dir_fd = sealed_fs::ensure_dir_nofollow_absolute(&canonical_home)?;
     let mut resolved = canonical_home;
@@ -1422,8 +1417,6 @@ impl DshNativeProvider {
             undeleted_lease: None,
         };
         let lease = provision_sealed_home(&self.env).map_err(launch_error)?;
-        // revalidate that the lexical child/patch still resolve to the
-        // owned inode/files before the runtime is pointed at them.
         if let Err(message) = lease.revalidate_for_start() {
             let undeleted_lease = self.discard_failed_lease(lease);
             return Err(SealedStartFailure {
@@ -1547,7 +1540,6 @@ impl DshNativeProvider {
         let config = self.sdk_config(cwd, &executable, Some(&lease.path));
         let retained = Arc::clone(&self.retained_leases);
         let sealed_cleanup = async move {
-            // revalidate the owned inode/files immediately before start.
             if let Err(message) = lease.revalidate_for_start() {
                 if remove_lease_tree(&lease).is_err() {
                     retain_lease_path(&retained, lease.path.clone());
@@ -2151,8 +2143,6 @@ impl ProviderAdapter for DshNativeProvider {
             taken
         };
 
-        // the flag is set without the per-session mutex, so a run in
-        // flight can never delay this rejection.
         if closing.load(Ordering::Acquire) {
             return Err(HostError::internal(format!(
                 "dsh session {} is closing or closed",
@@ -2169,8 +2159,6 @@ impl ProviderAdapter for DshNativeProvider {
                 )));
             }
             if guard.policy_locked && guard.recipe != desired {
-                // reject policy changes (deny_all ↔ None included) rather
-                // than losing the conversation or escalating permissions.
                 return Err(HostError::policy_denied(
                     "the permission scope cannot change after the first admitted prompt; \
                      the session recipe is retained",
@@ -2281,8 +2269,6 @@ impl ProviderAdapter for DshNativeProvider {
             return Ok(());
         };
         closing.store(true, Ordering::Release);
-        // this synchronous cell is never held across an await and never
-        // behind the run mutex.
         let cleanup = cleanup_slot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -4430,8 +4416,6 @@ mod tests {
         );
         std::fs::write(&release_sealed_start, b"release").expect("release the held sealed start");
 
-        // the start completes, the close is confirmed, and the lease is
-        // removed.
         let entries = wait_for_observed(
             "both recipes to be spawned",
             || std::fs::read_to_string(&req_log).map_or_default(|text| parse_req_log(&text)),
