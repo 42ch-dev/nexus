@@ -41,4 +41,6 @@ Register new schemas by adding an `entry!` macro to `build_schema_map()` in `cra
 
 ## Wire `schema_version`
 
-**`LATEST_SCHEMA_VERSION`: `1`** — constant emitted by codegen into both Rust and TypeScript. Individual DTOs carry per-type `schema_version`; the bundle envelope aligns with the latest value after `pnpm run codegen`.
+**`LATEST_SCHEMA_VERSION`: `2`** — constant emitted by codegen into both Rust and TypeScript. Individual DTOs carry per-type `schema_version`; the bundle envelope version is defined by `schemas/platform/sync/bundle.schema.json`.
+
+Constraint tightening (for example adding `minimum: 0` to an existing field) does not bump `schema_version`; the stamp tracks structural or serialization changes.
