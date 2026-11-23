@@ -106,7 +106,11 @@ my-strategy/
 ```
 
 The bundle directory name is part of the contract: the validator enforces
-`preset.id` == bundle directory name (`check_bundle_id_vs_directory`).
+`preset.id` == bundle directory name (`check_bundle_id_vs_directory`). Embedded
+presets follow the same rule: the essay bootstrap preset's id is `essay-init`
+(renamed from `essay`), so a user override must live at
+`~/.nexus42/presets/essay-init/`; a bundle at the old `essay/` path shadows
+nothing.
 
 ## preset.yaml — manifest format
 
@@ -115,7 +119,7 @@ Top-level keys (subset of `PresetManifest` in
 
 | Key | Meaning |
 |-----|---------|
-| `preset.id` | Identifier; `/^[a-z][a-z0-9._-]*$/` and **must equal the bundle directory name**. There is no separate `name` field — `id` is the identifier and `description` is the human label. |
+| `preset.id` | Identifier; `/^[a-z][a-z0-9._-]*$/` and **must equal the bundle directory name**. The workflow-IR document id (`WorkflowDocumentId`) uses the same grammar, so a manifest id accepted here is also a valid IR id. There is no separate `name` field — `id` is the identifier and `description` is the human label. |
 | `preset.version` | Schema version (`>= 1`; bump on breaking changes to this preset). |
 | `preset.kind` | `creator` (user-facing) or `system` (internal). External strategies use `creator`. |
 | `preset.description` | Human-readable description (<= 240 chars). |

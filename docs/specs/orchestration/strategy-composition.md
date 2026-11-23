@@ -14,7 +14,8 @@ through is [orchestration-engine.md §8.2.1](orchestration-engine.md).
 A pattern is a directory under the local registry (`~/.nexus42/patterns/<id>/` by default) holding
 `pattern.toml` and `workflow.ir.json`. The manifest declares `id` (`[a-z][a-z0-9._-]*`, equal to the
 directory name), SemVer `version`, an inclusive `ir_compat` range, a human `description`, `effect_class`,
-`slots`, and `requires_capabilities`. Unknown fields are rejected.
+`slots`, and `requires_capabilities`. Unknown fields are rejected. The same grammar is the
+workflow-IR document id (`WorkflowDocumentId`), so a preset id needs no separate IR-id migration.
 
 **The pin is the canonical content hash of the IR fragment, never the manifest and never the version
 string.** Two packages may declare `1.0.0` with different bytes; the version is a label, the hash is the

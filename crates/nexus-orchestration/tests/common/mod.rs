@@ -1,10 +1,10 @@
 //! Shared bootstrap for `nexus-orchestration` integration tests.
 //!
 //! One pool initialisation, reached through the tuple shapes each suite binds.
-//! The tuple order is the order that suite bound its owner and pool; `(Arc,
-//! owner)` and `(owner, Arc)` are not interchangeable, so each shape is its own
-//! thin wrapper. Only the owner differs where a suite re-opens the DB by path:
-//! the run-state suite needs a named temp *file*, the rest a temp *dir*.
+//! Each shape is its own thin wrapper, and its name says which element is the
+//! owner and which is the pool. Only the owner differs where a suite re-opens
+//! the DB by path: the run-state suite needs a named temp *file*, the rest a
+//! temp *dir*.
 
 #![allow(dead_code)] // one binary per test file; each uses a subset
 
