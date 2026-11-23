@@ -663,16 +663,11 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 
     let file_path = std::path::Path::new(path);
 
-    if file_path
-        .file_name()
-        .is_some_and(|name| name.to_string_lossy().ends_with(".ir.json"))
+    if file_path.is_file()
+        && file_path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().ends_with(".ir.json"))
     {
-        if !file_path.exists() {
-            return Err(CliError::Other(format!(
-                "File not found: {}",
-                file_path.display()
-            )));
-        }
         return validate_workflow_ir_file(file_path);
     }
 
@@ -1521,6 +1516,27 @@ states:
         );
         assert_eq!(resp["errors"].as_array().unwrap().len(), 0);
         assert_eq!(resp["id"], "tiny-valid");
+        assert_eq!(resp["state_count"], 2);
+    }
+
+    /// I-000395: a directory whose name ends in `.ir.json` is a bundle, not an
+    /// IR document — the selector requires `is_file()` so it falls through to
+    /// the `is_dir()` bundle branch and reads `preset.yaml`.
+    #[test]
+    fn local_validate_ir_named_dir_resolves_as_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("tiny-valid.ir.json");
+        std::fs::create_dir_all(&bundle).unwrap();
+        // preset.id must match the bundle directory name (loader bundle check).
+        let yaml = LOCAL_VALID_YAML.replace("id: tiny-valid", "id: tiny-valid.ir.json");
+        std::fs::write(bundle.join("preset.yaml"), yaml).unwrap();
+
+        let resp = validate_preset_local(bundle.to_str().unwrap()).unwrap();
+        assert_eq!(
+            resp["valid"], true,
+            "*.ir.json directory should resolve through the bundle path: {resp}"
+        );
+        assert_eq!(resp["id"], "tiny-valid.ir.json");
         assert_eq!(resp["state_count"], 2);
     }
 
