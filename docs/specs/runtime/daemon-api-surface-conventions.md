@@ -230,9 +230,10 @@ Outline prose writes go through the canvas patch route
 [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md) §3.5. The atomic-write
 invariants for that PATCH content path are enforced by
 `crates/nexus-core/src/outline.rs::apply_chapter_patch`
-(the `atomic_write_outline` call: sibling temp + rename + file fsync + directory
-fsync, run while the caller holds a `RuntimeLockGuard`). The route is served by
-`apps/nexus-service` (`content.ts`).
+(through `persist_chapter_outline_content` →
+`nexus_core::content::atomic_write_text`: sibling temp + rename + file fsync +
+directory fsync, run while the caller holds a `RuntimeLockGuard`). The route is
+served by `apps/nexus-service` (`content.ts`).
 
 When `set.content` is present on an `outline.patch_chapter` request, the handler
 MUST:
