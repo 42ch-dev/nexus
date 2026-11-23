@@ -43,4 +43,4 @@ Register new schemas by adding an `entry!` macro to `build_schema_map()` in `cra
 
 **`LATEST_SCHEMA_VERSION`: `2`** — constant emitted by codegen into both Rust and TypeScript. Individual DTOs carry per-type `schema_version`; the bundle envelope version is defined by `schemas/platform/sync/bundle.schema.json`.
 
-Constraint tightening (for example adding `minimum: 0` to an existing field) does not bump `schema_version`; the stamp tracks structural or serialization changes. The keyword is recorded in the schema; enforcement depends on the consumer and on codegen's keyword mapping — some keywords (for example `const`, `pattern`, `minLength`, and `minimum: 1` → `NonZeroU64`) are enforced by generated types, while Daemon API bodies are decoded by serde structs and run no general JSON-schema instance validator.
+Constraint tightening (for example adding `minimum: 0` to an existing field) does not bump `schema_version`; the stamp tracks structural or serialization changes.
