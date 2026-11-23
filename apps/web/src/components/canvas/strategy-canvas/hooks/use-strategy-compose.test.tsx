@@ -8,6 +8,7 @@ import type { WorkflowDocument } from '@42ch/nexus-contracts';
 
 import { BrowserClient } from '@/lib/nexus';
 import { ClientProvider } from '@/lib/client-context';
+import { ToastProvider, Toaster } from '@/lib/use-toast';
 import { useStrategyCompose } from '@/components/canvas/strategy-canvas/hooks/use-strategy-compose';
 import { SlotInspector } from '@/components/canvas/strategy-canvas/inspectors/slot-inspector';
 import { buildStrategyGraphFromIr } from '@/lib/canvas/strategy-graph-ir';
@@ -81,7 +82,10 @@ function makeWrapper() {
     return (
       <QueryClientProvider client={qc}>
         <ClientProvider client={new BrowserClient()} desktop={null} connectionConfig={null}>
-          {children}
+          <ToastProvider>
+            {children}
+            <Toaster />
+          </ToastProvider>
         </ClientProvider>
       </QueryClientProvider>
     );
@@ -338,6 +342,38 @@ describe('useStrategyCompose', () => {
     });
     expect(result.current.conflict).toBeNull();
     expect(result.current.workingDocument?.revision).toBe(1);
+  });
+
+  it('a failed compose op (500) surfaces an error toast instead of failing silently', async () => {
+    seedHandlers();
+    useHandlers(
+      http.post(COMPOSE_PATH, () =>
+        HttpResponse.json(
+          { error: { code: 'internal_error', message: 'compose exploded' } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    const { result } = renderCompose();
+    await waitFor(() => expect(result.current.workingDocument?.id).toBe(STRATEGY_ID));
+    const before = result.current.workingDocument;
+
+    await act(async () => {
+      await expect(
+        result.current.nestPattern({
+          attachNodeId: 'draft',
+          package: { id: 'prompt-step', version: '1.0.0' },
+        }),
+      ).rejects.toThrow('compose exploded');
+    });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not apply the canvas edit');
+    expect(alert).toHaveTextContent('compose exploded');
+    expect(result.current.workingDocument).toBe(before);
+    expect(result.current.conflict).toBeNull();
+    expect(result.current.refusal).toBeNull();
   });
 
   it('a failing recovery read surfaces a refusal and keeps the conflict (T4)', async () => {

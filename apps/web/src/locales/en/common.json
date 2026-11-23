@@ -89,6 +89,7 @@
     "couldNotStartStrategyRun": "Could not start Harness run",
     "couldNotSteerStrategy": "Could not steer Harness",
     "couldNotResumeStrategy": "Could not resume Harness",
+    "couldNotComposeStrategyEdit": "Could not apply the canvas edit",
     "couldNotUpdateOutlineStructure": "Could not update outline structure",
     "couldNotUpdateOutlineChapter": "Could not update chapter",
     "couldNotUpdateOutlineTimeline": "Could not update timeline",

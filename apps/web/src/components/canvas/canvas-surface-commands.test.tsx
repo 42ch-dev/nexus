@@ -22,6 +22,7 @@ import { clearCommands, getCommands, type Command } from '@/lib/canvas/command-r
 import { ClientProvider } from '@/lib/client-context';
 import { EntranceProvider } from '@/lib/entrance-context';
 import { noopClient } from '@/test/test-providers';
+import { ToastProvider } from '@/lib/use-toast';
 
 vi.mock('@/components/canvas/canvas-shell', () => ({
   CanvasShell: () => null,
@@ -318,7 +319,9 @@ function withProviders(element: ReactElement): ReactElement {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <ClientProvider client={noopClient} desktop={null} connectionConfig={null}>
-          <EntranceProvider>{element}</EntranceProvider>
+          <EntranceProvider>
+            <ToastProvider>{element}</ToastProvider>
+          </EntranceProvider>
         </ClientProvider>
       </MemoryRouter>
     </QueryClientProvider>
