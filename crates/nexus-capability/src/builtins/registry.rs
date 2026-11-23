@@ -252,14 +252,14 @@ const fn is_ipv6_private_range(v6: &Ipv6Addr) -> bool {
 }
 
 /// Bumped every release when the snapshot list is updated.
-const REGISTRY_SNAPSHOT_VERSION: &str = "2026-11-11.v1";
+pub const REGISTRY_SNAPSHOT_VERSION: &str = "2026-11-11.v1";
 
 /// Embedded capability IDs shipped with the binary.
 ///
 /// This is a minimal list (capability IDs only) — not the full registry
 /// metadata. Updated per release to match the logical catalog in
 /// `docs/specs/agents/acp-capability-set.md`.
-const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
+pub const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
     "nexus.context.whoami",
     "nexus.workspace.info",
     "nexus.workspace.paths",

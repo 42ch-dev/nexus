@@ -1625,10 +1625,13 @@ impl StateCompositeTask {
 /// on `source` must treat `"synthetic"` as "no data" and
 /// `"synthetic_fallback"` as "best-effort data from a deterministic source".
 fn synthetic_registry_output() -> serde_json::Value {
+    use nexus_capability::builtins::registry::{
+        REGISTRY_SNAPSHOT_CAPABILITIES, REGISTRY_SNAPSHOT_VERSION,
+    };
     serde_json::json!({
         "source": "synthetic",
-        "snapshotVersion": "2026-06-22.v1",
-        "capabilityCount": 31,
+        "snapshotVersion": REGISTRY_SNAPSHOT_VERSION,
+        "capabilityCount": REGISTRY_SNAPSHOT_CAPABILITIES.len(),
         "fallbackReason": "",
         "retryCount": 0,
         "cacheAgeMs": 0,
@@ -5336,5 +5339,15 @@ mod tests {
             "score > 80 should route to approved, got {:?}",
             result.next_action
         );
+    }
+
+    #[test]
+    fn synthetic_registry_output_derives_from_snapshot_constants() {
+        use nexus_capability::builtins::registry::{
+            REGISTRY_SNAPSHOT_CAPABILITIES, REGISTRY_SNAPSHOT_VERSION,
+        };
+        let out = synthetic_registry_output();
+        assert_eq!(out["snapshotVersion"], REGISTRY_SNAPSHOT_VERSION);
+        assert_eq!(out["capabilityCount"], REGISTRY_SNAPSHOT_CAPABILITIES.len());
     }
 }
