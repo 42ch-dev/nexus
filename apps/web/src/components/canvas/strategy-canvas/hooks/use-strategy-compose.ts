@@ -13,10 +13,13 @@
  *
  * T4: a refused op (409/422) leaves the working document unchanged and is never
  * auto-retried. The 409 recovery reloads the canonical candidate at its current
- * revision, so the user reapplies the op against what the daemon holds.
+ * revision, so the user reapplies the op against what the daemon holds. Any
+ * other failure (a 500, a network drop) surfaces as an error toast — callers
+ * still consume the rejection, so nothing fails silently.
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 
 import type {
   ListPatternsResponse,
@@ -27,6 +30,7 @@ import type {
 
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError, type NexusClient } from '@/lib/nexus';
+import { useToast } from '@/lib/use-toast';
 
 export interface ComposeConflict {
   /** The daemon's message: "Candidate changed before this edit. Reload revision N and reapply the change." */
@@ -116,6 +120,8 @@ async function listAllPatterns(client: NexusClient): Promise<ListPatternsRespons
 
 export function useStrategyCompose(presetId: string, enabled: boolean) {
   const client = useNexusClient();
+  const { toast } = useToast();
+  const { t } = useTranslation('common');
 
   const patternsQuery = useQuery<ListPatternsResponse>({
     queryKey: ['canvas', 'strategy-compose', 'patterns'],
@@ -192,13 +198,19 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
             message: error.message,
             details,
           });
+        } else {
+          toast({
+            variant: 'error',
+            title: t('error.couldNotComposeStrategyEdit'),
+            description: error instanceof Error ? error.message : t('error.unexpected'),
+          });
         }
         throw error;
       } finally {
         setIsComposing(false);
       }
     },
-    [applyResponse, client, presetId],
+    [applyResponse, client, presetId, t, toast],
   );
 
   const reload = useCallback(async () => {

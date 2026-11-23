@@ -89,6 +89,7 @@
     "couldNotStartStrategyRun": "无法启动 Harness 运行",
     "couldNotSteerStrategy": "无法引导 Harness",
     "couldNotResumeStrategy": "无法恢复 Harness",
+    "couldNotComposeStrategyEdit": "无法应用画布编辑",
     "couldNotUpdateOutlineStructure": "无法更新大纲结构",
     "couldNotUpdateOutlineChapter": "无法更新章节",
     "couldNotUpdateOutlineTimeline": "无法更新时间线",

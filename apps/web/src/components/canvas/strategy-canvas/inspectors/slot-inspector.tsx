@@ -1,6 +1,7 @@
 /**
- * A refused op (409/422) is presented by the hook's conflict/refusal state, so
- * each handler consumes its rejection instead of rethrowing it at the boundary.
+ * A refused op (409/422) is presented by the hook's conflict/refusal state and
+ * any other failure by the hook's error toast, so each handler consumes its
+ * rejection instead of rethrowing it at the boundary.
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
