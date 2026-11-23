@@ -197,7 +197,7 @@ describe('WizardShell', () => {
 
     await reachWorldStep(user);
     expect(screen.getByLabelText('World name')).toHaveValue('Throne of Ashes');
-    await user.click(screen.getByRole('button', { name: 'Create and Open' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/worlds/world-1?layer=brief'),
@@ -213,7 +213,7 @@ describe('WizardShell', () => {
     renderShell({ client, activeCreatorId: 'creator-a' });
 
     await reachWorldStep(user);
-    await user.click(screen.getByRole('button', { name: 'Create and Open' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/worlds/world-1?layer=brief'),
@@ -228,7 +228,7 @@ describe('WizardShell', () => {
 
     await reachWorldStep(user);
     await user.click(screen.getByTestId('world-template-scifi'));
-    await user.click(screen.getByRole('button', { name: 'Create and Open' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(
       await screen.findByText('Could not create the World: daemon refused. Try again or choose a different name.'),
@@ -245,13 +245,13 @@ describe('WizardShell', () => {
     renderShell({ client });
 
     await reachWorldStep(user);
-    await user.click(screen.getByRole('button', { name: 'Create and Open' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('Could not select the default workspace')).toBeInTheDocument();
     expect(screen.queryByText(/Could not create the World/)).not.toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
     expect(screen.getByLabelText('World name')).toHaveValue('Throne of Ashes');
-    expect(screen.getByRole('button', { name: 'Create and Open' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);
   });
 
@@ -261,7 +261,7 @@ describe('WizardShell', () => {
     renderShell({ client });
 
     await reachWorldStep(user);
-    await user.click(screen.getByRole('button', { name: 'Create and Open' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('Could not refresh setup status')).toBeInTheDocument();
     expect(screen.getByText('gate probe failed. Try again.')).toBeInTheDocument();
@@ -280,9 +280,9 @@ describe('WizardShell', () => {
     await advanceIdentity(user, 'developer');
     await screen.findByRole('heading', { name: 'Agent and Workspace' });
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Open Dev Console' })).toBeEnabled(),
+      expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled(),
     );
-    await user.click(screen.getByRole('button', { name: 'Open Dev Console' }));
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/developer'));
     expect(calls.filter((call) => call !== 'probe')).toEqual(['creator', 'select']);

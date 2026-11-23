@@ -306,7 +306,7 @@ describe('StepAgent (creator AI partner)', () => {
     expect(await screen.findByText('Could not scan this computer for AI (daemon offline)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: 'Retry Scan' }));
+    await user.click(screen.getByRole('button', { name: 'Rescan' }));
 
     await waitFor(() => expect(screen.getByTestId('agent-row-claude')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();

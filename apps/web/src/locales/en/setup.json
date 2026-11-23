@@ -200,7 +200,7 @@
       "loading": "Looking for available AI on your computer…",
       "error": "Could not scan this computer for AI",
       "errorWithReason": "Could not scan this computer for AI ({{reason}})",
-      "retry": "Retry Scan",
+      "retry": "Rescan",
       "launchCommand": "Launch command"
     },
     "agent": {
@@ -229,7 +229,7 @@
       },
       "workspaceRoot": "Workspace root",
       "browse": "Browse…",
-      "finish": "Open Dev Console"
+      "finish": "Finish"
     },
     "firstWorld": {
       "stepLabel": "Step 3 of 3",
@@ -256,7 +256,7 @@
       "namePlaceholder": "e.g. Throne of Ashes",
       "savedInDefault": "Files are saved in the default workspace ·",
       "createFailed": "Could not create the World: {{reason}}. Try again or choose a different name.",
-      "submit": "Create and Open"
+      "submit": "Create"
     },
     "changeLocation": "Advanced: Change location",
     "defaultWorkspace": "Default workspace",

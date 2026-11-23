@@ -76,7 +76,7 @@ describe('StepFirstWorld (creator first World)', () => {
     const field = screen.getByLabelText('World name');
     expect(field).toHaveAttribute('placeholder', 'e.g. Throne of Ashes');
     expect(field).toHaveValue('Throne of Ashes');
-    expect(screen.getByRole('button', { name: 'Create and Open' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
 
     expect(screen.queryByTestId('first-world-root')).not.toBeInTheDocument();
   });
@@ -88,7 +88,7 @@ describe('StepFirstWorld (creator first World)', () => {
     await user.click(screen.getByTestId('world-template-blank'));
     expect(screen.getByTestId('world-template-blank')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('World name')).toHaveValue('');
-    expect(screen.getByRole('button', { name: 'Create and Open' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
 
     await user.click(screen.getByTestId('world-template-scifi'));
     expect(screen.getByLabelText('World name')).toHaveValue('Farstar');
@@ -96,7 +96,7 @@ describe('StepFirstWorld (creator first World)', () => {
     await user.clear(screen.getByLabelText('World name'));
     await user.type(screen.getByLabelText('World name'), '  我的世界  ');
     expect(screen.getByLabelText('World name')).toHaveValue('  我的世界  ');
-    expect(screen.getByRole('button', { name: 'Create and Open' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   });
 
   it('submits the trimmed name and locks the button while the finish runs', async () => {
@@ -107,13 +107,13 @@ describe('StepFirstWorld (creator first World)', () => {
 
     await user.clear(screen.getByLabelText('World name'));
     await user.type(screen.getByLabelText('World name'), '  Throne of Ashes  ');
-    await user.click(screen.getByRole('button', { name: 'Create and Open' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(onFinish).toHaveBeenCalledWith('Throne of Ashes');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Create and Open' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled());
 
     pending.resolve();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Create and Open' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled());
   });
 
   it('keeps the draft and reports the reason when creation fails', async () => {
@@ -122,7 +122,7 @@ describe('StepFirstWorld (creator first World)', () => {
     renderStep({ onFinish });
 
     await user.click(screen.getByTestId('world-template-scifi'));
-    await user.click(screen.getByRole('button', { name: 'Create and Open' }));
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(
       await screen.findByText('Could not create the World: daemon refused. Try again or choose a different name.'),
@@ -130,7 +130,7 @@ describe('StepFirstWorld (creator first World)', () => {
     expect(screen.getByRole('heading', { name: 'Create Your First World' })).toBeInTheDocument();
     expect(screen.getByTestId('world-template-scifi')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('World name')).toHaveValue('Farstar');
-    expect(screen.getByRole('button', { name: 'Create and Open' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   });
 
   it('claims no absolute path until the service reports a root', async () => {

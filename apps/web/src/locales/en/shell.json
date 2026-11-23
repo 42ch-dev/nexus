@@ -354,7 +354,7 @@
       "keyLabel": "Enter API key…",
       "submit": "Authorize",
       "invalid": "The API key is invalid or has expired. Check it and try again.",
-      "recheck": "Check Again"
+      "recheck": "Recheck"
     }
   },
   "daemonIdentity": {

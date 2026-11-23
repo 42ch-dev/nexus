@@ -118,7 +118,7 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
     expect(screen.getByText('Workspace root')).toBeInTheDocument();
 
     expect(await screen.findByTestId('agent-row-claude')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('button', { name: 'Open Dev Console' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled();
     expect(screen.getAllByText('ACP')).toHaveLength(2);
     expect(screen.getByText('ACP · Installed · Recommended')).toBeInTheDocument();
   });
@@ -202,7 +202,7 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
       screen.getByLabelText("Custom launch command (optional, overrides the selected agent's default launch)"),
     ).toHaveValue('claude --opus');
 
-    await user.click(screen.getByRole('button', { name: 'Open Dev Console' }));
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
     expect(onFinish).toHaveBeenCalledTimes(1);
     expect(vi.mocked(client.saveAgentProfile)).toHaveBeenCalledWith({
       name: 'Claude Code',
@@ -215,7 +215,7 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
     const { onFinish } = renderStep();
 
     await screen.findByTestId('agent-row-claude');
-    await user.click(screen.getByRole('button', { name: 'Open Dev Console' }));
+    await user.click(screen.getByRole('button', { name: 'Finish' }));
 
     expect(onFinish).toHaveBeenCalledTimes(1);
   });
@@ -234,7 +234,7 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
       } as unknown as NexusClient,
     });
 
-    expect(screen.getByRole('button', { name: 'Open Dev Console' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
 
     const customLaunch = await screen.findByLabelText(
       'Custom launch command (required: no agent was found on this computer)',
@@ -243,6 +243,6 @@ describe('StepAgentWorkspace (developer agent + workspace)', () => {
 
     await user.type(customLaunch, 'my-agent --flag');
 
-    expect(screen.getByRole('button', { name: 'Open Dev Console' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeEnabled();
   });
 });

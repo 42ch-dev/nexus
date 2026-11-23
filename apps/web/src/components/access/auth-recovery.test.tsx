@@ -50,7 +50,7 @@ describe('AuthRecoveryGate', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Enter API key…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Authorize' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Check Again' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recheck' })).toBeInTheDocument();
     expect(screen.queryByText('intended destination')).not.toBeInTheDocument();
   });
 
@@ -89,7 +89,7 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Check Again' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck' }));
 
     expect(await screen.findByText('intended destination')).toBeInTheDocument();
   });
@@ -106,7 +106,7 @@ describe('AuthRecoveryGate', () => {
     renderGate();
     signalUnauthorized();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Check Again' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recheck' }));
 
     expect(await screen.findByText('intended destination')).toBeInTheDocument();
 
