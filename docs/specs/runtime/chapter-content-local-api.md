@@ -37,7 +37,7 @@ The surface is intentionally split:
 - `work_chapters` is the chapter metadata SSOT: `chapter`, `volume`, `slug`, `planned_word_count`, `actual_word_count`, `status`, `outline_path`, `body_path`, `created_at`, `updated_at`.
 - `seed_chapters` initializes `outline_path` as `Works/{work_ref}/Outlines/chapters/chNN-outline.md` and `body_path` as `Works/{work_ref}/Stories/chNN-{slug}.md`.
 - `work_chapters::update_paths` and `update_status` update DB metadata with `updated_at`.
-- `work_chapters::sync_frontmatter_status` demonstrates the filesystem write pattern P0 must mirror for outline writes: sibling temp file, flush, atomic rename, and best-effort temp cleanup on failure.
+- `nexus_core::content::fsync_write_atomic` (used by `owner::work_artifact`) demonstrates the filesystem write pattern P0 must mirror for outline writes: sibling temp file, flush, atomic rename, and best-effort temp cleanup on failure.
 - `crates/nexus-core/src/content.rs` owns the body-read guard: `chapter_body` reads the DB-sourced `body_path` through `read_guarded_file` and `resolve_guarded_path_async` / `resolve_guarded_path`, canonicalizing under the workspace root and failing closed when the resolved path escapes it.
 
 ### 3. Endpoint summary
