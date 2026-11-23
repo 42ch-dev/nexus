@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import { HighlightLayer } from './highlight-layer';
+import { i18n } from '@/lib/i18n/config';
 import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 
 function annotation(overrides: Partial<ReadingAnnotation> = {}): ReadingAnnotation {
@@ -43,6 +44,13 @@ describe('HighlightLayer', () => {
     render(<Layer annotations={[annotation({ end_offset: 100 })]} bodyLength={11} />);
     expect(screen.getByRole('note')).toHaveTextContent(/may have shifted after body edits/i);
     expect(screen.getByTestId('prose')).toBeInTheDocument();
+  });
+
+  it('renders the drift notice in zh-CN', async () => {
+    await i18n.changeLanguage('zh-CN');
+    render(<Layer annotations={[annotation({ end_offset: 100 })]} bodyLength={11} />);
+    expect(screen.getByRole('note')).toHaveTextContent('标注可能因正文编辑而偏移');
+    await i18n.changeLanguage('en');
   });
 
   it('does not render a drift notice when all annotations fit the body', () => {

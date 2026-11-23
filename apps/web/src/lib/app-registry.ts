@@ -7,7 +7,7 @@
  * carries the `shell` i18n key rendered by the rail.
  *
  * `lockedUntil` exists only for 作品 (`brief-saved` → activation store);
- * 会话/记忆 carry their § Copy lock reason as literal copy with NO
+ * 会话/记忆 carry a `rail.lockReason.*` `shell`-namespace i18n key with NO
  * `lockedUntil` member and NO unlock path this iteration (compass D17/D26).
  */
 import type { ComponentType } from 'react';
@@ -46,15 +46,15 @@ export interface AppDef {
   load: () => Promise<{ default: ComponentType }>;
   /** 作品 only — mapped to the activation store's `brief-saved` event (D26). */
   lockedUntil?: 'brief-saved';
-  /** Locked reason, verbatim from the plan § Copy table. Absent = never locked. */
+  /** `shell` namespace i18n key for the locked reason. Absent = never locked. */
   lockReason?: string;
 }
 
-/** Rail lock reasons — plan § Copy (final, product-owned), verbatim. */
+/** Rail lock reasons — `shell` namespace i18n keys under `rail.lockReason`. */
 export const RAIL_LOCK_REASON = {
-  work: '完成 Brief 后解锁「作品」',
-  session: '创建作品后解锁「会话」',
-  memory: '世界开始运转后解锁「记忆」',
+  work: 'rail.lockReason.work',
+  session: 'rail.lockReason.session',
+  memory: 'rail.lockReason.memory',
 } as const;
 
 const CREATOR_APPS: readonly AppDef[] = [
@@ -160,7 +160,8 @@ export function appsForEntrance(entrance: EntranceId): readonly AppDef[] {
 
 /**
  * Locked-state resolution. `brief-saved` apps consult the activation store;
- * apps with literal copy (会话/记忆) stay locked with no unlock path (D17).
+ * apps carrying a `RAIL_LOCK_REASON` i18n key without `lockedUntil` stay
+ * locked with no unlock path (D17).
  */
 export function isAppLocked(app: AppDef, unlocked: (appId: AppId) => boolean): boolean {
   if (!app.lockReason) return false;

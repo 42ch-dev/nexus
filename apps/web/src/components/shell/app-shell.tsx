@@ -12,6 +12,8 @@ import { Suspense, lazy, useEffect, useMemo } from 'react';
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 
+import { i18n } from '@/lib/i18n/config';
+
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
@@ -141,7 +143,7 @@ export function AppModuleRoute({ appId }: { appId: AppId }) {
 
   useEffect(() => {
     if (locked && app?.lockReason) {
-      toast({ title: app.lockReason, variant: 'info' });
+      toast({ title: i18n.t(app.lockReason, { ns: 'shell' }), variant: 'info' });
     }
   }, [locked, app, toast]);
 

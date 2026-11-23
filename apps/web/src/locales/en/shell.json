@@ -264,6 +264,9 @@
     "ariaLabel": "Workspaces",
     "title": "Workspaces — containers for creative content, each with its own root directory"
   },
+  "workspace": {
+    "switched": "Switched to workspace {{name}}"
+  },
   "workspaceCreate": {
     "chip": "＋ New workspace",
     "title": "New workspace",
@@ -338,7 +341,12 @@
     "harness": "Harness",
     "modules": "Modules",
     "caps": "Capabilities",
-    "characters": "Characters"
+    "characters": "Characters",
+    "lockReason": {
+      "work": "Works unlock once you complete the Brief",
+      "session": "Sessions unlock once you create a Work",
+      "memory": "Memory unlocks once the World is running"
+    }
   },
   "topnav": {
     "searchDisabled": "Search (coming soon)",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { i18n } from '@/lib/i18n/config';
 import {
   appsForEntrance,
   isAppLocked,
@@ -22,13 +23,30 @@ describe('appsForEntrance', () => {
     expect(apps.map((a) => a.id)).toEqual([...DEVELOPER_IDS]);
   });
 
-  it('ships the § Copy lock reasons verbatim on the creator locked rows', () => {
+  it('ships `shell` i18n keys as lock reasons on the creator locked rows', () => {
     const apps = appsForEntrance('content-creator');
     const byId = Object.fromEntries(apps.map((a) => [a.id, a]));
-    expect(byId.work.lockReason).toBe('完成 Brief 后解锁「作品」');
-    expect(byId.session?.lockReason).toBe('创建作品后解锁「会话」');
-    expect(byId.memory?.lockReason).toBe('世界开始运转后解锁「记忆」');
+    expect(byId.work.lockReason).toBe('rail.lockReason.work');
+    expect(byId.session?.lockReason).toBe('rail.lockReason.session');
+    expect(byId.memory?.lockReason).toBe('rail.lockReason.memory');
     expect(RAIL_LOCK_REASON.work).toBe(byId.work.lockReason);
+  });
+
+  it('resolves every rail lock reason in the en and zh-CN catalogs', async () => {
+    await i18n.changeLanguage('en');
+    expect(i18n.t(RAIL_LOCK_REASON.work, { ns: 'shell' })).toBe(
+      'Works unlock once you complete the Brief',
+    );
+    expect(i18n.t(RAIL_LOCK_REASON.session, { ns: 'shell' })).toBe(
+      'Sessions unlock once you create a Work',
+    );
+    expect(i18n.t(RAIL_LOCK_REASON.memory, { ns: 'shell' })).toBe(
+      'Memory unlocks once the World is running',
+    );
+    await i18n.changeLanguage('zh-CN');
+    expect(i18n.t(RAIL_LOCK_REASON.work, { ns: 'shell' })).toBe('完成 Brief 后解锁「作品」');
+    expect(i18n.t(RAIL_LOCK_REASON.session, { ns: 'shell' })).toBe('创建作品后解锁「会话」');
+    expect(i18n.t(RAIL_LOCK_REASON.memory, { ns: 'shell' })).toBe('世界开始运转后解锁「记忆」');
   });
 
   it('locks 作品 via brief-saved only; 会话/记忆 have no unlock member (D17)', () => {

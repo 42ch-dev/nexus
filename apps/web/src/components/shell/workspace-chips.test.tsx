@@ -283,6 +283,20 @@ describe('WorkspaceChips', () => {
     expect(await screen.findByText('已切换到工作区「我的小说」')).toBeInTheDocument();
   });
 
+  it('toasts the switch copy in English when the locale is en', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'en');
+    await i18n.changeLanguage('en');
+    useWorkspaceHandlers();
+    const user = userEvent.setup();
+    renderChips();
+
+    await screen.findByRole('button', { name: '默认工作区' });
+    await user.click(screen.getByRole('button', { name: '我的小说' }));
+
+    expect(await screen.findByText('Switched to workspace 我的小说')).toBeInTheDocument();
+    await i18n.changeLanguage('zh-CN');
+  });
+
   it('opens the panel on the create chip without any create request', async () => {
     useWorkspaceHandlers();
     renderChips();

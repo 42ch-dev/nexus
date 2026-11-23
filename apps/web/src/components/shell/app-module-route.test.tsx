@@ -61,6 +61,7 @@ function renderRoute(appId: AppId) {
 describe('AppModuleRoute — progressive activation lazy boundary', () => {
   beforeEach(async () => {
     window.localStorage.clear();
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
     loadSpy.mockClear();
     await i18n.changeLanguage('zh-CN');
     useHandlers(
