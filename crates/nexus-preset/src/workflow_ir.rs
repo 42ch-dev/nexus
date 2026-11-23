@@ -388,7 +388,7 @@ fn state_node(state: &StateDefinition) -> WorkflowNode {
             strategy: converge_strategy_ir(converge.strategy),
         }),
         context_update: state.context_update.as_ref().map(context_update_ir),
-        timeout_ms: state.timeout_ms,
+        timeout_ms: state.timeout_ms.map(|ms| ms.min(i64::MAX as u64)),
         on_timeout: state.on_timeout.clone(),
         bind: serde_json::Map::new(),
         depends_on: Vec::new(),
