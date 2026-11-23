@@ -160,8 +160,8 @@ export function appsForEntrance(entrance: EntranceId): readonly AppDef[] {
 
 /**
  * Locked-state resolution. `brief-saved` apps consult the activation store;
- * apps carrying a `RAIL_LOCK_REASON` i18n key stay locked with no unlock
- * path (D17).
+ * apps carrying a `RAIL_LOCK_REASON` i18n key without `lockedUntil` stay
+ * locked with no unlock path (D17).
  */
 export function isAppLocked(app: AppDef, unlocked: (appId: AppId) => boolean): boolean {
   if (!app.lockReason) return false;
