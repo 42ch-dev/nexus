@@ -230,9 +230,10 @@ Outline prose writes go through the canvas patch route
 [canvas-strategy-surface.md](../surfaces/canvas-strategy-surface.md) §3.5. The atomic-write
 invariants for that PATCH content path are enforced by
 `crates/nexus-core/src/outline.rs::apply_chapter_patch`
-(the `atomic_write_outline` call: sibling temp + rename + file fsync + directory
-fsync, run while the caller holds a `RuntimeLockGuard`). The route is served by
-`apps/nexus-service` (`content.ts`).
+(through `persist_chapter_outline_content` →
+`nexus_core::content::atomic_write_text`: sibling temp + rename + file fsync +
+directory fsync, run while the caller holds a `WorkLock`). The route is
+served by `apps/nexus-service` (`content.ts`).
 
 When `set.content` is present on an `outline.patch_chapter` request, the handler
 MUST:
@@ -244,15 +245,15 @@ MUST:
 2. Resolve that path under the active workspace root and apply the path guard in
    §6.5 before creating directories or writing bytes.
 3. Write `content` to a sibling temp file, flush/sync, then atomically rename it
-   over the final outline file (`atomic_write_outline`: temp + rename + file
-   fsync + directory fsync), mirroring the reconcile atomic write pattern in
-   `work_chapters::sync_frontmatter_status`.
+   over the final outline file, reusing
+   `nexus_core::content::atomic_write_text` (temp + rename + file fsync +
+   directory fsync).
 4. Persist `work_chapters.outline_path` and `updated_at`, and bump
    `frontmatter.outline_revision`, in the same transactional finalization path
    as the file rename so subsequent reads return the new revision. Failed DB
    update or failed rename must clean up the temp file where possible and must
    not report success.
-5. Hold the per-Work `RuntimeLockGuard` across the validate → DB persist →
+5. Hold the per-Work `WorkLock` across the validate → DB persist →
    frontmatter mutate → outline-path seed/write sequence, releasing it on every
    exit path (success and error). Body-ownership invariant: handlers MUST NOT
    mutate `body_path` or body markdown files (see §6.4).
