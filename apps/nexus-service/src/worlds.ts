@@ -202,7 +202,12 @@ export function listTimelineEvents(
       ...(status !== null ? { status: timelineEventStatus(status) } : {}),
       ...(event_type !== null ? { event_type } : {}),
       ...(limit !== null
-        ? { limit: parseOptionalInteger(searchParams, 'limit', { min: 1 }) }
+        ? {
+            limit: parseOptionalInteger(searchParams, 'limit', {
+              min: 1,
+              max: Number.MAX_SAFE_INTEGER,
+            }),
+          }
         : {}),
       ...(cursor !== null ? { cursor } : {}),
     }),

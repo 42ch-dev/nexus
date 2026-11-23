@@ -293,9 +293,15 @@ describe('domain-http (P5-T1)', () => {
       );
     }
 
+    const unsafeInteger = await jsonFetch(`${timelineUrl}?limit=9007199254740992`);
+    assert.equal(unsafeInteger.status, 400, unsafeInteger.text);
+    assert.equal(unsafeInteger.payload.error.code, 'invalid_input', unsafeInteger.text);
+
     const page = await jsonFetch(`${timelineUrl}?limit=1`);
     assert.equal(page.status, 200, page.text);
     assert.ok(Array.isArray(page.payload.items), page.text);
+    const large = await jsonFetch(`${timelineUrl}?limit=99999999999`);
+    assert.equal(large.status, 200, large.text);
   });
 
   test('scene/beat authoring reaches the core owner over HTTP and persists', async () => {
