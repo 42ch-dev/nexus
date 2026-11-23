@@ -3534,7 +3534,6 @@ async fn recovered_parent_drives_existing_inner_child() {
             .spawn_child_session(params)
             .await
             .expect("spawn child");
-
     } // pool drops — simulates daemon shutdown
 
     {

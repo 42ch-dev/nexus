@@ -5,11 +5,11 @@ mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
 mod actors;
-mod atomic_write;
 #[cfg(feature = "execution")]
 mod apply;
 #[cfg(feature = "strategy-authoring")]
 mod approve;
+mod atomic_write;
 mod changes;
 mod chronology;
 // the dependency direction is `nexus-core → nexus-connect`, never back, and
@@ -32,17 +32,16 @@ mod memory;
 mod memory_binding;
 mod memory_credentials;
 mod memory_pipeline;
-#[cfg(feature = "execution")]
-pub mod owner;
 mod memory_provider_error;
 #[cfg(feature = "memory-remote")]
 mod memory_remote;
 mod memory_selection;
-mod operation_receipts;
-pub mod slug;
 #[cfg(feature = "operation-id")]
 pub mod operation_id;
+mod operation_receipts;
 mod outline;
+#[cfg(feature = "execution")]
+pub mod owner;
 mod patterns;
 mod presets;
 mod principal;
@@ -51,6 +50,7 @@ mod reading;
 mod service;
 #[cfg(feature = "strategy-authoring")]
 mod simulate;
+pub mod slug;
 mod soul;
 mod storage_status;
 mod strategy_candidates;
@@ -89,6 +89,12 @@ pub use apply::{
     StrategyApprovals,
 };
 pub use chronology::CoreWorkChronology;
+#[cfg(feature = "execution")]
+pub use compose::document_bodies;
+pub use compose::{
+    BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
+    PatternPackageRef, ReplaceSubtreeOp, UnnestOp,
+};
 pub use config_lock::with_config_lock;
 pub use content::{resolve_guarded_path, resolve_guarded_path_async, CoreChapterContentQuery};
 pub use context::{LocalDirectiveStore, ReadOnlyDirectiveStore};
@@ -101,6 +107,8 @@ pub use findings::{
     format_routing_hint, CreateFindingRequest, ListFindingsQuery, ListFindingsResponse,
     PruneFindingsOutcome, StaleFindingEntry, StaleFindingsResponse,
 };
+#[cfg(feature = "strategy-authoring")]
+pub use generate::{Correction, GenerateExhaustion, GenerateOutcome, GenerateRequest};
 pub use home::CoreHomeService;
 #[cfg(feature = "provider-host")]
 pub use host::HostHandle;
@@ -121,14 +129,6 @@ pub use nexus_memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 pub use owner::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use presets::PresetError;
 pub use principal::Principal;
-#[cfg(feature = "execution")]
-pub use compose::document_bodies;
-pub use compose::{
-    BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
-    PatternPackageRef, ReplaceSubtreeOp, UnnestOp,
-};
-#[cfg(feature = "strategy-authoring")]
-pub use generate::{Correction, GenerateExhaustion, GenerateOutcome, GenerateRequest};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};
 pub use soul::CoreCharacterMind;
 pub use spoke_operations::spoke_schemas::{ProfileDocument, RetainedRecord};

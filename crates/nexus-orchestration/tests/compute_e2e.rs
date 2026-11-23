@@ -271,7 +271,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         output["new_key_blocks_created"], 0,
         "basic-combat does not emit new key blocks"
     );
-
 }
 
 /// The capability must reject a missing world (admission gate) even when a

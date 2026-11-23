@@ -1115,14 +1115,12 @@ pub async fn mark_confirmed_in_tx_with_cas(
         (None, _) => Err(LocalDbError::MissingVersionKey {
             key: format!("kb_extract_jobs/{job_id}"),
         }),
-        _ => {
-            Err(LocalDbError::VersionMismatch {
-                table: "kb_extract_jobs".to_string(),
-                id: job_id.to_string(),
-                expected: expected_version,
-                actual: version,
-            })
-        }
+        _ => Err(LocalDbError::VersionMismatch {
+            table: "kb_extract_jobs".to_string(),
+            id: job_id.to_string(),
+            expected: expected_version,
+            actual: version,
+        }),
     }
 }
 

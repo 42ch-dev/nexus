@@ -138,10 +138,7 @@ impl KnowledgeQueryPort for NexusAdapter<'_> {
                 .collect()
         };
 
-        let wire: Vec<KnowledgeEntry> = entries
-            .iter()
-            .map(knowledge_record_to_spoke)
-            .collect();
+        let wire: Vec<KnowledgeEntry> = entries.iter().map(knowledge_record_to_spoke).collect();
 
         debug_assert!(
             !wire.iter().any(has_nexus_body),

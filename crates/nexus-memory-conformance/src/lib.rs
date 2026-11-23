@@ -33,11 +33,11 @@ mod policy;
 mod provider;
 mod raw_invoke;
 #[allow(dead_code)]
-mod reflections;
-#[allow(dead_code)]
 mod recall;
 #[allow(dead_code)]
 mod records;
+#[allow(dead_code)]
+mod reflections;
 mod server;
 #[allow(dead_code)]
 mod spaces;

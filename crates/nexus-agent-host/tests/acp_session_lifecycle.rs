@@ -110,7 +110,6 @@ fn owner(creator_id: &str, workspace_root: PathBuf) -> SessionOwner {
 }
 
 fn host_start_config(ws: &TestWorkspace) -> HostStartConfig {
-
     HostStartConfig {
         config_path: ws.config_path.clone(),
         workspace_root: ws.workspace_root.clone(),

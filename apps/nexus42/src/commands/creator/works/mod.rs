@@ -14,7 +14,6 @@ use clap::Subcommand;
 
 use crate::config::CliConfig;
 use crate::core::{finish_direct, map_core_error, open_direct_core};
-use nexus_home_layout;
 use nexus_contracts::daemon_api::findings::{
     StaleFindingEntry as StaleFindingWire, StaleFindingsResponse as StaleFindingsWire,
 };
@@ -28,6 +27,7 @@ use nexus_core::{
     PromotePoolRequest, ReconcileDryRunQuery, StaleFindingsResponse as CoreStaleFindingsResponse,
     WorkReconcileReport,
 };
+use nexus_home_layout;
 
 pub mod chronology;
 pub mod cron;

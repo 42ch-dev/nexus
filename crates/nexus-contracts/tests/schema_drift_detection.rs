@@ -1794,61 +1794,57 @@ fn make_dummy_value(
                 Value::Array(vec![item_val])
             },
         ),
-        Some("object") => {
-            prop_def
-                .get("properties")
-                .and_then(|p| p.as_object())
-                .map_or_else(
-                    || {
-                        if let Some(first_arm) = prop_def
-                            .get("oneOf")
-                            .and_then(|a| a.as_array())
-                            .and_then(|a| a.first())
-                        {
-                            return make_dummy_value(
-                                first_arm,
+        Some("object") => prop_def
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .map_or_else(
+                || {
+                    if let Some(first_arm) = prop_def
+                        .get("oneOf")
+                        .and_then(|a| a.as_array())
+                        .and_then(|a| a.first())
+                    {
+                        return make_dummy_value(
+                            first_arm,
+                            schema_cache,
+                            current_dir,
+                            current_schema_path,
+                        );
+                    }
+                    let val = prop_def.get("additionalProperties").map_or_else(
+                        || Value::String("_".to_string()),
+                        |ap| make_dummy_value(ap, schema_cache, current_dir, current_schema_path),
+                    );
+                    let mut m = serde_json::Map::new();
+                    let key = if prop_def
+                        .get("propertyNames")
+                        .and_then(|pn| pn.get("pattern"))
+                        .and_then(|p| p.as_str())
+                        .is_some_and(|p| p.starts_with("^[a-z]"))
+                    {
+                        "key"
+                    } else {
+                        "_"
+                    };
+                    m.insert(key.to_string(), val);
+                    Value::Object(m)
+                },
+                |sub_props| {
+                    let mut map = serde_json::Map::new();
+                    for (sub_name, sub_def) in sub_props {
+                        map.insert(
+                            sub_name.clone(),
+                            make_dummy_value(
+                                sub_def,
                                 schema_cache,
                                 current_dir,
                                 current_schema_path,
-                            );
-                        }
-                        let val = prop_def.get("additionalProperties").map_or_else(
-                            || Value::String("_".to_string()),
-                            |ap| {
-                                make_dummy_value(ap, schema_cache, current_dir, current_schema_path)
-                            },
+                            ),
                         );
-                        let mut m = serde_json::Map::new();
-                        let key = if prop_def
-                            .get("propertyNames")
-                            .and_then(|pn| pn.get("pattern"))
-                            .and_then(|p| p.as_str())
-                            .is_some_and(|p| p.starts_with("^[a-z]"))
-                        {
-                            "key"
-                        } else {
-                            "_"
-                        };
-                        m.insert(key.to_string(), val);
-                        Value::Object(m)
-                    },
-                    |sub_props| {
-                        let mut map = serde_json::Map::new();
-                        for (sub_name, sub_def) in sub_props {
-                            map.insert(
-                                sub_name.clone(),
-                                make_dummy_value(
-                                    sub_def,
-                                    schema_cache,
-                                    current_dir,
-                                    current_schema_path,
-                                ),
-                            );
-                        }
-                        Value::Object(map)
-                    },
-                )
-        }
+                    }
+                    Value::Object(map)
+                },
+            ),
         _ => {
             for key in &["allOf", "oneOf", "anyOf"] {
                 if let Some(subs) = prop_def.get(*key).and_then(|a| a.as_array()) {

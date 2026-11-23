@@ -1599,18 +1599,16 @@ impl WorkflowRunCoordinator {
         let session_id = format!("{}:{}", preset_id, uuid::Uuid::new_v4());
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
         let wired = match &applied {
-            Some(applied) => {
-                nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
-                    &applied.document,
-                    nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
-                    &engine_proxy,
-                    &registry,
-                    daemon_tool_dispatch,
-                    prompt_executor,
-                    self.session_cancels.clone(),
-                )
-                .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?
-            }
+            Some(applied) => nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
+                &applied.document,
+                nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
+                &engine_proxy,
+                &registry,
+                daemon_tool_dispatch,
+                prompt_executor,
+                self.session_cancels.clone(),
+            )
+            .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?,
             None => nexus_orchestration::preset_runtime::build_wired_outer_graph(
                 &loaded,
                 &engine_proxy,
@@ -2790,18 +2788,16 @@ impl WorkflowRunCoordinator {
 
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
         let wired = match &applied {
-            Some(applied) => {
-                nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
-                    &applied.document,
-                    nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
-                    &engine_proxy,
-                    &registry,
-                    daemon_tool_dispatch,
-                    prompt_executor,
-                    self.session_cancels.clone(),
-                )
-                .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?
-            }
+            Some(applied) => nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
+                &applied.document,
+                nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
+                &engine_proxy,
+                &registry,
+                daemon_tool_dispatch,
+                prompt_executor,
+                self.session_cancels.clone(),
+            )
+            .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?,
             None => nexus_orchestration::preset_runtime::build_wired_outer_graph(
                 &loaded,
                 &engine_proxy,

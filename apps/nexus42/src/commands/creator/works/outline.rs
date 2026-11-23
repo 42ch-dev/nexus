@@ -547,14 +547,9 @@ async fn outline_patch(
         let core = open_direct_core(config).await?;
         let outcome = async {
             let principal = core.active_principal().await.map_err(map_core_error)?;
-            core.patch_outline_structure(
-                &principal,
-                "outline",
-                work_ref.to_string(),
-                req,
-            )
-            .await
-            .map_err(map_core_error)
+            core.patch_outline_structure(&principal, "outline", work_ref.to_string(), req)
+                .await
+                .map_err(map_core_error)
         }
         .await;
         finish_direct(&core, outcome).await?
@@ -760,14 +755,9 @@ async fn timeline_patch(
         let core = open_direct_core(config).await?;
         let outcome = async {
             let principal = core.active_principal().await.map_err(map_core_error)?;
-            core.patch_timeline_event(
-                &principal,
-                "timeline",
-                work_ref.to_string(),
-                req,
-            )
-            .await
-            .map_err(map_core_error)
+            core.patch_timeline_event(&principal, "timeline", work_ref.to_string(), req)
+                .await
+                .map_err(map_core_error)
         }
         .await;
         finish_direct(&core, outcome).await?

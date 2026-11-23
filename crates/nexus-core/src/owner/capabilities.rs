@@ -54,8 +54,8 @@ use super::work_artifact::{
     WorkArtifactPort, WorkArtifactWrite, WorkPath,
 };
 use crate::content::resolve_guarded_path_async;
-use crate::error::{CoreError, CoreResult};
 use crate::error::CoreError as NexusApiError;
+use crate::error::{CoreError, CoreResult};
 use crate::service::CoreService;
 use crate::tool_catalog::{
     host_tool_catalog, lookup_host_tool, Access, AdmissionGate, HostToolId, HostToolMetadata,

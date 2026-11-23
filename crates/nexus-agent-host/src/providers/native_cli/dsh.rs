@@ -720,15 +720,13 @@ async fn close_and_reap(
             }
             Ok(())
         }
-        Err(_sdk_error) => {
-            Err(CleanupError {
-                message: "dsh close ladder reported an error; cleanup is unconfirmed and the \
+        Err(_sdk_error) => Err(CleanupError {
+            message: "dsh close ladder reported an error; cleanup is unconfirmed and the \
                           session evidence is retained"
-                    .to_string(),
-                close_confirmed: false,
-                failed_lease: sealed_home.map(|lease| lease.path),
-            })
-        }
+                .to_string(),
+            close_confirmed: false,
+            failed_lease: sealed_home.map(|lease| lease.path),
+        }),
     }
 }
 

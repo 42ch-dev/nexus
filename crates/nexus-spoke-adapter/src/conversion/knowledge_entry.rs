@@ -62,13 +62,13 @@ use spoke_schemas::knowledge_entry::{
     SourceAnchor as SpokeSourceAnchor,
 };
 
+#[cfg(test)]
+use crate::extensions::set_nexus_body;
 use crate::extensions::{
     get_created_from_command_id, get_nexus_extras, get_owner, get_provenance,
     refuse_legacy_creator_only, set_created_from_command_id, set_nexus_extras, set_owner,
     set_provenance, take_nexus_body,
 };
-#[cfg(test)]
-use crate::extensions::set_nexus_body;
 use crate::ops::{assert_revision, transition_status};
 use crate::{SpokeReject, SpokeResult};
 

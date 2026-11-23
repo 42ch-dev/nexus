@@ -465,46 +465,44 @@ impl AcpProvider {
             AcpStreamUpdate::Stopped {
                 stop_reason: reason,
                 ..
-            } => {
-                match reason {
-                    nexus_contracts::local::acp::NexusStopReason::EndTurn => {
-                        HostEvent::OpFinished(OperationFinishedEvent {
-                            session_id: session_id.clone(),
-                            op_id: op_id.clone(),
-                            reason: FinishReason::EndTurn,
-                        })
-                    }
-                    nexus_contracts::local::acp::NexusStopReason::Cancelled => {
-                        HostEvent::OpFinished(OperationFinishedEvent {
-                            session_id: session_id.clone(),
-                            op_id: op_id.clone(),
-                            reason: FinishReason::Cancelled,
-                        })
-                    }
-                    nexus_contracts::local::acp::NexusStopReason::Refusal => {
-                        HostEvent::OpFailed(OperationFailedEvent {
-                            session_id: session_id.clone(),
-                            op_id: op_id.clone(),
-                            error_category: "refusal".to_string(),
-                            error_message: "agent refused the request".to_string(),
-                        })
-                    }
-                    nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
-                        HostEvent::OpFinished(OperationFinishedEvent {
-                            session_id: session_id.clone(),
-                            op_id: op_id.clone(),
-                            reason: FinishReason::MaxTokens,
-                        })
-                    }
-                    nexus_contracts::local::acp::NexusStopReason::MaxTurnRequests => {
-                        HostEvent::OpFinished(OperationFinishedEvent {
-                            session_id: session_id.clone(),
-                            op_id: op_id.clone(),
-                            reason: FinishReason::MaxTurnRequests,
-                        })
-                    }
+            } => match reason {
+                nexus_contracts::local::acp::NexusStopReason::EndTurn => {
+                    HostEvent::OpFinished(OperationFinishedEvent {
+                        session_id: session_id.clone(),
+                        op_id: op_id.clone(),
+                        reason: FinishReason::EndTurn,
+                    })
                 }
-            }
+                nexus_contracts::local::acp::NexusStopReason::Cancelled => {
+                    HostEvent::OpFinished(OperationFinishedEvent {
+                        session_id: session_id.clone(),
+                        op_id: op_id.clone(),
+                        reason: FinishReason::Cancelled,
+                    })
+                }
+                nexus_contracts::local::acp::NexusStopReason::Refusal => {
+                    HostEvent::OpFailed(OperationFailedEvent {
+                        session_id: session_id.clone(),
+                        op_id: op_id.clone(),
+                        error_category: "refusal".to_string(),
+                        error_message: "agent refused the request".to_string(),
+                    })
+                }
+                nexus_contracts::local::acp::NexusStopReason::MaxTokens => {
+                    HostEvent::OpFinished(OperationFinishedEvent {
+                        session_id: session_id.clone(),
+                        op_id: op_id.clone(),
+                        reason: FinishReason::MaxTokens,
+                    })
+                }
+                nexus_contracts::local::acp::NexusStopReason::MaxTurnRequests => {
+                    HostEvent::OpFinished(OperationFinishedEvent {
+                        session_id: session_id.clone(),
+                        op_id: op_id.clone(),
+                        reason: FinishReason::MaxTurnRequests,
+                    })
+                }
+            },
             AcpStreamUpdate::Failed {
                 error_category,
                 error_message,

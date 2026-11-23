@@ -92,19 +92,17 @@ impl NexusAdapter<'_> {
                     )
                 }
             }
-            LocalDbError::VersionMismatch { actual: None, .. } => {
-                reject(
-                    SpokeRejectCode::RevisionConflict,
-                    format!(
-                        "KnowledgeEntry not found for update: {entry_id} (expected base {expected})"
-                    ),
-                    json!({
-                        "entry_id": entry_id,
-                        "expectedBaseRevision": expected,
-                        "storeRevision": null,
-                    }),
-                )
-            }
+            LocalDbError::VersionMismatch { actual: None, .. } => reject(
+                SpokeRejectCode::RevisionConflict,
+                format!(
+                    "KnowledgeEntry not found for update: {entry_id} (expected base {expected})"
+                ),
+                json!({
+                    "entry_id": entry_id,
+                    "expectedBaseRevision": expected,
+                    "storeRevision": null,
+                }),
+            ),
             LocalDbError::WorldConflict {
                 table,
                 id,
@@ -614,18 +612,13 @@ async fn run_cas_update_in_tx(
         modules_json: Some(modules_json.as_deref()),
         source_provenance_kind: world_entry.source_provenance_kind.as_deref(),
     };
-    let new_rev = match cas_update_key_block_fields(
-        tx,
-        entry_id,
-        expected.cast_signed(),
-        world_id,
-        &fields,
-    )
-    .await
-    {
-        Ok(new_rev) => new_rev,
-        Err(e) => return NexusAdapter::map_cas_err(e, entry_id, expected),
-    };
+    let new_rev =
+        match cas_update_key_block_fields(tx, entry_id, expected.cast_signed(), world_id, &fields)
+            .await
+        {
+            Ok(new_rev) => new_rev,
+            Err(e) => return NexusAdapter::map_cas_err(e, entry_id, expected),
+        };
 
     SpokeResult::Ok(new_rev)
 }

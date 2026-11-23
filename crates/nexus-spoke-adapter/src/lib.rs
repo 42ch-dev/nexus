@@ -95,12 +95,12 @@ pub use adapter::computable_port::is_safe_module_id;
 
 pub use adapter::mca_read::{ScopedKbRead, SpokeBackedKbStore};
 
-pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
-pub use spoke_schemas;
 pub use spoke_operations::{
     filter_timeline_events_by_moment_scale, order_timeline_events_by_ids,
     order_timeline_events_by_precedes, OrderTimelineEventsByPrecedesOptions,
 };
+pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
+pub use spoke_schemas;
 // the 4 existing wire types stay listed; the remaining names are the ops
 // envelopes + capability types the orchestrators accept/return.
 pub use spoke_schemas::{

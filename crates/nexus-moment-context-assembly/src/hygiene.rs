@@ -1149,9 +1149,7 @@ mod tests {
                     "replacement": format!("b{i}"),
                 })
             })
-            .chain(
-                (0..4).map(|i| serde_json::json!({ "pattern": format!("a{i}") })),
-            )
+            .chain((0..4).map(|i| serde_json::json!({ "pattern": format!("a{i}") })))
             .collect();
         let summary = (0..MAX_HYGIENE_TRANSFORMS)
             .map(|i| format!("a{i}"))

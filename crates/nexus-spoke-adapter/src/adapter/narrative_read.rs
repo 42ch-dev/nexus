@@ -93,23 +93,17 @@ impl NexusAdapter<'_> {
             .map(str::to_owned);
         let ordered_ids = ordered_ids.to_vec();
 
-        let rows = match list_timeline_events_scoped(
-            &pool,
-            &world_id,
-            branch_id.as_deref(),
-            &[],
-        )
-        .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                return reject(
-                    SpokeRejectCode::InternalError,
-                    format!("storage error on list_timeline_events_scoped: {e}"),
-                    json!({ "scope_id": world_id }),
-                );
-            }
-        };
+        let rows =
+            match list_timeline_events_scoped(&pool, &world_id, branch_id.as_deref(), &[]).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    return reject(
+                        SpokeRejectCode::InternalError,
+                        format!("storage error on list_timeline_events_scoped: {e}"),
+                        json!({ "scope_id": world_id }),
+                    );
+                }
+            };
 
         let mut sorted = rows;
         sorted.sort_by_key(|e| e.sequence_no);
