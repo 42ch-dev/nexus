@@ -27,8 +27,8 @@ export function WorkspaceChips() {
       <div
         data-testid="workspace-chips"
         role="group"
-        aria-label="工作区"
-        title="工作区（workspace）— 创作内容的容器，每个有自己的根目录"
+        aria-label={t('workspaceChips.ariaLabel')}
+        title={t('workspaceChips.title')}
         className="flex flex-wrap items-center gap-2"
       >
         {workspaces.map((workspace) => {

@@ -260,6 +260,10 @@
     "creating": "正在创建世界…",
     "create": "创建"
   },
+  "workspaceChips": {
+    "ariaLabel": "工作区",
+    "title": "工作区（workspace）— 创作内容的容器，每个有自己的根目录"
+  },
   "workspaceCreate": {
     "chip": "＋ 新建工作区",
     "title": "新建工作区",

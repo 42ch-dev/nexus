@@ -192,6 +192,28 @@ describe('WorkspaceChips', () => {
     expect(screen.getByTestId('workspace-create-chip')).toHaveTextContent('＋ 新建工作区');
   });
 
+  it('labels the chip group from the shell catalog (zh-CN)', async () => {
+    useWorkspaceHandlers();
+    renderChips();
+    const group = await screen.findByRole('group', { name: '工作区' });
+    expect(group).toHaveAttribute(
+      'title',
+      '工作区（workspace）— 创作内容的容器，每个有自己的根目录',
+    );
+  });
+
+  it('labels the chip group from the shell catalog (en)', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'en');
+    await i18n.changeLanguage('en');
+    useWorkspaceHandlers();
+    renderChips();
+    const group = await screen.findByRole('group', { name: 'Workspaces' });
+    expect(group).toHaveAttribute(
+      'title',
+      'Workspaces — containers for creative content, each with its own root directory',
+    );
+  });
+
   it('renders one chip per workspace display_name', async () => {
     useWorkspaceHandlers();
     renderChips();
