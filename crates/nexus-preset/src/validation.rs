@@ -571,7 +571,7 @@ fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut Validati
                     category: DiagnosticCategory::MergeIntegrity,
                 });
             }
-            if m != i64::try_from(incoming).unwrap_or(i64::MAX) {
+            if m != u64::try_from(incoming).unwrap_or(u64::MAX) {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: format!("{state_path}.merge.m"),
                     message: format!(

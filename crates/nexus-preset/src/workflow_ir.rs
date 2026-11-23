@@ -388,9 +388,7 @@ fn state_node(state: &StateDefinition) -> WorkflowNode {
             strategy: converge_strategy_ir(converge.strategy),
         }),
         context_update: state.context_update.as_ref().map(context_update_ir),
-        timeout_ms: state
-            .timeout_ms
-            .map(|ms| i64::try_from(ms).unwrap_or(i64::MAX)),
+        timeout_ms: state.timeout_ms,
         on_timeout: state.on_timeout.clone(),
         bind: serde_json::Map::new(),
         depends_on: Vec::new(),
@@ -629,8 +627,8 @@ fn merge_ir(merge: &MergeKind) -> WorkflowMerge {
         },
         MergeKind::Quorum { n, m } => WorkflowMerge {
             kind: WorkflowMergeKind::Quorum,
-            n: Some(i64::try_from(*n).unwrap_or(i64::MAX)),
-            m: Some(i64::try_from(*m).unwrap_or(i64::MAX)),
+            n: Some(u64::try_from(*n).unwrap_or(u64::MAX)),
+            m: Some(u64::try_from(*m).unwrap_or(u64::MAX)),
         },
     }
 }

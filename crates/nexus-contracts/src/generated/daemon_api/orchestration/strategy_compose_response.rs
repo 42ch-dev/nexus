@@ -1223,10 +1223,10 @@ pub struct WorkflowMerge {
     pub kind: WorkflowMergeKind,
     ///Expected incoming edges (quorum only).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub m: ::std::option::Option<i64>,
+    pub m: ::std::option::Option<u64>,
     ///Minimum arrivals (quorum only).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub n: ::std::option::Option<i64>,
+    pub n: ::std::option::Option<u64>,
 }
 impl WorkflowMerge {
     pub fn builder() -> builder::WorkflowMerge {
@@ -1709,7 +1709,7 @@ pub struct WorkflowNode {
     pub template: ::std::option::Option<::std::string::String>,
     ///Bounded-join deadline in milliseconds (join nodes only).
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub timeout_ms: ::std::option::Option<i64>,
+    pub timeout_ms: ::std::option::Option<u64>,
     ///Tool policy for the step's ACP prompt.
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub tool_policy: ::std::option::Option<::std::string::String>,
@@ -3740,8 +3740,8 @@ pub mod builder {
     #[derive(Clone, Debug)]
     pub struct WorkflowMerge {
         kind: ::std::result::Result<super::WorkflowMergeKind, ::std::string::String>,
-        m: ::std::result::Result<::std::option::Option<i64>, ::std::string::String>,
-        n: ::std::result::Result<::std::option::Option<i64>, ::std::string::String>,
+        m: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
+        n: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
     }
     impl ::std::default::Default for WorkflowMerge {
         fn default() -> Self {
@@ -3765,7 +3765,7 @@ pub mod builder {
         }
         pub fn m<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::option::Option<i64>>,
+            T: ::std::convert::TryInto<::std::option::Option<u64>>,
             T::Error: ::std::fmt::Display,
         {
             self.m = value
@@ -3775,7 +3775,7 @@ pub mod builder {
         }
         pub fn n<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::option::Option<i64>>,
+            T: ::std::convert::TryInto<::std::option::Option<u64>>,
             T::Error: ::std::fmt::Display,
         {
             self.n = value
@@ -4329,7 +4329,7 @@ pub mod builder {
             ::std::string::String,
         >,
         timeout_ms: ::std::result::Result<
-            ::std::option::Option<i64>,
+            ::std::option::Option<u64>,
             ::std::string::String,
         >,
         tool_policy: ::std::result::Result<
@@ -4581,7 +4581,7 @@ pub mod builder {
         }
         pub fn timeout_ms<T>(mut self, value: T) -> Self
         where
-            T: ::std::convert::TryInto<::std::option::Option<i64>>,
+            T: ::std::convert::TryInto<::std::option::Option<u64>>,
             T::Error: ::std::fmt::Display,
         {
             self.timeout_ms = value
