@@ -287,8 +287,8 @@
                 "enum": ["all", "any", "quorum"],
                 "description": "Merge kind."
               },
-              "n": { "type": ["integer", "null"], "description": "Minimum arrivals (quorum only)." },
-              "m": { "type": ["integer", "null"], "description": "Expected incoming edges (quorum only)." }
+              "n": { "type": ["integer", "null"], "minimum": 0, "description": "Minimum arrivals (quorum only)." },
+              "m": { "type": ["integer", "null"], "minimum": 0, "description": "Expected incoming edges (quorum only)." }
             }
           },
           "context_update": {
@@ -310,7 +310,7 @@
               "capability": { "type": ["string", "null"], "description": "Summarize capability (llm_summarize)." }
             }
           },
-          "timeout_ms": { "type": ["integer", "null"], "description": "Bounded-join deadline in milliseconds (join nodes only)." },
+          "timeout_ms": { "type": ["integer", "null"], "minimum": 0, "description": "Bounded-join deadline in milliseconds (join nodes only)." },
           "on_timeout": { "type": ["string", "null"], "description": "Node id to reroute to when the deadline fires." },
           "step_kind": {
             "type": "string",
