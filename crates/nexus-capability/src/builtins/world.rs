@@ -659,6 +659,7 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("world_metadata", _) if ch.field == "title" => {
+                    // SAFETY: SELECT against known narrative_worlds schema.
                     let live_title: Option<String> =
                         sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
                             .bind(&world_id)

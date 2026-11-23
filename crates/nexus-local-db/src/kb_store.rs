@@ -618,6 +618,9 @@ impl SqliteKbStore {
         let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
 
+        // SAFETY: static SQL with vetted column names; the owner columns come from
+        // the closed [`KnowledgeOwnerRef`] (exactly one is non-NULL, matching the
+        // migration's owner union CHECK).
         let owner_kind = owner.kind();
         let world_id_opt = owner.world_id();
         let character_id = owner.character_id();
@@ -2763,6 +2766,8 @@ pub async fn cas_update_key_block_fields(
         reject_legacy_creator_only_extension(json)
             .map_err(|err| LocalDbError::ValidationError(err.to_string()))?;
     }
+    // SAFETY: dynamic SET built from a fixed field whitelist (not user-controlled
+    // SQL); all values are bind params.
     let mut sets = vec!["revision = ?".to_string(), "updated_at = ?".to_string()];
     if fields.canonical_name.is_some() {
         sets.push("canonical_name = ?".to_string());
