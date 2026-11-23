@@ -10,8 +10,6 @@
 //!
 //! See the retired local-db-refactor-legacy baseline (local record) for the design.
 
-// `#[cfg(unix)]` gate was wrong and broke `kb_relationships` (which imports
-// `crate::cas`) on the Windows x64 build.
 pub mod actor_knowledge_store;
 pub mod actor_world_binding;
 pub mod cas;
@@ -71,11 +69,9 @@ pub(crate) mod seed_shared;
 mod version;
 pub mod writer_protocol;
 
-// (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
 #[cfg(test)]
 mod test_tracing;
 
-// surface: compiled only under `cfg(test)`, never re-exported.
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -400,7 +396,6 @@ pub mod begin_immediate_report {
             .execute(&mut *conn)
             .await?;
         match sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await {
-            // leaves the connection exactly as it found it.
             Ok(_) => {
                 sqlx::query("ROLLBACK").execute(&mut *conn).await?;
             }
@@ -678,11 +673,6 @@ async fn apply_fk_suspension_tx(
 ) -> Result<(), LocalDbError> {
     use sqlx::{Connection as _, Executor as _};
 
-    // `MigrateError::Execute` — exactly how sqlx's stock `Migrate::apply`
-    // classifies them (`MigrateError::Execute(#[from] Error)`) — so a
-    // transient SQLITE_BUSY or `_sqlx_migrations` UNIQUE race at any of
-    // these seams keeps the existing single co-boot retry instead of
-    // degrading to a non-retryable `LocalDbError::Sqlx`.
     let mut tx = conn
         .begin()
         .await
@@ -690,12 +680,6 @@ async fn apply_fk_suspension_tx(
     let start = std::time::Instant::now();
 
     let outcome: Result<(), LocalDbError> = async {
-        // BLAKE3 holder id of every stored Creator/Character, and SQLite has
-        // no BLAKE3 function (holder-governance §2.1 is a Rust dependency
-        // here). Stage those `<subject_kind, subject_id, holder_entry_id>`
-        // rows on this connection inside the migration transaction; the
-        // script preflights that the staging is present and complete, so a
-        // path that applies this migration without the hook fails loudly.
         if migration.version == crate::holders::HOLDER_MIGRATION_VERSION {
             crate::holders::stage_holder_digests_in_tx(&mut tx).await?;
         }
@@ -931,7 +915,6 @@ fn is_transient_migration_error(err: &LocalDbError) -> bool {
     else {
         return false;
     };
-    // a string (SqliteError formats its `sqlite3_extended_errcode` value).
     let sqlx::Error::Database(db_err) = sqlx_err else {
         return false;
     };
@@ -941,7 +924,6 @@ fn is_transient_migration_error(err: &LocalDbError) -> bool {
     {
         return true;
     }
-    // violates the `_sqlx_migrations.version` UNIQUE constraint.
     db_err.is_unique_violation() && db_err.message().contains("_sqlx_migrations")
 }
 
@@ -1080,10 +1062,6 @@ pub fn reset_local_state_with_post_fence_hook(
         return Ok(0);
     }
 
-    // refuses the whole reset instead of leaving a half-applied one. The path
-    // checks below describe a moment; admission holds the directory itself, so
-    // the deletions resolve against what was admitted rather than against
-    // whatever the path points at later.
     let mut targets = Vec::new();
     for entry in read_entries(&creators_root)? {
         let creator_dir = entry.path();
@@ -1108,7 +1086,6 @@ pub fn reset_local_state_with_post_fence_hook(
         }
     }
 
-    // the reset with no bytes removed from any store.
     let fences = targets
         .iter()
         .map(|target| writer_protocol::acquire_store_reset_fence(&target.dir().join(STATE_DB_NAME)))
@@ -1124,7 +1101,6 @@ pub fn reset_local_state_with_post_fence_hook(
             }
         }
     }
-    // of the reset.
     drop(fences);
     Ok(reset)
 }
@@ -1184,7 +1160,6 @@ impl AdmittedDir {
             let std::path::Component::Normal(name) = component else {
                 return Err(untrusted_target(path, home));
             };
-            // ends with this block so the opened child can replace `current`.
             let opened = nix::fcntl::openat(
                 current.as_ref().unwrap_or(&home_fd).as_fd(),
                 name,
@@ -1393,9 +1368,6 @@ fn untrusted_target(path: &std::path::Path, home: &std::path::Path) -> LocalDbEr
 mod tests {
     use super::*;
 
-    // database with no foreign-key violations. The 202606230001 table-recreate
-    // migration now includes an explicit `PRAGMA foreign_key_check`; this test
-    // would fail if any migration (including that one) introduced dangling FKs.
     #[tokio::test]
     async fn migrations_leave_no_foreign_key_violations() {
         let dir = tempfile::tempdir().unwrap();
@@ -1416,8 +1388,6 @@ mod tests {
         );
     }
 
-    // hard when the database contains a foreign-key violation, rather than
-    // leaving `PRAGMA foreign_key_check` as a diagnostic-only result.
     #[tokio::test]
     async fn migrations_fail_on_foreign_key_violation() {
         let dir = tempfile::tempdir().unwrap();
@@ -1520,8 +1490,6 @@ mod tests {
                 .unwrap();
         }
 
-        // makes the owner migration's first statement (`DROP TABLE IF EXISTS
-        // kb_key_blocks_new`) fail ("use DROP VIEW to delete view ...").
         sqlx::query("CREATE VIEW kb_key_blocks_new AS SELECT 1 AS x")
             .execute(&pool)
             .await
@@ -1531,7 +1499,6 @@ mod tests {
             .await
             .expect_err("owner migration must fail on the sabotage view");
 
-        // is ON and a dangling write is rejected.
         let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
             .fetch_one(&pool)
             .await
@@ -1642,7 +1609,6 @@ mod tests {
                 .unwrap();
         }
 
-        // (inserted with enforcement off, mirroring the W-001 fixture above).
         {
             let mut conn = pool.acquire().await.unwrap();
             // SAFETY: PRAGMA statement — no table schema to validate against.
@@ -1738,7 +1704,6 @@ mod tests {
         .await
         .expect_err("the injected bookkeeping collision must surface after the single retry");
 
-        // co-boot signature (UNIQUE on `_sqlx_migrations.version`) …
         let msg = format!("{err}");
         assert!(
             msg.contains("UNIQUE constraint failed: _sqlx_migrations.version"),
@@ -1860,7 +1825,6 @@ mod tests {
             );
         }
 
-        // same migration; the loser's bookkeeping insert collides) → transient.
         let err = fake_db_error("2067", "UNIQUE constraint failed: _sqlx_migrations.version");
         assert!(is_transient_migration_error(&err));
 
@@ -1870,7 +1834,6 @@ mod tests {
         let err = fake_db_error("1", "no such column: oops");
         assert!(!is_transient_migration_error(&err));
 
-        // transient.
         assert!(!is_transient_migration_error(&LocalDbError::Sqlx(
             sqlx::Error::RowNotFound
         )));
@@ -1881,8 +1844,6 @@ mod tests {
 
     #[test]
     fn transient_migration_error_detected_from_migration_body_wrapper() {
-        // `ExecuteMigration(error, version)` rather than `Execute`; both must
-        // be recognized.
         let err = LocalDbError::Migrate(sqlx::migrate::MigrateError::ExecuteMigration(
             sqlx::Error::Database(Box::new(FakeDbError {
                 code: Some("5"),
@@ -1895,8 +1856,6 @@ mod tests {
 
     #[tokio::test]
     async fn init_migrations_retries_once_on_transient_error() {
-        // error; the retry runs the real migrations, which now succeed (as
-        // they would once the winning process has committed).
         let dir = tempfile::tempdir().unwrap();
         let pool = open_pool(&dir.path().join("test.db")).await.unwrap();
         let calls = std::sync::atomic::AtomicUsize::new(0);
@@ -1922,7 +1881,6 @@ mod tests {
 
     #[tokio::test]
     async fn init_migrations_surfaces_error_after_single_retry() {
-        // surfaced.
         let dir = tempfile::tempdir().unwrap();
         let pool = open_pool(&dir.path().join("test.db")).await.unwrap();
         let calls = std::sync::atomic::AtomicUsize::new(0);
@@ -1941,7 +1899,6 @@ mod tests {
 
     #[tokio::test]
     async fn init_migrations_does_not_retry_non_transient_error() {
-        // must be surfaced immediately — no retry, no backoff.
         let dir = tempfile::tempdir().unwrap();
         let pool = open_pool(&dir.path().join("test.db")).await.unwrap();
         let calls = std::sync::atomic::AtomicUsize::new(0);

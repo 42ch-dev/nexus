@@ -45,7 +45,6 @@ export function useInboundEventFocus<TNodeData extends Record<string, unknown>>(
     if (!targetNodeId) return;
     if (appliedRef.current === targetNodeId) return;
     if (selectedNodeId === targetNodeId) {
-      // mark it applied so we never fight a later user selection.
       appliedRef.current = targetNodeId;
       return;
     }

@@ -1,6 +1,3 @@
-/**
- * and owns the active inspector section.
- */
 import { describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';

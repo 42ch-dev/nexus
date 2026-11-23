@@ -1,6 +1,3 @@
-/**
- * match createAcpProvider()'s return type.
- */
 import type { ProviderCallbacks } from './index.js';
 import { createAcpProvider } from './index.js';
 

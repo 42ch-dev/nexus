@@ -1,7 +1,4 @@
 /**
- * (v1.192 P0-T4). Loaded only via `utilityProcess.fork` — never in the
- * sandboxed renderer.
- *
  * The utility is the app's single native owner: it imports the existing
  * `startService(options): Promise<RunningService>` and closes the returned
  * handle, and it is the only process that loads the native binding, for the
@@ -89,10 +86,6 @@ function closeBudgetExceeded(): Promise<never> {
   return promise;
 }
 
-/**
- * the handle; an unconfirmed close retains it (and the published discovery) so
- * a retry can still confirm cleanup — never a successful forced cleanup.
- */
 async function closeService(): Promise<CoreCloseReport> {
   const running = state.running;
   if (!running) {
@@ -130,7 +123,6 @@ async function dispatch(request: UtilityRequest): Promise<unknown> {
       }
       state.running = running;
       state.serviceState = 'running';
-      // reached readiness — the same record `startService` returns.
       post({ type: 'service-ready', generation: request.generation, discovery: running.discovery } satisfies ServiceReadyMessage);
       return { discovery: running.discovery };
     }

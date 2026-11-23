@@ -9,12 +9,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const scriptRoot = join(__dirname, '..', 'scripts');
 
 /**
- * abrupt-restart group-kill path (`scripts/proof-browser.mjs`). Same extraction
- * contract as `proof-browser-children.test.mjs`: the orchestrator is a
- * dependency-free single-file script, so its REAL helpers are extracted
- * verbatim (stable section anchors) into throwaway modules — no copy of the
- * logic, no mocks of the logic itself.
- *
  * Contracts under test:
  * - a fixed DB/LIFE acceptance row can only derive `pass` from the COMPLETE
  *   locked sample count (DB-1: 100 typed competing-write pairs; LIFE-2/-3: 10
@@ -179,7 +173,6 @@ describe('proof-browser locked DB-1 acceptance derivation', () => {
     assert.equal(verdict.typedPairCount, 100);
     assert.equal(verdict.pairMs.samples.length, 100);
     assert.equal(verdict.pairMs.max, Math.max(...verdict.pairMs.samples));
-    // fixture distribution — for n=100 this is NOT the max (that is rank 100).
     const sorted = [...verdict.pairMs.samples].sort((a, b) => a - b);
     assert.equal(verdict.pairMs.p95, sorted[Math.ceil(0.95 * sorted.length) - 1]);
   });
@@ -395,8 +388,6 @@ describe('proof-browser provenance completeness gate', () => {
 
 describe('proof-browser abrupt-restart group kill (QC3-C3)', () => {
   test('a parked group descendant is DETECTED before the kill and gone after the shared group kill', async () => {
-    // stays pending), announces readiness, then exits — the exact abrupt-kill
-    // shape. The grandchild outlives the leader.
     const leaderScript = `
 const { spawn } = require('node:child_process');
 spawn(process.execPath, ['-e', 'process.stdout.write("grandchild-ready-marker"); setInterval(() => {}, 1_000);'], { stdio: ['ignore', 'inherit', 'inherit'] });
@@ -408,8 +399,6 @@ setTimeout(() => process.exit(0), 100);
     });
     await waitForChildOutput(child, 'grandchild-ready-marker');
 
-    // leader dies, orphans are re-parented and a fresh ps walk could no
-    // longer find them.
     const groupBefore = lifecycle
       .collectDescendants([child.pid], lifecycle.psRows())
       .filter((row) => row.pid !== child.pid);
@@ -420,7 +409,6 @@ setTimeout(() => process.exit(0), 100);
 
     await new Promise((resolveExit) => child.once('exit', resolveExit));
 
-    // old unconditional pid fallback silently skipped.
     const survivorsBefore = lifecycle.survivingGroupRows(groupBefore, child.pid);
     assert.equal(survivorsBefore.length, 1, 'the parked grandchild must be reported as a survivor');
     assert.equal(survivorsBefore[0].pid, groupBefore[0].pid);
@@ -445,8 +433,6 @@ setTimeout(() => process.exit(0), 100);
     lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
     await Promise.race([child.__closed, sleep(2_000)]);
     assert.equal(child.__closeSettled, true);
-    // hits ESRCH on the dead leader, and the helper stays silent — a missing
-    // group is a settled state, not an error.
     lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
   });
 });

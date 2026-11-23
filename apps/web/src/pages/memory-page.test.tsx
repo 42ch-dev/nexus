@@ -108,7 +108,6 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
 
   it('deletes a pending review via the row action and removes it from the list', async () => {
     const deleteSpy = vi.fn(() => HttpResponse.json({ success: true, pending_id: 'p1' }));
-    // mirroring a real server that honors the deletion before the refetch.
     let deleted = false;
     useHandlers(
       ...soulHandlers(),

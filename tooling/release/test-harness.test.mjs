@@ -14,9 +14,6 @@ import {
   readRepoFile,
 } from "./test-harness.mjs";
 
-/**
- * `Cargo.lock` member row the version its bracket requires.
- */
 function assertFixtureVersion(dir, version) {
   for (const surface of readSurfaceVersions(dir)) {
     assert.equal(surface.version, version, surface.path);

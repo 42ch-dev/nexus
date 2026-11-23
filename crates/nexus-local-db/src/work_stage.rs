@@ -112,7 +112,6 @@ pub fn check_stage_advance(
             });
         }
 
-        // (uses intake_status from V1.33, not stage_status)
         if work.current_stage == "intake" && work.intake_status != "complete" {
             return Err(StageGateError {
                 code: "FL_E_INTAKE_INCOMPLETE".to_string(),

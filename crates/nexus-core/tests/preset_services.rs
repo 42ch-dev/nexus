@@ -119,7 +119,6 @@ async fn stale_source_hash_cannot_overwrite_strategy() {
 #[tokio::test]
 async fn concurrent_editors_have_one_commit_and_one_conflict() {
     let fixture = setup().await;
-    // re-spelling the two results as an array.
     let results = tokio::join!(
         fixture.core.patch_strategy_state(
             &fixture.principal,
@@ -340,14 +339,6 @@ async fn new_template_cannot_escape_through_symlink_parent() {
     assert!(!outside.path().join("new.md").exists());
     fixture.core.close().await.unwrap();
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// (the route handlers wrapped this core CAS seam directly) and
-// `presets_route_api.rs` (router registration and framework-404 expectations
-// retire; the catalog/scaffold behavior stays core-owned). State rename/stale
-// source/concurrent editor/prompt-template rollback cases above already cover
-// the remaining `strategy_patch.rs` assertions.
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// A bundle whose `start` state has no outgoing transition.
 const LINEAR_BUNDLE: &str = r#"revision: 1
@@ -691,7 +682,6 @@ async fn preset_validation_is_confined_to_the_daemon_home() {
         .unwrap();
     assert!(valid.valid, "unexpected errors: {:?}", valid.errors);
 
-    // refusal does not echo the path it was given.
     for outside in ["/etc/passwd", "/tmp", "/"] {
         let error = fixture
             .core

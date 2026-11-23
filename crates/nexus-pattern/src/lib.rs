@@ -310,7 +310,6 @@ fn load(
             rollup,
         });
     }
-    // `content_hash` field (which is a constant `None` there).
     let content_hash = nexus_workflow_ir::content_hash(&fragment).map_err(Unavailable::Hash)?;
     Ok((fragment, content_hash))
 }

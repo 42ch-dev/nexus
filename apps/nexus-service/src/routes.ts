@@ -56,12 +56,6 @@ function readServiceVersion(): string {
   return manifest.version;
 }
 
-/**
- * manifest so it stays in lockstep with the governed release version instead of
- * drifting on a hard-coded literal. The manifest is resolved relative to this
- * module, so the read works identically from `src/` (tsx) and `dist/`
- * (compiled).
- */
 const SERVICE_VERSION: string = readServiceVersion();
 
 /**
@@ -214,13 +208,6 @@ export async function handleRoute(
 }
 
 
-/**
- * authority is truthful degraded readiness, not a client error. It is
- * recognized by its typed `details.category`, never by the human message.
- * Every other native rejection (uninitialized, forbidden, not_found, an
- * unrelated invalid_input, ...) propagates.
- */
-
 /** A legacy-branch route's success payload (family entries only). */
 type LegacyBody = unknown;
 
@@ -343,7 +330,6 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     family: 'host',
     handle: async (service) => {
       const response = await tryHostQuery(service, { query: 'catalog', format: 'scan' });
-      // contract (`ScanResponse`) names it `agents`, so normalize at the seam.
       return { body: { agents: response?.scan?.entries ?? [] } };
     },
   },
@@ -388,10 +374,6 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     family: 'host',
     capture: 'operationId',
     handle: async (service, params) => {
-      // authority's own CharacterOperationResult; every other id keeps the
-      // generic provider-only / recovered-journal answer. One observation does
-      // both, so a GET never spends a second Character read: the arm is decided
-      // from the mirror's stored session identity, not from an empty result.
       const observation = await lookupOperationObservation(service, params[0]);
       if (!observation) {
         throw new HttpError(404, 'not_found', `operation ${params[0]} not found`, {
@@ -401,7 +383,6 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
       return { body: observation };
     },
   },
-  // execute/cancel and the bounded SSE event pull.
   {
     method: 'POST',
     pattern: /^\/v1\/daemon\/agent-host\/sessions$/,
@@ -449,9 +430,6 @@ export const HOST_ROUTES: readonly DomainRoute[] = [
     capture: 'sessionId',
     handle: async (service, params, search, _body, request) => {
       const sessionId = params[0];
-      // resume cursors, and this is the one slot the stream reader parses. An
-      // empty header carries no usable id, so it yields to the query cursor
-      // instead of clobbering it with an empty cursor (full replay).
       if (request.lastEventId !== undefined && request.lastEventId !== '') {
         search.set('cursor', request.lastEventId);
       }
@@ -551,8 +529,6 @@ async function tryHostQuery(service: ServiceCore, request: Parameters<typeof hos
     if (isAbsentHostError(mapped)) {
       return null;
     }
-    // readiness degrades exactly like an absent host until promotion. After
-    // promotion the core exists and an `uninitialized` rejection still surfaces.
     if (mapped.code === 'uninitialized' && !service.workspaceInitialized) {
       return null;
     }

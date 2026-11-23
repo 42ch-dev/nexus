@@ -48,7 +48,6 @@ fn modules_round_trip_byte_for_byte_with_unknown_key() {
         .modules
         .expect("modules must survive the round-trip (None would mean data loss)");
 
-    // normalization must serialize to identical JSON text.
     assert_eq!(
         serde_json::to_string(&original).unwrap(),
         serde_json::to_string(&round_tripped).unwrap(),
@@ -141,7 +140,6 @@ fn modules_null_rejected_at_seam() {
 #[test]
 #[should_panic(expected = "modules must deserialize into the spoke typed module map")]
 fn modules_invalid_key_rejected_at_seam() {
-    // and fails the key newtype's FromStr validation during map deserialize.
     let mut event = TimelineEvent::new("wld_1", "fbk_root", TimelineEventType::StoryAdvance, 8);
     event.modules = Some(json!({"Bad-Key": {}}));
     let _spoke: SpokeTimelineEvent = event.into();

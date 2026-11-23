@@ -454,8 +454,6 @@ async fn crash_after_journal_commit_is_withheld_then_settled_by_a_replay() {
     );
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
 
-    // pending window reports the pending state — and the read-only receipt
-    // channel never settles the intent itself (MEM-R011).
     let receipt_id = receipt_id_of_key(&env, "k-post-commit").await;
     let read = wire(
         &provider
@@ -482,7 +480,6 @@ async fn crash_after_journal_commit_is_withheld_then_settled_by_a_replay() {
     assert_eq!(recalled["total_authorized"], 0);
     assert_eq!(files_under(&root), Vec::<String>::new());
 
-    // the planned target and only then terminalizes the receipt.
     let replayed = wire(
         &provider
             .create_record(&admin(), record_create_request("k-post-commit", TEXT))
@@ -591,7 +588,6 @@ async fn crash_after_publish_marks_the_intent_applied() {
             .await,
     );
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
-    // as quarantined until a pass re-drives it.
     assert_eq!(journal_states(&env).await, vec!["quarantined"]);
     let record_id = only_record_id(&env).await;
     assert_eq!(files_under(&root), vec![format!("records/{record_id}.md")]);
@@ -699,8 +695,6 @@ async fn conflicting_target_is_quarantined_and_the_subject_reads_terminal() {
         assert_eq!(error_code(&body), "INTERNAL_ERROR");
         assert_eq!(retry_class(&body), "terminal");
     }
-    // reserved for authorized readers. An unauthorized probe learns nothing —
-    // not that the record exists, not which subject it belongs to.
     let probed = wire(
         &provider
             .get_record(&stranger(), record_get_request(&record_id))
@@ -1253,7 +1247,6 @@ async fn settle_failure_on_the_replay_branch_is_uncertain() {
     );
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
 
-    // fails the same way.
     provider.inject_settle_fault(true);
     let replayed = wire(
         &provider
@@ -1268,7 +1261,6 @@ async fn settle_failure_on_the_replay_branch_is_uncertain() {
         "the failed replay settlement left the intent recoverable, not applied"
     );
 
-    // serves the committed receipt.
     drop(provider);
     let provider = open_provider(&env).await;
     assert_eq!(journal_states(&env).await, vec!["applied"]);
@@ -1463,7 +1455,6 @@ async fn a_bounded_pass_advances_past_persistently_conflicting_heads() {
         "the intent the bound did not reach is deferred, not silently dropped: {states:?}"
     );
 
-    // quarantined behind each other.
     drop(provider);
     let provider = open_provider(&env).await;
     assert_eq!(
@@ -1668,7 +1659,6 @@ async fn a_deletion_crash_inside_the_swap_leaves_no_body_behind() {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
     let receipt_id = receipt_id_of_key(&env, "k-swap-delete").await;
 
-    // tombstone stayed in the staged file, and the target is gone.
     let scratch = root.join(format!("records/.{record_id}.md.{receipt_id}.prior"));
     std::fs::rename(&target, &scratch).unwrap();
     assert!(!target.exists());
@@ -1723,8 +1713,6 @@ async fn a_failed_scratch_cleanup_is_settled_by_the_next_pass() {
     assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
     let receipt_id = receipt_id_of_key(&env, "k-cleanup-delete").await;
 
-    // staged file. The failed install linked the tombstone at the target and
-    // kept the body at its scratch name; the intent is still pending.
     let staged_path = root.join(format!("records/.{record_id}.md.{receipt_id}.staged"));
     let scratch = root.join(format!("records/.{record_id}.md.{receipt_id}.prior"));
     std::fs::hard_link(&target, &scratch).unwrap();
@@ -1775,7 +1763,6 @@ async fn an_unauthorized_update_never_learns_of_the_unsettled_predecessor() {
     );
     let clear_id = record_id_of(receipt(&clear));
 
-    // no intent produced.
     provider.inject_commit_fault(true);
     let blocked_commit = wire(
         &provider
@@ -2121,7 +2108,6 @@ async fn two_provider_instances_on_one_workspace_serialize_publication() {
             )
         }
     });
-    // second instance asks for it.
     tokio::time::timeout(std::time::Duration::from_secs(10), entered.notified())
         .await
         .expect("the first instance's publication holds the workspace gate");
@@ -2136,7 +2122,6 @@ async fn two_provider_instances_on_one_workspace_serialize_publication() {
         }
     });
 
-    // holds the workspace gate.
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(200), &mut queued)
             .await
@@ -2188,9 +2173,6 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
             queued_on.push(Arc::new(open_provider(&env).await));
         }
 
-        // all four providers feed one channel. The holder's own report lands
-        // before it parks in the section, so consuming it first leaves the
-        // channel empty for the queued callers.
         let (report_tx, report_rx) = std::sync::mpsc::channel();
         holder.report_flock_waits(report_tx.clone());
 
@@ -2226,8 +2208,6 @@ fn queued_publications_never_exhaust_the_blocking_pool_the_holder_needs() {
                 )
             }));
         }
-        // reaches the flock wait while the holder is parked. Under the previous
-        // flock-first order each waiter reports here instead.
         assert!(
             report_rx
                 .recv_timeout(std::time::Duration::from_millis(300))
@@ -2283,7 +2263,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
         ensure(&provider).await;
         let files_root = provider.file_root();
 
-        // so every publication below really waits for it.
         let holder = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -2298,7 +2277,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
         let (report_tx, report_rx) = std::sync::mpsc::channel();
         provider.report_flock_waits(report_tx);
 
-        // test measures.
         for index in 0..3 {
             let caller = tokio::spawn({
                 let provider = Arc::clone(&provider);
@@ -2332,7 +2310,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
             );
         }
 
-        // gets the other.
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let probe = tokio::task::spawn_blocking(move || {
@@ -2345,7 +2322,6 @@ fn cancelled_flock_waiters_never_stack_and_leave_the_pool_free() {
         release_tx.send(()).expect("the probe is released");
         probe.await.expect("the probe completes");
 
-        // second waiter — and proceeds once the external holder lets go.
         let mut next = tokio::spawn({
             let provider = Arc::clone(&provider);
             async move {
@@ -2419,7 +2395,6 @@ async fn another_process_holding_the_workspace_flock_blocks_publication() {
     );
     wait_for(|| held.exists(), "the child takes the workspace flock");
 
-    // it either. Dropped before the publication asks for it.
     let probe = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -2568,7 +2543,6 @@ async fn journal_retention_prunes_only_applied_shells() {
     let provider = open_provider(&env).await;
     ensure(&provider).await;
 
-    // it and marks the entry `applied` (content scrubbed).
     let aged = wire(
         &provider
             .create_record(&admin(), record_create_request("k-journal-aged", TEXT))
@@ -2579,7 +2553,6 @@ async fn journal_retention_prunes_only_applied_shells() {
         .expect("receipt id")
         .to_string();
 
-    // is `quarantined` and keeps the payload a recovery pass republishes.
     provider.inject_file_fault(false);
     let quarantined = wire(
         &provider
@@ -2594,7 +2567,6 @@ async fn journal_retention_prunes_only_applied_shells() {
         "the injected publish failure is reported: {quarantined}"
     );
 
-    // shell and must leave the quarantined intent alone.
     provider.advance_clock(JOURNAL_RETENTION_SECONDS + 1);
     ensure(&provider).await;
 

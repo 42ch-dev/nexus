@@ -102,8 +102,6 @@ async fn live_writer_refuses_the_reset_before_any_deletion() {
     let live = seed_store(home.path(), "ctr_alpha", "default", &[]);
     let idle = seed_store(home.path(), "ctr_beta", "ws2", &STATE_FILES);
 
-    // the retained in-process guard (the daemon/test shape). It owns a real
-    // `state.db` (plus its WAL/SHM siblings while the pool is open).
     let guarded = init_guarded_pool(&live.join("state.db"))
         .await
         .expect("init guarded pool");
@@ -128,7 +126,6 @@ async fn live_writer_refuses_the_reset_before_any_deletion() {
         );
     }
 
-    // the same reset succeeds.
     guarded.pool().close().await;
     drop(guarded);
     release_retained_writer_guards(&live.join("state.db"));
@@ -263,7 +260,6 @@ fn a_state_file_swapped_for_a_symlink_after_fencing_is_refused() {
     let victim = outside.join("state.db");
     fs::write(&victim, "victim-payload").expect("victim file");
 
-    // swaps the admitted `state.db` for a symlink out of the store.
     let refused = reset_local_state_with_post_fence_hook(home.path(), &mut || {
         fs::remove_file(store.join("state.db")).expect("remove the admitted file");
         symlink(&victim, store.join("state.db")).expect("swap for a symlink");
@@ -302,7 +298,6 @@ fn a_store_directory_swapped_after_fencing_cannot_redirect_the_deletion() {
     let home = TempDir::new().expect("home");
     let store = seed_store(home.path(), "ctr_alpha", "default", &STATE_FILES);
     fs::write(store.join("workspace.toml"), "keep").expect("sibling data");
-    // state files are not this reset's target.
     let replacement = home.path().join("replacement-workspace");
     fs::create_dir_all(&replacement).expect("replacement dir");
     for name in STATE_FILES {
@@ -310,7 +305,6 @@ fn a_store_directory_swapped_after_fencing_cannot_redirect_the_deletion() {
     }
     let admitted_move = home.path().join("moved-admitted");
 
-    // point its path at the replacement.
     let reset = reset_local_state_with_post_fence_hook(home.path(), &mut || {
         fs::rename(&store, &admitted_move).expect("move the admitted directory");
         symlink(&replacement, &store).expect("point the admitted path at the replacement");

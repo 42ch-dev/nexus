@@ -72,10 +72,6 @@ declare module 'node:fs' {
   export function readFileSync(path: string, encoding: string): string;
 }
 
-/**
- * older `lib`. Declaring the runtime surface here keeps the implementation free
- * of the executor anti-pattern without widening the compile target.
- */
 interface PromiseConstructor {
   withResolvers<T>(): {
     promise: Promise<T>;

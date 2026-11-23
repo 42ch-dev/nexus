@@ -55,9 +55,6 @@ export interface Shape {
   readonly minProperties?: number;
 }
 
-/**
- * (add/rename drift fails this build) and `required` must name only keys of `T`.
- */
 type ShapeOf<T> = Omit<Shape, 'fields' | 'required'> & {
   readonly fields: { readonly [K in keyof T]-?: FieldSpec };
   readonly required: readonly (keyof T & string)[];

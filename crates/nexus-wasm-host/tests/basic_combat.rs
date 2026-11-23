@@ -68,7 +68,6 @@ fn basic_combat_resolves_attack_into_four_part_output() {
         .compute(&module, &manifest, &combat_input())
         .expect("compute succeeds");
 
-    // `kind` only; module-specific fields are validated pre-deserialize).
     assert!(
         output.battle_report.kind.is_some(),
         "battle_report.kind must be present"

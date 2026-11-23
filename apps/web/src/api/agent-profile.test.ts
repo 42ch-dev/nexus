@@ -1,7 +1,3 @@
-/**
- * trust boundary. A polluted/foreign value must never reach callers as a
- * malformed snapshot or throw inside `launchCommand?.trim()`.
- */
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { readBrowserAgentProfile } from '@/api/queries';

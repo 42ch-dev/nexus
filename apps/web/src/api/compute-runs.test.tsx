@@ -230,23 +230,14 @@ describe('useRunCompute — runs-list invalidation', () => {
     expect(listSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
-    // the server-recorded Failed row surfaces without a manual refresh.
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
   });
 });
 
 describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation', () => {
-  /**
-   * list + run detail (the mutation's direct targets) AND the Timeline
-   * overview + World-KB graph consumers that must also refetch after an
-   * Accept (qc1 W-001 / qc3 W-1: Accept mutates World + Timeline + KB
-   * together; `refetchOnWindowFocus: false` means invalidation is the only
-   * freshness path).
-   */
   function renderRunInspector(
     button: 'accept' | 'discard',
     crossCache: {
-      // as `Mock<Constructable | Procedure>`, which is not callable.
       timelineSpy: () => unknown;
       worldKbSpy: () => unknown;
     },
@@ -313,7 +304,6 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
     fireEvent.click(screen.getByRole('button', { name: /accept/i }));
     await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(detailSpy).toHaveBeenCalledTimes(2));
-    // Timeline and the KB graph without a manual reload.
     await waitFor(() => expect(timelineSpy).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(worldKbSpy).toHaveBeenCalledTimes(2));
   });
@@ -349,11 +339,6 @@ describe('useAcceptRun / useDiscardRun — runs-list + run-detail invalidation',
 });
 
 describe('useClearRuns — cleared rows leave every cached view', () => {
-  /**
-   * must empty. The mutation is called with a per-call `onSuccess` exactly like
-   * `run-studio.tsx` does (the toast copy), so this also pins that the
-   * hook-level invalidation ordering keeps working at that call site.
-   */
   function renderClearHarness(status: () => unknown) {
     function Harness() {
       const runs = useComputeRuns({ module_id: 'basic-combat', world_id: 'w1' });
@@ -384,8 +369,6 @@ describe('useClearRuns — cleared rows leave every cached view', () => {
   }
 
   it('drops the cleared row from the mounted runs list and run detail', async () => {
-    // with the pre-clear ones, so only a real refetch can move the mounted
-    // consumers (call counting would pass on a spy echo).
     let cleared = false;
     useHandlers(
       http.get('/v1/daemon/compute/runs', () =>
@@ -415,10 +398,7 @@ describe('useClearRuns — cleared rows leave every cached view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /clear/i }));
 
-    // server just deleted (observed against the real service: DOM kept both
-    // rows while `GET /compute/runs` already returned `items: []`).
     await waitFor(() => expect(screen.getByTestId('runs')).toHaveTextContent('0'));
-    // state (the real studio renders "Could not load this Run" from it).
     await waitFor(() => expect(screen.getByTestId('run')).toHaveTextContent('error'));
   });
 });

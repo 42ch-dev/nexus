@@ -16,11 +16,6 @@ export interface RunStatusBadgeProps {
   className?: string;
 }
 
-/**
- * succeeded → warning (amber — author action needed: Accept/Discard),
- * failed → error, running → queued (teal, in-flight), discarded → neutral.
- * Variants are token-backed and theme-safe in both light and dark.
- */
 const STATUS_VARIANT = {
   running: 'queued',
   succeeded: 'warning',

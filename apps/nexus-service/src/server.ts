@@ -66,10 +66,6 @@ const RUNTIME_STOP_PATH = '/v1/daemon/runtime/stop';
  */
 const RUNTIME_DISCOVERY_PATH = '/v1/daemon/runtime/discovery';
 
-/**
- * the wire schema. Handled before `matchRoute` because it answers with a
- * `302` + `Set-Cookie` instead of the JSON-only domain route shape.
- */
 const AUTH_BOOTSTRAP_PATH = '/__bootstrap';
 
 /** §6.2 copy, verbatim: the bootstrap route's own 401 bodies. */
@@ -101,10 +97,6 @@ function boundEndpoint(server: Server, config: ResolvedServiceConfig): CoreServi
   return { transport: 'http', url: httpUrlFor(config, boundPort(server, config)) };
 }
 
-/**
- * constructor `startService` publishes, so the response cannot fork the record
- * shape or leak a secret field.
- */
 function discoveryRecordFor(
   service: ServiceCore,
   config: ResolvedServiceConfig,
@@ -122,9 +114,6 @@ function discoveryRecordFor(
   });
 }
 
-/**
- * here because the stop path never crosses the native wire validator.
- */
 function parseStopRequest(body: unknown): CoreServiceStopRequest {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     throw new HttpError(400, 'invalid_input', 'stop request must be a JSON object');
@@ -151,10 +140,6 @@ function parseStopRequest(body: unknown): CoreServiceStopRequest {
   return { expected_instance_id, expected_engine_epoch };
 }
 
-/**
- * answers on it; a live listener refuses the bind with `busy` instead of a
- * cryptic EADDRINUSE.
- */
 async function clearStaleUnixSocket(path: string): Promise<void> {
   if (!existsSync(path)) return;
   const live = await new Promise<boolean>((resolveProbe) => {
@@ -219,15 +204,6 @@ function rawRequestPath(target: string | undefined): string {
   return query === -1 ? raw : raw.slice(0, query);
 }
 
-/**
- * only — the same segmentation the static handler's `path.resolve` applies
- * after its own decode — so a decoded `?`/`#`/space stays a filename character
- * instead of `new URL()` structure. Empty and `.` segments are skipped before
- * any fold, matching `path.resolve`'s treatment of duplicate slashes; `..`
- * then pops a real parent (an empty stack is the root and stays there), every
- * other segment is verbatim. The result is single-`/`-separated with no
- * trailing empty segment, so `/v1/` and `/v1/.` both collapse to `/v1`.
- */
 function collapseDotSegments(decoded: string): string {
   const rooted = decoded.startsWith('/');
   const stack: string[] = [];
@@ -248,7 +224,6 @@ function requestId(req: IncomingMessage): string {
 function writeCors(res: ServerResponse, origin: string | undefined, allowed: readonly string[]): void {
   if (origin && allowed.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    // dev origins (access spec §3.1); only explicit allowlisted origins get it.
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
   }
@@ -256,10 +231,6 @@ function writeCors(res: ServerResponse, origin: string | undefined, allowed: rea
   res.setHeader('Access-Control-Allow-Headers', corsAllowHeaders());
 }
 
-/**
- * `headersTimeout` (parsed before this handler runs), never by a timer that
- * can only start once the headers already arrived.
- */
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
@@ -309,7 +280,6 @@ function sendJson(
   writeCors(res, origin, allowed);
   res.statusCode = status;
   res.setHeader('X-Request-Id', requestIdValue);
-  // serialization (the transport would drop it anyway).
   if (status === 204) {
     res.end();
     return;
@@ -334,7 +304,6 @@ export function createServiceServer(
   closeFn: () => Promise<CoreCloseReport>,
   authSessions: AuthSessionStore = new AuthSessionStore(),
 ): { server: Server } {
-  // reported from the bound listener, never from this placeholder.
   const protocol = config.tlsCert && config.tlsKey ? 'https' : 'http';
   const url = `${protocol}://${formatHttpAuthority(config.host, config.port)}`;
 
@@ -364,10 +333,7 @@ export function createServiceServer(
         return;
       }
 
-      // matcher — it answers `302` + `Set-Cookie`, and an unmatched non-`/v1`
-      // path would otherwise fall into the SPA static fallback.
       if (method === 'GET' && urlObj.pathname === AUTH_BOOTSTRAP_PATH) {
-        // authentication, so the TLS requirement does not apply here.
         const bindFailure = validateBindPolicy(config, remoteAddress, true);
         if (bindFailure) {
           sendError(
@@ -400,8 +366,6 @@ export function createServiceServer(
         return;
       }
 
-      // admission as domain routes, handled before the domain route matcher
-      // because it controls the transport itself rather than a family.
       if (method === 'POST' && urlObj.pathname === RUNTIME_STOP_PATH) {
         const auth = checkApiKey(req, config, remoteAddress, authSessions);
         if (!auth.ok) {
@@ -420,8 +384,6 @@ export function createServiceServer(
           stopRequest.expected_instance_id === service.instanceId &&
           stopRequest.expected_engine_epoch === service.engineEpoch;
         if (!matches) {
-          // never stops its replacement, and a read-only attach never kills
-          // an unowned service.
           throw new HttpError(
             409,
             'instance_conflict',
@@ -434,9 +396,6 @@ export function createServiceServer(
             },
           );
         }
-        // sockets, including the one carrying this response, so the close is
-        // deferred until the response is flushed ('finish') and its result is
-        // observed by polling the health route (§7 semantics).
         res.once('finish', () => {
           void closeFn().catch(() => undefined);
         });
@@ -444,7 +403,6 @@ export function createServiceServer(
         return;
       }
 
-      // stop path, answered from this instance's own identity.
       if (method === 'GET' && urlObj.pathname === RUNTIME_DISCOVERY_PATH) {
         const auth = checkApiKey(req, config, remoteAddress, authSessions);
         if (!auth.ok) {
@@ -463,22 +421,7 @@ export function createServiceServer(
 
       const route = matchRoute(method, urlObj.pathname);
       if (!route) {
-        // gate only; every `/v1/*` admission is unchanged.
         const staticTarget = rawRequestPath(req.url);
-        // `pathname` is the same view `matchRoute` uses, so a dot-segment form
-        // (`/foo/../v1/x`) collapses into the API domain and cannot slip into
-        // the SPA fallback. `pathname` keeps percent-escapes (`/v1/` ≠
-        // `/%76%31/`), so the raw target is decoded and its dot segments are
-        // collapsed textually with the handler's `/`-segment semantics: a
-        // decoded `?` or `#` is a filename character, never URL structure, so
-        // the admission view and the resolve view segment the same string.
-        // The decode + collapse is check-only and never served, so the
-        // handler's sole decode (§5 step 1) is untouched. The collapse skips
-        // empty and `.` segments the way `path.resolve` ignores duplicate
-        // slashes, so `/v1/` and `/v1/.` both normalize to the bare `/v1` that
-        // `path.resolve` also produces — the boundary must therefore accept
-        // the exact `/v1` form, or those equivalent paths split into the API
-        // and static views again.
         let decodedTarget: string | null = null;
         try {
           decodedTarget = decodeURIComponent(staticTarget);
@@ -516,9 +459,6 @@ export function createServiceServer(
 
       const bodyBuffer = method === 'GET' || method === 'HEAD' ? Buffer.alloc(0) : await readBody(req);
       const body = parseJsonBody(bodyBuffer, method);
-      // not judge it — the core's subscription authority is the one that
-      // decides whether `<epoch>:<sequence>` is resumable, malformed or
-      // future, and a bad cursor must become ITS typed refusal, not a guess.
       const lastEventId = req.headers['last-event-id'];
       const result = await handleRoute(
         service,
@@ -541,8 +481,6 @@ export function createServiceServer(
             released = true;
             releaseSessionSubscriber(subscriberSessionId);
           };
-          // normal completion so repeated SSE requests over one keep-alive
-          // socket do not accumulate dead listeners.
           const subscriberSocket = req.socket;
           subscriberSocket?.once('close', release);
           try {
@@ -550,8 +488,6 @@ export function createServiceServer(
             writeCors(res, origin, config.allowedOrigins);
             await result.run(res);
           } finally {
-            // after an SSE response completed, so a completed or thrown stream
-            // must free its admission here, not at socket close.
             subscriberSocket?.off('close', release);
             release();
           }
@@ -588,12 +524,8 @@ export function createServiceServer(
         )
       : createHttpServer({ ServerResponse: BoundedSseHttpResponse }, handler);
 
-  // and request read 10s (`requestTimeout` >= `headersTimeout`).
   server.headersTimeout = HEADER_READ_TIMEOUT_MS;
   server.requestTimeout = REQUEST_READ_TIMEOUT_MS;
-  // 5s header bound would not be enforced until the 30s default sweep.
-  // `connectionsCheckingInterval` is a runtime server property (Node >= 18.7);
-  // the bundled @types/node does not declare it on `Server`.
   (server as Server & { connectionsCheckingInterval: number }).connectionsCheckingInterval =
     HEADER_DEADLINE_CHECK_MS;
 
@@ -633,10 +565,6 @@ export async function listenServer(
   });
   const port = boundPort(server, config);
   if (port !== config.port) {
-    // kernel picked the real one. Extend it with the actually-served origin
-    // before the first request can run: the listening callback resolves into
-    // this synchronous continuation ahead of any connection event, and the
-    // handler reads `config.allowedOrigins` per request.
     config.allowedOrigins = [
       ...new Set([...config.allowedOrigins, ...resolveAllowedOrigins(port, config.host)]),
     ];

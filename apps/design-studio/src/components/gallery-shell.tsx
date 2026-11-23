@@ -31,8 +31,6 @@ export function GalleryShell({ children }: GalleryShellProps) {
     cancelFocusRef.current?.();
     cancelFocusRef.current = focusGalleryHeading(id);
   }, []);
-  // mounts. Pair mode never searches the parent document for fixture IDs —
-  // the announcement and frame URL hash updates carry the selection there.
   useEffect(() => {
     const id = hash.startsWith('#') ? hash.slice(1) : hash;
     if (!id || compareEnabled) return;

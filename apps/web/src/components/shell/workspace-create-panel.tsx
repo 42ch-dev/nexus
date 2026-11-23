@@ -1,6 +1,4 @@
 /**
- * handling added by plan v1220 QC fix wave 2).
- *
  * Opened from the chip row's trailing 「＋新建工作区」 chip on creator-entrance
  * content surfaces (世界/作品). Display name → slug via
  * {@link deriveWorkspaceSlug}; the creative root preview mirrors the core's
@@ -48,11 +46,6 @@ export function WorkspaceCreatePanel({ onClose }: { onClose: () => void }) {
   const [created, setCreated] = useState<CreatedWorkspace | null>(null);
   const [pending, setPending] = useState(false);
 
-  /**
-   * not commit; once the workspace exists, activation failures must never reuse
-   * the create fallback (that would contradict the created state), so they use
-   * the created-state copy.
-   */
   function failureReason(error: unknown, phase: 'create' | 'activate'): string {
     if (phase === 'activate') return t('workspaceCreate.activationGeneric');
     if (error instanceof NexusClientError) {

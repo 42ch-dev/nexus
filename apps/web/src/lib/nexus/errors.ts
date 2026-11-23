@@ -39,17 +39,9 @@ export interface NexusErrorBody {
 export type TransportErrorKind =
   /** TCP refuse, DNS failure, offline, or undifferentiated fetch throw. */
   | 'network'
-  /**
-   * the throw carries no detectable TLS signal, the classifier falls back to
-   * `network` rather than over-claiming cert rejection.
-   */
   | 'tls'
   /** Explicit abort / timeout (AbortError, AbortSignal.timeout). */
   | 'timeout'
-  /**
-   * an unrouted path. Treated as transport-class because the request never
-   * reached the API layer.
-   */
   | 'http_fallback'
   /** Local-mode daemon is not running (browser-tab client with empty `baseUrl`). */
   | 'daemon_down'
@@ -70,10 +62,6 @@ export class NexusClientError extends Error {
   readonly status: number;
   readonly code: string;
   readonly details: unknown;
-  /**
-   * (transport unreachable). HTTP errors (`status >= 400`) leave this
-   * `undefined`; their recovery UX is driven by `code` / `details` instead.
-   */
   readonly kind?: TransportErrorKind;
 
   constructor(
@@ -91,11 +79,6 @@ export class NexusClientError extends Error {
     this.kind = kind;
   }
 
-  /**
-   * `service_unavailable` / message contains "engine not available").
-   * List surfaces map this to honest unavailable/empty UX — not the generic
-   * `common.error.title` crash framing.
-   */
   static isOrchestrationEngineUnavailable(error: unknown): boolean {
     return (
       error instanceof NexusClientError

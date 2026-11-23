@@ -52,8 +52,6 @@ describe('cancel honours the request deadline', () => {
     const engine = createTestEngine();
     const owner = makeOwner(child);
     engine.adoptSession('sess-1', owner);
-    // immediately without settling it — the shape that used to hang the adapter
-    // forever because the prompt join was unbounded.
     owner.connection = { cancel: async () => undefined };
     engine.adoptOperation('sess-1', 'op-1', new Promise(() => {}), new OperationDelivery('op-1'));
 
@@ -129,7 +127,6 @@ describe('cancel honours the request deadline', () => {
     assert.equal(engine.cleanupFenceCount(), 1);
     assert.equal(childAlive(child), true, 'mismatched identity must not be signalled');
 
-    // settlement call standing in for the production retry path.
     owner.boundIdentity = identity;
     const settled = await cancel();
     assert.equal(settled.ok, true, JSON.stringify(settled));
@@ -174,11 +171,6 @@ describe('cancel honours the request deadline', () => {
 });
 
 describe('one absolute deadline per handler', () => {
-  /**
-   * escalating to SIGKILL, which costs far more than the supplied deadline — so
-   * a handler that grants itself a fresh default reap budget is instantly
-   * visible here, both in wall time and in whether it claims a confirmed reap.
-   */
   function spawnTermResistantChild() {
     return spawn(
       resolveNode(),
@@ -233,7 +225,6 @@ describe('one absolute deadline per handler', () => {
     );
     assert.equal(childAlive(child), true, 'no unconfirmable kill may be issued');
 
-    // confirms the reap (SIGKILL escalation) and clears the fence.
     const settled = await engine.trySettleCleanupFences();
     assert.equal(settled.pending.length, 0, `settlement must confirm: ${JSON.stringify(settled)}`);
     assert.equal(settled.settled.length, 1, 'the retained owner must settle on retry');
@@ -283,7 +274,6 @@ describe('one absolute deadline per handler', () => {
   });
 
   test('a generous deadline still confirms the reap in one call', async () => {
-    // handler, so the deadline bounds the work rather than always fencing.
     const child = spawnTermResistantChild();
     await new Promise((resolve) => setTimeout(resolve, 150));
 

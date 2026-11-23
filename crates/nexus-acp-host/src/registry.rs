@@ -826,8 +826,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_registry_returns_error_when_no_cache_and_no_network() {
-        // we test with an empty temp dir and override to test the error path.
-        // Instead, test that load_cached returns None when no cache exists.
         let (client, _tmp) = make_test_client();
         assert!(client.load_cached().is_none());
     }

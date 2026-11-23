@@ -19,9 +19,6 @@ export interface ServiceOptions {
   cdnUrl?: string;
   /** Enable the embedded MCP lane for peers that request it. */
   embeddedMcp?: boolean;
-  /**
-   * `undefined` for repo-anchored auto-discovery (`resolveWebDist`).
-   */
   webDist?: string | null;
 }
 
@@ -161,10 +158,6 @@ function resolvePositiveIntEnv(name: string, fallback: number): number {
   return parsed;
 }
 
-/**
- * *larger* value resolves to the ceiling, so no environment variable can raise
- * the process-wide bound the proof is computed against.
- */
 function resolveCeilEnv(name: string, ceiling: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return ceiling;
@@ -242,7 +235,6 @@ export function validateServiceHome(home: string): void {
 /** Blocklist ranges (private/loopback/link-local/metadata) for four IPv4 octets. */
 function isBlockedIpv4Octets(octets: readonly number[]): boolean {
   const [a, b] = [octets[0], octets[1]];
-  // endpoint, mirroring the legacy `is_blocked_ip` V4 arm.
   return (
     a === 10 ||
     a === 127 ||
@@ -283,7 +275,6 @@ function parseIpv6Groups(input: string): number[] | null {
 
 function isBlockedIpv6(groups: readonly number[]): boolean {
   if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true;
-  // deprecated IPv4-compatible ::/96 all judge by the embedded IPv4 address.
   if (groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0xffff || groups[5] === 0)) {
     return isBlockedIpv4Octets([groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff]);
   }
@@ -297,9 +288,6 @@ function isBlockedCdnIp(ip: string): boolean {
     const groups = parseIpv6Groups(lowered);
     return groups !== null && isBlockedIpv6(groups);
   }
-  // 32-bit IPv4 spellings all canonicalize here before classification, so
-  // `0177.0.0.1` or `2130706433` can no longer smuggle a loopback past the
-  // decimal-only matcher.
   try {
     const hostname = new URL(`https://${lowered}/`).hostname;
     const v4 = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
@@ -313,12 +301,6 @@ function isBlockedCdnIp(ip: string): boolean {
   return false;
 }
 
-/**
- * in spirit: public HTTPS URLs only, literal-IP hosts in private, loopback,
- * link-local or metadata ranges are refused. Hosts go through real URL/IP
- * parsing — bracketed IPv6 (`[::1]`, ULA, link-local), both IPv4-mapped
- * spellings, and exotic IPv4 forms are canonicalized before classification.
- */
 export function validateCdnUrl(url: string): void {
   if (url.trim().length === 0) {
     throw new Error('--cdn-url must be a public HTTPS CDN URL (https://...); got empty value');
@@ -337,10 +319,6 @@ export function validateCdnUrl(url: string): void {
   }
 }
 
-/**
- * unix socket requires an absolute `socketPath`, and the socket path conflicts
- * with an explicitly selected HTTP bind.
- */
 function resolveTransport(
   options: Pick<ServiceOptions, 'transport' | 'socketPath'>,
 ): { transport: 'http' | 'unix'; socketPath?: string } {
@@ -483,8 +461,6 @@ export function parseCliArgs(argv: string[]): CliArgs {
   if ((tlsCert && !tlsKey) || (!tlsCert && tlsKey)) {
     throw new Error('--tls-cert and --tls-key must be supplied together');
   }
-  // selected HTTP bind (architecture §7): an explicit --host/--port on the
-  // unix transport has no meaning, and a socket path on http is ambiguous.
   if (transport === 'unix') {
     if (!socketPath) {
       throw new Error('--socket <absolute-path> is required for --transport unix');

@@ -131,9 +131,6 @@ pub fn spawn_auto_chronology_tick(
 /// Thin wrapper over [`nexus_orchestration::auto_chronology::run_one_tick`];
 /// the orchestration layer owns scan + finish detection + advance.
 pub async fn run_one_tick(pool: &SqlitePool, workspace_dir: Option<&std::path::Path>) {
-    // DB-only tests). The orchestration advance will fail its outline write
-    // per-Work and log the error non-fatally; production always passes a real
-    // workspace path.
     let ws: std::path::PathBuf = workspace_dir.map_or_else(
         || std::path::PathBuf::from("/__nexus_no_workspace__"),
         std::path::PathBuf::from,

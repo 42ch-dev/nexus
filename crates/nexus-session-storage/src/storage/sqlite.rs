@@ -238,11 +238,6 @@ impl SessionStorage for SqliteSessionStorage {
     async fn save(&self, session: Session) -> graph_flow::Result<()> {
         let now = chrono::Utc::now().timestamp();
 
-        // to the durable `graph_version` column (brief §3.1 — `state_revision`
-        // stays the workflow control CAS; `execution_version` stays the format
-        // marker). Checked conversions: an incoming version outside SQLite's
-        // signed range or an exhausted counter is a hard storage error with
-        // NO write — never wrapped, saturated, or clamped.
         let incoming_version = i64::try_from(session.version).map_err(|_| {
             graph_flow::GraphError::StorageError(format!(
                 "save session '{}': incoming graph version {} exceeds SQLite's signed range",
@@ -273,11 +268,6 @@ impl SessionStorage for SqliteSessionStorage {
         let session_id = session.id;
         let current_task_id = session.current_task_id;
 
-        // one `BEGIN IMMEDIATE` write lock (the same convention as
-        // `commit_transition` / `restore_pre_step`). The write and the
-        // classification read are one atomic observation — no check-then-write
-        // race that could re-open overwrite risk.
-        //
         // graph-flow 0.8 OCC contract (brief §3.2): an absent row inserts with
         // the incremented graph_version; an existing row updates ONLY when it
         // is re-stepable (`status IN ('running','paused')`) AND its stored
@@ -327,14 +317,6 @@ impl SessionStorage for SqliteSessionStorage {
         .map_err(|e| {
             graph_flow::GraphError::StorageError(format!("save session '{session_id}': {e}"))
         })?;
-        // already exists outside the admitted set: a stale graph version, a
-        // protected durable status, or a corrupt/unknown row. Classify the
-        // outcome under the same write transaction instead of silently
-        // reporting success: in 0.8 a successful save promises a versioned
-        // write, so a refused save reports `SessionConflict` (stale version /
-        // protected known status) or an explicit storage error
-        // (unknown/corrupt) — never a fake success, never a mutation on
-        // refusal.
         if result.rows_affected() == 0 {
             return Err(save_zero_row_outcome(&mut tx, &session_id, incoming_version).await?);
         }
@@ -369,8 +351,6 @@ impl SessionStorage for SqliteSessionStorage {
                 ))
             })?;
 
-        // hard storage error — never coerced to zero, never silently
-        // deserialized away (brief §3.1).
         let version = u64::try_from(row.graph_version).map_err(|_| {
             graph_flow::GraphError::StorageError(format!(
                 "get session '{id}': negative/corrupt graph_version {} (non-replayable)",
@@ -545,11 +525,6 @@ async fn child_cas_outcome(
                 "completed" | "failed" | "cancelled" | "interrupted"
             );
             if terminal && found_rev == expected_revision as i64 {
-                // parent's checkpoint confirms it **only** when the DB
-                // terminal status matches the submitted child status. A
-                // stale Running/completed checkpoint submitted against a
-                // Failed/Cancelled child must not confirm the parent's
-                // transition (Important 6).
                 if status == submitted_status.as_db_str() {
                     None
                 } else {
@@ -752,8 +727,6 @@ async fn save_zero_row_outcome(
             "save session '{session_id}': row absent after upsert (non-replayable)"
         )));
     };
-    // storage error, never a concurrency outcome. Surface it, never coerce,
-    // never write.
     if row.graph_version < 0 || row.graph_version == i64::MAX {
         return Ok(graph_flow::GraphError::StorageError(format!(
             "save session '{session_id}': corrupt/exhausted graph_version {} \
@@ -762,10 +735,6 @@ async fn save_zero_row_outcome(
         )));
     }
     Ok(match SessionStatus::from_db_str(&row.status) {
-        // the graph_version OCC — a concurrent writer won. (The write lock
-        // makes status-passing + version-matching unreachable here; both
-        // shapes are the same concurrency outcome: conflict, save not
-        // applied.)
         Some(SessionStatus::Running | SessionStatus::Paused) => {
             graph_flow::GraphError::SessionConflict(format!(
                 "save session '{}': stored graph version {} no longer equals the \
@@ -773,16 +742,11 @@ async fn save_zero_row_outcome(
                 session_id, row.graph_version, incoming_version
             ))
         }
-        // success, never a conflict alias.
         None => graph_flow::GraphError::StorageError(format!(
             "save session '{session_id}': unknown/corrupt status {:?} \
              (non-replayable; save not applied)",
             row.status
         )),
-        // interrupted / cancelled): the save is REFUSED. 0.8 honesty:
-        // report SessionConflict rather than the old fake-success no-op; the
-        // durable row/blob/token/revisions/timestamp stay byte-identical
-        // (A4).
         Some(_) => graph_flow::GraphError::SessionConflict(format!(
             "save session '{}': durable status {:?} is protected from late \
              graph saves (save not applied)",
@@ -898,8 +862,6 @@ async fn persist_child_checkpoints(
             .parent_session_id
             .as_ref()
             .map(|s| s.0.clone());
-        // never match a stored row — a hard storage error, never a wrapped
-        // CAS (brief §3.1 convention).
         let child_revision = i64::try_from(child.state_revision).map_err(|_| {
             StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} child '{child_id}': state_revision {} exceeds SQLite's signed range \
@@ -907,12 +869,6 @@ async fn persist_child_checkpoints(
                 child.state_revision
             )))
         })?;
-        // checked incoming checkpoint version + 1; an existing row's
-        // authoritative write advances the stored graph_version in the same
-        // transaction (authority comes from the workflow CAS above, not the
-        // stale pre-step session version — brief §3.3). The range guard
-        // makes counter exhaustion/corruption fail closed (zero rows ->
-        // typed error), never wrap into a REAL.
         let child_graph_version = checked_next_graph_version(child.session.version)?;
         // NOTE: the SQL text is byte-identical to the pre-refactor inline
         // query; the .sqlx offline cache hashes the string verbatim.
@@ -1016,7 +972,6 @@ async fn classify_transition_fence_miss(
                 session_id.0, row.graph_version
             )))
         }
-        // terminal outcome (Important 6).
         Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
             StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "{op} '{}': unknown/corrupt status {:?} (non-replayable)",
@@ -1037,8 +992,6 @@ async fn classify_transition_fence_miss(
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        // graph-only winner owns the session clock — the same typed
-        // ownership loss as a revision mismatch, never a mutation.
         Some(row) if expected_graph_i64.is_some_and(|expected| row.graph_version != expected) => {
             StorageError::RevisionMismatch {
                 session_id: session_id.0.clone(),
@@ -1247,7 +1200,6 @@ async fn run_commit_transition_cas(
         )))
     })?;
     if result.rows_affected() == 0 {
-        // a terminal/cancelled fence without mutating any of them.
         return Err(classify_transition_fence_miss(
             tx,
             session_id,
@@ -1411,9 +1363,6 @@ async fn classify_restore_fence_miss(
                 session_id.0, row.graph_version
             )))
         }
-        // deterministic `TerminalState`/`RevisionMismatch` outcomes the
-        // engine treats as an expected concurrent winner — it is corruption,
-        // checked before the revision fence (Important 6).
         Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
             StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "restore_pre_step '{}': unknown/corrupt status {:?} (non-replayable)",
@@ -1427,9 +1376,7 @@ async fn classify_restore_fence_miss(
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        // terminal/waiting winner.
         Some(_) => StorageError::TerminalState(session_id.0.clone()),
-        // winner, and not safely replayable.
         None => StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
             "restore_pre_step '{}': row absent after zero-row restore fence (non-replayable)",
             session_id.0
@@ -1467,7 +1414,6 @@ async fn classify_mark_fence_miss(
                 session_id.0, row.graph_version
             )))
         }
-        // error, never a concurrency/terminal outcome (Important 6).
         Some(row) if crate::SessionStatus::from_db_str(&row.status).is_none() => {
             StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                 "mark_step_in_flight '{}': unknown/corrupt status {:?} (non-replayable)",
@@ -1481,8 +1427,6 @@ async fn classify_mark_fence_miss(
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        // graph-only winner owns the session clock — the same typed
-        // ownership loss as a revision mismatch, never an overwrite.
         Some(row) if expected_graph_i64.is_some_and(|expected| row.graph_version != expected) => {
             StorageError::RevisionMismatch {
                 session_id: session_id.0.clone(),
@@ -1539,10 +1483,6 @@ async fn ensure_marker_not_cancelled(
         )))
     })?;
     if cancel_intent == Some(1) {
-        // the cancel intent stands between the step and an external effect
-        // committed after the cancel winner. Refuse it: the drive loop stops
-        // as a losing writer (no failure settlement, no durable write of any
-        // kind).
         return Err(StorageError::GraphFlow(
             graph_flow::GraphError::SessionConflict(format!(
                 "mark_step_in_flight '{}': durable cancel intent committed at revision {}; \
@@ -1640,9 +1580,6 @@ async fn classify_prompt_attempt_miss(
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        // while `expected_step` named one): a newer step superseded this
-        // prompt's admission — same linearization boundary, same typed
-        // mismatch.
         Some(row) if expected_step.is_some() && row.step_marker.as_deref() != expected_step => {
             StorageError::RevisionMismatch {
                 session_id: session_id.0.clone(),
@@ -1650,9 +1587,6 @@ async fn classify_prompt_attempt_miss(
                 found: u64::try_from(row.state_revision).unwrap_or(0),
             }
         }
-        // `in_flight`: a concurrent same-anchor prompt claimed the slot (or
-        // updated its own op) before this request — the durable marker must
-        // never be replaced (attempt ownership).
         Some(row)
             if expected_attempt_id.is_some()
                 && row.in_flight_attempt_id.as_deref() != expected_attempt_id =>
@@ -1869,7 +1803,6 @@ async fn reject_existing_claim(
             )),
         ));
     }
-    // recovery, never mint a second session.
     Err(StorageError::GraphFlow(
         graph_flow::GraphError::StorageError(format!(
             "admit_schedule_run: schedule {schedule_id} has a stale claim on {existing}; \
@@ -1954,8 +1887,6 @@ fn child_run_record_from_row(
             parent_session_id.0, row.session_id, row.execution_version
         )))
     })?;
-    // (A7) — never coerce it to zero. Preserve the row verbatim
-    // (Important 1), exactly as `load_run` does for the root row.
     let state_revision_i64 = row.state_revision;
     if state_revision_i64 < 0 {
         return Err(StorageError::GraphFlow(
@@ -2008,7 +1939,6 @@ fn child_run_record_from_row(
             graph_version,
         })
     } else {
-        // non-replayable error rather than silently dropping it.
         Err(StorageError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "load_children '{}': v0 legacy child row (non-replayable)",
@@ -2044,9 +1974,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
             return Ok(None);
         };
 
-        // (A2/A7): corrupt or unsupported values are surfaced as errors,
-        // never coerced. The row/blobs are preserved verbatim — the caller
-        // does not rewrite them (Important 4).
         let (execution_version, state_revision, graph_version) = checked_load_clocks(
             "load_run",
             &session_id.0,
@@ -2055,17 +1982,13 @@ impl WorkflowStateStore for SqliteSessionStorage {
             row.graph_version,
         )?;
 
-        // diagnostic only. v1 rows carry the authoritative descriptor/state.
         if execution_version >= 1 {
-            // status value is corrupt/ambiguous and must be surfaced as
-            // non-replayable (A7), never silently reinterpreted as Running.
             let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
                 StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "load_run '{}': unknown/unsupported v1 status {:?} (non-replayable)",
                     session_id.0, row.status
                 )))
             })?;
-            // is corrupt/unsupported and non-replayable (A7).
             let descriptor_bytes = row.run_descriptor_json.as_deref().ok_or_else(|| {
                 StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "load_run '{}': v1 row missing run_descriptor_json (non-replayable)",
@@ -2091,10 +2014,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 graph_version,
             }))
         } else {
-            // status must remain distinct and non-replayable (A7) — never
-            // silently reinterpreted as `running`. A negative or out-of-range
-            // integer revision is also corrupt and must not be coerced to
-            // zero (A2/A7): preserve the row but surface it as unknown.
             let status = SessionStatus::from_db_str(&row.status).ok_or_else(|| {
                 StorageError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "load_run '{}': unknown/unsupported v0 status {:?} (non-replayable)",
@@ -2133,7 +2052,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
         let state_bytes = serialize_blob(next_state)?;
         let descriptor_bytes = serialize_blob(descriptor)?;
-        // checked incoming checkpoint version + 1 (normally 1) — brief §3.3.
         let root_graph_version = checked_next_graph_version(checkpoint.root.version)?;
         let now = chrono::Utc::now().timestamp();
 
@@ -2145,9 +2063,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
 
-        // launders an existing uncertain legacy row in place — an existing
-        // row (any execution_version, including a v0 legacy row) must be
-        // left untouched and the caller must mint a new session id.
         ensure_run_absent(&mut tx, session_id, "start_run").await?;
 
         insert_v1_run_row(
@@ -2169,8 +2084,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
         )
         .await?;
 
-        // child inherits the trusted root identity (A2/A4) and is
-        // revision-fenced + terminal-fenced (Important 2).
         persist_child_checkpoints(
             &mut tx,
             &session_id.0,
@@ -2233,9 +2146,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
 
-        //    claim (status/current_session_id) and the v1 run row commit
-        //    together — a concurrent admission loses the claim and returns
-        //    the winner's owned run (C-1).
         let row = load_fenced_schedule_claim(
             &mut tx,
             schedule_id,
@@ -2244,7 +2154,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
         )
         .await?;
 
-        // (see `verify_admission_gate`).
         if let Some(gate) = admission_gate {
             verify_admission_gate(&mut tx, schedule_id, session_id, gate).await?;
         }
@@ -2254,10 +2163,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
             reject_existing_claim(&mut tx, schedule_id, session_id, existing).await?;
         }
 
-        //    seeded context) — the run is durable before the schedule
-        //    pointer is published (C-2). A2: an existing row (any
-        //    execution_version) is left untouched and the caller must mint a
-        //    new session id.
         ensure_run_absent(&mut tx, session_id, "admit_schedule_run").await?;
         insert_v1_run_row(
             &mut tx,
@@ -2317,7 +2222,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
 
-        // `run_commit_transition_cas`): only authoritative v1 rows may advance.
         run_commit_transition_cas(
             &mut tx,
             session_id,
@@ -2501,9 +2405,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
         let current_task_id = pre_step.current_task_id.clone();
 
-        // in-flight markers the aborted step's `mark_step_in_flight` wrote so
-        // the restored row is not left pretending a step is dispatching
-        // (A2/A7 Important 3 + 5).
         let cleared_state = RunStateV1 {
             step_in_flight: None,
             in_flight: None,
@@ -2519,13 +2420,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
 
-        // matches AND the row is a status that may actually be stepped
-        // (explicit running/paused intent — a paused row is re-stepped by the
-        // drive loop and its position must restore too). `waiting_for_input`
-        // (and unknown statuses) are excluded so a stale step invocation can
-        // never clear or overwrite a durable human-wait row, including its
-        // WaitRecord token (A4). A concurrent transition that won between a
-        // check and a separate save is left untouched.
         let expected_revision_i64 =
             checked_expected_revision("restore_pre_step", session_id, expected_revision)?;
         let result = sqlx::query!(
@@ -2563,8 +2457,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
             .await?);
         }
 
-        // restore advances only the graph clock, and this record is the
-        // operation-owned anchor a failed step's witness must adopt.
         let (status, graph_version) =
             read_post_write_clocks(&mut tx, session_id, "restore_pre_step", "post-restore").await?;
         let descriptor = read_root_descriptor(&mut tx, &session_id.0).await?;
@@ -2629,16 +2521,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                 )))
             })?;
 
-        // `paused`), `state_revision = expected`, and the loaded GRAPH
-        // preimage. `waiting_for_input` and unknown statuses are excluded so a
-        // stale step cannot overwrite a durable wait. The graph predicate
-        // closes the last stale-checkpoint window: a graph-only writer that
-        // advanced the session clock while keeping the workflow revision made
-        // the pre-step context stale, so the marker must lose the CAS rather
-        // than clobber the winner's context. Advancing BOTH clocks in the same
-        // write makes the marker a CAS boundary on the ownership pair, and the
-        // returned record carries the exact clocks the step transition and any
-        // failure witness must anchor to.
         let expected_revision_i64 =
             checked_expected_revision("mark_step_in_flight", session_id, expected_revision)?;
         let expected_graph_i64: Option<i64> = expected_graph_version
@@ -2650,9 +2532,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
                     session_id.0
                 )))
             })?;
-        // while a durable cancel intent is committed is refused — the step
-        // would otherwise dispatch its external effect after the cancel
-        // linearization point (see `ensure_marker_not_cancelled`).
         ensure_marker_not_cancelled(
             &mut tx,
             session_id,
@@ -2691,9 +2570,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         if result.rows_affected() == 0 {
-            // graph-only winner owns the session clock — the external effect
-            // must not run on an unmarked row, and none of these may be
-            // overwritten.
             return Err(classify_mark_fence_miss(
                 &mut tx,
                 session_id,
@@ -2704,7 +2580,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
             .await?);
         }
 
-        // step transition and any failure witness anchor here.
         let (status, graph_version) =
             read_post_write_clocks(&mut tx, session_id, "mark_step_in_flight", "post-marker")
                 .await?;
@@ -2743,21 +2618,8 @@ impl WorkflowStateStore for SqliteSessionStorage {
             )))
         })?;
 
-        // advancing the revision. The fence keeps the write off terminal
-        // rows, off rows whose revision moved since the caller loaded it,
-        // and (with `expected_step = Some(task)`) off rows whose step
-        // marker moved — the same linearization boundary the engine's
-        // control transitions anchor to. When `expected_attempt_id` names
-        // this request's own admission, the row must either have NO
-        // `in_flight` attempt yet (Dispatching claims an empty slot) or
-        // already carry exactly this operation's attempt id (Active updates
-        // the SAME operation) — a concurrent same-anchor prompt cannot
-        // overwrite another operation's durable attempt.
         let expected_revision_i64 =
             checked_expected_revision("persist_prompt_attempt", session_id, expected_revision)?;
-        // row must either have NO `in_flight` attempt yet (Dispatching
-        // claims an empty slot) or already carry exactly this operation's
-        // attempt id (Active updates the SAME operation).
         let owner_cas_sql = match expected_attempt_id {
             Some(_) => " AND (json_extract(COALESCE(run_state_json, '{}'), '$.in_flight') IS NULL \
                    OR json_extract(COALESCE(run_state_json, '{}'), '$.in_flight.attempt_id') = ?)"
@@ -2816,7 +2678,6 @@ impl WorkflowStateStore for SqliteSessionStorage {
         })?;
 
         if result.rows_affected() == 0 {
-            // or an unrelated in-flight owner.
             return Err(classify_prompt_attempt_miss(
                 &self.pool,
                 session_id,
@@ -2977,11 +2838,6 @@ mod tests {
         let (pool, _db) = fresh_pool().await;
         let storage = SqliteSessionStorage::new(pool.clone());
 
-        // resume re-drive re-steps. The graph-flow post-step `save` seam
-        // must persist the task's in-memory context mutations (the
-        // `_gate_park_*` marker) for a paused row too — otherwise the
-        // engine's post-step re-fetch reads a marker-less stale context and
-        // misclassifies the re-park as a human wait.
         let session = Session::new_from_task("sess-paused-save".into(), "join");
         seed_row(
             &pool,
@@ -3029,8 +2885,6 @@ mod tests {
         let (pool, _db) = fresh_pool().await;
         let storage = SqliteSessionStorage::new(pool.clone());
 
-        // never be overwritten by the graph-flow post-step save seam — a
-        // stale step invocation cannot clear or replace the WaitRecord.
         let session = Session::new_from_task("sess-wait-fence".into(), "wait_state");
         seed_row(
             &pool,
@@ -3040,7 +2894,6 @@ mod tests {
             &serde_json::to_vec(&session.context).expect("serialize seed context"),
         )
         .await;
-        // must conflict (0.8 honest refusal, no fake-success no-op).
         let mut session = storage
             .get("sess-wait-fence")
             .await
@@ -3080,8 +2933,6 @@ mod tests {
         let (pool, _db) = fresh_pool().await;
         let storage = SqliteSessionStorage::new(pool.clone());
 
-        // (WHERE fence skipped) against it must be an explicit error, never
-        // a silent `Ok(())` that masks the broken row.
         let session = Session::new_from_task("sess-unknown-status".into(), "task_a");
         seed_row(
             &pool,
@@ -3122,10 +2973,6 @@ mod tests {
         let (pool, _db) = fresh_pool().await;
         let storage = SqliteSessionStorage::new(pool.clone());
 
-        // skipped by something other than the status fence (the BEGIN
-        // IMMEDIATE write lock makes the check-then-write race unreachable
-        // through this path). A regression trigger reproduces the skip; the
-        // save must surface a revision/status conflict, never success.
         let session = Session::new_from_task("sess-zero-row-race".into(), "task_a");
         seed_row(
             &pool,
@@ -3412,9 +3259,6 @@ mod tests {
         seed_v1_stepped_row(&pool, "sess-cas-ok").await;
         let storage = SqliteSessionStorage::new(pool.clone());
 
-        // written and the revision is NOT advanced (the engine's step
-        // transition CAS anchor is preserved). The ownership CAS accepts
-        // the claim onto an empty `in_flight` slot.
         let first = test_attempt("t1", crate::run_state::PromptPhase::Dispatching);
         storage
             .persist_prompt_attempt(
@@ -3438,7 +3282,6 @@ mod tests {
         let state = record.state.expect("v1 state");
         assert_eq!(state.in_flight.as_ref().expect("in_flight").task_id, "t1");
 
-        // attempt id — the ownership CAS matches the occupant).
         let active = test_attempt("t1", crate::run_state::PromptPhase::Active);
         let mut active = active;
         active.attempt_id = first.attempt_id.clone();
@@ -3487,8 +3330,6 @@ mod tests {
             .await
             .expect("request A claims the empty slot");
 
-        // tries to claim the slot with a DIFFERENT attempt id: the durable
-        // `in_flight` owner must never be replaced.
         let second = test_attempt("t2", crate::run_state::PromptPhase::Dispatching);
         let err = storage
             .persist_prompt_attempt(
@@ -3505,7 +3346,6 @@ mod tests {
             "expected RevisionMismatch for foreign-owner overwrite, got: {err:?}"
         );
 
-        // could not replace nor displace it.
         let record = storage
             .load_run(&SessionId("sess-owner".into()))
             .await
@@ -3518,7 +3358,6 @@ mod tests {
             "the durable in_flight marker must remain request A's operation"
         );
 
-        // own the slot, so it can never write its Host ids into the marker.
         let second_active = test_attempt("t2", crate::run_state::PromptPhase::Active);
         let err = storage
             .persist_prompt_attempt(
@@ -3542,7 +3381,6 @@ mod tests {
         seed_v1_stepped_row(&pool, "sess-stale").await;
         let storage = SqliteSessionStorage::new(pool.clone());
 
-        // prompt invocation holds the old anchor.
         sqlx::query!(
             "UPDATE orchestration_sessions
              SET state_revision = state_revision + 1, run_state_json = json_set(
@@ -3553,7 +3391,6 @@ mod tests {
         .await
         .expect("advance revision");
 
-        // state (revision 3, cancel_requested) is never overwritten.
         let stale = test_attempt("stale-t1", crate::run_state::PromptPhase::Dispatching);
         let err = storage
             .persist_prompt_attempt(
@@ -3601,7 +3438,6 @@ mod tests {
         seed_v1_stepped_row(&pool, "sess-step-moved").await;
         let storage = SqliteSessionStorage::new(pool.clone());
 
-        // invocation still holds the old task marker.
         sqlx::query!(
             "UPDATE orchestration_sessions
              SET run_state_json = json_set(

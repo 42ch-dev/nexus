@@ -14,9 +14,6 @@ export const queryKeys = {
     details: () => [...queryKeys.works.all, 'detail'] as const,
     detail: (workId: string) => [...queryKeys.works.details(), workId] as const,
   },
-  // creator-scoped (none of the four payloads carries a `work_id`), so a
-  // `works.lists()` invalidation must not blank the pool cache. No `detail`:
-  // there is no single-item GET route.
   inspiration: {
     all: ['inspiration'] as const,
     lists: () => [...queryKeys.inspiration.all, 'list'] as const,
@@ -46,16 +43,8 @@ export const queryKeys = {
   presets: {
     all: ['presets'] as const,
     list: () => [...queryKeys.presets.all, 'list'] as const,
-    // (R-V167P1-QC3-S2): getPreset/updatePreset/deletePreset operate on a
-    // single preset by id. Invalidation follows the existing inline mutation
-    // pattern — `qc.invalidateQueries({ queryKey: queryKeys.presets.all })`
-    // covers the list + every detail, and `queryKeys.presets.detail(id)`
-    // targets one.
     details: () => [...queryKeys.presets.all, 'detail'] as const,
     detail: (presetId: string) => [...queryKeys.presets.details(), presetId] as const,
-    // scaffold/reload/delete mutations invalidate the whole `['presets']`
-    // key set and refresh catalog lanes after a manifest change — see the
-    // staleness contract on `usePresetProfile`.
     profile: (presetId: string) => [...queryKeys.presets.all, 'profile', presetId] as const,
   },
   creators: {
@@ -63,8 +52,6 @@ export const queryKeys = {
     list: (query?: object) => [...queryKeys.creators.all, 'list', query ?? {}] as const,
     active: () => [...queryKeys.creators.all, 'active'] as const,
   },
-  // switch invalidates `workspaces.all`; content families are invalidated
-  // separately by the workspace context on switch.
   workspaces: {
     all: ['workspaces'] as const,
     list: (query?: object) => [...queryKeys.workspaces.all, 'list', query ?? {}] as const,
@@ -75,13 +62,10 @@ export const queryKeys = {
     scan: (request?: { filter?: string; registry_refresh?: boolean }) =>
       [...queryKeys.agentHost.all, 'scan', request?.filter ?? 'all', request?.registry_refresh ?? false] as const,
   },
-  // Agent Save handler can invalidate it and the DaemonStatusBar badge refreshes
-  // immediately after a save (AD-P1-1) instead of waiting for the 10s poll.
   agentProfile: {
     all: ['agentProfile'] as const,
     detail: () => [...queryKeys.agentProfile.all, 'detail'] as const,
   },
-  // refetches only its own sources (per-card error isolation).
   hub: {
     all: ['hub'] as const,
     service: {
@@ -109,13 +93,10 @@ export const queryKeys = {
     all: ['outline'] as const,
     detail: (workId: string) => [...queryKeys.outline.all, 'detail', workId] as const,
   },
-  // apply + newest approval). A successful apply or approve invalidates it.
   strategies: {
     all: ['strategies'] as const,
     applied: (strategyId: string) =>
       [...queryKeys.strategies.all, 'applied', strategyId] as const,
-    // an apply refreshes the live identity while the approval rows do not move; an
-    // approve moves both.
     approvals: (strategyId: string) =>
       [...queryKeys.strategies.all, 'approvals', strategyId] as const,
   },
@@ -133,15 +114,10 @@ export const queryKeys = {
     all: ['worldFindings'] as const,
     list: (worldId: string) => [...queryKeys.worldFindings.all, 'list', worldId] as const,
   },
-  // are CLI-authored (PD-1) and no mutation ever invalidates this key.
   worldRules: {
     all: ['worldRules'] as const,
     list: (worldId: string) => [...queryKeys.worldRules.all, 'list', worldId] as const,
   },
-  // the character id before any query object so two Characters never share a
-  // cache entry, and the families live under `characters` rather than the
-  // creator-scoped `memory` branch: a creator-scoped invalidation must not
-  // blank a character's data and vice versa.
   characters: {
     all: ['characters'] as const,
     lists: () => [...queryKeys.characters.all, 'list'] as const,
@@ -156,7 +132,6 @@ export const queryKeys = {
       detail: (characterId: string, bindingId: string) =>
         [...queryKeys.characters.bindings.details(), characterId, bindingId] as const,
     },
-    // `characters`-first prefix keeps the two caches disjoint.
     memory: {
       pendingLists: () => [...queryKeys.characters.all, 'memory', 'pending', 'list'] as const,
       pendingList: (characterId: string, query?: object) =>
@@ -193,8 +168,6 @@ export const queryKeys = {
     fragments: (creatorId: string, query?: object) =>
       [...queryKeys.memory.all, 'fragments', creatorId, query ?? {}] as const,
     worlds: () => [...queryKeys.memory.all, 'worlds'] as const,
-    // key includes the selected `world_id` so switching scopes creates exactly
-    // one active observer per active scope and never leaves a stale narrative visible.
     soulNarrative: (creatorId: string, worldId?: string | null) =>
       [...queryKeys.memory.all, 'soul-narrative', creatorId, worldId ?? 'creator'] as const,
   },
@@ -213,7 +186,6 @@ export const queryKeys = {
       detail: (moduleId: string) =>
         [...queryKeys.compute.modules.all(), 'detail', moduleId] as const,
     },
-    // run/accept/discard mutations invalidate all visible runs lists at once.
     runs: {
       all: () => [...queryKeys.compute.all, 'runs'] as const,
       lists: () => [...queryKeys.compute.runs.all(), 'list'] as const,
@@ -222,9 +194,6 @@ export const queryKeys = {
       detail: (runId: string) => [...queryKeys.compute.runs.details(), runId] as const,
     },
   },
-  // (the UI observes the route, AC-I6), but the directive set/clear mutation
-  // invalidates `inspector.all` so the packet's directive-status section
-  // refreshes after a write (AC-I5).
   inspector: {
     all: ['inspector'] as const,
     moment: (request?: object) =>
@@ -232,12 +201,7 @@ export const queryKeys = {
   },
   timeline: {
     all: ['timeline'] as const,
-    // under this single key (pageParam is not part of it), so `timeline.all`
-    // prefix-invalidation covers all pages. Do not re-add a cursor parameter.
     overview: () => [...queryKeys.timeline.all, 'overview'] as const,
-    // e.g. compute_result). `all()` prefix-covers every world + filter so
-    // accept/discard invalidation via `timeline.all` refetches the mounted
-    // canvas events query.
     events: {
       all: () => [...queryKeys.timeline.all, 'events'] as const,
       list: (worldId: string, filter?: object) =>

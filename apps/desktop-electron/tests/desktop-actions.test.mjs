@@ -30,10 +30,6 @@ import test from 'node:test';
 import { isAllowedDesktopExternalUrl } from '../dist/desktop-contract.js';
 import { createDesktopActions } from '../dist/desktop-actions.js';
 
-/**
- * every call that would reach the OS, so tests can assert denies happen
- * before any effect.
- */
 function fakeOs() {
   const effects = [];
   const shell = {
@@ -186,10 +182,8 @@ test('root change between calls is re-resolved (fresh authority per call)', asyn
   const { handlers, os } = ws.actions();
   await handlers.open_with({ path: 'top.txt' }, { operation: 'open_with' });
   assert.deepEqual(os.effects, [['openPath', realpathSync(ws.rootFile)]]);
-  // now be denied because the new root does not contain it.
   ws.setRoot(ws.sibling);
   await expectCode(handlers.open_with({ path: 'top.txt' }, { operation: 'open_with' }), 'path_unresolvable');
-  // containment deny, not an unresolvable one.
   const other = mkdtempSync(join(tmpdir(), 'nexus-desktop-actions-other-'));
   t.after(() => rmSync(other, { recursive: true, force: true }));
   ws.setRoot(other);
@@ -260,7 +254,6 @@ test('URL predicate preserves all http/https destinations', () => {
   assert.equal(isAllowedDesktopExternalUrl('javascript:alert(1)'), false);
   assert.equal(isAllowedDesktopExternalUrl('https://exam\x01ple.com'), false); // control char
   assert.equal(isAllowedDesktopExternalUrl('https://example.com/\0x'), false);
-  // URL must still be rejected on the raw input string.
   assert.equal(isAllowedDesktopExternalUrl('https://example.com/a\nb'), false); // newline in path
   assert.equal(isAllowedDesktopExternalUrl('https://example.com/\tfoo'), false); // tab in path
   assert.equal(isAllowedDesktopExternalUrl('https://example.com/\u0001foo'), false); // SOH in path
@@ -304,7 +297,6 @@ test('pick_directory forwards defaultPath, resolves the selection, and cancel = 
   const picked = await handlers.pick_directory({ defaultPath: '/Volumes/External' }, { operation: 'pick_directory' });
   assert.equal(picked, '/Volumes/External/New Workspace');
   assert.deepEqual(os.dialog.pickDirectoryCalls, [{ defaultPath: '/Volumes/External' }]);
-  // result — the picker is not a guarded open/reveal action.
   os.dialog.pickDirectoryResult = null;
   assert.equal(await handlers.pick_directory({ defaultPath: '' }, { operation: 'pick_directory' }), null);
   assert.deepEqual(os.dialog.pickDirectoryCalls[1], {});
@@ -351,7 +343,6 @@ test('confirmed reset invokes the bounded real recovery once', async (t) => {
   const result = await handlers.reset_local_database(undefined, { operation: 'reset_local_database' });
   assert.deepEqual(result, { status: 'confirmed' }); // success ONLY after confirmation + completed recovery
   assert.equal(controller.calls, 1);
-  // handler never passes a renderer-supplied path.
   assert.equal(tree.snapshot(), before); // the FAKE removes nothing; invocation is asserted
 });
 

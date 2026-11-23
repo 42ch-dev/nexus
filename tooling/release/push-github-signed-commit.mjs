@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /**
- * `createCommitOnBranch` (no bot GPG key required).
- *
  * This is the spoke-ported release primitive: a plain `GITHUB_TOKEN` git push
  * would work today but produces an unsigned commit, which breaks the moment
  * `required_signatures` protection lands. `createCommitOnBranch` produces a
@@ -68,7 +66,6 @@ export function parseArgs(argv, env = process.env) {
     bodyFile: null,
     trailers: [],
     baseRef: "main",
-    // empty string, so the falsy fallback is deliberate here.
     // eslint-disable-next-line typescript/prefer-nullish-coalescing -- blank env must map to null, not ""
     expectedBaseOid: env.RELEASE_BASE_OID?.trim() || null,
     repo: env.GITHUB_REPOSITORY ?? null,
@@ -226,7 +223,6 @@ export function collectFileChanges(repoRoot, baseRef) {
     }
   }
 
-  // silently drop one (e.g. a newly bootstrapped artifact).
   for (const path of git(repoRoot, ["ls-files", "--others", "--exclude-standard"])
     .split("\n")
     .filter((entry) => entry.length > 0)) {
@@ -240,9 +236,6 @@ export function collectFileChanges(repoRoot, baseRef) {
 }
 
 /**
- * step (github.com and GitHub Enterprise Server alike); the tests point it at a
- * local stub.
- *
  * @returns {string}
  */
 function apiBaseUrl() {
@@ -257,7 +250,6 @@ function apiBaseUrl() {
  * @returns {Promise<unknown>}
  */
 async function ghApi(path, body, method = body === undefined ? "GET" : "POST") {
-  // already treats an empty token as missing, so the falsy fallback is intended.
   // eslint-disable-next-line typescript/prefer-nullish-coalescing -- empty token must fall through, not throw
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (!token) {
@@ -309,8 +301,6 @@ async function ghGraphql(query, variables) {
 }
 
 /**
- * not exist yet.
- *
  * Exact-match endpoint: singular `GET /git/ref/heads/<branch>`. The plural
  * `refs` form is a prefix match — `release/0.1.0` also matches
  * `release/0.1.0-alpha.3` and cannot decide existence.
@@ -397,16 +387,12 @@ export async function main(argv = process.argv.slice(2)) {
   const baseOid = git(repoRoot, ["rev-parse", `origin/${baseRef}`]);
   verifyPinnedBase(expectedBaseOid, baseOid, baseRef);
 
-  // empty delta there means there is nothing to publish. Refusing before any
-  // GitHub call keeps the branch (and its previous head) untouched.
   const baseChanges = collectFileChanges(repoRoot, baseRef);
   if (baseChanges.additions.length === 0 && baseChanges.deletions.length === 0) {
     console.error(`No file changes vs origin/${baseRef}; nothing to commit on ${branch}.`);
     return 1;
   }
 
-  // replacement commit carries its current OID as the compare-and-swap
-  // `expectedHeadOid`, so the ref only moves as part of a successful mutation.
   const existingHeadOid = await resolveBranchOid(
     /** @type {string} */ (repo),
     /** @type {string} */ (branch),
@@ -415,8 +401,6 @@ export async function main(argv = process.argv.slice(2)) {
   let fileChanges = baseChanges;
   let expectedHeadOid = baseOid;
   if (existingHeadOid !== null) {
-    // taken against that head: a delta against `baseRef` would drop the
-    // `baseRef` changes that landed after the branch was first published.
     git(repoRoot, ["fetch", "origin", /** @type {string} */ (branch), "--prune"]);
     fileChanges = collectFileChanges(repoRoot, /** @type {string} */ (branch));
     if (fileChanges.additions.length === 0 && fileChanges.deletions.length === 0) {

@@ -27,11 +27,6 @@ import {
   openPalette,
 } from './command-palette';
 
-/**
- * than before) keeps the dialog's mount + effects inside a single act scope,
- * avoiding spurious "state update not wrapped in act" warnings from the
- * activeIndex-reset effect that fires on mount.
- */
 function renderPalette() {
   const result = render(
     <LocaleProvider>
@@ -80,7 +75,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // which would re-render a still-mounted palette outside an act scope.
   cleanup();
   clearCommands();
   _resetPaletteForTests();
@@ -336,7 +330,6 @@ describe('CommandPalette — available() predicate', () => {
 
 describe('CommandPalette — locale switching', () => {
   it('updates command labels without remounting when the locale changes', () => {
-    // the rendered text. The palette stays open and is not remounted.
     clearCommands();
     registerCommand({
       id: 'test.locale',

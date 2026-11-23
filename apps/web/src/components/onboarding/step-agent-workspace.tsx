@@ -62,7 +62,6 @@ export function StepAgentWorkspace({ onBack, onFinish }: StepAgentWorkspaceProps
   }
 
   async function finish() {
-    // so the user can retry (commit() surfaces the error toast).
     if (await selection.commit()) onFinish();
   }
 

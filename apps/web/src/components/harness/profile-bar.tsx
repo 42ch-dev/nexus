@@ -63,9 +63,6 @@ export function ProfileBar() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const profileSettled = saved.isFetched;
 
-  // scan-recommended default), as long as the user has not touched the
-  // controls. Before the read settles the scan default may show; Save is
-  // gated meanwhile, so it is never committed as the persisted choice.
   useEffect(() => {
     if (touched) return;
     const stored = saved.profile;
@@ -85,7 +82,6 @@ export function ProfileBar() {
   function handleAgentChange(name: string) {
     setTouched(true);
     setSelected(name);
-    // agent's scan default (or nothing) as a non-override origin.
     setCommand(options.find((candidate) => candidate.name === name)?.launchCommand ?? '');
     setCommandOrigin('scan');
     setSavedState(false);
@@ -108,12 +104,10 @@ export function ProfileBar() {
     setSavedState(false);
     try {
       if (desktop) {
-        // edited value (preserve/apply), never for a scan default.
         const ipcCommand =
           commandOrigin === 'scan' || trimmed.length === 0 ? undefined : trimmed;
         await desktop.setAgentProfile(selected, ipcCommand);
       } else {
-        // override (a blank edit explicitly clears it).
         await client.saveAgentProfile(
           commandOrigin === 'edited'
             ? { name: selected, launch_command: trimmed }

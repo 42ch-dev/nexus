@@ -24,7 +24,6 @@ export function worldRuleStatusVariant(
     case 'draft':
       return 'neutral'; // staged, not evaluated — muted
     default:
-      // renders verbatim (never coerced to a different vocabulary).
       return 'neutral';
   }
 }

@@ -248,7 +248,6 @@ impl PeerToolRegistry {
 
         let mut inner = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
 
-        // (deterministic last-wins).
         if let Some(prior) = inner.sessions.remove(peer_id) {
             for id in &prior.tool_ids {
                 if inner.tools.get(id).is_some_and(|e| e.peer_id == peer_id) {
@@ -257,7 +256,6 @@ impl PeerToolRegistry {
             }
         }
 
-        // vector is cloned; `inner` stays held for the whole admission.
         let (policy, peer_priority) = {
             let config_guard = self.config.lock().unwrap_or_else(PoisonError::into_inner);
             config_guard
@@ -279,11 +277,6 @@ impl PeerToolRegistry {
             match collision_decision(&id, peer_id, &inner.tools, policy, &peer_priority) {
                 CollisionDecision::Admit => {}
                 CollisionDecision::Preempt => {
-                    // other rows keep dispatching. An in-flight invoke on the
-                    // evicted row resolves as an honest per-call failure — the
-                    // spine reads the registry at invoke time, so a rebound row
-                    // dispatches to the new owner and a removed row yields
-                    // `not_supported`, never a silent retry.
                     inner.tools.remove(&id);
                 }
                 CollisionDecision::Refuse => {

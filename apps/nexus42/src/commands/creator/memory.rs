@@ -311,7 +311,6 @@ async fn run_direct(command: MemoryCommand, config: &CliConfig, creator_id: &str
                 )
                 .await
             }
-            // opened.
             MemoryCommand::List
             | MemoryCommand::Create { .. }
             | MemoryCommand::Show { .. }
@@ -354,8 +353,6 @@ impl MemoryLine {
             .structured
             .as_ref()
             .and_then(|structured| structured.get("nexus_legacy"));
-        // is not listed under one: a blank SLUG column named nothing (fix
-        // round 3, F6).
         Some(Self {
             slug: legacy
                 .and_then(|legacy| legacy["slug"].as_str())?
@@ -453,7 +450,6 @@ async fn create(
             MemoryKind::all_as_strings().join(", ")
         )));
     }
-    // open editor never holds the cross-process writer admission.
     let body = match content {
         Some(body) => body,
         None => open_editor_temp("Memory content", "")?,
@@ -527,9 +523,6 @@ fn memory_revision(record: &RetainedRecord) -> Option<MemoryRevision> {
 }
 
 async fn edit(config: &CliConfig, creator_id: &str, slug: &str) -> Result<()> {
-    // holds the workspace writer. The read's identity and revision ride into the
-    // guarded write, so a change another writer made while the editor was open
-    // is refused instead of silently overwritten (NXM-6 fix round 1, finding F3).
     let (revision, current) = with_read_only_core(config, async |core, principal| {
         let record = core
             .get_creator_memory(principal, slug)
@@ -577,7 +570,6 @@ async fn delete(config: &CliConfig, creator_id: &str, slug: &str, force: bool) -
         return Ok(());
     }
     let text = with_direct_core(config, async |core, principal| {
-        // replaced while the prompt was open is not the one the user confirmed.
         let target = core
             .get_creator_memory(principal, slug)
             .await
@@ -687,7 +679,6 @@ fn fold_review_response(outcome: &mut DrainOutcome, result: &ReviewResponse, cal
     if !outcome.has_more {
         return false;
     }
-    // has_more would loop forever on an unprocessable head row.
     if result.processed.unwrap_or(0) == 0 {
         outcome.stopped_zero_progress = true;
         return false;
@@ -718,8 +709,6 @@ async fn drain_review_queue(
         cap_exhausted: false,
     };
     for call in 0..REVIEW_DRAIN_MAX_CALLS {
-        // value the daemon adapter sent; the core re-checks it against the
-        // admitted principal and refuses a mismatch.
         let result = core
             .review_memory(
                 principal,
@@ -908,9 +897,6 @@ async fn pending_show(
     pending_id: &str,
     json: bool,
 ) -> Result<String> {
-    // creator with more pending reviews can bury the requested ID past page 1.
-    // Walk `pagination.next_cursor` until the ID is found or the pages are
-    // exhausted (bounded loop — same cap convention as the review drain).
     let mut cursor: Option<String> = None;
     let entry = loop {
         let result = core
@@ -926,7 +912,6 @@ async fn pending_show(
         }
         match result.pagination.next_cursor {
             Some(next) if cursor.as_deref() != Some(next.as_str()) => cursor = Some(next),
-            // not on any page.
             _ => {
                 return Err(crate::errors::CliError::Other(format!(
                     "Pending review '{pending_id}' not found for creator '{creator_id}'."
@@ -1177,8 +1162,6 @@ mod tests {
 
     #[test]
     fn fold_stops_on_zero_progress_with_has_more() {
-        // stop the loop (an unprocessable head row cannot spin forever)
-        // and be reported as a zero-progress stop, not cap exhaustion.
         let mut outcome = DrainOutcome {
             promoted: 0,
             fragmented: 0,
@@ -1201,7 +1184,6 @@ mod tests {
 
     #[test]
     fn fold_continues_while_progress_and_has_more() {
-        // cumulative counters accumulate across folds.
         let mut outcome = DrainOutcome {
             promoted: 0,
             fragmented: 0,
@@ -1233,8 +1215,6 @@ mod tests {
 
     #[test]
     fn fold_stops_at_call_cap() {
-        // must not ask for another iteration (call 99 is the last allowed
-        // call — `call + 1 < 100` is false on the 100th call index 99).
         let mut outcome = DrainOutcome {
             promoted: 0,
             fragmented: 0,
@@ -1260,9 +1240,6 @@ mod tests {
 
     #[test]
     fn review_json_serializes_stop_reasons_differently() {
-        // unprocessable head row (zero-progress stop) from call-cap
-        // exhaustion — the two terminal causes serialize to distinct
-        // envelopes.
         let mut zero_progress = DrainOutcome {
             promoted: 0,
             fragmented: 0,
@@ -1324,8 +1301,6 @@ mod tests {
 
     #[test]
     fn review_human_lines_empty_message_only_when_queue_genuinely_empty() {
-        // empty-queue signal — a zero-progress stop must still surface the
-        // stuck-queue note + retry guidance instead of "No pending memories".
         let lines = review_human_lines(&drain_outcome(0, 0, false, false));
         assert_eq!(lines, ["No pending memories to review."]);
 
@@ -1341,7 +1316,6 @@ mod tests {
             "stuck-queue note missing: {lines:?}"
         );
 
-        // summary + continue note.
         let lines = review_human_lines(&drain_outcome(3, 50, true, false));
         assert!(lines[0].contains("promoted=3"), "{lines:?}");
         assert!(lines[1].contains("not fully drained"), "{lines:?}");
@@ -1390,11 +1364,9 @@ mod tests {
                 "updated_at": "2026-01-01T00:00:00Z",
             })),
         );
-        // address it by, so it is not a list row.
         let slugless = retained("research_material", "Native body.", None);
         assert!(MemoryLine::from_record(&slugless).is_none());
 
-        // the record's namespaced kind.
         let bare_kind = retained(
             "research_material",
             "Native body.",
@@ -1416,7 +1388,6 @@ mod tests {
             )),
             "fixed-width row shape drifted: {text}"
         );
-        // timestamp (no authored `updated_at` in its legacy block).
         assert!(
             text.contains(&format!(
                 "{:<30} {:<20} {}",

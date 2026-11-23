@@ -157,10 +157,6 @@ const DENY = Object.freeze({
   evidenceWriteFailed: 'evidence_write_failed',
 });
 
-/**
- * of them present the guard cannot establish what to admit at all, so the
- * request is denied as `malformed_env` rather than being classified.
- */
 const MALFORMED_LABELS = new Set([
   'not_node_runtime',
   ...Object.keys(ENV_KEYS).map((field) => `env_missing:${field}`),
@@ -192,9 +188,6 @@ class RequestGuardDenied extends Error {
 }
 
 
-/**
- * variable (and never a credential-shaped one) is touched.
- */
 function readGuardEnv() {
   const values = {};
   const problems = [];
@@ -229,9 +222,6 @@ function packageRootOf(filePath) {
 }
 
 /**
- * module (`process.argv[1]`), canonicalized so an npm bin symlink resolves to
- * the installed entry the driver recorded.
- *
  * `dsh` is the only runtime that may be admitted. Any other entry is `other`
  * and denied; when that entry sits inside the installed dsh package directory
  * the denial is labelled `package_child_runtime`, which is the same decision
@@ -259,10 +249,6 @@ function resolveObservedEntry() {
   return canonicalPath(entry);
 }
 
-/**
- * group/other permission bits. The guard never creates it: that is what makes
- * "a second run cannot recreate the evidence directory" true.
- */
 function validateAttemptDir(dir) {
   if (!isAbsolute(dir)) return { category: DENY.attemptDirMissing, problem: 'attempt_dir_not_absolute' };
   let stats;
@@ -282,9 +268,6 @@ function validateAttemptDir(dir) {
 }
 
 /**
- * with no userinfo, query or fragment. Its canonical `href` is then the exact
- * string an incoming request has to equal.
- *
  * Cleartext is only ever the deterministic loopback test origin (§6.3 item 2);
  * a non-loopback `http:` origin is refused as a configuration fault so a
  * mis-set driver URL cannot turn a live model call into cleartext egress.
@@ -319,10 +302,6 @@ function isLoopbackHostname(hostname) {
   return /^127(\.\d{1,3}){3}$/.test(hostname);
 }
 
-/**
- * event reports all of them); the first one in priority order becomes the
- * denial category for an attempted fetch.
- */
 function initialize() {
   const state = {
     runtime: 'other',
@@ -393,9 +372,6 @@ function initialize() {
 }
 
 
-/**
- * what a failure means. An event is written once with `wx` and never rewritten.
- */
 function writeEvent(state, kind, category, problems = null) {
   if (state.eventsDir === null) return false;
   const name = `${kind}-${process.pid}-${state.eventCounter}-${randomUUID().slice(0, 8)}.json`;
@@ -416,11 +392,6 @@ function writeEvent(state, kind, category, problems = null) {
   }
 }
 
-/**
- * so it is written once with `wx` (an existing marker already says exactly this)
- * and it never carries anything derived from a request. Returns false when no
- * marker exists and none could be written — the caller must then stop the child.
- */
 function writeMarker(state, kind, reason) {
   if (state.markerWritten) return true;
   if (state.attemptDir === null) return false;
@@ -444,10 +415,6 @@ function writeMarker(state, kind, reason) {
   }
 }
 
-/**
- * ceiling. Nothing here may be catchable: `process.exit` cannot be intercepted
- * by the runtime, and the signal fallback covers the case where it returns.
- */
 function terminateUnrecordable() {
   try {
     process.exit(UNRECORDABLE_EXIT_CODE);
@@ -459,11 +426,6 @@ function terminateUnrecordable() {
   }
 }
 
-/**
- * request may be dispatched. The marker is the durable signal the consumer
- * checks; when even the marker cannot be written the child is terminated, so a
- * rejection the runtime catches can never leave a run looking green.
- */
 function taint(state, kind, reason) {
   if (state.tainted) return;
   state.tainted = true;
@@ -483,10 +445,6 @@ function persistEvent(state, kind, category, problems = null) {
 }
 
 /**
- * across processes; an existing slot is the second attempt and is denied
- * without any further inspection. The slot is never created, deleted or
- * recreated anywhere else in this file.
- *
  * The create is made durable before the caller may dispatch: an acknowledged
  * spend that a power loss can erase would leave the one authorized call spent
  * but not retryable. The token is written to its last byte, then synced, then
@@ -511,25 +469,18 @@ function spend(state) {
       }
       return DENY.filesystemError;
     }
-    // payload is ASCII by construction, so the byte count is its length.
     let written = 0;
     while (written < payload.length) {
       const bytes = writeSync(fd, payload.slice(written));
       if (!(bytes > 0)) return DENY.filesystemError;
       written += bytes;
     }
-    // power loss.
     fsyncSync(fd);
     try {
       closeSync(fd);
     } finally {
       fd = null;
     }
-    // that directory is durable only once ITS entry in the parent is synced: a
-    // power loss right after creation can otherwise erase a fresh attempt
-    // directory and the spent slot with it (I-000120). POSIX only: Windows
-    // cannot open a directory as a file (EPERM/EISDIR), and the failure would
-    // land AFTER the slot is spent.
     if (process.platform !== 'win32') {
       const dirFd = openSync(state.attemptDir, 'r');
       try {
@@ -602,13 +553,6 @@ function forwardedInit(init) {
   return { ...init, redirect: 'error' };
 }
 
-/**
- * always answers the guarded function: an assignment from a later polyfill is
- * ignored (it cannot silently drop the ceiling and it cannot crash dsh either),
- * while `delete`/`defineProperty` fail closed. An absent `globalThis.fetch` is
- * not a bypass — the accessor still answers, and every call is denied as an
- * unsupported transport.
- */
 function installGuard(state) {
   const captured = typeof globalThis.fetch === 'function' ? globalThis.fetch : null;
   state.transportOk = captured !== null;
@@ -620,7 +564,6 @@ function installGuard(state) {
       return new RequestGuardDenied(category);
     };
     if (!state.transportOk) throw deny(DENY.unsupportedTransport);
-    // already disqualified, and an admission could no longer be recorded.
     if (state.tainted) throw deny(DENY.evidenceWriteFailed);
     if (state.configError === DENY.malformedEnv) throw deny(DENY.malformedEnv);
     if (state.runtime !== 'dsh') throw deny(state.foreignCategory);
@@ -629,7 +572,6 @@ function installGuard(state) {
     if (requestDenial !== null) throw deny(requestDenial);
     const spendFailure = spend(state);
     if (spendFailure !== null) throw deny(spendFailure);
-    // incomplete must never be readable as a qualified one.
     if (!persistEvent(state, 'admitted', ADMITTED_CATEGORY)) throw deny(DENY.evidenceWriteFailed);
     return captured(input, forwardedInit(init));
   };
@@ -642,11 +584,6 @@ function installGuard(state) {
       set: () => {},
     });
   } catch {
-    // the ceiling cannot be locked. An installable-but-replaceable wrapper would
-    // be a silent bypass: a later assignment would drop the guard entirely, and
-    // a run could then be authorized by evidence produced before the drop. The
-    // only fail-closed answer is to record the integrity failure and stop the
-    // child — this is a preload/configuration failure, not a request decision.
     state.problems.push(MARKER_REASONS.fetchNotReplaceable);
     taint(state, null, MARKER_REASONS.fetchNotReplaceable);
     terminateUnrecordable();
@@ -655,6 +592,4 @@ function installGuard(state) {
 
 const guardState = initialize();
 installGuard(guardState);
-// attempt is tainted (and the child terminated when the marker cannot be
-// written either), so a missing handshake can never be mistaken for a clean run.
 persistEvent(guardState, 'loaded', LOADED_CATEGORY, guardState.problems);

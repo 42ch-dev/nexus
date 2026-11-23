@@ -175,8 +175,6 @@ async fn w179_dr67_02_current_chapter_advances_only_on_finalize() {
     );
     assert_eq!(read_chapter_status(&pool, "dr67_cc", 2).await, "draft");
 
-    // (patch_work(current_chapter) performed by novel.chapter_transition)
-    // sets it to the just-finalized number.
     update_status(&pool, "dr67_cc", 2, 1, "finalized", Some(4321), NOW)
         .await
         .unwrap();
@@ -221,7 +219,6 @@ async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_int
     let pool = nexus_local_db::open_pool(tmp.path()).await.unwrap();
     nexus_local_db::run_migrations(&pool).await.unwrap();
 
-    // intake complete → complete.
     insert_work(&pool, "dr67_done", 3, 3, "complete").await;
     for ch in 1..=3 {
         insert_chapter_row(&pool, "dr67_done", ch, "finalized").await;
@@ -232,7 +229,6 @@ async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_int
          complete → complete"
     );
 
-    // complete.
     insert_work(&pool, "dr67_intake", 3, 3, "pending").await;
     for ch in 1..=3 {
         insert_chapter_row(&pool, "dr67_intake", ch, "finalized").await;
@@ -251,7 +247,6 @@ async fn w179_dr67_03_completion_requires_all_rows_finalized_count_match_and_int
         "a non-finalized row blocks completion"
     );
 
-    // mismatch) → NOT complete.
     insert_work(&pool, "dr67_under", 4, 3, "complete").await;
     for ch in 1..=3 {
         insert_chapter_row(&pool, "dr67_under", ch, "finalized").await;
@@ -288,7 +283,6 @@ async fn w179_dr67_04_resume_reuses_draft_row_without_creating_new() {
         "§4.5.2: the draft row is resumed"
     );
 
-    // a new row nor reset the draft.
     seed_chapters(&pool, "dr67_resume", "wrk_dr67", 3, NOW)
         .await
         .unwrap();
@@ -366,7 +360,6 @@ async fn w179_dr67_05_reconcile_rebuilds_missing_rows_with_db_status_ssot() {
         "conflicting ch1 frontmatter is re-synced"
     );
 
-    // mirrored (no DB row existed to disagree with).
     assert_eq!(
         read_chapter_status(&pool, work_id, 2).await,
         "draft",

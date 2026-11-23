@@ -66,11 +66,8 @@ describe('OutlinePage chapter preselect (V1.75 F-QC3-001)', () => {
 
     renderOutline('/works/w-123/outline?chapter=2');
 
-    // selected (the empty state returns a bare card without this title).
     expect(await screen.findByText('Chapter Inspector')).toBeInTheDocument();
     const inspectorCard = screen.getByText('Chapter Inspector').closest('[class*="card"]') as HTMLElement;
-    // the outline canvas." Scoping to the card avoids matching the structure
-    // panel helper text that also mentions the outline canvas.
     expect(
       within(inspectorCard).getByText('Metadata for chapter #2 exposed on the outline canvas.'),
     ).toHaveTextContent('#2');

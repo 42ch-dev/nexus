@@ -81,8 +81,6 @@ async fn seed_world(pool: &SqlitePool) {
 
 async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &str) {
     let now = chrono::Utc::now().timestamp();
-    // review-time extraction is admitted under (`current_session_id` FK), so the
-    // run row is seeded with it.
     let run_id = format!("run_{schedule_id}");
     // SAFETY: test-only INSERT into orchestration_sessions (the FK target of
     // `creator_schedules.current_session_id`).
@@ -110,8 +108,6 @@ async fn insert_review_master_schedule(pool: &SqlitePool, schedule_id: &str, wor
     )
     .bind(schedule_id)
     .bind(CREATOR)
-    // schedule's stored production run identity; extraction refuses an empty
-    // one instead of inventing a default session.
     .bind(&run_id)
     .bind(format!("kb-extract-{work_id}"))
     .bind(now)
@@ -179,9 +175,6 @@ impl nexus_capability::PromptExecutor for MockLlmExtractWorker {
 }
 
 fn registry_with_mock_worker() -> CapabilityRegistry {
-    // this map and fail closed when none is registered. v1.191 P1 T13: the
-    // review-time hook now passes the schedule's stored production run
-    // identity (`run_<schedule_id>`), so the fixture registers exactly those.
     let mut cancels = std::collections::HashMap::new();
     for id in [
         "run_sch_v151_llm",

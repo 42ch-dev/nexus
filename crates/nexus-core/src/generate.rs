@@ -177,7 +177,6 @@ impl CoreService {
         corrector: Option<&dyn PromptExecutor>,
     ) -> CoreResult<GenerateOutcome> {
         self.verify_principal(principal)?;
-        // the CAS refuses anyway.
         let current = self.read_strategy_candidate(principal, strategy_id).await?;
         if current.revision != base_revision {
             return Err(conflict(strategy_id, base_revision, current.revision));
@@ -187,7 +186,6 @@ impl CoreService {
         let mut round = 1;
         let warnings = loop {
             let (bodies, pin_diagnostics) = crate::compose::document_bodies(&document, &packages);
-            // the corrector: an under-declared fence would hide a write from Simulate and Approve.
             let summary = document_summary(&document, &bodies);
             let linted = lint(&document, &bodies, &pin_diagnostics, &packages);
             if linted.violations.is_empty() {

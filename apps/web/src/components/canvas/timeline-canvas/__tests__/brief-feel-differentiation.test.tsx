@@ -84,7 +84,6 @@ function makeContext(
 
 describe('TimelineCanvasAdapter — Brief-distinct layout options (layer-feel §2.2)', () => {
   it("Brief adapter emits wider rankSep + smaller nodeSep than Narrative default", () => {
-    // Narrative nodeSep (or Brief non-default).
     const briefAdapter = createTimelineCanvasAdapter(
       { current: makeContext() },
       'brief',
@@ -102,8 +101,6 @@ describe('TimelineCanvasAdapter — Brief-distinct layout options (layer-feel §
     const briefRank = briefAdapter.layoutOptions?.rankSep ?? 0;
     const briefNode = briefAdapter.layoutOptions?.nodeSep ?? 0;
 
-    // default in useAutoLayout (80/80) applies. Brief must override with
-    // wider rankSep + smaller nodeSep.
     const narrativeRank = narrativeAdapter.layoutOptions?.rankSep ?? 80;
     const narrativeNode = narrativeAdapter.layoutOptions?.nodeSep ?? 80;
 
@@ -112,7 +109,6 @@ describe('TimelineCanvasAdapter — Brief-distinct layout options (layer-feel §
   });
 
   it("Brief adapter preserves hasSuppliedPositions so the temporal-sorted era positions survive first open", () => {
-    // on explicit `relayout()`.
     const briefAdapter = createTimelineCanvasAdapter(
       { current: makeContext() },
       'brief',
@@ -170,7 +166,6 @@ describe('TimelineCanvasAdapter.renderInspector — Brief-era dispatch', () => {
   });
 
   it("Brief-era inspector surfaces era markers (eraId, startHint, endHint, worldSummary) from body.attributes", () => {
-    // the card chrome).
     const era = eraEntity({
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
@@ -196,7 +191,6 @@ describe('TimelineCanvasAdapter.renderInspector — Brief-era dispatch', () => {
     const { nodes } = adapter.projectGraph(graph);
     const inspector = adapter.renderInspector!(nodes[0]!);
 
-    // inspector is a controlled form over the node data).
     const { container } = renderInApp(inspector as ReactElement);
 
     expect(container.textContent).toContain('era-first');

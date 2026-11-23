@@ -95,9 +95,6 @@ pub async fn open_remote_binding(
             })?,
         ),
     };
-    // Ed25519 PUBLIC peer id derived from the same loaded seed the signed hello
-    // signs with. It is never the credential id, a path, a seed hash or a
-    // payload principal (§5.1/D18).
     let local_seed = *credential.identity_seed();
     let client_identity = client_public_peer_id(&local_seed);
 
@@ -135,14 +132,11 @@ pub async fn open_remote_binding(
     let adapter = match dialed {
         Ok(adapter) => adapter,
         Err(error) => {
-            // fail-closed pre-I/O refusal returns before an adapter exists, so
-            // this end still owns the transport and closes it here.
             let _ = tokio::time::timeout(CONNECT_BOUND, transport.close()).await;
             return Err(dial_refusal(&error));
         }
     };
 
-    // its cleanup until a binding takes it (see `UndeliveredSession`).
     let session = UndeliveredSession::new(adapter);
 
     let admitted = admit(session.adapter(), &client_identity, selection).await;
@@ -158,8 +152,6 @@ pub async fn open_remote_binding(
                 access != CoreAccess::ReadOnly,
             ))
         }
-        // session on the way out, and the caller's failed-open path then
-        // releases the pool admission.
         Err(error) => Err(error),
     }
 }
@@ -217,8 +209,6 @@ async fn admit(
             "the signed hello carried no remote manifest",
         )
     })?;
-    // manifests. This dial's manifest advertises exactly the memory family it
-    // is a client of, so the remote side must declare the same family.
     if !manifest
         .capabilities
         .iter()
@@ -229,7 +219,6 @@ async fn admit(
             "the remote host did not negotiate the spoke-memory family",
         ));
     }
-    // to its own stable principal (§4.1), so this is a label, never authority.
     let principal = client_principal(client_identity)?;
     let described = adapter
         .describe(

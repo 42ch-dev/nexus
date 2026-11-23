@@ -216,7 +216,6 @@ impl FixtureFaults {
             return Ok(());
         };
         if let Some(reached) = reached {
-            // success signal for either side.
             let _ = reached.send(());
         }
         let Some(release) = release else {
@@ -265,11 +264,6 @@ impl FaultHold {
     /// [`FaultHoldLost::Disarmed`] when the arm was released, replaced or
     /// dropped first.
     pub fn wait_reached(&mut self) -> impl Future<Output = Result<(), FaultHoldLost>> + Send + '_ {
-        // can be polled: an observation future that is created and dropped
-        // without a first poll still retires this handle's own still-armed
-        // entry, so a retained handle cannot make a later operation inherit the
-        // fault. A replacement (different token) or an already-consumed arm is
-        // untouched. Native RAII only — no adapter type, allocation or flag.
         let guard = ReachGuard {
             control: Arc::clone(&self.control),
             token: self.token,
@@ -343,7 +337,6 @@ impl Drop for FaultHold {
         {
             state.armed = None;
         }
-        // sender closes its channel, which is an explicit fault failure.
     }
 }
 
@@ -511,8 +504,6 @@ impl Drop for TargetReachGuard {
 
 impl Drop for TargetHold {
     fn drop(&mut self) {
-        // no longer in the slot and a replacement carries a different token, so
-        // neither is affected.
         let mut state = self
             .control
             .lock()
@@ -702,8 +693,6 @@ mod tests {
             "loss-1",
         );
 
-        // connection down instead of waiting for it: no receipt is returned and
-        // the operation future is cancelled.
         let mut hold = scenario
             .provider
             .faults()
@@ -720,7 +709,6 @@ mod tests {
         drop(operation);
         let scenario = scenario.close_and_reopen().await;
 
-        // on disk even though the response never reached the caller.
         let stored_receipt: String = sqlx::query("SELECT receipt_id FROM receipts")
             .fetch_one(scenario.provider.store().pool())
             .await
@@ -923,7 +911,6 @@ mod tests {
         let now = now_instant();
         scenario.subject_and_capture_grant(now).await;
 
-        // caller must resolve it with the same key.
         let timeout_request = capture_request(
             &scenario.space_id,
             "Committed before a bounded hold expires.",
@@ -952,8 +939,6 @@ mod tests {
             .expect("the same key resolves the uncertain outcome");
         assert_eq!(receipt_status(&replayed), "committed");
 
-        // response is held, which is still an uncertain outcome on a durable
-        // receipt, never a clean no-effect failure.
         let dropped_request = capture_request(
             &scenario.space_id,
             "Committed before the control was dropped.",
@@ -993,7 +978,6 @@ mod tests {
         assert_eq!(receipt_status(&replayed), "committed");
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
 
-        // retryable internal failure is honest.
         let precommit_request = capture_request(
             &scenario.space_id,
             "Staged, then the pre-commit hold expired.",
@@ -1031,7 +1015,6 @@ mod tests {
         let now = now_instant();
         scenario.subject_and_capture_grant(now).await;
 
-        // dropped handle disarms it so a later capture is unaffected.
         let mut never = scenario
             .provider
             .faults()
@@ -1046,7 +1029,6 @@ mod tests {
             .expect("no stale fault remains after the dropped observation");
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
 
-        // reports an explicit disarmed result instead of a reach.
         let mut replaced = scenario
             .provider
             .faults()
@@ -1062,7 +1044,6 @@ mod tests {
         );
         drop(replaced);
 
-        // operation; it never leaks to a later one.
         let second = capture_request(&scenario.space_id, "Replacement trips.", "control-2");
         assert_eq!(
             refusal(scenario.provider.capture(CLIENT, &second, now).await).code,
@@ -1077,7 +1058,6 @@ mod tests {
             .expect("the consumed fail point does not reach a later call");
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
 
-        // operation proceeds without a fault.
         let mut early = scenario
             .provider
             .faults()
@@ -1156,7 +1136,6 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 1);
         drop(timed_out);
 
-        // surprise the caller with an uncertain outcome.
         let mut timed_out = scenario
             .provider
             .faults()
@@ -1183,7 +1162,6 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 2);
         drop(timed_out);
 
-        // retires its own arm.
         let mut cancelled = scenario
             .provider
             .faults()
@@ -1206,7 +1184,6 @@ mod tests {
         assert_eq!(count_rows(&scenario, "candidates").await, 3);
         drop(cancelled);
 
-        // observation timing out: the guard retires only its own token.
         let mut held = scenario
             .provider
             .faults()

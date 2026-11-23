@@ -70,8 +70,6 @@ export function CreatorHubDualPane() {
   const handleSelectCard = useCallback(
     (id: string) => {
       if (activeTab === 'world') {
-        // new app surface (Brief default); the per-world Timeline stays
-        // reachable via the row submenu's 打开时间线.
         navigate(`/worlds/${encodeURIComponent(id)}`);
         return;
       }

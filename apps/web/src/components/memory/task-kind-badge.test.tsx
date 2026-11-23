@@ -4,8 +4,6 @@ import { render } from '@testing-library/react';
 import { TaskKindBadge } from './task-kind-badge';
 
 /**
- * components.memory-task-kind-*).
- *
  * Pins: each known task-kind consumes the projected `memory-task-kind-*`
  * token classes (bg/text/border) — no raw color-mix arbitrary classes.
  */

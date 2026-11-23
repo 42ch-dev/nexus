@@ -109,7 +109,6 @@ export function bucketByTime(
   const maxMs = stamped[stamped.length - 1]!.ms;
   if (maxMs < minMs) return [];
 
-  // is too small to divide meaningfully — avoids div-by-zero and empty buckets.
   const span = maxMs - minMs;
   const bucketCount = span === 0 ? 1 : Math.max(1, Math.min(targetBuckets, distinctDays(stamped)));
   const step = span === 0 ? 1 : span / bucketCount;

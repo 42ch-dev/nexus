@@ -148,7 +148,6 @@ async fn converge_timeout_without_on_timeout_fails_typed_not_wait() {
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::WaitForInput));
 
-    // typed.
     clock.advance(101);
     let err = task
         .run(ctx.clone())
@@ -248,7 +247,6 @@ async fn join_without_timeout_fields_keeps_legacy_waiting_and_writes_no_tracking
     let task = make_converge_task("join_e", None, None, clock.clone());
     let ctx = Context::new();
 
-    // like the pre-DR-06 behaviour, with no wait-start tracking key written.
     for _ in 0..5 {
         let result = task.run(ctx.clone()).await.unwrap();
         assert!(
@@ -303,7 +301,6 @@ async fn join_exit_clears_wait_start_so_same_session_reentry_gets_fresh_budget()
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::WaitForInput));
 
-    // wait-start key must retire with the join cycle.
     converge_arrive(&ctx, "join_f", "b");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
@@ -316,7 +313,6 @@ async fn join_exit_clears_wait_start_so_same_session_reentry_gets_fresh_budget()
         "successful join exit must clear the wait-start key"
     );
 
-    // must start — the stale timestamp must not fire the deadline.
     clock.advance(5_000);
     converge_arrive(&ctx, "join_f", "a");
     let result = task.run(ctx.clone()).await.unwrap();
@@ -367,16 +363,11 @@ async fn merge_pass_keeps_state_level_wait_budget_for_converge_gate() {
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::WaitForInput));
 
-    // waits in the same tick — the budget must survive the merge success.
     clock.advance(50);
     merge_arrive(&ctx, "join_g", "label_b");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::WaitForInput));
 
-    // (110 ms) fires the shared budget (whichever gate is waiting — the
-    // merge key was cleared by the merge success, so the merge gate re-check
-    // sees 0/2). A merge-success clear would have restarted the budget at
-    // t=1050 and the deadline would NOT fire (only 60 ms would have elapsed).
     clock.advance(60);
     let err = task
         .run(ctx.clone())

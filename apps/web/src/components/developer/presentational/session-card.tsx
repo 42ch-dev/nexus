@@ -1,6 +1,4 @@
 /**
- * v221-caps-sessions-rail T2).
- *
  * The product page (`components/developer/sessions-page.tsx`) owns the query,
  * the i18n lookups and the router `Link`; this module owns the card markup so
  * the Design Studio fixture can mount it from static view models with literal

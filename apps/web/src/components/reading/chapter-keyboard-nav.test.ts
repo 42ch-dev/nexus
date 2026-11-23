@@ -81,9 +81,6 @@ describe('useChapterKeyboardNav — ←/→ navigation', () => {
 
   it('ignores already-prevented events', () => {
     const navigate = vi.fn();
-    // before dispatch, so simulate a real earlier listener that cancels the
-    // event: registered before the hook's listener (both bubble-phase on
-    // window), it runs first and the hook observes `defaultPrevented === true`.
     const cancel = (e: KeyboardEvent) => e.preventDefault();
     window.addEventListener('keydown', cancel);
     renderHook(() => useChapterKeyboardNav('work-1', NEIGHBORS, navigate));
@@ -199,8 +196,6 @@ describe('useChapterKeyboardNav — guard short-circuits', () => {
     renderHook(() => useChapterKeyboardNav('work-1', NEIGHBORS, navigate));
 
     const ce = document.createElement('div');
-    // becomes it); jsdom never computes isContentEditable, so stub the property
-    // the production predicate reads to exercise the guard.
     ce.setAttribute('contenteditable', 'true');
     Object.defineProperty(ce, 'isContentEditable', { configurable: true, value: true });
     document.body.appendChild(ce);
@@ -254,7 +249,6 @@ describe('isEditable — focus predicate', () => {
 
   it('flags contenteditable elements', () => {
     const el = document.createElement('div');
-    // property the production predicate reads.
     Object.defineProperty(el, 'isContentEditable', { configurable: true, value: true });
     expect(isEditable(el)).toBe(true);
   });

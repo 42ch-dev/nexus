@@ -1,6 +1,4 @@
 /**
- * (FB-GS-000, V1.109 P2 T1; residual R-V1108P0QC3-S002).
- *
  * The graph↔list alt-view toggle unmounts `CanvasShell` (and therefore the
  * RF tree), which drops the viewport state. This hook stores the last
  * user viewport in a module-level `Map` keyed by `surfaceKey` so a
@@ -25,14 +23,7 @@ import type { Viewport } from '@xyflow/react';
 const viewportCache = new Map<string, Viewport>();
 
 export interface UseCanvasViewportResult {
-  /**
-   * viewport has been cached yet (first mount) or when `surfaceKey` is not
-   * provided (opt-out). Pass to RF `defaultViewport` and use to gate `fitView`.
-   */
   readonly cachedViewport: Viewport | null;
-  /**
-   * user pans/zooms. No-op when `surfaceKey` is undefined.
-   */
   onViewportChange: (viewport: Viewport) => void;
 }
 
@@ -44,7 +35,6 @@ export interface UseCanvasViewportResult {
  *   default for surfaces that have not opted in yet).
  */
 export function useCanvasViewport(surfaceKey?: string): UseCanvasViewportResult {
-  // stable across re-renders within the same mount lifecycle.
   const [cachedViewport] = useState<Viewport | null>(
     () => (surfaceKey ? (viewportCache.get(surfaceKey) ?? null) : null),
   );

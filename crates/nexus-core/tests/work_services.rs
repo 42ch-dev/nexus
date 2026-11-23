@@ -581,7 +581,6 @@ async fn work_list_grammar_matches_legacy_daemon_contract() {
             "unsupported sort key ''; allowed: updated_at, title, status, intake_status"
         )
     );
-    // default ordering instead of erroring.
     for sort in ["", "   ", ",,status,,-title,,"] {
         assert!(
             core.list_works(&principal, query(serde_json::json!({"sort": sort})))
@@ -711,7 +710,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         .unwrap()
         .world_id;
     let work_id = create(&core, &principal, &world, "Locked Work").await;
-    // phase — seed both so the mutator actually reaches lock acquire.
     core.patch_work(
         &principal,
         work_id.clone(),
@@ -729,8 +727,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         serde_json::to_vec(&serde_json::json!({"local_root": home.join("creative")})).unwrap(),
     )
     .unwrap();
-    // is refused as a lock conflict naming the holder that already owns the
-    // Work. Neither label is asserted — only the conflict class is.
     let lock_seed = init_guarded_pool(&db, "author").await.unwrap();
     let lock_pool = lock_seed.clone_pool();
     let holder = nexus_local_db::cli_holder("core");
@@ -812,7 +808,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
     };
     assert_lock_conflict(&resource, &work_id, &holder);
 
-    // survive and the holder is still the one that acquired the lock.
     let unchanged = core.get_work(&principal, work_id.clone()).await.unwrap();
     assert_eq!(unchanged.title, "Locked Work");
     assert_eq!(unchanged.story_ref.as_deref(), Some("locked-work"));
@@ -822,7 +817,6 @@ async fn work_lifecycle_locks_refuse_conflicting_holder() {
         Some(holder.as_str())
     );
 
-    // is gone once it returns.
     assert!(nexus_local_db::release_runtime_lock(
         &lock_pool,
         principal.creator_id(),
@@ -1847,9 +1841,6 @@ async fn retained_pool_addressing_and_creator_binding_guards() {
         assert_eq!(entry.status, "active");
     }
 
-    // the creator-scoped no-row case through the storage carrier (the daemon
-    // mapped the same DAO fault onto its 404 envelope); the security-relevant
-    // half is that the foreign row is never mutated.
     sqlx::query(
         "INSERT INTO novel_pool_entries (entry_id, creator_id, work_id, status, promoted_at, \
          title, updated_at) VALUES ('npe_foreign', 'other', ?, 'queued', datetime('now'), 'F', \
@@ -2117,7 +2108,6 @@ async fn retained_findings_crud_filters_and_creator_scope() {
         .await
         .unwrap();
 
-    // is unreachable by ID, and the author's own row still updates.
     let foreign_row = core
         .create_finding(
             &principal,
@@ -2403,7 +2393,6 @@ async fn retained_findings_batch_dao_failure_preserves_prior_updates() {
         "got {error:?}"
     );
 
-    // already committed, the third was never reached.
     assert_eq!(
         core.get_finding(&principal, ids[0].clone())
             .await
@@ -2559,7 +2548,6 @@ async fn retained_work_list_ordering_cursor_walk_and_pagination_shape() {
     assert!(!second_page.pagination.has_more);
     assert!(second_page.pagination.next_cursor.is_none());
 
-    // there is another page.
     let truncated = nexus_contracts::PaginationInfo {
         limit: 50,
         next_cursor: Some("v2:1:2".to_string()),

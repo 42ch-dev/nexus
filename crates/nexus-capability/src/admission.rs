@@ -81,8 +81,6 @@ pub fn admit(
     dir: &Path,
     builtin_names: &HashSet<&str>,
 ) -> Result<AdmittedCapability, AdmissionError> {
-    // scan's `read_descriptor` already validates, but `admit` is the
-    // standalone contract — defensive).
     descriptor.validate().map_err(AdmissionError::Descriptor)?;
 
     if builtin_names.contains(descriptor.name.as_str()) {
@@ -92,9 +90,6 @@ pub fn admit(
         )));
     }
 
-    // shared `nexus-module-manifest` surface (pure metadata — no WASM engine),
-    // so gates 2–4 run identically with the `wasm` feature off; only the
-    // executable binding behind `run()` is gated (WorkerUnavailable).
     let manifest_path = dir.join("manifest.json");
     let wasm_path = dir.join(format!("{}.wasm", descriptor.wasm.module_id));
     if !manifest_path.is_file() {
@@ -142,8 +137,6 @@ pub fn admit(
         )));
     }
 
-    // rejects (AR-38). `clamp_sandbox` lives beside `SandboxOverrides` in
-    // `user_capability.rs` (also re-applied at `UserCapability::new`, F1).
     let mut admitted_descriptor = descriptor.clone();
     if let Some(overrides) = &admitted_descriptor.sandbox {
         admitted_descriptor.sandbox = Some(clamp_sandbox(overrides));
@@ -255,7 +248,6 @@ mod tests {
     #[test]
     fn admit_collision_rejects_builtin_name() {
         let tmp = tempfile::tempdir().unwrap();
-        // dir (builtin wins, AR-43 order: collision first).
         let descriptor = stage(tmp.path(), "sync.pull", None);
         let err = admit(&descriptor, &tmp.path().join("sync.pull"), &builtins())
             .expect_err("builtin name must be rejected");

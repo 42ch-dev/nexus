@@ -14,8 +14,6 @@
 //! Both ACP roles run in-process over the SDK's `Channel::duplex()`; the SDK
 //! owns the JSON-RPC framing.
 
-// assertions operate on fixed local fixtures where a panic IS the failure
-// signal; `.unwrap()`/`.expect()` keep the tests linear and readable.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::PathBuf;
@@ -110,7 +108,6 @@ async fn acp_session_delivers_generic_mcp_server_descriptors() {
 
     let agent_task = tokio::spawn(run_scripted_agent(agent_channel, evidence_tx));
 
-    // descriptor kinds.
     let client_result = Client
         .v1()
         .name("descriptor-probe-client")

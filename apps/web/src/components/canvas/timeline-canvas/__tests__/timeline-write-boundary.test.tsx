@@ -87,7 +87,6 @@ function eventNode(
 }
 
 function makeMockClient(): NexusClient {
-  // fail loudly if any Timeline code path accidentally wires them.
   return {
     getWorldKbGraph: vi.fn().mockResolvedValue({
       entities: [entityEvent()],
@@ -161,7 +160,6 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
     renderInspector({ client, ctxOverrides: { onPatchEntity } });
 
     const bodyTextarea = screen.getByLabelText('Body') as HTMLTextAreaElement;
-    // fireEvent.change so the literal braces land in the textarea verbatim.
     fireEvent.change(bodyTextarea, {
       target: { value: '{"attributes":{"occurred_at":"1100-01-01T00:00:00Z"}}' },
     });
@@ -251,9 +249,6 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
 
 
 vi.mock('@/components/canvas/canvas-shell', async () => {
-  // `<ReactFlowProvider>`; the mock must do the same so the
-  // `<SemanticZoomBridge>` child (which calls `useViewport()`) mounts
-  // cleanly without throwing "ReactFlowProvider as an ancestor".
   const { ReactFlowProvider } = await import('@xyflow/react');
   return {
     CanvasShell: ({ children }: { children?: React.ReactNode }) => (
@@ -367,9 +362,6 @@ describe('TimelineCanvas orchestrator — visible ordering-disclaimer notice (PR
     expect(notice).toHaveTextContent(
       /inferred from available event data/i,
     );
-    // users get the disclaimer via the CanvasShell live region; this visible
-    // notice uses `role="note"` (no aria-live) to avoid duplicate
-    // announcements.
     expect(notice).toHaveAttribute('role', 'note');
   });
 
@@ -397,8 +389,6 @@ describe('TimelineCanvas orchestrator — visible ordering-disclaimer notice (PR
   });
 
   it('does NOT render the visible notice for an empty graph (empty-state branch)', async () => {
-    // <EmptyState> (§7); the a11y live region therefore does NOT carry the
-    // ordering disclaimer, and neither does the visible notice.
     const client = makeMockClient();
     (client.getWorldKbGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
       entities: [],

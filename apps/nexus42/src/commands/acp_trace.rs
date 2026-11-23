@@ -117,7 +117,6 @@ pub fn append_trace_event(
 
     let trace_file = nexus_home_layout::acp_run_trace_file(home, &run_id.0);
 
-    // rather than propagating the error — trace writes are best-effort.
     let mut guard = TRACE_WRITER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -280,12 +279,6 @@ mod tests {
     fn singleton_writer_reuses_file_handle() {
         let _lock = trace_lock();
         reset_trace_writer();
-        // contract is observable only through trace output — repeated appends
-        // for one run land in that run's file (append, never truncate), and
-        // another run's appends land in that run's own file. Asserting the
-        // mutex's internal state (`guard.is_some()`) raced with sibling
-        // resets under the default parallel harness; file-content assertions
-        // are deterministic because every run id here is unique.
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path();
         let run_id = NexusRunId("run_singleton00000000000000000001".to_string());
@@ -313,7 +306,6 @@ mod tests {
         append_trace_event(home, &run_id, &event).unwrap();
         append_trace_event(home, &run_id, &event).unwrap();
 
-        // first run's bytes.
         append_trace_event(home, &other_run_id, &other_event).unwrap();
 
         flush_trace_writer();
@@ -347,7 +339,6 @@ mod tests {
         if let Some(parent) = trace_path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
-        // SAFE: constant is 10 MiB, always fits in usize
         #[allow(clippy::cast_possible_truncation)]
         let oversize_content = "X".repeat((TRACE_FILE_SIZE_LIMIT + 1) as usize);
         std::fs::write(&trace_path, oversize_content.as_bytes()).unwrap();

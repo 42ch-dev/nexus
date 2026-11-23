@@ -155,8 +155,6 @@ struct WorldDeltaApplyInput {
     atomic: bool,
 }
 
-// entity identifiers (world_id, creator_id, source_work_id) — diverging would
-// break the delta-package contract documented in world-delta-propose-apply.md.
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Deserialize)]
 struct PolicyContext {
@@ -249,10 +247,6 @@ impl Capability for WorldStateQuery {
         let world_json =
             serde_json::to_value(&world).map_err(|e| CapabilityError::Internal(e.to_string()))?;
 
-        // admitted Creator ActorView — another holder's `owner-private` World
-        // row is never part of the slice, and an unresolvable selection refuses
-        // rather than widening to the World listing. A timeline-only slice
-        // reads no KB rows, so it needs no KB selection.
         let kb_blocks = if want_kb {
             let selection =
                 admitted_creator_view_scope(pool, &parsed.creator_id, &parsed.world_id).await?;
@@ -473,8 +467,6 @@ impl Capability for WorldDeltaApply {
             "world.delta.apply admitted"
         );
 
-        // is accepted but V1.60 still applies transactionally (partial commit is
-        // post-1.0); the output reports `atomic_applied: true`.
         let mut tx = pool
             .begin()
             .await
@@ -499,9 +491,6 @@ impl Capability for WorldDeltaApply {
         let mut results: Vec<Value> = Vec::with_capacity(parsed.proposed_changes.len());
         let mut all_applied = true;
 
-        // for all kb_key_block update targets in chunked, deduplicated
-        // IN-lists, replacing the per-change SELECT + UPDATE N+1 pattern
-        // while bounding the SQL size regardless of caller input.
         let update_kids: Vec<&str> = parsed
             .proposed_changes
             .iter()
@@ -516,7 +505,6 @@ impl Capability for WorldDeltaApply {
 
         let mut live_body_map: HashMap<String, Option<String>> = HashMap::new();
         if !update_kids.is_empty() {
-            // counts or generate redundant IN-list chunks.
             let mut seen = HashSet::with_capacity(update_kids.len());
             let unique_update_kids: Vec<&str> = update_kids
                 .into_iter()
@@ -610,8 +598,6 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("kb_key_block", None) => {
-                    // atomically with sibling changes.
-                    //
                     // R-V160P0-QC1-W001: the prior hand-written INSERT
                     // referenced a non-existent `metadata_json` column and
                     // defaulted `block_type` to the invalid literal "concept".
@@ -673,8 +659,6 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("world_metadata", _) if ch.field == "title" => {
-                    // live title before applying. SAFETY: SELECT against known
-                    // narrative_worlds schema.
                     let live_title: Option<String> =
                         sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
                             .bind(&world_id)
@@ -952,7 +936,6 @@ mod tests {
         )
         .await;
 
-        // exclusion below is the selection's policy, not an empty KB.
         let unscoped = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone())
             .list_by_world("wld_a")
             .await
@@ -1156,11 +1139,6 @@ mod tests {
 
     #[tokio::test]
     async fn world_delta_apply_kb_key_block_create_persists_row() {
-        // previously hand-wrote an INSERT referencing a non-existent
-        // `metadata_json` column (and an invalid "concept" block_type default).
-        // None of the 9 in-file tests exercised the create path, so CI stayed
-        // green while runtime would fail with a SQL error. This test drives the
-        // create branch end to end and asserts the row lands in kb_key_blocks.
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool, "ctr_a").await;
         seed_world(&pool, "ctr_a", "wld_a").await;
@@ -1323,9 +1301,6 @@ mod tests {
         assert!(villain_body.unwrap().contains("20"));
     }
 
-    // kb_key_block pre-fetch. Applies body_json updates for more ids than
-    // one IN-list chunk can hold, verifying the handler still returns correct
-    // results and does not construct an oversized SQL statement.
     #[tokio::test]
     async fn world_delta_apply_batch_kb_updates_prefetch_chunks() {
         let (_dir, pool) = fresh_pool().await;

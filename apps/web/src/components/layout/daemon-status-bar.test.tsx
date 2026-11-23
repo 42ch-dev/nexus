@@ -261,7 +261,6 @@ describe('DaemonStatusBar agent badge (V1.117 P2 T3)', () => {
 });
 
 describe('DaemonStatusBar locale parity (V1.117 P2 T4)', () => {
-  // describe blocks in this file (they do not clear localStorage themselves).
   afterEach(() => {
     window.localStorage.clear();
   });
@@ -284,7 +283,6 @@ describe('DaemonStatusBar locale parity (V1.117 P2 T4)', () => {
 });
 
 describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
-  // describe blocks (they do not clear localStorage themselves).
   afterEach(() => {
     window.localStorage.clear();
   });
@@ -295,8 +293,6 @@ describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
       client: new BrowserClient(),
     });
 
-    // its accessible name names the daemon, and the hover tooltip (title)
-    // carries the same object so users know what restarts.
     const restart = await screen.findByRole('button', { name: 'Restart daemon' });
     expect(restart).toHaveAccessibleName('Restart daemon');
     expect(restart).toHaveAttribute('title', 'Restart daemon');
@@ -325,9 +321,6 @@ describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
   });
 });
 
-/**
- * where a navigation landed without mocking `useNavigate`.
- */
 function LocationSentinel({ onChange }: { onChange: (pathname: string) => void }) {
   const location = useLocation();
   onChange(location.pathname);

@@ -123,7 +123,6 @@ pub fn spawn(
             interval_secs = config.interval.as_secs(),
             "hosted scheduler task installed; waiting for the owner's post-recovery start"
         );
-        // run until recovery has classified the durable runs.
         tokio::select! {
             biased;
             () = shutdown.notified() => return,
@@ -131,9 +130,7 @@ pub fn spawn(
         }
 
         let mut ticker = tokio::time::interval(config.interval);
-        // of firing a burst of sweeps at the DB.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // owner's start signal, so consume it and wait a full cadence.
         ticker.tick().await;
 
         loop {

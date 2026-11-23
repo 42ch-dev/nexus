@@ -145,7 +145,6 @@ mod tests {
 
         let _ptr = alloc(16);
 
-        // sentinel (-1) without dereferencing the (null) pointers.
         assert_eq!(compute(0, 0, 0, 0), -1);
     }
 

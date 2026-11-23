@@ -110,7 +110,6 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
   });
 
   it('routes a timeline-brief-era node to the Work-Brief inspector (distinct from Narrative event inspector)', () => {
-    // inspector — NOT the generic Work Timeline inspector shell.
     const era = eraEntity({
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
@@ -137,7 +136,6 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
   });
 
   it('surfaces era markers (era id, time span, world summary) + read-only note', () => {
-    // pill + time-span label + full world summary.
     const era = eraEntity({
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',
@@ -179,10 +177,6 @@ describe('WorkTimelineCanvasAdapter.renderInspector — read-only Brief-era disp
   });
 
   it('renders NO editable fields, NO Save, NO Edit-in-Outline CTA (read-only projection — PD-2)', () => {
-    // Work Timeline must NOT dispatch a write-capable inspector. The World
-    // surface owns Brief writes (`kb.patch_entity`); the Work surface is a
-    // read-only projection — no text inputs, no submit, no manuscript
-    // edit hand-off.
     const era = eraEntity({
       key_block_id: 'kb-era-1',
       canonical_name: 'The First Age',

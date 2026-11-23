@@ -30,7 +30,6 @@ export function AssemblyInspectorPanel({ packet, directiveActions }: AssemblyIns
   const { t } = useTranslation('inspector');
   const traceTitleId = useId();
 
-  // share one lookup.
   const slotByEntry = useMemo(
     () => new Map(packet.slot_map.map((entry) => [entry.entry_id, entry.slot])),
     [packet.slot_map],

@@ -219,8 +219,6 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
     let (pool, _dir) = fresh_pool().await;
     seed_world(&pool, "wld_test").await;
 
-    // P1 T8 target gate admits it (L2 F4 + T8 CI fix: the entry must live in the
-    // routed world and be visible to the caller).
     let mut cited = nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord::new(
         "wld_test",
         nexus_contracts::BlockType::Character,
@@ -236,7 +234,6 @@ async fn world_scoped_finding_routes_to_world_findings_table() {
     .unwrap();
 
     let adapter = scoped(pool.clone());
-    // description + text_position/source_anchor for verbatim JSON asserts.
     let finding: Finding = serde_json::from_value(json!({
         "schema_version": 1,
         "finding_id": "fnd_wld",
@@ -400,9 +397,6 @@ async fn mixed_batch_mid_failure_rolls_back_both_tables() {
     seed_world(&pool, "wld_test").await;
 
     let adapter = scoped(pool.clone());
-    // id]. The third item collides on the `world_findings` PK mid-batch →
-    // UNIQUE violation. The W-1 transaction must roll back the work row
-    // (inserted second) AND the first world row together (AR-2 atomicity).
     let batch = vec![
         world_finding("fnd_rb_wld"),
         work_finding("fnd_rb_wrk"),
@@ -430,9 +424,6 @@ async fn mixed_batch_mid_failure_rolls_back_both_tables() {
     assert_legacy_finding_absent(&pool, "fnd_rb_wrk").await;
 }
 
-/// selection authorizes, and its target entry must be one the caller can read.
-/// A target the caller cannot see takes the same unknown-target branch as an
-/// absent id, so findings cannot probe for hidden rows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
     let (pool, _dir) = fresh_pool().await;
@@ -468,7 +459,6 @@ async fn v1191_holder_ports_world_findings_stay_inside_the_bound_selection() {
         "a refused world finding must persist nothing"
     );
 
-    // the unknown-target shape, and nothing is written for that finding.
     let mut unknown_target = world_finding("fnd_unknown_target");
     unknown_target.target_entry_id = Some("kb_not_visible".to_string());
     match adapter.put_findings(vec![unknown_target]).await {
@@ -505,7 +495,6 @@ async fn v1191_holder_ports_cross_world_target_is_refused() {
     seed_world(&pool, "wld_test").await;
     seed_world(&pool, "wld_foreign").await;
 
-    // lives in another world than the finding's route.
     let mut foreign = KnowledgeEntryRecord::new("wld_foreign", BlockType::Character, "ForeignNote");
     foreign.entry_id = "kb_foreign_note".to_string();
     SqliteKbStore::new(pool.clone())

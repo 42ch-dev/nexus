@@ -6,7 +6,6 @@ import { StepFirstWorld } from './step-first-world';
 import { renderInApp } from '@/test/test-providers';
 import type { NexusClient } from '@/lib/nexus';
 
-// equivalent until the lib target reaches es2024.
 function withResolvers<T>(): {
   promise: Promise<T>;
   resolve: (value: T) => void;

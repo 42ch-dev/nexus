@@ -179,9 +179,6 @@ async fn c_075_reflection_subject_all_requires_unrestricted_grant_local() {
         }
     }
 
-    // the grant's reach, so it must not answer the C-075 refusal. The admitted
-    // request serves the (empty) basis; the refusal is the grant's reach, not
-    // the family.
     let scoped = provider
         .get_reflection_state(
             &grantee,
@@ -201,8 +198,6 @@ async fn c_075_reflection_subject_all_requires_unrestricted_grant_local() {
         SpokeResult::Ok(_) => {}
     }
 
-    // `reflect` within its coverage, so the same subject-wide selection is not
-    // coverage-refused for the admin.
     let admin_wide = provider
         .get_reflection_state(
             &admin,
@@ -845,7 +840,6 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
     );
     digests.push(expect_state_digest(&profile_state, "after profile update"));
 
-    // context-scoped basis moves when its grant's reach moves.
     let scoped_selection = json!({
         "mode": "selected_contexts",
         "context_ids": [T3_CONTEXT_A],
@@ -875,7 +869,6 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
         "context A holds no live row any more: {peer_state}"
     );
 
-    // honestly false throughout.
     for state in [created, grown, shrunk, profile_state] {
         assert_eq!(state["stale"], json!(false), "{state}");
     }
@@ -886,8 +879,6 @@ async fn c_042_basis_changes_invalidate_reflection_state_local() {
         "every basis-affecting fact changed the digest: {digests:?}"
     );
 
-    // fact classes now answer `stale` honestly at the next read — computed,
-    // never stored, with no eager invalidation writes.
     let pinned_digest = expect_state_digest(
         &t3_state(&provider, &admin, selection.clone(), None).await,
         "the pin source",
@@ -951,7 +942,6 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
     grant_subject_all_reflect(&provider, &admin).await;
     let selection = json!({ "mode": "subject_all" });
 
-    // the authorized records.
     let profiled = served(
         provider
             .update_profile(
@@ -986,8 +976,6 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
         "{profile_only}"
     );
 
-    // consecutive reads agree, and the filter resolution is part of the
-    // digest's input.
     t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "honest row a").await;
     t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_B, "honest row b").await;
     let full = t3_state(&provider, &admin, selection.clone(), None).await;
@@ -1007,7 +995,6 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
         "the filter resolution is part of the digest: {full} vs {filtered}"
     );
 
-    // recomputed staleness stays honestly false.
     let (record_id, revision) = t3_records(&provider, &admin).await.remove(0);
     let edited = served(
         provider
@@ -1032,8 +1019,6 @@ async fn c_076_pinned_basis_publishes_and_reports_honest_staleness_local() {
     );
     assert_eq!(after_edit["stale"], json!(false), "{after_edit}");
 
-    // and the state read report the recomputed staleness honestly; the stored
-    // write-time cache is never consulted.
     let pin_digest = expect_state_digest(&after_edit, "the pin source");
     let receipt = served(
         t3_generate(&provider, &admin, &pin_digest, "t3c076-pin").await,
@@ -1103,8 +1088,6 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
         "an empty page is the end of results: {page}"
     );
 
-    // bound to the query that minted them (MEM-R026). Two record rows let the
-    // record listing mint a real continuation cursor.
     t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "listed row a").await;
     t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "listed row b").await;
     let records_page = served(
@@ -1125,8 +1108,6 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
         .as_str()
         .expect("a two-row subject pages, so the record listing mints a cursor");
 
-    // `CURSOR_INVALID` whether the text parses as a cursor or not: the
-    // binding is by content.
     for cursor in ["not-a-cursor", foreign_cursor] {
         let refused = match provider
             .list_reflections(
@@ -1159,9 +1140,6 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
         );
     }
 
-    // names its reflection and carries no envelope body; `receipts.get`
-    // serves the same terminal receipt verbatim; two envelopes page under the
-    // bound with an absent end-of-results cursor.
     author_required_profile(&provider, &admin).await;
     let digest = expect_state_digest(
         &t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await,
@@ -1253,7 +1231,6 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
     grant_subject_all_reflect(&provider, &admin).await;
     let selection = json!({ "mode": "subject_all" });
 
-    // record: the pin's only delta is that tombstone.
     author_required_profile(&provider, &admin).await;
     let record_a = t3_record(
         &provider,
@@ -1336,8 +1313,6 @@ async fn c_077_tombstoned_bases_excluded_from_list_get_local() {
         "the tombstoned row is excluded: {listed:?}"
     );
 
-    // listing and stops surfacing as the state's last reflection — the
-    // deleted content must not leak through the derived envelope.
     let excluded = t3_list(&provider, &grantee, None, None).await;
     assert_eq!(
         excluded["reflections"],
@@ -1545,8 +1520,6 @@ async fn c_072_generated_envelope_shape_local() {
     assert_eq!(envelope["schema_version"], json!(1), "{page}");
     assert_eq!(envelope["stale"], json!(false), "{page}");
 
-    // state digest, and the envelope still carries the basis it was generated
-    // over — honestly stale, never rewritten.
     let (record_id, revision) = t3_records(&provider, &admin).await.remove(0);
     served(
         provider
@@ -1710,7 +1683,6 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
     grant_subject_all_reflect(&provider, &admin).await;
     let selection = json!({ "mode": "subject_all" });
 
-    //    refuses `PROFILE_INCOMPLETE` naming the missing kinds.
     let empty = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(empty["data_sufficiency"], json!("insufficient"), "{empty}");
     assert_eq!(
@@ -1734,7 +1706,6 @@ async fn c_079_insufficient_data_policy_outcomes_local() {
         "the refusal names the missing kinds: {missing:?}"
     );
 
-    //    generation refuses `INSUFFICIENT_DATA`.
     author_required_profile(&provider, &admin).await;
     let profiled = t3_state(&provider, &admin, selection.clone(), None).await;
     assert_eq!(
@@ -1897,7 +1868,6 @@ async fn c_090_reflection_grant_surfaces_local() {
     );
     expect_state_digest(&covered, "the covered read");
 
-    // shared access is the coverage refusal, terminal.
     expect_refusal(
         provider
             .get_reflection_state(
@@ -1986,7 +1956,6 @@ async fn c_100_reflection_error_classes_local() {
         "the ungranted state read",
     );
 
-    //    outright — the honest D9 refusal, never a widened selection.
     let cognition = expect_refusal(
         provider
             .get_reflection_state(
@@ -2024,8 +1993,6 @@ async fn c_100_reflection_error_classes_local() {
         "the empty-basis generation",
     );
 
-    //    digest; the committed generation replays; a changed payload under the
-    //    same key is `IDEMPOTENCY_CONFLICT` (terminal).
     let digest = sufficient_basis(&provider, &admin).await;
     let stale = expect_refusal(
         t3_generate(
@@ -2119,7 +2086,6 @@ async fn c_100_reflection_error_classes_local() {
     );
     assert_eq!(unfenced["status"], json!("committed"), "{unfenced}");
 
-    //    zero records — the records-only verdict.
     let empty_subject = "sbj_c100_empty";
     served(
         provider
@@ -2180,7 +2146,6 @@ async fn c_100_reflection_error_classes_local() {
         "the recordless generation",
     );
 
-    //    while the reads stay served through the freeze.
     served(
         provider
             .create_record(
@@ -2272,7 +2237,6 @@ async fn c_100_reflection_error_classes_local() {
     );
     assert_eq!(unfrozen["status"], json!("committed"), "{unfrozen}");
 
-    //    commits an honest failed receipt with no cost.
     provider.inject_generation_fault();
     let interrupted = expect_refusal(
         provider
@@ -2312,7 +2276,6 @@ async fn c_100_reflection_error_classes_local() {
         "no cost on failure: {failed}"
     );
 
-    //    `OUTCOME_UNCERTAIN` until the terminal outcome commits.
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Barrier::new(2));
     provider.park_next_generation(Arc::clone(&entered), Arc::clone(&release));
@@ -2484,8 +2447,6 @@ async fn qc_b1_verdicts_are_per_row_under_one_pin_local() {
         "R1 pins the superseded basis: {page}"
     );
 
-    // becomes tombstone-only (excluded); R1's pin is whole again (fresh),
-    // so the listing keeps exactly R1 and the state names R1 last.
     let revision = t3_records(&provider, &admin)
         .await
         .iter()
@@ -2549,7 +2510,6 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
     );
     assert_eq!(pin["status"], json!("committed"), "{pin}");
 
-    // its file effect is owed, and the caller learns OUTCOME_UNCERTAIN.
     provider.inject_commit_fault(true);
     expect_refusal(
         provider
@@ -2571,7 +2531,6 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
         "the lost record commit",
     );
 
-    // serves empty and stays admitted; the committed envelope does not leak.
     let listed = served(
         provider
             .list_records(
@@ -2602,9 +2561,6 @@ async fn qc_b2_pending_journal_withholds_then_answers_terminal_local() {
         "the recovering intent is pending"
     );
 
-    // target holds bytes this intent did not produce: reopen with foreign
-    // bytes at the target path (relative to the provider's `memory-store`
-    // file root).
     let target = nexus_home_layout::operational_workspace_dir(home.path(), ADMIN, "default")
         .join("memory-store")
         .join(&path);
@@ -2895,7 +2851,6 @@ async fn qc_b4_filtered_list_and_state_honor_provenance_local() {
         "{listed_b}"
     );
 
-    // the reported staleness is that envelope's own verdict.
     let state_a = t3_state(
         &provider,
         &admin,
@@ -3015,8 +2970,6 @@ async fn c_r2_recovery_skips_a_live_generation_lease_local() {
     );
     let window = async {
         entered.notified().await;
-        // here, against A's published pending receipt. The live lease must
-        // survive it untouched and pending.
         let other = LocalMemoryProvider::open(home_path.clone(), ADMIN, "default")
             .await
             .expect("open process B over the same workspace");
@@ -3090,7 +3043,6 @@ async fn c_r2_state_serves_one_snapshot_local() {
         .expect("the committed reflection id")
         .to_owned();
 
-    // digest, so `stale` is false — both members from one snapshot.
     let before = t3_state(&provider, &admin, json!({ "mode": "subject_all" }), None).await;
     assert_eq!(before["state_digest"], json!(pinned), "{before}");
     assert_eq!(before["stale"], json!(false), "{before}");
@@ -3100,7 +3052,6 @@ async fn c_r2_state_serves_one_snapshot_local() {
         "{before}"
     );
 
-    // AND the staleness verdict of an envelope pinning the older one.
     t3_record(
         &provider,
         &admin,
@@ -3249,13 +3200,6 @@ async fn c_r2_reflections_name_the_refused_field_local() {
         "{refused:?}"
     );
 
-    // provider — the wire schema enforces its 64-hex pattern at
-    // deserialization, exactly like `idempotency_key`'s 1–128 shape; the
-    // provider-side `is_state_digest` gate that names
-    // `details.field = "expected_state_digest"` is defense in depth for
-    // direct (untyped) callers. A well-formed-but-stale digest is
-    // `REVISION_CONFLICT` (no field; it names `current_state_digest`
-    // instead), covered by the C-100 row.
     let deserialization =
         serde_json::from_value::<schemas::MemoryReflectionsGenerateRequest>(json!({
             "space_id": space,

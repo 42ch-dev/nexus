@@ -1,6 +1,4 @@
 /**
- * Reading Chrome (P0 headline).
- *
  * The prose reading surface: applies reading typography (measure, line-height,
  * paragraph spacing via DESIGN.md §Typography/reading-prose tokens) to the body
  * markdown render. Promotes the V1.75-pivot residuals verbatim — frontmatter

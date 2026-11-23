@@ -39,7 +39,6 @@ pub const KNOWN_FINDING_KINDS: &[&str] = &[
     "consistency",
     "plot_hole",
     "world_inconsistency",
-    // (the parser falls back to `craft` for unknown tokens per spec §1.2).
 ];
 
 /// Finding `severity` vocabulary (spec §2.1).
@@ -191,7 +190,6 @@ fn split_sections(content: &str) -> Vec<(String, String)> {
 
     for line in content.lines() {
         let trimmed = line.trim_start();
-        // `#` swallowed by the h2 prefix.
         if let Some(rest) = trimmed
             .strip_prefix("### ")
             .or_else(|| trimmed.strip_prefix("## "))
@@ -306,14 +304,12 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
     let mut i = 0;
     while i < raw_tokens.len() {
         let tok = raw_tokens[i];
-        // split_whitespace has already isolated).
         if let Some(key) = tok
             .strip_suffix(':')
             .map(|s| s.trim().to_ascii_lowercase())
             .filter(|k| TAG_KEYS.contains(&k.as_str()))
         {
             if matches!(key.as_str(), "rule_suggestion" | "rule") {
-                // recognized tag appears later.
                 let mut value_parts: Vec<&str> = Vec::new();
                 let mut j = i + 1;
                 while j < raw_tokens.len() {
@@ -346,7 +342,6 @@ fn scan_tokens(bullet: &str) -> (HashMap<String, String>, Vec<String>) {
             i += 1;
             continue;
         }
-        // naturally (`, ` separators don't belong in prose).
         prose.push(tok.trim_end_matches(',').to_string());
         i += 1;
     }
@@ -520,7 +515,6 @@ Adequate; no actionable issues.
 
     #[test]
     fn parse_skips_malformed_bullets_but_keeps_good_ones() {
-        // dropped; the first and third are kept.
         let report = "\
 ## Issues
 - Real issue. kind: craft, severity: minor

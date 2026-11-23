@@ -19,9 +19,6 @@ import {
   stringifyWire,
 } from '../dist/validate.js';
 
-// version as the loader package (the packaging flow asserts the packed pair).
-// Deriving it here keeps this suite green across version bumps instead of
-// pinning the release literal.
 const loaderPackageVersion = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ).version;

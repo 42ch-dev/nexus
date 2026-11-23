@@ -9,14 +9,6 @@ import { useStudioEmbed } from '@/components/studio-embed-context';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { HomePage } from '@/pages/home';
 
-/**
- * ~2.3k lines, brand, components, surfaces subtree) are lazy-loaded so an
- * unrelated route does not eagerly parse every gallery module into the main
- * chunk. Each lazy route keeps the exact label/hash/fixture behavior; the
- * Suspense boundary gives a meaningful, accessible loading state (role +
- * aria-busy). HomePage stays eager as the first route.
- */
-
 const TokensPage = lazy(() => import('@/pages/tokens').then((m) => ({ default: m.TokensPage })));
 const BrandPage = lazy(() => import('@/pages/brand').then((m) => ({ default: m.BrandPage })));
 const ComponentsPage = lazy(() => import('@/pages/components').then((m) => ({ default: m.ComponentsPage })));

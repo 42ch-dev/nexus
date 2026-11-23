@@ -115,12 +115,6 @@ function expectedPlatformPackageName(): string {
   throw new Error(`unsupported platform ${platform}/${arch}`);
 }
 
-/**
- * actually lives: the loader declares it as an optional dependency, so pnpm
- * links it under the loader's own `node_modules` and @electron/packager
- * flattens it beside the loader inside the app bundle. Anchoring at this app's
- * directory would miss the workspace layout (packages/nexus-native/node_modules).
- */
 function resolvePlatformPackageRoot(pkgName: string): string {
   const loaderEntry = fileURLToPath(import.meta.resolve('@42ch/nexus-native'));
   return dirname(createRequire(loaderEntry).resolve(`${pkgName}/package.json`));

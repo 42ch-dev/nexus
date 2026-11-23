@@ -24,7 +24,6 @@ const FOREIGN: &str = "wld_pack_foreign";
 
 async fn seed(pool: &SqlitePool) {
     for owner in [CREATOR, "other_creator"] {
-        // registry row, which the admitted read selections resolve.
         nexus_local_db::ensure_creator_row(pool, owner, "Test")
             .await
             .unwrap();
@@ -160,9 +159,6 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
         .await
         .unwrap_err();
     assert!(matches!(denied, CoreError::WorldOwnerDenied { .. }));
-    // (forged) creator is rejected on identity before ownership is even
-    // consulted, and a known creator on a foreign World is rejected by the
-    // ownership guard.
     let denied = CoreService::import_legacy_world_pack(
         &pool,
         "ctr_forged",
@@ -188,8 +184,6 @@ async fn pack_import_skip_cross_world_and_reimport_is_idempotent() {
     assert_eq!(atom_counts(&pool, FOREIGN).await, (0, 0));
 
     let reader = nexus_local_db::open_pool_read_only(&db_path).await.unwrap();
-    // pool is refused by the bridge's admission, and SQLite mode=ro pools by
-    // the writer-protocol fencing.
     assert!(CoreService::import_legacy_world_pack(
         &reader,
         CREATOR,
@@ -298,7 +292,6 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
     let cli_pool = nexus_local_db::init_pool(&db_path).await.unwrap();
     seed(&cli_pool).await;
 
-    // not the configured active creator.
     let identities: Vec<String> =
         sqlx::query_scalar("SELECT DISTINCT creator_id FROM core_writer_registration")
             .fetch_all(&cli_pool)
@@ -310,8 +303,6 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         "retained CLI pool must be bootstrap-registered: {identities:?}"
     );
 
-    // pack bytes come from the real export owner; the bridge then imports
-    // on the bootstrap pool only — no second writer registration.
     let reader_core = CoreService::open(CoreOpenOptions {
         user_home: home,
         access: CoreAccess::ReadOnly,
@@ -326,7 +317,6 @@ async fn bridge_admits_non_bootstrap_owner_on_bootstrap_pool() {
         .await
         .unwrap();
     let mut pack = serde_json::to_value(exported).unwrap();
-    // (skip policy) against the same DB's SOURCE rows. Mint fresh target ids.
     fresh_entry_ids_in_pack(&mut pack);
     let plan = CoreService::import_legacy_world_pack(
         &cli_pool,
@@ -518,7 +508,6 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
             ),
         ]
     );
-    // stored for it at all (neither the local holder nor any other).
     let colliding_rows: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE key_block_id = ?")
             .bind("kb_gov_collide")
@@ -530,7 +519,6 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
     let (shared_holder, shared_disclosure) = stored_governance(&pool, "kb_gov_shared").await;
     assert_eq!((shared_holder, shared_disclosure), (None, None));
 
-    // immutable original JSON and never a knowledge view.
     let batch_id = summary.quarantined[0].import_batch_id.clone();
     let review = core
         .review_world_pack_import(&principal, TARGET.to_string(), batch_id.clone())
@@ -552,7 +540,6 @@ async fn v1191_holder_pack_unmapped_and_colliding_holders_stay_quarantined() {
         colliding.original_disclosure.as_deref(),
         Some(DISCLOSURE_OWNER_PRIVATE)
     );
-    // a re-serialization of the typed entry.
     let document_atom = pack["entries"][1].to_string();
     assert_eq!(
         colliding.original_entry.as_deref(),
@@ -595,7 +582,6 @@ async fn v1191_holder_pack_mapped_adoption_removes_quarantine_atomically() {
     assert_eq!(quarantine_rows(&pool).await.len(), 1);
     assert_eq!(atom_counts(&pool, TARGET).await, (0, 0));
 
-    // refuses the whole import with zero writes.
     let refused = CoreService::import_legacy_world_pack(
         &pool,
         CREATOR,
@@ -796,11 +782,9 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         pack["modules"]["pack"]["title"], "Pack World",
         "a defaulted pack title is the World title: {pack}"
     );
-    // same-world re-import arm below.
     let same_world_pack = pack.clone();
     fresh_entry_ids_in_pack(&mut pack);
 
-    //    the imported relation endpoints follow the renamed id ─────────────
     sqlx::query("INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, revision, body_json, created_at, updated_at) VALUES ('kb_target_kael', ?, 'character', 'Kael', 'confirmed', 0, ?, datetime('now'), datetime('now'))")
         .bind(TARGET)
         .bind(json!({"summary": "Pre-existing Kael"}).to_string())
@@ -876,7 +860,6 @@ async fn retained_pack_conflict_policies_and_review_bound() {
         "the pre-existing collision row is never stamped"
     );
 
-    //    own status survives ───────────────────────────────────────────────
     sqlx::query(
         "UPDATE kb_key_blocks SET status = 'provisional' WHERE key_block_id = 'kb_target_kael'",
     )

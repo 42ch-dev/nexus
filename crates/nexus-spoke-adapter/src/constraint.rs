@@ -121,7 +121,6 @@ pub struct CarrierError {
 /// module_presence | module_absence | required_field |
 /// observer_cardinality`), plus the offending `member`.
 #[allow(clippy::too_many_lines)]
-// grammar (AR-2); splitting would fragment the shape table it documents.
 pub fn parse_carrier_json_member(value: &Value) -> Result<Constraint, CarrierError> {
     let obj = value.as_object().ok_or_else(|| CarrierError {
         member: "constraint",
@@ -391,7 +390,6 @@ mod tests {
                 }
             })
         );
-        // dotted names other than the two reserved entry-level values.
         assert!(parse_carrier_json(&json!({
             "family": "required_field",
             "module_key": "characters",

@@ -21,8 +21,6 @@ const FOREIGN_SESSION_ID = 'sess_foreign_observation';
 const AGENT_BINDINGS = { default: { provider_id: 'mock-acp' } };
 
 /**
- * (`GET /v1/daemon/orchestration/sessions/{run_id}/events`).
- *
  * Every observation below comes from the real compiled native addon behind the
  * real in-process service over a real HTTP listener and a real seeded store:
  * the subscription authority, the run's own event ring, its caps, the
@@ -43,13 +41,6 @@ function resolvePython() {
   }).stdout.trim();
 }
 
-/**
- * one ~384 KiB chunk, so a run that walks several prompt boundaries pushes its
- * own ring past the frozen 1 MiB per-run byte cap and the ring trims its oldest
- * records — the condition a LATE subscriber must see as an explicit gap rather
- * than a silently short history. Runs with a single prompt stay well under the
- * cap and are unaffected by the flag.
- */
 function acpProviderConfig() {
   return `
 [[providers]]
@@ -63,11 +54,6 @@ OVERSIZED_UPDATE = "1"
 `;
 }
 
-/**
- * an initialized profile needs — the agent-host provider selection and the
- * selected workspace's registered creative root, written the way
- * `nexus42 creator workspace create --creative-root <abs>` writes it.
- */
 function seededHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-p1t3-'));
   const seed = spawnSync(
@@ -88,12 +74,6 @@ function seededHome() {
   return home;
 }
 
-/**
- * store the service will open. It is written with the engine writer identity
- * the fixture's own `init_engine_pool` committed (the store validates every
- * write through connection-local scalar functions), so a subscription that
- * ignored the stored owner would find a readable run there.
- */
 function seedForeignRun(home) {
   const script = `
 import sqlite3, glob, sys
@@ -115,12 +95,6 @@ conn.commit()
   assert.equal(seeded.status, 0, seeded.stderr || seeded.stdout);
 }
 
-/**
- * admitted run dispatches a real `acp.prompt` (which publishes host-event
- * frames on its own ring) and then parks durably at the gate, so a subscriber
- * sees retained frames on a LIVE run — the state the same-run stream, its
- * cursor and its release semantics all have to hold in.
- */
 function observedParkPresetYaml(id) {
   return `preset:
   id: ${id}
@@ -154,10 +128,6 @@ states:
 `;
 }
 
-/**
- * ring exceeds its 1 MiB per-run byte cap while it is running, so its oldest
- * records are gone by the time a LATE subscriber arrives.
- */
 function ringTrimPresetYaml(id) {
   const boundary = (stateId, next) => `  - id: ${stateId}
     enter:
@@ -252,11 +222,6 @@ async function startServiceOn(home) {
   return startService({ home, host: '127.0.0.1', port: 0, allowRemote: false });
 }
 
-/**
- * load-bearing: a control frame that must NOT carry a cursor omits the `id`
- * LINE entirely, which is a different wire fact from `id: ` — an empty id
- * field would reset a client's last-event-id instead of leaving it alone.
- */
 function parseSseFields(block) {
   const fields = new Map();
   for (const line of block.split('\n')) {
@@ -288,11 +253,6 @@ function eventsUrl(base, runId) {
   return `${base}/v1/daemon/orchestration/sessions/${runId}/events`;
 }
 
-/**
- * read again after the run is signalled, so the live tail is observed on the
- * subscription that already delivered the retained replay — never a second
- * subscription pretending to be the same stream.
- */
 class EventReader {
   constructor(response) {
     this.response = response;
@@ -315,9 +275,6 @@ class EventReader {
     }
   }
 
-  /**
-   * early must not leave two readers racing for the same connection.
-   */
   next() {
     this.pending ??= this.reader.read().then(
       (read) => read,
@@ -385,8 +342,6 @@ async function openEvents(base, runId, lastEventId) {
 }
 
 /**
- * line and headers have arrived.
- *
  * A paused TCP reader is the only way a test can hold a real socket closed: the
  * client's receive window stops advancing, the server's own `write()` eventually
  * returns `false`, and the transport's drain wait becomes the thing under test —
@@ -459,10 +414,6 @@ function splitSseFrames(text) {
     .map((block) => frameOf(parseSseFields(block)));
 }
 
-/**
- * the connection ends. `ended: false` means the server never closed it inside
- * the window — itself an observable outcome, not a timeout to ignore.
- */
 function collectToEof(socket, timeoutMs) {
   return new Promise((resolveCollect) => {
     const chunks = [];
@@ -496,9 +447,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   let drainTimeoutMs;
 
   /**
-   * wait for its owned run. Admission is asynchronous by contract, so the run
-   * identity is observed by polling the public read, never assumed.
-   *
    * `concurrency` is passed through when a case needs an INDEPENDENT run: the
    * scaffolded default is `serial`, which admits only while no other schedule of
    * the same creator is `running`. `parked` waits out the run's own drive to the
@@ -558,8 +506,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   }
 
   before(async () => {
-    // and the service compiles against that declaration: all three are built
-    // here (each is incremental after the first run).
     assert.equal(
       spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], { cwd: root, stdio: 'inherit' })
         .status,
@@ -577,10 +523,7 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       0,
     );
 
-    // it takes the retained test-only override to its smallest legal value.
     process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1';
-    // in-process service uses, so the drain hook counter and the frozen drain
-    // deadline below are the running transport's own, not a copy.
     ({ sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js')));
     ({ SSE_DRAIN_TIMEOUT_MS: drainTimeoutMs } = await import(join(serviceRoot, 'dist/config.js')));
     home = seededHome();
@@ -591,7 +534,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       yaml: observedParkPresetYaml,
       parked: true,
     }));
-    // a ring with an earlier case whose readers may still be draining.
     ({ runId: capRunId } = await admitRun('p1t3-observe-cap', {
       yaml: observedParkPresetYaml,
       concurrency: 'parallel_any',
@@ -605,7 +547,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   });
 
   test('same run replay: retained frames carry the inspected root run id and the cursor is exact', async () => {
-    // never a Host session and never a freshly created prompt.
     const inspected = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${parkRunId}`);
     assert.equal(inspected.status, 200, inspected.text);
     assert.equal(inspected.payload.session.session_id, parkRunId, inspected.text);
@@ -636,7 +577,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
         `the durable run state is observable on its own ring: ${JSON.stringify(stream.frames.map((f) => f.event))}`,
       );
 
-      // `<epoch>:<sequence>`: it is refused before any frame is written.
       const numeric = await jsonFetch(eventsUrl(base, parkRunId), {
         headers: { 'Last-Event-ID': '7' },
       });
@@ -652,9 +592,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       assert.equal(future.status, 400, future.text);
       assert.equal(future.payload.error.code, 'invalid_input', future.text);
 
-      // run is owned and readable, so the stream opens, carries ONE explicit
-      // `history_unavailable` control frame and closes — never an invented
-      // history and never a silent empty 200.
       const priorEpoch = await openEvents(
         base,
         parkRunId,
@@ -680,7 +617,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
         'the control frame names the public inspect URL of the SAME run',
       );
 
-      // subscription delivers is strictly AFTER it, and the replay starts at the
       const resumed = await openEvents(base, parkRunId, stream.frames[0].id);
       try {
         await resumed.read(1, 8_000);
@@ -705,9 +641,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   });
 
   test('same run replay: a disconnected reader releases the run subscriber permit', async () => {
-    // exactly that many open streams is how "released on disconnect" becomes
-    // observable from outside: while they are held, the next subscription is the
-    // pre-header refusal; after the readers leave, the permit is reusable.
     const capRunUrl = eventsUrl(base, capRunId);
     const held = [];
     for (let index = 0; index < 16; index += 1) {
@@ -724,7 +657,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       await response.body.cancel().catch(() => undefined);
     }
 
-    // the permit must become reusable inside a bounded window.
     const reopened = await waitFor(
       async () => {
         const response = await fetch(capRunUrl);
@@ -787,7 +719,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     });
     trimRunId = runId;
 
-    // ring then closes and stays readable as a terminal ring.
     await waitFor(
       async () => {
         const response = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${runId}`);
@@ -836,7 +767,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
         `the durable final frame is the last word: ${JSON.stringify(finalFrame.data)}`,
       );
 
-      // EXCLUSIVELY and in full, with no re-sent and no skipped frame.
       const cursorIndex = Math.max(0, stream.frames.length - 2);
       const cursor = stream.frames[cursorIndex].id;
       const resumed = await openEvents(base, runId, cursor);
@@ -880,7 +810,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
    * whichever branch the platform produces rather than pretending to force one.
    */
   test('same run replay: a stalled socket is bounded by the drain deadline, never a silent replay', async (t) => {
-    // below.
     const complete = await openEvents(base, trimRunId);
     let retained;
     try {
@@ -899,8 +828,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       /^HTTP\/1\.1 200/,
       `an admitted observation opens on the raw socket: ${head.toString('utf8', 0, 80)}`,
     );
-    // before looking at the outcome, so a deadline that was going to expire has
-    // expired.
     await delay(drainTimeoutMs + 1_500);
     const { body, ended } = await collectToEof(socket, 12_000);
     socket.destroy();
@@ -949,7 +876,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
     service = await startServiceOn(home);
     base = service.url;
 
-    // still reports the cancel truth it settled with.
     const inspected = await jsonFetch(`${base}/v1/daemon/orchestration/sessions/${parkRunId}`);
     assert.equal(inspected.status, 200, inspected.text);
     assert.equal(inspected.payload.session.session_id, parkRunId, inspected.text);
@@ -994,14 +920,11 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
       `foreign, absent and child ids stay indistinguishable: ${refused.join(' | ')}`,
     );
 
-    // opens a stream on the very same route, so the refusal above is
-    // authorization and not a missing route.
     const owned = await openEvents(base, capRunId);
     await owned.read(1, 15_000);
     assert.ok(owned.frames.length >= 1, 'the owned run opens its stream on the same identity');
     await owned.disconnect();
 
-    // ignored into a full replay.
     const strayQuery = await jsonFetch(`${eventsUrl(base, capRunId)}?after_sequence=1`);
     assert.equal(strayQuery.status, 400, strayQuery.text);
     assert.equal(strayQuery.payload.error.code, 'invalid_input', strayQuery.text);

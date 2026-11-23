@@ -148,7 +148,6 @@ async fn patch_state_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("strategy_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry HTTP 409: {err}");
-    // conflicting path, recovery hint.
     assert!(err.contains("current_revision"), "stderr: {err}");
     assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
@@ -187,9 +186,6 @@ async fn patch_state_unknown_strategy_surfaces_404() {
 async fn patch_state_malformed_bundle_surfaces_bad_request() {
     let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
-    // the patch. Its internal code (`strategy_invalid`) is outside the public
-    // code allowlist, so it degrades to the coarse `bad_request` — the CLI
-    // must surface the public code, not the internal classification.
     std::fs::write(
         bundle_dir.join("preset.yaml"),
         "revision: 1\npreset:\n  id: test-strategy\n",
@@ -249,7 +245,6 @@ async fn patch_transition_update_rewires_target() {
     let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
-    // outgoing transition, so it is a valid (terminal-by-absence) target.
     let out = cli(
         &d,
         &[
@@ -288,7 +283,6 @@ async fn patch_transition_create_branch() {
     let d = DirectFixture::new().await;
     let bundle_dir = seed_bundle(d.home.path(), "test-strategy");
 
-    // branch create seeds a conditional map with a default target.
     let out = cli(
         &d,
         &[
@@ -396,8 +390,6 @@ async fn patch_prompt_writes_template_and_bumps_revision() {
     std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
     std::fs::write(&template_path, "# Hello\n").expect("write template");
 
-    // below proves the core wrote the NEW bytes, not the pre-existing
-    // template (a skipped write would leave the old body in place).
     let source_path = bundle_dir.join("prompts/start.new.md");
     std::fs::write(&source_path, "# Hello, patched world\n").expect("write source");
 
@@ -506,7 +498,6 @@ async fn patch_prompt_stdin_writes_template() {
     std::fs::create_dir_all(template_path.parent().unwrap()).expect("create prompts dir");
     std::fs::write(&template_path, "# Hello\n").expect("write template");
 
-    // stdin convention claimed in cli-spec §6.2G.4).
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_nexus42"))
         .args([
             "preset",

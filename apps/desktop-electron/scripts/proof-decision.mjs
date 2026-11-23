@@ -32,10 +32,6 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..', '..');
 
-/**
- * (`.mstar/**` is gitignored). Resolve the evidence root against the repository
- * that actually holds the documents; `--evidence-root` overrides it.
- */
 function evidenceRoot() {
   const override = process.argv.includes('--evidence-root')
     ? process.argv[process.argv.indexOf('--evidence-root') + 1]
@@ -174,11 +170,6 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
       const failedChecks = [...missing.map((name) => `${name} missing`), ...failures];
       const declaredStatus = doc.status;
       if (declaredStatus === 'fail') {
-        // therefore drive the whole decision to no-go — only when the row
-        // names a row-specific, explicitly measured failure predicate.
-        // Absent required checks and structural gaps stay blocking evidence:
-        // a crashed or incomplete producer that writes `status: "fail"` must
-        // never be promoted into a product measurement (F-001).
         const failureEvidence = typeof measuredFailure === 'function' ? measuredFailure(doc) : measuredFailure;
         const measured = Array.isArray(failureEvidence) ? failureEvidence : failureEvidence ? [failureEvidence] : [];
         if (missing.length > 0) {
@@ -207,7 +198,6 @@ function deriveRow({ id, row, evidence, schema, target, sourceSha = source.sourc
         state = 'blocked';
         problems.push(`status ${declaredStatus ?? 'absent'} is neither pass nor fail`);
       } else if (failedChecks.length > 0) {
-        // measured failure — fail closed rather than guess (I10).
         state = 'blocked';
         problems.push(...notes, `status is pass but predicates failed: ${failedChecks.join('; ')}`);
       } else {
@@ -302,7 +292,6 @@ for (const arch of ARCHES) {
           required: INSTALL_REQUIRED_CHECKS,
           failures: failed,
           notes: [`${okCount}/${(doc.checks ?? []).length} checks pass`],
-          // checks are unsupported evidence and must block rather than no-go.
           measuredFailure: falseChecks,
         };
       },
@@ -361,7 +350,6 @@ for (const arch of ARCHES) {
     evidence: EV(`native-binary-${arch.suffix}/binary-inspection.json`),
     schema: 'rft-p3-t1-binary-inspection/v1',
     target: arch.target,
-    // artifact digest it shares with the source-verified package receipt.
     sourceSha: null,
     predicates: (doc) => {
       const failed = [];
@@ -431,8 +419,6 @@ for (const arch of GUI_ARCHES) {
   const loaded = readEvidence(evidence);
   const bundlePath = absoluteFor(APP_BUNDLE(arch.key));
   const expectations = {
-    // expectation must be canonicalised the same way (a /tmp symlink would
-    // otherwise make every match look stale).
     app_path: existsSync(bundlePath) ? realpathSync(bundlePath) : undefined,
     app_bundle_id: 'com.nexus42.rft-electron-proof',
     arch: arch.key,
@@ -512,8 +498,6 @@ for (const arch of GUI_ARCHES) {
 
 
 /**
- * against its actual field names (read from the gate document, not invented).
- *
  * A decision row may not be satisfied by the gate's `status` alone: each of
  * these must independently hold inside the cited document, and the nested
  * runtime evidence must describe the artifact that is on disk right now.
@@ -557,8 +541,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   add(gate.schema === 'rft-p3-t3-package-gate/v2', `schema ${gate.schema ?? 'absent'} != rft-p3-t3-package-gate/v2`);
   add(gate.bundle_id === 'com.nexus42.rft-electron-proof', `bundle_id ${gate.bundle_id ?? 'absent'} != com.nexus42.rft-electron-proof`);
   add(gate.arch === arch.key, `arch ${gate.arch ?? 'absent'} != ${arch.key}`);
-  // string proves nothing: a forged gate can point at another bundle that
-  // happens to live under a `darwin-${arch}` path and copy the real hashes.
   const expectedAppPath = artifact.present ? artifact.app_path : null;
   if (!expectedAppPath) {
     problems.push(`cannot establish the canonical ${arch.key} app path: ${artifact.reason}`);
@@ -717,8 +699,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     if (typeof recordedRelative !== 'string' || recordedRelative.length === 0) {
       problems.push('nested runtime provenance native_node_path_relative is absent');
     } else {
-      // actually contains, and it must resolve inside that bundle: a copied
-      // hash with a rewritten or traversing path is a substitution, not proof.
       add(
         recordedRelative === artifact.native_node_path_relative,
         `nested runtime native_node_path_relative ${recordedRelative} != current ${artifact.native_node_path_relative ?? 'absent'}`,
@@ -767,8 +747,6 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
     }
     problems.splice(0, problems.length, ...goProblems);
   } else if (gate.status === 'no-go') {
-    // measurement failed: the security predicates must still hold, and the
-    // runtime must record that failure consistently.
     const noGoProblems = [];
     if (nestedState !== 'valid-fail') {
       noGoProblems.push(`nested contract_state ${nestedState ?? 'absent'} != valid-fail`);
@@ -802,17 +780,11 @@ function validateGateDocument(gate, arch, sourceNow, artifact) {
   return { status, summary, problems };
 }
 
-/**
- * with the shared digest so the gate's claims can be checked against reality.
- */
 function currentArtifact(arch) {
   const bundlePath = absoluteFor(APP_BUNDLE(arch.key));
   if (!existsSync(bundlePath)) {
     return { present: false, reason: `app bundle absent: ${bundlePath}` };
   }
-  // native path and the recorded app path can never disagree about which bundle
-  // is under review (a `/tmp` -> `/private/tmp` alias would otherwise produce a
-  // native path that is not relative to the canonical root).
   const canonicalRoot = canonicalPath(bundlePath);
   if (!canonicalRoot) {
     return { present: false, reason: `app bundle path is not resolvable: ${bundlePath}` };
@@ -990,8 +962,6 @@ function main() {
   const missingRows = gatingRows.length - passRows - measuredFailures;
   const allRequiredRowsPass = gatingRows.length > 0 && gatingRows.every((row) => row.verdict === 'PASS');
 
-  // release gate and remains visible as non-gating evidence; platform-native
-  // rows are produced by the GitHub Actions matrix.
   let status = 'blocked';
   if (allRequiredRowsPass) status = 'go';
   else if (measuredFailures > 0) status = 'no-go';

@@ -264,7 +264,6 @@ mod tests {
             .find(|l| l.starts_with("- ["))
             .expect("bullet line should exist");
         let body_part = body_line.split(": ").nth(1).unwrap_or_default();
-        // but we set rule_suggestion=None above, so it's just the truncated body.
         assert!(
             body_part.chars().count() <= MAX_BODY_CHARS + 1, // +1 for ellipsis
             "body should be truncated to {} chars + ellipsis; got {} chars",

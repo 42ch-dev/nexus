@@ -7,9 +7,6 @@ import { spawnSync } from 'node:child_process';
 import { after, before, describe, test } from 'node:test';
 
 /**
- * `world_id` key lands on the curated `world_id_required` refusal, identical to
- * the empty-string shape — one remediation-text owner, never a duplicated one.
- *
  * The curated discriminator rides `error.details.field`: the wire vocabulary
  * has no `world_id_required` code, so the core guard's
  * `WorkFault::BadRequest { code: "world_id_required" }` maps to
@@ -94,7 +91,6 @@ describe('create-work world_id curated refusal (v1.215 P1 T2)', () => {
     assert.equal(missing.payload.error.details?.field, 'world_id_required', missing.text);
     assert.match(missing.payload.error.message, /World binding is required for new Works/);
 
-    // same remediation text — one text owner, not two.
     const empty = await jsonFetch(`${baseUrl}/v1/daemon/works`, {
       method: 'POST',
       body: { ...WORK_BODY, world_id: '' },

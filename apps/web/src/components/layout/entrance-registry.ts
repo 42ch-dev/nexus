@@ -94,10 +94,6 @@ export function isEntranceId(value: string | null | undefined): value is Entranc
   return value === 'content-creator' || value === 'developer';
 }
 
-/**
- * both entrance descriptors (plan QC S-1): adding a surface visible on both
- * trees edits this constant only, not the two descriptor lists.
- */
 const WORKS_GROUP: ShellNavGroup = {
   id: 'works',
   label: 'nav.works',

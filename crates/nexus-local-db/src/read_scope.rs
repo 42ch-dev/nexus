@@ -104,8 +104,6 @@ pub async fn creator_actor_view_scope(
     let (containers, _) = owned_world_containers(pool, creator_id, world_id).await?;
     let holder_entry_id = crate::require_creator_holder(pool, creator_id).await?;
     KnowledgeReadScope::actor_view(holder_entry_id, containers).map_err(|err| {
-        // holder id. It fails closed rather than forming a holder-less
-        // selection that would admit shared rows only.
         LocalDbError::HolderStateInvalid {
             reason: err.to_string(),
         }

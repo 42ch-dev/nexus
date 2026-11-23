@@ -43,9 +43,6 @@ const CONTRACTS_PUBLISHED = { name: "nexus-contracts", version: "9.8.7", checksu
 
 const CHANGELOG = "# Changelog\n\n## [Unreleased]\n\n### Features\n- **test**: fixture entry\n";
 
-/**
- * be observed rather than string-scanned.
- */
 const DENY_NETWORK_PRELOAD = `
 import net from "node:net";
 import tls from "node:tls";
@@ -66,9 +63,6 @@ globalThis.fetch = async () => {
 `;
 
 /**
- * caller's mutations, then one commit — so provenance is the fixture's own HEAD
- * and the tree is clean.
- *
  * @param {{ version?: string; files?: Record<string, string>; mutate?: (dir: string) => void }} [options]
  * @returns {{ dir: string; sha: string }}
  */
@@ -82,8 +76,6 @@ function fixture(options = {}) {
 }
 
 /**
- * --json` prints.
- *
  * @param {string} sha
  * @param {{ name: string; version: string; checksum?: string }[]} rows
  * @param {{ clean?: boolean }} [source]
@@ -102,10 +94,6 @@ function evidence(sha, rows, source = {}) {
   };
 }
 
-/**
- * test uses. It records uploads, can refuse an upload or a confirmation read,
- * and deliberately has no withdraw/yank operation.
- */
 function fixtureRegistry({ published = [], refuse, readFailure } = {}) {
   const rows = [...published];
   const uploads = [];
@@ -202,7 +190,6 @@ test("dependency order precedes consumers and ignores the caller's order", () =>
       assert.equal(row.tag, `crate/${row.name}/v${row.version}`);
       assert.equal(row.version, "9.8.7");
     }
-    // evidence leave every row blocked, and the reason says so.
     assert.equal(plan.ok, true);
     assert.equal(plan.ready, false);
     assert.ok(blockerCodes(plan).includes("archive-unverified"));
@@ -582,7 +569,6 @@ test("publication refuses a refused plan and a plan that is not ready", async ()
 test("an unknown registry view cannot make a pending selection publishable", async () => {
   const { dir, sha } = fixture();
   try {
-    // stands between verified evidence and a publishable plan.
     const evidenceRows = [{ name: "nexus-module-manifest", version: "9.8.7" }];
     const unknown = planPackageRelease(dir, {
       packages: ["nexus-module-manifest"],
@@ -630,8 +616,6 @@ test("a staged copy is verified against the revision in both directions", () => 
       drifted.slice(0, 5).join(","),
     );
 
-    // commit-blob-only walk went blind, because the addition is not in the
-    // commit at all.
     writeRepoFile(stage, "crates/nexus-knowledge/src/added.rs", "pub fn added() {}\n");
     const added = verifyStagedSource(dir, sha, stage);
     assert.ok(
@@ -652,7 +636,6 @@ test("a staged copy is verified against the revision in both directions", () => 
 });
 
 test("a gitlink is one tree entry, not a staged extra", () => {
-  // the worktree contains its files, which staging copies.
   const upstream = mkdtempSync(join(tmpdir(), "nexus-submodule-"));
   const { dir } = fixture();
   const stage = mkdtempSync(join(tmpdir(), "nexus-stage-gitlink-"));
@@ -734,8 +717,6 @@ test("preparation writes only selected literals, dependency bounds and changelog
 });
 
 test("preparation rewrites every declaration of a bumped prerequisite", () => {
-  // dependency — so one non-global rewrite would leave the other bound at the
-  // old minor while reporting success.
   const { dir } = fixture({ version: "0.4.2" });
   try {
     const before = readRepoFile(dir, "crates/nexus-knowledge/Cargo.toml");
@@ -762,7 +743,6 @@ test("preparation rewrites every declaration of a bumped prerequisite", () => {
 });
 
 test("a quoted dependency key is read as the same declaration", () => {
-  // key, so it is handled (not refused): the same one-line rewrite applies.
   const { dir } = fixture({ version: "0.4.2" });
   try {
     const manifest = "crates/nexus-pattern/Cargo.toml";
@@ -784,9 +764,6 @@ test("a quoted dependency key is read as the same declaration", () => {
 });
 
 test("a literal-quoted dependency key is read as the same declaration", () => {
-  // double-quoted spellings, and a literal-quoted `version` value is the same
-  // requirement, so both are handled (not refused): the rewrite carries the
-  // key's own quoting, and only the version string changes.
   const { dir } = fixture({ version: "0.4.2" });
   try {
     const manifest = "crates/nexus-pattern/Cargo.toml";
@@ -811,8 +788,6 @@ test("a literal-quoted dependency key is read as the same declaration", () => {
 });
 
 test("a dependency renamed with a literal-quoted target refuses", () => {
-  // 'nexus-workflow-ir'` names the same package, so it must not slip past the
-  // scan and leave the edge unplanned.
   const { dir } = fixture({ version: "0.4.2" });
   try {
     const manifest = "crates/nexus-pattern/Cargo.toml";
@@ -839,7 +814,6 @@ test("a dependency renamed with a literal-quoted target refuses", () => {
 });
 
 test("a renamed dependency on an inventory package refuses", () => {
-  // rewrite by name, so it refuses instead of skipping the edge.
   const { dir } = fixture({ version: "0.4.2" });
   try {
     const manifest = "crates/nexus-pattern/Cargo.toml";
@@ -870,9 +844,6 @@ test("a renamed dependency on an inventory package refuses", () => {
 });
 
 test("preparation refuses dependency declarations it cannot rewrite", () => {
-  // requirement string), and both are forms this helper cannot rewrite in
-  // place. The scan refuses by name and file:line instead of skipping the
-  // declaration and leaving the bound behind.
   const cases = [
     [
       "trailing comment",
@@ -1009,7 +980,6 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
     assert.equal(gated.status, 1, gated.stdout);
     assert.match(gated.stdout, /ready {5}no/);
 
-    // checker's JSON report, both outside the packed tree.
     const statePath = join(scratch, "registry-state.json");
     writeFileSync(
       statePath,
@@ -1113,7 +1083,6 @@ test("check-only CLI plans from the reviewed source and exits on readiness", () 
       /refused: input-unusable: --archive-evidence .*missing\.json/,
     );
 
-    // a TypeError from whatever reads it next.
     const wrongShape = join(scratch, "wrong-shape.json");
     writeFileSync(wrongShape, JSON.stringify({ results: 5 }), "utf8");
     const badEvidence = runReleaseScript(

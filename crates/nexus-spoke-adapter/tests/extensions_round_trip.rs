@@ -30,7 +30,6 @@ fn make_entry() -> KnowledgeEntry {
         canonical_name: KnowledgeEntryCanonicalName::try_from("Mira Vale".to_owned())
             .expect("non-empty canonical name"),
         created_at: None,
-        // absent for these fixtures; the native↔wire mapping lands with T2/T8.
         disclosure: None,
         entry_id: "kb_test".into(),
         entry_type: "character".into(),
@@ -78,7 +77,6 @@ fn optional_fields_default_to_none_when_namespace_absent() {
 #[test]
 fn optional_fields_read_none_when_not_set_but_namespace_present() {
     let mut entry = make_entry();
-    // provenance/command fields should still read None.
     set_world_id(&mut entry, "wld_only".into());
 
     assert_eq!(get_world_id(&entry), Some("wld_only"));
@@ -117,7 +115,6 @@ fn preserves_unknown_keys_inside_extensions_nexus() {
         Some("manual".into()),
     );
 
-    // future/forward-compatible field that nexus does not yet know about.
     let nexus_key = ExtensionKey::try_from("nexus").expect("nexus matches namespace regex");
     let ns = entry.extensions.entry(nexus_key).or_default();
     ns.insert("future_field".into(), json!("keep-me"));
@@ -195,7 +192,6 @@ fn ext_map(from: &Value) -> ExtensionMap {
 
 #[test]
 fn build_extensions_nexus_writes_typed_fields_and_preserves_unknown_keys() {
-    // a sibling namespace that must be carried through untouched by callers.
     let existing = ext_map(&json!({
         "nexus": { "future_field": "keep-me", "world_id": "STALE" },
         "other_product": { "book_id": "bk_1" }

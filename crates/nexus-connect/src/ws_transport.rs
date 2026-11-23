@@ -227,8 +227,6 @@ async fn dispose<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    // runtime scheduling that woken call: taking first moves the halves into
-    // this task, where the flush below and the final drops release them.
     let sink = sink_half.lock().await.take();
     let stream = stream_half.lock().await.take();
     drop(stream);
@@ -285,7 +283,6 @@ where
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
         }
-        // for ordinary socket readiness, which must not evict a queued caller.
         let notified = self.closed_signal.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
@@ -296,7 +293,6 @@ where
             biased;
             () = notified.as_mut() => Err(TransportError::Closed),
             guard = slot.lock() => {
-                // to the close.
                 if self.closed.load(Ordering::SeqCst) {
                     Err(TransportError::Closed)
                 } else {
@@ -313,7 +309,6 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     async fn send(&self, envelope: &[u8]) -> Result<(), TransportError> {
-        // on that serialisation past a close.
         let _slot = self.lock_until_closed(&self.send_slot).await?;
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
@@ -321,13 +316,10 @@ where
         let mut message = Some(Message::Binary(envelope.to_vec().into()));
         let mut staged = false;
         loop {
-            // between is never lost.
             let notified = self.io_wake.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
             let outcome = {
-                // poll and released before the await below; a retained caller
-                // therefore never keeps it from the teardown.
                 let mut sink_guard = self.sink.lock().await;
                 if self.closed.load(Ordering::SeqCst) {
                     return Err(TransportError::Closed);
@@ -336,7 +328,6 @@ where
                 let waker = Waker::from(Arc::clone(&self.io_wake));
                 let mut context = Context::from_waker(&waker);
                 let mut pinned = Pin::new(sink);
-                // exceptional one, and the comment reads top-down.
                 let unstaged = !staged;
                 let polled = if unstaged {
                     match pinned.as_mut().poll_ready(&mut context) {
@@ -355,7 +346,6 @@ where
                 } else {
                     poll_flush(&mut pinned, &mut context)
                 };
-                // teardown must never wait for a retained caller.
                 drop(sink_guard);
                 polled
             };
@@ -367,7 +357,6 @@ where
     }
 
     async fn recv(&self) -> Result<Vec<u8>, TransportError> {
-        // wait on that serialisation past a close.
         let _slot = self.lock_until_closed(&self.recv_slot).await?;
         if self.closed.load(Ordering::SeqCst) {
             return Err(TransportError::Closed);
@@ -398,13 +387,10 @@ where
                         "non-Binary WS message received; session closed (fail-closed)".into(),
                     ));
                 }
-                // (auto-pong); a close frame surfaces as stream end → Closed.
                 Poll::Ready(Some(Ok(
                     Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_),
                 ))) => {}
                 Poll::Ready(Some(Err(error))) => {
-                    // cap ⇒ tungstenite Capacity): fail-closed — no further
-                    // traffic may flow on this transport.
                     self.signal();
                     return Err(map_ws_error(error));
                 }
@@ -456,8 +442,6 @@ where
                 });
             }
             Err(_) => {
-                // leaving callers on a teardown that can never run; the halves
-                // are released when the transport drops.
                 teardown.settle(Err(TransportError::Io(
                     "ws close requires a Tokio runtime".to_string(),
                 )));
@@ -468,7 +452,6 @@ where
     /// Await the one settled teardown result.
     async fn settled_result(&self) -> Result<(), TransportError> {
         loop {
-            // between cannot be missed.
             let notified = self.teardown.settled.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();

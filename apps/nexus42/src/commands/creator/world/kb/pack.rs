@@ -125,8 +125,6 @@ pub async fn run(cmd: PackCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // close that did not settle is never reported as an exported or imported
-    // pack.
     match finish_direct(&core, outcome).await? {
         PackRender::Text(text) => println!("{text}"),
         PackRender::Import {
@@ -245,8 +243,6 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
         description: None,
         ..Default::default()
     };
-    // instead of loading a raw store, so a row outside the exporting Creator's
-    // authority is never read, let alone emitted.
     let response = core
         .export_world_pack(
             principal,
@@ -315,8 +311,6 @@ async fn export(args: ExportArgs, core: &CoreService, principal: &Principal) -> 
 /// is inadmissible, the review arm cannot read the batch, or the core refuses
 /// the World/admission.
 async fn import(args: ImportArgs, core: &CoreService, principal: &Principal) -> Result<PackRender> {
-    // with pack/ST input and mappings (clap enforces it). Core admission
-    // authorizes it to the stored controlling Creator and the owning World.
     if let Some(batch_id) = args.review_import.as_deref() {
         return review_quarantine(core, principal, &args.world_ref, batch_id)
             .await
@@ -368,7 +362,6 @@ async fn import_report(
     let parsed = parse_pack(&value)
         .map_err(|e| CliError::Other(format!("Invalid pack format in {source_display}: {e}")))?;
     let serde_json::Value::Object(pack) = parsed.source else {
-        // construction — it stays a refusal instead of a panic.
         return Err(CliError::Other(format!(
             "Invalid pack format in {source_display}: the pack document must be a JSON object"
         )));
@@ -381,8 +374,6 @@ async fn import_report(
             ConflictStrategy::Overwrite => PackImportRequestConflict::Overwrite,
         },
         include_anchors: false,
-        // `holder_map` argument), exactly like the retired adapter's
-        // out-of-band argument — never duplicated onto the wire literal.
         holder_map: Vec::new(),
         review_import: None,
     };
@@ -416,9 +407,6 @@ async fn import_report(
 fn read_source(
     args: &ImportArgs,
 ) -> Result<(serde_json::Value, Vec<ConversionDiagnostic>, String)> {
-    // (`--from-st`). clap enforces exactly one. The ST converter runs before
-    // `parse_pack`; its diagnostics are printed before the import summary
-    // (also under `--dry-run`).
     if let Some(st_path) = &args.from_st {
         let text = std::fs::read_to_string(st_path).map_err(|e| {
             CliError::Other(format!(
@@ -558,7 +546,6 @@ async fn review_quarantine(
             atom.original_owner.as_deref().unwrap_or("<none>"),
             atom.original_disclosure.as_deref().unwrap_or("<none>"),
         ));
-        // carried it (never a re-serialization of the typed entry).
         if let Some(original) = atom.original_entry.as_deref() {
             lines.push(format!("    original: {original}"));
         }
@@ -608,7 +595,6 @@ fn quarantine_reason_wire(reason: PackImportResponseQuarantinedItemReason) -> St
     serde_json::to_value(reason)
         .ok()
         .and_then(|value| value.as_str().map(ToString::to_string))
-        // rather than printing an empty label.
         .unwrap_or_else(|| format!("{reason:?}"))
 }
 
@@ -894,9 +880,6 @@ mod tests {
             .await
             .expect_err("export must fail for missing world");
         let msg = format!("{err}");
-        // resource (`map_core_error` mirrors the daemon adapter's status and
-        // envelope), which is the retained texture for a missing World on this
-        // seam.
         assert!(msg.contains("404"), "error must be the 404 family: {msg}");
         assert!(
             msg.contains("wld_nonexistent"),
@@ -1076,16 +1059,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn import_skips_on_canonical_name_collision() {
-        // plus another, then import into a world that already has a
-        // different entry_id but same canonical_name.
         let (fx, entry_ids, _rel_ids) = seeded_pool().await;
         let alice_id = &entry_ids[0]; // "Alice"
         let bob_id = &entry_ids[1]; // "Bob"
         let carol_id = &entry_ids[2]; // "Carol"
         let (pack_path, _pack_dir) = export_to_file(&fx).await;
 
-        // but same canonical_name. Then import the pack (which also has Carol
-        // under the original entry_id).
         let fx2 = empty_world_pool().await;
         let store = SqliteKbStore::new(fx2.pool.clone());
         let mut carol_clone = KnowledgeEntryRecord::new(WORLD, BlockType::Character, "Carol");
@@ -1113,7 +1092,6 @@ mod tests {
             .await
             .expect("import must succeed");
 
-        // canonical_name collision), and skip Carol's entry_id.
         assert_eq!(count_entries(&fx2.pool, WORLD).await, 3); // clone Carol + Alice + Bob
         assert!(
             store.get_knowledge_entry(carol_id).await.is_err(),
@@ -1465,7 +1443,6 @@ mod tests {
             .await
             .expect("import must succeed with remap");
 
-        // should land pointing at B's Alice/Bob ids.
         assert_eq!(count_entries(&fx.pool, WORLD_B).await, 3);
         assert_eq!(
             count_relations(&fx.pool, WORLD_B).await,
@@ -1816,7 +1793,6 @@ mod tests {
     /// pack's Carol id.
     #[tokio::test(flavor = "multi_thread")]
     async fn import_remaps_relation_endpoints_on_name_collision() {
-        // Alice→Bob).
         let fx = world_fixture(WORLD, WORLD_TITLE, "pack-world").await;
 
         let store = SqliteKbStore::new(fx.pool.clone());
@@ -1974,8 +1950,6 @@ mod tests {
         }));
         let _dragon_res = store_a.insert_knowledge_entry(dragon).await.unwrap();
 
-        // a stage0 that only mentions "dragon". Summary deliberately
-        // avoids the substring "haunt" so the entry does not self-match.
         let mut ghost = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Ghost");
         ghost.body = Some(KnowledgeEntryBody {
             summary: Some("A spooky translucent apparition".to_string()),
@@ -2600,7 +2574,6 @@ mod tests {
         let fx = empty_world_pool().await;
         let dir = tempfile::tempdir().unwrap();
         let st_path = dir.path().join("lorebook.json");
-        // uid-keyed object form is the native ST export shape and converts).
         std::fs::write(&st_path, r#"{ "entries": "not-an-array-or-object" }"#).unwrap();
 
         let args = ImportArgs {

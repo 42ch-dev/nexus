@@ -551,7 +551,6 @@ impl CoreService {
         op: ComposeOp,
     ) -> CoreResult<ComposeOutcome> {
         self.verify_principal(principal)?;
-        // alone: never after scanning the whole pattern registry for pins it will not use.
         let current = self.read_strategy_candidate(principal, strategy_id).await?;
         if current.revision != base_revision {
             return Err(conflict(strategy_id, base_revision, current.revision));
@@ -728,8 +727,6 @@ fn nest_pattern(
         });
     }
 
-    // inserts: `settle` filters only `GraphCycle`, so a self-loop or an unknown target would
-    // commit bytes that every later operation refuses.
     let attach_to = op.attach_to.as_deref();
     if let Some(attach_to) = attach_to {
         if attach_to == op.parent_node {
@@ -759,7 +756,6 @@ fn nest_pattern(
         parent_node: op.parent_node.clone(),
         pin_policy: WorkflowNestBindingPinPolicy::Exact,
     });
-    // commit wires it. The target was proven to name an existing node above.
     if let Some(attach_to) = attach_to {
         let mut taken: HashSet<String> =
             document.edges.iter().map(|edge| edge.id.clone()).collect();
@@ -1016,9 +1012,6 @@ pub fn verify_recorded_pins(
     packages: &[PatternPackage],
 ) -> Result<(), PinVerificationFailure> {
     if recorded.is_empty() {
-        // at all. A carrier with no recorded hash is refused here rather than cleared, because the
-        // fragment it loads can pin packages the empty snapshot never recorded — deciding it pins
-        // nothing would mean reading the registry the shortcut exists to avoid.
         for nest in &document.nests {
             let Some(pin) = pinned_pattern(&nest.child) else {
                 continue;
@@ -1250,7 +1243,6 @@ fn move_body(
         if let Some(id) = node_ids.get(&node.id) {
             moved.id.clone_from(id);
         }
-        // wire a stranger's id, so it is dropped.
         moved.depends_on = node
             .depends_on
             .iter()
@@ -1608,9 +1600,6 @@ impl<'a> PackageIndex<'a> {
             let Some(manifest) = package.manifest() else {
                 continue;
             };
-            // order, so a broken duplicate cannot make a readable package unresolvable; only when
-            // none is available does the first scanned directory keep the pin, and its own reason
-            // is the one a refusal names. The listing still reports every directory.
             match by_pin.entry((manifest.id.as_str(), manifest.version.as_str())) {
                 std::collections::hash_map::Entry::Vacant(entry) => {
                     entry.insert(package);
@@ -1660,8 +1649,6 @@ impl<'a> PackageIndex<'a> {
             let Some(pin) = pinned_pattern(&nest.child) else {
                 continue;
             };
-            // that failed to load is skipped, so a carrier whose bytes changed or whose package is
-            // gone is always reported.
             self.report_unusable_pin(nest, &pin, diagnostics);
             if !seen.insert(pin.to_string()) {
                 continue;
@@ -1871,7 +1858,6 @@ mod tests {
             pinned_pattern(&child(Some("research-loop"), Some("1.0.0"))),
             Some(pin)
         );
-        // the version too instead of falling through on a non-empty id.
         assert_eq!(pinned_pattern(&child(Some("research-loop"), None)), None);
         assert_eq!(
             pinned_pattern(&child(Some("research-loop"), Some(""))),

@@ -151,10 +151,6 @@ describe('validateStartupBind — startup gate', () => {
   });
 });
 
-/**
- * real boot can. A refused bind must exit non-zero and never print the ready
- * line on stdout — wiping the gate call from `startService` turns this red.
- */
 describe('startService wiring — the gate refuses before listen', () => {
   test('a non-loopback bind without --allow-remote exits without a ready line', async () => {
     const home = mkdtempSync(join(tmpdir(), 'nexus-gate-home-'));
@@ -202,10 +198,6 @@ describe('startService wiring — the gate refuses before listen', () => {
         !stdout.includes('NEXUS_SERVICE_READY'),
         `a refused boot must print no ready line: ${JSON.stringify(stdout)}`,
       );
-      // is up, so a refused boot must never report one. The status/ready line
-      // above cannot tell a gate-before-listen refusal from a refusal that
-      // bound the non-loopback socket first; this line keeps a boot that
-      // reaches a listener from looking identical to one that never did.
       assert.ok(
         !stderr.includes('listening on'),
         `a refused boot must never report a listener: ${JSON.stringify(stderr)}`,

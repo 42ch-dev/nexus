@@ -54,7 +54,6 @@ export function WorkInspectorPage() {
   >(undefined);
 
   const worldId = workQuery.data?.world_id?.trim() ?? undefined;
-  // stage is omitted so the daemon applies its own default.
   const request: MomentInspectRequest | undefined = worldId
     ? { world_id: worldId, work_id: workId, ...(generationStage ? { generation_stage: generationStage } : {}) }
     : undefined;

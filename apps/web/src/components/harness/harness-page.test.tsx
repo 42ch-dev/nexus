@@ -156,7 +156,6 @@ describe('HarnessPage', () => {
     useHandlers(
       http.get('/v1/daemon/presets', () => {
         listCalls += 1;
-        // new list facts, which is what the row must show.
         return HttpResponse.json(
           listCalls === 1
             ? presetBody()
@@ -253,7 +252,6 @@ describe('HarnessPage', () => {
 
     await userEvent.click(screen.getByTestId('preset-validate-user/one'));
 
-    // own manifest path (still editable) instead of a blank disk path.
     const dialog = await screen.findByRole('dialog', { name: '验证预设' });
     const pathField = within(dialog).getByRole('textbox');
     expect(pathField).toHaveValue('/tmp/nexus42/presets/user/one/preset.yaml');
@@ -344,7 +342,6 @@ describe('HarnessPage', () => {
     renderHarness();
 
     expect(await screen.findByTestId('preset-row-user/one')).toBeInTheDocument();
-    // explicit unknown badge.
     const badge = screen.getByTestId('preset-running-user/one');
     expect(badge).toHaveTextContent('运行状态未知');
     expect(badge).not.toHaveTextContent('idle');

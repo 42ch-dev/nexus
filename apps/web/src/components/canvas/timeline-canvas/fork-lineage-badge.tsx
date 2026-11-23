@@ -26,15 +26,7 @@ import type { ForkLineage } from '@/api/queries';
 export interface ForkLineageBadgeProps {
   /** Branch-level marker-derived lineage (T2 hook output). */
   lineage: ForkLineage;
-  /**
-   * `handleBranchChange(lineage.parent_branch_id)`; omitted when the
-   * lineage carries no parent (defensive — a fork marker always has one).
-   */
   onOpenParent?: () => void;
-  /**
-   * degraded strip ("fork — lineage unavailable") with a retry instead of
-   * hiding the fork chrome (the chrome doubles as the one-hop return path).
-   */
   unavailable?: boolean;
   /** Retry the failed lineage read (wired to the hook's `refetch`). */
   onRetry?: () => void;

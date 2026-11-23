@@ -64,7 +64,6 @@ impl FixtureMemoryProvider {
     pub async fn open(database_path: &Path) -> Result<Self, FixtureError> {
         let store = FixtureStore::open(database_path).await?;
         let identity = provision_space(&store).await?;
-        // session can never complete, so reopen terminalizes it `failed`.
         crate::reflections::terminalize_orphaned_generate_receipts(&store).await?;
         Ok(Self {
             store,
@@ -171,7 +170,6 @@ async fn provision_space(store: &FixtureStore) -> Result<FixtureIdentity, Fixtur
             .bind(Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true))
             .execute(&mut *transaction)
             .await?;
-            // so the mutators can advance it without a lazy-create branch.
             sqlx::query("INSERT INTO provider_snapshot (space_id, marker) VALUES (?, 1)")
                 .bind(&identity.space_id)
                 .execute(&mut *transaction)

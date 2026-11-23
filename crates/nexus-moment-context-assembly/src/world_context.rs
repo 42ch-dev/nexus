@@ -811,8 +811,6 @@ mod tests {
         assert!(yaml.contains(TRUNCATION_MARKER.trim_start_matches('\n')));
     }
 
-    // World-scoped `KbQuery` builders; both directions (present / absent) are
-    // pinned because the caller no longer has a store to fall back on.
     #[test]
     fn snapshot_helpers_filter_admitted_rows_only() {
         let hero = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Ada");
@@ -841,7 +839,6 @@ mod tests {
         );
     }
 
-    // World-wide read (`build_chapter_kb_block` has no store to widen with).
     #[test]
     fn v1191_holder_context_chapter_block_reads_admitted_snapshot_only() {
         let params = ChapterKbBlockParams {

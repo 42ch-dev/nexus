@@ -67,8 +67,6 @@ fn bench_synthetic_cold(c: &mut Criterion) {
 }
 
 fn bench_synthetic_warm(c: &mut Criterion) {
-    // run() cost (embedded snapshot + metrics + tracing).
-    // Target: < 1 ms (V1.58 spec primary latency target).
     let rt = tokio::runtime::Runtime::new().unwrap();
     c.bench_function("synthetic_warm_run", |b| {
         let cap = RegistryRefresh::new();
@@ -80,13 +78,6 @@ fn bench_synthetic_warm(c: &mut Criterion) {
 }
 
 fn bench_fallback_warm(c: &mut Criterion) {
-    // literal blocked IP. `fetch_from_cdn` fails fast at `is_blocked_ip`
-    // (the host is a literal loopback address; `tokio::net::lookup_host`
-    // returns immediately without DNS; the retry loop is never entered
-    // because `BlockedHost` returns before it). The capability then serves
-    // the embedded synthetic snapshot with `source = "synthetic_fallback"`.
-    // Deterministic, no external I/O, no mock server.
-    // Target: < 5 ms (adds CdnError construction + blocked-IP guard).
     let rt = tokio::runtime::Runtime::new().unwrap();
     c.bench_function("fallback_warm_run", |b| {
         let cap = RegistryRefresh::with_cdn(CdnConfig {

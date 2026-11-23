@@ -1,6 +1,4 @@
 /**
- * candidate via `world_kb.promote_candidate` (V1.73 P0 A6).
- *
  * Per-row OCC on `kb_extract_jobs.version`. Conflicts (409) are handed to the
  * parent canvas, which renders the `promote_candidate` conflict modal. The
  * merge flow selects a target confirmed KeyBlock from the graph projection.
@@ -60,11 +58,6 @@ export function PromotionInspector({
     setValidationErrors([]);
   }, [candidate.candidate_id, reseedSignal]);
 
-  // (world_kb.rs promote_merge status guard); any other status that has leaked
-  // into `confirmedEntities` (e.g. `merged`/`rejected`/`deprecated`/`deleted`)
-  // would 422 at submit with no client-side hint. Filter the dropdown to the
-  // backend's allowed set so users never pick a target the daemon will reject.
-  // (greptile 4→5)
   const mergeTargets = confirmedEntities.filter(
     (e) =>
       e.block_type === candidate.block_type &&
@@ -103,7 +96,6 @@ export function PromotionInspector({
             };
           };
           if (details.status === 409) {
-            // conflicting path when available; default to the user's action tense.
             const hint = details.details?.recovery_hint ?? '';
             const newStatus: WorldKbCanonicalStatus = inferCanonicalStatus(hint, action);
             onConflict({

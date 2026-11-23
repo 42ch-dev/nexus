@@ -94,7 +94,6 @@ async fn fresh_env() -> ReadingEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // child must not be handed a home another writer still holds.
     release_retained_writer_guards(&db_path);
 
     ReadingEnv { fixture, work_id }

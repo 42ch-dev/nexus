@@ -59,19 +59,10 @@ import type {
   WorkOutline,
 } from '@42ch/nexus-contracts';
 
-/**
- * (or before the outline read resolves). Module-level so the projection memo
- * deps stay referentially stable across re-renders — no new object identity
- * per render.
- */
 const EMPTY_SCENE_BEAT_FIXTURE: SceneBeatFixturePayload = { scenes: [], beats: [] };
 
 export interface OutlineCanvasProps {
   workId: string;
-  /**
-   * the route's `?chapter=N` query param by {@link OutlinePage} and used to
-   * seed {@link selectedChapterId}; later user clicks override it normally.
-   */
   initialSelectedChapterId?: number | null;
   /**
    *
@@ -100,13 +91,8 @@ export function OutlineCanvas({
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [showAlt, setShowAlt] = useState(false);
   const qc = useQueryClient();
-  // its local dirty state (e.g. following conflict resolution / reapply).
   const [contentVersion, setContentVersion] = useState(0);
 
-  // functional `setShowAlt(v => !v)` updater is used so the handler (captured
-  // once on mount by `useRegisterCommand`) reads current state rather than the
-  // mount-time value. No node-create command: the Outline canvas exposes no
-  // chapter-creation entrypoint (the structure panel is select/move only).
   useRegisterCommand({
     id: 'outline.toggle-view',
     labelKey: 'outline.toggle-view.label',
@@ -122,9 +108,6 @@ export function OutlineCanvas({
 
   const chapters = useMemo(() => flattenPages(chaptersQuery.data), [chaptersQuery.data]);
 
-  // complete outline structure. Without this, paginated chapter data (20/page)
-  // leaves volume→chapter edges pointing at unloaded chapter nodes. The graph
-  // is a structural overview, so completeness matters more than lazy loading.
   useEffect(() => {
     if (chaptersQuery.hasNextPage && !chaptersQuery.isFetchingNextPage) {
       void chaptersQuery.fetchNextPage();
@@ -136,15 +119,9 @@ export function OutlineCanvas({
     return map;
   }, [chapters]);
 
-  // / `.beats[]` arrays are authoritative: with no explicit Studio/test fixture
-  // the projection, the Scene/Beat inspectors and the alt view read those
-  // arrays (the same WorkOutline read the authoring panel and the Timeline
-  // Moment layer consume). Design Studio / tests still inject an explicit
-  // payload via the `sceneBeatFixture` prop, which wins.
   const canonicalSceneBeatFixture = useMemo<SceneBeatFixturePayload>(() => {
     if (!outline.data) return EMPTY_SCENE_BEAT_FIXTURE;
     const payload = sceneBeatPayloadFromOutline(outline.data);
-    // scene/beat data so the projection memo deps don't churn on re-render.
     return payload.scenes.length === 0 && payload.beats.length === 0
       ? EMPTY_SCENE_BEAT_FIXTURE
       : payload;
@@ -152,17 +129,10 @@ export function OutlineCanvas({
 
   const fixture = sceneBeatFixture ?? canonicalSceneBeatFixture;
 
-  // scene/beat chrome) apart from an active fixture (nested rows +
-  // empty-under-chapter helper). Forward a canonical payload only once it has
-  // content, so a genuinely scene-less Work keeps its honest empty chrome.
   const altViewSceneBeatFixture =
     sceneBeatFixture ??
     (fixture.scenes.length > 0 || fixture.beats.length > 0 ? fixture : undefined);
 
-  // `beatParentSceneTitle` is a `Map.get`, not an `Array.find` per render.
-  // Mirrors the `chapterById` pattern; rebuilt only when `fixture.scenes`
-  // changes (stable across renders on real Works where `fixture` is the
-  // module-level `EMPTY_SCENE_BEAT_FIXTURE`).
   const sceneTitleById = useMemo(() => {
     const map = new Map<string, string | null>();
     for (const scene of fixture.scenes) {
@@ -171,13 +141,6 @@ export function OutlineCanvas({
     return map;
   }, [fixture.scenes]);
 
-  // hook + `OutlineCanvasAdapter` (T1a). The projection memo, rfNodes/rfEdges
-  // state, and the position-merge sync effect that previously lived in the
-  // surface-specific `useOutlineCanvasGraph` hook are now provided by
-  // `useCanvasSurface` (same merge logic, same selection-key derivation). The
-  // orchestrator retains ownership of: the conflict modal (surface-specific
-  // `ConflictState` shape), the chapter/scene/beat inspector routing, the
-  // alt-view toggle, and the structure/timeline panels.
   const translateFallback = useCallback(
     (chapter: number) => t('chapter.fallback', { chapter }),
     [t],
@@ -186,7 +149,6 @@ export function OutlineCanvas({
   const surfaceQuery = useMemo<CanvasSurfaceQueryResult<OutlineSurfaceGraph>>(() => {
     const outlineData = outline.data;
     const workData = work.data;
-    // adapter's projectGraph always receives a complete graph payload.
     if (!outlineData || !workData) {
       return {
         data: undefined,
@@ -222,8 +184,6 @@ export function OutlineCanvas({
     chapters, fixture,
   ]);
 
-  // fresh values from this ref at projection/render time so the orchestrator
-  // can update state without invalidating useCanvasSurface's memoized graph.
   const ctxRef = useRef<OutlineCanvasAdapterContext>({
     translateFallback,
     t,
@@ -242,21 +202,12 @@ export function OutlineCanvas({
   const adapter = useMemo(() => createOutlineCanvasAdapter(ctxRef), []);
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
-  // the orchestrator. `useCanvasSurface` exposes `selectedNodeId` (derived from
-  // the RF node `selected` flag); the orchestrator resolves it to chapter /
-  // scene / beat ids via the existing helpers so the StructurePanel,
-  // TimelinePanel, and inline inspector routing stay coordinated.
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
     initialSelectedChapterId ?? null,
   );
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(null);
 
-  // (FB-C1-003 + FB-C2-002). Reads `surface.selectedNode` (which changes only
-  // when the selected RF node changes) and resolves chapter / scene / beat ids
-  // via the same helpers the hook used. Passing a one-node array to the helpers
-  // works because `surface.selectedNode` carries `selected: true`.
-  //
   // `hasSelectedRef` distinguishes initial-mount-with-no-selection from a real
   // deselection (user clicks the canvas background after selecting a node). On
   // mount we must NOT clear — `initialSelectedChapterId` (deep-link via
@@ -292,11 +243,6 @@ export function OutlineCanvas({
 
   const selectedChapter = selectedChapterId ? chapterById.get(selectedChapterId) ?? null : null;
 
-  // selection state (FB-C2-002). The selection resolver above drives
-  // `selectedSceneId` / `selectedBeatId` from RF graph-click; the orchestrator
-  // resolves them against the fixture to get the entity data + parent title for
-  // the inspector. On real Works (empty fixture) both are always null — the
-  // Chapter inspector remains the default.
   const selectedScene = selectedSceneId
     ? fixture.scenes.find((s) => s.sceneId === selectedSceneId) ?? null
     : null;
@@ -321,8 +267,6 @@ export function OutlineCanvas({
     base: Omit<ConflictState, 'currentRevision' | 'conflictingPath'>,
   ) {
     if (!isOutlineConflictError(error)) return;
-    // OutlineConflict arm); `current_version` is the World-KB field name and
-    // never appears on this envelope.
     const details = error.details as
       | { current_revision?: number; conflicting_path?: string }
       | undefined;
@@ -333,7 +277,6 @@ export function OutlineCanvas({
     });
   }
 
-  // write actually lands — a 409/422 refusal keeps the draft intact for retry.
   function handleStructure(request: OutlinePatchStructureRequest, onSuccess?: () => void) {
     const state: Omit<ConflictState, 'currentRevision' | 'conflictingPath'> = {
       pendingRequest: { kind: 'structure', request },
@@ -356,8 +299,6 @@ export function OutlineCanvas({
     );
   }
 
-  // its bind drafts only once the write actually lands (V1.200 DR-26 round 2) —
-  // a 409/422 refusal keeps the typed World-event draft for retry.
   function handleTimeline(request: TimelinePatchEventRequest, onSuccess?: () => void) {
     const state: Omit<ConflictState, 'currentRevision' | 'conflictingPath'> = {
       pendingRequest: { kind: 'timeline', request },
@@ -371,18 +312,9 @@ export function OutlineCanvas({
   async function onUseCurrent() {
     setConflict(null);
     await outline.refetch();
-    // the content editor). The work-level outline.refetch() above does NOT touch
-    // the chapter outline query; without this invalidation the forced content
-    // reset below would reload stale chapter prose — silently showing outdated
-    // content when another writer concurrently edited the same chapter. The
-    // content editor's content-sync effect guards on outline.isFetching, so it
-    // waits for this refetch before applying the forced reset.
     void qc.invalidateQueries({
       queryKey: [...queryKeys.chapters.outlines(), workId],
     });
-    // content. contentVersion is no longer bumped on ordinary patches, so this
-    // bump is a reliable forced-reset signal that overrides the editor's
-    // dirty/saving guard.
     setContentVersion((v) => v + 1);
   }
 
@@ -436,9 +368,6 @@ export function OutlineCanvas({
     );
   }
 
-  // JSX). The adapter object is stable, so useCanvasSurface's memoized graph
-  // projection survives state changes; inspectors/alt-view rendered via the
-  // adapter read fresh values from this ref at their render time.
   ctxRef.current = {
     translateFallback,
     t,
@@ -493,8 +422,6 @@ export function OutlineCanvas({
           summaryText={summary}
           ariaLabel={t('outline.graphAriaLabel')}
           surfaceKey={`outline:${workId}`}
-          // minimap with its own accent token, not the shell's strategy
-          // default.
           minimapAccent="var(--color-canvas-outline-accent)"
         >
           {/* I-QC1-001 — when the projection has zero nodes, render the
@@ -655,7 +582,6 @@ function SceneBeatAuthoringPanel({
         chapter_id: chapterId,
         title: sceneTitle.trim(),
       },
-      // (which opens the conflict modal) keeps the title for retry.
       () => setSceneTitle(''),
     );
   }
@@ -738,9 +664,6 @@ function SceneBeatAuthoringPanel({
                 ? scene.title
                 : t('sceneBeatAuthoring.untitledScene');
 
-              // removes every beat it owns, so confirm first and name the
-              // affected beats (`window.confirm`, the outline/inspector confirm
-              // pattern). A scene with no beats removes directly.
               function removeScene() {
                 if (beats.length > 0) {
                   const affected = beats

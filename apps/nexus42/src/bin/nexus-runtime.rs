@@ -119,13 +119,6 @@ fn resolve_home(cli_home: Option<&Path>) -> PathBuf {
             }
         },
         |home| {
-            // `dirs::home_dir()` directly (there is no central home
-            // indirection), so an override re-points the platform home env
-            // BEFORE any downstream read — the same mechanism
-            // `testutil::isolated_home` uses in-process. Safe here because
-            // `main` runs single-threaded before the Tokio runtime starts
-            // (the same pre-runtime env discipline the `nexus42` CLI main
-            // applies for its PATH enrichment).
             let home = if home.is_absolute() {
                 home
             } else {
@@ -166,7 +159,6 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
             nexus42::errors::CliError::Config(format!("connect node start failed: {e}"))
         })?;
     let peer_tools_shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
-    // own host-tool roster (the protocol crate names no core registry).
     let builtin_tool_ids: std::collections::HashSet<String> =
         nexus_core::tool_catalog::reserved_host_tool_ids()
             .map(ToOwned::to_owned)
@@ -186,15 +178,12 @@ async fn boot(home: &Path, allow_peer: &[String], listen: &[String]) -> Result<(
         }
     };
 
-    // health endpoint; the daemon router never boots in this process).
     println!("nexus-runtime: Connect Host (N-C2 E2) ready");
     println!("  peer_id: {}", node.local_peer_id());
     println!("  host_id: {host_id}");
     for addr in node.listen_addrs() {
         println!("  listen: {addr}");
     }
-    // ACTUALLY bound (never the config echo); absent when the lane
-    // warn-and-skipped (see the `event_lane:` warning above).
     if let Some(lane) = peer_tools_lane.as_ref() {
         println!("  {}", nexus_connect::event_lane_readiness_line(lane.addr));
     }

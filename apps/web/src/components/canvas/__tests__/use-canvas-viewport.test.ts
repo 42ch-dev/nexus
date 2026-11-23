@@ -1,6 +1,4 @@
 /**
- * (FB-GS-000, V1.109 P2 T1).
- *
  * The alt-view toggle unmounts `CanvasShell` (and therefore the React Flow
  * tree), dropping the pan/zoom viewport. This hook caches `{ x, y, zoom }`
  * in a module-level store keyed by surface so a re-mount restores the last

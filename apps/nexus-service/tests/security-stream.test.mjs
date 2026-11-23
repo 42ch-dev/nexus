@@ -78,9 +78,6 @@ async function startSharedService(home, port = 0, apiKey, tlsOpts) {
   throw lastError;
 }
 
-// processes append concurrently), so a torn or interleaved line is an expected
-// artifact of reading it, not a lost read: an unreadable file still answers
-// `[]`, but one malformed line skips only itself.
 function readFixtureLog(logPath) {
   let text;
   try {
@@ -107,10 +104,6 @@ function seedHome(extraEnv = {}, extraProviders = '', maxSessions = 0) {
   const home = mkdtempSync(join(tmpdir(), 'nexus-security-stream-'));
   const seed = spawnSync('cargo', ['run', '-q', '-p', 'nexus-core-node', '--bin', 'native-wire-fixture-seed', '--', home], { stdio: 'inherit' });
   assert.equal(seed.status, 0, seed.stderr?.toString());
-  // engine-owner open pins this root as the Host's workspace boundary and probes
-  // the catalog there. Without it every provider stays `probe_context_unavailable`
-  // and the service reports `provider_degraded` — the provider-only lane keeps
-  // working either way, which is what made the missing registration invisible.
   const creativeRoot = join(home, 'creative', SEEDED_CREATOR, 'default');
   mkdirSync(creativeRoot, { recursive: true });
   const operational = join(home, '.nexus42', 'creators', SEEDED_CREATOR, 'workspaces', 'default');
@@ -131,12 +124,6 @@ function seedHome(extraEnv = {}, extraProviders = '', maxSessions = 0) {
   const log = join(home, 'fixture.log');
   const python = resolvePython();
   const envLines = Object.entries({ ACP_FIXTURE_LOG: log, ...extraEnv }).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join('\n');
-  // table header; a multi-row journey legitimately needs more live sessions than
-  // the default, and the budget itself is not what such a test is asserting.
-  // The base provider is written out completely — table AND env — before any
-  // extra provider: a `[providers.env]` header binds to the most recently
-  // opened `[[providers]]` element, so emitting the base env last would hand it
-  // to the last extra provider and duplicate its table.
   const config = `${maxSessions > 0 ? `max_sessions = ${maxSessions}\n` : ''}[[providers]]\nid = "mock-acp"\nprotocol = "acp"\ncommand = ${JSON.stringify(python)}\nargs = [${JSON.stringify(fixture)}]\nenabled = true\n[providers.env]\n${envLines}\n${extraProviders}\n`;
   writeFileSync(join(agentHostDir, 'config.toml'), config);
   return { home, log, creativeRoot };
@@ -149,7 +136,6 @@ async function jsonFetch(url, { method = 'GET', headers = {}, body, ca } = {}) {
     const payload = text.length > 0 ? JSON.parse(text) : null;
     return { status: response.status, headers: response.headers, payload, text };
   }
-  // hostname validation, scoped to this trust anchor — no process-wide bypass.
   return new Promise((resolveFetch, rejectFetch) => {
     const request = https.request(url, { method, headers, ca, rejectUnauthorized: true }, (res) => {
       const chunks = [];
@@ -268,13 +254,6 @@ async function providerFlow(url, headers = {}) {
   return { sessionId: created.payload.session_id, operationId: executed.payload.operation_id };
 }
 
-/**
- * reason, using the fixture's own `ACP_FIXTURE_STOP_REASON` knob (default
- * `end_turn`) plus `ACP_FIXTURE_PROMPT_ERROR` for the deterministic JSON-RPC
- * prompt failure. The provider ids are distinct because the Host keys a session
- * by provider, so each row gets its own real session. Every peer logs to one
- * file, so a single read observes the cwd each of them was really launched with.
- */
 const CHARACTER_PROVIDERS = [
   ['mock-acp-end-turn', {}],
   ['mock-acp-max-tokens', { ACP_FIXTURE_STOP_REASON: 'max_tokens' }],
@@ -296,10 +275,6 @@ function characterProviderConfig(logPath) {
     .join('');
 }
 
-/**
- * is the core's truth, not the transport mirror's: the row it returns is the
- * `CharacterOperationResult` the adapter→Host→core→native path settled.
- */
 async function waitForCharacterOutcome(url, operationId, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -382,7 +357,6 @@ describe('security-stream (P4-T2)', () => {
     const envHome = seedHome({ OVERSIZED_UPDATE: '1' });
     const prevHwm = process.env.NEXUS_SSE_SOCKET_HWM;
     const prevPullDelay = process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS;
-    // window makes the pull gate deterministic: no pull can happen while stalled.
     process.env.NEXUS_SSE_SOCKET_HWM = '128';
     process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1800';
     const local = await startProviderService(envHome.home, 0);
@@ -452,7 +426,6 @@ describe('security-stream (P4-T2)', () => {
     const both = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(frames[1].id)}`, { headers: { 'Last-Event-ID': resumeFrom } });
     assert.deepEqual(idsOf(both.raw), after.map((frame) => frame.id), 'the retained header must outrank the query cursor');
 
-    // rather than clobber it with an empty cursor (which would replay all).
     const emptyHeader = await rawSseGet(baseUrl, `${eventsPath}&cursor=${encodeURIComponent(resumeFrom)}`, { headers: { 'Last-Event-ID': '' } });
     assert.deepEqual(idsOf(emptyHeader.raw), after.map((frame) => frame.id), 'an empty Last-Event-ID must yield to the query cursor');
 
@@ -496,10 +469,6 @@ describe('security-stream (P4-T2)', () => {
   test('sequential completed SSE requests over keep-alive never exhaust the subscriber cap', async () => {
     const { sessionId, operationId } = await providerFlow(baseUrl);
     const eventsUrl = `${baseUrl}/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
-    // the full stream; the rest replay the completed hub. Every response
-    // completes normally while undici keeps the keep-alive socket pooled —
-    // exactly the shape that charged one leaked admission per request before
-    // the completion release existed.
     const first = await fetch(eventsUrl, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(10_000) });
     assert.equal(first.status, 200);
     await first.text();
@@ -521,13 +490,9 @@ describe('security-stream (P4-T2)', () => {
     try {
       const { sessionId, operationId } = await providerFlow(local.url);
       const completedPath = `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`;
-      // socket stays open, so only a completion-time release frees its slot —
-      // a socket-destroying client would mask the leak via socket close.
       const completed = await fetch(`${local.url}${completedPath}`, { headers: { Accept: 'text/event-stream' }, signal: AbortSignal.timeout(20_000) });
       assert.equal(completed.status, 200);
       await completed.text();
-      // live in the first-pull gate while the completed operation's keep-alive
-      // admission must already have been released.
       const executed = await jsonFetch(
         `${local.url}/v1/daemon/agent-host/sessions/${sessionId}/operations`,
         {
@@ -610,8 +575,6 @@ describe('security-stream (P4-T2)', () => {
       const executed = await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}/operations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { kind: 'prompt', content: 'cancel-me' } });
       const cancel = await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: {} });
       assert.equal(cancel.payload.status, 'cancelled');
-      // GET reports `cancelled` (never a stale `running`), and the session is no
-      // longer busy.
       const opAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/operations/${executed.payload.operation_id}`)).payload;
       assert.equal(opAfter.status, 'cancelled');
       const sessionAfter = (await jsonFetch(`${local.url}/v1/daemon/agent-host/sessions/${created.payload.session_id}`)).payload;
@@ -628,7 +591,6 @@ describe('security-stream (P4-T2)', () => {
     assert.deepEqual(Object.keys(listed.payload).sort(), ['items', 'pagination']);
     assert.ok(Array.isArray(listed.payload.items));
     assert.deepEqual(Object.keys(listed.payload.pagination).sort().filter((k) => k !== 'next_cursor'), ['has_more', 'limit']);
-    // sessions in-process, so list truth and cache truth are checked separately.
     for (const item of listed.payload.items) {
       assert.deepEqual(Object.keys(item).sort(), ['provider_id', 'session_id', 'state']);
     }
@@ -718,7 +680,6 @@ describe('security-stream (P4-T2)', () => {
     const operationId = '00000000-0000-4000-8000-000000000102';
     registry.registerSession({ sessionId, providerId: 'mock-acp', state: 'Running', activeOpId: operationId });
     registry.registerOperation({ operationId, sessionId, providerId: 'mock-acp', status: 'started', terminalEvent: null, terminalTranscript: null });
-    // `cancelled` terminal exactly like the cancel route does.
     registry.settleOperationStatus(operationId, 'cancelled');
     assert.equal(registry.operationRecord(operationId).status, 'cancelled');
     assert.equal(registry.activeOperationCount(), 0, 'an accepted cancel is no longer charged as active');
@@ -771,7 +732,6 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(okHub.hasTerminal(), true, 'an accepted terminal is still recorded');
     assert.equal(registry.operationRecord(okOperation).status, 'finished');
 
-    // with the one bounded resync gap — no hang, no fabricated terminal frame.
     const written = [];
     const fakeRes = {
       socket: null,
@@ -1343,7 +1303,6 @@ describe('security-stream (P4-T2)', () => {
 
       const results = [];
       for (const row of rows) {
-        // the Host session and, through it, the provider launch below.
         const session = await fetchJson('/v1/daemon/agent-host/sessions', {
           method: 'POST',
           headers: jsonHeaders,
@@ -1364,7 +1323,6 @@ describe('security-stream (P4-T2)', () => {
         assert.equal(executed.status, 200, `${row.provider}: ${executed.text}`);
         const operationId = executed.payload.operation_id;
 
-        // read over TCP while the authority's own Character read settles.
         const sse = rawSseGet(local.url, `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`);
         const outcome = await waitForCharacterOutcome(local.url, operationId);
         const frames = parseSseChunks((await sse).raw);
@@ -1383,14 +1341,10 @@ describe('security-stream (P4-T2)', () => {
         if (row.terminal === 'OpFinished') {
           assert.equal(finishedFrames[0].data.OpFinished.reason, row.reason, `${row.provider} must reach SSE with its own reason`);
         } else {
-          // `protocol_error`, so the failure row is pinned rather than a racy
-          // category; the bounded resync gap is the same row's other truthful
-          // shape. What may never appear is a success frame.
           assert.ok(failedFrames.length <= 1, `${row.provider} at most one OpFailed frame`);
           assert.ok(failedFrames.length === 1 || frames.some((frame) => frame.event === 'gap'), `${row.provider} must end in the failure row or its resync gap`);
         }
 
-        // row may read as `finished` or keep a successful transcript.
         const record = local.service.providerRegistry.operationRecord(operationId);
         assert.ok(record, `${row.provider} mirror record`);
         assert.equal(
@@ -1402,7 +1356,6 @@ describe('security-stream (P4-T2)', () => {
         else assert.equal(record.status, row.mirror, `${row.provider} mirror status`);
       }
 
-      // kept as their own `incomplete` row, failed, and cancelled.
       assert.deepEqual(
         [...new Set(results.map((result) => `${result.run}/${result.finish ?? ''}`))].sort(),
         [
@@ -1414,8 +1367,6 @@ describe('security-stream (P4-T2)', () => {
         ],
       );
 
-      // the catalog probes and the row sessions alike — records the directory it
-      // was created in, and every row's own prompt really reached a peer.
       const pin = realpathSync(home.creativeRoot);
       const entries = readFixtureLog(journeyLog);
       const peerSessions = entries.filter((entry) => entry.event === 'session_new');
@@ -1440,8 +1391,6 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(reread.payload.finish_reason, 'max_tokens');
       assert.equal(reread.payload.capture.status, 'disabled');
 
-      // a torn/interleaved write: the readable lines stay readable and only the
-      // partial line is skipped.
       const intact = readFixtureLog(journeyLog);
       const tornWrite = JSON.stringify({ event: 'peer_note', cwd: pin, pid: 4242 });
       appendFileSync(journeyLog, `${tornWrite.slice(0, tornWrite.length - 14)}\n` + `${JSON.stringify({ event: 'after_torn' })}\n`);
@@ -1451,7 +1400,6 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(afterTorn.at(-1).event, 'after_torn', 'the line after the torn write is still readable');
     } finally {
       await closeServiceBounded(local);
-      // slice's; the peer processes above are already reaped by the close.
       rmSync(journeyDir, { recursive: true, force: true });
       rmSync(home.home, { recursive: true, force: true });
       await startSharedService(homeCtx.home, 0);
@@ -1490,8 +1438,6 @@ describe('security-stream (P4-T2)', () => {
       const pendingBefore = (await fetchJson(`/v1/daemon/characters/${characterId}/memory/pending-review/count`)).payload.count;
       assert.equal(pendingBefore, 0);
 
-      // this creator does not own, a foreign World, and a cwd outside the
-      // admitted pin (the Nexus root the pre-T2 default used to resolve to).
       const admissions = [
         [{ provider_id: 'mock-acp', actor_ref: { actor_kind: 'character', character_id: `chr_${'f'.repeat(32)}` }, viewpoint }, 404, 'not_found'],
         [{ provider_id: 'mock-acp', actor_ref: actorRef, viewpoint: { world_id: 'wld_foreign', binding_id: bindingId } }, 404, 'not_found'],
@@ -1503,7 +1449,6 @@ describe('security-stream (P4-T2)', () => {
         assert.equal(refused.payload.error.code, code, refused.text);
       }
 
-      // reservation, no provider work, no pending capture.
       const remember = await fetchJson(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
         method: 'POST',
         headers: jsonHeaders,
@@ -1512,7 +1457,6 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(remember.status, 501, remember.text);
       assert.equal(remember.payload.error.code, 'route_not_migrated');
 
-      // live operation.
       const nativeSessionsAfter = (await local.service.core.hostQuery({ query: 'list_sessions' })).sessions.items.length;
       assert.equal(nativeSessionsAfter, nativeSessionsBefore, 'a refusal must not create a Host session');
       const mirror = registry.sessionRecord(sessionId);
@@ -1525,7 +1469,6 @@ describe('security-stream (P4-T2)', () => {
       const fragments = await fetchJson(`/v1/daemon/characters/${characterId}/memory/fragments`);
       assert.equal(fragments.payload.fragments.length, 0, 'a refusal must not write a memory fragment');
 
-      // so the zeros above are the refusals' doing, not a dead fixture.
       const control = await fetchJson(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
         method: 'POST',
         headers: jsonHeaders,
@@ -1557,7 +1500,6 @@ describe('security-stream (P4-T2)', () => {
     };
     const opFinished = (index, reason) => ({ OpFinished: { session_id: sessionOf(index), op_id: operationOf(index), reason } });
 
-    // the consumer-visible operation record.
     const projection = [
       ['end_turn', 'finished', true],
       ['max_tokens', 'incomplete', false],
@@ -1581,7 +1523,6 @@ describe('security-stream (P4-T2)', () => {
       assert.equal(registry.activeOperationCount(), 0, `reason ${reason} is terminal, not live work`);
     });
 
-    // its own reason — and therefore still has no successful transcript.
     const late = projection.length + 1;
     startOperation(late);
     ingestEvents(serviceStub, operationOf(late), [opFinished(late, 'max_tokens')]);
@@ -1600,7 +1541,6 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(cancelled.terminalEvent, null);
     assert.equal(cancelled.terminalTranscript, null);
 
-    // is a failure — never a completed turn with a successful transcript.
     const unusable = [
       ['a terminal with no reason', (index) => ({ session_id: sessionOf(index), op_id: operationOf(index) })],
       ['a reason outside the wire set', (index) => ({ session_id: sessionOf(index), op_id: operationOf(index), reason: 'exhausted' })],
@@ -1621,10 +1561,6 @@ describe('security-stream (P4-T2)', () => {
     assert.equal(stopped.status, 'stopped');
     assert.equal(stopped.terminalTranscript, null, 'a stopped session has no successful transcript');
 
-    // for the cancel path, which refuses it before dispatching any provider
-    // mutation. Driven through the real consumer with a hydrated native row (a
-    // terminal status and no local terminal event yet), so the assertion covers
-    // the gate itself rather than the projection above.
     assert.equal(isTerminalOperationStatus('incomplete'), true, 'an incomplete run is terminal work');
     const hydrated = 96;
     registry.registerSession({ sessionId: sessionOf(hydrated), providerId: 'mock-acp', state: 'Running', activeOpId: operationOf(hydrated) });

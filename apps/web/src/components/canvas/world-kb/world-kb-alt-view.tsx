@@ -41,11 +41,6 @@ export interface WorldKbAltViewProps {
   onPromoteAllSuggestions?: SuggestedRelationshipsPaneProps['onPromoteAll'];
   /** V1.76: whether a promote/delete mutation is in flight. */
   suggestionPending?: boolean;
-  /**
-   * canvas can fetch extraction suggestions only while the Suggested pane is
-   * open (and only in list view). Optional — when omitted the tab is purely
-   * internal, preserving the pre-V1.76 call shape for existing consumers/tests.
-   */
   onActiveTabChange?: (tab: Tab) => void;
 }
 
@@ -68,7 +63,6 @@ export function WorldKbAltView({
   const { t } = useTranslation('canvas');
   const [activeTab, setActiveTab] = useState<Tab>('entities');
 
-  // opening/closing and gate the `include_suggested` graph fetch accordingly.
   function selectTab(tab: Tab) {
     setActiveTab(tab);
     onActiveTabChange?.(tab);

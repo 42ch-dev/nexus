@@ -1,11 +1,3 @@
-/**
- * inspiration, durable selection, completion-lock release and chapter
- * reconcile (P1-T1 authority). Every operation is a thin translation over the
- * native family surface — the stored Principal is minted natively, ownership,
- * the per-Work locks and pool rules stay in the single Rust core authority,
- * and the wire shapes are the schema-owned generated DTOs
- * (`schemas/core/works-api.schema.json`, `schemas/daemon-api/works/…`).
- */
 import type {
   AppendInspirationRequest,
   AppendInspirationResponse,

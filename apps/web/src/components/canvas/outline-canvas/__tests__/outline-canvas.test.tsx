@@ -1,6 +1,4 @@
 /**
- * (FB-C1-003) and panel selection path regression (V1.108 P0 T2).
- *
  * CanvasShell (React Flow) is mocked out so jsdom never needs ResizeObserver;
  * the test focuses on the orchestrator's 409 conflict wiring and the panel
  * → inspector selection path that must remain functional alongside the new
@@ -18,14 +16,6 @@ import { NexusClientError } from '@/lib/nexus/errors';
 import type * as WorldKbData from '@/lib/canvas/use-world-kb-data';
 import type { WorkOutline } from '@42ch/nexus-contracts';
 
-// integration harness instead of a div stub. The harness mounts a genuine
-// `<ReactFlowProvider>` + `<ReactFlow>` consuming the same nodes/edges/
-// onNodesChange props the orchestrator passes to CanvasShell, so graph-click →
-// inspector selection flows through real RF state. The ResizeObserver polyfill
-// in `src/test/setup.ts` covers jsdom mounting (same path `outline-page.test`
-// relies on). `testUseNodeChangeHandler` mirrors the real CanvasShell helper so
-// the hook's `onNodesChange` actually applies RF selection changes.
-//
 // I-QC1-001 — the harness renders children so the in-shell EmptyState overlay
 // test still asserts its presence inside the shell.
 vi.mock('@/components/canvas/canvas-shell', async () => {
@@ -134,9 +124,6 @@ vi.mock('@/lib/canvas/use-outline-data', async (importOriginal) => {
   };
 });
 
-// (the query itself is gated on the bound World id). This file renders the
-// orchestrator under a bare QueryClientProvider — no ClientProvider — and the
-// Work it mocks is unbound, so the read is stubbed to its disabled shape.
 vi.mock('@/lib/canvas/use-world-kb-data', async (importOriginal) => {
   const actual = await importOriginal<typeof WorldKbData>();
   return {
@@ -171,23 +158,12 @@ function renderOutline() {
   );
 }
 
-/**
- * mounts, the chapter title appears in BOTH the graph node and the structure
- * panel row, so unscoped `getByText('Chapter One')` is ambiguous. The panel
- * Card is anchored by its unique "Volumes & Chapters" CardTitle.
- */
 function structurePanel(): HTMLElement {
   return (
     screen.getByText('Volumes & Chapters').closest('[class*="card"]') ?? document.body
   );
 }
 
-/**
- * envelope (core_error.rs: details carry `current_revision`). The rendered
- * revision in the modal is falsifiable because the cached fixture outline
- * carries `outline_revision: 2` while tests inject 5: a modal showing 5
- * proves the envelope won; 2 would mean the cache fallback was taken.
- */
 function outlineConflictErr(currentRevision: number): NexusClientError {
   return new NexusClientError(409, 'outline_conflict', 'stale revision', {
     current_revision: currentRevision,
@@ -226,10 +202,6 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await rejectLastChapterAsConflict(5);
 
-    //    revision (FB-C1-003 acceptance: stale revision → conflict modal
-    //    appears with retry/merge path). The envelope carries
-    //    `current_revision: 5` while the cached outline revision is 2, so
-    //    this passes only when the envelope field feeds the modal.
     expect(
       screen.getByRole('heading', { name: 'Outline Conflict' }),
     ).toBeInTheDocument();
@@ -308,7 +280,6 @@ describe('OutlineCanvas — graph↔list alt toggle (FB-C1-004)', () => {
   });
 });
 
-// projection produces zero nodes. The EmptyState renders as an in-shell overlay.
 describe('OutlineCanvas — empty graph shell parity (I-QC1-001)', () => {
   it('mounts CanvasShell with in-shell EmptyState when projection has zero nodes', () => {
     mocks.outlineResult.data = {
@@ -346,8 +317,6 @@ function renderOutlineWithFixture(fixture: typeof SCENE_BEAT_FIXTURE) {
 
 describe('OutlineCanvas — Scene/Beat alt view integration (FB-C2-000/003)', () => {
   beforeEach(() => {
-    // shared mocks. Each Scene/Beat test needs the default Volume/Chapter
-    // structure to render the hierarchy.
     mocks.outlineResult.data = mocks.OUTLINE;
     mocks.chaptersResult.data = {
       pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
@@ -418,8 +387,6 @@ describe('OutlineCanvas — Scene/Beat inspector mounting (FB-C2-002)', () => {
   it('shows the Chapter inspector by default (no Scene/Beat selection)', () => {
     renderOutlineWithFixture(SCENE_BEAT_FIXTURE);
 
-    // prompt shows when no chapter is selected. Scene/Beat inspectors only
-    // appear when those nodes are selected via graph click.
     expect(screen.getByText('Select a chapter to inspect its outline metadata.')).toBeInTheDocument();
     expect(screen.queryByText('Scene')).not.toBeInTheDocument();
     expect(screen.queryByText('Beat')).not.toBeInTheDocument();
@@ -449,11 +416,7 @@ describe('OutlineCanvas — real RF graph-click selection (FB-GS-002)', () => {
     renderOutline();
 
     const harness = screen.getByTestId('rf-integration-harness');
-    // (rfNodes) is consumed by a genuine <ReactFlow>. The chapter title appears
-    // inside the graph node, scoped to the harness so it does not collide with
-    // the structure-panel row.
     expect(within(harness).getByText('Chapter One')).toBeInTheDocument();
-    // proof a real RF tree (not a stub) rendered the projection.
     expect(harness.querySelector('.react-flow__node[data-id="chapter:1"]')).not.toBeNull();
   });
 
@@ -466,7 +429,6 @@ describe('OutlineCanvas — real RF graph-click selection (FB-GS-002)', () => {
     ).toBeInTheDocument();
 
     const harness = screen.getByTestId('rf-integration-harness');
-    // the harness so this targets the graph node, not the structure-panel row).
     await user.click(within(harness).getByText('Chapter One'));
 
     // Real RF selection flows: node `selected` → onNodesChange → hook
@@ -538,7 +500,6 @@ describe('OutlineCanvas — Scene/Beat authoring (V1.200 DR-26 Task 3)', () => {
     await user.click(screen.getByTestId('outline-add-scene'));
     await rejectLastStructureAsConflict(5);
 
-    // modal must show the server's canonical 5, not the stale cached 2.
     expect(screen.getByRole('heading', { name: 'Outline Conflict' })).toBeInTheDocument();
     expect(screen.getByText('5', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
@@ -614,11 +575,9 @@ describe('OutlineCanvas — canonical scene/beat visibility (Greptile wave A)', 
     renderOutline(); // No sceneBeatFixture prop — canonical arrays are the source.
 
     const harness = screen.getByTestId('rf-integration-harness');
-    // empty fixture, which hid authored structure from the graph).
     expect(harness.querySelector('.react-flow__node[data-id="scene:scn_1"]')).not.toBeNull();
     expect(harness.querySelector('.react-flow__node[data-id="beat:bet_1"]')).not.toBeNull();
 
-    // same arrays (parent-chapter helper included).
     await user.click(within(harness).getByText('Opening'));
     expect(screen.getByText('Part of Chapter One.')).toBeInTheDocument();
 
@@ -742,9 +701,6 @@ describe('OutlineCanvas — drafts survive failed writes (Greptile wave A)', () 
       new NexusClientError(422, 'outline_validation_failed', 'title must not be blank'),
     );
 
-    // survives so the author can correct it and retry (qc3 F-001 named the
-    // non-conflict refusal class; the 409 cases above cover the stale-revision
-    // class, whose draft also survives for the modal's replay).
     expect(screen.queryByRole('heading', { name: 'Outline Conflict' })).toBeNull();
     expect(screen.getByTestId('outline-scene-title')).toHaveValue('Opening Scene');
   });

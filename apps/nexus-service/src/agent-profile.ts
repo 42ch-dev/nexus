@@ -1,8 +1,4 @@
 /**
- * the daemon home `<user_home>/.nexus42/config.toml` under the `agent_profile`
- * table — the same store the native core owns for `active_creator_id` and the
- * workspace selection.
- *
  * Storage semantics mirror the core CLI config (`read_cli_config` /
  * `write_cli_config` in `crates/nexus-core/src/creators.rs`): a missing file is
  * an empty document, every other key is preserved on write, and the document is
@@ -38,13 +34,6 @@ const MAX_NAME_LENGTH = 200;
 const MAX_LAUNCH_COMMAND_LENGTH = 4096;
 
 /**
- * cross-process writers share (see `crates/nexus-core/src/config_lock.rs`, the
- * CLI `apps/nexus42/src/config.rs` and
- * `apps/desktop-electron/src/desktop-config.ts`): exclusive create for the
- * whole read-modify-write, stale steal after 10 s, release by unlink. `flock`
- * is not an option: Node's stdlib has none, and mixing lockfile-existence with
- * flock breaks mutual exclusion.
- *
  * A normal hold is milliseconds (a small TOML document, at most two fsyncs);
  * the 10 s age is a stale heuristic, not proof of a crash: a paused live
  * holder can look stale, and stealing can transiently yield two holders. Safe
@@ -54,10 +43,6 @@ const LOCK_FILE = `${CONFIG_FILE}.lock`;
 const LOCK_STALE_MS = 10_000;
 const LOCK_BACKOFF_INITIAL_MS = 25;
 const LOCK_BACKOFF_CAP_MS = 500;
-/**
- * immutable file: EACCES/EPERM). Past this deadline the write fails instead of
- * hot-looping — the same 2× stale window the core and desktop writers use.
- */
 const LOCK_STEAL_DEADLINE_MS = 2 * LOCK_STALE_MS;
 
 const sleepFor = (ms: number): Promise<void> => {
@@ -85,10 +70,8 @@ async function acquireConfigLock(directory: string): Promise<HeldConfigLock> {
     try {
       const lock = await open(lockPath, 'wx', 0o600);
       try {
-        // whole line is the ownership proof release compares.
         await lock.writeFile(`${token}\n`);
       } catch (error) {
-        // before failing, or the next writer stalls until the stale steal.
         await lock.close().catch(() => undefined);
         await rm(lockPath, { force: true }).catch(() => undefined);
         throw error;
@@ -104,8 +87,6 @@ async function acquireConfigLock(directory: string): Promise<HeldConfigLock> {
         () => undefined, // Released between the create and the stat: retry now.
       );
       if (ageMs !== undefined && ageMs > LOCK_STALE_MS) {
-        // leaving two live holders, and a live slow holder can lose its lock.
-        // Accepted only because all four writers are user-paced.
         try {
           await rm(lockPath, { force: true });
         } catch (unlinkError) {
@@ -128,16 +109,9 @@ async function acquireConfigLock(directory: string): Promise<HeldConfigLock> {
   }
 }
 
-/**
- * past the stale window is stolen, and unlinking on resume would delete the new
- * owner's lock and admit a third writer into the second's read-modify-write.
- * The whole line is the token, so the compare is byte-for-byte: a file that
- * merely contains or ends with our token belongs to another writer.
- */
 async function releaseConfigLock({ lockPath, token }: HeldConfigLock): Promise<void> {
   try {
     const contents = await readFile(lockPath, 'utf8');
-    // the ownership proof, compared whole rather than by a token suffix.
     if (contents.replace(/\n$/, '') !== token) {
       console.error(`[nexus-service] ${LOCK_FILE} was stolen; leaving the new owner's lock`);
       return;
@@ -153,10 +127,6 @@ async function releaseConfigLock({ lockPath, token }: HeldConfigLock): Promise<v
   }
 }
 
-/**
- * existing unreadable/corrupt file is an error (never treated as absent — a
- * silent empty doc would drop the other stored config on the next write).
- */
 async function readConfigDocument(home: string): Promise<TomlTable> {
   let text: string;
   try {
@@ -188,8 +158,6 @@ async function writeConfigDocument(home: string, document: TomlTable): Promise<v
     await mkdir(dirname(configPath), { recursive: true });
     await publishDocument(configPath, stringify(document));
   } catch (error) {
-    // `403 forbidden` for a refused target and the sanitized `500 internal`
-    // otherwise, never a silent success.
     console.error(`[nexus-service] ${CONFIG_FILE} write failed:`, error);
     throw mapNativeError(error);
   }
@@ -246,19 +214,14 @@ export async function writeAgentProfile(
     );
   }
 
-  // writer's document must be read AFTER it is committed, never before.
   const heldLock = await acquireConfigLock(join(home, NEXUS_DIR));
   try {
     const document = await readConfigDocument(home);
     const existing = document[PROFILE_TABLE];
-    // command. Switching to a different agent stores the new name with no
-    // launch_command (the previous agent's override must not leak across).
     const storedName =
       isTomlTable(existing) && typeof existing['name'] === 'string'
         ? existing['name'].trim()
         : undefined;
-    // untrimmed legacy value would re-persist the very shape the write fold
-    // forbids, and an all-blank stored command means "no command".
     const storedCommand =
       isTomlTable(existing) &&
       storedName === name &&

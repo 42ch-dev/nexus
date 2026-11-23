@@ -52,7 +52,6 @@ export function ConnectDaemonForm() {
   useEffect(() => {
     if (savedConfig) {
       setUrl(savedConfig.endpointUrl);
-      // load) — prefill only what the saved config actually carries.
       setApiKey(savedConfig.apiKey ?? '');
       setLabel(savedConfig.label ?? '');
     }
@@ -62,8 +61,6 @@ export function ConnectDaemonForm() {
 
   const hasSavedConfig = Boolean(savedConfig);
   const savedEndpointMatches = savedConfig?.endpointUrl === normalizedUrl;
-  // key the author is not required to re-enter. An endpoint change can never
-  // retain the old endpoint's credential (main enforces this on save too).
   const canRetainCredential =
     hasSavedConfig && savedEndpointMatches && Boolean(savedConfig?.hasApiKey);
   const savedFingerprint = savedConfig?.pinnedFingerprint;
@@ -334,21 +331,12 @@ export function ConnectDaemonForm() {
         </div>
 
         {fpState.status === 'error' && fpState.kind ? (
-          // the promoted <TransportErrorBlock>. CTAs are intentionally
-          // omitted — the author is already on the Connection settings page
-          // (so "Open Connection Settings" is redundant), and the existing
-          // Fetch Fingerprint button below serves as the retry affordance.
-          // The classifier's long-form diagnostic rides the detail line so
-          // the actionable text (e.g. "use the Nexus desktop app") survives.
-          // QC1-F-001: caller-owned localized copy (primitive defaults are an
-          // English fallback for Studio).
           <TransportErrorBlock
             kind={fpState.kind}
             {...transportErrorCopyFor(fpState.kind, shellT, commonT)}
             detail={fpState.message}
           />
         ) : fpState.status === 'error' ? (
-          // recovery is daemon-side (fix the 4xx/5xx), not transport.
           <div
             className="rounded-card border border-error-surface-border bg-error-surface p-4"
             role="alert"

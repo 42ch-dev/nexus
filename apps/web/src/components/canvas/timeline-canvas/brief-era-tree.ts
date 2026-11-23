@@ -67,11 +67,6 @@ function isParentEraRelationship(
   );
 }
 
-/**
- * narrowing mirrors `occurredAtOf` / `extractEraAttributes` in the Timeline
- * adapter — `body.attributes` is `unknown` until narrowed; non-string values
- * and empty strings are treated as absent.
- */
 function eraTypeOf(entity: WorldKbEntityProjection): string | undefined {
   const attrs = entity.body?.attributes;
   if (attrs === null || typeof attrs !== 'object') return undefined;
@@ -101,8 +96,6 @@ export function buildEraTree(
     .sort((a, b) => a.key_block_id.localeCompare(b.key_block_id));
   const eraById = new Map(eras.map((e) => [e.key_block_id, e]));
 
-  // Q3). Orphan edges (target missing from the set) are skipped silently.
-  //
   // Multi-parent handling (Greptile P1): the Relation system is a general
   // graph and CAN persist multiple parent_era edges for one child. The tree
   // builder renders a **DAG forest** — a child with two parents appears
@@ -131,7 +124,6 @@ export function buildEraTree(
   const tree: EraTreeNode[] = [];
   const reachable = new Set<string>();
 
-  // under multiple parents (DAG); only true cycles (A→B→A) are cut.
   const visit = (id: string, depth: number, pathAncestors: Set<string>): EraTreeNode => {
     reachable.add(id);
     const era = eraById.get(id) as WorldKbEntityProjection;

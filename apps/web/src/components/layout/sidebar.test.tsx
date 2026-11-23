@@ -66,7 +66,6 @@ describe('Sidebar', () => {
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
     expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
-    // groups only; the EL §3 hide-table surfaces stay out of the nav.
     expect(screen.getByRole('link', { name: 'Works' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Timeline' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Findings' })).toBeInTheDocument();
@@ -103,7 +102,6 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
-    // Connect operator chrome, and the Develop hub are absent from Create.
     expect(screen.queryByRole('link', { name: 'Harness' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sessions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Schedule' })).not.toBeInTheDocument();
@@ -121,7 +119,6 @@ describe('Sidebar', () => {
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
     await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
 
-    // compute (capability browser), memory.
     expect(screen.getByRole('link', { name: 'Develop' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Works' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Worlds' })).toBeInTheDocument();
@@ -227,7 +224,6 @@ describe('Sidebar', () => {
     const control = screen.getByTestId('entrance-switch-control');
     expect(control).toHaveTextContent('Switch entrance');
     expect(control).toHaveTextContent('Create');
-    // in the mode-switch chrome.
     expect(screen.getByTestId('shell-mode-switch').querySelectorAll('[role="tab"]')).toHaveLength(2);
   });
 
@@ -321,7 +317,6 @@ describe('Sidebar', () => {
   });
 
   it('selects Orchestrator tab on /strategies deep link (V1.125 P1)', async () => {
-    // harness group renders (V1.170 P1).
     window.localStorage.setItem('nexus-entrance', 'developer');
     useSidebarHandlers();
 
@@ -627,7 +622,6 @@ describe('Sidebar — inline create (V1.136 P1)', () => {
     await user.type(screen.getByLabelText('Long-term goal'), 'Finish arc one');
     await user.type(screen.getByLabelText('Initial idea'), 'A heist in the sky');
 
-    // automatically; the author is not forced through a one-option selector.
     const worldSelect = screen.getByLabelText('World');
     await waitFor(() => expect(worldSelect).toHaveValue('world-1'));
 

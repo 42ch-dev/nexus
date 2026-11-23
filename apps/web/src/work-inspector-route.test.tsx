@@ -63,7 +63,6 @@ function makePacket(): MomentInspectResponse {
 }
 
 function makeClient(packet: MomentInspectResponse): NexusClient {
-  // `inspectMoment` so the inspector query resolves deterministically.
   const base = new BrowserClient();
   return Object.assign(base, {
     inspectMoment: vi.fn().mockResolvedValue(packet),

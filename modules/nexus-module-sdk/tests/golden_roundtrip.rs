@@ -40,7 +40,6 @@ where
 fn compute_input_golden_round_trips_and_typed_fields_survive() {
     let input: ComputeInput = assert_round_trip(INPUT_GOLDEN);
 
-    // high-churn parts stay opaque `Value` passthroughs.
     assert_eq!(input.schema_version, 1);
     assert_eq!(input.world_ref.world_id.as_deref(), Some("w_abc123"));
     assert_eq!(input.world_ref.branch_id.as_deref(), Some("root"));
@@ -58,7 +57,6 @@ fn compute_input_golden_round_trips_and_typed_fields_survive() {
 fn compute_output_golden_round_trips_with_delta_op_enum() {
     let output: ComputeOutput = assert_round_trip(OUTPUT_GOLDEN);
 
-    // (`DeltaOp` serde-renamed to the wire `add`/`sub`/`set`).
     assert_eq!(output.schema_version, 1);
     assert_eq!(output.state_delta.len(), 1);
     assert_eq!(output.state_delta[0].op, DeltaOp::Sub);

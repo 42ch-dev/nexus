@@ -10,7 +10,6 @@ use tokio::sync::{Notify, Semaphore};
 use uuid::Uuid;
 
 const MAX_EVENTS: usize = 1024;
-// publish and subscribe evict an inactive ring; active rings are never evicted.
 const MAX_STREAMS: usize = 4096;
 const MAX_BATCH: usize = 64;
 
@@ -254,12 +253,6 @@ impl EventSubscription {
             .streams
             .get(&self.stream)
             .map_or_else(Vec::new, |ring| {
-                // cursor while a batch was outstanding, so the retained front
-                // can stop being contiguous with `cursor`. The same
-                // lost-history check the `subscribe` path applies (front is
-                // more than one past the cursor) must lead the page with a
-                // cursorless `gap` instead of silently skipping the evicted
-                // sequences (§A.4).
                 let lost_history = ring
                     .events
                     .front()
@@ -735,7 +728,6 @@ mod tests {
         registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, mut first) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
-        // park on the ack semaphore forever.
         assert_eq!(first.next_batch().await.len(), 1);
         assert!(
             tokio::time::timeout(Duration::from_millis(10), first.next_batch())
@@ -750,7 +742,6 @@ mod tests {
             [] as [EventFrame; 0]
         );
         registry.activate("p", "s");
-        // then prove the new generation delivers fresh live frames.
         let replay = second.next_batch().await;
         assert_eq!(replay.len(), 1);
         second.ack();
@@ -903,8 +894,6 @@ mod tests {
         let first = registry.publish("s", "one", json!(1)).unwrap();
         let (_, _, mut subscription) = registry.subscribe("p", "s", None).await.unwrap();
         registry.activate("p", "s");
-        // overruns the ring, evicting every sequence the cursor still points
-        // at (the retained front moves strictly past `cursor + 1`).
         assert_eq!(subscription.next_batch().await, vec![first.clone()]);
         for n in 0..=MAX_EVENTS {
             registry.publish("s", "filler", json!(n)).unwrap();
@@ -913,8 +902,6 @@ mod tests {
 
         let batch = subscription.next_batch().await;
         assert_generated_gap(&batch[0], "history_unavailable");
-        // retained window starts at sequence 3 (1 initial + MAX_EVENTS+1
-        // fillers, ring keeps the last MAX_EVENTS).
         let epoch = first.id.unwrap().split_once(':').unwrap().0.to_owned();
         assert_eq!(batch[1].id.as_deref(), Some(format!("{epoch}:3").as_str()));
         assert_eq!(batch.len(), MAX_BATCH + 1);

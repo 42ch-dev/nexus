@@ -1,11 +1,3 @@
-/**
- * fork / pack / rules / world findings (P0-T2) and the World timeline reads
- * (P0-T3). Every operation is a thin translation over the native family
- * surface — the stored Principal is minted natively, ownership/CAS/effects
- * stay in the single Rust core authority, and the wire shapes are the
- * schema-owned generated DTOs (`schemas/core/narrative-api.schema.json`,
- * `schemas/daemon-api/{worlds,timeline}/…`).
- */
 import type {
   CreateForkRequest,
   CreateForkResponse,

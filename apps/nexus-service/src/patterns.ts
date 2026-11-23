@@ -1,6 +1,4 @@
 /**
- * local packages under `<home>/.nexus42/patterns`.
- *
  * The reader owns discovery, manifest validation and the fragment pin; nothing
  * here writes, creates the directory or loads a capability. Pagination lives in
  * this tier so the native lane stays a passthrough: the cursor is the
@@ -40,7 +38,6 @@ export async function listPatterns(
   };
 
   const scanned = await withPrincipal(service, (principal) => service.core.listPatterns(principal));
-  // order, which is what the reader sorts by, never a locale-dependent collation.
   let items: PatternSummary[] = [...scanned].sort((left, right) =>
     Buffer.compare(Buffer.from(left.package_dir, 'utf8'), Buffer.from(right.package_dir, 'utf8')),
   );

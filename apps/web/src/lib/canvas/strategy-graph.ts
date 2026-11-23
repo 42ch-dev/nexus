@@ -45,10 +45,6 @@ export interface StrategyNodeData extends Record<string, unknown> {
   /** Live overlay status (filled by the overlay layer, not the adapter). */
   status?: string;
   description?: string;
-  /**
-   * an over-approximation from the static walk, never a commitment that a run
-   * pauses here.
-   */
   predictedWait?: 'manual' | 'signal';
   /** Static-simulation overlay: an `llm_judge` state collapsed to its declared default branch. */
   branchNotExplored?: boolean;
@@ -110,8 +106,6 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
     layerOf.set(initialId, 0);
     while (queue.length > 0) {
       const id = queue.shift()!;
-      // target doesn't exist in byId. The ValidationPanel surfaces these as
-      // warnings; crashing here would hide that affordance entirely.
       const state = byId.get(id);
       if (!state) continue;
       const layer = layerOf.get(id)!;
@@ -278,8 +272,6 @@ function pushOuterEdge(
     dangling.push(`${source} → ${target}`);
     return;
   }
-  // would otherwise collide on id. Append the current edges.length as a
-  // disambiguator so React Flow keeps every conditional rule visible.
   edges.push({
     id: `e-${source}-${target}-${data.transitionKind}-${edges.length}`,
     source,

@@ -151,9 +151,6 @@ impl Capability for ScriptSectionStatusUpdate {
             )));
         }
 
-        // read-modify-write against concurrent manual edits or other CLI
-        // processes (R-V167P2-QC3-S1). On non-Unix platforms the lock is a
-        // no-op at compile time because the crate is macOS-only in V1.66+.
         #[cfg(unix)]
         {
             let work_dir = scripts_dir_canonical

@@ -1,6 +1,4 @@
 /**
- * over the ONE hosted execution owner.
- *
  * Every handler is a thin adapter over the native compute facade — the module
  * registry (C1/C2), the existing WASM run authority (C3, which persists
  * proposals or an honest failure and mutates nothing), run detail/history
@@ -64,7 +62,6 @@ export function listComputeRuns(service: ServiceCore, query: ListRunsQuery) {
 
 /** `POST /v1/daemon/compute/runs/{run_id}/accept` — commit that run once (C6). */
 export function acceptComputeRun(service: ServiceCore, runId: string, body: unknown) {
-  // means "accept every proposal". Only a body of another shape is a fault.
   const request: RunAcceptRequest = body === undefined ? {} : wirePayload(body, 'request');
   return withPrincipal(service, (principal) =>
     service.core.acceptComputeRun(principal, runId, request),
@@ -108,8 +105,6 @@ function listRunsQuery(search: URLSearchParams): ListRunsQuery {
 }
 
 /**
- * retained 422 `invalid_input` envelope.
- *
  * `world_id` is REQUIRED — Clear is World-scoped, and the retired route
  * answered a missing scope with 422 `invalid_input`, never a World-wide
  * delete. `status` narrows Clear to ONE terminal state; `running` and

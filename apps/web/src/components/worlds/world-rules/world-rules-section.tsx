@@ -1,6 +1,4 @@
 /**
- * V1.169 P2 T1/T2 with the inline authoring surface (DF-82).
- *
  * Rules section mounted BELOW the findings panel on the world findings page
  * (PD-2). Consumes `GET /v1/daemon/worlds/:world_id/rules` via
  * {@link useWorldRules} with the generated `WorldRulesListResponse` types;
@@ -65,12 +63,6 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
     setEditingRuleId(null);
   }
 
-  /**
-   * form state is initialized once from the mount-time rule and would keep
-   * `status: 'active'` after the list refresh, so a later save could
-   * silently reactivate a rule the author just deactivated. Closing here
-   * makes reactivation an explicit Edit → `active` choice only.
-   */
   function handleDeactivated(ruleId: string) {
     if (editingRuleId === ruleId) closeForm();
   }
@@ -170,16 +162,6 @@ export function WorldRulesSection({ worldId }: { worldId: string }) {
   );
 }
 
-/**
- * kind (open string verbatim) + severity hint badge (T1 token mapping).
- * Expanded: the human `statement`, a definition list with the
- * constraint-carrier summary and the target entry types, plus the T2
- * authoring controls — **Edit** (opens the inline edit form prefilled from
- * this row) and **Deactivate** (`PATCH status=deprecated`, product lock: no
- * DELETE, no confirm modal — reversible via Edit → `active`). Deprecated
- * rows hide Deactivate (nothing left to deactivate) and stay listed with the
- * deprecated badge. Collapsed-row click stays expand-only (T2 lock).
- */
 function WorldRuleRow({
   worldId,
   rule,

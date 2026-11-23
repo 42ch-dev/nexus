@@ -179,7 +179,6 @@ const bridge: DesktopBridge = {
   invoke,
   onStatusChanged(listener) {
     const handler = (_event: unknown, raw: unknown): void => {
-      // Electron event objects never cross this boundary.
       if (isBoundedStatusFrame(raw)) listener(raw);
     };
     ipcRenderer.on(DESKTOP_STATUS_CHANNEL, handler);

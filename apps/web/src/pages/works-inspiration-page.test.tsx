@@ -1,6 +1,4 @@
 /**
- * (v1.222 P1 T2) against the real `BrowserClient` + msw.
- *
  * Pins the four service calls the page drives: list, add (`{title}` only),
  * promote (`{item_id}` only — `set_default` is inert server-side) and archive,
  * plus the promote landing route, the status-driven row actions, the verbatim
@@ -159,8 +157,6 @@ describe('WorksInspirationPage', () => {
   });
 
   it('keeps one promote in flight, so a second row cannot create a second Work', async () => {
-    // overlapping promotes of the same pool can mint two Works. The page holds
-    // the lock; the second row must neither fire nor look actionable.
     const promoteBodies: unknown[] = [];
     // the neighboring suite uses the same deferred resolver.
     let releaseFirst: (() => void) | undefined;
@@ -238,7 +234,6 @@ describe('WorksInspirationPage', () => {
   });
 
   it('surfaces a read failure as page error chrome and recovers on retry', async () => {
-    // retry disabled, so the first 500 lands on screen as-is.
     let calls = 0;
     useHandlers(
       http.get(LIST_ROUTE, () => {

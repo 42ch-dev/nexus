@@ -38,8 +38,6 @@ export function RevisionBadge({
 }
 
 /**
- * graph↔list alt-view toggle (FB-C1-004).
- *
  * Mirrors `strategy-canvas/canvas-layout.tsx` `CanvasHeader`: the toggle
  * uses `aria-pressed` so keyboard/screen-reader users know which view is
  * active. Locked copy: **Show list view** (from graph) / **Show graph**

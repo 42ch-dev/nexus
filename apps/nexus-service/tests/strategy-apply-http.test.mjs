@@ -6,19 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * `GET /v1/daemon/strategies/{strategy_id}/applied` and
- * `GET /v1/daemon/strategies/{strategy_id}/approvals`): the preset family mounts all three at
- * the Strategy tier and hands the whole request body to the core authority. The apply write, its
- * five refusals, the append-only rows and the `candidate_revision` ordering are proven against a
- * real store in `crates/nexus-core/tests/apply_write.rs`; this target proves the HTTP contract —
- * path id, tier, payload passthrough, the applied identity read back through the status route, the
- * null `current_apply` case, the approvals list passthrough (the rollback target read), and the
- * refusal status mapping: `already_applied` and `approval_hash_changed` answer 409 under a code
- * naming the conflict (their reason), mirroring `strategy_already_approved`; every other refusal
- * keeps the core's client-error status and `invalid_input` code.
- */
-
 let routes;
 
 before(async () => {

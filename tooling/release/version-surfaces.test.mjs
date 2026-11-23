@@ -144,7 +144,6 @@ test("package names parse and members resolve to lock entries", () => {
   );
   assert.throws(() => parseCargoPackageName("[dependencies]\nfoo = \"1\"\n"), /missing \[package\]\.name/);
 
-  // other member's row equals the product version.
   const contractNames = readVersionBrackets(REPO_ROOT).map((entry) => entry.name);
   const expected = expectedMemberLockVersions(REPO_ROOT, currentVersion);
   assert.ok(
@@ -172,7 +171,6 @@ test("writeReleaseVersion regenerates Cargo.lock through Cargo", () => {
     }
 
     const lock = readFileSync(join(dir, CARGO_LOCK_PATH), "utf8");
-    // literal their manifest still declares.
     const expected = expectedMemberLockVersions(dir, "9.9.9");
     assert.ok(
       [...expected.values()].some((version) => version !== "9.9.9"),
@@ -185,7 +183,6 @@ test("writeReleaseVersion regenerates Cargo.lock through Cargo", () => {
       parseCargoLockPackageVersion(lock, "nexus-contracts"),
       FIXTURE_BASELINE_VERSION,
     );
-    // standalone (excluded) crate, `leb128fmt` an unrelated dependency.
     for (const name of ["nexus-module-manifest", "leb128fmt"]) {
       assert.equal(
         parseCargoLockPackageVersion(lock, name),
@@ -247,12 +244,6 @@ test("the version brackets carrier names manifests whose package names agree", (
   }
 });
 
-/**
- * is the only inventory: a second pinned list here would let a carrier edit pass
- * while the privacy and caret rules still partitioned by the stale copy. The
- * eight-count below keeps "publishing one more crate is a new consumer
- * commitment" a deliberate act without keeping a second roster.
- */
 const PUBLIC_MANIFEST_PATHS = readVersionBrackets(REPO_ROOT).map(
   (entry) => entry.manifest,
 );
@@ -332,8 +323,6 @@ test("every public-to-public local edge carries a caret requirement", () => {
   let checked = 0;
   for (const row of rows.filter((row) => publicNames.has(row.name))) {
     for (const dep of row.dependencies) {
-      // Cargo omits from a published manifest; its integration target moves to
-      // the private crate instead of inventing a version for it here.
       if (dep.path === null || !publicNames.has(dep.name)) {
         continue;
       }
@@ -349,14 +338,9 @@ test("every public-to-public local edge carries a caret requirement", () => {
       );
     }
   }
-  // narrative→contracts+knowledge, module-test→SDK.
   assert.equal(checked, 8, "every retained public local edge was checked");
 });
 
-/**
- * with the member's, so member paths must be POSIX too — the platform `join`
- * here made every run on win32 throw instead.
- */
 test("workspace member manifest paths use the carrier's POSIX convention", () => {
   const members = readWorkspaceMemberPackages(REPO_ROOT);
   assert.ok(members.length > 0, "workspace has no members");
@@ -370,8 +354,6 @@ test("workspace member manifest paths use the carrier's POSIX convention", () =>
 });
 
 /**
- * reject it.
- *
  * @param {(carrier: { contract: { name: string; manifest: string }[] }) => void} mutate
  * @param {RegExp} pattern
  */
@@ -420,7 +402,6 @@ test("readVersionBrackets rejects an empty contract array instead of exempting n
 test("readVersionBrackets rejects a carrier path that is not the member's manifest", () => {
   const dir = createTempRepo();
   try {
-    // the name check and let the real member go unchecked.
     writeRepoFile(
       dir,
       "shadow/Cargo.toml",
@@ -468,7 +449,6 @@ test("readStandalonePublishableCrates skips a crate declared publish = false", (
       !crates.some((crate) => crate.manifest === FIXTURE_STANDALONE_MANIFEST),
       "a publish = false crate cannot version independently, so it needs no carrier entry",
     );
-    // not a broken read.
     assert.ok(
       crates.some((crate) => crate.manifest === "modules/nexus-module-sdk/Cargo.toml"),
       "real publishable crate missing from the read",

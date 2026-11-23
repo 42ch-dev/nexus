@@ -1,8 +1,4 @@
 /**
- * (v239-p3-canvas-compose-ui T3): bind_slot writes, replace_subtree and
- * unnest. Binding inputs are per the pinned manifest's slot declarations;
- * a required slot with no binding names itself before approval can pass.
- *
  * A refused op (409/422) is presented by the hook's conflict/refusal state, so
  * each handler consumes its rejection instead of rethrowing it at the boundary.
  */

@@ -486,7 +486,6 @@ async fn outline_patch(
     target_chapter: Option<u64>,
     json: bool,
 ) -> Result<()> {
-    // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         OutlineOpArg::MoveChapter => {
             if chapter.is_none() {
@@ -550,7 +549,6 @@ async fn outline_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_outline_structure(
                 &principal,
-                // passed `http` for its own surface.
                 "outline",
                 work_ref.to_string(),
                 req,
@@ -599,7 +597,6 @@ async fn chapter_patch(
     json: bool,
 ) -> Result<()> {
     let chapter = parse_positive(n, "--n")?;
-    // parse time, so at most one is set here.
     let content = if let Some(text) = content {
         Some(text.to_string())
     } else if let Some(path) = content_file {
@@ -648,7 +645,6 @@ async fn chapter_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_outline_chapter(
                 &principal,
-                // passed `http` for its own surface.
                 "chapter",
                 work_ref.to_string(),
                 n.to_string(),
@@ -692,7 +688,6 @@ async fn timeline_patch(
     foreshadows_event: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    // scripts fail fast with named messages before a writer is admitted (PL-5).
     match op {
         TimelineOpArg::AddEvent => {
             if title.is_none() {
@@ -767,7 +762,6 @@ async fn timeline_patch(
             let principal = core.active_principal().await.map_err(map_core_error)?;
             core.patch_timeline_event(
                 &principal,
-                // passed `http` for its own surface.
                 "timeline",
                 work_ref.to_string(),
                 req,

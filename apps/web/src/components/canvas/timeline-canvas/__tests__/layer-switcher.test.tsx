@@ -1,16 +1,6 @@
 /**
  * TimelineCanvas — V1.123 P1 T3 (layer switcher + default-layer logic).
  *
- * layer logic locked by:
- *   - `iterations/v1.123/specs/three-layer-architecture.md` §7 + §8 (Brief
- *     default on World Timeline when era data exists; architect §7.3
- *     override is Work-Timeline-specific, NOT World-Timeline).
- *   - `iterations/v1.123/specs/layer-feel-differentiation.md` §3.2 (Brief ↔
- *     Narrative explicit layer control via header tabs).
- *   - Plan `2026-07-18-v1.123-world-timeline-brief-narrative.md` Global
- *     Constraints: "P1 only changes default **layer** within Timeline
- *     (Brief if `block_type=era` data, else Narrative)".
- *
  * Coverage:
  *   - Brief + Narrative tabs render in the canvas header (layer-feel §3.2).
  *   - Default layer = `'brief'` when graph has at least one
@@ -88,9 +78,6 @@ function makeMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
-    // complete works enumeration) must RESOLVE: an unresolved / failed read is
-    // no longer rendered as "no bound Works". An empty page = this World has
-    // no bound Works.
     listWorks: vi.fn().mockResolvedValue({
       items: [],
       pagination: { limit: 20, has_more: false },
@@ -149,11 +136,6 @@ describe('TimelineCanvas — layer switcher UI (V1.123 P1 T3)', () => {
 
     const canvas = await screen.findByTestId('timeline-canvas');
 
-    // Brief tab is pressed and the container's `data-active-layer` mirror
-    // reads 'brief'. We assert the data-attribute (not the rendered era
-    // card text) because React Flow does not render readable node text in
-    // jsdom — the projection contract itself is covered by
-    // `brief-projection.test.tsx` at the adapter level.
     const briefTab = screen.getByTestId('timeline-layer-tab-brief');
     expect(briefTab).toHaveAttribute('aria-pressed', 'true');
     expect(canvas).toHaveAttribute('data-active-layer', 'brief');
@@ -164,9 +146,6 @@ describe('TimelineCanvas — layer switcher UI (V1.123 P1 T3)', () => {
   });
 
   it('defaults to Narrative layer when graph has no era entities', async () => {
-    // exists; else Narrative fallback. Task 5 owns the honest empty-state
-    // copy ("No era markers yet — switch to Narrative to see events.");
-    // here we only verify the fallback layer is Narrative.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -221,10 +200,6 @@ describe('TimelineCanvas — layer switcher UI (V1.123 P1 T3)', () => {
 
     fireEvent.click(screen.getByTestId('timeline-layer-tab-narrative'));
 
-    // flips to 'narrative'. The discrete semantic swap per layer-feel §3.1
-    // is verified at the projection contract level in
-    // `brief-projection.test.tsx` (Brief layer excludes events; Narrative
-    // layer excludes eras).
     await waitFor(() => {
       expect(canvas).toHaveAttribute('data-active-layer', 'narrative');
     });
@@ -239,8 +214,6 @@ describe('TimelineCanvas — layer switcher UI (V1.123 P1 T3)', () => {
   });
 
   it('clicking Brief tab switches active layer to Brief (Narrative → Brief)', async () => {
-    // Brief to preview the (empty) Brief layer; Task 5 owns the honest
-    // empty-state copy.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -277,10 +250,6 @@ describe('TimelineCanvas — layer switcher UI (V1.123 P1 T3)', () => {
   });
 
   it('hides the Brief layer tab toggle from the empty-state branch (zero entities)', async () => {
-    // entities. The layer switcher targets the spatial canvas only — there
-    // are no nodes to switch between on an empty graph. Task 5 owns the
-    // per-layer empty-state copy; Task 3 only gates the switcher
-    // visibility by the empty-state branch.
     const graph: WorldKbGraphResponse = {
       entities: [],
       source_anchors: [],
@@ -351,9 +320,6 @@ describe('TimelineCanvas — layer swap does not trigger forbidden writes (T3 ne
   });
 
   it('renders NLE multi-track band overlay in the canvas host (V1.128 P1 T3)', async () => {
-    // of the NLE era-sweep clips (spec §3.3.3 supersede), so the NLE overlay
-    // contract is asserted on the Narrative layer here; the Brief-layer
-    // time-band contract is covered by the sibling test below.
     const graph: WorldKbGraphResponse = {
       entities: [
         entity({
@@ -381,8 +347,6 @@ describe('TimelineCanvas — layer swap does not trigger forbidden writes (T3 ne
   });
 
   it('renders vertical time-bands for the Brief layer (V1.159 P1 T2 supersede)', async () => {
-    // vertical time-band panel (built from `buildEraTree`); the V1.123 flat
-    // era sweep + NLE band overlay no longer render for Brief.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -404,7 +368,6 @@ describe('TimelineCanvas — layer swap does not trigger forbidden writes (T3 ne
     await waitFor(() => {
       expect(screen.getByTestId('brief-time-bands')).toBeInTheDocument();
     });
-    // world-summary lines, so scope to the band container).
     expect(
       within(screen.getByTestId('brief-time-bands')).getAllByTestId(
         'brief-time-band',
@@ -420,8 +383,6 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
   });
 
   it('renders the Moment layer tab alongside Brief + Narrative (3-way segmented control)', async () => {
-    // layers — Brief | Narrative | Moment (3×2 matrix completion). The
-    // existing two tabs remain; Moment is additive.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -451,8 +412,6 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
   });
 
   it('never defaults to the Moment layer (read-only projection — one click away)', async () => {
-    // click away)." With era data the default is Brief; the Moment tab
-    // starts unpressed in both default regimes.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -504,8 +463,6 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
 
     fireEvent.click(screen.getByTestId('timeline-layer-tab-moment'));
 
-    // (the loading affordance owns the swap in between, V1.200 DR-26 round 2),
-    // so the active layer is asserted on the CURRENT canvas element.
     await waitFor(() => {
       expect(screen.getByTestId('timeline-canvas')).toHaveAttribute(
         'data-active-layer',
@@ -516,7 +473,6 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
       'aria-pressed',
       'true',
     );
-    // regression of the Brief/Narrative pressed-state semantics.
     expect(screen.getByTestId('timeline-layer-tab-brief')).toHaveAttribute(
       'aria-pressed',
       'false',
@@ -528,8 +484,6 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
   });
 
   it('round-trips Brief → Narrative → Moment → Narrative → Brief without regression', async () => {
-    // additive third tab — the switcher stays a single active-layer
-    // discriminator.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -596,7 +550,6 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
   });
 
   it('hides the Moment layer tab from the empty-state branch (zero entities)', async () => {
-    // branch owns the surface and the switcher is hidden entirely.
     const graph: WorldKbGraphResponse = {
       entities: [],
       source_anchors: [],
@@ -616,8 +569,6 @@ describe('TimelineCanvas — 3-way layer switcher Moment tab (V1.156 P1 T2)', ()
   });
 
   it('does NOT trigger any forbidden write endpoint when swapping into Moment (read-only layer)', async () => {
-    // World-owned Moment write flow. The swap into Moment must leave every
-    // write endpoint untouched (mirrors the T3 negative pattern).
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -662,9 +613,6 @@ describe('TimelineCanvas — 3-way layer switcher a11y (V1.156 P1 T2)', () => {
   });
 
   it('wraps the three tabs in a labelled role="group" (SR summary)', async () => {
-    // semantics: `role="group"` + i18n aria-label so SR users can navigate
-    // to the switcher by name (WCAG 2.1 — the switcher is a labelled
-    // toggle-button group).
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -691,10 +639,6 @@ describe('TimelineCanvas — 3-way layer switcher a11y (V1.156 P1 T2)', () => {
   });
 
   it('keeps every tab a native focusable button with aria-pressed toggle state', async () => {
-    // (Tab to focus, Enter/Space to activate — platform-native keyboard
-    // navigation) and carries `aria-pressed` so SR users hear the active
-    // layer as a toggle state. The Moment tab must participate exactly like
-    // the two original tabs.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -726,8 +670,6 @@ describe('TimelineCanvas — 3-way layer switcher a11y (V1.156 P1 T2)', () => {
     expect(momentTab).toHaveFocus();
     expect(momentTab).toHaveAttribute('aria-pressed', 'false');
 
-    // active layer. The Moment swap re-renders the shell (its bound-Work
-    // source resolves first), so both are asserted on current elements.
     fireEvent.click(momentTab);
     await waitFor(() => {
       expect(screen.getByTestId('timeline-layer-tab-moment')).toHaveAttribute(

@@ -83,7 +83,6 @@ mod tests {
     #[cfg(not(nexus_no_wasm_target))]
     #[test]
     fn basic_combat_is_embedded() {
-        // embedded-modules/basic-combat/basic-combat.wasm at build time.
         assert!(
             embedded_module_bytes("basic-combat").is_some(),
             "basic-combat.wasm must be embedded; build.rs compiles it from modules/basic-combat/"

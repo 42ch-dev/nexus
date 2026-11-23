@@ -26,28 +26,19 @@
 //! retention operators are test control only — the assertions read the
 //! provider's own answers, refusals and receipts.
 
-// (`Admitted::from_scope`), while this slice's own direct-admission entry
-// points and its pending/failed receipt states stay exercised by the embedded
-// tests and the §7.0.3 async owners.
 #[allow(dead_code)]
 mod candidates;
-// assembled mutation path.
 mod faults;
 mod policy;
 mod provider;
-// classification and the cognition refusal. Grown by the serving tasks.
 mod raw_invoke;
 #[allow(dead_code)]
 mod reflections;
-// entry points, while the assembled port commits through the caller-owned
-// `*_in_tx` siblings so effect, receipt and dedup share one transaction.
 #[allow(dead_code)]
 mod recall;
 #[allow(dead_code)]
 mod records;
 mod server;
-// grant-loading and caller-owned seams, and its outer wrappers remain its own
-// embedded-test entry points.
 #[allow(dead_code)]
 mod spaces;
 mod storage;

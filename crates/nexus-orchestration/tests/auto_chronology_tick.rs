@@ -248,7 +248,6 @@ async fn tick_skips_when_outline_already_exists() {
     works::create_work(&pool, &work).await.unwrap();
     seed_and_finalize(&pool, "wrk_neg4", 1, 3, true).await;
     opt_in(&pool, "wrk_neg4").await;
-    // after the outline write but before the tx commit).
     let outline = outline_path(ws.path(), "neg4-novel", 2);
     std::fs::create_dir_all(outline.parent().unwrap()).unwrap();
     std::fs::write(&outline, "pre-existing").unwrap();
@@ -275,12 +274,10 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
     seed_and_finalize(&pool, "wrk_crash", 1, 3, true).await;
     opt_in(&pool, "wrk_crash").await;
 
-    // by hand (as if the atomic write succeeded) but seed NO chapters for v2.
     let outline = outline_path(ws.path(), "crash-novel", 2);
     std::fs::create_dir_all(outline.parent().unwrap()).unwrap();
     std::fs::write(&outline, "crashed-mid-advance").unwrap();
 
-    // error, not clobber.
     run_one_tick(&pool, ws.path()).await;
     assert_eq!(
         std::fs::read_to_string(&outline).unwrap(),
@@ -288,7 +285,6 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
         "recovery tick must not clobber the crashed-state outline"
     );
 
-    // rolled back; the recovery tick did not re-seed).
     let vol2_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM work_chapters WHERE work_id = 'wrk_crash' AND volume = 2",
     )
@@ -313,20 +309,16 @@ async fn perform_advance_writes_outline_after_tx_commit() {
     let work = base_work("wrk_order", "order-novel");
     works::create_work(&pool, &work).await.unwrap();
 
-    // `create_dir_all(outline.parent())` fails post-commit (NotADirectory).
     let outlines_as_file = ws.path().join("Works").join("order-novel").join("Outlines");
     std::fs::create_dir_all(outlines_as_file.parent().unwrap()).unwrap();
     std::fs::write(&outlines_as_file, "blocker").unwrap();
 
-    // (chapter seed + updated_at) FIRST, then try the outline write → fails.
     let result = advance_manual(&pool, ws.path(), "wrk_order", 2, Some(3), false).await;
     assert!(
         result.is_err(),
         "outline write failure must surface as Err (observable); got: {result:?}"
     );
 
-    // rows persist despite the outline failure. This is the key invariant —
-    // the Work is not stuck because the DB is the source of truth.
     let vol2_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM work_chapters WHERE work_id = 'wrk_order' AND volume = 2",
     )
@@ -344,8 +336,6 @@ async fn perform_advance_writes_outline_after_tx_commit() {
         "no partial outline file after failed write"
     );
 
-    // passes (no outline), seed is idempotent (INSERT OR IGNORE), and the
-    // outline write succeeds on retry.
     std::fs::remove_file(&outlines_as_file).unwrap();
     let outcome = advance_manual(&pool, ws.path(), "wrk_order", 2, Some(3), false)
         .await
@@ -409,7 +399,6 @@ async fn manual_advance_bypasses_gates_and_seeds_chapters() {
     let (_dir, pool) = test_pool().await;
     let ws = tempfile::tempdir().unwrap();
     let mut work = base_work("wrk_manual", "manual-novel");
-    // still advance (spec §2.2).
     work.intake_status = "pending".to_string();
     works::create_work(&pool, &work).await.unwrap();
     assert!(

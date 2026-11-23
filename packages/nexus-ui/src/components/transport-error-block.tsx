@@ -10,8 +10,6 @@ const CTA_LINK_CLASS =
   'text-label-12 font-normal text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700';
 
 /**
- * {@code TransportErrorKind} (V1.129 P0 — `apps/web/src/lib/nexus/errors.ts`).
- *
  * The package cannot import from `apps/web`, so the literal-union is mirrored
  * here. TypeScript checks structural compatibility at the call site — both
  * unions carry the same six literals, so an apps/web {@code TransportErrorKind}
@@ -113,33 +111,17 @@ export interface TransportErrorBlockProps
   onRetry?: () => void;
   /** "Open Connection Settings" callback. Omit to hide that CTA. */
   onOpenSettings?: () => void;
-  /**
-   * string). Rendered below the body copy when present.
-   */
   detail?: string;
   /** Optional headline override (rare; defaults to per-kind headline). */
   title?: string;
-  /**
-   * default (used by the English-only Studio fixture). App surfaces pass a
-   * localized `t()` string here (QC1-F-001).
-   */
   body?: string;
-  /**
-   * per-kind default. App surfaces pass a localized `t()` string here.
-   */
   primaryCtaLabel?: string;
-  /**
-   * per-kind default. App surfaces pass a localized `t()` string here.
-   * `undefined` is equivalent to "use the default".
-   */
   secondaryCtaLabel?: string;
   /** DOM ref forwarded to the underlying section (React 19 ref-as-prop). */
   ref?: Ref<HTMLDivElement>;
 }
 
 /**
- * failure UX (V1.129 P1).
- *
  * Renders the per-kind headline + body + CTA matrix. The CTA visibility and
  * ordering are owned by the primitive (driven by `kind`); the callbacks are
  * supplied by the caller. One variant; caller composes with surrounding
@@ -242,9 +224,6 @@ export function TransportErrorBlock({
   );
 }
 
-/**
- * (informational) and is never rendered as a button — see {@link isCtaVisible}.
- */
 function ctaOnClick(
   cta: TransportCtaKind,
   onRetry: (() => void) | undefined,
@@ -255,13 +234,6 @@ function ctaOnClick(
   return undefined;
 }
 
-/**
- * caller supplied the matching callback. `useDesktopApp` is informational —
- * it never renders as a button (QC1-F-002: a keyboard-focusable no-op button
- * is misleading and inaccessible). The desktop-app instruction is carried by
- * the body copy instead. The CTA stays in {@link PRIMARY_CTA} so the matrix
- * records the kind's recovery intent.
- */
 function isCtaVisible(
   cta: TransportCtaKind,
   onRetry: (() => void) | undefined,

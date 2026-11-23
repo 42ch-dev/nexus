@@ -130,9 +130,6 @@ describe('WorkTimelineCanvas — global empty-state preserved (V1.122 family)', 
   });
 
   it('renders the global empty-state when the outline has zero events (Narrative empty)', async () => {
-    // empty-state equivalent." This is the V1.122 family regression — the
-    // surface MUST NOT surface the Moment-empty panel on the global-empty
-    // branch (different copy, different CTA).
     const client = makeMockClient(outline({ timeline_events: [] }));
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 
@@ -153,10 +150,6 @@ describe('WorkTimelineCanvas — Moment-layer honest empty-state (V1.123 P2 Task
   });
 
   it('does NOT render the Moment-empty panel when default layer is Narrative (events present, no fixture)', async () => {
-    // when no fixture is wired, the default Narrative view MUST NOT surface
-    // the Moment-empty panel — the panel only fires when the user has
-    // explicitly switched to Moment (mirrors the V1.123 P1 Brief-empty
-    // contract).
     const client = makeMockClient(outline());
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 
@@ -168,8 +161,6 @@ describe('WorkTimelineCanvas — Moment-layer honest empty-state (V1.123 P2 Task
   });
 
   it('renders the Moment-empty panel when the user switches to Moment with no fixture', async () => {
-    // AND the projection is empty (no scene/beat data), the surface renders
-    // the Moment-empty panel with i18n copy + a CTA back to Narrative.
     const client = makeMockClient(outline());
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 
@@ -191,8 +182,6 @@ describe('WorkTimelineCanvas — Moment-layer honest empty-state (V1.123 P2 Task
   });
 
   it('clicking the Moment-empty CTA switches back to Narrative (escape hatch)', async () => {
-    // Moment-empty panel switches to Narrative. This is the escape hatch
-    // from a Moment-empty Work.
     const client = makeMockClient(outline());
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 
@@ -216,7 +205,6 @@ describe('WorkTimelineCanvas — Moment-layer honest empty-state (V1.123 P2 Task
   });
 
   it('does NOT render the Moment-empty panel when a scene/beat fixture provides data', async () => {
-    // nodes and the surface renders the canvas — NOT the Moment-empty panel.
     const client = makeMockClient(outline());
     renderInApp(
       <WorkTimelineCanvas
@@ -258,10 +246,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
   });
 
   it('renders the Brief-empty panel when the user switches to Brief with no bound World', async () => {
-    // a read-only projection of the bound World's Brief. A Work with no
-    // bound World has no world-shape context → honest empty-state panel
-    // with a CTA back to Narrative. NO "create Brief" CTA — the Work does
-    // NOT own Brief authoring (Brief is World spine).
     const client = makeMockClient(outline());
     renderInApp(<WorkTimelineCanvas workId="work-1" />, { client });
 
@@ -281,9 +265,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
   });
 
   it('renders the Brief-empty panel when the bound World has no era markers', async () => {
-    // `block_type=era` entities → the Brief projection is empty → honest
-    // empty-state panel (world-shape context appears when the bound World
-    // has era markers).
     const client = makeMockClient(outline(), {
       worldId: 'world-es',
       graph: {
@@ -335,10 +316,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
   });
 
   it('does NOT render the Brief-empty panel when the bound World has era data', async () => {
-    // era nodes and the canvas renders — NOT the empty-state panel. This
-    // also exercises the full render path (CanvasShell + summarize + NLE
-    // band) on Brief-era nodes (P1 fix-wave lesson: no crash on Brief-era
-    // nodes in alt-view/summarize paths).
     const client = makeMockClient(outline(), {
       worldId: 'world-es',
       graph: {
@@ -373,9 +350,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
   });
 
   it('does NOT render the Brief-empty panel on the global-empty branch', async () => {
-    // surface (V1.122 family — preserved). Even with ?layer=brief in the
-    // URL, the global empty-state renders and the Brief-empty panel MUST
-    // NOT appear (mirrors the Moment-empty gate on the global branch).
     const client = makeMockClient(outline({ timeline_events: [] }));
     renderInApp(<WorkTimelineCanvas workId="work-1" />, {
       client,
@@ -392,12 +366,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
   });
 
   it('shows a loading state (not the Brief-empty panel) while the bound-World graph is in flight', async () => {
-    // World's KB graph — an async source independent of the outline. On a
-    // `?layer=brief` deep link the graph fetch is still in-flight after the
-    // outline resolves; the surface MUST show a loading state instead of
-    // flashing the dishonest "No world-shape context yet" Brief-empty panel
-    // while era data is incoming (mirrors the World Timeline's
-    // `graph.isLoading` gate — timeline-canvas.tsx:670-672).
     let resolveGraph!: (value: WorldKbGraphResponse) => void;
     const graphPromise = new Promise<WorldKbGraphResponse>((resolve) => {
       resolveGraph = resolve;
@@ -417,7 +385,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
       initialRouterEntries: ['/works/work-1/timeline?layer=brief'],
     });
 
-    // pending → loading state, and the Brief-empty panel MUST NOT flash.
     await waitFor(() => {
       expect(graphFn).toHaveBeenCalled();
     });
@@ -445,10 +412,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
   });
 
   it('shows an ErrorState with a retry CTA (not the Brief-empty panel) when the bound-World graph fetch fails', async () => {
-    // as a retryable error — NOT as the dishonest "No world-shape context
-    // yet" empty-state (the Work IS bound; that copy would be false).
-    // Mirrors the World Timeline's `graph.isError` + refetch pattern
-    // (timeline-canvas.tsx:673-680).
     const client = makeMockClient(
       outline(),
       {
@@ -474,7 +437,6 @@ describe('WorkTimelineCanvas — Brief-layer honest empty-state (V1.156 P2 T2)',
       initialRouterEntries: ['/works/work-1/timeline?layer=brief'],
     });
 
-    // panel MUST NOT render.
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load the work timeline.');
     expect(screen.queryByTestId('work-timeline-brief-empty-state')).toBeNull();

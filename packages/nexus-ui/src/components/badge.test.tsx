@@ -16,7 +16,6 @@ describe('Badge', () => {
   it('renders soft running with ~16% fill and ~50% border alpha', () => {
     render(<Badge variant="running">Running</Badge>);
     const badge = screen.getByText('Running');
-    // nexus-ui-badge-soft-* tokens (16% fill / -1000 text / 50% border).
     expect(badge).toHaveClass('text-nexus-ui-badge-soft-running-text');
     expect(badge).toHaveClass('bg-nexus-ui-badge-soft-running-bg');
     expect(badge).toHaveClass('border-nexus-ui-badge-soft-running-border');
@@ -98,8 +97,6 @@ describe('Badge', () => {
       </Badge>,
     );
     const badge = screen.getByText('Solid Running');
-    // darker (green-800) so white text clears AA; dark pins the bright
-    // green-700 fill per the Button Contrast Invariant.
     expect(badge).toHaveClass('bg-green-800');
     expect(badge).toHaveClass('dark:bg-green-700');
     expect(badge).toHaveClass('text-white');

@@ -99,8 +99,6 @@ pub fn simulate_document(
             .as_ref()
             .is_some_and(|exit| exit.kind == WorkflowExitWhenKind::LlmJudge);
         let next: Vec<&str> = if judged {
-            // does not count: a judge whose only default edge dangles is refused like a
-            // judge with no default edge, never reported as successfully stubbed.
             let defaults: Vec<&str> = outgoing
                 .iter()
                 .filter(|edge| {

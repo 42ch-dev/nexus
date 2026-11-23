@@ -146,9 +146,6 @@ describe('work route nesting (T2)', () => {
     expect(screen.queryByTestId('work-shell-layout')).not.toBeInTheDocument();
   });
 
-  // Work whose id is one of these literals loses WorkShellLayout. The source is
-  // the independent truth: adding a static sibling reds until the reservation
-  // is re-decided.
   it('reserves exactly the static /works sibling segments in App.tsx', () => {
     const source = readFileSync(path.resolve(__dirname, 'App.tsx'), 'utf8');
     const segments = Array.from(

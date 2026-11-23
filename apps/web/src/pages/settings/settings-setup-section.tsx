@@ -1,6 +1,4 @@
 /**
- * §6.3).
- *
  * The wizard route is always directly reachable (compass D21), so re-running
  * setup is a plain navigation: nothing is cleared, no data is deleted, and an
  * initialized service re-runs the finish path idempotently. Browser-available
@@ -16,7 +14,6 @@ export function SettingsSetupSection() {
   const navigate = useNavigate();
 
   return (
-    // reusable chrome: a page may mount this chrome more than once per route.
     <div id="setup">
       <SettingsSetupSectionChrome
         data-testid="settings-setup-section"

@@ -263,7 +263,6 @@ async fn insert_owned_kb(
     .bind(character_id)
     .bind(binding_id)
     .bind(holder_entry_id)
-    // exercised with direct SQL in the v1.191 governance cases below.
     .bind(holder_entry_id.map(|_| "owner-private"))
     .bind(canonical_name)
     .bind(status)
@@ -310,8 +309,6 @@ const BINDING_DUMP_SQL: &str = "SELECT json_array(\
      FROM actor_world_bindings ORDER BY binding_id";
 
 async fn index_names(pool: &SqlitePool) -> Vec<String> {
-    // internal, carries NULL sql, and is recreated by the rebuild itself;
-    // the inventory covers only named, schema-owned indexes.
     sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_master \
          WHERE type = 'index' AND tbl_name = 'kb_key_blocks' \
@@ -601,10 +598,6 @@ async fn pre_v1184_upgrade_preserves_bytes_children_and_schema_objects() {
     );
     assert_eq!(pre_rows.len(), 11, "fixture row count");
 
-    // `run_migrations` scopes an FK-off window to the rebuild migration so
-    // the DROP/recreate does not cascade into child tables. The post-upgrade
-    // phase then continues on the admitted factory, because the remaining
-    // fixture mutations (cascade delete) target guarded tables.
     drop(pool);
     let pool = nexus_local_db::init_pool(&db_path).await.unwrap();
 
@@ -794,7 +787,6 @@ async fn upgrade_preserves_exact_sqlite_master_definitions() {
     let (pool, _dir) = fresh_pool().await;
     run_migrator(&pool, pre_upgrade_migrator()).await;
 
-    //    legacy indexes, and no table-attached triggers. ──────────────────
     let pre_objects = kb_schema_objects(&pool).await;
     let pre_tables = pre_objects
         .iter()
@@ -1088,7 +1080,6 @@ async fn v1191_holder_migration_governance_columns() {
     )
     .await
     .unwrap();
-    // re-constrained to the (retired) legacy World-only rule.
     insert_owned_kb(
         &pool,
         "kb_gov_char",
@@ -1151,7 +1142,6 @@ async fn v1191_holder_migration_governance_columns() {
         .map(|_| ()),
         "empty holder_entry_id",
     );
-    // the import boundary, never stored here).
     expect_check_violation(
         sqlx::query(
             "INSERT INTO kb_key_blocks \
@@ -1177,7 +1167,6 @@ async fn v1191_holder_migration_governance_columns() {
         .map(|_| ()),
         "holder referencing an unregistered registry row",
     );
-    // from under it (ON DELETE RESTRICT).
     expect_fk_violation(
         sqlx::query("DELETE FROM knowledge_holders WHERE holder_entry_id = ?")
             .bind(&creator_holder)
@@ -1385,7 +1374,6 @@ async fn owner_scoped_active_uniqueness_enforced() {
         .await,
         "duplicate active world-owned name (legacy invariant)",
     );
-    // longer blocks a replacement in the same owner scope.
     insert_owned_kb(
         &pool,
         "kb_u_term",
@@ -1921,7 +1909,6 @@ async fn v1191_holder_migration_schema_shape() {
         "per-subject unique partial indexes: {indexes:?}"
     );
     assert!(indexes.contains(&"idx_knowledge_import_quarantine_batch".to_string()));
-    // them.
     let kb_indexes = index_names(&pool).await;
     for name in OWNER_INDEXES {
         assert!(kb_indexes.contains(&name.to_string()), "missing {name}");
@@ -2274,7 +2261,6 @@ async fn v1191_holder_migration_rejects_legacy_extension_input() {
         );
     }
 
-    //    serialization fallback — are accepted.
     let mut accepted = Vec::new();
     for (index, extensions) in [r#"{"world_id":"wld_ownerA","custom_unknown":1}"#, ""]
         .into_iter()
@@ -2323,8 +2309,6 @@ async fn v1191_holder_migration_rejects_legacy_extension_input() {
         "expected the invalid-input family with the stable reason, got {err:?}"
     );
 
-    //    refusal rides the crate's `Protocol` vehicle and still names the
-    //    reason.
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let err = nexus_local_db::kb_store::update_key_block_auxiliary_fields_in_tx(
         &mut tx,
@@ -2343,7 +2327,6 @@ async fn v1191_holder_migration_rejects_legacy_extension_input() {
         "expected the stable reason in the storage-level refusal, got {err}"
     );
 
-    //    known (non-passthrough) key, so it never reaches the document.
     let mut smuggler = KnowledgeEntryRecord::new(WORLD_A, BlockType::Character, "Smuggler");
     smuggler.extensions_nexus_extras = Some(serde_json::json!({"creator_only": true, "custom": 2}));
     store

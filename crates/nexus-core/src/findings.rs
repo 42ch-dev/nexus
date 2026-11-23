@@ -356,7 +356,6 @@ impl CoreService {
         self.verify_principal(principal)?;
         self.resolve_owned_work(principal, &work_id).await?;
 
-        // the underlying offset, fetch `limit + 1` to detect `has_more`.
         let offset = decode_offset_cursor(query.cursor.as_ref())?;
         let limit = query.limit.unwrap_or(100).min(500);
         let fetch_limit = limit.saturating_add(1);
@@ -430,7 +429,6 @@ impl CoreService {
             .map_err(findings_db_err)?
             .ok_or_else(|| FindingsFault::NotFound(format!("finding {finding_id}")))?;
         if f.work_id != work_id {
-            // 404 shape so the mismatch is indistinguishable from absence.
             return Err(FindingsFault::NotFound(format!("finding {finding_id}")).into());
         }
         Ok(to_finding_detail(f))
@@ -476,8 +474,6 @@ impl CoreService {
         finding_id: String,
         request: FindingsApi,
     ) -> CoreResult<FindingDetailResponse> {
-        // so a malformed value is refused before the identity gates — the same
-        // order the adapter's own parse had before the generated DTO replaced it.
         let patch = finding_patch_from_update(request)?;
         self.verify_principal(principal)?;
         self.require_work_write()?;
@@ -662,9 +658,6 @@ impl CoreService {
                         error = %other,
                         "findings batch PATCH: internal error updating finding"
                     );
-                    // `invalid_input`; every other fault (invalid enum values
-                    // included) classified as `DATABASE_ERROR` via the shared
-                    // storage carrier.
                     return Err(match other {
                         nexus_local_db::LocalDbError::ValidationError(message) => {
                             FindingsFault::BadRequest {

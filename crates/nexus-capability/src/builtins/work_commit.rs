@@ -45,9 +45,6 @@ pub fn resolve_works_dirs(
 ) -> Result<(PathBuf, PathBuf), CapabilityError> {
     let workspace_root = executor.workspace_root()?;
     let works_dir = workspace_root.join("Works");
-    // real executor refuses any other parent only at commit — after the claim
-    // and the mkdir. Confining the root here keeps a foreign or nested tree
-    // from being mutated at all.
     if workspace_root.join(works_root) != works_dir {
         return Err(CapabilityError::InputInvalid(format!(
             "works_root must resolve to {}: {}",
@@ -176,7 +173,6 @@ pub async fn claim_work_ref(
     requested: Option<&str>,
 ) -> Result<WorkRefClaim, CapabilityError> {
     let Some(pool) = pool else {
-        // resolve the stored ref, so refuse instead of guessing.
         let Some(work_ref) = requested else {
             return Err(CapabilityError::InputInvalid(
                 "a re-init excluding work_ref needs a works row".to_string(),
@@ -575,8 +571,6 @@ mod tests {
     #[tokio::test]
     async fn a_late_novel_transaction_failure_restores_the_prior_ref() {
         let tmp = tempfile::tempdir().expect("tmpdir");
-        // `create_world_tx` fails inside the chapters/world transaction AFTER
-        // the scaffold files landed.
         let pool = pool_with_work(tmp.path(), Some("prior-ref"), None).await;
         let works_root = tmp.path().join("Works");
         let executor = RecordingExecutor::at(tmp.path());
@@ -725,7 +719,6 @@ mod tests {
             }))
             .await
         });
-        // hanging commit proves the claim is set when the future is dropped.
         reached.notified().await;
         run.abort();
         assert!(run.await.is_err(), "the scaffold run was cancelled");
@@ -760,7 +753,6 @@ mod tests {
             Some("claimed-ref")
         );
 
-        // pending, so the restore below is cancelled mid-await.
         let held = pool.acquire().await.expect("occupy the only connection");
         let started = std::sync::Arc::new(tokio::sync::Notify::new());
         let signal = std::sync::Arc::clone(&started);

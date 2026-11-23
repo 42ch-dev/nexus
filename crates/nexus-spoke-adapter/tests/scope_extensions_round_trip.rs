@@ -20,8 +20,6 @@ use spoke_schemas::ExtensionKey;
 
 #[test]
 fn scope_extensions_nexus_namespace_round_trips() {
-    // spoke orchestrator. Populate the `"nexus"` namespace with the P2
-    // typed-carrier fields.
     let wire = json!({
         "scope_id": "wld_mira",
         "extensions": {
@@ -38,9 +36,6 @@ fn scope_extensions_nexus_namespace_round_trips() {
     let scope: Scope =
         serde_json::from_value(wire).expect("Scope with extensions.nexus deserializes");
 
-    // way to look up the namespace (it does not impl `Borrow<str>`, mirroring
-    // `ExtensionKey`). Constructing it via `try_from` proves the
-    // 0.6.0 newtype name + the "nexus" key the P2 redo depends on.
     let nexus_key = ExtensionKey::try_from("nexus").expect("valid namespace key");
     let nexus_ns = scope
         .extensions
@@ -78,9 +73,6 @@ fn scope_extensions_nexus_namespace_round_trips() {
 
 #[test]
 fn minimal_scope_without_extensions_still_deserializes() {
-    // (`scope_id` only, like `scope_query_port::scope_for`) stay valid and
-    // deserialize to `None`. This guards the property the existing
-    // serde-based construction relies on.
     let scope: Scope = serde_json::from_value(json!({ "scope_id": "wld_any" }))
         .expect("minimal scope without extensions deserializes");
     assert!(scope.extensions.is_none());

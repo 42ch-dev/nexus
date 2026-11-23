@@ -96,7 +96,6 @@ async fn queue_extract_and_status_round_trip() {
         lines[4]
     );
 
-    // (no duplicate row), so the leaf renders the same "queued" line.
     let again = queue_extract(&fixture, &["kb_smoke", "--world-id", "wld_smoke"]);
     assert!(
         again.status.success(),
@@ -111,7 +110,6 @@ async fn queue_extract_and_status_round_trip() {
         "{re_rendered}"
     );
 
-    // row — the idempotency key never duplicates a row.
     let listed = extract_status(&fixture, &[]);
     assert!(
         listed.status.success(),

@@ -50,7 +50,6 @@ const nativeFixture = resolve(repoRoot, 'crates/nexus-agent-host/tests/fixtures/
 
 const WORLD_ID = 'wld_owned';
 const CAS_ENTITY = 'kb_cas';
-// (nexus-core `world_kb.rs`); a non-hex id is rejected as validation (422).
 const CREATE_ENTITY = 'kb_a11ce001';
 const CLI_BINARY = resolve(repoRoot, 'target', 'debug', 'nexus42');
 
@@ -104,28 +103,14 @@ function commandLineMatchesCargo(commandLine) {
 
 const trackedChildren = new Set();
 let cleanedUp = false;
-// exactly what failure evidence needs to attribute the failure. Entries are
-// keyed by unique child identity (label + pid + spawn sequence — labels like
-// `nexus-service` repeat across restarts), and retention is capped in entry
-// count and tail size, so one child's tail can never be mistaken for another's.
 const retainedExitedOutput = new Map();
 const RETAINED_EXITED_OUTPUT_MAX = 8;
 let childSpawnSequence = 0;
 
 function trackChild(child, label) {
   child.__label = label;
-  // key binds the label to the pid and a process-global spawn sequence — two
-  // children can never collide on one retained-output entry.
   child.__evidenceKey = `${label}-pid${child.pid ?? 'x'}-${(childSpawnSequence += 1)}`;
-  // fire before piped stdout/stderr have drained, and the evidence drain scans
-  // this set for exited-but-not-closed children — removing at `exit` would
-  // hide exactly the children the drain exists to wait for.
   trackedChildren.add(child);
-  // (ENOENT) never emits `exit`, so every waiter (evidence drain, stop,
-  // cleanup) must observe a settled child instead of waiting forever. This
-  // `error` listener also keeps a spawn failure from crashing the process as
-  // an unhandled 'error' event. `close` still captures the bounded trailing
-  // output before the child leaves the tracked set.
   child.__closed = new Promise((resolveClose) => {
     const settle = (err) => {
       if (child.__closeSettled) return;
@@ -149,10 +134,6 @@ function trackChild(child, label) {
   return child;
 }
 
-/**
- * has not closed yet, bounded per child. Failure evidence collected after
- * this drain sees the final retained output of freshly exited children.
- */
 async function drainExitedChildrenForEvidence({ timeoutMs = 500 } = {}) {
   const pending = [];
   for (const child of trackedChildren) {
@@ -164,7 +145,6 @@ async function drainExitedChildrenForEvidence({ timeoutMs = 500 } = {}) {
 }
 
 function spawnLogged(command, args, { cwd, env, label, collect = true }) {
-  // whole tree (a SIGKILL'd service must not orphan its ACP fixture grandchild).
   const child = spawn(command, args, {
     cwd,
     env,
@@ -184,13 +164,6 @@ function spawnLogged(command, args, { cwd, env, label, collect = true }) {
   return child;
 }
 
-/**
- * immediate-pid fallback fires ONLY on ESRCH — the group, leader included, is
- * already gone — so a failed group signal (EPERM, …) can never masquerade as
- * a delivered group kill while group descendants may still be alive. Callers
- * that need survivor proof verify via `survivingGroupRows`, not via this
- * function's silence.
- */
 function signalProcessGroup(pid, signal) {
   try {
     process.kill(-pid, signal);
@@ -203,13 +176,6 @@ function signalProcessGroup(pid, signal) {
   }
 }
 
-/**
- * the group once more, then await `close` — every wait bounded. A child that
- * already exited but has not closed skips the signaling and goes straight to
- * the sweep + bounded close drain, so a group descendant holding the pipes
- * cannot outlive cleanup, and cleanup can never hang on a pending
- * `exit`/`close`.
- */
 async function stopChild(child, { graceMs = 4_000, killMs = 2_000, closeMs = 2_000 } = {}) {
   if (!child || child.__closeSettled) return;
   const pid = child.pid;
@@ -217,17 +183,12 @@ async function stopChild(child, { graceMs = 4_000, killMs = 2_000, closeMs = 2_0
     try {
       signalProcessGroup(pid, signal);
     } catch {
-      // escalation below, but it is NOT treated as a delivered group signal.
-      // Survivor proof for the abrupt-restart path lives in
-      // `runInterruptedRestartCycles` (ps sweep), not here.
     }
   };
   const exited = () => child.exitCode !== null || child.signalCode !== null;
   const awaitExit = (ms) =>
     Promise.race([
       new Promise((resolve) => {
-        // exiting between the two would otherwise be missed and awaited
-        // forever (the exit-listener race).
         if (exited()) return resolve(true);
         child.once('exit', () => resolve(true));
         child.once('error', () => resolve(true));
@@ -238,14 +199,10 @@ async function stopChild(child, { graceMs = 4_000, killMs = 2_000, closeMs = 2_0
     signalGroup('SIGTERM');
     if (!(await awaitExit(graceMs))) {
       signalGroup('SIGKILL');
-      // cleanup past this deadline.
       await awaitExit(killMs);
     }
   }
   if (!child.__closeSettled) {
-    // inheriting the pipes keeps `close` pending. Bounded group sweep so the
-    // descendant dies, then a bounded close drain so cleanup neither leaks
-    // the pipes nor hangs on them.
     signalGroup('SIGKILL');
     await Promise.race([child.__closed ?? Promise.resolve(), sleep(closeMs)]);
   }
@@ -322,10 +279,6 @@ async function waitForHttpOk(url, { timeoutMs = 120_000, intervalMs = 250 } = {}
 }
 
 
-/**
- * World, key blocks, two pending candidates). Uses the existing Rust seed bin —
- * a recorded *baseline* native build step, never part of the TS edit loop.
- */
 function seedFixtureHome(home) {
   const seed = spawnSync(
     'cargo',
@@ -342,9 +295,6 @@ function resolvePython() {
   return execFileSync('which', ['python3'], { encoding: 'utf8' }).trim();
 }
 
-/**
- * protocol fixture. `extraEnv` toggles fixture modes (e.g. BLOCK_PROMPT=1).
- */
 function writeProviderConfig(home, logPath, extraEnv = {}) {
   const agentHostDir = join(home, '.nexus42', 'agent-host');
   mkdirSync(agentHostDir, { recursive: true });
@@ -369,12 +319,6 @@ function writeProviderConfig(home, logPath, extraEnv = {}) {
 }
 
 
-/**
- * `NEXUS_DAEMON_ALLOWED_ORIGINS`. The service's `resolveAllowedOrigins` only
- * *appends* env values, so an existing user configuration is preserved. This is
- * the actual dev proof origin (the Vite server), not a security bypass: the
- * origin is a loopback host and the allowlist is the service's existing seam.
- */
 function withProofOrigin(env, vitePort) {
   const origin = `http://127.0.0.1:${vitePort}`;
   const existing = (env.NEXUS_DAEMON_ALLOWED_ORIGINS ?? '').trim();
@@ -386,10 +330,6 @@ function withProofOrigin(env, vitePort) {
   return { ...env, NEXUS_DAEMON_ALLOWED_ORIGINS: merged, __RFT_PROOF_ORIGIN: origin };
 }
 
-/**
- * entrypoint (no compile step → a TS source edit becomes visible on restart
- * without a build). Returns a handle with a stable `restart()`.
- */
 async function startService({ home, port, env }) {
   const url = `http://127.0.0.1:${port}`;
   const child = spawnLogged(
@@ -399,9 +339,6 @@ async function startService({ home, port, env }) {
   );
   const startedAt = Date.now();
   await waitForHttpOk(`${url}/v1/daemon/runtime/health`, { timeoutMs: 60_000 });
-  // while our own service is still initializing. Require the runtime to report
-  // an initialized, provider-enabled profile (the mode this proof uses) before
-  // returning, so later requests never race the DB/engine open.
   const deadline = Date.now() + 60_000;
   let status = null;
   for (;;) {
@@ -465,10 +402,6 @@ function resolveChromium() {
   const home = process.env.HOME ?? '';
   const macLayouts = ['chrome-mac-arm64', 'chrome-mac'];
 
-  //    macOS build hangs on the proof URL (direct `--dump-dom` never commits);
-  //    the Puppeteer Chrome 147 loads it in ~3.5s. Enumerate
-  //    `~/.cache/puppeteer/chrome/<revision>-<version>/<layout>/...` dynamically
-  //    (no version hardcode), newest revision first.
   const puppeteerCache = join(home, '.cache/puppeteer/chrome');
   const puppeteerCandidates = [];
   if (existsSync(puppeteerCache)) {
@@ -529,7 +462,6 @@ function resolveChromium() {
           ),
         );
       }
-      // in the cache as well.
       chromiumCandidates.push(join(playwrightCache, dir, 'chrome-linux', 'chrome'));
     }
   }
@@ -568,7 +500,6 @@ class CdpClient {
         reject(new Error(`CDP WebSocket error: ${event?.message ?? 'unknown'}`));
       });
     });
-    // (polling) rather than CDP events, so unsolicited notifications are ignored.
     ws.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
       if (message.id && this.pending.has(message.id)) {
@@ -652,10 +583,6 @@ async function launchChromium({ debugPort, userDataDir }) {
 }
 
 async function openPageTarget(debugPort, pageUrl) {
-  // against this Chrome 149 build (`/json/new?<encoded url>` returns a target
-  // whose `url` is that URL). `Page.navigate` hangs on this CDP client, so no
-  // explicit navigate command is issued; the driver connects/enables and polls
-  // the readiness handle, tolerating a page that loaded before enable.
   const res = await httpRequest(
     `http://127.0.0.1:${debugPort}/json/new?${encodeURIComponent(pageUrl)}`,
     { method: 'PUT' },
@@ -680,11 +607,6 @@ async function evaluate(client, expression, { awaitPromise = true, timeoutMs = 3
   return result.result?.value;
 }
 
-/**
- * Runtime.callFunctionOn with `args` passed as CDP call arguments, so runtime
- * values are transported as data and never enter executable page code.
- * Diagnostics mirror `evaluate` (exceptionDetails thrown verbatim).
- */
 async function callPage(client, fn, args = [], { awaitPromise = true, timeoutMs = 30_000 } = {}) {
   const probe = await client.send('Runtime.evaluate', { expression: 'window', returnByValue: false });
   const objectId = probe.result?.objectId;
@@ -730,10 +652,6 @@ async function waitForPageFunction(client, fn, args = [], opts = {}) {
   return pollUntilTruthy(() => callPage(client, fn, args), fn, opts);
 }
 
-/**
- * a body excerpt, and any captured Runtime exceptions/console errors. Keeps a
- * timeout attributable instead of opaque.
- */
 async function collectPageDiagnostics(client) {
   const diag = {};
   try {
@@ -778,12 +696,6 @@ function redactChildOutput(text, fixtureHome) {
   out = out.replace(/(NEXUS42_DAEMON_API_KEY\s*=\s*)\S+/gi, '$1<redacted>');
   return out;
 }
-/**
- * unique child identity (label + pid + spawn sequence). Lets a
- * launch/navigation/service failure be attributed in the failure evidence
- * without dumping unbounded logs; exited children contribute their retained
- * output so a failed launch is still attributable to the exact child.
- */
 function collectChildOutput(fixtureHome) {
   const rows = {};
   for (const child of trackedChildren) {
@@ -795,9 +707,6 @@ function collectChildOutput(fixtureHome) {
       fixtureHome,
     );
   }
-  // tail-bounded) output is merged so the failure evidence keeps the very
-  // child output that explains a launch/service failure. Keys are unique per
-  // child, so a silent restart never masks an earlier child's tail.
   for (const [evidenceKey, text] of retainedExitedOutput) {
     if (rows[evidenceKey]) continue;
     rows[evidenceKey] = redactChildOutput(text, fixtureHome);
@@ -807,12 +716,6 @@ function collectChildOutput(fixtureHome) {
 
 // ── Direct CLI writer ───────────────────────────────────────────────────────
 
-/**
- * and a direct CLI writer surfaces as `workspace writer busy … migration.lock`.
- * Retry ONLY that condition, within a monotonic deadline, rerunning the exact
- * same args. Conflicts (stale CAS), validation, and every other error return
- * immediately — CAS semantics are unchanged.
- */
 const WRITER_BUSY_PATTERN = /workspace writer busy|migration\.lock/;
 const CLI_WRITER_BUSY_DEADLINE_MS = 20_000;
 const CLI_WRITER_BUSY_BACKOFF_MS = 100;
@@ -857,15 +760,6 @@ async function runBrowserInteractionProof(ctx) {
   const { client, screenshotsDir } = ctx;
   const world = WORLD_ID;
 
-  // (`/json/new?<pageUrl>`) — the single navigation. Poll the page readiness
-  // handle, which tolerates load-before-enable. The bound is deliberately large
-  // (180 s): the FIRST load on a cold Chrome/Vite dev module graph may require
-  // transforming the whole route graph before the proof page's module executes
-  // and publishes `window.__RFT_NATIVE_PROOF__`. This is bounded cold-start
-  // readiness, NOT a DX edit metric (the DX-2 latency criterion is measured
-  // separately, on a warm page, after readiness). A transient per-evaluation
-  // error (the page busy during transform) is retried inside
-  // `waitForPageCondition`. On timeout, attach bounded page diagnostics.
   try {
     await waitForPageCondition(
       client,
@@ -888,12 +782,6 @@ async function runBrowserInteractionProof(ctx) {
     `async (entityId) => window.__RFT_NATIVE_PROOF__.readGraph().then((g) => ({ entities: (g.entities||[]).length, casVersion: (g.entities||[]).filter(e => e.key_block_id === entityId).map(e => e.version)[0] ?? null }))`,
     [CAS_ENTITY],
   );
-  // before screenshotting — React Flow mounts nodes asynchronously and applies
-  // fitView on layout, and the headless browser may default to the accessible
-  // list view, so an API promise is not visual readiness. Accept either a
-  // React-Flow node or an entity-table row that is on-screen and carries a
-  // seeded entity name (an offscreen/zero-size element is not meaningful
-  // evidence).
   try {
     await waitForPageFunction(
       client,
@@ -953,7 +841,6 @@ async function runBrowserInteractionProof(ctx) {
     'window.__RFT_NATIVE_PROOF__.readCandidates().then((c) => (c.items||[]).map(i => i.candidate_id))',
   );
 
-  // observe the existing canvas (which refetches via the graph query).
   const created = await callPage(
     client,
     `async (entityId) => window.__RFT_NATIVE_PROOF__.createEntityOnAbsent({ entity_id: entityId, expected_version: 0, patch: { title: 'Proof Entity', block_type: 'character' } }).then((r) => ({ ok: true, version: r.version, id: r.entity.key_block_id })).catch((e) => ({ ok: false, status: e.status ?? 0, code: e.code ?? null, message: String((e && e.message) || e) }))`,
@@ -969,11 +856,6 @@ async function runBrowserInteractionProof(ctx) {
     [CREATE_ENTITY],
     { timeoutMs: 15_000 },
   );
-  // position) — the watcher/cache path, not visibility. Then, because adding a
-  // node grows the graph and React Flow preserves the previous viewport
-  // (expected production behavior), use the EXISTING fit-view control to
-  // reframe, and only then require the created entity on-screen before
-  // screenshotting. No production viewport reset and no new UI are added.
   try {
     await waitForPageCondition(
       client,
@@ -1017,7 +899,6 @@ async function runBrowserInteractionProof(ctx) {
       `created entity absent from canvas DOM: ${err instanceof Error ? err.message : String(err)}; diagnostics=${JSON.stringify(diagnostics)}`,
     );
   }
-  // require the created entity on-screen.
   const fitViewControl = await evaluate(
     client,
     `(() => {
@@ -1060,13 +941,6 @@ async function runBrowserInteractionProof(ctx) {
   const readCasVersionFn = `async (entityId) => window.__RFT_NATIVE_PROOF__.readGraph().then((g) => (g.entities||[]).filter(e => e.key_block_id === entityId).map(e => e.version)[0] ?? null)`;
   const postUpdateVersion = await callPage(client, readCasVersionFn, [CAS_ENTITY]);
 
-  // pairs. Each pair is a real two-writer barrier — the next expected version
-  // is observed from canonical state, then the browser (BrowserClient in the
-  // page) and the direct CLI writer race at that SAME expected version.
-  // Exactly one wins; the loser must observe the typed conflict (HTTP 409 /
-  // CLI exit 76) and the committed version must advance by exactly one per
-  // pair (no lost commit). The criterion verdict is derived in
-  // `deriveDb1Criterion` from the COMPLETE sample only.
   const racePairs = [];
   {
     let expectedVersion = postUpdateVersion;
@@ -1088,7 +962,6 @@ async function runBrowserInteractionProof(ctx) {
       const browserWon = browserRaceResult.status === 200;
       const cliWon = cli.status === 0;
       if (browserWon === cliWon) {
-        // stop — the derivation fails the criterion, never fabricates a winner.
         racePairs.push({
           index,
           expectedVersion,
@@ -1141,8 +1014,6 @@ async function runBrowserInteractionProof(ctx) {
       `CLI watermark write failed: status=${cliWrite.status} cliVersion=${cliVersion} stdout=${cliWrite.stdout.trim()} stderr=${cliWrite.stderr.trim()}`,
     );
   }
-  //    canonical_name equals the CLI title. This isolates a data-propagation
-  //    failure (service/core/DB) from a render failure before the DOM check.
   let graphCanonical = null;
   try {
     graphCanonical = await waitForPageFunction(
@@ -1156,8 +1027,6 @@ async function runBrowserInteractionProof(ctx) {
       `CLI watermark canonical visibility failed: ${err instanceof Error ? err.message : String(err)}; cliWrite=${JSON.stringify({ status: cliWrite.status, stdout: cliWrite.stdout.trim().slice(0, 400) })}`,
     );
   }
-  //    the CLI result, the latest graph entity/version/title, and the latest
-  //    core_changes page so the failure is attributable.
   let canvasText = null;
   try {
     canvasText = await waitForPageFunction(
@@ -1242,12 +1111,6 @@ async function runProviderProof(ctx) {
 
 async function runCancelProof(ctx, serviceHandle) {
   const { client } = ctx;
-  // cycles against the real TS ACP SDK adapter and the blocking protocol
-  // fixture. Each cycle measures acknowledgment→terminal from the driver
-  // send of the cancel (monotonic `performance.now()`), with the terminal
-  // observed through a real GET — a cancel ack with a stale `running` GET is
-  // a native defect this criterion must expose. The verdict is derived in
-  // `deriveCancelCriterion` from the COMPLETE cycle sample only.
   const cycles = [];
   for (let index = 0; index < LIFE_REQUIRED_CYCLES; index += 1) {
     const session = await evaluate(
@@ -1291,15 +1154,6 @@ async function runCancelProof(ctx, serviceHandle) {
   return { cycles };
 }
 
-/**
- * SIGKILLs the service's WHOLE process group through the shared
- * `signalProcessGroup` path (the immediate-pid fallback fires only on ESRCH),
- * verifies via `ps` that NO group descendant survived (QC3-C3: an unconditional
- * pid fallback used to hide survivors), then restarts and requires the
- * previously active non-resumable operation to be reported `interrupted`.
- * Every wait is bounded; any surviving descendant is recorded in the cycle row
- * and fails the criterion via `deriveRestartCriterion`.
- */
 async function runInterruptedRestartCycles(ctx, serviceHandle, { cycles = LIFE_REQUIRED_CYCLES } = {}) {
   const rows = [];
   let handle = serviceHandle;
@@ -1314,7 +1168,6 @@ async function runInterruptedRestartCycles(ctx, serviceHandle, { cycles = LIFE_R
       [session.session_id],
     );
     await sleep(750);
-    // orphans are re-parented and a fresh ps walk could no longer find them.
     const groupBefore = collectDescendants([handle.child.pid], psRows()).filter(
       (row) => row.pid !== handle.child.pid,
     );
@@ -1329,8 +1182,6 @@ async function runInterruptedRestartCycles(ctx, serviceHandle, { cycles = LIFE_R
     // delays `close`. Port release below remains the authoritative stop check.
     await Promise.race([handle.child.__closed ?? Promise.resolve(), sleep(5_000)]);
     const closedSettled = handle.child.__closeSettled === true;
-    // window, then the verdict rows. A survivor here is evidence, never a
-    // silent pass.
     let groupSurvivors = survivingGroupRows(groupBefore, handle.child.pid);
     if (groupSurvivors.length > 0) {
       try {
@@ -1374,9 +1225,6 @@ async function waitForPortFree(port, { timeoutMs = 15_000 } = {}) {
   throw new Error(`port ${port} did not free within ${timeoutMs}ms`);
 }
 
-/**
- * non-resumable operation must be reported `interrupted`.
- */
 async function observeInterrupted(serviceHandle, operationId) {
   const inspect = await jsonRequest(
     `${serviceHandle.url}/v1/daemon/agent-host/operations/${operationId}`,
@@ -1422,10 +1270,6 @@ function countCargoTraces(rootPids) {
   return rows.filter((row) => commandLineMatchesCargo(row.command)).length;
 }
 
-/**
- * exact pid AND command line still exist. The command line must match too: a
- * bare pid match could be pid reuse inside the observation window.
- */
 function survivingGroupRows(groupBefore, leaderPid) {
   const rows = psRows();
   return groupBefore.filter(
@@ -1434,17 +1278,6 @@ function survivingGroupRows(groupBefore, leaderPid) {
   );
 }
 
-/**
- * a pid array or a zero-arg function re-resolved on every sample. A sampling
- * failure or a zero-sample window FAILS the trace: a `cargoTraceCount === 0`
- * claim requires observed samples, never a blind spot.
- */
-
-/**
- * LIVE service child. Resolved per sample, because `restartServiceFromEdit`
- * replaces the service process mid-window and the replacement must stay inside
- * the traced root set.
- */
 function liveServiceRootPids(ctx) {
   const roots = [process.pid];
   const child = ctx.service?.child;
@@ -1461,7 +1294,6 @@ async function traceDuringEdit(resolveRootPids, work, { intervalMs = 50 } = {}) 
   const sampler = (async () => {
     while (running) {
       try {
-        // process mid-window keeps the replacement inside the traced roots.
         const roots = typeof resolveRootPids === 'function' ? resolveRootPids() : resolveRootPids;
         samples.push(countCargoTraces(roots));
       } catch (err) {
@@ -1489,8 +1321,6 @@ async function traceDuringEdit(resolveRootPids, work, { intervalMs = 50 } = {}) 
 // ── Reversible edit outcome precedence ──────────────────────────────────────
 
 /**
- * the outcome so neither failure can replace the other:
- *
  * - the restore gate ALWAYS runs, on success and on failure;
  * - a gate failure is never swallowed and never reports the sample as a
  *   success;
@@ -1559,10 +1389,6 @@ class TrackedEdit {
   }
 }
 
-/**
- * for the running Vite page to observe the new value (HMR, no full reload
- * required). Measures edit→visible and counts Cargo traces throughout.
- */
 async function runWebEditSample(ctx, sampleIndex) {
   const { client } = ctx;
   const markerPath = resolve(webRoot, 'src/pages/rft-native-proof-marker.ts');
@@ -1592,9 +1418,6 @@ async function runWebEditSample(ctx, sampleIndex) {
     async () => {
       edit.restore();
       if (!edit.isRestored()) throw new Error(`marker file not restored: ${markerPath}`);
-      // the DOM AND the proof handle back at ready. A failed restore is NOT
-      // swallowed — it fails the run, because the next sample would otherwise run
-      // against a stale/frozen handle.
       await waitForPageCondition(
         client,
         `(document.querySelector('[data-testid="rft-native-proof-marker"]')?.textContent ?? '').includes('baseline')`,
@@ -1609,20 +1432,10 @@ async function runWebEditSample(ctx, sampleIndex) {
   );
 }
 
-/**
- * source, restart the service under `tsx` (no compile), wait for readiness, and
- * observe the edited behavior over real HTTP. Counts Cargo traces throughout.
- */
 async function runRouteEditSample(ctx) {
   const targetPath = resolve(serviceRoot, 'src/world-kb.ts');
   const edit = new TrackedEdit(targetPath).capture();
   const originalSource = edit.original.toString('utf8');
-  // pagination default from 50 to 1. The locked fixture seeds exactly TWO
-  // pending candidates, so the edited behavior is OBSERVABLE — after restart
-  // `GET .../kb/candidates` (no `limit`) must return `pagination.limit === 1`
-  // AND a single item, versus the restored baseline of limit 50 / two items.
-  // Asserting the response shape (not a source marker) proves the running
-  // service actually recompiled and served the transformed code.
   const editedSource = originalSource.replace(
     '{ defaultLimit = 50, max = 250 }: { defaultLimit?: number; max?: number } = {}',
     '{ defaultLimit = 1, max = 250 }: { defaultLimit?: number; max?: number } = {}',
@@ -1675,9 +1488,6 @@ async function runRouteEditSample(ctx) {
   );
 }
 
-/**
- * spawn→ready latency. Used by the TS edit samples.
- */
 async function restartServiceFromEdit(ctx) {
   await stopService(ctx.service);
   await waitForPortFree(ctx.port);
@@ -1690,12 +1500,6 @@ async function restartServiceFromEdit(ctx) {
 
 // ── Adapter edit restore gate ───────────────────────────────────────────────
 
-/**
- * session, prompt once, drain all events, and project the streamed message
- * text plus terminal settlement. Shared verbatim by the edited-adapter
- * evaluation and the restored-baseline assertion so both observe the SAME
- * provider vertical.
- */
 const ADAPTER_SESSION_SCRIPT = `(async () => {
   const h = window.__RFT_NATIVE_PROOF__;
   const s = await h.createAgentHostSession({ provider_id: 'mock-acp' });
@@ -1706,11 +1510,6 @@ const ADAPTER_SESSION_SCRIPT = `(async () => {
   return { text, terminal, op: op.operation_id };
 })()`;
 
-/**
- * error throws with a bounded output tail. The adapter edit sample must never
- * continue past a failed restore — the stale edited `dist` would keep serving
- * the edited behavior while the proof reports success.
- */
 function requireRestoredAdapterBuild() {
   const restore = spawnSync('pnpm', ['-F', '@42ch/nexus-provider-acp', 'run', 'build'], {
     cwd: repoRoot,
@@ -1726,11 +1525,6 @@ function requireRestoredAdapterBuild() {
   }
 }
 
-/**
- * and service restart, a fresh provider session must reach a terminal event
- * WITHOUT the edit marker. Proves the restored runnable output actually
- * serves — a stale or failed restore cannot masquerade as a successful proof.
- */
 async function assertRestoredAdapterBaseline(ctx, marker) {
   await waitForHttpOk(`${ctx.serviceUrl}/v1/daemon/runtime/health`, { timeoutMs: 30_000 });
   await waitForPageCondition(
@@ -1778,16 +1572,11 @@ async function runAdapterEditSample(ctx, sampleIndex) {
       edit.write(editedSource);
       let restartMs = null;
       const { cargoSamples } = await traceDuringEdit(() => liveServiceRootPids(ctx), async () => {
-        // script (tsup is a TS build, never a Cargo/native one). The build runs
-        // as a tracked async child: a synchronous build would block this event
-        // loop and blind the sampler for the whole build window.
         const build = spawnLogged(
           'pnpm',
           ['-F', '@42ch/nexus-provider-acp', 'run', 'build'],
           { cwd: repoRoot, label: `adapter-build-${sampleIndex}` },
         );
-        // (which settles on `error`) keeps a build-launch failure bounded and
-        // reportable instead of hanging the sample forever.
         let buildTimer;
         const buildTimeout = new Promise((resolveTimeout) => {
           buildTimer = setTimeout(() => resolveTimeout('timeout'), 60_000);
@@ -1830,9 +1619,6 @@ async function runAdapterEditSample(ctx, sampleIndex) {
         'Boolean(window.__RFT_NATIVE_PROOF__ && window.__RFT_NATIVE_PROOF__.ready)',
         { timeoutMs: 60_000 },
       );
-      // adapter output is what actually streamed. The CDP send timeout must
-      // exceed the inner bounded drain (30 s) so a slow-but-bounded drain can
-      // resolve/report rather than being cut off by the transport.
       let stream;
       try {
         stream = await evaluate(ctx.client, ADAPTER_SESSION_SCRIPT, { timeoutMs: 45_000 });
@@ -1860,10 +1646,6 @@ async function runAdapterEditSample(ctx, sampleIndex) {
     async () => {
       edit.restore();
       if (!edit.isRestored()) throw new Error(`adapter file not restored: ${targetPath}`);
-      // restarted (a failed rebuild leaves the edited dist serving), then the
-      // restored adapter must observably serve the BASELINE (no edit marker)
-      // before this sample can report success. A restore failure therefore
-      // fails the proof before any PASS can be recorded.
       requireRestoredAdapterBuild();
       await restartServiceFromEdit(ctx);
       await assertRestoredAdapterBaseline(ctx, marker);
@@ -1873,20 +1655,12 @@ async function runAdapterEditSample(ctx, sampleIndex) {
 
 // ── Acceptance derivations (pure; extracted verbatim by focused tests) ──────
 
-// deterministic competing-write pairs; LIFE-2/LIFE-3 require 10 cycles each.
-// A fixed acceptance row may claim `pass` ONLY from the complete locked count
-// of typed outcomes — a smaller sample is recorded as incomplete, never
-// silently green.
 const DB1_REQUIRED_PAIRS = 100;
 const LIFE_REQUIRED_CYCLES = 10;
 const LIFE2_CANCEL_ACK_P95_MAX_MS = 2_000;
 const LIFE2_CANCEL_ACK_MAX_MS = 3_000;
 const LIFE3_RESTART_READY_MAX_MS = 5_000;
 
-/**
- * conflict (browser HTTP 409 / CLI exit 76), and the committed version must
- * have advanced by exactly one (no lost commit).
- */
 function isValidDb1Pair(pair) {
   if (pair === null || typeof pair !== 'object') return false;
   const typedOutcome =
@@ -1896,9 +1670,6 @@ function isValidDb1Pair(pair) {
   return typedOutcome && pair.resultingVersion === pair.expectedVersion + 1;
 }
 
-/**
- * COMPLETE locked count where every pair is typed and version-continuous.
- */
 function deriveDb1Criterion(pairs, requiredPairs = DB1_REQUIRED_PAIRS) {
   const rows = Array.isArray(pairs) ? pairs : [];
   const pairMsSamples = rows.map((p) => p?.pairMs).filter((v) => Number.isFinite(v));
@@ -1916,10 +1687,6 @@ function deriveDb1Criterion(pairs, requiredPairs = DB1_REQUIRED_PAIRS) {
   };
 }
 
-/**
- * acknowledged AND settle to `cancelled` within the matrix latency envelope
- * (ack→terminal nearest-rank p95 ≤2 s, max ≤3 s).
- */
 function deriveCancelCriterion(cycles, requiredCycles = LIFE_REQUIRED_CYCLES) {
   const rows = Array.isArray(cycles) ? cycles : [];
   const ackMsSamples = rows.map((c) => c?.cancelAckToTerminalMs).filter((v) => Number.isFinite(v));
@@ -1949,11 +1716,6 @@ function deriveCancelCriterion(cycles, requiredCycles = LIFE_REQUIRED_CYCLES) {
   };
 }
 
-/**
- * the prior operation `interrupted` over HTTP 200, settle the killed child's
- * close, leave NO group descendant alive, and reach restart readiness within
- * the matrix bound (≤5 s).
- */
 function deriveRestartCriterion(cycles, requiredCycles = LIFE_REQUIRED_CYCLES) {
   const rows = Array.isArray(cycles) ? cycles : [];
   const readyMsSamples = rows.map((c) => c?.restartReadyMs).filter((v) => Number.isFinite(v));
@@ -1983,12 +1745,6 @@ function deriveRestartCriterion(cycles, requiredCycles = LIFE_REQUIRED_CYCLES) {
   };
 }
 
-/**
- * attributable to its exact source revision, execution environment, and
- * fixture dataset. Every required fact must be OBSERVED — anything
- * unavailable stays `null`, lands in `missing`, and blocks acceptance. No
- * value here is ever defaulted or guessed.
- */
 function deriveProvenanceCompleteness(provenance) {
   const observed = (v) => v !== null && v !== undefined && v !== '';
   const isSha256 = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
@@ -2033,15 +1789,6 @@ function firstVersionLine(command, args) {
   return (res.stdout ?? '').split('\n').map((s) => s.trim()).find(Boolean) ?? null;
 }
 
-/**
- * cleanliness from git, OS/arch/libc and CPU/RAM from the running process,
- * toolchain/runtime versions from the real binaries this runner depends on,
- * the contract revision hash from the contract document this checkout (or the
- * harness control root) actually carries, and the seeded fixture dataset
- * (identity = sha256 + byte size of the freshly seeded workspace `state.db`).
- * Dataset counts observed later from the live graph/candidate reads are
- * filled by `main()`. Everything unavailable stays `null`.
- */
 function collectProvenance(fixtureHome) {
   const gitOut = (args) => {
     const res = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
@@ -2111,12 +1858,6 @@ function collectProvenance(fixtureHome) {
 }
 
 
-/**
- * or edit phase (not just when the binary is missing): a stale `nexus42` can
- * take an exclusive migration path and surface as writer-busy against the
- * service. This Cargo build is a baseline step, explicitly excluded from the DX
- * edit loop (DX-1 counts only Cargo/native execs traced DURING an edit).
- */
 function baselineBuildNexus42() {
   const startedAt = Date.now();
   const build = spawnSync('cargo', ['build', '-p', 'nexus42', '--bin', 'nexus42'], {
@@ -2149,8 +1890,6 @@ async function main() {
   const outDir = resolve(repoRoot, args.out);
   const screenshotsDir = join(outDir, 'screenshots');
   mkdirSync(screenshotsDir, { recursive: true });
-  // FAIL file/screenshot cannot coexist with this run's outcome. Only paths
-  // inside the resolved --out are touched.
   for (const stale of ['browser-vertical-pass.json', 'browser-vertical-fail.json', 'browser-vertical.json']) {
     rmSync(join(outDir, stale), { force: true });
   }
@@ -2207,12 +1946,8 @@ async function main() {
     seedFixtureHome(fixtureHome);
     writeProviderConfig(fixtureHome, fixtureLog);
 
-    // deterministic fixture dataset exists (dataset identity is the freshly
-    // seeded workspace `state.db`; counts are filled from live reads below).
     evidence.provenance = collectProvenance(fixtureHome);
 
-    // on the service (append-only, user config preserved) so the page's
-    // BrowserClient requests are not rejected with 403.
     const serviceEnv = withProofOrigin(process.env, vitePort);
     evidence.proofOrigin = serviceEnv.__RFT_PROOF_ORIGIN;
 
@@ -2277,19 +2012,15 @@ async function main() {
     );
     evidence.phases.cancel = await runCancelProof(ctx, service);
 
-    // ops Interrupted, and NO group descendant survives the SIGKILL unnoticed.
     const interruptedRun = await runInterruptedRestartCycles(ctx, service);
     service = interruptedRun.service;
     ctx.service = service;
     ctx.serviceUrl = service.url;
-    // BLOCK_PROMPT=1 set for the cancel/restart cycles is rewritten away —
-    // otherwise the adapter sample's prompt blocks for 30 s.
     const restored = await restartService(service, { providerEnv: {} });
     service = restored;
     ctx.service = service;
     ctx.serviceUrl = service.url;
     evidence.phases.interrupted = { cycles: interruptedRun.rows };
-    // config the service was restarted with must no longer carry BLOCK_PROMPT.
     const providerConfig = readFileSync(
       join(fixtureHome, '.nexus42', 'agent-host', 'config.toml'),
       'utf8',
@@ -2335,8 +2066,6 @@ async function main() {
     };
     evidence.criteria['DX-2-ts-restart'].p95 = nearestRankP95(evidence.criteria['DX-2-ts-restart'].samples);
     evidence.criteria['DX-2-ts-restart'].pass = (evidence.criteria['DX-2-ts-restart'].p95 ?? Infinity) <= 2_000;
-    // a successful restart): the running service serves the transformed route,
-    // and the real provider vertical streams the transformed adapter output.
     evidence.criteria['DX-2-route-transform'] = {
       observedLimit: evidence.phases.routeEdit.observedLimit,
       observedCount: evidence.phases.routeEdit.observedCount,
@@ -2349,7 +2078,6 @@ async function main() {
       terminal: evidence.phases.adapterEdit.terminal,
       pass: evidence.phases.adapterEdit.editObserved === true && evidence.phases.adapterEdit.terminal === true,
     };
-    // resolve an API promise) before its screenshots are meaningful.
     evidence.criteria['P4-canvas-rendered'] = {
       view: evidence.phases.interaction.renderedNodes.view,
       nodeCount: evidence.phases.interaction.renderedNodes.nodes.length,
@@ -2361,7 +2089,6 @@ async function main() {
           evidence.phases.interaction.renderedNodes.rows.some((n) => n.w > 1 && n.h > 1)) &&
         evidence.phases.interaction.fitViewOutcome.visibleAfterFit === true,
     };
-    // a rendered DOM observation, not a promise resolution.
     evidence.criteria['DB-2-cli-watermark-visible'] = {
       cliWriteStatus: evidence.phases.interaction.watermarkOutcome.cliWrite.status,
       graphCanonical: evidence.phases.interaction.watermarkOutcome.graphCanonical,
@@ -2395,8 +2122,6 @@ async function main() {
     evidence.criteria['FFI-hashes-unchanged'].pass =
       evidence.criteria['FFI-hashes-unchanged'].schemaUnchanged &&
       evidence.criteria['FFI-hashes-unchanged'].nativeUnchanged;
-    // its exact source revision, environment, and fixture dataset. Missing
-    // provenance blocks acceptance — the run cannot claim pass.
     {
       const provenanceVerdict = deriveProvenanceCompleteness(evidence.provenance);
       evidence.criteria['provenance-complete'] = {
@@ -2418,11 +2143,6 @@ async function main() {
   } catch (err) {
     evidence.errors.push(err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
     evidence.timestamps.utcEnd = new Date().toISOString();
-    // each child's captured output keyed by unique child identity. Children
-    // that exited just before the failure are drained to `close` first (short
-    // bound), so the final drained bytes land in the retained evidence.
-    // Redaction strips anything that looks like a path under the fixture home
-    // or an API key header value.
     await drainExitedChildrenForEvidence();
     evidence.childOutput = collectChildOutput(fixtureHome);
     writeEvidence(outDir, `browser-vertical-fail.json`, evidence);

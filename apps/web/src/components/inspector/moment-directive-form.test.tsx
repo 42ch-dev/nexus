@@ -172,7 +172,6 @@ describe('MomentDirectiveForm — set (T4)', () => {
     });
     expect(setRequests[0]).not.toHaveProperty('replace');
 
-    // directive (set → active), and the Clear action becomes available.
     expect(await screen.findByTestId('directive-status-active')).toHaveTextContent('Active');
     expect(screen.queryByTestId('directive-none')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('directive-form-clear')).toBeEnabled());
@@ -222,7 +221,6 @@ describe('MomentDirectiveForm — clear (T4)', () => {
     const user = userEvent.setup();
     renderHarness();
 
-    // scope default is Work — Clear must still target the World scope.
     expect(await screen.findByTestId('directive-status-active')).toBeInTheDocument();
     expect(screen.getByTestId('directive-scope')).toHaveTextContent('world');
 
@@ -283,7 +281,6 @@ describe('MomentDirectiveForm — 409 replace prompt (T4)', () => {
     const retry = screen.getByTestId('directive-form-enable-replace');
     expect(retry).toBeEnabled();
 
-    // fire (it would silently no-op on the validation early-return).
     await user.clear(screen.getByLabelText('Directive body'));
     expect(screen.getByTestId('directive-form-errors')).toHaveTextContent(
       'Directive body is required.',

@@ -598,12 +598,6 @@ fn character_operation_result_and_capture_outcome_roundtrip() {
     serde_json::from_value::<CharacterOperationResult>(result).expect("operation result");
 }
 
-// an `owner-private`-only `disclosure`) authored through a closed `audience`.
-// These cases pin the *generated* DTOs against that frozen wire shape. They
-// assert wire decoding only — no governance decision is taken here, and the
-// service-resolved holder/verbatim-key gates live in `nexus-knowledge`
-// (T2's own `v1191_governance` cases).
-
 const HEX64: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn hld() -> String {

@@ -222,13 +222,11 @@ describe('V1.163 Task 3 — Work inspector CTA slots (event-level)', () => {
     const cta = screen.queryByTestId('work-timeline-view-on-world-timeline');
     expect(cta).not.toBeNull();
     expect(cta).toHaveTextContent('View on World Timeline');
-    // (PD-5 state 1: deep-link `?layer=narrative&event=…`).
     expect(cta).toHaveAttribute('data-world-id', 'world-9');
     expect(cta).toHaveAttribute('data-event-id', WORLD_EVENT_ID);
   });
 
   it('renders the CTA WITHOUT an event id when the node has no worldEventId (V1.123 fallback)', () => {
-    // (the orchestrator falls back to `?layer=narrative`).
     render(
       <MemoryRouter>
         <WorkTimelineEventInspector
@@ -246,7 +244,6 @@ describe('V1.163 Task 3 — Work inspector CTA slots (event-level)', () => {
   });
 
   it('hides the CTA when no bound World exists (even with a worldEventId)', () => {
-    // surface a dead CTA (honest scope cut).
     render(
       <MemoryRouter>
         <WorkTimelineEventInspector
@@ -328,7 +325,6 @@ describe('V1.163 Task 3 — Work → World event deep-link (AC-V1163-1/4/5, PD-5
       ['/works/work-1/timeline?layer=narrative&event=evt-1'],
     );
 
-    // opens with the event-level CTA.
     const cta = await screen.findByTestId('work-timeline-view-on-world-timeline');
     expect(cta).toHaveAttribute('data-event-id', WORLD_EVENT_ID);
 
@@ -394,8 +390,6 @@ describe('V1.163 Task 3 — inbound `?event=` focus on the Work Timeline (AC-V11
       ['/works/work-1/timeline?layer=narrative&event=evt-1'],
     );
 
-    // primitive). The deep-linked event's inspector opening is the observable
-    // proof that `wt-event:evt-1` got selected.
     const inspector = await screen.findByTestId('work-timeline-inspector');
     expect(within(inspector).getByText('Coronation beat')).toBeInTheDocument();
   });
@@ -419,11 +413,6 @@ describe('V1.163 Task 3 — inbound `?event=` focus on the Work Timeline (AC-V11
   });
 });
 
-/**
- * direction: surface bind = bound World (`worldId`), event bind =
- * `world_event_id` projected onto the node (`worldEventId`). Expected CTA +
- * URL contract per the plan's Task 4 table.
- */
 type WorkPd5MatrixState = {
   state: string;
   surfaceBind: boolean;
@@ -507,7 +496,6 @@ describe('V1.163 Task 4 — PD-5 three-state matrix, Work → World (table-drive
         );
       }
 
-      // (or an honest hide) never fires a write op.
       expect(client.patchTimelineEvent).not.toHaveBeenCalled();
       expect(client.patchOutlineStructure).not.toHaveBeenCalled();
       expect(client.patchOutlineChapter).not.toHaveBeenCalled();

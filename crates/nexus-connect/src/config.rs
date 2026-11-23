@@ -245,8 +245,6 @@ impl PeerToolsConfig {
                 for entry in &parsed.tool_allowlist {
                     validate_allowlist_entry(entry)?;
                 }
-                // appear at most once (a duplicate would make the rank
-                // ambiguous). Fail-closed, never silently deduped.
                 let mut seen_peers: HashSet<&str> = HashSet::new();
                 for entry in &parsed.peer_priority {
                     if !seen_peers.insert(entry.as_str()) {
@@ -256,8 +254,6 @@ impl PeerToolsConfig {
                         )));
                     }
                 }
-                // catalog ids — umbrella / malformed entries fail the
-                // whole load (fail-closed, never silently dropped).
                 for entry in &parsed.mcp_visibility {
                     validate_visibility_entry(entry)?;
                 }
@@ -278,7 +274,6 @@ impl PeerToolsConfig {
 /// `InvalidAllowlist` error; an invalid entry fails the whole config load
 /// (never silently dropped).
 fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
-    // wildcard — an allowlist entry must name ONE exact tool id.
     if entry.contains('*') || entry.split('.').count() < 3 {
         return Err(ConnectConfigError::InvalidAllowlist {
             entry: entry.to_owned(),
@@ -294,9 +289,6 @@ fn validate_allowlist_entry(entry: &str) -> Result<(), ConnectConfigError> {
             reason: "reserved namespace (tools.nexus.* is daemon-owned)".to_owned(),
         });
     }
-    // this allowlist feeds is tools-only, so a capability name or an
-    // operation family name can never be admitted — declaring one would
-    // advertise unenforced KE capability.
     if KE_CAPABILITIES.contains(&entry) || KE_OPERATION_FAMILIES.contains(&entry) {
         return Err(ConnectConfigError::InvalidAllowlist {
             entry: entry.to_owned(),
@@ -527,7 +519,6 @@ mod tests {
 
     #[test]
     fn unknown_collision_policy_value_fails_load() {
-        // (fail-closed) — never a silent fallback to first_stays.
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         fs::write(
@@ -543,8 +534,6 @@ mod tests {
 
     #[test]
     fn duplicate_peer_priority_entries_fail_load() {
-        // makes the rank ambiguous and fails load (fail-closed, never
-        // silently deduped).
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         fs::write(
@@ -763,8 +752,6 @@ mod tests {
 
     #[test]
     fn absent_mcp_visibility_defaults_to_empty() {
-        // as an empty subset ⇒ absent policy (all tools visible —
-        // byte-identical current behavior).
         let home = isolated_home();
         let config = PeerToolsConfig::load(home.path()).expect("default load");
         assert!(
@@ -775,7 +762,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_parses_exact_ids() {
-        // `tools.*`, and user-capability ids.
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         fs::write(
@@ -795,8 +781,6 @@ mod tests {
     }
     #[test]
     fn mcp_visibility_parses_slash_separated_ids() {
-        // catalog ids — the operator config surface must express them
-        // (the `fs/*` family is part of the real spine catalog).
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         fs::write(
@@ -816,8 +800,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_umbrella_rejected() {
-        // silently dropped. (Single-segment ids like `tools` are accepted:
-        // they can never match a catalog row, so they simply hide nothing.)
         for entry in ["tools.*", "tools.t4.*", "*"] {
             let home = isolated_home();
             fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
@@ -845,8 +827,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_malformed_rejected() {
-        // parsing (so the named validator catches it) and fails the whole
-        // load with `InvalidVisibility`.
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         fs::write(
@@ -865,9 +845,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_json_hostile_entries_fail_closed() {
-        // (serde) — still a hard load failure, just at the parse layer.
-        // Both layers fail closed; the named validator only sees entries
-        // that survive JSON parsing.
         for entry in ["tools\tt4.echo", "tools.t4.e\u{1}cho"] {
             let home = isolated_home();
             fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
@@ -885,8 +862,6 @@ mod tests {
 
     #[test]
     fn mcp_visibility_allows_reserved_namespace() {
-        // IS a valid visibility entry: hiding a daemon-owned tool from a
-        // consumer is legitimate (visibility never grants execute).
         let home = isolated_home();
         fs::create_dir_all(nexus_home_layout::connect_dir(home.path())).expect("mkdir");
         fs::write(

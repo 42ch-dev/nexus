@@ -1,7 +1,4 @@
 /**
- * relationship edges + source-anchor provenance edges
- * (canvas-strategy-surface.md §3.3 surface 3 + §3.4).
- *
  * Pure functions: convert the V1.74 generated projections
  * (`WorldKbGraphResponse` + `WorldKbCandidatesResponse`) into the
  * {@link WorldKbNodeData} / {@link WorldKbEdgeData} payloads plus React Flow
@@ -57,9 +54,6 @@ const ROW_Y = 150;
 const ORIGIN_X = 40;
 const ORIGIN_Y = 40;
 
-/**
- * same kind stack vertically and kinds spread horizontally across the canvas.
- */
 function laneIndexOf(kind: BlockType): number {
   const i = LANE_ORDER.indexOf(kind);
   return i === -1 ? LANE_ORDER.length : i;
@@ -125,10 +119,6 @@ export function layoutNodes(
     });
   }
 
-  // lane actually occupied (lane 0 when no entities). Basing this on the
-  // maximum occupied lane — not on all 18 possible BlockTypes — keeps the graph
-  // compact: a world with a few entity kinds must not leave ~17 empty lanes of
-  // horizontal gap that force `fitView` to zoom out and push entities offscreen.
   const pendingLane = maxEntityLane + 1;
   candidates.forEach((candidate, row) => {
     nodes.push({
@@ -162,9 +152,6 @@ export function deriveEdges(
       target: `entity:${anchor.key_block_id}`,
       type: 'straight',
       data,
-      // (`canvas-worldkb-source-anchor-edge` = purple-700 in both themes per
-      // the P0 chromatic hygiene table). Previously relied on React Flow's
-      // default stroke, leaving the provenance edge off-token.
       selectable: false,
       focusable: true,
       style: { stroke: 'var(--color-canvas-worldkb-source-anchor-edge)' },

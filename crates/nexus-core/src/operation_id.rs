@@ -213,7 +213,6 @@ pub struct OperationIdentity {
 pub fn resolve_operation_identity(
     scope: &OperationScope<'_>,
 ) -> Result<OperationIdentity, OperationIdError> {
-    // and the fingerprint the whole digest.
     let canonical = canonical_operation_json(scope);
     let digest = Sha256::digest(canonical.as_bytes());
     let operation_id = match scope.args.get(OPERATION_ID_FIELD) {
@@ -543,8 +542,6 @@ mod tests {
              fingerprint identically on every attempt"
         );
 
-        // that share a verbatim caller-supplied id but differ in scope must
-        // NOT collide, or one would silently replay the other's receipt.
         for (label, other) in [
             ("actor", scope("creator-2", "session-1", "op", &args)),
             ("session", scope("creator-1", "session-2", "op", &args)),

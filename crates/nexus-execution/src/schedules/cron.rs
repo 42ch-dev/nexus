@@ -122,8 +122,6 @@ pub async fn run_one_tick(
     // `tick_clocked` filters by `scheduled_at <= now` (cron schedules have no
     // `scheduled_at`, so they are on-demand-admissible).
     if summary.fired > 0 {
-        // redundant full-table scan on idle ticks (the supervisor's tick_inner
-        // loads all active schedules every call).
         if let Err(e) = supervisor.tick_clocked(now.timestamp()).await {
             tracing::warn!(
                 error = %e,

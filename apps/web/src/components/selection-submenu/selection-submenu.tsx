@@ -103,12 +103,6 @@ export function SelectionSubmenu({
 
   useEffect(() => {
     if (!open || !anchorEl) return;
-    // `position: fixed` and its coordinates are computed once from the
-    // anchor's rect at render (see below); scrolling the sidebar chrome's
-    // `overflow-auto` <ul> or resizing the window moves the anchor but not
-    // the popover, causing drift. Dismiss-on-layout-change keeps geometry
-    // simple (no reposition) and the submenu is cheap to reopen.
-    //
     // `resize` fires only on `window`. `scroll` does NOT bubble natively, so
     // a bubble-phase window listener would miss sidebar-container scrolls;
     // capturing on `window` catches `scroll` on ANY descendant (the capture

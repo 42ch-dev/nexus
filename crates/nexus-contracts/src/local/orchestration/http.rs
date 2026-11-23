@@ -215,8 +215,3 @@ pub struct CapabilityInfo {
     /// (dependency direction, AR-40) — the handler maps it to this string.
     pub origin: String,
 }
-
-// `PresetProfile*` family) are generated from
-// `schemas/core/orchestration-presets-api.schema.json` and live in
-// `crate::generated::core::orchestration_presets_api`. The handwritten copies
-// were retired by the P5 schema lane, not copied.

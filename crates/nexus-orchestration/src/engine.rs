@@ -260,8 +260,6 @@ impl Default for Context {
     }
 }
 
-/// step attempt.
-///
 /// Durable failure writes must CAS against
 /// [`owned_revision`](Self::owned_revision) and the pre-step checkpoint —
 /// never a post-error reload of the latest revision.
@@ -790,13 +788,9 @@ impl EngineSharedState {
         let Some(store) = &self.workflow_store else {
             return Ok(());
         };
-        // of silently continuing with an empty children map (Important 1).
         let children = match store.load_children(parent_session_id).await {
             Ok(children) => children,
             Err(e) => {
-                // so a checkpoint from before the error never lingers
-                // (Minor 1: hydrate_children must not leave a stale entry on
-                // a load/child-snapshot error).
                 self.children.write().await.remove(&parent_session_id.0);
                 return Err(e.into());
             }
@@ -807,16 +801,6 @@ impl EngineSharedState {
             .await
             .map_err(EngineError::GraphFlow)?
             .ok_or_else(|| EngineError::SessionNotFound(parent_session_id.0.clone()))?;
-        // carry the trusted frozen identity. A parseable but tampered child
-        // descriptor makes the whole owned closure non-replayable — the root
-        // must not be reconstructed over it (and a later reattachment must
-        // never fall back to minting a fresh child). Legacy v0 children are
-        // left to the shipped conservative path by the validator itself, so a
-        // v1 child under a v0 parent is still refused.
-        // A load ERROR must not be swallowed by the `if let` fence: propagate
-        // it and drop the stale children-map entry (Minor 1 discipline) so a
-        // later replay retries cleanly instead of hydrating against an
-        // unverified parent record.
         let parent_record = match store.load_run(parent_session_id).await {
             Ok(record) => record,
             Err(e) => {
@@ -831,7 +815,6 @@ impl EngineSharedState {
                     parent_record.descriptor.as_ref(),
                     child,
                 ) {
-                    // children-map entry behind a failed hydration (Minor 1).
                     self.children.write().await.remove(&parent_session_id.0);
                     return Err(e);
                 }
@@ -865,14 +848,12 @@ impl EngineSharedState {
             {
                 continue;
             }
-            // corrupt: propagate rather than silently skip it (Important 1).
             let Ok(Some(child_session)) = self
                 .storage
                 .get(&child.session_id.0)
                 .await
                 .map_err(EngineError::GraphFlow)
             else {
-                // children-map entry before propagating (Minor 1).
                 self.children.write().await.remove(&parent_session_id.0);
                 return Err(EngineError::GraphFlow(
                     graph_flow::GraphError::StorageError(format!(
@@ -891,7 +872,6 @@ impl EngineSharedState {
                 graph_name,
             });
         }
-        // stale entry so it never lingers as if hydrated (Important 1).
         let mut map = self.children.write().await;
         if checkpoints.is_empty() {
             map.remove(&parent_session_id.0);
@@ -984,9 +964,6 @@ impl EngineSharedState {
             .ok_or_else(|| EngineError::SessionNotFound(session_id.0.clone()))?;
         let expected_revision = record.state_revision;
 
-        // caller anchored to. Every write of this signal path fences the
-        // graph clock too — a graph-only winner between any load and any
-        // commit of this cleanup is an ownership loss, never an overwrite.
         let cancel_anchor = if let EngineSignal::FailAnchored {
             expected_revision: anchor_revision,
             expected_graph_version: anchor_graph,
@@ -1005,11 +982,6 @@ impl EngineSharedState {
         };
 
         if record.status.is_terminal() {
-            // intent accepts a further `Cancel` as the bounded, owner-scoped
-            // cleanup retry — the run is terminal and never re-driven, but
-            // the owned Host sessions may still be unconfirmed and must
-            // remain reapeable. All other signals on a terminal run are
-            // refused.
             let interrupted_cancel_retry = matches!(
                 signal,
                 EngineSignal::Cancel | EngineSignal::FailAnchored { .. }
@@ -1020,10 +992,6 @@ impl EngineSharedState {
             }
         }
         let mut next_state = record.state.unwrap_or_default();
-        // intent is committed, the cancel winner is the ONLY durable
-        // control winner. Every other signal — Continue included — is
-        // refused with a state conflict and the wait is never consumed:
-        // no new work is created while cancellation is in flight.
         if next_state.cancel_requested
             && !matches!(
                 signal,
@@ -1032,9 +1000,6 @@ impl EngineSharedState {
         {
             return Err(EngineError::TerminalState(session_id.0.clone()));
         }
-        // run; all other non-cancel signals are fenced against waits and
-        // in-flight markers (A4: advance/resume/force-transition cannot
-        // bypass a human wait).
         if !matches!(
             signal,
             EngineSignal::Cancel
@@ -1071,11 +1036,6 @@ impl EngineSharedState {
                 });
             }
 
-            // be cleared so the child can be re-stepped (A4 "propagate one
-            // authorized token to the exact waiting descendant"). The child
-            // checkpoint is carried in the SAME root `commit_transition`
-            // so the root+child wait clear is one atomic CAS — a duplicate
-            // consumer loses the root CAS and never clears the child.
             let mut children: Vec<ChildCheckpoint> = Vec::new();
             if let Some(child_session_id) = &wait.child_session_id {
                 let child_sid = SessionId(child_session_id.clone());
@@ -1104,8 +1064,6 @@ impl EngineSharedState {
                 });
             }
 
-            // checkpoint (when nested) is committed atomically with the
-            // root under both the workflow and graph snapshot clocks.
             next_state.wait = None;
             let checkpoint = RunCheckpoint {
                 root: &root,
@@ -1122,10 +1080,6 @@ impl EngineSharedState {
                 )
                 .await?;
 
-            // revision AND graph version. Rebuild each cached child
-            // checkpoint from the authoritative persisted record (session
-            // snapshot incl. `Session.version`, status, state, revision) —
-            // never a blind in-memory increment of a stale snapshot (N-7).
             for child in &children {
                 self.sync_child_checkpoint_after_step(&SessionId(child.session.id.clone()))
                     .await?;
@@ -1139,30 +1093,10 @@ impl EngineSharedState {
         };
 
         if let Some(mut cleanup_terminal) = cleanup_terminal {
-            // durable cancel intent re-enters the cancel path as the
-            // bounded, owner-scoped cleanup retry. The cancel-intent fence
-            // is already durable — skip phase 1 and go straight to token
-            // fire + bounded Host teardown. The run is terminal, so no step
-            // is ever re-driven (the drive loop and `ensure_driving` refuse
-            // `Interrupted`).
             let interrupted_retry = record.status == SessionStatus::Interrupted;
 
-            // caller's verified anchor and advance ONLY from the
-            // `RunRecord` each successful write returns. Reads verify
-            // (build state/root), never anchor — a later load must not
-            // become the CAS target. `None` in rebase mode (ordinary
-            // Cancel), which keeps the existing load-fenced retry.
             let mut anchored_clocks: Option<(u64, u64)> = cancel_anchor;
 
-            // `cancel_requested = true` while keeping the status
-            // non-terminal — the run is not yet confirmed cancelled. The
-            // fence is a revision CAS: a concurrent `mark_step_in_flight`
-            // (or any other transition) that wins the CAS is reloaded and
-            // the fence is retried against the new revision while the run
-            // is still cancellable (Finding 1) — the cancel intent is
-            // persisted BEFORE the token fires, so active Host work is
-            // always reached. A terminal observation is a deliberate
-            // conflict, never silent success.
             if !interrupted_retry {
                 let mut fence_revision = expected_revision;
                 let mut fence_status = record.status.clone();
@@ -1170,8 +1104,6 @@ impl EngineSharedState {
                 fence_state.cancel_requested = true;
                 let mut attempts: u32 = 0;
                 loop {
-                    // never clobbers the winner's position/context with a
-                    // stale checkpoint.
                     let fence_root = self
                         .storage
                         .get(&session_id.0)
@@ -1182,8 +1114,6 @@ impl EngineSharedState {
                         root: &fence_root,
                         children: &[],
                     };
-                    // retries a graph-only winner; anchored cleanup retains
-                    // the caller's exact ownership clock without rebasing.
                     let fence_graph = cancel_anchor.map_or(fence_root.version, |(_, graph)| graph);
                     let fence_result = store
                         .commit_transition_with_graph_fence(
@@ -1213,17 +1143,12 @@ impl EngineSharedState {
                             }
                             attempts += 1;
                             if attempts >= CANCEL_FENCE_RETRY_BOUND {
-                                // could not win within the bound — surface
-                                // the CAS loss so the caller projects the
-                                // exact public conflict after reloading.
                                 return Err(EngineError::RevisionMismatch {
                                     session_id: session_id.0.clone(),
                                     expected: fence_revision,
                                     found: fence_revision,
                                 });
                             }
-                            // against the new revision while the run is
-                            // still cancellable.
                             let Some(current) = store.load_run(session_id).await? else {
                                 return Err(EngineError::GraphFlow(
                                     graph_flow::GraphError::StorageError(format!(
@@ -1233,8 +1158,6 @@ impl EngineSharedState {
                                 ));
                             };
                             if current.status.is_terminal() {
-                                // cancel fence was in flight — a deliberate
-                                // conflict, never silent success.
                                 return Err(EngineError::TerminalState(session_id.0.clone()));
                             }
                             fence_revision = current.state_revision;
@@ -1247,13 +1170,6 @@ impl EngineSharedState {
                 }
             }
 
-            // in-flight prompt operation observes cancellation and begins
-            // its bounded Host cleanup. The root token covers root-level
-            // prompt nodes; nested inner-graph prompt nodes run in child
-            // sessions with their OWN registered tokens (A4 nested child
-            // propagation) — fire those too so a cancel reaches the exact
-            // waiting descendant.
-            //
             // Finding 2 (round 3): the owned-descendant closure is built
             // RECURSIVELY from the in-memory parent relationship — a child
             // can itself own nested children (`InnerGraphTask` spawns
@@ -1291,11 +1207,6 @@ impl EngineSharedState {
                             }
                         }
                     }
-                    // child row of this parent joins the closure (and is
-                    // enqueued for its own persisted descendants), even when
-                    // the in-memory map entry is absent or stale. A
-                    // load failure is non-replayable (A7) — propagate rather
-                    // than settle a cancellation over an incomplete closure.
                     if let Some(store) = &self.workflow_store {
                         let persisted = store.load_children(&SessionId(parent.clone())).await?;
                         for child in persisted {
@@ -1324,16 +1235,7 @@ impl EngineSharedState {
                 }
             }
 
-            // the root AND every owned descendant run (Finding 3): Host
-            // sessions are keyed by the request run id, and nested prompt
-            // tasks pass their own child session id — a child parked at a
-            // human wait has a cached Host session with no active operation
-            // to observe the fired token, so the root finalize alone never
-            // visits it. All owned cleanup must be confirmed before the run
-            // settles `Cancelled`; failed entries are retained for the
-            // owner-scoped retry.
             if let Some(executor) = &self.prompt_executor {
-                // the first descendant-finalize error (if any).
                 let root_cleanup_err = executor.finalize_run(&session_id.0).await.err();
                 let cleanup_error = if let Some(e) = root_cleanup_err {
                     Some(e)
@@ -1348,14 +1250,6 @@ impl EngineSharedState {
                     child_err
                 };
                 if let Some(e) = cleanup_error {
-                    // never false successful cancellation) and surface the
-                    // error. The run stays visibly interrupted. The
-                    // transition is revision-fenced and bounded like the
-                    // other cancellation transitions (Finding 2): a
-                    // concurrent transition that wins the CAS is reloaded
-                    // and re-committed against the new revision; the write
-                    // result is never discarded, and the in-memory summary
-                    // is updated only after the durable write succeeds.
                     let reason = if cleanup_terminal == SessionStatus::Failed {
                         format!(
                             "failure cleanup unconfirmed for run '{}': {e}",
@@ -1378,7 +1272,6 @@ impl EngineSharedState {
                         let mut interrupted_state = current.state.unwrap_or_default();
                         interrupted_state.cancel_requested = true;
                         interrupted_state.in_flight = None;
-                        // original driver error with a teardown error.
                         if interrupted_state
                             .failure
                             .as_ref()
@@ -1393,8 +1286,6 @@ impl EngineSharedState {
                                 message: reason.clone(),
                             });
                         }
-                        // checkpoint never clobbers a position/context a
-                        // concurrent transition advanced.
                         let interrupted_root = self
                             .storage
                             .get(&session_id.0)
@@ -1405,12 +1296,6 @@ impl EngineSharedState {
                             root: &interrupted_root,
                             children: &[],
                         };
-                        // commit-owned clocks (phase-1's returned record, or
-                        // the caller's anchor when phase 1 was skipped for an
-                        // Interrupted retry) — never the freshly loaded
-                        // revision/graph, which may belong to a winner. The
-                        // loads below only build the state/root the write
-                        // carries.
                         let (interrupted_revision, interrupted_graph) =
                             anchored_clocks.unwrap_or((current_revision, interrupted_root.version));
                         let interrupted_result = store
@@ -1444,13 +1329,10 @@ impl EngineSharedState {
                                         found: current_revision,
                                     });
                                 }
-                                // revision.
                             }
                             Err(err) => return Err(err.into()),
                         }
                     }
-                    // in-memory summary (Finding 2 — never before durable
-                    // success).
                     if let Some(s) = self
                         .sessions
                         .write()
@@ -1485,7 +1367,6 @@ impl EngineSharedState {
                         )),
                     ));
                 };
-                // commit) must preserve the durable execution failure.
                 if current
                     .state
                     .as_ref()
@@ -1495,12 +1376,6 @@ impl EngineSharedState {
                     cleanup_terminal = SessionStatus::Failed;
                 }
                 if current.status == cleanup_terminal {
-                    // row is only OUR success when it still carries the
-                    // previous operation's owned revision/graph. A newer
-                    // winner that settled the same terminal (or any other
-                    // writer that moved either clock) is an ownership loss —
-                    // never adopted as this failed owner's cleanup success.
-                    // Ordinary Cancel keeps the idempotent shortcut below.
                     if let Some((owned_revision, owned_graph)) = anchored_clocks {
                         if current.state_revision != owned_revision
                             || current.graph_version != owned_graph
@@ -1512,12 +1387,8 @@ impl EngineSharedState {
                             });
                         }
                     }
-                    // confirmed cleanup outcome is identical.
                     return Ok(cleanup_terminal);
                 }
-                // intent) is the A5 settlement target — it must pass through
-                // to `settle_cancelled`. Every other terminal status is a
-                // deliberate conflict.
                 let interrupted_retry_shape = current.status == SessionStatus::Interrupted
                     && current.state.as_ref().is_some_and(|s| s.cancel_requested);
                 if current.status.is_terminal() && !interrupted_retry_shape {
@@ -1527,12 +1398,6 @@ impl EngineSharedState {
                 let mut cancelled_state = current.state.unwrap_or_default();
                 cancelled_state.cancel_requested = true;
                 cancelled_state.in_flight = None;
-                // authoritative root snapshot together with the current run
-                // record. The `root` loaded before the phase-1 fence may
-                // predate a concurrent control winner (e.g. a Continue that
-                // consumed the wait and advanced the position/context); the
-                // terminal checkpoint must carry the NEWEST durable root so
-                // the Cancelled row never clobbers the winner's position.
                 let settle_root = self
                     .storage
                     .get(&session_id.0)
@@ -1543,10 +1408,6 @@ impl EngineSharedState {
                     root: &settle_root,
                     children: &[],
                 };
-                // commit-owned clocks (phase-1 / Interrupted records); the
-                // load above only builds the state/root. A graph-only or
-                // revision winner since that write loses the CAS and the
-                // winner is left untouched (no rebase in anchored mode).
                 let (settle_revision, settle_graph) =
                     anchored_clocks.unwrap_or((current_revision, settle_root.version));
                 let terminal_target = if cleanup_terminal == SessionStatus::Cancelled {
@@ -1570,7 +1431,6 @@ impl EngineSharedState {
                         break;
                     }
                     Ok(SettlementResult::Observed(record)) => {
-                        // tokens or infer cleanup from Observed (P4 §6.2).
                         return Ok(record.status);
                     }
                     Err(StorageError::RevisionMismatch { .. }) => {
@@ -1593,11 +1453,6 @@ impl EngineSharedState {
                     Err(e) => return Err(e.into()),
                 }
             }
-            // the same confirmed run-terminal ownership boundary. Finding 2
-            // (round 3): every owned descendant token is reclaimed at the
-            // same confirmed-cleanup boundary — the whole closure was
-            // finalized successfully above, so no descendant can still be
-            // driving work.
             {
                 let mut cancels = self
                     .session_cancels
@@ -1621,10 +1476,6 @@ impl EngineSharedState {
                 &next_state,
             )
             .await?;
-        // parent's children map (N-7): the inner poller resumes a paused
-        // child via `EngineSignal::Resume`, which commits +1 revision here;
-        // without the sync the parent's next `commit_transition` submits a
-        // stale child CAS anchor and the run is misclassified Interrupted.
         self.sync_child_checkpoint_after_step(session_id).await?;
         Ok(target_status)
     }
@@ -1766,9 +1617,6 @@ impl EngineSharedState {
             )))
         })?;
         let committed_version = committed.version.0;
-        // pointer of the schedule that owns it — that shape means the marker
-        // and the owning schedule disagree, so the boundary must refuse rather
-        // than pick a winner.
         if applied > committed_version {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
@@ -1783,9 +1631,6 @@ impl EngineSharedState {
             return Ok(());
         }
 
-        // moving to a `Struct` version must render `{{core_context.struct.*}}`
-        // and lose the stale text binding, and the reverse. Both admission and
-        // this refresh bind through the one helper so they cannot drift.
         bind_core_context_payload(&session.context, &committed.content)
             .map_err(EngineError::GraphFlow)?;
         session
@@ -1834,11 +1679,6 @@ impl EngineSharedState {
             if let Some(runner) = found {
                 runner
             } else {
-                // NOT steppable (it has no v1 descriptor/authority, and a
-                // v1 writer may never mutate or promote it): report the
-                // typed non-replayable shape instead of a generic
-                // no-graph error. Any other missing-runner case keeps the
-                // existing contract.
                 if let Some(store) = &self.workflow_store {
                     if let Ok(Some(record)) = store.load_run(session_id).await {
                         if record.execution_version < 1 {
@@ -1861,15 +1701,8 @@ impl EngineSharedState {
 
         let mut step_witness: Option<FailedStepWitness> = None;
 
-        // this run was mid-execution must render at the NEXT state transition.
-        // This runs BEFORE the pre-step root/revision are read, so the step's
-        // own snapshot, marker CAS and rendered prompts all observe one
-        // consistent (refreshed) context; a failure here refuses the boundary
-        // instead of stepping on a stale snapshot.
         self.refresh_core_context_at_boundary(session_id).await?;
 
-        // is anchored to the pre-step state (A2). A `load_run` failure has
-        // no witness — the driver must not reconstruct authority afterward.
         let (expected_revision, pre_step_status, pre_execution_version) =
             if let Some(store) = &self.workflow_store {
                 match store.load_run(session_id).await {
@@ -1889,10 +1722,6 @@ impl EngineSharedState {
             };
         let mut transition_revision = expected_revision;
 
-        // `commit_transition` (e.g. stale-child CAS) can restore the root to
-        // its pre-step position — `FlowRunner.run` saves position/context
-        // before `commit_transition`, so without this the root would be left
-        // partially advanced on failure (Important 2).
         let pre_step_root = match self.storage.get(&session_id.0).await {
             Ok(session) => session,
             Err(e) => return Err(EngineError::GraphFlow(e)),
@@ -1937,11 +1766,7 @@ impl EngineSharedState {
             }
         }
 
-        // effect in the step. The marker write is fenced to step-able status
-        // plus the pre-step revision and atomically advances the revision.
         if let (Some(store), Some(pre)) = (&self.workflow_store, pre_step_root.as_ref()) {
-            // transitions against comes from the returned marker record
-            // below, never from this derived value.
             expected_revision.checked_add(1).ok_or_else(|| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                     "run '{}': state revision overflow",
@@ -1956,10 +1781,6 @@ impl EngineSharedState {
                 root: pre,
                 children: &[],
             };
-            // writer that made `pre` stale loses the write instead of having
-            // its context clobbered by this checkpoint. On success the marker
-            // RETURNED record is the step attempt's exact owned clocks — the
-            // witness must adopt them, never a derived `pre.version + 1`.
             match store
                 .mark_step_in_flight(
                     session_id,
@@ -1975,15 +1796,9 @@ impl EngineSharedState {
                     | StorageError::TerminalState(_)
                     | StorageError::GraphFlow(graph_flow::GraphError::SessionConflict(_))),
                 ) => {
-                    // winner (revision/graph ownership loss, terminal state,
-                    // or the durable cancel-intent fence) owns no failure
-                    // authority: it must reach the drive loop as the losing
-                    // writer's own disposition, never wrapped into a
-                    // fabricated step-failure settlement.
                     return Err(e.into());
                 }
                 Err(e) => {
-                    // pre-step revision/clock (typed ownership facts).
                     let witness = FailedStepWitness {
                         owned_revision: expected_revision,
                         owned_graph_version: Some(pre.version),
@@ -2050,9 +1865,6 @@ impl EngineSharedState {
                         witness,
                     ))
                 } else {
-                    // authority at all. Surface the original failure as
-                    // non-replayable instead of fabricating an anchor (or
-                    // panicking).
                     tracing::warn!(
                         session_id = %session_id.0,
                         "run_step: step failed with no pre-step root checkpoint; no ownership anchor exists (non-replayable)"
@@ -2062,25 +1874,12 @@ impl EngineSharedState {
             }
         };
 
-        // outcome is EITHER a scheduler converge/merge gate park (live join
-        // keys in the post-step context — persisted `paused`, tokenless per
-        // A2) OR a genuine manual/nested human wait (no live join keys —
-        // persisted `waiting_for_input` with a fresh A4 token). Both classes
-        // surface to the caller as `StepOutcome::WaitingForInput` (the drive
-        // loop stops at the same boundary); only the durable shape differs.
-        // graph-flow 0.8: upstream `ExecutionStatus` carries only
-        // Completed/WaitingForInput/Paused; task/timeout/storage failures
-        // arrive as `Err(GraphError)` from `runner.run` and propagate via `?`
-        // above — never mapped to a fake Completed/empty outcome here.
         let mut status = match &result.status {
             ExecutionStatus::Completed => SessionStatus::Completed,
             ExecutionStatus::WaitingForInput => SessionStatus::WaitingForInput,
             ExecutionStatus::Paused { .. } => SessionStatus::Paused,
         };
 
-        // store is present. Terminal/wait/paused statuses must survive
-        // restart and not be disguised as `running` (Critical 1: paused is
-        // authoritative; Critical 4: a human wait carries a durable token).
         if let Some(store) = &self.workflow_store {
             if status.is_terminal()
                 || matches!(
@@ -2097,24 +1896,6 @@ impl EngineSharedState {
                         wrap_step_boundary_err(EngineError::SessionNotFound(session_id.0.clone()))
                     })?;
 
-                // join persists as `paused` with NO human-wait token (A2:
-                // "Distinguish persisted scheduler joins (paused + existing
-                // join keys) from human waits (waiting_for_input + A4 wait
-                // record)"). Classification is authoritative to the CURRENT
-                // gate: the gated `StateCompositeTask` writes a state-scoped
-                // marker `_gate_park_{state_id}` at the exact merge/converge
-                // park and nulls it on gate success/leave/timeout (fix round
-                // 4, Critical 1). Historical/broad keys (`_merge_*`,
-                // `_converge_arrivals_*`, `_join_wait_start_*`) are written
-                // by labeled/conditional ROUTING for the routed target —
-                // including plain manual-wait states — so they are not
-                // authoritative park evidence and must never demote a
-                // genuine manual/nested wait to `paused`. Re-classifying
-                // only on the current task's live gate marker keeps
-                // scheduler joins tokenless (rule 4 cannot later
-                // misclassify a park as a human wait) while manual waits
-                // reached through labeled/conditional paths keep their
-                // fresh retained A4 token.
                 if matches!(status, SessionStatus::WaitingForInput)
                     && serde_json::to_value(&root.context)
                         .ok()
@@ -2128,8 +1909,6 @@ impl EngineSharedState {
                 }
 
                 let next_state = build_step_state(&status, &root.current_task_id, &root.context);
-                // `spawn_child_session` so nested child rows are persisted
-                // atomically and reconstructible after restart (Important 2).
                 let children: Vec<ChildCheckpoint> = self
                     .children
                     .read()
@@ -2154,20 +1933,10 @@ impl EngineSharedState {
                     root: &root,
                     children: &children,
                 };
-                // clearing the marker, so a failed commit can still classify as
-                // Interrupted (Important 3). The marker is then removed from the
-                // context that `commit_transition` persists so it reflects
-                // current-step intent only, not history (Minor 2).
                 let had_effect = step_had_external_effect(&root);
                 if had_effect {
                     clear_step_effect_marker(&root);
                 }
-                // SNAPSHOT this checkpoint carries (the step's own position/
-                // context saves advance the column via the re-stepable save,
-                // so `root.version` IS the durable preimage of this write).
-                // A graph-only writer landing after that snapshot loses the
-                // CAS instead of having its context clobbered by the stale
-                // step result.
                 let commit_result: Result<(bool, SessionStatus), EngineError> =
                     if status == SessionStatus::Completed {
                         match store
@@ -2203,21 +1972,6 @@ impl EngineSharedState {
                     Ok((owned_commit, durable_status)) => {
                         status = durable_status;
                         if owned_commit {
-                            // child checkpoint with `state_revision + 1` (the
-                            // store's ON CONFLICT bump). Synchronize the
-                            // in-memory children map to the persisted revisions
-                            // for exactly the children THIS commit carried —
-                            // otherwise the stale pre-commit revision fails the
-                            // child CAS on the parent's next step and the run is
-                            // misclassified Interrupted (N-7: multi-step inner
-                            // graphs after a child step).
-                            // Reload every carried child checkpoint from
-                            // storage: the commit advanced both the child's
-                            // `state_revision` AND its durable `graph_version`,
-                            // so the cached `Session.version` must come from an
-                            // authoritative reload, not a blind increment (the
-                            // cached snapshot is otherwise a stale OCC
-                            // preimage).
                             for child in &children {
                                 if let Err(e) = self
                                     .sync_child_checkpoint_after_step(&SessionId(
@@ -2240,14 +1994,6 @@ impl EngineSharedState {
                                 }
                             }
 
-                            // (Completed/Failed) finalizes every `(run, role)`
-                            // Host session and reclaims the run's coordinator
-                            // cancellation token. The cancel path
-                            // (`persist_signal_transition`) performs the same
-                            // finalization before persisting terminal
-                            // `Cancelled`; cleanup-unconfirmed stays
-                            // non-terminal/actionable (never finalized here).
-                            //
                             // I-002: the token is reclaimed ONLY when
                             // finalization is confirmed. On unconfirmed cleanup
                             // the token and the executor's session entries are
@@ -2285,14 +2031,6 @@ impl EngineSharedState {
                     }
                     Err(commit_err) => {
                         if had_effect {
-                            // to a seemingly safe boundary — a retry could execute
-                            // the external effect again. Persist an
-                            // interrupted/uncertain disposition instead (A2/A7):
-                            // the run becomes terminal `interrupted`, never
-                            // auto-replayed. The interrupted write is itself
-                            // revision-fenced (F2): if a concurrent transition
-                            // already won, it is left as the truthful state and we
-                            // surface the original error.
                             let interrupted_state = RunStateV1 {
                                 step_in_flight: Some(root.current_task_id.clone()),
                                 ..RunStateV1::default()
@@ -2318,7 +2056,6 @@ impl EngineSharedState {
                                 )
                                 .await;
 
-                            // disposition when the interrupted CAS succeeded.
                             if interrupted.is_ok() {
                                 if let Some(s) = self
                                     .sessions
@@ -2333,21 +2070,12 @@ impl EngineSharedState {
                             return Err(wrap_step_boundary_err(commit_err));
                         }
 
-                        // pre-step root via ONE atomic revision-fenced storage
-                        // operation (Important 3) — never a separate check-then-
-                        // save. A concurrent successful root transition (revision
-                        // advanced) is never overwritten by the older pre-step
-                        // position, and the restore clears the in-flight markers
-                        // the pre-step mark wrote (a safe boundary).
                         let mut restored_witness: Option<FailedStepWitness> = None;
                         if let Some(pre) = &pre_step_root {
                             match store
                                 .restore_pre_step(session_id, transition_revision, pre)
                                 .await
                             {
-                                // restore's RETURNED clocks are this attempt's
-                                // own (it advanced only the graph clock), so
-                                // the failure witness must adopt them.
                                 Ok(restored) => {
                                     restored_witness = Some(FailedStepWitness {
                                         owned_revision: restored.state_revision,
@@ -2364,10 +2092,6 @@ impl EngineSharedState {
                                     StorageError::RevisionMismatch { .. }
                                     | StorageError::TerminalState(_),
                                 ) => {}
-                                // corruption) must remain observable: an
-                                // operator must see that the in-flight marker
-                                // / pre-step restore did NOT complete. Chain
-                                // it with the original commit error.
                                 Err(restore_err) => {
                                     return Err(wrap_step_boundary_err(EngineError::GraphFlow(
                                         graph_flow::GraphError::StorageError(format!(
@@ -2378,12 +2102,6 @@ impl EngineSharedState {
                                 }
                             }
                         }
-                        // an intended OWNERSHIP loss: surface it typed and
-                        // non-mutating (the winner is left untouched). Every
-                        // other (storage/serialization) failure keeps the
-                        // attempt's witness — with the RESTORE's own clocks
-                        // when the safe boundary was re-established — so the
-                        // driver can still persist its coupled failure.
                         if matches!(
                             commit_err,
                             EngineError::RevisionMismatch { .. } | EngineError::TerminalState(_)
@@ -2401,13 +2119,6 @@ impl EngineSharedState {
             }
         }
 
-        // back into the parent's children map so the parent's next
-        // `commit_transition` submits the correct child revision (Important 1).
-        // This runs AFTER the child's own `commit_transition` (above) so the
-        // parent's map reflects the child's post-transition revision.
-        // A storage/load failure here is propagated (A7): a child whose
-        // persisted record cannot be read is non-replayable and must not
-        // let the parent continue with a stale/missing checkpoint.
         if let Err(e) = self.sync_child_checkpoint_after_step(session_id).await {
             return Err(wrap_step_boundary_err(e));
         }
@@ -2443,8 +2154,6 @@ impl EngineSharedState {
         &self,
         params: ChildSessionParams,
     ) -> Result<SessionId, EngineError> {
-        // the same millisecond must not collide with `start_run`'s
-        // existing-row rejection. A UUID is unique per admission.
         let child_session_id = format!(
             "{}:child:{}",
             params.parent_session_id,
@@ -2458,23 +2167,13 @@ impl EngineSharedState {
         let mut session_mut =
             graph_flow::Session::new_from_task(child_session_id.clone(), &start_task_id);
         session_mut.context = params.initial_context;
-        // any inner node executes: `InnerGraphNodeTask::resolve_session_id`
-        // reads `_session_id` to route the prompt through the durable child
-        // descriptor. Without this, un-bound inner `acp_prompt` nodes fell
-        // back to `"default"` and the Host executor refused/looked up the
-        // wrong run (Important: nested graph prompts lose the child durable
-        // identity).
         session_mut
             .context
             .set("_session_id", child_session_id.clone())?;
-        // checkpoint back to the parent's children map after each step
-        // (Important 1: child revisions must be synchronized).
         session_mut
             .context
             .set("_parent_session_id", params.parent_session_id.clone())?;
 
-        // inherits the trusted root descriptor (A2/A4). The child's
-        // `graph_name` is the inner graph's id.
         if let Some(store) = &self.workflow_store {
             let root_record = store
                 .load_run(&SessionId(params.parent_session_id.clone()))
@@ -2499,7 +2198,6 @@ impl EngineSharedState {
                 parent_session_id: Some(SessionId(params.parent_session_id.clone())),
                 graph_name: Some(params.inner_graph.id.clone()),
                 applied: root_descriptor.applied.clone(),
-                // admitted under; recovery follows the recorded mode.
                 intake_mode: root_descriptor.intake_mode,
             };
             let checkpoint = RunCheckpoint {
@@ -2518,18 +2216,9 @@ impl EngineSharedState {
             self.storage.save(session_mut.clone()).await?;
         }
 
-        // child's `acp_prompt` nodes resolve their token from the shared
-        // per-run map and fail closed when none is registered.
         self.register_cancellation(&SessionId(child_session_id.clone()));
 
-        // nested child row atomically (Important 2). The CAS anchor is the
-        // child's actual persisted revision: a v1 child created via
-        // `start_run` is at revision 1; a bare-save child (no store) is at 0.
         let child_revision = u64::from(self.workflow_store.is_some());
-        // snapshot (`start_run`/`save` incremented the durable
-        // `graph_version` above it). Reload the persisted session so the
-        // cached checkpoint carries the authoritative `Session.version`
-        // instead of a stale version-0 preimage.
         let persisted_child = self
             .storage
             .get(&child_session_id)
@@ -2549,21 +2238,6 @@ impl EngineSharedState {
             graph_name: Some(params.inner_graph.id.clone()),
         };
 
-        // revision-linearized with the parent. The child row is now durable,
-        // but an in-flight `InnerGraphTask` can race the root cancel fence:
-        // the fence may commit (durable `cancel_requested`) or the root may
-        // reach a terminal state while this admission was in flight. Re-check
-        // the AUTHORITATIVE parent record AFTER the child row is persisted,
-        // atomically with the children-map push (the cancel closure snapshots
-        // the map under the read lock, so a fence that commits after this
-        // recheck is guaranteed to observe the child in the closure). A parent
-        // that is terminal or carries durable `cancel_requested` refuses the
-        // admission: the child is rolled back — its coordinator token is
-        // fired, its row is settled durably `cancelled` (A5 settlement fence;
-        // never runnable, never replayed), and every in-memory entry is
-        // dropped — so no descendant can escape a root cancellation closure
-        // (A5: no downstream effects after the fence, complete owned-work
-        // cleanup).
         {
             let mut child_map = self.children.write().await;
             if let Some(store) = &self.workflow_store {
@@ -2579,11 +2253,6 @@ impl EngineSharedState {
                         .as_ref()
                         .is_some_and(|s| s.cancel_requested)
                 {
-                    // no prompt can ever admit under it, settle the child row
-                    // terminal `cancelled` (the row is `running` at revision
-                    // 1 — an admissible A5 settlement source), and drop every
-                    // in-memory entry so no late child remains mapped,
-                    // driven, or awaiting a closure reap.
                     {
                         let cancels = self
                             .session_cancels
@@ -2593,19 +2262,6 @@ impl EngineSharedState {
                             token.cancel();
                         }
                     }
-                    // Cancelled settlement BEFORE any in-memory ownership is
-                    // dropped. The settlement is revision-fenced and retried
-                    // on a CAS loss against the current child record (the
-                    // same cancel-settlement retry shape as the confirmed
-                    // cleanup path): a concurrent transition that wins the
-                    // fence between our reload and commit is reloaded and
-                    // re-settled against the new revision (or confirmed
-                    // already-Cancelled — the rollback outcome is identical).
-                    // Other storage/settlement errors propagate: the token
-                    // stays registered so the parent-cancel persisted-closure
-                    // reconciliation remains the owner-scoped fallback, and
-                    // no `TerminalState` is returned as if the rollback
-                    // completed.
                     let child_sid = SessionId(child_session_id.clone());
                     let mut settle_attempts: u32 = 0;
                     loop {
@@ -2617,11 +2273,8 @@ impl EngineSharedState {
                             ));
                         };
                         if current.status == SessionStatus::Cancelled {
-                            // the rollback outcome is identical.
                             break;
                         }
-                        // cancel intent) is an A5 settlement target; every
-                        // other terminal status is a deliberate conflict.
                         let interrupted_retry_shape = current.status == SessionStatus::Interrupted
                             && current.state.as_ref().is_some_and(|s| s.cancel_requested);
                         if current.status.is_terminal() && !interrupted_retry_shape {
@@ -2631,9 +2284,6 @@ impl EngineSharedState {
                         let mut cancelled_state = current.state.unwrap_or_default();
                         cancelled_state.cancel_requested = true;
                         cancelled_state.in_flight = None;
-                        // with the current run record so the terminal
-                        // checkpoint never clobbers a position/context a
-                        // concurrent transition advanced.
                         let settle_root = self
                             .storage
                             .get(&child_session_id)
@@ -2669,7 +2319,6 @@ impl EngineSharedState {
                                         found: current_revision,
                                     });
                                 }
-                                // revision.
                             }
                             Err(e) => return Err(e.into()),
                         }
@@ -2765,11 +2414,6 @@ impl EngineSharedState {
         let Some((child_id, child_task, child_status)) = target else {
             return Ok(None);
         };
-        // attached when its frozen descriptor still matches the trusted root
-        // identity. A parseable but tampered child (different parent, graph,
-        // preset, version or source) is non-replayable — failing closed here
-        // also prevents the caller from falling back to `spawn_child_session`
-        // and replaying work under a fresh child id.
         if let Some(store) = &self.workflow_store {
             let parent_id = SessionId(parent_session_id.to_string());
             let parent_record = store
@@ -2790,14 +2434,10 @@ impl EngineSharedState {
                 )?;
             }
         }
-        // stepped from its persisted position (and so the caller can query
-        // its durable status via `get_status`).
         if !self.runners.read().await.contains_key(&child_id) {
             let runner = Arc::new(FlowRunner::new(inner_graph, self.storage.clone()));
             self.runners.write().await.insert(child_id.clone(), runner);
         }
-        // (A1): a resumed child's `acp_prompt` nodes must find their token
-        // in the shared map (fail-closed otherwise).
         self.register_cancellation(&SessionId(child_id.clone()));
         let (parent_creator_id, parent_preset_id) = self
             .sessions
@@ -2806,9 +2446,6 @@ impl EngineSharedState {
             .iter()
             .find(|summary| summary.session_id.0 == parent_session_id)
             .map_or_default(|summary| (summary.creator_id.clone(), summary.preset_id.clone()));
-        // `get_status`/`InnerGraphTask` can observe its durable status
-        // (terminal children are attached and consumed, never re-stepped —
-        // Round-5 Important 1).
         {
             let mut sessions = self.sessions.write().await;
             if !sessions.iter().any(|s| s.session_id.0 == child_id) {
@@ -2841,8 +2478,6 @@ fn validate_child_descriptor_identity(
             child.session_id.0
         )))
     };
-    // children carry the frozen identity this validator enforces. A v1 child
-    // under a v0 parent reaches the `parent` check below and is refused.
     if child.execution_version < 1 {
         return Ok(());
     }
@@ -2919,7 +2554,6 @@ fn validate_descendant_position(
     if terminal {
         return Ok(());
     }
-    // child session can never own a live descendant (P3 T1 rereview-5 P1).
     if !parent_is_root {
         return Err(EngineError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
@@ -2938,9 +2572,6 @@ fn validate_descendant_position(
                  (tampered/unsupported metadata, non-replayable)"
             )),
         )),
-        // abandoned the child). Tolerated ONLY when the root context records
-        // this exact child under a state that enters THIS graph — otherwise a
-        // loop-back re-entry would miss attachment and mint a replacement.
         None if recorded_graph == Some(name) => Ok(()),
         None => Err(EngineError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
@@ -3021,16 +2652,7 @@ fn build_step_state(
     current_task_id: &str,
     root_context: &graph_flow::Context,
 ) -> RunStateV1 {
-    // failure (no upstream `ExecutionStatus::Error`); failures propagate as
-    // `Err(GraphError)` and are persisted by the daemon driver's failure
-    // path. A step that reached `build_step_state` therefore carries no
-    // fabricated failure record.
     let failure: Option<nexus_session_storage::run_state::RunFailure> = None;
-    // is waiting for human input, the root WaitRecord names the exact
-    // waiting descendant (`child_session_id` / `child_task_id`) so restart
-    // reconstruction and explicit continue target the right child cursor.
-    // `InnerGraphTask` writes `_child_wait_session` / `_child_wait_task` on
-    // the parent context in exactly that case.
     let (child_session_id, child_task_id) = if matches!(status, SessionStatus::WaitingForInput) {
         (
             root_context.get("_child_wait_session"),
@@ -3150,9 +2772,6 @@ impl OrchestrationEngine for EngineProxy {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
-        // store is present: Cancel → Cancelled, Pause → Paused, Resume →
-        // Running (fenced against terminal states). Memory-only status
-        // flips are no longer the SSOT (Critical 3).
         let target_status = self
             .state
             .persist_signal_transition(session_id, &signal)
@@ -3230,16 +2849,10 @@ impl OrchestrationEngine for EngineProxy {
     }
 
     async fn recover_sessions(&self, summaries: Vec<SessionSummary>) {
-        // preset loader to wire inner graphs); full A7 reconstruction lives
-        // on GraphFlowEngine. The in-memory tracker half is still honored so
-        // a proxy-backed consumer observes recovered sessions.
         self.state.recover_sessions(summaries).await;
     }
 
     async fn ensure_recovered_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
-        // frozen-source reconstruction cannot run through it. GraphFlowEngine
-        // (the daemon's concrete engine) is the only supported path; this
-        // proxy never serves daemon recovery.
         Err(EngineError::GraphFlow(
             graph_flow::GraphError::StorageError(format!(
                 "ensure_recovered_runner: EngineProxy cannot reconstruct session '{}' \
@@ -3446,13 +3059,6 @@ impl GraphFlowEngine {
     ) {
         self.prompt_executor = Some(executor.clone());
         self.session_cancels = session_cancels.clone();
-        // registrations (spawn/attach on `EngineSharedState`) and the
-        // prompt consumers (graph tasks wired with this engine's map,
-        // capabilities wired with the boot map) must read the SAME Arc.
-        // The production boot calls this on a freshly constructed engine
-        // (state refcount 1), so `get_mut` succeeds; engines whose shared
-        // state is aliased keep their own map (test wiring passes the
-        // engine's shared map to the prompt consumers explicitly).
         if let Some(state) = std::sync::Arc::get_mut(&mut self.state) {
             state.session_cancels = session_cancels;
             state.prompt_executor = Some(executor);
@@ -3536,15 +3142,8 @@ impl GraphFlowEngine {
                 continue;
             }
 
-            // (A1): a resumed run's prompt consumers resolve their token
-            // from the shared per-run map and fail closed when none is
-            // registered.
             self.register_cancellation(&summary.session_id);
 
-            // closure (children hydrated first, then the root runner from
-            // the frozen source). A corrupt/unsupported child propagates as
-            // non-replayable (A7). No-store (in-memory/test) engines keep
-            // the legacy embedded-preset reconstruction directly.
             let result = if self.state.workflow_store.is_some() {
                 self.attach_runner_with_owned_closure(&summary.session_id)
                     .await
@@ -3584,15 +3183,11 @@ impl GraphFlowEngine {
     ) -> Result<(), EngineError> {
         let mut hydrate_queue: std::collections::VecDeque<SessionId> =
             std::collections::VecDeque::new();
-        // recovery: visit each session at most once (tri-QC P1-D).
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         hydrate_queue.push_back(root_session_id.clone());
         visited.insert(root_session_id.0.clone());
         while let Some(parent) = hydrate_queue.pop_front() {
             self.state.hydrate_children(&parent).await?;
-            // cancellation token (A1) and is enqueued for its own
-            // children — the closure is complete only when the whole
-            // persisted tree is hydrated.
             let children = self
                 .state
                 .children
@@ -3608,8 +3203,6 @@ impl GraphFlowEngine {
                 }
             }
         }
-        // descriptor. The persisted session data in storage preserves the
-        // execution position.
         self.reconstruct_runner(root_session_id).await
     }
 
@@ -3728,7 +3321,6 @@ impl GraphFlowEngine {
             ));
         }
 
-        // embed — Important 5.
         if descriptor.preset_version != loaded.version {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
@@ -3772,9 +3364,6 @@ impl GraphFlowEngine {
                     embedded_applied_document(loaded).map(Some)
                 })?,
         };
-        // one gate every route shares: a legacy descriptor with no `applied`
-        // (frozen before the identity existed) included — it must not rebuild
-        // the YAML manifest a source merely failed to resolve a document for.
         if resolved.is_none()
             && loaded.is_some_and(|loaded| {
                 matches!(
@@ -3793,9 +3382,6 @@ impl GraphFlowEngine {
 
     #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)] // sequential descriptor→validate→rebuild path; guard spans await loop
     async fn reconstruct_runner(&self, session_id: &SessionId) -> Result<(), EngineError> {
-        // persisted source identity and preset version (Important 5). A run
-        // that has no v1 descriptor is a legacy/unverified row — its runner
-        // cannot be reconstructed over a frozen source (A2/A7).
         let descriptor = if let Some(store) = &self.state.workflow_store {
             let record = store.load_run(session_id).await?.ok_or_else(|| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -3812,10 +3398,6 @@ impl GraphFlowEngine {
                 )))
             })?
         } else {
-            // descriptor exists, so a frozen-source reconstruction is
-            // impossible. The legacy embedded path is used by
-            // `recover_sessions` directly; an on-demand attach without
-            // a store (no durable run) is non-replayable.
             let summary = self
                 .state
                 .sessions
@@ -3838,9 +3420,6 @@ impl GraphFlowEngine {
             }
         };
 
-        // bundle — is the source an applied run executes, so this arm is
-        // resolved before anything the bundle says.
-        //
         // The reload below is the no-apply path's frozen-source proof (A7), and
         // for an EMBEDDED applied run it is also the applied route's key: the
         // embedded arm of the resolution below is keyed off the reloaded source
@@ -3858,10 +3437,6 @@ impl GraphFlowEngine {
             _ => Some(self.reload_frozen_bundle(&descriptor, session_id)?),
         };
 
-        // current config. `ir-only` is the only recorded arm; without a frozen
-        // applied identity it is the no-apply admission refusal resurfaced:
-        // never rebuilt from YAML. A legacy row (no recorded mode) keeps the
-        // pre-existing resolution.
         let applied = {
             if descriptor.intake_mode
                 == Some(nexus_home_layout::strategy_intake::StrategyIntakeMode::IrOnly)
@@ -3886,18 +3461,6 @@ impl GraphFlowEngine {
                     )))
                 })?
         };
-        // rebuilt ONLY from that identity. The resolution above answers with the
-        // strategy's CURRENT apply, so a re-apply (or a rollback that gave the
-        // admitted row a successor) between admission and this restart would
-        // otherwise rebuild the run from a document it never ran — carrying its
-        // old position, context and bindings into a graph it was not admitted
-        // under. Refusing keeps the run non-replayable, exactly as admission
-        // refuses an applied identity it cannot verify; a descriptor with no
-        // recorded identity (no apply then, or a row predating the freeze) keeps
-        // the pre-existing resolution unchanged — with one exception: an
-        // EMBEDDED preset that resolved no document refused in
-        // `resolve_applied`, so `current: None` below is always a non-embedded
-        // preset's answer and that preset executes its manifest.
         let applied = match (descriptor.applied.as_ref(), applied) {
             (None, current) => current.map(|applied| applied.document),
             (Some(recorded), Some(current)) if current.identity == *recorded => {
@@ -3925,9 +3488,6 @@ impl GraphFlowEngine {
             }
         };
 
-        // no-apply run's source is the bundle reloaded below. Descendant
-        // validation and graph construction both read this ONE projection, so a
-        // persisted child is never judged against a bundle the run did not run.
         let applied_manifest = match &applied {
             Some(document) => Some(nexus_preset::export_preset(document).map_err(|error| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -3942,14 +3502,7 @@ impl GraphFlowEngine {
         let caps = self.current_caps();
         let loaded = bundle;
 
-        // `graph_name` must name an inner graph the frozen preset actually
-        // defines, and every NON-TERMINAL child must additionally name the
-        // inner graph entered by its parent's CURRENT task position. A
-        // parseable but tampered graph_name (unknown, or valid-but-wrong
-        // position) would otherwise miss the reattachment lookup and make
-        // `InnerGraphTask` spawn a fresh child and replay the work.
         {
-            // children name ITS inner graphs, not a bundle's.
             let run_manifest = match (&applied_manifest, &loaded) {
                 (Some(manifest), _) => manifest,
                 (None, Some(loaded)) => &loaded.manifest,
@@ -3969,7 +3522,6 @@ impl GraphFlowEngine {
                 .flat_map(|graphs| graphs.keys())
                 .map(String::as_str)
                 .collect();
-            // across the storage awaits below.
             let snapshot: Vec<(
                 SessionId,
                 Vec<nexus_session_storage::run_state::ChildCheckpoint>,
@@ -4011,9 +3563,6 @@ impl GraphFlowEngine {
                 } else {
                     None
                 };
-                // state that owns it (`_inner_child_session_<state>`); a
-                // non-terminal child past the inner-graph position is only
-                // replayable when that record names it consistently.
                 let recorded: std::collections::HashMap<
                     String,
                     std::collections::HashSet<Option<String>>,
@@ -4045,7 +3594,6 @@ impl GraphFlowEngine {
                     std::collections::HashMap::new()
                 };
                 for child in children {
-                    // graph (duplicate/conflicting markers are tampering).
                     let recorded_graph: Option<&str> = recorded
                         .get(&child.session.id)
                         .filter(|set| set.len() == 1)
@@ -4071,11 +3619,6 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        // projection above: the applied document when the descriptor froze an
-        // apply, the bundle otherwise. An applied embedded document builds from
-        // its own compiled-in bundle; any other applied document's id is not a
-        // bundle id, so reading the embedded bundle for one could serve a
-        // colliding preset's bytes — it is never read on that arm.
         let wired = match (&applied, &loaded) {
             (Some(document), _) => crate::preset_runtime::build_wired_outer_graph_from_ir(
                 document,
@@ -4093,10 +3636,6 @@ impl GraphFlowEngine {
                     session_id.0
                 )))
             })?,
-            // refuses an embedded preset that resolved no document — a legacy
-            // descriptor with no recorded `applied` included — and a document
-            // it cannot construct refused below. Such a preset (`_system.`, a
-            // system directory bundle) executes its manifest.
             (None, Some(loaded)) => crate::preset_runtime::build_wired_outer_graph(
                 loaded,
                 &engine_proxy,
@@ -4284,8 +3823,6 @@ impl GraphFlowEngine {
                 )
                 .await?;
             let sid = SessionId(session_id.clone());
-            // run's prompt consumers resolve their token from the shared
-            // per-run map and fail closed when none is registered.
             self.register_cancellation(&sid);
             let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
             self.state
@@ -4324,11 +3861,6 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let caps = self.current_caps();
-        // and `_system.` presets never consult it and keep the resolution
-        // they always ran. An engine without a configured home has no
-        // operator key to read, so it takes the missing-file default,
-        // `ir-only` — it never joins `config.toml` onto an empty path, which
-        // would read one relative to the process CWD.
         let user_bundle = nexus_home_layout::strategy_intake::is_user_strategy_bundle(
             &loaded.id,
             matches!(
@@ -4354,7 +3886,6 @@ impl GraphFlowEngine {
             .resolve_applied(&loaded.id, Some(loaded))
             .await
             .map_err(|error| EngineError::GraphFlow(graph_flow::GraphError::StorageError(error)))?;
-        // before graph construction — never a YAML fallback.
         if user_bundle && applied.is_none() {
             return Err(EngineError::GraphFlow(
                 graph_flow::GraphError::StorageError(format!(
@@ -4365,8 +3896,6 @@ impl GraphFlowEngine {
             ));
         }
         let wired = match &applied {
-            // other applied document's id is not a bundle id, so reading the
-            // embedded bundle could serve a colliding preset's bytes.
             Some(applied) => crate::preset_runtime::build_wired_outer_graph_from_ir(
                 &applied.document,
                 crate::preset_runtime::ir_template_source(Some(loaded)),
@@ -4379,8 +3908,6 @@ impl GraphFlowEngine {
             .map_err(|error| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
             })?,
-            // refuses an embedded preset that resolved no document, and every
-            // other embedded answer carries one.
             None => crate::preset_runtime::build_wired_outer_graph(
                 loaded,
                 &proxy,
@@ -4449,7 +3976,6 @@ impl GraphFlowEngine {
             if !creator_id.is_empty() {
                 session.context.set("_creator_id", creator_id.to_string())?;
             }
-            // session context BEFORE the checkpoint is persisted (A3).
             for (key, value) in &input {
                 session
                     .context
@@ -4471,8 +3997,6 @@ impl GraphFlowEngine {
                 )
                 .await?;
             let sid = SessionId(session_id.to_string());
-            // run's prompt consumers resolve their token from the shared
-            // per-run map and fail closed when none is registered.
             self.register_cancellation(&sid);
             let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
             self.state
@@ -4489,8 +4013,6 @@ impl GraphFlowEngine {
             });
             Ok(SessionId(session_id.to_string()))
         } else {
-            // path. Input seeding is a v1-run concern; the raw path has no
-            // durable descriptor to freeze.
             self.start_session_with_creator(&loaded.id, graph, Some(creator_id))
                 .await
         }
@@ -4553,10 +4075,6 @@ impl GraphFlowEngine {
         descriptor.work_id = work_id;
         descriptor.input = input.clone();
         descriptor.agent_bindings = agent_bindings;
-        // persisted with the schedule, never by resolving current registry
-        // precedence and discarding the stored identity. The stored identity
-        // must match the current load's content hash — a changed/shadowed
-        // preset refuses admission instead of running under stale bytes.
         if let Some(frozen) = frozen_source {
             let current = loaded.source_identity.as_ref().ok_or_else(|| {
                 EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
@@ -4581,7 +4099,6 @@ impl GraphFlowEngine {
         if !creator_id.is_empty() {
             session.context.set("_creator_id", creator_id.to_string())?;
         }
-        // session context BEFORE the checkpoint is persisted (A3).
         for (key, value) in &input {
             session
                 .context
@@ -4590,8 +4107,6 @@ impl GraphFlowEngine {
         if let Some(payload) = core_context {
             bind_core_context_payload(&session.context, payload)?;
         }
-        // boundary: the boundary refresh compares the schedule's committed
-        // pointer against it (v1.195 P0-T6).
         session
             .context
             .set(CORE_CONTEXT_VERSION_KEY, core_context_version.to_string())?;
@@ -4612,8 +4127,6 @@ impl GraphFlowEngine {
             )
             .await?;
         let sid = SessionId(session_id.to_string());
-        // run's prompt consumers resolve their token from the shared
-        // per-run map and fail closed when none is registered.
         self.register_cancellation(&sid);
         let runner = Arc::new(FlowRunner::new(graph, self.state.storage.clone()));
         self.state
@@ -4665,9 +4178,6 @@ impl GraphFlowEngine {
             session.context.set("_creator_id", creator_id.to_string())?;
         }
 
-        // a v1 run (authoritative descriptor + state) via start_run — never a
-        // bare SessionStorage::save. The source identity is resolved from the
-        // preset (embedded or directory bundle).
         if let Some(store) = &self.state.workflow_store {
             let (source, preset_version) = self.resolve_source_identity(preset_id)?;
             let descriptor = RunDescriptorV1 {
@@ -4682,7 +4192,6 @@ impl GraphFlowEngine {
                 parent_session_id: None,
                 graph_name: None,
                 applied: None,
-                // no intake mode (legacy construction site).
                 intake_mode: None,
             };
             let checkpoint = RunCheckpoint {
@@ -4746,8 +4255,6 @@ impl GraphFlowEngine {
         preset_id: &str,
     ) -> Result<(PresetSourceIdentity, u32), EngineError> {
         let caps = self.current_caps();
-        // resolve_preset's own precedence). A directory preset shadows an
-        // embedded preset with the same id (A7).
         if let Some(home) = &self.nexus_home {
             if let Ok(loaded) = nexus_preset::resolve_preset(preset_id, home, &caps) {
                 if let Some(identity) = loaded.source_identity {
@@ -4871,9 +4378,6 @@ impl OrchestrationEngine for GraphFlowEngine {
         session_id: &SessionId,
         signal: EngineSignal,
     ) -> Result<(), EngineError> {
-        // store is present: Cancel → Cancelled, Pause → Paused, Resume →
-        // Running (fenced against terminal states). Memory-only status
-        // flips are no longer the SSOT (Critical 3).
         let target_status = self
             .state
             .persist_signal_transition(session_id, &signal)
@@ -5111,8 +4615,6 @@ impl WorkflowStateStore for InterruptedCasInjectingStore {
                 .injected
                 .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
-            // transition commits at the SAME revision the Interrupted write
-            // is about to lose.
             let record = self
                 .inner
                 .load_run(session_id)
@@ -5352,9 +4854,6 @@ impl WorkflowStateStore for ContinueWinsBeforeCancelFenceStore {
         next_status: SessionStatus,
         next_state: &nexus_session_storage::run_state::RunStateV1,
     ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
-        // cancel intent on a non-terminal status. Inject the Continue winner
-        // at the SAME revision BEFORE the fence commits, so the fence loses
-        // the CAS and must reload/re-fence against the winner.
         if next_state.cancel_requested
             && next_status != SessionStatus::Interrupted
             && !self
@@ -5990,7 +5489,6 @@ mod tests {
             "got {err}"
         );
 
-        // under a non-root parent is non-replayable.
         let err = validate_descendant_position(
             "preset",
             &valid,
@@ -6042,9 +5540,6 @@ mod tests {
 
     #[tokio::test]
     async fn r6_recovered_session_has_runner_no_graph_loaded_fix() {
-        // in-memory tracker but did NOT reconstruct FlowRunners. Calling
-        // run_step() on a recovered session would fail with NoGraphLoaded.
-        //
         // With the R6 fix, recover_sessions() loads the embedded preset and
         // reconstructs the FlowRunner. However, this only works for sessions
         // started with known embedded presets (e.g., "novel-writing").
@@ -6055,7 +5550,6 @@ mod tests {
 
         let engine = test_engine();
 
-        // that was started with a preset not available as embedded).
         let summary = SessionSummary {
             session_id: SessionId("test:unknown-preset-session".to_string()),
             creator_id: "test-creator".to_string(),
@@ -6072,7 +5566,6 @@ mod tests {
             "recovered session should be in active list"
         );
 
-        // unknown preset (this is the expected degraded behavior).
         let result = engine.run_step(&summary.session_id).await;
         assert!(
             result.is_err(),
@@ -6096,7 +5589,6 @@ mod tests {
             current_task_id: Some("gathering".to_string()),
         };
 
-        // the FlowRunner reconstruction should succeed)
         let session = graph_flow::Session::new_from_task(
             summary.session_id.0.clone(),
             summary.current_task_id.as_deref().unwrap_or(""),
@@ -6122,8 +5614,6 @@ mod tests {
 
     #[tokio::test]
     async fn has_runner_reflects_reconstruction_success() {
-        // whose runner failed reconstruction (user presets stay
-        // tracked-but-not-driven). `has_runner` is the seam.
         let storage: Arc<dyn SessionStorage> = Arc::new(InMemorySessionStorage::new());
         let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
@@ -6196,10 +5686,6 @@ mod tests {
         );
     }
 
-    /// `mark_step_in_flight` immediately before the cancel fence commits.
-    /// The cancel must reload the authoritative row, re-fence against the
-    /// new revision, fire the token, and settle `cancelled` — the active
-    /// Host work is always reached.
     #[tokio::test]
     async fn cancel_fence_reloads_after_mark_step_in_flight_wins() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -6220,14 +5706,9 @@ mod tests {
             store.clone(),
             caps,
         );
-        // invoke `finalize_run` (bounded owned-Host teardown) after the
-        // re-fenced cancel intent — the token-only check below is the
-        // lower-level fence assertion, and the executor call is the
-        // load-bearing external side effect.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(())]));
         engine.set_prompt_executor(executor.clone(), engine.state.session_cancels.clone());
 
-        // shared map the cancel path reads).
         let graph = Arc::new(
             graph_flow::GraphBuilder::new("cancel-race")
                 .add_task(Arc::new(crate::tasks::ManualWaitTask))
@@ -6239,8 +5720,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // (advancing to R+1) BEFORE the cancel fence commits against R.
-        // Simulate the winner's write directly through the store.
         let record = store
             .load_run(&session_id)
             .await
@@ -6285,8 +5764,6 @@ mod tests {
             .cloned()
             .expect("token registered");
 
-        // the authoritative row, re-fences against the new revision, fires
-        // the token, and settles cancelled.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -6384,8 +5861,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // intent fence, committed while the status deliberately stays
-        // non-terminal (the run is not yet a confirmed cancellation).
         let record = store
             .load_run(&session_id)
             .await
@@ -6426,7 +5901,6 @@ mod tests {
             "precondition: the durable cancel intent is committed"
         );
 
-        // step must not be able to start or commit anything.
         let step_result = engine.run_step(&session_id).await;
         if let Err(err) = &step_result {
             let conflict = match err {
@@ -6501,8 +5975,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // then completes the run (R+1 → R+2, terminal `completed`) before
-        // the cancel fence commits against R.
         let record = store
             .load_run(&session_id)
             .await
@@ -6553,7 +6025,6 @@ mod tests {
             .await
             .expect("run completes");
 
-        // terminal state, and returns a deliberate conflict.
         let err = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -6575,10 +6046,6 @@ mod tests {
         );
     }
 
-    /// yields `Interrupted` (cleanup unconfirmed), a subsequent cancel
-    /// re-enters the cancel path as the owner-scoped cleanup retry, reaps
-    /// the owned Host session, and settles `Cancelled` — no step is
-    /// re-driven.
     #[tokio::test]
     async fn interrupted_cleanup_retry_preserves_terminal_cause() {
         for failed in [false, true] {
@@ -6597,7 +6064,6 @@ mod tests {
             let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
             let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-            // the retry succeeds (reaps the owned Host session).
             let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
                 Err(CapabilityError::Internal("shutdown timeout".to_string())),
                 Ok(()),
@@ -6647,7 +6113,6 @@ mod tests {
                     .unwrap();
             }
 
-            // false successful cancellation).
             let err = engine
                 .state
                 .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -6697,7 +6162,6 @@ mod tests {
                 .expect_err("resume on interrupted must refuse");
             assert!(matches!(err, EngineError::TerminalState(_)));
 
-            // execution outcome or re-driving a step.
             let status = engine
                 .state
                 .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -6736,7 +6200,6 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        // owned session is retained.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
             Err(CapabilityError::Internal("shutdown timeout".to_string())),
             Err(CapabilityError::Internal("shutdown timeout".to_string())),
@@ -6787,10 +6250,6 @@ mod tests {
         assert_eq!(executor.calls(), 2, "both retries invoked finalize_run");
     }
 
-    /// durable cancel intent is committed, a matching Continue must be
-    /// refused with a state conflict — the wait is never consumed, the
-    /// cancel fence stays intact, and no new work is created while
-    /// cancellation is in flight.
     #[tokio::test]
     async fn continue_after_cancel_fence_is_state_conflict() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -6884,7 +6343,6 @@ mod tests {
             .await
             .expect("cancel fence wins the CAS");
 
-        // is the ONLY durable control winner. The wait is never consumed.
         let err = engine
             .state
             .persist_signal_transition(
@@ -6995,7 +6453,6 @@ mod tests {
             .await
             .expect("park at human wait");
 
-        // commits a NEWER root position/context at R+1 (the durable winner).
         let continued = store
             .load_run(&session_id)
             .await
@@ -7026,9 +6483,6 @@ mod tests {
             .await
             .expect("continue wins the CAS");
 
-        // the authoritative row AND root, re-fences against the new
-        // revision, and settles Cancelled. The terminal checkpoint must
-        // carry the winner's root — never the stale pre-Continue root.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -7150,10 +6604,6 @@ mod tests {
             .await
             .expect("park at human wait");
 
-        // winner (same revision), reloads the winner row/root, re-fences
-        // against the new revision, and settles Cancelled. The terminal
-        // checkpoint must carry the winner's root — never the stale
-        // pre-fence root.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -7194,11 +6644,6 @@ mod tests {
         );
     }
 
-    /// round 3): a root with child A and grandchild A:child:* — the cancel
-    /// fires EVERY descendant token, finalizes EVERY descendant run (root,
-    /// child, grandchild), and reclaims every descendant token only after
-    /// the whole closure is confirmed. A parked grandchild with no active
-    /// operation is still reaped by its own run id.
     #[tokio::test]
     async fn cancel_finalizes_recursive_descendant_closure() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -7266,8 +6711,6 @@ mod tests {
             .await
             .expect("spawn grandchild");
 
-        // cached but no grandchild operation is active to observe a fired
-        // token — the recursive finalize must still reach it by run id.
         let grandchild_record = store
             .load_run(&grandchild_id)
             .await
@@ -7302,7 +6745,6 @@ mod tests {
             .await
             .expect("park grandchild at human wait");
 
-        // them; assert they exist and are not yet cancelled).
         let cancels = engine
             .state
             .session_cancels
@@ -7320,7 +6762,6 @@ mod tests {
         assert!(!child_token.is_cancelled());
         assert!(!grandchild_token.is_cancelled());
 
-        // child + grandchild, and settles Cancelled.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -7386,7 +6827,6 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        // finalize successfully.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Ok(()), Ok(()), Ok(())]));
 
         let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
@@ -7426,8 +6866,6 @@ mod tests {
             .await
             .expect("spawn child");
 
-        // in-memory entries — the shape of an admission whose map entry was
-        // lost before the cancel closure snapshot.
         let inner2 = Arc::new(
             graph_flow::GraphBuilder::new("inner-late")
                 .add_task(Arc::new(crate::tasks::ManualWaitTask))
@@ -7470,8 +6908,6 @@ mod tests {
         };
         assert!(!late_token.is_cancelled());
 
-        // fires the late child's token, finalizes root + child + late child,
-        // and settles Cancelled.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -7479,10 +6915,8 @@ mod tests {
             .expect("cancel must settle cancelled");
         assert_eq!(status, SessionStatus::Cancelled);
 
-        // it after the fence.
         assert!(late_token.is_cancelled(), "late child token must fire");
 
-        // reaped even though its map entry was gone.
         assert_eq!(
             executor.finalized_runs(),
             vec![session_id.0.clone(), child_id.0.clone(), late_id.0.clone(),],
@@ -7567,7 +7001,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // fence of the cancel path) BEFORE the child admission recheck.
         let record = store
             .load_run(&session_id)
             .await
@@ -7594,8 +7027,6 @@ mod tests {
             .await
             .expect("cancel-intent fence commits");
 
-        // `cancel_requested`, so no child may be created/registered after the
-        // fence.
         let inner = Arc::new(
             graph_flow::GraphBuilder::new("inner-late")
                 .add_task(Arc::new(crate::tasks::ManualWaitTask))
@@ -7616,7 +7047,6 @@ mod tests {
             "refusal must be the terminal-state conflict, got {err:?}"
         );
 
-        // runnable, never replayed (A5 settlement fence).
         let children = store
             .load_children(&session_id)
             .await
@@ -7662,9 +7092,6 @@ mod tests {
             );
         }
 
-        // persisted parent relation, so the rolled-back child's durable row
-        // (terminal `cancelled`) is also finalized — idempotent, and any
-        // Host session it might have created is reaped.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -7726,7 +7153,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // child admission recheck.
         let record = store
             .load_run(&session_id)
             .await
@@ -7753,8 +7179,6 @@ mod tests {
             .await
             .expect("cancel-intent fence commits");
 
-        // CAS to the injected competing transition, reloads the child
-        // record, and re-settles against the current revision.
         let inner = Arc::new(
             graph_flow::GraphBuilder::new("inner-late")
                 .add_task(Arc::new(crate::tasks::ManualWaitTask))
@@ -7779,8 +7203,6 @@ mod tests {
             "the competing transition must have been injected before the child settle"
         );
 
-        // reload/retry settled against the CURRENT revision, never a stale
-        // one, and no running child row remains.
         let children = store
             .load_children(&session_id)
             .await
@@ -7800,8 +7222,6 @@ mod tests {
             "the rolled-back child must carry the durable cancel intent"
         );
 
-        // dropped only after the confirmed Cancelled settlement, so no
-        // unregistered late child remains.
         {
             let child_map = engine.state.children.read().await;
             assert!(
@@ -7828,8 +7248,6 @@ mod tests {
             );
         }
 
-        // persisted parent relation and finalizes the rolled-back child's
-        // durable row (idempotent).
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -7863,7 +7281,6 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        // unconfirmed). Retry: root OK, child OK, grandchild OK.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![
             Ok(()),
             Ok(()),
@@ -7926,8 +7343,6 @@ mod tests {
             .await
             .expect("spawn grandchild");
 
-        // grandchild token must be RETAINED (not reclaimed) because its
-        // cleanup is unconfirmed.
         let err = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -7968,7 +7383,6 @@ mod tests {
         );
         drop(cancels);
 
-        // settles Cancelled, and every token is reclaimed.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -8007,13 +7421,6 @@ mod tests {
         drop(cancels);
     }
 
-    /// (Important 1, round 4): a root with child A and grandchild A:child:*
-    /// is persisted, then a FRESH engine (restart) recovers ONLY the root
-    /// summary (the boot shape — `list_non_terminal_sessions` returns root
-    /// rows only). Recovery must recursively hydrate the persisted parent
-    /// relation so the root Cancel fires/finalizes every owned descendant
-    /// — the grandchild is never left outside the closure. A failed
-    /// descendant cleanup on the retry remains reachable.
     #[tokio::test]
     async fn recovered_root_cancel_reaches_persisted_grandchild() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -8026,7 +7433,6 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
 
-        // grandchild at a durable human wait (non-terminal, recoverable).
         let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
@@ -8078,7 +7484,6 @@ mod tests {
             .await
             .expect("spawn grandchild");
 
-        // non-terminal persisted descendant after "restart".
         let grandchild_record = store
             .load_run(&grandchild_id)
             .await
@@ -8113,8 +7518,6 @@ mod tests {
             .await
             .expect("park grandchild at human wait");
 
-        // — the boot shape (`list_non_terminal_sessions` returns root rows
-        // only). The child/grandchild rows are never supplied as summaries.
         let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
@@ -8135,8 +7538,6 @@ mod tests {
         };
         restarted.recover_sessions(vec![root_summary]).await;
 
-        // children map carries root→child AND child→grandchild, and every
-        // descendant has a registered coordinator token.
         {
             let children = restarted.state.children.read().await;
             let root_children = children
@@ -8179,9 +7580,6 @@ mod tests {
         assert!(!child_token.is_cancelled());
         assert!(!grandchild_token.is_cancelled());
 
-        // tokens, finalizes every owned descendant by its own run id, and
-        // settles Cancelled — the grandchild is never left outside the
-        // closure.
         let status = restarted
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -8279,7 +7677,6 @@ mod tests {
             .await
             .expect("spawn grandchild");
 
-        // cancel: root OK, child OK, grandchild FAILS. Retry: all OK.
         let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             CapabilityRegistry::with_builtins(),
         ));
@@ -8307,7 +7704,6 @@ mod tests {
         };
         restarted.recover_sessions(vec![root_summary]).await;
 
-        // grandchild token is retained for the owner-scoped retry.
         let err = restarted
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -8348,7 +7744,6 @@ mod tests {
         );
         drop(cancels);
 
-        // Cancelled, and every token is reclaimed.
         let status = restarted
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -8387,10 +7782,6 @@ mod tests {
         drop(cancels);
     }
 
-    /// `Interrupted` commit loses a revision CAS to a competing transition;
-    /// the bounded retry reloads and re-commits against the new revision.
-    /// The durable row AND the in-memory summary both land on
-    /// `Interrupted`, and the actionable failure record is persisted.
     #[tokio::test]
     async fn interrupted_write_cas_loss_retries_and_persists() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -8407,7 +7798,6 @@ mod tests {
             storage.clone(),
         ));
 
-        // write then loses its CAS once and must retry.
         let executor = Arc::new(ScriptedFinalizeExecutor::new(vec![Err(
             CapabilityError::Internal("shutdown timeout".to_string()),
         )]));
@@ -8433,8 +7823,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // the CAS once, the bounded retry re-commits, and the error is
-        // surfaced with the actionable reason.
         let err = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -8445,7 +7833,6 @@ mod tests {
             "unconfirmed cleanup surfaces the error, got {err:?}"
         );
 
-        // record (the write result was never discarded).
         let record = real_store
             .load_run(&session_id)
             .await
@@ -8468,7 +7855,6 @@ mod tests {
             failure.message
         );
 
-        // (Finding 2 — never before).
         let sessions = engine.state.sessions.read().await;
         let in_memory = sessions
             .iter()
@@ -8481,11 +7867,6 @@ mod tests {
         );
     }
 
-    /// parked at a human wait (cached Host session, no active operation)
-    /// is reaped via its OWN `finalize_run` call — the root finalize alone
-    /// never visits the child-keyed cache entry. On root cleanup failure the
-    /// run is `Interrupted`; the retry finalizes root AND child and settles
-    /// `Cancelled`.
     #[tokio::test]
     async fn cancel_finalizes_child_host_sessions() {
         let db = tempfile::NamedTempFile::new().unwrap();
@@ -8526,7 +7907,6 @@ mod tests {
             .await
             .expect("start session");
 
-        // its own cancellation token and v1 run row.
         let inner = Arc::new(
             graph_flow::GraphBuilder::new("inner")
                 .add_task(Arc::new(crate::tasks::ManualWaitTask))
@@ -8543,7 +7923,6 @@ mod tests {
             .await
             .expect("spawn child");
 
-        // but no child operation is active to observe a fired token.
         let child_record = store
             .load_run(&child_id)
             .await
@@ -8578,7 +7957,6 @@ mod tests {
             .await
             .expect("park child at human wait");
 
-        // NOT finalized (root failure short-circuits before descendants).
         let err = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -8597,8 +7975,6 @@ mod tests {
             .expect("run exists");
         assert_eq!(interrupted.status, SessionStatus::Interrupted);
 
-        // finalize reaps the child-keyed Host session, and the run settles
-        // Cancelled.
         let status = engine
             .state
             .persist_signal_transition(&session_id, &EngineSignal::Cancel)
@@ -8691,7 +8067,6 @@ mod tests {
                 .map(|c| (c.session.version, c.state_revision))
         };
 
-        // (1), not the pre-save version-0 snapshot.
         let (cached_v, cached_rev) = cached_child(&engine, &session_id.0, &child_id.0)
             .await
             .expect("child cached");
@@ -8702,7 +8077,6 @@ mod tests {
         );
         assert_eq!(cached_rev, 1);
 
-        // same commit: the child clock advances and the cache is RELOADED.
         let outcome = engine.run_step(&session_id).await.expect("parent step");
         assert!(
             matches!(
@@ -8729,8 +8103,6 @@ mod tests {
             "cached child revision must equal the persisted revision"
         );
 
-        // ON the child) and continue with the exact token. The root+child
-        // wait clear commits atomically and the cache is reloaded again.
         let parent_record = store
             .load_run(&session_id)
             .await
@@ -8825,12 +8197,9 @@ mod tests {
                 context: graph_flow::Context,
             ) -> Result<TaskResult, graph_flow::GraphError> {
                 self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                // at session start; the racing task reads it from there.
                 let session_id: String = context
                     .get("_session_id")
                     .expect("engine seeds _session_id");
-                // losing drive marked the step in flight (revision 1 -> 2)
-                // before the runner loaded, so the winner anchors at 2.
                 let winner = graph_flow::Session::new_from_task(session_id.clone(), "winner-task");
                 winner
                     .context
@@ -8924,7 +8293,6 @@ mod tests {
 
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
-        // revision are exactly what the winning commit wrote.
         let row = storage
             .get(&session_id.0)
             .await

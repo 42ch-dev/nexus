@@ -32,11 +32,6 @@ export const TERMINAL_FINDING_STATUSES: ReadonlySet<FindingStatus> = new Set([
   'duplicate',
 ]);
 
-/**
- * maps to the set of statuses it may advance to. Self-loops are NOT permitted
- * (a `status: "<current>"` patch is rejected as `INVALID_TRANSITION`); callers
- * that only want to refresh `updated_at` must omit `status` from the patch.
- */
 const TRANSITIONS: Readonly<Record<string, readonly FindingStatus[]>> = {
   open: ['triaged', 'in_review', 'resolved', 'wont_fix', 'duplicate'],
   triaged: ['in_review', 'resolved', 'wont_fix', 'duplicate'],

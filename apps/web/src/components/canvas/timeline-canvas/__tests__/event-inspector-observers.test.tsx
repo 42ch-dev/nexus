@@ -2,17 +2,6 @@
  * Timeline Narrative event inspector — modules.observation.observers
  * read-only display (V1.164 P3 Task 4).
  *
- * Narrative event with a populated `modules.observation.observers` bag
- * renders the "Observers:" metadata line. Observer entry_ids resolve to
- * canonical names ONLY when the name is already in the loaded graph
- * (PD-18 — no new fan-out fetch solely for this panel); otherwise the raw
- * id renders. `observers: []` renders the explicit "No observers" claim
- * (PD-9 — empty = explicitly nobody, distinct from absent). Absent
- * `modules` / `modules.observation` skips the line entirely (PD-9 —
- * absent = unrecorded). Malformed (non-array) observers also skips —
- * lenient like the P2 checker. Copy resolves through the existing web i18n
- * (canvas namespace, `timeline.inspector.observers` / `.noObservers`).
- *
  * V1.165 P2 T3 — AC-V165-8 completion E2E (R-V1164P3QC-001): the
  * graph-derived tests below feed a `WorldKbGraphResponse` shaped exactly
  * like the daemon's post-patch wire (T1's daemon test
@@ -73,10 +62,6 @@ function eventNode(
   };
 }
 
-/**
- * loaded graph" PD-18 resolution source — `ctxRef.current.nodes` mirrors
- * what the orchestrator supplies from `surface.nodes`).
- */
 function graphNodesWith(names: Record<string, string>): Node<TimelineNodeData>[] {
   return Object.entries(names).map(([id, name]) => ({
     id: `entity:${id}`,
@@ -99,12 +84,6 @@ const EVENT_WITH_OBSERVERS: Partial<TimelineNodeData> = {
   },
 };
 
-/**
- * event` entity: `GET /worlds/:id/kb/graph` returns `entities[].modules`
- * verbatim (mirrors T1's `patch_entity_observation_on_event_entity_
- * round_trip_on_graph_read` assertion shape). The observers are the KB
- * character entities so the PD-18 name resolution has an in-graph source.
- */
 function observedEventGraph(): WorldKbGraphResponse {
   return {
     entities: [
@@ -180,7 +159,6 @@ describe('TimelineInspector — modules.observation.observers line (V1.164 P3 Ta
   });
 
   it('falls back to raw ids when observer names are NOT in the loaded graph (PD-18 — no new fetch)', () => {
-    // the raw entry_ids.
     renderInspector({ node: eventNode({ ...EVENT_WITH_OBSERVERS }) });
 
     const line = screen.getByTestId('event-observers-line');
@@ -276,8 +254,6 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
   it('renders the observers line from the post-patch graph wire (graph → projection → spread → inspector)', () => {
     const { nodes } = project(observedEventGraph());
 
-    // entityToTimelineNodeData spreads `...entity`, so `modules` rides the
-    // node data verbatim (the AR-7 referent: WorldKbEntityProjection.modules).
     const eventNode = nodes.find((n) => n.data.key_block_id === 'kb_event');
     expect(eventNode).toBeDefined();
     expect(eventNode!.data.layoutHint).toBe('event');
@@ -288,7 +264,6 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
       },
     });
 
-    // (PD-18: ctx.nodes mirrors surface.nodes — the full projected graph).
     renderInspector({ node: eventNode!, ctxOverrides: { nodes } });
 
     const line = screen.getByTestId('event-observers-line');
@@ -319,7 +294,6 @@ describe('TimelineInspector — AC-V165-8: observation→canvas via the KB patch
     };
     const { nodes } = project(graph);
 
-    // (layoutHint === 'event') surfaces the Observers line.
     const charNode = nodes.find((n) => n.data.key_block_id === 'kb_char_1');
     expect(charNode).toBeDefined();
     expect(charNode!.data.layoutHint).toBe('context');
@@ -378,7 +352,6 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
 
     expect(onPatchEntity).toHaveBeenCalledTimes(1);
     const [, patchArg] = onPatchEntity.mock.calls[0];
-    // along with the edited observers list.
     expect(patchArg).toEqual({
       modules: {
         observation: { observers: ['kb_char_2'], access: { line_of_sight: true } },
@@ -399,7 +372,6 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
 
     expect(onPatchEntity).toHaveBeenCalledTimes(1);
     const [, patchArg] = onPatchEntity.mock.calls[0];
-    // key (absent would read back as unrecorded).
     expect(patchArg.modules.observation.observers).toEqual([]);
     expect(patchArg.modules.observation.access).toEqual({ line_of_sight: true });
   });
@@ -574,7 +546,6 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
       ctxOverrides: { nodes: CTX_NODES, onPatchEntity },
     });
 
-    // whitespace-containing id seeded verbatim, not coerced.
     expect(screen.getByTestId('observation-observer-kb_char_1')).not.toBeChecked();
     expect(screen.getByTestId('timeline-inspector-save')).toBeDisabled();
 
@@ -622,8 +593,6 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     });
 
     const raw = screen.getByTestId('observation-raw-json') as HTMLTextAreaElement;
-    // unknown inner keys (PD-13) and the previously nonrepresentable
-    // members round-trip through the author's text.
     fireEvent.change(raw, {
       target: {
         value: JSON.stringify({ ...stored, note: 'edited' }, null, 2),
@@ -697,7 +666,6 @@ describe('TimelineInspector — O3 observation editing (v1.203 P2 T3)', () => {
     const [, patchArg] = onPatchEntity.mock.calls[0];
     expect(patchArg).toEqual({ modules: { observation: { observers: [] } } });
 
-    // `observers: []` renders the explicit "No observers" claim line.
     const updated = eventNode({
       modules: { observation: { observers: [] } },
       version: 4,

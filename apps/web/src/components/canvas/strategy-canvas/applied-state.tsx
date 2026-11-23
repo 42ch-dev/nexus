@@ -1,6 +1,4 @@
 /**
- * `getStrategyApplied` read:
- *
  *   (a) never applied, never approved → Compose is the only action;
  *   (b) approved with no live version → the apply lead, and no Compose;
  *   (c) an apply is recorded but its document no longer verifies → an error.

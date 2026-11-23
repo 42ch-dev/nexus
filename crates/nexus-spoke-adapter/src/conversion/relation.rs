@@ -40,7 +40,6 @@ use spoke_schemas::Relation;
 /// the 6 typed columns are then overlaid so they remain authoritative. Any key
 /// in the JSON that is not among the 6 known nexus-locals survives as-is.
 fn build_relation_nexus_ns(row: &KbRelationshipRow) -> Map<String, Value> {
-    // keys from the last write). If absent, start empty.
     let mut ns = row
         .extensions_nexus_json
         .as_deref()
@@ -117,8 +116,6 @@ pub fn kb_relationship_row_to_spoke(row: &KbRelationshipRow) -> Relation {
     let nexus_ns = build_relation_nexus_ns(row);
 
     let mut extensions = HashMap::new();
-    // conversion is infallible at runtime (mirrors the V1.139
-    // `ExtensionKey` pattern).
     let key = ExtensionKey::try_from("nexus").expect("\"nexus\" matches the extensions-key regex");
     extensions.insert(key, nexus_ns);
 

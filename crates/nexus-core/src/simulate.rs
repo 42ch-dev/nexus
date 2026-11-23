@@ -79,7 +79,6 @@ impl CoreService {
             }
             .into());
         }
-        // shape; the body is already JSON, so this is the boundary that joins them.
         let document: WorkflowDocument = serde_json::to_value(&wire)
             .and_then(serde_json::from_value)
             .map_err(|error| CoreError::InvalidInput {

@@ -1,6 +1,4 @@
 /**
- * v1219-world-module T1).
- *
  * Asserts the architect-locked information architecture:
  *   - `/worlds/:worldId` renders the World app surface (header + layer
  *     tabs; v1219-world-module T1 — the index STOPS redirecting to
@@ -23,20 +21,11 @@ import { noopClient } from '@/test/test-providers';
 import { TimelinePage } from '@/pages/timeline-page';
 import { WorldApp } from '@/components/world/world-app';
 
-/**
- * route-resolution tests we mock it so the test asserts routing (the index
- * owns the URL and renders the surface), not data loading.
- */
 vi.mock('@/components/world/world-app', () => ({
   WorldApp: () => <div data-testid="world-app-mock" />,
 }));
 
 
-/**
- * resolution tests we mock it so the test asserts routing, not React Flow
- * rendering. The mock surfaces a stable test-id + the peer-surface nav
- * links so the IA assertions can probe them.
- */
 vi.mock('@/components/canvas/timeline-canvas/timeline-canvas', () => ({
   TimelineCanvas: ({ worldId }: { worldId: string }) => (
     <div data-testid="timeline-canvas-mock">

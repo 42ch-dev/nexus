@@ -138,7 +138,6 @@ pub fn sync_embedded_skills(nexus_home: &Path) -> Result<SkillSyncResult, SkillS
     Ok(result)
 }
 
-/// `embedded_ids` and append them to `result.removed_from_embedded`.
 fn detect_removed_skills(
     skills_dir: &Path,
     embedded_ids: &HashSet<&str>,
@@ -314,15 +313,12 @@ mod tests {
         }
 
         // Write a file to make a subdirectory for the skill to "exist".
-        // the read-only skills dir.  Since the skills dir is read-only,
-        // `create_dir_all` for a new skill subdirectory should fail.
         let result = sync_embedded_skills(temp.path());
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
 
-            // and creating subdirectories inside it will fail.
             assert!(result.is_err(), "sync should fail on read-only directory");
 
             let mut perms = fs::metadata(&skills_dir).expect("metadata").permissions();

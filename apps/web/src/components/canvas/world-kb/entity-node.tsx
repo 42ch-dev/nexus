@@ -70,10 +70,6 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
         // wrapper forward the dragging prop without a class-name branch,
         // mirroring NodeChromeShell's pattern.
         'min-w-[200px] max-w-[240px] rounded-card border bg-canvas-worldkb-entity-card-fill-default px-3 py-2 shadow-card transition-shadow duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4 focus-visible:outline-none',
-        // DESIGN.md §Canvas Surface). Mirrors NodeChromeShell's spine; this
-        // node keeps its bespoke 3-state fill tokens (default/hover/selected)
-        // rather than routing through NodeChromeShell because the entity
-        // card's selected-fill diverges from `canvas-node-fill`.
         'border-l-[3px] border-l-canvas-worldkb-accent',
         selected
           ? 'border-canvas-worldkb-entity-card-stroke-selected bg-canvas-worldkb-entity-card-fill-selected'
@@ -120,7 +116,6 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
           onClose={close}
           onConnectTo={() => {
             close();
-            // canvas listens for selection change after the menu closes.
             const event = new CustomEvent('world-kb-connect-to', {
               detail: { sourceEntityId: d.keyBlockId! },
             });

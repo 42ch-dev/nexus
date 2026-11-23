@@ -236,9 +236,6 @@ mod tests {
         assert_eq!(fetched.creator_id, "ctr_localTest123");
     }
 
-    // persistent `display_name` rejects a second INSERT with the same name —
-    // an honest failure instead of a silent duplicate. Two concurrent
-    // 0-match reads can both mint; the index fences the second write.
     #[tokio::test]
     async fn duplicate_persistent_display_name_is_rejected() {
         let (_dir, pool) = fresh_pool().await;
@@ -272,7 +269,6 @@ mod tests {
         );
     }
 
-    // NOT constrained — the index is partial (persistent + non-NULL name).
     #[tokio::test]
     async fn duplicate_nameless_persistent_rows_are_allowed() {
         let (_dir, pool) = fresh_pool().await;

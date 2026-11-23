@@ -56,7 +56,6 @@ describe('projectWorldTimelineNodesToNleTracks', () => {
   });
 
   it('maps World Moment scenes and beats to separate tracks (V1.156 P5)', () => {
-    // of producing zero tracks (the pre-fix Narrative fallthrough).
     const nodes = [
       node('sc-1', 'work-timeline-moment-scene', 40, 0, { label: 'Opening Scene' }),
       node('bt-1', 'work-timeline-moment-beat', 56, 120, { label: 'Hook Beat' }),
@@ -71,8 +70,6 @@ describe('projectWorldTimelineNodesToNleTracks', () => {
 
 describe('projectWorkTimelineNodesToNleTracks', () => {
   it('maps Work-Brief era nodes to Brief + Undated tracks (V1.156 P2 T2)', () => {
-    // (`timeline-brief-era`) — the band must mirror the World Timeline
-    // Brief tracks (dated eras on the when-axis + undated cluster).
     const nodes = [
       node('era-1', 'timeline-brief-era', 40, 0, { canonical_name: 'First Age' }),
       node('era-2', 'timeline-brief-era', 360, 220, { canonical_name: 'Undated Era' }),

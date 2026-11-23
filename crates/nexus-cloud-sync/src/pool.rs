@@ -39,8 +39,6 @@ impl OutboxPool {
         db_path: &Path,
         max_size: usize,
     ) -> Result<Self, nexus_local_db::LocalDbError> {
-        // beyond the `u32` connection domain is rejected rather than
-        // truncated (fail-closed).
         let max_connections = u32::try_from(max_size).map_err(|_| {
             nexus_local_db::LocalDbError::ValidationError(format!(
                 "pool max_size {max_size} exceeds the u32 connection domain"
@@ -89,7 +87,6 @@ mod tests {
     #[tokio::test]
     async fn pool_max_size_beyond_u32_is_rejected_not_truncated() {
         let (_tmp, db_path) = create_test_db();
-        // than truncate to a smaller pool.
         let huge = usize::try_from(u64::from(u32::MAX)).unwrap() + 1;
         let err = match OutboxPool::new(&db_path, huge).await {
             Ok(_pool) => panic!("oversized max_size must be rejected, not accepted"),

@@ -148,7 +148,6 @@ impl Capability for NovelChapterTransition {
         if let (Some(ws_root), Some(work_ref), Some(body_path)) =
             (&inp.workspace_root, &inp.work_ref, &inp.body_path)
         {
-            // injected port, addressed relative to `Works/<work_ref>/`.
             let work_root = Path::new("Works").join(work_ref);
             let rel_child = Path::new(body_path).strip_prefix(&work_root).map_err(|_| {
                 CapabilityError::InputInvalid(format!(
@@ -580,8 +579,6 @@ Body text here.";
             "§4.5.2 invariant: draft→finalized advances current_chapter to 1"
         );
 
-        // must NOT jump to 3. It stays at 1 because draft is not finalize.
-        // This verifies the "never skips ahead" clause.
         cap.run(serde_json::json!({
             "work_id": "wrk_457_cc",
             "creator_id": "ctr_test",
@@ -598,7 +595,6 @@ Body text here.";
             "§4.5.2 invariant: drafting ch3 must NOT advance current_chapter (only finalize does)"
         );
 
-        // current_chapter becomes 2 (just-finalized chapter number).
         cap.run(serde_json::json!({
             "work_id": "wrk_457_cc",
             "creator_id": "ctr_test",

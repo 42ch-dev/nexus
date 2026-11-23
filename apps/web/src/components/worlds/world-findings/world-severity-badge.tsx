@@ -19,7 +19,6 @@ export function worldSeverityVariant(severity: string | undefined | null): Badge
     case 'error':
       return 'error';
     default:
-      // renders verbatim (never coerced to work `minor/major/blocker`).
       return 'neutral';
   }
 }

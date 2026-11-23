@@ -1,6 +1,4 @@
 /**
- * surface (V1.166 P2 / DR-64 surfacing half, Task 1).
- *
  * Reads the world id from the URL and renders {@link WorldFindingsPanel}.
  * The page is thin so the panel can be tested in isolation. IA (PD-2,
  * locked): `/worlds/:worldId/findings` is a **peer** of `/timeline` and

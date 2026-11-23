@@ -18,7 +18,6 @@ describe('deriveWorkspaceSlug', () => {
     expect(deriveWorkspaceSlug('星际拓荒志')).toBe('ws-748324af');
     expect(deriveWorkspaceSlug('我的小说')).toBe('ws-20029f24');
     expect(deriveWorkspaceSlug('·—·')).toBe('ws-79c1da63');
-    // whitespace only after trimming.
     expect(deriveWorkspaceSlug('  星际拓荒志 ')).toBe('ws-748324af');
   });
 

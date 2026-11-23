@@ -419,10 +419,6 @@ pub async fn promote_character_fragment_to_shared(
                 code: ActorContractConflict::CharacterFragmentAlreadyShared,
             });
         };
-        // clearing its provenance: it must still be active, belong to this
-        // Character, and target an owned active World. An invalid source
-        // binding rejects with zero mutation rather than leaking the row into
-        // shared Character memory.
         require_valid_provenance_tx(&mut tx, owner_creator_id, character_id, Some(old_binding))
             .await?;
         if current.revision != expected_revision {

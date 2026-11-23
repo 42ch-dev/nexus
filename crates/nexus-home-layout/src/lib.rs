@@ -54,10 +54,6 @@ pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(nexus_home.join("acp").join("runs"))?;
     std::fs::create_dir_all(nexus_home.join("rules"))?;
 
-    // so it takes the same `config.toml.lock` protocol as the CLI/service/
-    // desktop/core writers. The existence check is repeated under the lock: a
-    // writer that committed while this acquisition waited must not be
-    // overwritten with the empty skeleton.
     let toml_path = nexus_home.join("config.toml");
     let json_path = nexus_home.join("config.json");
     if !toml_path.exists() && !json_path.exists() {
@@ -1161,7 +1157,6 @@ mod tests {
             mem.starts_with(&root),
             "memory dir must stay under the Character root"
         );
-        // creator root itself or in a sibling creator's tree.
         let owner_root = PathBuf::from("/h/.nexus42/creators/ctr_owner");
         assert!(root.starts_with(&owner_root));
         assert!(!root.starts_with("/h/.nexus42/creators/ctr_other"));
@@ -1228,7 +1223,6 @@ mod tests {
 
     #[test]
     fn is_valid_character_id_matches_minted_format() {
-        // `chr_` + 32 lowercase hex.
         assert!(is_valid_character_id(
             "chr_0123456789abcdef0123456789abcdef"
         ));

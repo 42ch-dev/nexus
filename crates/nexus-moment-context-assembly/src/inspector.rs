@@ -88,14 +88,12 @@ pub fn build_inspector_packet(ctx: &MomentContext) -> serde_json::Value {
         })
         .collect();
 
-    // activation ran) renders zeros with null cap/remaining.
     let budget = serde_json::json!({
         "primary_tokens_est": ctx.activation_budget.as_ref().map_or(0, |b| b.primary_tokens_est),
         "hop_tokens_est": ctx.activation_budget.as_ref().map_or(0, |b| b.hop_tokens_est),
         "cap": ctx.activation_budget.as_ref().and_then(|b| b.cap),
         "remaining": ctx.activation_budget.as_ref().and_then(|b| b.remaining),
     });
-    // construction** (AC-I3). `"none"` + nulls when no directive injected.
     let moment_directive = match ctx.moment_directive_meta.as_ref() {
         Some(meta) => serde_json::json!({
             "scope": meta.scope.kind,

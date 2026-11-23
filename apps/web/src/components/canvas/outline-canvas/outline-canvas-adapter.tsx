@@ -1,7 +1,4 @@
 /**
- * Flow nodes/edges and renders surface-specific chrome (inspectors, alt-view,
- * a11y summary).
- *
  * V1.115 P0 T1a: implements the shared {@link CanvasSurfaceAdapter} interface
  * so the orchestrator can delegate projection, node types, summary, and
  * alt-view to the surface (mirrors the V1.114 Strategy + World KB adapters).
@@ -47,10 +44,6 @@ export interface OutlineSurfaceGraph {
   sceneBeatFixture: SceneBeatFixturePayload;
 }
 
-/**
- * single `TNodeData`; `renderInspector` narrows by `node.type` before reading
- * kind-specific fields (each data shape carries `[key: string]: unknown`).
- */
 export type OutlineNodeData =
   | OutlineVolumeNodeData
   | OutlineChapterNodeData
@@ -59,9 +52,6 @@ export type OutlineNodeData =
   | OutlineTimelineEventNodeData;
 
 /**
- * graph, render inspectors / alt-view, and produce an a11y summary without
- * closing over stale values.
- *
  * All fields are read at projection/render time from the ref; the adapter
  * object itself is stable and never recreated.
  */
@@ -76,11 +66,6 @@ export interface OutlineCanvasAdapterContext {
   chapterById: Map<number, ChapterSummary>;
   /** Always-defined fixture used to resolve Beat/Scene entities from node data. */
   fixture: SceneBeatFixturePayload;
-  /**
-   * Studio/test `sceneBeatFixture` prop when present, else the Work's canonical
-   * scenes/beats once they have content. `undefined` keeps the alt view's
-   * honest empty chrome (no empty-under-chapter helper).
-   */
   altViewSceneBeatFixture?: SceneBeatFixturePayload;
 
   onPatchChapter: (chapter: number, request: OutlinePatchChapterRequest) => void;
@@ -161,9 +146,6 @@ export function createOutlineCanvasAdapter(
 }
 
 /**
- * the matching entity (chapter / scene / beat) from the context ref, then
- * renders the appropriate inspector.
- *
  * Mirrors the routing that previously lived inline in `outline-canvas.tsx`:
  *   • outline-beat    → BeatInspector (read-only; resolves beat from fixture)
  *   • outline-scene   → SceneInspector (read-only; resolves scene from fixture)

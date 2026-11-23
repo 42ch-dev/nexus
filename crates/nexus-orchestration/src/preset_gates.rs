@@ -127,10 +127,7 @@ impl PresetInput {
         workspace_root: &Path,
     ) -> Result<PathBuf, GateEvalError> {
         let full_path = workspace_root.join(resolved);
-        // separately, but canonicalize on a missing path errors.
         if !full_path.exists() {
-            // check downstream. Canonicalize is only needed for paths that
-            // exist (to detect symlink escapes).
             return Ok(full_path);
         }
         let canonical_full =
@@ -333,13 +330,6 @@ fn work_field_remediation(field: &str) -> String {
         "work_ref" => "Run `creator bootstrap --init-preset novel-project-init` to set work_ref. \
              See the creator-run-preset-entry spec"
             .to_string(),
-        // `creator bootstrap --preset creative-brief-intake`, which is wrong:
-        // `--preset` overrides the PRODUCTION preset (not intake — intake is
-        // always `creative-brief-intake` and hardcoded in bootstrap), and
-        // `creator bootstrap` creates a NEW Work rather than completing
-        // intake on the existing one. Per creator-run-preset-entry §3.2,
-        // intake is triggered only via `creator bootstrap`. The honest
-        // remediation is to tell the user intake runs via bootstrap.
         "intake_status" => "Intake (`creative-brief-intake`) has not completed on this Work. \
              Intake runs automatically during `nexus42 creator bootstrap`. \
              See novel-author-experience §3.2 for the onboarding path."
@@ -817,8 +807,6 @@ mod tests {
         assert_eq!(gate, back);
     }
 
-    /// `work_ref` to be present. Verify that a Work with intake complete
-    /// and a `work_ref` passes all gates.
     #[tokio::test]
     async fn research_gates_pass_with_intake_complete_and_work_ref() {
         let gates = vec![
@@ -904,9 +892,6 @@ mod tests {
         );
     }
 
-    /// excludes raw `.mstar/` paths. Consolidates the per-test `contains()`
-    /// duplication flagged by R-V146P1-QC2-S2 into one semantic helper so
-    /// the assertion contract lives in one place.
     fn assert_remediation_cites_spec(failed: &FailedGate, expected_spec: &str) {
         assert!(
             failed.remediation.contains(expected_spec),
@@ -935,10 +920,6 @@ mod tests {
     /// strings cite the preset-entry spec and an executable command.
     #[tokio::test]
     async fn remediation_work_field_cites_preset_entry_spec() {
-        // so the remediation includes an executable `creator bootstrap`
-        // command, giving command-validity coverage in addition to the spec
-        // citation. `work_profile`'s remediation is field-setting guidance
-        // with no command and is covered by the spec-citation helper.
         let gates = vec![Gate::WorkField {
             field: "work_ref".to_string(),
             op: GateOp::Equals {
@@ -1035,10 +1016,6 @@ mod tests {
         assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
-    /// executable `creator bootstrap` command, not the broken
-    /// `creator bootstrap --preset creative-brief-intake` (which misuses
-    /// `--preset` — that flag overrides the PRODUCTION preset, not intake).
-    ///
     /// Per `creator-run-preset-entry.md` §3.2, intake is triggered only via
     /// `creator bootstrap`; the remediation must reference that command
     /// without the misleading `--preset creative-brief-intake` suffix.
@@ -1069,7 +1046,6 @@ mod tests {
             remediation.contains("creator bootstrap"),
             "intake_status remediation should cite `creator bootstrap`: {remediation:?}"
         );
-        // (that overrides the production preset, not intake).
         assert!(
             !remediation.contains("--preset creative-brief-intake"),
             "intake_status remediation must not suggest broken `--preset creative-brief-intake`: {remediation:?}"
@@ -1118,8 +1094,6 @@ mod tests {
             }
         }
 
-        // default make_work has intake_status=complete, so the gate above
-        // passes without producing a remediation string).
         {
             let gates = vec![Gate::WorkField {
                 field: "intake_status".to_string(),

@@ -1,6 +1,4 @@
 /**
- * v221-caps-sessions-rail T1).
- *
  * The product page (`components/developer/capabilities-page.tsx`) owns the
  * query, the router read and the i18n lookups; this module owns the markup so
  * the Design Studio fixture can render the same tree from static view models

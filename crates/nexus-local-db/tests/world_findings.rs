@@ -125,7 +125,6 @@ async fn insert_world_finding_roundtrips_verbatim() {
     assert_eq!(row.finding_id, "fnd_test_001");
     assert_eq!(row.world_id, "wld_findings_test");
     assert_eq!(row.schema_version, 1);
-    // mapping.
     assert_eq!(row.severity, "warning");
     assert_eq!(row.status, "open");
     assert_eq!(row.title, "Bo's belief drifted");
@@ -307,10 +306,6 @@ async fn list_by_target_filters_within_world() {
     assert!(empty.is_empty());
 }
 
-/// exactly the newest `cap + 1` rows (so the caller can flag truncation
-/// honestly), the cap itself returns exactly `cap` rows, a limit beyond
-/// the row count returns everything, and a negative limit is clamped to
-/// zero (`SQLite` treats negative `LIMIT` as "no limit").
 #[tokio::test]
 async fn list_by_world_respects_limit() {
     let (pool, _dir) = setup_db().await;
@@ -329,7 +324,6 @@ async fn list_by_world_respects_limit() {
         .await;
     }
 
-    // the caller sees `len > cap` and flags truncation honestly.
     let probe = list_world_findings_by_world(&pool, "wld_findings_test", 501)
         .await
         .unwrap();
@@ -347,7 +341,6 @@ async fn list_by_world_respects_limit() {
         .unwrap();
     assert_eq!(all.len(), 502);
 
-    // "no limit" and silently reintroduce the unbounded query.
     let zero = list_world_findings_by_world(&pool, "wld_findings_test", -1)
         .await
         .unwrap();

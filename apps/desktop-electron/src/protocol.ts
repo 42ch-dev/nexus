@@ -155,7 +155,6 @@ export function desktopPathHasTraversal(urlPath: string): boolean {
     return true;
   }
   if (decoded.includes('\0')) return true;
-  // `..` segments (e.g. "a/../../b" → "../b") and hide the traversal attempt.
   const relative = decoded.replace(/^\/+/, '');
   return relative.split('/').includes('..');
 }
@@ -227,12 +226,6 @@ export function allowDesktopNavigation(
   if (url !== url.trim()) return false;
   return isDesktopAppOrigin(url, options);
 }
-
-// contract (`isAllowedDesktopExternalUrl` in desktop-contract.ts); it is
-// re-exported here so existing protocol consumers keep one import site. The
-// implementation is NOT duplicated: raw-string C0/DEL + whitespace + size
-// checks run before WHATWG parsing, then http/https, nonempty host, no
-// userinfo.
 
 export { isAllowedDesktopExternalUrl } from './desktop-contract.js';
 

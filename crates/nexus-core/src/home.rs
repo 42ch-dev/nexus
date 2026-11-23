@@ -153,7 +153,6 @@ impl CoreHomeService {
 
         let global_db = self.nexus_home.join("state.db");
 
-        // the registration is a no-op or a collision).
         if let Some(trimmed) = display_name.as_deref() {
             if global_db.exists() {
                 let matches = self.read_persistent_matches(&global_db, trimmed).await?;
@@ -186,8 +185,6 @@ impl CoreHomeService {
             }
         }
 
-        // guarded initialization factory), INSERT, optional platform link,
-        // then the active-creator config write.
         std::fs::create_dir_all(&self.nexus_home).map_err(|e| CoreError::Internal {
             category: format!("home_dir_create: {e}"),
         })?;
@@ -205,11 +202,6 @@ impl CoreHomeService {
         )
         .await;
         if let Err(err) = inserted {
-            // name minted concurrently between our 0-match read and this
-            // INSERT (TOCTOU): surface the same honest collision. The
-            // collision read must run on the still-open pool — reading after
-            // the close would turn a concurrent same-name registration into
-            // an internal closed-pool failure instead of the collision error.
             if let nexus_local_db::LocalDbError::Sqlx(sqlx::Error::Database(db_err)) = &err {
                 if db_err.is_unique_violation() {
                     let collision = match nexus_local_db::list_local_identities(&pool).await {
@@ -250,9 +242,6 @@ impl CoreHomeService {
 
         Ok(CreatorDetail {
             creator_id,
-            // `creators` row (and with it the holder registry row) is
-            // materialized by the workspace-selection path, so no registry
-            // state is at hand to project here.
             holder_entry_id: None,
             display_name,
             handle: None,
@@ -279,7 +268,6 @@ impl CoreHomeService {
         }
         Ok(CreatorDetail {
             creator_id: creator_id.to_string(),
-            // pool, so there is no registry state to project.
             holder_entry_id: None,
             display_name: display_name.map(str::to_string),
             handle: None,
@@ -378,7 +366,6 @@ impl CoreHomeService {
             )));
         }
 
-        // empty, and a later failure removes just the artifacts we added.
         let preexisting_root = creative_root.is_dir().then_some(creative_root.as_path());
         if let Some(root) = preexisting_root {
             if !directory_is_empty(root)? {
@@ -564,10 +551,6 @@ impl CoreHomeService {
         }
         deny_foreign_workspace(&op_dir, &creator_id, workspace_slug)?;
 
-        // selection: guarded initialization factory (Direct-writer admission
-        // + migrations + seed versions) and the workspace `creators` row the
-        // FK-prechecks rely on. The pool is closed before returning — the
-        // home entry holds no workspace pool.
         let db_path = workspace_state_db_path(&self.user_home, &creator_id, workspace_slug);
         let row_display_name = self.resolved_display_name(&creator_id).await;
         let pool = nexus_local_db::init_pool(&db_path)
@@ -578,12 +561,8 @@ impl CoreHomeService {
         pool.close().await;
         materialized.map_err(local_db_err)?;
 
-        // workspace's discovery metadata so it is listable (D25 — the first
-        // workspace is selected, never created over HTTP).
         self.ensure_workspace_registration(&creator_id, workspace_slug)?;
 
-        // after initialization fully succeeded, so an initialization failure
-        // preserves the previous selection instead of committing a broken one.
         write_active_selection(
             &self.nexus_home,
             &creator_id,
@@ -621,8 +600,6 @@ impl CoreHomeService {
 
         let workspace_json = creative_meta.join("workspace.json");
         if !workspace_json.exists() {
-            // `默认工作区`; an additional workspace names itself by slug (the
-            // deferred create route supplies its own display name).
             let display_name = if slug == "default" {
                 "默认工作区"
             } else {
@@ -877,9 +854,6 @@ fn directory_is_empty(dir: &Path) -> CoreResult<bool> {
         field: "creative_root".to_string(),
         reason: "not readable".to_string(),
     })?;
-    // directory that only carries them must not read as "already holds
-    // content". `.DS_Store` (Finder), `desktop.ini` (Explorer) and `Thumbs.db`
-    // (Explorer thumbs) are the three platforms' equivalents.
     Ok(entries.all(|entry| {
         entry.is_ok_and(|entry| {
             entry

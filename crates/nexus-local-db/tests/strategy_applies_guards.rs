@@ -121,7 +121,6 @@ async fn the_migration_applies_to_a_database_that_already_holds_rows() {
     let (pool, _dir) = pool().await;
     insert_approval(&pool, STRATEGY_A, "approval-a", "hash-a").await;
 
-    // table, and sqlx only re-applies a migration whose record is gone.
     sqlx::query("DROP TABLE strategy_applies")
         .execute(&pool)
         .await
@@ -261,7 +260,6 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
         "{cross}"
     );
 
-    // row is still the one a same-strategy supersede would name.
     let applied_by: String =
         sqlx::query_scalar("SELECT applied_by FROM strategy_applies WHERE apply_id = 'apply-a'")
             .fetch_one(&pool)

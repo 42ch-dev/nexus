@@ -14,8 +14,6 @@
 //! fires `STORED_REVISION_STALE` when the store is ahead and
 //! `REVISION_CONFLICT` when the caller claims an impossible future revision.
 
-// in this test crate) plus main-only `use` entries. Silence those lints on
-// the module so the test crate compiles warning-clean.
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
@@ -81,7 +79,6 @@ fn project_request(entry_id: &str) -> ProjectRequest {
 
 #[tokio::test]
 async fn orchestrate_upsert_happy_create_path() {
-    // create path (`expected_base_revision = None`, entry absent) fires.
     let mock = seeded_mock();
     let new_id = "kb_aran";
     let request = upsert_request(&[upsert_entry_wire(new_id, 0)]);
@@ -107,11 +104,6 @@ async fn orchestrate_upsert_happy_create_path() {
 
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_create_when_exists() {
-    // the entry is absent → derives `expected_base_revision = None` and
-    // treats this as a create (`validate_create_path` requires revision ≤ 0
-    // on create, hence candidate_rev=0). The orchestrator then calls our
-    // mock's put with `None` against an entry that IS present →
-    // `KnowledgeEntryAlreadyExists`.
     let mock = seeded_mock();
     mock.mask_next_get(SEEDED_ENTRY_ID);
 
@@ -123,13 +115,6 @@ async fn orchestrate_upsert_cas_reject_create_when_exists() {
 
 #[tokio::test]
 async fn orchestrate_upsert_happy_update_path() {
-    // carry the same revision as stored (the library's
-    // `validate_update_path` calls `assert_revision_match(candidate.revision,
-    // stored.revision)` before touching our port). The orchestrator then
-    // derives `expected_base_revision = Some(stored_rev)`, which equals the
-    // candidate's revision, and the mock's CAS accepts. The persisted entry
-    // reflects the candidate's body (canonical_name updated here to prove
-    // the replace took effect).
     let mock = seeded_mock();
     let updated_wire = json!({
         "schema_version": 1,
@@ -165,9 +150,6 @@ async fn orchestrate_upsert_happy_update_path() {
 
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_stale_revision() {
-    // returns revision 1 → orchestrator derives `expected_base_revision =
-    // Some(1)` → calls put(candidate, Some(1)). Mock CAS sees stored(3) >
-    // expected(1) → `STORED_REVISION_STALE` (caller read a stale base).
     let mock = NexusBaselineMock::with_seeded_entry(knowledge_entry(SEEDED_ENTRY_ID, 3));
     mock.override_next_get_revision(SEEDED_ENTRY_ID, 1);
 
@@ -187,10 +169,6 @@ async fn orchestrate_upsert_cas_reject_stale_revision() {
 
 #[tokio::test]
 async fn orchestrate_upsert_cas_reject_conflict() {
-    // returns revision 5 → orchestrator derives `expected_base_revision =
-    // Some(5)` → calls put(candidate, Some(5)). Mock CAS sees stored(1) <
-    // expected(5) → `REVISION_CONFLICT` (caller expects an impossible
-    // future revision the store has never reached).
     let mock = NexusBaselineMock::with_seeded_entry(knowledge_entry(SEEDED_ENTRY_ID, 1));
     mock.override_next_get_revision(SEEDED_ENTRY_ID, 5);
 
@@ -223,8 +201,6 @@ async fn orchestrate_promote_happy_path() {
 
 #[tokio::test]
 async fn orchestrate_promote_cas_reject_stale() {
-    // orchestrator's `assert_revision_match(1, 2)` fires before reaching
-    // the mock's put: actual(2) > expected(1) → `STORED_REVISION_STALE`.
     let mock = seeded_mock();
 
     let result =
@@ -234,8 +210,6 @@ async fn orchestrate_promote_cas_reject_stale() {
 
 #[tokio::test]
 async fn orchestrate_assemble_happy_path() {
-    // packet builder assembles the scoped entries into an AssemblePacket
-    // keyed by `assemble:<scope_id>`.
     let mock = seeded_mock();
 
     let result =
@@ -252,9 +226,6 @@ async fn orchestrate_assemble_happy_path() {
 
 #[tokio::test]
 async fn orchestrate_check_happy_path() {
-    // the product checker callback, persists findings. A trivial callback
-    // returning Ok(empty) exercises the full pipeline without product
-    // logic.
     let mock = seeded_mock();
     let request = check_request("world_1", SEEDED_ENTRY_ID);
 
@@ -274,15 +245,6 @@ async fn orchestrate_check_happy_path() {
         _ => panic!("expected check success, got {result:?}"),
     }
 }
-
-//
-// implements the seven baseline port families (delegating to the mock) and
-// manually implements `ComputablePorts` returning `None` — i.e. it claims
-// the computable capability boundary without backing it with a
-// `ComputablePort` impl. `orchestrate_project` probes
-// `ComputablePorts::as_computable()` and surfaces
-// `CAPABILITY_PORT_MISSING` (spec §7.3 capability reject path) before any
-// request validation.
 
 struct BaselineOnlyPorts(NexusBaselineMock);
 
@@ -371,9 +333,6 @@ impl HostManifestPort for BaselineOnlyPorts {
     }
 }
 
-// (which only fires for `BaselinePorts + ComputablePort`). Because
-// `BaselineOnlyPorts` does NOT impl `ComputablePort`, the blanket does not
-// apply and this manual impl is the one the orchestrator sees.
 impl ComputablePorts for BaselineOnlyPorts {
     fn as_computable(&self) -> Option<&dyn ComputablePort> {
         None
@@ -384,7 +343,6 @@ impl ComputablePorts for BaselineOnlyPorts {
 async fn capability_missing_reject() {
     let ports = BaselineOnlyPorts(seeded_mock());
 
-    // before `validate_project_request`, so the request body is irrelevant.
     let result = orchestrate_project(&ports, project_request(SEEDED_ENTRY_ID)).await;
     expect_reject_with_code(result, SpokeRejectCode::CapabilityPortMissing);
 }
@@ -418,5 +376,4 @@ impl ExpectOkEntry for SpokeResult<KnowledgeEntry> {
     }
 }
 
-// fixture API re-exported above and may be exercised by future scenarios.
 const _: fn(&str, u64) -> Value = knowledge_entry_wire;

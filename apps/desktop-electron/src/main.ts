@@ -293,9 +293,6 @@ export interface ComposeDesktopHostOptions {
       session: SessionLike,
       getActiveAuth: () => ActiveConnectionAuth | null,
     ) => void;
-    /**
-     * macOS-keychain/app-data adapter over `app.getPath('appData')`.
-     */
     legacyCredentials?: LegacyCredentialAdapter;
   };
 }
@@ -354,10 +351,6 @@ export interface LegacyCredentialAdapter {
 }
 
 export interface LegacyCredentialAdapterDeps {
-  /**
-   * argv is asserted WITHOUT reading or writing the user's keychain; the
-   * default runs the real CLI with a bounded timeout.
-   */
   runSecurity?: (args: string[]) => Promise<{ stdout: string }>;
   /** Filesystem removal primitive (defaults to `rmSync`). */
   removeFile?: (filePath: string) => void;
@@ -413,7 +406,6 @@ export function createLegacyCredentialAdapter(
             LEGACY_KEYCHAIN_ACCOUNT,
           ]);
         } catch (err) {
-          // failure (locked keychain, denied access, …) must surface.
           if (Number((err as { code?: unknown } | null)?.code) !== SECURITY_ITEM_NOT_FOUND) throw err;
         }
       }
@@ -443,8 +435,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   const resolvedPort = resolveDesktopServicePort(undefined, input.env);
   const localEndpoint = `http://${DESKTOP_SERVICE_HOST}:${resolvedPort}`;
-  // as every remote endpoint, so the CSP fallback below can never be the
-  // reason a response is emitted without a policy.
   const localServiceOrigin = connectionEndpointOrigin(localEndpoint);
   const navigationOptions = { dev };
 
@@ -462,7 +452,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
   const config = createDesktopConfig(input.paths.home, input.paths.documentsPath);
   const { resolveWorkspaceRoot, ...configHandlers } = config;
 
-  // carries the removal of both plaintext originals.
   const legacyCredentials =
     adapters.legacyCredentials ?? createLegacyCredentialAdapter(e.app.getPath('appData'));
   const connectionStore =
@@ -473,13 +462,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       readLegacy: () => legacyCredentials.read(),
       cleanupLegacy: () => legacyCredentials.cleanup(),
     }));
-  // channels: the durable main-process diagnostic (the legacyCleanupFailure
-  // stderr shape, extended with the typed classification code) and a one-shot
-  // window-less notice. The compose seam runs after
-  // `whenReady` and before any window exists, and `.catch` keeps a dialog
-  // failure from ever failing boot; the stderr write stays the durable
-  // record. The dialog copy names the classification in user-facing words and
-  // never carries the raw code, a file path, or secret material.
   if (connectionStore.openFailure !== null) {
     const openFailureCode = errorCode(connectionStore.openFailure);
     process.stderr.write(
@@ -509,10 +491,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   attachNetworkHooks(e.session, () => connectionStore.getAuth());
 
-  // origin (frozen contract: main validates and inserts exact origins only).
-  // The origin is derived ONLY through the shared endpoint grammar; a stored
-  // config that fails it (or an unreadable store) falls back to the validated
-  // app-managed local origin, so no response is ever sent without a policy.
   const activeServiceOrigin = (): string => {
     if (activeConfig?.active === true) {
       try {
@@ -700,8 +678,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
 
   function hardenWindow(win: BrowserWindow): void {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    // link must call `open_external_url` — an untrusted navigation is never
-    // auto-opened as an external URL.
     win.webContents.on('will-navigate', (event, url) => {
       if (!allowDesktopNavigation(url, navigationOptions)) event.preventDefault();
     });
@@ -712,7 +688,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       if (currentWindow === win) {
         currentWindow = null;
       }
-      // a renderer crash and no second owner is created.
       recreateWindow();
     });
   }
@@ -745,10 +720,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     return win;
   }
 
-  // one's registration and disposes it (it is superseded by definition —
-  // whether it won and was stored, or resolved late and was not) before the
-  // current one binds. ipcMain allows a single handler per channel, so a
-  // stale in-flight binding must never coexist with the live one (QC1 F-001).
   let inflightRegistration: Promise<RegisterDesktopIpcResult | null> | null = null;
   function selectWindow(win: BrowserWindow): Promise<void> {
     generation += 1;
@@ -763,9 +734,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
         getCurrentGeneration: () => generation,
         dev,
       });
-      // clobber the live binding. It is NOT disposed here: the newer
-      // selection (which is awaiting us as `previous`) disposes us exactly
-      // once, always before it re-binds the sole invoke channel.
       if (currentWindow === win && generation === boundGeneration) {
         ipcRegistration = registration;
         ipcBindings.push({
@@ -800,8 +768,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
       await selectWindow(win);
     })()
       .catch((err) => {
-        // leaves the visible window without its bridge — that must be
-        // visible in main-process diagnostics (QC1 F-001).
         process.stderr.write(`[desktop] window replacement registration failed: ${errorMessage(err)}\n`);
       })
       .finally(() => {
@@ -846,8 +812,6 @@ export async function composeDesktopHost(input: ComposeDesktopHostOptions): Prom
     }
   });
 
-  // through here. DesktopQuitController is single-flight, so a re-raised
-  // before-quit during the decision joins the same promise.
   let quitAllowed = false;
   e.app.on('before-quit', (event) => {
     if (quitAllowed) return;
@@ -906,7 +870,6 @@ async function bootstrap(): Promise<void> {
     : join(__dirname, '..', 'resources');
   const product = loadProductIdentity(resourcesDir);
 
-  // it never spawns a duplicate service.
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return;
@@ -976,14 +939,11 @@ async function bootstrap(): Promise<void> {
     nodeExecutable,
   });
 
-  // diagnostic channel and the app keeps running: the encrypted store is
-  // authoritative and the plaintext source is retried by the next launch.
   if (host.connectionStore.legacyCleanupFailure !== null) {
     process.stderr.write(`[desktop] ${errorMessage(host.connectionStore.legacyCleanupFailure)}\n`);
   }
 }
 
-// imports get the composition factory without side effects.
 if (process.type === 'browser') {
   bootstrap().catch((err) => {
     process.stderr.write(`[desktop] bootstrap failed: ${errorMessage(err)}\n`);

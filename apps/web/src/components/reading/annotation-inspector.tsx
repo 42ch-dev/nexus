@@ -14,7 +14,6 @@ import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 
-// it stays in sync with `@42ch/nexus-contracts` rather than being hardcoded.
 type ReadingAnnotationColor = ReadingAnnotation['color'];
 
 const ANNOTATION_COLORS: ReadingAnnotationColor[] = ['yellow', 'blue', 'green', 'pink'];

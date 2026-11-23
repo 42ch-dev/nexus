@@ -191,8 +191,6 @@ export function collectCommits(repoRoot, baseRef, headRef = "HEAD") {
 export function resolveChangelogBase(repoRoot) {
   const tags = runGit(repoRoot, ["tag", "--list", "v*"]);
   if (tags.status === 0) {
-    // `v0.2.0-rc.1` above `v0.2.0` unless `versionsort.suffix` is configured,
-    // an environment coupling this module refuses to inherit.
     /** @type {string | null} */
     const newest = tags.stdout
       .split("\n")

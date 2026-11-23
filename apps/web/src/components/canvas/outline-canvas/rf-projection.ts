@@ -35,8 +35,6 @@ import type {
   SceneFixture,
 } from './graph-projection';
 
-// consumers import it from one barrel (the projection SSOT). The canonical
-// definition lives in `graph-projection.ts` (lowest-level shared module).
 export type { OutlineSceneStatus } from './graph-projection';
 
 /** React Flow node data for a Volume lane node. */
@@ -180,9 +178,6 @@ export function projectOutlineGraph(
 
   const allNodes = [...volumeNodes, ...chapterNodes, ...eventNodes];
 
-  // of Chapter parents; Beats are children of Scene parents. Orphans (scene
-  // whose chapter is absent, beat whose scene is absent) are filtered so the
-  // projection never emits a `parentId` pointing at a non-existent node.
   const chapterIds = new Set(chapters.map((c) => c.chapter));
   const sceneNodes = layoutSceneNodes(outline.work_id, sceneBeatFixture, chapterIds);
   const emittedSceneIds = new Set(sceneNodes.map((n) => (n.data as OutlineSceneNodeData).sceneId));
@@ -192,10 +187,6 @@ export function projectOutlineGraph(
 
   const allEdges = [...containsEdges, ...realizesEdges, ...foreshadowEdges];
 
-  // exist. Chapter data is paginated (20/page) and the orchestrator auto-fetches
-  // remaining pages, but this guard ensures the projection never emits a
-  // dangling edge if a chapter referenced by the outline is absent from the
-  // loaded pages or the chapters list entirely.
   const nodeIds = new Set(allNodesWithSceneBeat.map((n) => n.id));
   const edges = allEdges.filter(
     (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
@@ -298,21 +289,12 @@ export function layoutTimelineEventNodes(outline: WorkOutline): Node<OutlineTime
   });
 }
 
-// `position` is **relative to the parent node's top-left**, not the canvas
-// origin. Scenes stack vertically inside their Chapter parent; Beats stack
-// vertically inside their Scene parent. The exact offsets are a pragmatic
-// deterministic grid — the layout engine (dagre/elk) is deferred.
-
 /** Relative offset from the parent's top-left where the first child starts. */
 const CHILD_ORIGIN_X = 8;
 const CHILD_ORIGIN_Y = 40;
 /** Vertical stride between stacked children inside the same parent. */
 const CHILD_ROW_Y = 56;
 
-/**
- * in `chapterIds` (chapter not loaded / doesn't exist) are skipped so the
- * projection never emits a dangling `parentId`.
- */
 export function layoutSceneNodes(
   workId: string,
   fixture: SceneBeatFixturePayload | undefined,
@@ -320,7 +302,6 @@ export function layoutSceneNodes(
 ): Node<OutlineSceneNodeData>[] {
   if (!fixture || fixture.scenes.length === 0) return [];
 
-  // then assign per-parent child indices for the vertical offset.
   const perChapter = new Map<number, SceneFixture[]>();
   for (const scene of fixture.scenes) {
     if (!chapterIds.has(scene.chapterId)) continue;
@@ -446,7 +427,6 @@ export function deriveForeshadowEdges(outline: WorkOutline): Edge<OutlineEdgeDat
       target: eventNodeId(link.target_event_id),
       type: 'straight',
       data,
-      // (FB-C1-006). Not selectable in the T1 minimum; focusable for a11y.
       selectable: false,
       focusable: true,
       style: { stroke: 'var(--color-canvas-outline-foreshadow-edge)' },

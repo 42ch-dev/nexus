@@ -176,8 +176,6 @@ pub async fn run(cmd: RuleCommand, config: &CliConfig) -> Result<()> {
         }
     }
     .await;
-    // seam released the writer, so a refused or unsettleable write is never
-    // reported as an added/listed/deactivated rule.
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
     }
@@ -223,8 +221,6 @@ fn parse_constraint_object(constraint_json: &str) -> Result<Map<String, Value>> 
 /// carrier outside the closed grammar, the core's World-ownership refusal
 /// (403) or a storage error.
 #[allow(clippy::too_many_arguments)]
-// ten PD-1 flags into a struct would add indirection for the two callers
-// (CLI + tests).
 pub async fn rule_add(
     core: &CoreService,
     principal: &Principal,
@@ -304,7 +300,6 @@ pub async fn rule_list(
     include_archived: bool,
     json: bool,
 ) -> Result<Option<String>> {
-    // rows in SQL before the 501-row probe (`--include-archived` reveals them).
     let response = core
         .list_world_rules(principal, world_id.to_string(), include_archived)
         .await
@@ -373,7 +368,6 @@ pub async fn rule_deactivate(
         world_id.to_string(),
         rule_id.to_string(),
         request,
-        // `status` alone (the generated DTO cannot state that itself).
         RulePatchPresence::from_supplied_keys(&["status"]),
     )
     .await

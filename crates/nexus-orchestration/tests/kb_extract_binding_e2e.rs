@@ -102,9 +102,6 @@ async fn test_worldless_work_skips_world_promotion() {
     // This test verifies the enqueue still works (no FK violation) and
     // that prepare_extract uses Generic validation mode.
 
-    // — AC3 empty/absent world_id test gap: this test uses a present world_id
-    // in Generic mode; a dedicated test for truly empty/absent world_id is deferred.
-
     let store = InMemoryKbStore::new();
     let body = KnowledgeEntryBody {
         summary: Some("A generic knowledge item".to_string()),
@@ -180,7 +177,6 @@ async fn test_extract_idempotent_job() {
 
 #[tokio::test]
 async fn test_extract_novel_requires_novel_category() {
-    // id is allocated or any store is touched.
     let body = KnowledgeEntryBody {
         summary: Some("Test".to_string()),
         attributes: Some(serde_json::json!({})), // missing novel_category

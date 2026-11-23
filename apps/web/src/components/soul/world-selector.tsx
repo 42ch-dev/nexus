@@ -19,7 +19,6 @@ export function worldOptionLabel(
   fragmentCount: number,
   t: TFunction<'memory'>,
 ): string {
-  // only for the degenerate empty-string case.
   const countText = fragmentCount > 0 ? t('soul.fragmentCount', { count: fragmentCount, keyword: world.title ?? world.world_id }) : t('soul.noFragments');
   return `${world.title ?? world.world_id} (${countText})`;
 }

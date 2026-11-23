@@ -261,7 +261,6 @@ async fn referenced_id_entries_loaded() {
     );
     params.insert("difficulty".to_string(), Value::String("hard".to_string()));
 
-    // initial computable query — the defender is loaded via `_id`.
     let manifest = basic_manifest(vec!["character"]);
     let builder =
         ComputeInputBuilder::new(pool, "wld_test", manifest, params, test_scope("wld_test"));
@@ -364,7 +363,6 @@ async fn holder_private_rows_excluded_from_the_admitted_scope() {
     )
     .await;
 
-    // exclusion below is the selection's policy rather than an empty store.
     let unscoped = SqliteKbStore::new(pool.clone())
         .query(&nexus_knowledge::world_kb::KbQuery::new("wld_test"))
         .await
@@ -560,7 +558,6 @@ async fn narrative_state_shape() {
 async fn world_ref_contains_expected_fields() {
     let (_dir, pool) = test_pool().await;
 
-    // pattern (evt_ + hex) to satisfy the newtype regex guard.
     let head_id = "evt_0";
     seed_world_with_head(&pool, "wld_test", head_id).await;
 

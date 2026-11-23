@@ -237,9 +237,6 @@ fn v2_target_system_subcommands() {
     }
 }
 
-// removed with the `creator kb` group (the parser now refuses the group; see
-// `kb_rescan_cli.rs`).
-
 /// V2 Target: `acp session --help` shows list, show, delete subcommands.
 #[test]
 fn v2_target_acp_session_subcommands() {
@@ -360,9 +357,6 @@ fn acp_run_shows_run_id_flag() {
     );
 }
 
-// etc.) replaced by generic `creator run <preset_id>` dispatch; v1.193 P2-T1 then
-// removed that runner too, so these leaves are simply gone.
-
 /// Verify `creator works` subcommands exist (DF-60 §6.2H, V1.41).
 #[test]
 fn v141_creator_works_subcommands() {
@@ -384,9 +378,6 @@ fn v141_creator_works_subcommands() {
     }
 }
 
-// `v141_run_start_from_work_accepts_work_id`, `v141_resume_reopen_without_reason_rejects`
-// removed — old subcommands replaced by generic dispatch.
-
 /// AC5 (V1.41 QA blocker): `creator works pool inspiration add --help` must document
 /// that the pool is distinct from per-Work `works.inspiration_log`.
 #[test]
@@ -406,10 +397,6 @@ fn v141_pool_inspiration_help_disambiguates_from_work_log() {
         "AC5: 'creator works pool inspiration add --help' must mention 'inspiration_log' to disambiguate from per-Work log"
     );
 }
-
-// `v136_creator_run_start_has_init_preset_flag` removed — old subcommands replaced by generic dispatch.
-
-// removed with the PL-6 `system preset` forwarding alias.
 
 /// V1.35 P2: `platform sync --help` shows pull, push, status subcommands.
 #[test]
@@ -458,10 +445,6 @@ fn v135_root_help_shows_canonical_groups_and_no_top_level_sync() {
         );
     }
 
-    // may still appear in long_about examples ("nexus42 platform sync pull")
-    // which is intentional. So we check that `sync` does NOT appear as a
-    // top-level Commands entry — i.e. not in the "Commands:" section after
-    // the long_about examples.
     let commands_section = help_text
         .split("Commands:")
         .nth(1)
@@ -480,7 +463,6 @@ fn v135_root_help_shows_canonical_groups_and_no_top_level_sync() {
 #[cfg(feature = "connect-host")]
 #[test]
 fn v1193_connect_help_describes_served_compute_surface() {
-    // case) before matching the pinned phrases.
     fn flattened(args: &[&str]) -> String {
         let output = Command::cargo_bin("nexus42")
             .unwrap()
@@ -550,9 +532,6 @@ fn v135_root_long_about_mentions_creator_works_and_workspace() {
     );
 }
 
-// `v135_creator_help_mentions_kb_namespaces` removed with the `creator kb`
-// group.
-
 /// v231: the retired `creator kb` / `creator knowledge` / `creator reference`
 /// groups are unregistered, so the parser rejects them as unknown subcommands.
 #[test]
@@ -565,11 +544,6 @@ fn v231_retired_creator_knowledge_and_reference_groups_are_unknown() {
             .code(2);
     }
 }
-
-// `v135_chain_novel_writing_opt_out_syntax_accepted`,
-// `v136_start_help_mentions_auto_completion`,
-// `v137_stage_advance_has_force_gates_flags`, `v137_run_start_has_force_gates_flags`
-// removed — old subcommands replaced by generic dispatch with --force-gates/--reason.
 
 /// Invalid bundle fixture: `preset.initial` names a state that does not
 /// exist — the structural defect `loader_validate_manifest_compat` rejects.
@@ -650,14 +624,6 @@ fn preset_validation_rejects_invalid_bundle_without_daemon() {
         "v1.193 P1-T1: validation must not add files to the bundle"
     );
 
-    // and in the ID-bearing shape the deleted pre-parse interceptor used to
-    // match (R-V1193-P1T1-PRESET-RUN-HELP-INTERCEPT): `--help` after a preset id
-    // reached `extract_run_help_target`, which printed the manifest-enriched
-    // help for a `cli_args`-declaring preset and exited 0 before clap parsed
-    // anything. The second shape is the discriminating one —
-    // `novel-manuscript-audit-review` declares `cli_args`, so pre-fix it was
-    // answered from the interceptor (exit 0, custom help on stdout) instead of
-    // reaching the parser.
     for args in [
         &["preset", "run", "--help"][..],
         &["preset", "run", "novel-manuscript-audit-review", "--help"][..],
@@ -991,7 +957,6 @@ fn retired_operator_entrances_are_unknown() {
         );
     }
 
-    // removes routing, not the daemon-free inspector.
     Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home.path())
@@ -1272,7 +1237,6 @@ fn v1215_creator_primary_id_is_positional() {
              {removed_flag}: {help_text}"
         );
 
-        //    clap usage error (exit 1, `Creator not selected.`). ───────────
         let positional = Command::cargo_bin("nexus42")
             .unwrap()
             .env("HOME", home.path())
@@ -1298,7 +1262,6 @@ fn v1215_creator_primary_id_is_positional() {
             "v1.215 P1-T5: the declared refusal for `{leaf_label} <id>`: {positional_stderr}"
         );
 
-        //    it prints names the new positional instead. ──────────────────
         let old = Command::cargo_bin("nexus42")
             .unwrap()
             .env("HOME", home.path())

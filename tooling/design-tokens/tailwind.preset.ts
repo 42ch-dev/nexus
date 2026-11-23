@@ -51,9 +51,6 @@ const preset: Partial<Config> = {
           600: cv('gray-alpha-600'),
         },
         scrim: cv('scrim'),
-        // (V1.121: error landed P1 T2; success/warning/info added P2 T4 to
-        // tokenize preset-validation status cards + canvas live-session banner;
-        // theme-aware via .dark overrides).
         'error-surface': cv('error-surface'),
         'error-surface-border': cv('error-surface-border'),
         'success-surface': cv('success-surface'),
@@ -64,7 +61,6 @@ const preset: Partial<Config> = {
         'info-surface-border': cv('info-surface-border'),
         'data-table-row-protected': cv('data-table-row-protected'),
         'main-banner-background': cv('main-banner-background'),
-        // (V1.121 P1 T3; tinted fill + semantic text + border per status).
         'finding-status': {
           open: {
             bg: cv('finding-status-open-bg'),
@@ -124,7 +120,6 @@ const preset: Partial<Config> = {
             border: cv('memory-task-kind-unknown-border'),
           },
         },
-        // components.reading-maturation-badge.
         'reading-maturation': {
           'kb-density': {
             bg: cv('reading-maturation-kb-density-bg'),
@@ -137,9 +132,6 @@ const preset: Partial<Config> = {
             border: cv('reading-maturation-open-findings-border'),
           },
         },
-        // components.badge-status-pill.soft (v1.183 P0 R-V1121P1QC1-S001
-        // projection; tinted fill + semantic -1000 text + 50% border per
-        // variant). Neutral stays on gray-alpha tokens directly.
         'nexus-ui-badge-soft': {
           running: {
             bg: cv('nexus-ui-badge-soft-running-bg'),
@@ -273,10 +265,6 @@ const preset: Partial<Config> = {
           'strategy-accent': cv('canvas-strategy-accent'),
           'outline-accent': cv('canvas-outline-accent'),
           'worldkb-accent': cv('canvas-worldkb-accent'),
-          // differentiation.md §6.1). Brief=gold-bronze; Narrative=brand
-          // blue; Moment=ink-on-paper. Consumed by Brief-era + Moment
-          // scene/beat node components so a screenshot differentiates the
-          // three layers without reading chrome labels (AC-V1123-20).
           'layer-brief-accent': cv('canvas-layer-brief-accent'),
           'layer-narrative-accent': cv('canvas-layer-narrative-accent'),
           'layer-moment-accent': cv('canvas-layer-moment-accent'),
@@ -324,10 +312,6 @@ const preset: Partial<Config> = {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
         display: 'var(--font-display)',
-        // role's family follows the generated --text-<role>--font-family var so
-        // a DESIGN family edit re-projects through the same single chain. The
-        // fontSize tuple only carries supported options (lineHeight /
-        // letterSpacing / fontWeight); family lives here, not in the tuple.
         'display-32': sv('text-display-32--font-family'),
         'display-24': sv('text-display-24--font-family'),
         'display-20': sv('text-display-20--font-family'),
@@ -347,11 +331,6 @@ const preset: Partial<Config> = {
         'copy-13-mono': sv('text-copy-13-mono--font-family'),
       },
       fontSize: {
-        // typography:* through tooling/design-tokens (generate-tokens.mjs →
-        // project-tokens.mjs → generated tokens.css --text-<role> / metric
-        // tuples). fontSize tuples carry only the supported options; each
-        // role's font-family is projected via the fontFamily theme above —
-        // no handwritten duplicate literals here (single projection chain).
         'display-32': [
           sv('text-display-32'),
           {
@@ -533,9 +512,6 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-input-row-rounded': cv('setup-wizard-surface-input-row-rounded'),
       },
       spacing: {
-        // the matching Tailwind default numeric steps so the utilities resolve
-        // through the --space-* projection chain (values identical to the
-        // defaults; non-DESIGN fractional steps stay on the Tailwind scale).
         '1': sv('space-1'),
         '2': sv('space-2'),
         '3': sv('space-3'),
@@ -562,18 +538,11 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
         dialog: cv('dialog-max-width'),
       },
-      // components.sheet (V1.121 P1 T2; theme-independent). Structural
-      // (non-color) tokens — referenced via the bare `--dialog-*` /
-      // `--sheet-*` namespace, not the `--color-*` helper.
       width: {
         dialog: sv('dialog-width'),
         sheet: sv('sheet-width'),
       },
       opacity: {
-        // wash — promoted from apps/web app-local so every Nexus surface
-        // (incl. design-studio's mirrored gallery) renders the same
-        // disabled chrome. Theme-independent scalar; consumes the
-        // --color-states-disabled-opacity CSS variable.
         disabled: cv('states-disabled-opacity'),
       },
       maxHeight: {

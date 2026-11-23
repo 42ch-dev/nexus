@@ -135,7 +135,6 @@ describe('ClientProvider resume-time fingerprint gate', () => {
   });
 
   it('stays on local transport when a saved config lacks explicit active: true', async () => {
-    // endpointUrl + apiKey) must not redirect the client off loopback.
     vi.mocked(isDesktopBuild).mockReturnValue(true);
 
     const poison: ConnectionConfig = {
@@ -145,7 +144,6 @@ describe('ClientProvider resume-time fingerprint gate', () => {
 
     function Probe() {
       const client = useNexusClient();
-      // leave it undefined.
       const port = 'port' in client ? (client as { port?: number }).port : undefined;
       return (
         <div data-testid="probe">
@@ -308,9 +306,6 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     };
     renderWithGate(config, fetchImpl);
 
-    // for kind=network (the classifier's catch-all for undifferentiated fetch
-    // throws). The block owns headline + body + CTAs; the diagnostic message
-    // rides the `detail` line.
     const block = await screen.findByTestId('transport-error-block');
     expect(block).toHaveAttribute('data-kind', 'network');
     expect(block).toHaveTextContent('Could not connect to the daemon at this address');
@@ -371,12 +366,10 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     };
     renderWithGate(config, fetchImpl, ['/setup']);
 
-    // loading or error shell is shown.
     expect(await screen.findByTestId('child')).toBeInTheDocument();
     expect(screen.queryByText('Verifying daemon identity…')).not.toBeInTheDocument();
     expect(screen.queryByText('Could not verify daemon identity')).not.toBeInTheDocument();
 
-    // not block the route.
     await waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('child')).toBeInTheDocument();
     expect(screen.queryByText('Could not verify daemon identity')).not.toBeInTheDocument();

@@ -271,12 +271,7 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorkReconcileReport
         ),
-        // `ToolExecuteRequest`/`ToolExecuteResponse` pair.
         entry!("schemas/core/tools-api.schema.json", Strict, ToolsApi),
-        // the peer-tools event lane serves (subscribe request/response and the
-        // cursorless gap event) plus the receipt `CoreOperationReceipt`.
-        // Registered Strict like every other core DTO so a field rename on
-        // either side fails the drift gate.
         entry!(
             "schemas/core/core-connect-subscribe-request.schema.json",
             Strict,
@@ -297,12 +292,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CoreOperationReceipt
         ),
-        // registered here on purpose: it is an `allOf` alias to the
-        // daemon-api update-finding-request definition (single tri-state
-        // authority), and `extract_properties` does not follow `allOf` (same
-        // reason `core/chapter-content-query` is absent above). Its shape is
-        // covered by that definition's own entry below, plus the generated
-        // `FindingsApi` parity pinned in `tri_state_presence.rs`.
         entry!("schemas/common/version-ref.schema.json", Strict, VersionRef),
         entry!(
             "schemas/common/source-anchor.schema.json",
@@ -331,7 +320,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SyncPullResponse
         ),
-        // daemon's `{ success, false, error: ErrorResponse }` wire body).
         entry!(
             "schemas/daemon-api/common/error-response.schema.json",
             Strict,
@@ -354,8 +342,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CheckResponse
         ),
-        // packet mirrors build_inspector_packet 1:1 (AC-I3: moment_directive
-        // is status-only, no body field by construction).
         entry!(
             "schemas/daemon-api/inspector/moment-inspect-request.schema.json",
             Strict,
@@ -371,18 +357,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             MomentDirectiveRequest
         ),
-        // nexus-core/tests/context_services.rs
-        // (`retained_moment_directive_set_show_clear_and_scope_ownership`,
-        // migrated from the deleted nexus-daemon-runtime directive_api.rs
-        // fixture in v1.193 P2-T5).
         entry!(
             "schemas/daemon-api/inspector/moment-directive-response.schema.json",
             Strict,
             MomentDirectiveResponse
         ),
-        // struct of each schema is registered; inline/definition structs
-        // (ComputeOutputStateDelta) are emitted by codegen but validated
-        // indirectly via their parent schema.
         entry!(
             "schemas/daemon-api/compute/compute-input.schema.json",
             Strict,
@@ -1318,7 +1297,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListTimelineEventsResponse
         ),
-        // schemas → Strict.
         entry!(
             "schemas/daemon-api/worlds/create-fork-request.schema.json",
             Strict,
@@ -1329,22 +1307,16 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             CreateForkResponse
         ),
-        // item shape is validated indirectly via the parent schema (same
-        // convention as the check-response findings item).
         entry!(
             "schemas/daemon-api/worlds/world-findings-list-response.schema.json",
             Strict,
             WorldFindingsListResponse
         ),
-        // carrier (extensions bag not exposed).
         entry!(
             "schemas/daemon-api/worlds/world-rules-list-response.schema.json",
             Strict,
             WorldRulesListResponse
         ),
-        // roots → Strict. Type structure only (no minLength/enum/format):
-        // value validation lives in the daemon handler so form-producible
-        // the axum Json extractor.
         entry!(
             "schemas/daemon-api/worlds/world-rule-create-request.schema.json",
             Strict,
@@ -1355,8 +1327,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldRuleUpdateRequest
         ),
-        // 201 and PATCH 200 — the WorldRulesListResponseRulesItem shape
-        // verbatim → Strict.
         entry!(
             "schemas/daemon-api/worlds/world-rule-response.schema.json",
             Strict,
@@ -1731,7 +1701,6 @@ fn make_dummy_string(prop_def: &Value) -> Value {
         if format == "date-time" {
             return Value::String("2024-01-01T00:00:00Z".to_string());
         }
-        // which typify maps to `::uuid::Uuid`; the nil UUID round-trips it.
         if format == "uuid" {
             return Value::String("00000000-0000-0000-0000-000000000000".to_string());
         }
@@ -1830,7 +1799,6 @@ fn make_dummy_value(
                 .get("properties")
                 .and_then(|p| p.as_object())
                 .map_or_else(
-                    // KnowledgeOwnerRef unions referenced from daemon-api
                     || {
                         if let Some(first_arm) = prop_def
                             .get("oneOf")
@@ -1851,9 +1819,6 @@ fn make_dummy_value(
                             },
                         );
                         let mut m = serde_json::Map::new();
-                        // pattern's first class is `[a-z]` (the only
-                        // propertyNames shape in the schema corpus today;
-                        // same heuristic spirit as `make_dummy_string`).
                         let key = if prop_def
                             .get("propertyNames")
                             .and_then(|pn| pn.get("pattern"))
@@ -1922,8 +1887,6 @@ fn make_dummy_from_ref(
         },
     );
 
-    // `resolve_ref_file` return "" (which made every cache lookup miss and
-    // hit the silent "dummy" fallback — e.g. StaleFindingsResponse.items).
     let resolved_path = if file_part.is_empty() {
         current_schema_path.to_string()
     } else {

@@ -5,10 +5,7 @@ mod actor_knowledge;
 #[cfg(feature = "provider-host")]
 pub mod actor_sessions;
 mod actors;
-// (I-000564); deliberately not re-exported.
 mod atomic_write;
-// recovery runs on the execution cohort). Approve itself is authoring: it
-// re-simulates the candidate, so it links only with `strategy-authoring`.
 #[cfg(feature = "execution")]
 mod apply;
 #[cfg(feature = "strategy-authoring")]
@@ -25,8 +22,6 @@ mod creators;
 mod error;
 mod findings;
 mod forks;
-// surface that simulates and approves it lives on `strategy-authoring`, so Generate rides
-// that feature rather than the bare execution edge.
 #[cfg(feature = "strategy-authoring")]
 mod generate;
 mod home;
@@ -39,16 +34,12 @@ mod memory_credentials;
 mod memory_pipeline;
 #[cfg(feature = "execution")]
 pub mod owner;
-// core's. The provider crate names no core type, so this `From` impl is the
-// whole boundary between them.
 mod memory_provider_error;
 #[cfg(feature = "memory-remote")]
 mod memory_remote;
 mod memory_selection;
 mod operation_receipts;
 pub mod slug;
-// consumer resolves through. Root-level and gated on its own tiny feature so
-// the Connect host (which links no `execution`) reuses the ONE derivation.
 #[cfg(feature = "operation-id")]
 pub mod operation_id;
 mod outline;
@@ -125,22 +116,17 @@ pub use memory::{MemoryReviewPause, MemoryReviewRendezvous};
 pub use memory_credentials::MemoryCredential;
 pub use memory_selection::{MemoryProviderSelection, RemoteMemoryProviderSelection};
 pub use nexus_home_layout::MemoryProviderConfig;
-// types, and `nexus_core` keeps the path its callers already name.
 pub use nexus_memory_provider::{LegacyContentMigration, LegacyMigrationStatus};
 #[cfg(feature = "execution")]
 pub use owner::{ExecutionBuildObserver, ExecutionHandle, ExecutionOpenError, RunnerDeps};
 pub use presets::PresetError;
 pub use principal::Principal;
-// callers name the Creator record and SOUL profile documents through
-// `nexus_core` instead of a second DTO set.
 #[cfg(feature = "execution")]
 pub use compose::document_bodies;
 pub use compose::{
     BindSlotOp, ComposeDiagnostic, ComposeOp, ComposeOutcome, ComposeRefusal, NestOp,
     PatternPackageRef, ReplaceSubtreeOp, UnnestOp,
 };
-// surface (simulate/approve/import) is what consumes its candidates, so it rides
-// `strategy-authoring`.
 #[cfg(feature = "strategy-authoring")]
 pub use generate::{Correction, GenerateExhaustion, GenerateOutcome, GenerateRequest};
 pub use service::{CoreAccess, CoreOpenOptions, CoreService};

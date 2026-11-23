@@ -51,9 +51,6 @@ impl From<ContentFault> for CoreError {
                 field: code,
                 reason: message,
             },
-            // FILE_READ_ERROR, …) rides verbatim as `<CODE>: <message>`; the
-            // daemon content adapter re-emits the code instead of collapsing it
-            // to the shared `CORE_ERROR` shape.
             ContentFault::Internal { code, message } => Self::Internal {
                 category: format!("{code}: {message}"),
             },
@@ -134,16 +131,11 @@ pub fn resolve_guarded_path(
             field: "chapter_path_unresolvable".to_string(),
             reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
         })?;
-        // match would let `/home/user-data/evil.md` slip past a `/home/user`
-        // root because the string starts with "/home/user".
         if !canonical_target.starts_with(&canonical_root) {
             return Err(forbidden(rel_path));
         }
         Ok(canonical_target)
     } else {
-        // within the workspace root. We walk up to the nearest existing parent
-        // so that missing intermediate directories are still allowed as long
-        // as they would be created inside the root.
         let mut probe = joined.as_path();
         loop {
             if let Ok(canonical) = probe.canonicalize() {
@@ -229,9 +221,6 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
         Err(join) => Err(std::io::Error::other(join)),
     };
 
-    // never reaches the second blocking task, so the target keeps its
-    // previous content. It goes through `spawn_blocking` because the
-    // rename + fsyncs must not stall a Tokio worker.
     let write_result = match prepare_result {
         Ok(()) => {
             let commit_target = target.clone();
@@ -753,9 +742,6 @@ async fn list_chapters(
     let pool = &service.inner.pool;
 
     let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
-    // schema `minimum: 1` at deserialization (`?limit=0` rejects as 400
-    // instead of reaching `chapter_page_meta`), so only the upper bound is
-    // clamped here. Default 50 when absent.
     let limit = u32::try_from(query.limit.map_or(50, |l| l.get().min(100))).unwrap_or(50);
     let fetch_limit = i64::from(limit.saturating_add(1));
 
@@ -931,9 +917,6 @@ async fn patch_chapter(
 
     let record = load_chapter(service, work_id, chapter, volume).await?;
 
-    // a preset gate, so use BadRequest (HTTP 400, code `bad_request`) rather
-    // than PresetGatesFailed (HTTP 422, `preset_gates_failed`) — the previous
-    // observable contract and the semantic meaning of both error categories.
     if req.title.is_some() {
         return Err(ContentFault::BadRequest {
             code: "chapter_title_unsupported".to_string(),
@@ -992,8 +975,6 @@ async fn patch_chapter(
             .then_some(())
             .ok_or_else(|| ContentFault::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-        // row now lives at the new volume; re-fetching with the original query
-        // `volume` would miss it and return 404 on a fully-committed write.
         let fetch_volume = patch.volume.unwrap_or(volume);
         work_chapters::get_chapter(pool, work_id, chapter, fetch_volume)
             .await
@@ -1072,8 +1053,6 @@ mod tests {
                 outcome.is_err(),
                 "prepare must still be queued when the write is cancelled"
             );
-            // runs and exits; the sentinel submitted behind it resolves
-            // only once the pool is free again — FIFO on a single slot.
             let _ = release_tx.send(());
             tokio::task::spawn_blocking(|| ())
                 .await

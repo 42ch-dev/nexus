@@ -103,7 +103,6 @@ describe('FindingDetailPanel — status transitions', () => {
     renderInApp(<FindingDetailPanel workId="w1" finding={finding} />, { client });
 
     fireEvent.click(screen.getByRole('button', { name: /advance finding to triaged/i }));
-    // optimistic cache, so a failed mutation must not alter the displayed row.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /advance finding to triaged/i })).not.toBeDisabled(),
     );

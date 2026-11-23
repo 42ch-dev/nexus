@@ -190,7 +190,6 @@ describe('PresetProfilePage', () => {
     const badge = await screen.findByTestId('profile-signals-not-delivered');
     expect(badge).toHaveTextContent('Declared, not delivered');
 
-    // bindable webhooks; lifecycle runs through the signal actions.
     const card = screen.getByTestId('profile-signals');
     expect(card).toHaveTextContent(
       'declared, not delivered. Nothing fires them at runtime and they are not bindable webhooks',
@@ -206,7 +205,6 @@ describe('PresetProfilePage', () => {
     expect(stop).toHaveTextContent('Action: force_transition');
     expect(stop).toHaveTextContent('Target: ending');
 
-    // could offer webhook binding / "deliver this signal".
     expect(within(card).queryByRole('button')).not.toBeInTheDocument();
     expect(within(card).queryByRole('link')).not.toBeInTheDocument();
   });
@@ -219,14 +217,11 @@ describe('PresetProfilePage', () => {
     const lanesCard = await screen.findByTestId('profile-lanes');
     expect(lanesCard).toHaveTextContent('Trigger lanes');
 
-    // (trigger), wall-clock schedule, Work-role cron — with yes/no presence.
     expect(screen.getByTestId('profile-lane-cron-no')).toHaveTextContent('No');
     expect(screen.getByTestId('profile-lane-wallclock-yes')).toHaveTextContent('Yes');
     expect(screen.getByTestId('profile-lane-session-yes')).toHaveTextContent('Yes');
     expect(screen.getByTestId('profile-lane-direct-yes')).toHaveTextContent('Yes');
 
-    // wall-clock poller; `scheduled_at` is a schedule field, not a
-    // fabricated next-fire clock.
     expect(screen.getByTestId('profile-lane-cron')).toHaveTextContent(
       'Per-Work cron with roles (brainstorm / write / review) and timezone — not the wall-clock poller.',
     );
@@ -240,7 +235,6 @@ describe('PresetProfilePage', () => {
 
   it('degrades gracefully when the profile is missing — id + list facts, not a "preset gone" error (PL-13)', async () => {
     useHandlers(
-      // imply it is gone (PL-13 premise).
       http.get('/v1/daemon/presets', () =>
         HttpResponse.json({
           user: [{ id: 'user/ghost', source: 'user' }],
@@ -269,7 +263,6 @@ describe('PresetProfilePage', () => {
 
   it('omits the "still listed in the catalog" sentence when the preset is absent from the list (F-4 / QC3 S-1)', async () => {
     useHandlers(
-      // claim it is still listed.
       listHandler(),
       http.get('/v1/daemon/orchestration/presets/unknown%2Fpreset/profile', () =>
         HttpResponse.json(
@@ -283,7 +276,6 @@ describe('PresetProfilePage', () => {
 
     const summary = await screen.findByTestId('preset-profile-unavailable');
     expect(summary).toHaveTextContent('The profile for unknown/preset could not be loaded.');
-    // nothing) and no source badge is shown (no list facts for the id).
     expect(summary).not.toHaveTextContent('The preset is still listed in the catalog.');
     expect(screen.queryByTestId('profile-unavailable-source')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();

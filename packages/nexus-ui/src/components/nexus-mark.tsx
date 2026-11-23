@@ -19,10 +19,6 @@ export interface NexusMarkProps {
   /** Accessible label for the mark. Defaults to the product name. */
   label?: string;
   className?: string;
-  /**
-   * (`logoMarkAspectRatio`) so the mark stays wide; override with CSS
-   * `w-auto` + an explicit height class when preferred.
-   */
   size?: number;
 }
 

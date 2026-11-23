@@ -184,7 +184,6 @@ import type {
   UpdateKnowledgeEntryRequest,
   ViewRequest,
   ViewResponse,
-  // `schemas/daemon-api/*` producers) ────────────────────────────────────────
   NarrativeWorldsListResponse,
   NarrativeWorldResponse,
   WorkPoolListQuery,
@@ -246,15 +245,7 @@ import type {
 } from './types';
 
 export interface BrowserClientOptions {
-  /**
-   * origin, relative). Set only if the API is served from a different origin
-   * than the SPA shell.
-   */
   baseUrl?: string;
-  /**
-   * request carries an `X-API-Key` header. The fingerprint endpoint is the
-   * only daemon route that intentionally requires no key.
-   */
   apiKey?: string;
   /** Optional fetch implementation (testing/diagnostics injection). */
   fetchImpl?: typeof fetch;
@@ -262,12 +253,6 @@ export interface BrowserClientOptions {
 
 type QueryValue = string | number | boolean | undefined | null;
 
-/**
- * `$defs`. The generated core barrel re-exports the batch but not this nested
- * `$defs` member, so the browser client derives the identical type from the
- * generated field rather than hand-copying the wire shape (matching the
- * service-side alias in `apps/nexus-service/src/sse.ts`).
- */
 type CoreStreamGap = NonNullable<ProviderEventBatch['gap']>;
 
 /**
@@ -301,18 +286,14 @@ export class BrowserClient implements NexusClient {
   }
 
   certFingerprint(): Promise<CertFingerprintResponse> {
-    // reachable so clients can perform TOFU verification before sending the
-    // API key. It is the only daemon route that deliberately omits the key.
     return this.request<CertFingerprintResponse>('GET', '/v1/daemon/runtime/cert-fingerprint', undefined, false);
   }
 
   runtimeStatus(): Promise<RuntimeStatus> {
-    // first-run gate works on a fresh origin/LAN browser (compass D21).
     return this.get<RuntimeStatus>('/v1/daemon/runtime/status');
   }
 
   daemonStatus(): Promise<DaemonRuntimeStatus> {
-    // global service-unavailable surface (v1219-onboarding T4).
     return this.get<DaemonRuntimeStatus>('/v1/daemon/daemon/status');
   }
 
@@ -585,16 +566,11 @@ export class BrowserClient implements NexusClient {
   inspectMoment(request: MomentInspectRequest): Promise<MomentInspectResponse> {
     return this.post<MomentInspectResponse>('/v1/daemon/inspector/moment', request);
   }
-  /**
-   * Directive (V1.151 P1 — DF-76). The daemon surfaces an already-active
-   * directive without `replace` as HTTP 409 (no silent overwrite).
-   */
   momentDirective(request: MomentDirectiveRequest): Promise<MomentDirectiveResponse> {
     return this.post<MomentDirectiveResponse>('/v1/daemon/moment-directive', request);
   }
 
   exportPack(worldId: string, request?: PackExportRequest): Promise<PackExportResponse> {
-    // body; an omitted request means "export with defaults", sent as `{}`.
     return this.post<PackExportResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/pack/export`,
       request ?? {},
@@ -632,9 +608,6 @@ export class BrowserClient implements NexusClient {
   listWorkPool(query?: WorkPoolListQuery): Promise<WorkPoolListResponse> {
     return this.get<WorkPoolListResponse>('/v1/daemon/works/pool', query);
   }
-  /**
-   * persisted selection seam as CLI `works use`; never session-local).
-   */
   setWorkPoolActive(request: WorkPoolSetActiveRequest): Promise<WorkPoolEntry> {
     return this.post<WorkPoolEntry>('/v1/daemon/works/pool', request);
   }
@@ -677,9 +650,6 @@ export class BrowserClient implements NexusClient {
       request,
     );
   }
-  /**
-   * Work completion lock; 423 carries the structured `Locked` reason.
-   */
   releaseWorkCompletionLock(
     workId: string,
     request: ReleaseCompletionLockRequest,
@@ -689,9 +659,6 @@ export class BrowserClient implements NexusClient {
       request,
     );
   }
-  /**
-   * reconcile report; `dry_run` rides on the query string (no request body).
-   */
   reconcileWorkChapters(
     workId: string,
     query?: { dry_run?: boolean },
@@ -756,9 +723,6 @@ export class BrowserClient implements NexusClient {
       query,
     );
   }
-  // already shipped; only the TS client surface was missing). Renamed from
-  // `getFinding` (v1.190 P5-T1): the bare name belongs to the canonical
-  // creator-scoped `GET /v1/daemon/findings/{finding_id}` below.
   getWorkFinding(workId: string, findingId: string): Promise<FindingDetailResponse> {
     return this.get<FindingDetailResponse>(
       `/v1/daemon/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
@@ -811,9 +775,6 @@ export class BrowserClient implements NexusClient {
   }): Promise<FindingsPruneResponse> {
     return this.post<FindingsPruneResponse>(`/v1/daemon/findings/prune${toQueryString(query)}`);
   }
-  /**
-   * lookup (v1.190 P5-T1); the work-scoped route is `getWorkFinding` above.
-   */
   getFinding(findingId: string): Promise<FindingDetailResponse> {
     return this.get<FindingDetailResponse>(
       `/v1/daemon/findings/${encodeURIComponent(findingId)}`,
@@ -876,10 +837,6 @@ export class BrowserClient implements NexusClient {
       request,
     );
   }
-  /**
-   * the candidate IR in the body. Non-mutating: nothing is stored and no
-   * revision is consumed.
-   */
   simulateStrategy(
     strategyId: string,
     request: StrategySimulationRequest,
@@ -1078,11 +1035,6 @@ export class BrowserClient implements NexusClient {
   // against the same `/v1/daemon/*` HTTP transport as the rest of this class.
   // Wire payloads come from the generated DTOs; no handwritten wire shapes.
 
-  /**
-   * `after_sequence`. `next_sequence`/`snapshot_sequence` are decimal strings
-   * (never JS numbers) and `resync_required` marks a cursor below the retained
-   * minimum, which callers treat as a gap.
-   */
   getCoreChanges(request: CoreChangesRequest): Promise<CoreChangesResponse> {
     return this.get<CoreChangesResponse>('/v1/daemon/core/changes', request);
   }
@@ -1129,9 +1081,6 @@ export class BrowserClient implements NexusClient {
     );
   }
 
-  /**
-   * (the route's POST verb is cancel; there is no `/cancel` alias).
-   */
   cancelAgentHostOperation(operationId: string): Promise<CancelOperationResponse> {
     return this.post<CancelOperationResponse>(
       `/v1/daemon/agent-host/operations/${encodeURIComponent(operationId)}`,
@@ -1139,8 +1088,6 @@ export class BrowserClient implements NexusClient {
   }
 
   /**
-   * provider stream as an `AsyncIterable` of schema-typed values.
-   *
    * The SSE bytes arrive over a `fetch` `ReadableStream`, so this yields
    * incrementally decoded `ProviderHostEvent`/`CoreStreamGap` values rather
    * than a parsed-once page. The response body is read chunk by chunk with a
@@ -1222,8 +1169,6 @@ export class BrowserClient implements NexusClient {
           boundary = BrowserClient.nextSseBoundary(buffer);
         }
       }
-      // arrived (a final partial frame must not be dropped). An explicit abort
-      // ends iteration without emitting further values.
       if (!signal.aborted) {
         buffer += decoder.decode();
         const trailing = BrowserClient.parseSseFrame(buffer);
@@ -1235,8 +1180,6 @@ export class BrowserClient implements NexusClient {
   }
 
   /**
-   * retained/live observation frames as an `AsyncIterable` of typed values.
-   *
    * Same fetch-stream posture as {@link subscribeAgentHostEvents} (streaming
    * `TextDecoder`, chunk-boundary-safe splitting, trailing-frame flush, abort
    * window, typed non-200 refusals) but with this route's own `{id, event,
@@ -1317,8 +1260,6 @@ export class BrowserClient implements NexusClient {
         buffer += decoder.decode(chunk.value, { stream: true });
         let boundary = BrowserClient.nextSseBoundary(buffer);
         while (boundary) {
-          // holds complete frames; aborting must end iteration, not drain the
-          // rest of the buffer.
           if (signal.aborted) break;
           const frame = buffer.slice(0, boundary.index);
           buffer = buffer.slice(boundary.index + boundary.length);
@@ -1327,8 +1268,6 @@ export class BrowserClient implements NexusClient {
           boundary = BrowserClient.nextSseBoundary(buffer);
         }
       }
-      // arrived (a final partial frame must not be lost). An explicit abort
-      // ends iteration without emitting further values.
       if (!signal.aborted) {
         buffer += decoder.decode();
         const trailing = BrowserClient.parseWorkflowObservationFrame(buffer);
@@ -1345,10 +1284,6 @@ export class BrowserClient implements NexusClient {
     );
   }
 
-  /**
-   * default (V1.198 §13); the flag is set only when inclusion is requested,
-   * so the default read carries no query parameter.
-   */
   listWorldRules(
     worldId: string,
     includeArchived = false,
@@ -1360,22 +1295,12 @@ export class BrowserClient implements NexusClient {
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/rules${qs ? `?${qs}` : ''}`,
     );
   }
-  /**
-   * (V1.169 P1, AR-5). 400 `invalid_input` carries the AR-2 field-level
-   * `details` (`{ field, reason }`) that the authoring form echoes onto the
-   * matching form field.
-   */
   createWorldRule(worldId: string, body: WorldRuleCreateRequest): Promise<WorldRuleResponse> {
     return this.post<WorldRuleResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/rules`,
       body,
     );
   }
-  /**
-   * (V1.169 P1, AR-3/AR-5): `constraint` is whole-carrier replacement,
-   * absent fields stay unchanged. `status: "deprecated"` is the Deactivate
-   * recovery (product lock — no DELETE route).
-   */
   updateWorldRule(
     worldId: string,
     ruleId: string,
@@ -1403,7 +1328,6 @@ export class BrowserClient implements NexusClient {
     return this.post<RunResponse>('/v1/daemon/compute/run', request);
   }
   acceptRun(runId: string, request?: RunAcceptRequest | null): Promise<RunAcceptResponse> {
-    // body; an omitted request means "accept everything", sent as `{}`.
     return this.post<RunAcceptResponse>(
       `/v1/daemon/compute/runs/${encodeURIComponent(runId)}/accept`,
       request ?? {},
@@ -1441,8 +1365,6 @@ export class BrowserClient implements NexusClient {
     );
   }
 
-  // P5-T1: returns the canonical generated `NarrativeWorldsListResponse`
-  // envelope; callers read `.worlds` (`NarrativeWorldState[]`).
   listNarrativeWorlds(): Promise<NarrativeWorldsListResponse> {
     return this.get<NarrativeWorldsListResponse>('/v1/daemon/narrative/worlds');
   }
@@ -1571,7 +1493,6 @@ export class BrowserClient implements NexusClient {
     includeApiKey = true,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    // protocol and Vite dev origins (access spec §3.1).
     const init: RequestInit = {
       method,
       credentials: 'include',
@@ -1589,10 +1510,6 @@ export class BrowserClient implements NexusClient {
     try {
       response = await this.fetchImpl(url, init);
     } catch (cause) {
-      // legacy `transport_unreachable` `code` stays for backwards-compat with
-      // tests and toast routing; `kind` carries the V1.129 P0 sub-classification
-      // the dialog branches on. Classifier ordering is locked by the spec
-      // (profile-create-reliability.md § Interfaces).
       throw new NexusClientError(
         0,
         'transport_unreachable',
@@ -1602,11 +1519,6 @@ export class BrowserClient implements NexusClient {
       );
     }
 
-    // 200 — the release-mode SPA fallback for an unrouted path. Treat this as
-    // transport-class and re-classify before `!response.ok` would accept it as
-    // a successful empty body. The body is HTML, so `response.json()` would
-    // throw an unhandled SyntaxError; intercepting here keeps the failure
-    // inside the NexusClientError model.
     const contentType = response.headers.get('content-type') ?? '';
     if (response.status === 200 && contentType.includes('text/html')) {
       throw new NexusClientError(
@@ -1618,7 +1530,6 @@ export class BrowserClient implements NexusClient {
       );
     }
 
-    // owns deduplication, so concurrent 401s collapse into one instance.
     if (response.status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
@@ -1639,13 +1550,6 @@ export class BrowserClient implements NexusClient {
   }
 
 
-  /**
-   * that terminates an event block. All four mixed line-ending forms are
-   * recognized — `\n\n`, `\r\n\r\n`, `\r\n\n` and `\n\r\n` — because a
-   * delimiter may differ per line and either half may straddle a network chunk.
-   * Returns the delimiter's index and length so a `\r\n` split across two
-   * chunks is still matched once the rest arrives.
-   */
   private static nextSseBoundary(
     buffer: string,
   ): { index: number; length: number } | null {
@@ -1666,12 +1570,6 @@ export class BrowserClient implements NexusClient {
     return null;
   }
 
-  /**
-   * `data:` lines in one event are joined with `\n` (not concatenated); the
-   * frame's joined `data` JSON is returned verbatim and IS the generated
-   * `ProviderHostEvent` or `CoreStreamGap`. Frames with no data (comments,
-   * keep-alive pings) yield `null` and are skipped by the iterator.
-   */
   private static parseSseFrame(
     frame: string,
   ): ProviderHostEvent | CoreStreamGap | null {
@@ -1763,9 +1661,6 @@ export class BrowserClient implements NexusClient {
   }
 
   /**
-   * of `(baseUrl, cause)` so the unit-test matrix can drive each kind without a
-   * running daemon.
-   *
    * Locked ordering (profile-create-reliability.md § Classification algorithm):
    * 1. `baseUrl === ''` → `daemon_down`
    * 2. AbortError / AbortSignal timeout → `timeout`
@@ -1778,20 +1673,14 @@ export class BrowserClient implements NexusClient {
    * matches.
    */
   private static classifyTransportError(baseUrl: string, cause: unknown): TransportErrorKind {
-    // transport. The fetch itself may still throw a TypeError in practice; the
-    // loopback / empty-baseUrl signal is the honest classification so recovery
-    // CTAs point at the local daemon rather than Connection settings.
     if (!baseUrl || BrowserClient.isLoopbackBaseUrl(baseUrl)) {
       return 'daemon_down';
     }
 
-    // DOMException with name 'AbortError'.
     if (cause instanceof DOMException && cause.name === 'AbortError') {
       return 'timeout';
     }
 
-    // JS. Match common signal substrings; if none are present, fall through to
-    // `network` rather than over-claiming cert rejection (spec TLS fail-open).
     const message =
       cause instanceof Error
         ? `${cause.name} ${cause.message}`.toLowerCase()

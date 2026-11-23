@@ -13,13 +13,6 @@ const serviceRoot = join(__dirname, '..');
 const repoRoot = join(__dirname, '..', '..', '..');
 const acpFixture = join(repoRoot, 'crates/nexus-agent-host/tests/fixtures/mock_acp_workflow.py');
 
-/**
- * over the real in-process service and the real native temporary store. No
- * mock forwards anything — the Character/binding fixtures are created through
- * the surface itself, and denial (foreign Character, stale binding) is
- * observed as the retained HTTP statuses with zero storage effects.
- */
-
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-service-actor-'));
   const seed = spawnSync(
@@ -138,9 +131,6 @@ describe('actor-http (P5-T2)', () => {
         `missing mounted identity: ${method} ${path}\nmounted:\n${[...mounted].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join('\n')}`,
       );
     }
-    // tier1 (API-key only, no active creator); every P5-T2 family route is
-    // tier2 (creator-tier). (Runtime liveness reconciled unguarded in P5-T5
-    // is out of this task's scope.)
     const OWN_FAMILIES = new Set(['actors', 'memory', 'context']);
     for (const route of inventory) {
       if (!OWN_FAMILIES.has(route.family)) continue;
@@ -255,9 +245,6 @@ describe('actor-http (P5-T2)', () => {
     const bindingId = created.payload.binding?.binding_id;
     assert.ok(bindingId, `initial binding id missing: ${created.text}`);
 
-    //    denied by the real native store — 404, existence hidden — and the
-    //    denial produces zero provider/storage effects: the owned Character
-    //    list is unchanged afterwards.
     const FOREIGN_CHARACTER = 'chr_' + 'f'.repeat(32);
     const foreign = await jsonFetch(`${baseUrl}/v1/daemon/characters/${FOREIGN_CHARACTER}`);
     assert.equal(foreign.status, 404, foreign.text);
@@ -272,7 +259,6 @@ describe('actor-http (P5-T2)', () => {
     });
     assert.equal(foreignView.status, 404, foreignView.text);
 
-    //    conflict, and nothing is written.
     const stale = await jsonFetch(
       `${baseUrl}/v1/daemon/characters/${characterId}/bindings/${bindingId}`,
       { method: 'PATCH', body: { expected_revision: 999, world_sheet_entry_id: 'wse_stale' } },
@@ -289,7 +275,6 @@ describe('actor-http (P5-T2)', () => {
       'stale patch must not write the sheet',
     );
 
-    //    owned World returns the paginated KnowledgeView (no 501).
     const view = await jsonFetch(`${baseUrl}/v1/daemon/actor-knowledge/view`, {
       method: 'POST',
       body: {
@@ -301,14 +286,11 @@ describe('actor-http (P5-T2)', () => {
     assert.ok(Array.isArray(view.payload.items), 'admitted view must return items');
     assert.ok(view.payload.pagination, 'admitted view must return pagination');
 
-    //    not a routed identity (daemon strips the suffix inside the shared
-    //    `{creator_id}` segment and 404s otherwise).
     const bareLogout = await jsonFetch(`${baseUrl}/v1/daemon/creators/ctr_testcreator`, {
       method: 'POST',
     });
     assert.equal(bareLogout.status, 404, bareLogout.text);
 
-    //    the owned World instead of a migration denial.
     const directive = await jsonFetch(`${baseUrl}/v1/daemon/moment-directive`, {
       method: 'POST',
       body: {
@@ -627,13 +609,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     return { status: response.status, frames: parseSseBody(await response.text()) };
   }
 
-  /**
-   * frame, and the transport buffers its headers until the first one, so there
-   * is no response to await: the socket IS the handle, and `body()` is what the
-   * stream really wrote once it ended. An SSE response is chunked and the
-   * socket survives it (keep-alive), so the stream's end for a consumer is the
-   * body's own zero-size chunk, not the socket's close.
-   */
   function openActorStream(sessionId, operationId) {
     const target = new URL(url);
     const socket = net.connect(Number(target.port), target.hostname);
@@ -689,10 +664,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     };
   }
 
-  /**
-   * loop-back interval only samples that cadence — it is never the scheduler
-   * for what is being asserted (the throttle's clock is frozen here).
-   */
   async function until(predicate, what, timeoutMs = 5_000) {
     const deadline = Date.now() + timeoutMs;
     while (!predicate()) {
@@ -752,7 +723,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.deepEqual(created.viewpoint, { world_id: JOURNEY_WORLD, binding_id: bindingA });
     assert.equal(created.active_op_id, undefined, 'a fresh session is not busy');
 
-    // a provider-only session by a later read.
     const got = await jsonFetch(`/v1/daemon/agent-host/sessions/${created.session_id}`);
     assert.equal(got.status, 200, got.text);
     assert.deepEqual(got.payload.actor_ref, created.actor_ref);
@@ -763,12 +733,10 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.ok(row, 'the Actor session must appear in the merged list');
     assert.deepEqual(row.actor_ref, created.actor_ref);
 
-    // and holder/knowledge fingerprint) returns the SAME ready session.
     const reused = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
     assert.equal(reused.status, 200, reused.text);
     assert.equal(reused.payload.session_id, created.session_id);
 
-    // pairs never collapse into one journal or one cache row.
     const other = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: {
@@ -787,7 +755,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const launchesBefore = readLog(acpLog).length;
     /** @type {Array<[Record<string, unknown>, number, string]>} */
     const rejections = [
-      // own-property presence, so an explicit `null` is present-and-invalid).
       [actorBody({ actor_ref: null, viewpoint: null }), 400, 'invalid_input'],
       [{ provider_id: MAIN_PROVIDER, cwd: creativeRoot, actor_ref: { actor_kind: 'character', character_id: characterA } }, 400, 'invalid_input'],
       [actorBody({ actor_ref: { actor_kind: 'character', character_id: 'chr_bad' } }), 400, 'invalid_input'],
@@ -796,7 +763,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       [actorBody({ viewpoint: { world_id: JOURNEY_WORLD, binding_id: null } }), 400, 'invalid_input'],
       [actorBody({ viewpoint: { world_id: JOURNEY_WORLD, binding_id: bindingA, extra: 1 } }), 400, 'invalid_input'],
       [actorBody({ nope: 1 }), 400, 'invalid_input'],
-      // Creator ref that carries a Character binding are store-level refusals.
       [actorBody({ actor_ref: { actor_kind: 'creator', creator_id: 'ctr_othercreator' }, viewpoint: { world_id: JOURNEY_WORLD } }), 404, 'not_found'],
       [actorBody({ actor_ref: { actor_kind: 'creator', creator_id: JOURNEY_CREATOR }, viewpoint: { world_id: JOURNEY_WORLD, binding_id: bindingA } }), 400, 'invalid_input'],
       [actorBody({ viewpoint: { world_id: FOREIGN_WORLD, binding_id: bindingA } }), 404, 'not_found'],
@@ -812,9 +778,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     }
     assert.equal(readLog(acpLog).length, launchesBefore, 'a refused Actor must never launch a provider');
 
-    // and a prompt on the session that admitted it. The restore is in a
-    // `finally` so a failed assertion cannot leave the fixture archived for the
-    // tests that follow.
     const detail = await jsonFetch(`/v1/daemon/characters/${characterA}`);
     assert.equal(detail.status, 200, detail.text);
     const archived = await jsonFetch(`/v1/daemon/characters/${characterA}/archive`, {
@@ -846,8 +809,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('lifecycle and knowledge invalidation retire the session and the next create admits a fresh one', async () => {
-    // longer matches, so the next create admits a fresh session instead of
-    // reusing the pre-archive one.
     const fresh = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
     assert.equal(fresh.status, 200, fresh.text);
     assert.notEqual(fresh.payload.session_id, sessionA.payload.session_id);
@@ -874,7 +835,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(stale.payload.error.code, 'owner_busy');
     assert.equal(stale.payload.error.details.conflict_code, 'actor_session_stale');
 
-    // the fresh knowledge fingerprint, and it runs normally.
     const after = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
     assert.equal(after.status, 200, after.text);
     assert.notEqual(after.payload.session_id, freshSession);
@@ -890,7 +850,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('a Character prompt reports the authority outcome, and a non-success stop is never success', async () => {
-    // the stream and `capture` disabled (this host has no capture writer).
     const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
     assert.equal(session.status, 200, session.text);
     const executed = await jsonFetch(`/v1/daemon/agent-host/sessions/${session.payload.session_id}/operations`, {
@@ -941,7 +900,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     });
     assert.equal(prompt.status, 200, prompt.text);
 
-    // key is a Busy conflict, never a second session and never a second launch.
     const launchesBeforeBusy = readLog(acpLog).length + readLog(peerLog).length;
     const busy = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
@@ -962,7 +920,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(cancelled.run_status, 'cancelled');
     assert.equal(cancelled.finish_reason, 'cancelled');
 
-    // (its own log is the evidence); canonical truth must not move.
     const late = await (async () => {
       const deadline = Date.now() + 15_000;
       for (;;) {
@@ -996,7 +953,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const outcome = await waitForCharacterOutcome(prompt.payload.operation_id);
     assert.equal(outcome.run_status, 'succeeded');
     assert.equal(outcome.finish_reason, 'end_turn');
-    // real frames (and no fabricated terminal).
     const stream = await sseBody(session.payload.session_id, prompt.payload.operation_id);
     assert.equal(stream.status, 200);
     assert.ok(
@@ -1020,7 +976,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const outcome = await waitForCharacterOutcome(operationId);
     assert.equal(outcome.run_status, 'succeeded');
 
-    // authority's own truth must still authorize GET/SSE/cancel/delete as Actor.
     service.service.providerRegistry.removeSession(session.payload.session_id);
     assert.equal(service.service.providerRegistry.sessionRecord(session.payload.session_id), undefined);
     assert.equal(service.service.providerRegistry.operationRecord(operationId), undefined);
@@ -1152,7 +1107,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       body: { kind: 'prompt', content: 'legacy prompt' },
     });
     assert.equal(executed.status, 200, executed.text);
-    // a provider-only operation, including its inspect shape.
     const inspect = await jsonFetch(`/v1/daemon/agent-host/operations/${executed.payload.operation_id}`);
     assert.equal(inspect.status, 200, inspect.text);
     assert.deepEqual(Object.keys(inspect.payload).sort(), ['operation_id', 'session_id', 'status']);
@@ -1161,10 +1115,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(stream.status, 200);
     assert.ok(stream.frames.some((frame) => frame.data?.MessageDelta?.text?.includes('transformed:legacy prompt')));
 
-    // ea75345d4 migrated both to provider dispatch; the lane has no refusal of
-    // its own to pin now, and the provider's answer is not this surface's
-    // contract. Residual: an unmapped provider error reply still surfaces as
-    // 500 `internal` (I-000428).
   });
 
   /**
@@ -1182,7 +1132,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     Promise.reject(new Error(JSON.stringify(envelope)));
 
   test('host absence is classified by the typed category, never the message, at every Host consumer', async () => {
-    //    session plus its operation, which is what the absence fallbacks consult.
     const created = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
@@ -1201,7 +1150,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       hostQuery: core.hostQuery,
       hostCharacterOperation: core.hostCharacterOperation,
     };
-    //    authority does not own is the authority's own miss, before any absence.
     const unknownOperation = randomUUID();
     const liveMiss = await jsonFetch(
       `/v1/daemon/agent-host/sessions/${sessionA.payload.session_id}/events?operation_id=${unknownOperation}`,
@@ -1216,7 +1164,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     core.hostQuery = absence;
     core.hostCharacterOperation = absence;
     try {
-      //    client error.
       const health = await jsonFetch('/v1/daemon/agent-host/health');
       assert.equal(health.status, 200, health.text);
       assert.deepEqual(health.payload, { running: false, active_sessions: 0, active_operations: 0 });
@@ -1224,12 +1171,10 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       assert.equal(providers.status, 200, providers.text);
       assert.deepEqual(providers.payload, { providers: [] });
 
-      //    shutdown of a known provider-only session still reaches its lane.
       const shutdown = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`, { method: 'DELETE' });
       assert.equal(shutdown.status, 200, shutdown.text);
       assert.deepEqual(shutdown.payload, { session_id: sessionId, status: 'shutdown' });
 
-      //    absent answer is IDENTICAL to the live miss above — never a 400.
       const absentMiss = await jsonFetch(
         `/v1/daemon/agent-host/sessions/${sessionA.payload.session_id}/events?operation_id=${unknownOperation}`,
         { headers: { Accept: 'text/event-stream' } },
@@ -1237,9 +1182,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       assert.equal(absentMiss.status, 404, absentMiss.text);
       assert.equal(absentMiss.payload.error.code, 'not_found');
 
-      //    so absence must read as the same 404 a genuinely missing session
-      //    gives. The refusal precedes the stream headers, so the route answers
-      //    JSON.
       const stream = await jsonFetch(
         `/v1/daemon/agent-host/sessions/${sessionId}/events?operation_id=${operationId}`,
         { headers: { Accept: 'text/event-stream' } },
@@ -1251,7 +1193,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
     }
 
-    //    unrelated client error keeps its own answer, and a fault stays sanitized.
     core.hostQuery = rejectingBoundary({
       code: 'invalid_input',
       message: 'session_id must be a UUID',
@@ -1280,7 +1221,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       core.hostQuery = liveBoundary.hostQuery;
     }
 
-    //    message neither adds nor removes the classification.
     const { isAbsentHostError } = await import(join(serviceRoot, 'dist/errors.js'));
     const asNativeRejection = (envelope) => new Error(JSON.stringify(envelope));
     assert.equal(isAbsentHostError(asNativeRejection(absentHostEnvelope('reworded'))), true);
@@ -1300,12 +1240,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(isAbsentHostError(new Error('not a native rejection')), false);
   });
 
-  /**
-   * authority's own row can disagree. Under a typed absence the authority holds
-   * no row at all, so only a provider-only cache entry may answer: an Actor
-   * record is never resurrected as generic provider-only state, and the absence
-   * itself is never a client error for this read.
-   */
   test('host absence serves the cached provider-only row for the generic operation GET, never a resurrected Actor row', async () => {
     const legacy = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
@@ -1335,7 +1269,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       'precondition: the mirror carries the Actor mark for the Character run',
     );
 
-    // own provider-only row, and the Character run is its own Character result.
     const liveProviderOnly = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
     assert.equal(liveProviderOnly.status, 200, liveProviderOnly.text);
     assert.deepEqual(Object.keys(liveProviderOnly.payload).sort(), ['operation_id', 'session_id', 'status']);
@@ -1355,7 +1288,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     core.hostQuery = absence;
     core.hostCharacterOperation = absence;
     try {
-      //    provider-only row answers exactly as the live read above did.
       const absentProviderOnly = await jsonFetch(`/v1/daemon/agent-host/operations/${providerOnlyId}`);
       assert.equal(absentProviderOnly.status, 200, absentProviderOnly.text);
       assert.deepEqual(absentProviderOnly.payload, {
@@ -1364,8 +1296,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
         status: 'started',
       });
 
-      //    observation: with no authority row the operation is absent — the same
-      //    404 a live miss gives, never the cached admission row and never 400.
       const absentActor = await jsonFetch(`/v1/daemon/agent-host/operations/${actorOperationId}`);
       assert.equal(absentActor.status, 404, absentActor.text);
       assert.equal(absentActor.payload.error.code, 'not_found');
@@ -1374,7 +1304,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       core.hostCharacterOperation = liveBoundary.hostCharacterOperation;
     }
 
-    //    keep their own answers instead of degrading to the cached row.
     core.hostQuery = rejectingBoundary({
       code: 'invalid_input',
       message: 'operation_id must be a UUID',
@@ -1413,15 +1342,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     );
   });
 
-  /**
-   * provider-only cache entry still reaches the raw provider cancel lane, an
-   * Actor mark is cancelled by the authority alone (its own refusal is the
-   * answer, never a provider bypass), and an id nobody knows gains no effect and
-   * no invented success.
-   */
   test('host absence cancel stays in its cached lane and never bypasses the Actor authority', async () => {
-    // meets a live provider operation: the mock's own log is then the evidence
-    // that the raw provider cancel lane was reached (or was never entered).
     const legacy = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: { provider_id: BLOCK_PROVIDER, cwd: creativeRoot },
@@ -1460,8 +1381,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       hostCancelOperation: core.hostCancelOperation,
       providerCall: core.providerCall,
     };
-    // provider cancel must be attributed to the provider-only operation and to
-    // nothing else, while the real provider call still runs underneath.
     const providerCancels = [];
     core.providerCall = async (request) => {
       if (request.method === 'cancel') providerCancels.push(request.operation_id);
@@ -1496,13 +1415,10 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       core.providerCall = liveBoundary.providerCall;
     }
 
-    //    cancel still runs (the mock's own log and the dispatch record are the
-    //    evidence) and the accepted cancel is the cached truth.
     assert.equal(providerOnlyCancel.status, 200, providerOnlyCancel.text);
     assert.deepEqual(providerOnlyCancel.payload, { operation_id: providerOnlyId, status: 'cancelled' });
     assert.equal(service.service.providerRegistry.operationRecord(providerOnlyId)?.status, 'cancelled');
 
-    //    refusal is the typed failure, and the provider lane is never entered.
     assert.equal(actorCancel.status, 400, actorCancel.text);
     assert.equal(actorCancel.payload.error.code, 'invalid_input');
     assert.equal(actorCancel.payload.error.details?.category, 'host_not_started');
@@ -1513,7 +1429,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       'an Actor cancel must not settle the mirror through a provider call',
     );
 
-    //    provider effect, no invented success, no mirror mutation.
     assert.equal(coldCancel.status, 404, coldCancel.text);
     assert.equal(coldCancel.payload.error.code, 'not_found');
     assert.equal(service.service.providerRegistry.operationRecord(coldOperationId), undefined);
@@ -1571,9 +1486,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(live.payload.session_id, blockedSessionId);
     assert.equal(live.payload.status, 'running');
 
-    //    Creator row, so its own `not_found` is the answer — not the raw provider
-    //    cancel lane (which answered 500/internal before this fix) and not a
-    //    provider cancel the peer would have observed.
     const cancelLive = await jsonFetch(`/v1/daemon/agent-host/operations/${blockedOperationId}`, {
       method: 'POST',
       body: {},
@@ -1586,9 +1498,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       'an Actor operation id must never reach the provider-only cancel lane',
     );
 
-    //    prompt, so the Actor arm answers with its bounded resync gap to
-    //    canonical truth — not the 404 the Character-only narrowing produced,
-    //    and without ever pulling the provider-only stream.
     const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
     const pullsBefore = sseTestHooks.providerPullCount;
     const stream = await sseBody(blockedSessionId, blockedOperationId);
@@ -1600,7 +1509,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(gap.data.inspect_url, `/v1/daemon/agent-host/operations/${blockedOperationId}`);
     assert.equal(sseTestHooks.providerPullCount, pullsBefore, 'the Actor lane must not pull the provider stream');
 
-    //    never the mirror's stale `started` admission row.
     const settledSession = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: creatorBody(MAIN_PROVIDER),
@@ -1615,8 +1523,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const settled = await jsonFetch(`/v1/daemon/agent-host/operations/${settledPrompt.payload.operation_id}`);
     assert.equal(settled.status, 404, settled.text);
     assert.equal(settled.payload.error.code, 'not_found');
-    // operation the authority no longer serves, so the stream is refused before
-    // headers instead of hanging or fabricating frames.
     const settledStream = await fetch(
       `${url}/v1/daemon/agent-host/sessions/${settledSession.payload.session_id}/events?operation_id=${settledPrompt.payload.operation_id}`,
       { headers: { Accept: 'text/event-stream' } },
@@ -1632,9 +1538,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const cancelsBefore = readLog(acpLog).filter((entry) => entry.event === 'cancel').length;
     const { hostQuery } = await import(join(serviceRoot, 'dist/world-kb.js'));
 
-    //    is the session's live work: once it settles, the authority retains no
-    //    row of any kind for it (no Character outcome, no operation row) while
-    //    the mirror keeps its Actor mark. That is the aged state under test.
     const created = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: {
@@ -1664,7 +1567,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       'precondition: the mirror still carries the Actor mark',
     );
 
-    //    stale Actor record is refused on both the inspect and cancel paths.
     const got = await jsonFetch(`/v1/daemon/agent-host/operations/${operationId}`);
     assert.equal(got.status, 404, got.text);
     assert.equal(got.payload.error.code, 'not_found');
@@ -1672,9 +1574,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(cancel.status, 404, cancel.text);
     assert.equal(cancel.payload.error.code, 'not_found');
 
-    //    has already evicted: the eviction is simulated with an id the authority
-    //    never saw (driving 1024 terminal operations is not a fixture), and the
-    //    endpoint behaviour under test does not depend on how the record aged.
     const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
     assert.equal(session.status, 200, session.text);
     const evictedOperationId = randomUUID();
@@ -1715,7 +1614,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       });
       assert.equal(prompt.status, 200, prompt.text);
       tracked.push(prompt.payload.operation_id);
-      // run, and nothing else can tell the mirror it is over.
       assert.equal((await waitForCharacterOutcome(prompt.payload.operation_id)).run_status, 'succeeded');
       for (const earlier of tracked.slice(0, -1)) {
         assert.equal(
@@ -1736,12 +1634,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('a record retired while a pull is in flight still ends the stream with its outcome', async () => {
-    // admission (`ageSettledActorOperations` -> `retireActorOperation` ->
-    // `disposeOperation`). Retiring a record WHILE a stream's pull is in flight
-    // used to remove the record and close its hub under that reader: the fetched
-    // terminal was dropped (`ingestEvents` finds no record), the loop then read a
-    // closed hub, and the stream ended with neither a terminal frame nor a resync
-    // gap — the client could not tell a finished run from a truncated one.
     const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
     assert.equal(session.status, 200, session.text);
     const sessionId = session.payload.session_id;
@@ -1754,9 +1646,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const outcome = await waitForCharacterOutcome(operationId);
     assert.equal(outcome.run_status, 'succeeded', 'the authority settled the run and retains its observation');
 
-    // the mirror record exactly while that pull is in flight, then let the pull
-    // return the retained terminal. No timing luck: the retirement provably
-    // happens between the pull request and the batch the loop ingests.
     const core = service.service.core;
     const realNextHostEvents = core.nextHostEvents.bind(core);
     let pullStarted;
@@ -1801,7 +1690,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       assert.equal(endings[0].data.OpFinished.reason, 'end_turn');
       assert.equal(stream.frames.at(-1), endings[0], 'nothing may follow the stream ending');
 
-      // reader, and the retirement lands as soon as that reader is gone.
       const deadline = Date.now() + 5_000;
       while (service.service.providerRegistry.operationRecord(operationId) !== undefined) {
         assert.ok(Date.now() < deadline, 'the deferred retirement must be applied when the stream detaches');
@@ -1834,7 +1722,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     });
     registry.ensureHub(operationId, () => new OperationEventHub(operationId, sessionId));
 
-    // may take the record away from a stream that is still reading it.
     registry.attachOperationStream(operationId);
     registry.attachOperationStream(operationId);
     registry.retireActorOperation(operationId);
@@ -1847,11 +1734,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('the Actor stream-admission path stays bounded and its gap endings stay typed', async () => {
-    // no sweep on that path — so a stream-heavy, execute-light workload used to
-    // accumulate one record+hub per distinct connected operation until the next
-    // Actor execute. Each hub holds its typed ending (a gap slot) against the
-    // shared control reserve, so unbounded accumulation eventually left an ending
-    // nothing could charge and the stream closed bare — the one ending §5 forbids.
     const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
     const { OperationEventHub, sseUnretainedGapEvents } = await import(join(serviceRoot, 'dist/sse.js'));
     const { REGISTRY_MAX_ACTOR_OPERATIONS, SSE_CONTROL_RESERVED_TOTAL_BYTES } = await import(
@@ -1861,8 +1743,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const mirrorSessionId = randomUUID();
     const admitted = [];
 
-    // reader, mark the Actor record, ensure its hub, write the typed resync gap an
-    // exhausted observation ends with, detach. No execute anywhere.
     const gapEndedAdmission = () => {
       const operationId = randomUUID();
       admitted.push(operationId);
@@ -1881,8 +1761,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
 
     const first = gapEndedAdmission();
     assert.ok(first, 'the first gap-ended admission must produce a typed ending');
-    // control reserve per frame, so an UNBOUNDED arm provably outgrows it and its
-    // later endings cannot be charged at all.
     const admissions = Math.ceil(SSE_CONTROL_RESERVED_TOTAL_BYTES / first.wireBytes) + 1;
     let typed = 1;
     for (let index = 1; index < admissions; index += 1) {
@@ -1904,9 +1782,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       `an evicted Actor record must release its hub: ${retainedHubs} hubs after ${admissions} admissions`,
     );
 
-    // dropped (what happens between admissions), so the reconnect builds a fresh
-    // hub while the authority's observation is already drained and must still end
-    // with the typed resync gap, never a bare close.
     const session = await jsonFetch('/v1/daemon/agent-host/sessions', { method: 'POST', body: actorBody() });
     assert.equal(session.status, 200, session.text);
     const sessionId = session.payload.session_id;
@@ -1918,7 +1793,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const operationId = prompt.payload.operation_id;
     assert.equal((await waitForCharacterOutcome(operationId)).run_status, 'succeeded');
 
-    // record: the next stream is the gap-ended shape the finding describes.
     const firstStream = await sseBody(sessionId, operationId);
     assert.equal(firstStream.status, 200, `first stream: ${JSON.stringify(firstStream.frames)}`);
     service.service.providerRegistry.removeSession(sessionId);
@@ -1937,8 +1811,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       'the bounded Actor arm must leave every stream ending chargeable',
     );
 
-    // reserve saturated, the ending cannot be charged, and the bare close is
-    // counted and logged instead of passing silently.
     const { tryReserveControlBytes, releaseControlBytes } = await import(
       join(serviceRoot, 'dist/environment-budget.js')
     );
@@ -1955,7 +1827,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     let charged = 0;
     const before = sseUnretainedGapEvents.count;
     try {
-      // so the last free bytes must go too, or a small gap frame still fits.
       while (tryReserveControlBytes(1024)) charged += 1024;
       while (tryReserveControlBytes(1)) charged += 1;
       const exhausted = await sseBody(sessionId, operationIdTwo);
@@ -1976,16 +1847,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('Actor idle polling is amortized', async () => {
-    // operation on the stream's 25ms poll cadence, so an idle stream could ask
-    // the authority far more often than the authority can change its answer,
-    // and the operation GET paid a Character read on top of the one its generic
-    // answer needs. Everything below runs on a FROZEN clock: no throttle window
-    // can elapse on its own, so a status read is attributable to the poll that
-    // spent it and never to the passage of time.
     const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
-    // around it drop or shut down the journey's shared sessions, and an Actor
-    // reuse key is (provider, cwd, Actor, World/binding), so a Character nobody
-    // else holds is what makes this session — and its cwd-typed prompt — unique.
     const owned = await jsonFetch('/v1/daemon/characters', {
       method: 'POST',
       body: { world_id: JOURNEY_WORLD, display_name: 'Idle Polling Actor', persona: { voice: 'quiet' } },
@@ -2011,9 +1873,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(prompt.status, 200, prompt.text);
     const operationId = prompt.payload.operation_id;
     assert.equal((await waitForCharacterOutcome(operationId)).run_status, 'succeeded');
-    // replay are gone, the authority's own observation is already delivered —
-    // so every pull from here on is an immediate EMPTY batch, which is exactly
-    // the state an idle Actor stream polls in.
     assert.equal((await sseBody(sessionId, operationId)).status, 200);
     service.service.providerRegistry.removeSession(sessionId);
     assert.equal(service.service.providerRegistry.operationRecord(operationId), undefined);
@@ -2023,8 +1882,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const realNow = sseTestHooks.now;
     let clock = 1_000_000_000;
     let statusReads = 0;
-    // ending below is the authority's own answer), with its run status pinned
-    // to `running` so the idle state is deterministic instead of a race.
     let settled = false;
     core.hostCharacterOperation = async (principal, id) => {
       statusReads += 1;
@@ -2066,8 +1923,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       );
       assert.equal(stream.ended(), false, 'an idle run keeps its stream open while it polls');
 
-      // not re-checked inside the window, so the stream stays open rather than
-      // ending on the next poll. The ending waits for the next window's check.
       settled = true;
       const readsAtSettlement = statusReads;
       const pullsAtSettlement = sseTestHooks.providerPullCount;
@@ -2107,9 +1962,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       assert.equal(endings[0].data.resync_required, true);
       assert.equal(endings[0].data.operation_id, operationId);
 
-      // Character read at all on an id the mirror already holds as
-      // provider-only — while still answering with the authority's own result
-      // for an Actor operation.
       const providerOnly = await jsonFetch('/v1/daemon/agent-host/sessions', {
         method: 'POST',
         body: { provider_id: MAIN_PROVIDER, cwd: creativeRoot },
@@ -2149,8 +2001,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
         200,
       );
 
-      // frozen (no window can elapse at all) a run whose real terminal the
-      // authority delivers still ends its stream with that terminal, once.
       const immediatePrompt = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}/operations`, {
         method: 'POST',
         body: { kind: 'prompt', content: 'immediate-terminal' },
@@ -2179,17 +2029,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('the idle Actor settlement window is shared by every reader of the hub', async () => {
-    // so a second reader of that operation inherits the window the first reader
-    // opened instead of spending an authority read of its own. The window is the
-    // whole point: the empty batch's poll cadence is 25ms while the status read
-    // is a full Character lookup, so per-reader state would spend one such read
-    // per reader inside a single second. Everything below runs on a FROZEN
-    // clock: no window can elapse on its own, so a status read is attributable
-    // to the poll that spent it and never to the passage of time.
     const { sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js'));
-    // amortized test above): the reuse key is (provider, cwd, Actor,
-    // World/binding), so a Character nobody else holds is what keeps this
-    // session — and its cwd-typed prompt — unique.
     const owned = await jsonFetch('/v1/daemon/characters', {
       method: 'POST',
       body: { world_id: JOURNEY_WORLD, display_name: 'Shared Throttle Actor', persona: { voice: 'quiet' } },
@@ -2215,9 +2055,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(prompt.status, 200, prompt.text);
     const operationId = prompt.payload.operation_id;
     assert.equal((await waitForCharacterOutcome(operationId)).run_status, 'succeeded');
-    // replay are gone and the authority's observation is already delivered, so
-    // every pull from here on is an immediate EMPTY batch — the idle state that
-    // polls, which is the only state that reaches the settlement window.
     assert.equal((await sseBody(sessionId, operationId)).status, 200);
     service.service.providerRegistry.removeSession(sessionId);
     assert.equal(service.service.providerRegistry.operationRecord(operationId), undefined);
@@ -2227,8 +2064,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const realNow = sseTestHooks.now;
     let clock = 1_000_000_000;
     let statusReads = 0;
-    // run pinned to `running` so neither reader can settle and end on its own —
-    // a reader that ended would stop polling and leave the window unspent.
     core.hostCharacterOperation = async (principal, id) => {
       statusReads += 1;
       const latest = await realCharacterOperation.call(core, principal, id);
@@ -2241,7 +2076,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     let second;
     const diagnosis = () =>
       `reads=${statusReads} polls=${polls()} first=${first.ended()} second=${second ? second.ended() : 'not-opened'}`;
-    // one settlement check on its first empty batch.
     const first = openActorStream(sessionId, operationId);
     try {
       await until(() => polls() >= 2, 'two empty polls of the first reader');
@@ -2252,13 +2086,8 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       );
       assert.ok(!first.ended(), `the first reader stays open while idle: ${diagnosis()}`);
 
-      // reading. Its admission is its own authority read; the window it then
-      // polls inside is the hub's, so it spends no settlement check of its own.
       second = openActorStream(sessionId, operationId);
       await until(() => statusReads >= 3, 'the second reader to be admitted');
-      // reader's own empty batches. Attributing them to ONE reader is what makes
-      // the count below evidence of the shared window rather than a race with
-      // the first reader's poll cadence.
       first.close();
       const pollsAfterFirst = polls();
       await until(
@@ -2272,7 +2101,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       );
       assert.ok(!second.ended(), `the second reader stays open while idle: ${diagnosis()}`);
 
-      // inside it, never once per reader that has read it.
       const pollsBeforeWindow = polls();
       clock += 1_000;
       await until(
@@ -2297,11 +2125,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('Actor re-mark preserves settled terminal', async () => {
-    // admission bookkeeping, not an observation: it used to replace the row it
-    // already held with `started` and no terminal event while the id stayed in
-    // the terminal FIFO. A settled record then read as live again, so the FIFO's
-    // own non-terminal skip could never age it out — the mirror dropped the
-    // terminal it had already observed and stopped being bounded by it.
     const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
     const { REGISTRY_MAX_TERMINAL_OPERATIONS } = await import(join(serviceRoot, 'dist/config.js'));
     const registry = new ProviderRegistry();
@@ -2335,7 +2158,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       'a foreign association must not rewrite a live row',
     );
 
-    // the terminal arm's own overflow still retires it as its oldest terminal row.
     for (let index = 0; index < REGISTRY_MAX_TERMINAL_OPERATIONS; index += 1) {
       registry.registerOperation({
         operationId: randomUUID(),
@@ -2354,10 +2176,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('Actor re-mark from the same session with a different provider cannot take over a live operation', async () => {
-    // under: a re-mark naming the same session but a different provider is a
-    // no-op against the live row, not a second association it can claim. The
-    // mark still answers `true` — the mirror holds a row — so its caller never
-    // tears down the hub it is about to read.
     const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
     const registry = new ProviderRegistry();
     const sessionId = randomUUID();
@@ -2382,9 +2200,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('Actor live refresh with the identical association keeps the operation live', async () => {
-    // association it already holds. That is the compatible case, and it must
-    // leave the row exactly as admitted: the stream hub is keyed by the
-    // operation, so a rewrite here would only lose the live state.
     const { ProviderRegistry } = await import(join(serviceRoot, 'dist/provider-registry.js'));
     const registry = new ProviderRegistry();
     const sessionId = randomUUID();
@@ -2407,7 +2222,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
   });
 
   test('session create stays API-key and Origin guarded, with zero launch', async () => {
-    // down before the keyed service opens; it is restored either way.
     await service.close();
     service = undefined;
     const denied = seedJourneyHome('denied');
@@ -2444,7 +2258,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
       assert.equal(wrongOrigin.status, 403);
       assert.equal(launched(), launchesBefore, 'a denied request must launch nothing');
 
-      // measurement above is live, so the unchanged count was a real zero.
       const allowed = await fetch(`${keyed.url}/v1/daemon/agent-host/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': 'actor-journey-secret' },
@@ -2478,7 +2291,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     const status = await jsonFetch('/v1/daemon/runtime/status');
     assert.equal(status.payload.runtime_mode, 'provider_enabled');
 
-    // never a synthesized success and never a re-created session.
     const oldSession = await jsonFetch(`/v1/daemon/agent-host/sessions/${sessionId}`);
     assert.equal(oldSession.status, 404, oldSession.text);
     const oldOperation = await jsonFetch(`/v1/daemon/agent-host/operations/${operationId}`);

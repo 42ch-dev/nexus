@@ -359,8 +359,6 @@ async fn confirmed_close_releases_the_local_providers_direct_admission() {
         );
         assert!(core.close().await.expect("close").cleanup_confirmed);
 
-        // only when no writer admission — the core's or the dropped provider's
-        // — still holds the shared migration lock.
         let fence = nexus_local_db::writer_protocol::acquire_store_reset_fence(&env.db_path())
             .expect("a confirmed close releases every writer admission it opened");
         drop(fence);
@@ -389,7 +387,6 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     let db_path = env.db_path();
     let home = env.user_home.clone();
 
-    // in `memory_spaces` later is the measured open's own required write.
     let bootstrap = init_guarded_pool(&db_path, CREATOR)
         .await
         .expect("bootstrap workspace");
@@ -400,8 +397,6 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
     );
     let known_writers = writer_ids(&db_path).await;
 
-    // write, held here from before the spawn. Its descriptor conflicts with the
-    // open's exactly as another process's would.
     let publish_root = db_path
         .parent()
         .expect("workspace directory")
@@ -425,18 +420,10 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
             async move { LocalMemoryProvider::open(opening_home, CREATOR, "default").await },
         );
 
-    // the spawn, so every following observation is about this invocation. A
-    // finished task here means the lease did not hold it, which must fail.
     let measured_writer = open_registered_writer(&mut observer, &opening, &known_writers).await;
 
-    // produces for workspace_meta.
     opened_seed_write(&mut observer, &opening, &measured_writer).await;
 
-    // `provision`'s publication-lease wait while this test holds it, so the
-    // provisioning transaction cannot run. Give it an unambiguous opportunity
-    // to do so anyway: while the lease is held no duration can let it through,
-    // so this window is a fixture check that fails a gate which stopped
-    // covering this open, never the evidence for the ordering.
     assert!(
         tokio::time::timeout(std::time::Duration::from_secs(1), &mut opening)
             .await
@@ -468,9 +455,6 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the task was really cancelled, not completed"
     );
 
-    // lease only to give it straight back, so the workspace lease is free again.
-    // The cancelled open's own OS admission ends with it, proved while this
-    // process is still alive.
     drop(lease);
     assert!(
         eventual_fence(&db_path).await,
@@ -485,7 +469,6 @@ async fn cancelled_provider_open_after_seed_releases_its_admission() {
         "the cancelled open never reached its required provisioning write"
     );
 
-    // on the same workspace still completes, so no wait or lease leaked.
     let reopened = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         LocalMemoryProvider::open(home.clone(), CREATOR, "default"),
@@ -621,8 +604,6 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         0
     );
 
-    // read still works: a trigger on the grant table rejects the bootstrap
-    // grant insert. The workspace stays migrated and readable.
     let raw = raw_pool(&db_path).await;
     sqlx::query(
         "CREATE TRIGGER reject_provider_grants BEFORE INSERT ON memory_grants \
@@ -643,7 +624,6 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         "the failure is the real provisioning write, got {rendered}"
     );
 
-    // still holds its own admission.
     assert_eq!(
         engine
             .count_pending_reviews(&principal)
@@ -658,7 +638,6 @@ async fn failed_provisioning_keeps_an_adopted_user_and_releases_its_own_admissio
         "the adopted engine admission is still held"
     );
 
-    // failed open may still hold the workspace.
     assert!(engine.close().await.expect("close").cleanup_confirmed);
     assert!(
         eventual_fence(&db_path).await,
@@ -685,7 +664,6 @@ async fn pending_guarded_migration_runs_after_a_normal_provider_close() {
     );
     assert!(core.close().await.expect("close").cleanup_confirmed);
 
-    // migrator re-applies (its SQL is idempotent).
     let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", env.db_path().display()))
         .await
         .expect("raw pool");

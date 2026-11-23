@@ -128,8 +128,6 @@ fn wide_arithmetic_module_is_rejected() {
 
 #[test]
 fn fixture_runs_through_mini_host() {
-    // envelope is serialized into module memory, `init` + `compute` run, and
-    // the output envelope is parsed back into the SDK type.
     let wasm = echo_module();
     let output = run(&wasm, &probe_manifest("echo"), &fixture_input()).expect("run succeeds");
     assert_eq!(output.schema_version, 1);
@@ -141,11 +139,6 @@ fn fixture_runs_through_mini_host() {
 
 #[test]
 fn real_basic_combat_artifact_conformance() {
-    // by the AR-12 module-dx CI leg, which MUST set the env pair (the CI
-    // step asserts the artifact files exist before invoking, qc3 F-003).
-    // This SKIP path is a fail-open convenience for LOCAL DEV ONLY — a CI
-    // run turning into a visible SKIP is a gate regression the step's file
-    // assertions catch.
     let (Some(wasm_path), Some(manifest_path)) = (
         std::env::var("NEXUS_MODULE_TEST_WASM").ok(),
         std::env::var("NEXUS_MODULE_TEST_MANIFEST").ok(),
@@ -165,7 +158,6 @@ fn real_basic_combat_artifact_conformance() {
 
     let output = run(&wasm, &manifest, &fixture_input()).expect("real module runs");
 
-    // (crates/nexus-wasm-host/tests/basic_combat.rs).
     let delta = output
         .state_delta
         .iter()
@@ -207,12 +199,10 @@ fn real_template_artifact_conformance() {
         std::fs::read_to_string(&manifest_path).expect("read NEXUS_MODULE_TEST_MANIFEST");
     let manifest: ModuleManifest =
         serde_json::from_str(&manifest_json).expect("manifest parses as ModuleManifest");
-    // guard, qc2 W-1).
     manifest.validate().expect("template manifest is valid");
 
     let output = run(&wasm, &manifest, &fixture_input()).expect("template runs");
 
-    // on `character.dice`.
     assert_eq!(output.schema_version, 1);
     let tick = output
         .state_delta

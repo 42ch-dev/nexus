@@ -203,8 +203,6 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     assert_eq!(reviewed.processed, Some(1));
     assert_eq!(reviewed.has_more, Some(false));
 
-    // id and then consumed by the drain: the legacy queue is never written at
-    // all (fix round 5, B1 — the capture is one provider write).
     let pool = db_pool(&env).await;
     let candidate_id = legacy::character_pending_review_candidate_id("pend_coerce");
     assert_eq!(
@@ -228,7 +226,6 @@ async fn binding_local_promote_is_coerced_to_a_fact_fragment() {
     );
     pool.close().await;
 
-    // numbering, existing summary/keywords/TTL/session/pending provenance.
     let scoped = core
         .list_character_memory_fragments(
             &principal,
@@ -709,7 +706,6 @@ async fn a_listed_legacy_fragment_promotes_through_its_bridge_id() {
     );
     pool.close().await;
 
-    // adopted record wins over the projection).
     let shared = core
         .list_character_memory_fragments(&principal, character_id.clone(), None, 50, 0)
         .await
@@ -793,7 +789,6 @@ async fn promotion_refuses_another_characters_record_and_a_non_fragment() {
     );
     pool.close().await;
 
-    // kind, not promoted.
     let pool = db_pool(&env).await;
     sqlx::query(
         "INSERT INTO memory_records \
@@ -888,7 +883,6 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
     let character_id = env.character_id.clone();
     let binding_id = env.binding_id.clone();
 
-    // must leave alone.
     let unrelated_binding = core
         .add_binding(
             &principal,
@@ -934,7 +928,6 @@ async fn promotion_retry_finishes_an_interrupted_cache_invalidation() {
         .as_str()
         .to_string();
 
-    // it must leave alone.
     let pool = db_pool(&env).await;
     for binding in [
         None,

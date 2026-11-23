@@ -86,7 +86,6 @@ impl MemoryCredential {
     }
 }
 
-// log line cannot leak the seed.
 impl std::fmt::Debug for MemoryCredential {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("MemoryCredential(<redacted>)")
@@ -170,9 +169,6 @@ fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
         }
     }
 
-    // the already-open handle (§3.1): only the file's owner, SYSTEM and the
-    // Administrators group may hold any grant — read or nonread — and an
-    // unverifiable policy refuses before any byte is accepted.
     #[cfg(windows)]
     nexus_config_metadata::grants_only_to_trusted_principals(&file).map_err(|_| {
         invalid(
@@ -180,7 +176,6 @@ fn read_protected_file(path: &Path) -> CoreResult<Vec<u8>> {
         )
     })?;
 
-    // cannot make this loader allocate past the declared limit.
     let mut bytes = Vec::new();
     file.take(MAX_CREDENTIAL_FILE_BYTES + 1)
         .read_to_end(&mut bytes)
@@ -278,13 +273,6 @@ fn validate_capability_token(token: &serde_json::Value) -> CoreResult<()> {
 
 #[cfg(all(test, feature = "memory-remote"))]
 mod token_equivalence_tests {
-    // accept/reject exactly what the published `spoke_connect` 0.16.0
-    // `CapabilityTokenProof` accepts/rejects on every shared vector. The
-    // vectors enumerate the declared shape — including each declared
-    // optional member in every presence state — and one named hypothetical
-    // additive member (I-000338); an unnamed future upstream member is
-    // covered only once a lockstep bump extends these vectors, not by this
-    // module's presence alone.
     use super::{validate_capability_token, CREDENTIAL_INVALID_CODE};
     use crate::error::CoreError;
     use spoke_connect::core::CapabilityTokenProof;
@@ -390,7 +378,6 @@ mod token_equivalence_tests {
             "the refusal stays the coded credential failure: {err:?}"
         );
 
-        // precisely the equivalence a future additive member breaks.
         assert_equivalent(additive, "hypothetical additive member");
     }
 }

@@ -174,7 +174,6 @@ pub fn build_story_bundle(
         return None;
     }
 
-    // (fail-closed on a corrupt/injected chapter list) rather than truncating.
     let chapter_count = u32::try_from(chapters.len()).ok()?;
 
     Some(StoryBundle {
@@ -486,7 +485,6 @@ mod tests {
 
     #[test]
     fn sync_module_skips_foreshadowing_index_file() {
-        //     stray copy inside Stories/ is not treated as a chapter.
         assert!(
             SKIP_FILES.contains(&"foreshadowing.md"),
             "foreshadowing.md must be in SKIP_FILES"
@@ -496,9 +494,6 @@ mod tests {
             "event-index.md must be in SKIP_FILES"
         );
 
-        //     never scanned for chapters (only Stories/ is). Even with a
-        //     populated Outlines/foreshadowing.md, chapter discovery must
-        //     return only the real chapter.
         let workspace = setup_workspace();
         let work_root = works_dir(workspace.path(), "my-novel");
         let stories = work_root.join("Stories");

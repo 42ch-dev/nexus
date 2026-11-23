@@ -947,7 +947,6 @@ async fn unnest_flattens_a_two_level_and_a_three_level_body_into_the_parent_leve
         WorkflowNodeKind::PatternSlot
     );
 
-    // its slot: the outer `a -> b` now enters the inner body at `a~2`.
     let inner = setup
         .core
         .compose_strategy_candidate(
@@ -1081,7 +1080,6 @@ async fn unnest_retargets_the_wiring_the_slot_owned() {
     assert!(document.nodes.iter().all(|node| node.id != "wired-slot"));
     assert_eq!(flattened.diagnostics, []);
 
-    // names them, because both ends are nodes this flatten moved.
     let before_ids: Vec<&str> = before
         .document
         .nodes
@@ -1291,7 +1289,6 @@ async fn an_available_duplicate_directory_wins_over_a_broken_one_in_either_order
         &json!([]),
     );
 
-    // cannot match the manifest id, so the listing reports one pin twice with the alias unavailable.
     let patterns = setup.home.join("patterns");
     write_package(&setup.home, "dup-step", "pure", "", &body);
     std::os::unix::fs::symlink(patterns.join("dup-step"), patterns.join("aa-alias")).unwrap();
@@ -1642,7 +1639,6 @@ async fn a_package_that_changed_under_its_version_fails_closed() {
     );
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
 
-    // ones, so it is refused and names both hashes.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -1781,7 +1777,6 @@ async fn replace_subtree_refuses_a_retained_binding_whose_kind_the_pattern_chang
         .unwrap();
     let stored = stored_row(setup.core.pool(), STRATEGY).await;
 
-    // would refuse for the identical value.
     let error = setup
         .core
         .compose_strategy_candidate(
@@ -2004,7 +1999,6 @@ async fn two_stale_pins_refuse_only_the_region_the_operation_uses() {
     );
     assert_eq!(stored_row(setup.core.pool(), STRATEGY).await, stored);
 
-    // other region is reported, never allowed to wedge every operation.
     let replaced = setup
         .core
         .compose_strategy_candidate(
@@ -2079,8 +2073,6 @@ async fn a_changed_inner_pin_surfaces_before_the_shared_walk_dedupes() {
         "prompt-step, reworked",
     );
 
-    // carrier is reached only after the walk has de-duped `prompt-step` — so it is the one that
-    // proves the hash is compared before the de-dupe.
     let replaced = setup
         .core
         .compose_strategy_candidate(
@@ -2117,7 +2109,6 @@ async fn a_changed_inner_pin_surfaces_before_the_shared_walk_dedupes() {
 #[tokio::test]
 async fn unnest_refuses_a_body_declaration_the_parent_level_cannot_carry() {
     let setup = setup().await;
-    // declares `writer` and `reviewer`, so the body uses a role the parent level does not declare.
     let mut body = fragment(
         "role-step",
         "read",

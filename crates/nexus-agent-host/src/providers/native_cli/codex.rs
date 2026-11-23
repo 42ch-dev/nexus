@@ -209,7 +209,6 @@ impl CodexNativeProvider {
 
             let thread_id = if let Some(thread_id) = guard.thread_id.clone() {
                 if attempts > 1 {
-                    // turns continue where they left off (AR-5).
                     guard
                         .client
                         .as_mut()
@@ -254,8 +253,6 @@ impl CodexNativeProvider {
                 thread_id
             };
 
-            // no approval prompts — never more writable than today's
-            // headless `-s read-only`.
             match guard
                 .client
                 .as_mut()
@@ -278,8 +275,6 @@ impl CodexNativeProvider {
                     guard.active_turn_id = Some(response.turn.id.clone());
                     return Ok(response.turn.id);
                 }
-                // resume the thread (AR-5). Only when a thread already
-                // exists; a fresh session re-attempts from thread/start.
                 Err(CodexError::ServerClosed | CodexError::ConnectionClosed)
                     if attempts == 1 && guard.thread_id.is_some() =>
                 {
@@ -336,7 +331,6 @@ impl CodexNativeProvider {
         futures_util::stream::unfold(
             (sessions, op_id, session_id, read_timeout, VecDeque::new(), false),
             |(sessions, op_id, session_id, read_timeout, mut pending, finished)| async move {
-                // frame can carry multiple host events.
                 if let Some(event) = pending.pop_front() {
                     return Some((
                         Ok(event),
@@ -347,9 +341,6 @@ impl CodexNativeProvider {
                     return None;
                 }
 
-                // ends (terminal event / stream error / timeout). The read
-                // runs under the session's own lock (B-2): other sessions'
-                // cancel/shutdown never wait on this frame read.
                 loop {
                     let read = async {
                         let state = {
@@ -357,7 +348,6 @@ impl CodexNativeProvider {
                             guard.get(&session_id).map(|ns| Arc::clone(&ns.state))
                         };
                         let Some(state) = state else {
-                            // dropped (app-server killed) — backstop below.
                             return (Ok(None), None);
                         };
                         let mut guard = state.lock().await;
@@ -374,9 +364,6 @@ impl CodexNativeProvider {
 
                     match outcome {
                         Ok((Ok(Some(ServerMessage::Notification(notification))), active_turn_id)) => {
-                            // previous turn (stale terminal/deltas left in
-                            // the pipe by an abandoned stream) must not
-                            // drive this stream — keep reading.
                             let stale = notification.turn_id().is_some_and(|turn| {
                                 active_turn_id.as_deref() != Some(turn)
                             });
@@ -397,7 +384,6 @@ impl CodexNativeProvider {
                                 &op_id,
                             );
                             if events.is_empty() {
-                                // notification) — keep reading.
                                 continue;
                             }
                             let terminal = matches!(
@@ -435,7 +421,6 @@ impl CodexNativeProvider {
                             }
                         }
                         Ok((Ok(None), _)) => {
-                            // a terminal frame: exactly one OpFailed (PD-3).
                             clear_active_turn(&sessions, &session_id).await;
                             return Some((
                                 Ok(HostEvent::OpFailed(OperationFailedEvent {
@@ -457,10 +442,6 @@ impl CodexNativeProvider {
                             ));
                         }
                         Ok((Err(error), _)) => {
-                            // frame is lost, so the turn fails once (PD-3,
-                            // AR-7). The server-side turn is interrupted and
-                            // its leftover terminal drained so the next
-                            // execute cannot consume it (B-1).
                             interrupt_turn(&sessions, &session_id).await;
                             drain_turn_terminal(&sessions, &session_id).await;
                             clear_active_turn(&sessions, &session_id).await;
@@ -472,10 +453,6 @@ impl CodexNativeProvider {
                             ));
                         }
                         Err(_elapsed) => {
-                            // server-side (best effort), drain its leftover
-                            // terminal (B-1), then fail once with the AR-7
-                            // `timeout` token (parity with the old stream
-                            // read timeout).
                             interrupt_turn(&sessions, &session_id).await;
                             drain_turn_terminal(&sessions, &session_id).await;
                             clear_active_turn(&sessions, &session_id).await;
@@ -586,7 +563,6 @@ async fn auto_answer_approval(client: &mut AsyncClient, id: RequestId, request: 
                 tracing::warn!(error = %error, "Failed to answer codex approval request");
             }
         }
-        // classify — deny with a JSON-RPC error (headless fail-safe).
         _ => {
             tracing::info!(
                 method = request.method(),
@@ -698,9 +674,7 @@ async fn drain_turn_terminal(
                 ) {
                     return;
                 }
-                // noise — keep draining.
             }
-            // interrupt response follows; nothing to answer.
             Ok(Ok(Some(ServerMessage::Request { .. }))) => {}
             Ok(Ok(None) | Err(_)) | Err(_) => {
                 drop(guard);
@@ -752,9 +726,6 @@ impl ProviderAdapter for CodexNativeProvider {
                 provider_id,
                 available: false,
                 latency_ms: None,
-                // failure Display can embed arbitrary subprocess output
-                // (including secrets) and this string is published in the
-                // live provider catalog / API. Never echo the raw Display.
                 message: Some(
                     if matches!(error, codex_codes::Error::BinaryNotFound { .. }) {
                         "app-server command not found".to_string()
@@ -777,7 +748,6 @@ impl ProviderAdapter for CodexNativeProvider {
         &self,
         spec: crate::capability::model::LaunchSpec,
     ) -> HostResult<ManagedSessionHandle> {
-        // app-server process starts lazily on the first execute().
         let host_session_id = HostSessionId::new();
 
         {
@@ -851,8 +821,6 @@ impl ProviderAdapter for CodexNativeProvider {
             ));
         }
 
-        // timeout, mirroring the old spawn + stdin-write enforcement. A
-        // failure returns an error, not a stream.
         let turn_id = tokio::time::timeout(
             self.timeouts.prompt_duration(),
             self.ensure_client_and_start_turn(&session.session_id, &prompt_text),
@@ -892,9 +860,6 @@ impl ProviderAdapter for CodexNativeProvider {
         session: &ManagedSessionHandle,
         op_id: HostOperationId,
     ) -> HostResult<()> {
-        // client under the per-session lock (B-2: only this session's frame
-        // read can delay it). The app-server reports `Interrupted`, which
-        // maps to a clean `OpFinished(EndTurn)` on the stream (AR-1).
         interrupt_turn(&self.sessions, &session.session_id).await;
         tracing::info!(
             session_id = %session.session_id,
@@ -906,11 +871,6 @@ impl ProviderAdapter for CodexNativeProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // frame read holds it, which kills the app-server process (AsyncClient
-        // teardown owns the child — no raw Child map, no ChildReaper). An
-        // in-flight read releases the per-session lock when it returns
-        // (bounded by the read timeout), then the last state Arc drops the
-        // client.
         let mut sessions = self.sessions.write().await;
         sessions.remove(&session.session_id);
         drop(sessions);
@@ -930,11 +890,6 @@ impl ProviderAdapter for CodexNativeProvider {
 
 #[cfg(test)]
 mod tests {
-    // end of the visible test scope for readability; the nursery
-    // significant_drop_tightening suggestion to drop them earlier is noise
-    // here. `PROCESS_ENV_LOCK` (lib.rs test_support) is deliberately held
-    // across awaits: it serializes python-fixture spawns against the
-    // env-mutating discovery tests (see its doc comment).
     #![allow(clippy::significant_drop_tightening)]
     #![allow(clippy::await_holding_lock)]
 
@@ -947,9 +902,6 @@ mod tests {
     );
 
     fn test_probe_request(timeout_ms: u64) -> crate::capability::model::ProbeRequest {
-        // `current_dir` on Windows: spawn fails with ERROR_DIRECTORY (os
-        // error 267) before the fixture is ever reached. See register row
-        // R-V1202-P1T3-001.
         let cwd = std::env::temp_dir();
         crate::capability::model::ProbeRequest {
             timeout_ms,
@@ -1011,8 +963,6 @@ mod tests {
         provider: &CodexNativeProvider,
         text: &str,
     ) -> (ManagedSessionHandle, HostEventStream) {
-        // spawned via `#!/usr/bin/env python3`, which resolves python3
-        // through PATH at execve time (see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let handle = provider.launch(launch_spec()).await.expect("launch");
         let stream = provider
@@ -1057,15 +1007,9 @@ mod tests {
 
     #[tokio::test]
     async fn probe_failure_diagnostic_never_echoes_sdk_output() {
-        // error Display might carry (subprocess stderr, tokens, paths). The
-        // fixture fails `initialize` with it, so it genuinely travels the real
-        // probe failure path.
         const SENTINEL: &str = "sentinel-secret-do-not-publish-4f2a";
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
 
-        // reached it. Without a receipt a probe that never spawned (bad
-        // interpreter, missing fixture) would also report "unavailable" and the
-        // sentinel assertion below would pass vacuously.
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("probe-requests.jsonl");
         let provider = mock_provider(HashMap::from([
@@ -1085,7 +1029,6 @@ mod tests {
             !health.available,
             "a failing handshake must be unavailable, got {health:?}"
         );
-        // before the sentinel error was returned.
         let log = std::fs::read_to_string(&req_log)
             .expect("the probe must have spawned the fixture and logged a request");
         let requests: Vec<serde_json::Value> = log
@@ -1097,8 +1040,6 @@ mod tests {
             "the probe must have issued initialize to the fixture; log: {log}"
         );
 
-        // diagnostic. The exact wording of the static category is deliberately
-        // NOT asserted — that would pin source text rather than behavior.
         let message = health.message.unwrap_or_default();
         assert!(
             !message.contains(SENTINEL),
@@ -1254,7 +1195,6 @@ mod tests {
     /// `mock-thread-1`.
     #[tokio::test]
     async fn second_execute_reuses_thread() {
-        // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let temp_dir = tempfile::tempdir().expect("temp dir");
         let req_log = temp_dir.path().join("requests.jsonl");
@@ -1406,7 +1346,6 @@ mod tests {
     /// turn's events.
     #[tokio::test]
     async fn stale_turn_terminal_from_previous_turn_does_not_end_new_stream() {
-        // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([(
             "STALE_TURN_COMPLETED".to_string(),
@@ -1467,7 +1406,6 @@ mod tests {
     /// turn instead of consuming the interrupted turn's `turn/completed`.
     #[tokio::test]
     async fn decode_error_interrupts_and_drains_turn() {
-        // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BAD_FRAME".to_string(), "1".to_string())]));
 
@@ -1531,7 +1469,6 @@ mod tests {
     /// replaces the provider-global write lock.
     #[tokio::test]
     async fn session_b_cancel_and_shutdown_do_not_wait_on_session_a_read() {
-        // resolve python3 through PATH; see lib.rs test_support).
         let _env_lock = crate::test_support::PROCESS_ENV_LOCK.lock().await;
         let provider = mock_provider(HashMap::from([("BLOCK_TURN".to_string(), "1".to_string())]));
 
@@ -1577,7 +1514,6 @@ mod tests {
             "shutdown of session B must not wait on session A's frame read"
         );
 
-        // then tear the session down so no child process leaks.
         pump.abort();
         let _ = pump.await;
         provider.shutdown(handle_a).await.expect("shutdown a");

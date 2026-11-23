@@ -11,9 +11,6 @@ use std::sync::Arc;
 
 use nexus_orchestration::OrchestrationEngine;
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Build an engine + loaded preset for E2E testing.
 fn setup_engine() -> (
     Arc<nexus_orchestration::GraphFlowEngine>,
@@ -63,14 +60,8 @@ async fn seed_novel_writing_preset_input(
     )
     .unwrap();
     ctx.set("preset.input.slug", "ch01").unwrap();
-    // rendering does not fail. Worldless e2e tests use empty string.
     ctx.set("preset.input.world_kb_block", "").unwrap();
-    // does not fail. e2e tests do not exercise findings; empty string means
-    // the `{{#if open_findings_block}}` guard omits the section.
     ctx.set("preset.input.open_findings_block", "").unwrap();
-    // does not fail on `{{preset.input.foreshadowing_summary}}`. e2e tests do
-    // not populate the foreshadowing index; empty string means the
-    // `{{#if foreshadowing_summary}}` guard omits the section.
     ctx.set("preset.input.foreshadowing_summary", "").unwrap();
 }
 
@@ -112,9 +103,6 @@ async fn run_until_wait_or_terminal(
     outcomes
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn e2e_novel_writing_traverses_all_outer_states() {
     let (engine, loaded) = setup_engine();
@@ -139,9 +127,6 @@ async fn e2e_novel_writing_traverses_all_outer_states() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn e2e_chapter_scoped_pipeline_executes() {
     let (engine, loaded) = setup_engine();
@@ -150,7 +135,6 @@ async fn e2e_chapter_scoped_pipeline_executes() {
 
     let outcomes = run_until_wait_or_terminal(&engine, &session_id, 64).await;
 
-    // with capability-based enter actions.
     assert!(
         !outcomes.is_empty(),
         "should have executed at least one step"
@@ -175,9 +159,6 @@ async fn e2e_chapter_scoped_pipeline_executes() {
         "session should not be running after steps"
     );
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn e2e_schedule_advance_past_outlining() {
@@ -221,9 +202,6 @@ async fn e2e_schedule_advance_past_outlining() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn e2e_restart_durability_context_persists() {
     let (engine, loaded) = setup_engine();
@@ -266,9 +244,6 @@ async fn e2e_restart_durability_context_persists() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn e2e_session_list_includes_created() {
     let (engine, loaded) = setup_engine();
@@ -290,9 +265,6 @@ async fn e2e_session_list_includes_created() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[test]
 fn core_context_template_is_rendered_into_prompt() {
     let rendered = nexus_orchestration::tasks::render_core_context_template(
@@ -303,9 +275,6 @@ fn core_context_template_is_rendered_into_prompt() {
 
     assert_eq!(rendered, "World: Nexus");
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[test]
 fn e2e_novel_writing_has_four_states() {
@@ -338,13 +307,8 @@ fn e2e_novel_writing_has_four_states() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[test]
 fn template_syntax_error_returns_deterministic_failure() {
-    // the novel-writing preset. The assertion verifies a deterministic error
-    // (not a panic) with a message that explains the template syntax failure.
     let result = nexus_orchestration::tasks::render_core_context_template(
         "{{#if unclosed_block",
         &serde_json::json!({}),
@@ -361,9 +325,6 @@ fn template_syntax_error_returns_deterministic_failure() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[test]
 fn novel_writing_judge_quality_gate_on_finalize() {
     let caps = nexus_capability::CapabilityRegistry::with_builtins();
@@ -377,7 +338,6 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         .find(|s| s.id == "finalize")
         .expect("finalize state should exist");
 
-    // capability is deferred to finalize_commit.
     assert!(
         finalize.enter.is_empty(),
         "finalize should have no enter actions (chapter transition deferred to finalize_commit)"
@@ -445,9 +405,6 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         other => panic!("finalize_commit next should be Linear(done), got: {other:?}"),
     }
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 #[test]
 fn novel_chapter_transition_capability_registered() {

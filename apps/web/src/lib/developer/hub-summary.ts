@@ -91,7 +91,6 @@ export function useAgentSummary(): HubSectionState<AgentSummary> {
   const scan = useScanAgents({ filter: 'all' });
   const savedProfile = useSavedAgentProfile();
 
-  // claim "no agent selected", and either failure surfaces its own reason.
   const data: AgentSummary | undefined =
     scan.data && !savedProfile.isLoading && !savedProfile.error
       ? savedProfile.profile
@@ -136,10 +135,6 @@ interface SessionAggregate {
   truncated: boolean;
 }
 
-/**
- * {@link HUB_SESSION_MAX_PAGES}; `truncated` tells the card that the resulting
- * running count is a lower bound rather than an exact total.
- */
 async function fetchAllVisibleSessions(client: NexusClient): Promise<SessionAggregate> {
   const sessions: SessionSummary[] = [];
   let cursor: string | undefined;
@@ -179,8 +174,6 @@ export function useVisibleSessions() {
   return useQuery({
     queryKey: queryKeys.hub.harnessSessions(),
     queryFn: () => fetchAllVisibleSessions(client),
-    // remount (Hub ↔ Harness) replays the whole cursor chain, so it stays fresh
-    // for a minute — the count is a status summary, not a live feed.
     staleTime: 60_000,
   });
 }

@@ -255,10 +255,6 @@ pub fn is_launch_class_failure(error: &HostError) -> bool {
         HostError::LaunchFailed { .. }
         | HostError::CleanupUnconfirmed { .. }
         | HostError::ProviderUnavailable { .. } => true,
-        // launch/initialize boundary. The typed `stage` distinguishes those
-        // from an ordinary prompt/content/run timeout, which leaves an
-        // already-initialized recipe healthy — blanket-classifying every
-        // `operation_timeout` would tear down a provider that still works.
         HostError::OperationTimeout { stage, .. } => {
             matches!(stage.as_str(), "launch" | "initialize" | "session")
         }

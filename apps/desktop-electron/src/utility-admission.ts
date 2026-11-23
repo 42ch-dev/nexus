@@ -32,7 +32,6 @@ export function admitUtilityOperation(
       return { ok: true };
     }
     case 'close':
-      // unconfirmed one may be retried until cleanup is confirmed.
       return { ok: true };
     case 'reset-local-state': {
       if (state === 'running' || state === 'closing') {

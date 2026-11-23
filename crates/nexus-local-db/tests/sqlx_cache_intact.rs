@@ -24,7 +24,6 @@ fn workspace_sqlx_dir() -> std::path::PathBuf {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .join("../../.sqlx")
-        // relocated this test still resolves correctly via CARGO_MANIFEST_DIR.
         .canonicalize()
         .unwrap_or_else(|_| manifest_dir.join("../../.sqlx"))
 }

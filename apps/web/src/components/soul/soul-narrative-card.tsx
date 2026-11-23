@@ -46,8 +46,6 @@ export function SoulNarrativeCard({
 }) {
   const { t } = useTranslation('memory');
 
-  // server-reported state so the CTA shows active progress regardless of the
-  // pre-reflect cache shape.
   if (isReflecting) {
     return <GeneratingState t={t} />;
   }
@@ -75,7 +73,6 @@ export function SoulNarrativeCard({
     return <UngeneratedState onReflect={onReflect} t={t} />;
   }
 
-  // a growth banner above the cached prose with a primary re-reflect CTA.
   const stale = narrative.state === 'stale' || narrative.stale;
   if (narrative.narrative) {
     return (
@@ -88,8 +85,6 @@ export function SoulNarrativeCard({
     );
   }
 
-  // happen (the server returns text for those states), but degrade to the
-  // ungenerated CTA rather than a blank card.
   return <UngeneratedState onReflect={onReflect} t={t} />;
 }
 

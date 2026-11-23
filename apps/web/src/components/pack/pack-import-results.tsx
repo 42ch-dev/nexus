@@ -1,6 +1,4 @@
 /**
- * (V1.152 P1 T2, DF-77). Pure presentation.
- *
  * Renders the `PackImportResponse` returned by `useImportPack`: the two
  * `AtomCounts` blocks (entries / relations) and a native `<details>`
  * disclosure with the per-atom `details` list (kind / id / outcome /
@@ -52,7 +50,6 @@ export function PackImportResults({ summary }: PackImportResultsProps) {
   const { t } = useTranslation('pack');
   const titleId = useId();
 
-  // region; only non-zero outcomes are listed so the announcement stays short.
   const summarize = (counts: AtomCounts): string => {
     const parts = OUTCOME_KEYS.filter((key) => counts[key] > 0).map((key) =>
       t(`results.liveCount.${key}`, { count: counts[key] }),

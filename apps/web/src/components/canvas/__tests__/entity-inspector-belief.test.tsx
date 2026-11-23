@@ -358,7 +358,6 @@ describe('EntityInspector — modules.belief editing (v1.203 P2 O2)', () => {
       </QueryClientProvider>,
     );
 
-    // populate-empty on holder kinds, but no rows render.
     const section = screen.getByTestId('belief-section');
     expect(within(section).queryByRole('group')).not.toBeInTheDocument();
   });
@@ -475,7 +474,6 @@ describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
     const belief = callsOf(client.worldKbPatchEntity)[0][1].patch!.modules!.belief as Array<
       Record<string, unknown>
     >;
-    // including the unknown nested key — round-trips verbatim (no trimming).
     expect(belief[0]).toEqual({
       holder: 'chr_bo',
       proposition: '  the ferry is late  ',
@@ -590,7 +588,6 @@ describe('EntityInspector — fix round 1 (L2-T2-001/002/003/004)', () => {
       within(rows[0]).getByText('must reference a known character: got "chr_x"'),
     ).toBeInTheDocument();
     expect(within(rows[1]).getByText('must be a whole number: got 1.5')).toBeInTheDocument();
-    // at the form-level error list, verbatim (outside the collapsible section).
     expect(screen.getByText('modules.belief.5.truth: row does not exist')).toBeInTheDocument();
   });
 
@@ -684,7 +681,6 @@ describe('EntityInspector — fix round 2 (L2-T2-002 remainder: stored {} rows)'
       <EntityInspector worldId="w-1" node={node} entity={emptyRowEntity} onConflict={vi.fn()} />,
     );
 
-    // dirty dialect.
     const mentalSection = screen.getByTestId('mental-state-section');
     fireEvent.change(within(mentalSection).getByLabelText('Identity'), {
       target: { value: '{"note": "changed"}' },
@@ -860,14 +856,11 @@ describe('EntityInspector — plan QC fix 1 (QC1-F003: 422 row addresses map thr
     await user.click(within(section).getByRole('button', { name: 'Add belief' }));
     const rows = within(section).getAllByRole('group');
     expect(rows).toHaveLength(2);
-    // integer-valued order and is submitted at wire index 0.
     await user.type(within(rows[1]).getByLabelText('Proposition'), 'the tide tables are forged');
     await user.type(within(rows[1]).getByLabelText('Order'), '9223372036854775808');
 
     await user.click(screen.getByRole('button', { name: /^Save$/i }));
 
-    // row (the contributing one), not the blank first row. The reason keeps
-    // its additional ': ' text intact.
     const updated = await screen.findByTestId('belief-section');
     const updatedRows = within(updated).getAllByRole('group');
     expect(

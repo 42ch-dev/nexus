@@ -1,9 +1,3 @@
-/**
- * rendered after a successful save: tag `BRIEF · {relative timestamp}`, the
- * one-sentence summary, and a follow-up `世界已就绪` card announcing the Work
- * module unlock (product-owned copy). An edit affordance reopens the inline
- * editor (per-row OCC update on save).
- */
 import { useTranslation } from 'react-i18next';
 
 import { formatRelative } from '@/lib/format';
@@ -16,10 +10,6 @@ export interface BriefCardProps {
   onEdit: () => void;
 }
 
-/**
- * second-bucket cutover formatRelative uses), the shared relative formatter
- * afterwards.
- */
 function briefWhen(updatedAt: string, justNow: string): string {
   const ms = Date.parse(updatedAt);
   if (Number.isNaN(ms)) return formatRelative(updatedAt);

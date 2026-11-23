@@ -499,7 +499,6 @@ impl Parser {
                 }
             }
             Some(Token::Ident(_, _)) => {
-                // or a bare field_access (truthy check).
                 let field = self.parse_field_access()?;
                 let cmp_op = match self.peek() {
                     Some(Token::EqEq(_)) => Some(CmpOp::Eq),
@@ -603,9 +602,6 @@ impl Parser {
 /// Returns [`ExprError::FieldNotFound`] if a field path references a
 /// non-existent key, or [`ExprError::TypeError`] on type mismatches.
 pub fn evaluate(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprError> {
-    // kind + result. Kept at `debug!` so it is no-op by default; enable with
-    // `RUST_LOG=nexus_preset::expr=debug` when diagnosing
-    // conditional-routing misfires.
     let result = evaluate_inner(expr, context);
     tracing::debug!(
         expr_kind = ?expr.variant_name(),
@@ -880,7 +876,6 @@ mod tests {
     #[test]
     fn parse_nested_parens() {
         let expr = parse("((_context.a))").unwrap();
-        // (truthy check at eval time).
         assert!(matches!(expr, Expr::FieldAccess { .. }));
     }
 

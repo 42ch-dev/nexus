@@ -303,9 +303,6 @@ pub async fn process_bearer_review_batch(
         }
 
         let decision = nexus_creator_memory::review::classify_pending_review(&row.input);
-        // decision, and cancelling one mid-transaction can leave its target
-        // unsettled, which would refuse the bearer's next read. The call budget
-        // is therefore checked between rows, never inside one.
         let action_counts =
             consume_review_decision(&decision.action, row, bearer, memory, section).await;
 
@@ -339,11 +336,6 @@ async fn consume_review_decision(
     };
 
     let decision = match action {
-        // Promote decision on a World-life (binding) scope is coerced to
-        // the fragment path so it retains binding provenance (blocking
-        // binding removal via `binding_has_local_memory`) and only becomes
-        // Character-shared after the explicit revision-checked fragment
-        // promotion. Shared Character scope and the whole Creator arm promote.
         ReviewAction::PromoteToLongTerm if row.binding_local => fragment_decision(&row.input),
         ReviewAction::PromoteToLongTerm => match promote_decision(&row.input, bearer).await {
             Ok(decision) => decision,
@@ -368,7 +360,6 @@ async fn consume_review_decision(
         }
     };
 
-    // shared candidate (Creator arm or shared Character scope) carries none.
     let binding_id = if row.binding_local {
         row.input.scope_id.as_deref()
     } else {
@@ -441,13 +432,8 @@ async fn promote_decision(
         )
         .await
         .map_err(|error| internal_err("promote_to_long_term_failed", error))?;
-    // promotion derives it from the pending row, because the retained file
-    // promotion's slug came from its minted `memory_id` and a promoted record
-    // with no slug cannot be listed, shown, edited or deleted
-    // (fix round 1, Greptile `memory_pipeline.rs:441`).
     let memory_kind = nexus_creator_memory::review::task_kind_to_memory_kind(&input.task_kind);
     let memory_id = format!("mem_{}", input.pending_id);
-    // than a pending row the pipeline can serve (fix round 3, F3).
     let slug = nexus_creator_memory::long_term_memory::slug_from_memory_id(&memory_id);
     let slug = slug.ok_or_else(|| {
         internal_err(
@@ -502,7 +488,6 @@ impl PassthroughSummarizer {
     }
 }
 
-// `async`; clippy 1.98 `unused_async_trait_impl` is toolchain-drift debt.
 #[allow(clippy::unused_async_trait_impl)]
 impl SessionDigestSummarizer for PassthroughSummarizer {
     async fn summarize(

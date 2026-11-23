@@ -32,7 +32,6 @@ describe('resolveInstallUrl', () => {
   });
 });
 
-// and the More list via `excludeFromPicker`.
 describe('isExcludedFromPicker', () => {
   it('returns true for ACP wrappers', () => {
     expect(isExcludedFromPicker('claude-acp')).toBe(true);
@@ -220,10 +219,6 @@ describe('moreAgentsEntries', () => {
   });
 
   it('sorts More agents by name (P2: installed agents always land in the default grid)', () => {
-    // not-curated tier 3), so the More list only ever holds uninstalled
-    // non-curated agents — sorted by name. The installed-first comparator
-    // branch in `moreAgentsEntries` is defensive and not reachable through
-    // the real catalog pipeline.
     const entries = moreAgentsEntries([
       makeAgent({ name: 'z-agent', installed: false }),
       makeAgent({ name: 'b-agent', installed: false }),
@@ -245,8 +240,6 @@ describe('prioritizeInstalled', () => {
 });
 
 describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () => {
-  // different launch commands — the bug is that a catalog-key map collapses
-  // them, so selecting one card could save the other's launch command.
   const twoClaudeInstalls = (): AgentScanEntry[] => [
     makeAgent({
       registry_agent_id: null,
@@ -296,8 +289,6 @@ describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () =>
   });
 });
 
-// Spec: the v1.119 `setup-agent-picker-catalog` record (local).
-
 describe('P2 acceptance criteria (catalog layer)', () => {
   it('AC-P2-1: native Claude/Codex carry pinned ACP iconUrls', () => {
     const claude = resolveCatalogItem(
@@ -338,8 +329,6 @@ describe('P2 acceptance criteria (catalog layer)', () => {
       makeAgent({ name: 'aaa-custom', installed: true }),
     ];
     const ids = defaultGridEntries(scan).map((e) => e.id);
-    // Tier 2 (curated uninstalled, priority asc): codex-native(0), cursor(2)
-    // Tier 3 (installed not curated, displayName asc): aaa-custom, zzz-custom
     expect(ids).toEqual([
       'claude-native',
       'codex-native',
@@ -350,7 +339,6 @@ describe('P2 acceptance criteria (catalog layer)', () => {
   });
 
   it('AC-P2-7: forward-compat curated agents appear when scan includes their registry id', () => {
-    // priority the moment the scan surfaces their registry id.
     const scan: AgentScanEntry[] = [
       makeAgent({ registry_agent_id: 'hermes', name: 'Hermes', installed: false }), // priority 5
       makeAgent({ registry_agent_id: 'grok-build', name: 'Grok Build', installed: false }), // priority 7

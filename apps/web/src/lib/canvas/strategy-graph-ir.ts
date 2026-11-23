@@ -1,7 +1,4 @@
 /**
- * `workflow-ir` DTOs to the React Flow graph the Strategy Canvas renders
- * (v239-p3-canvas-compose-ui T1).
- *
  * The YAML projection (`buildStrategyGraph`) stays the compatibility view for
  * legacy bundles; this projection is the only path used when the
  * `strategy_canvas_compose` flag is on — one projection runs, never both,
@@ -176,10 +173,6 @@ export function buildStrategyGraphFromIr(
   const slotNestId = new Map<string, string>(); // slot node id → nest id
   for (const nest of document.nests) slotNestId.set(nest.parent_node, nest.id);
 
-  /**
-   * collapsed parent must keep it in the node set (hidden) so the edges naming
-   * it keep both endpoints, and an expanded parent emits it as its own child.
-   */
   const hiddenSlot = (id: string, seen: Set<string> = new Set()): boolean => {
     const parent = containment.get(id);
     if (parent === undefined) return false;
@@ -191,7 +184,6 @@ export function buildStrategyGraphFromIr(
   for (const node of nodes) {
     if (node.kind === 'inner_step') continue;
     const contained = node.kind === 'pattern_slot' && containment.has(node.id);
-    // it stays here as a hidden node rather than dropping out of the graph.
     const hidden = contained && hiddenSlot(node.id);
     if (contained && !hidden) continue;
     const layer = layerOf.get(node.id) ?? 0;
@@ -245,8 +237,6 @@ export function buildStrategyGraphFromIr(
       focusable: true,
     });
 
-    // binding rows and authored nested slots as child slot groups (three
-    // levels deep at most, matching the IR nest policy).
     if (isSlot && expanded) {
       const parent = rfNodes[rfNodes.length - 1];
       parent.data = { ...parent.data, isGroup: true, expanded: true };
@@ -328,11 +318,6 @@ interface SlotChild {
   data: StrategyNodeData;
 }
 
-/**
- * nested slots. Nested slots that are themselves expanded recurse (the
- * parents-first push order is preserved: each parent lands before its
- * children), bounded by the IR nest policy's three levels.
- */
 function pushSlotSubtree(
   rfNodes: Node<StrategyNodeData>[],
   slot: IrNode,
@@ -378,7 +363,6 @@ function pushSlotSubtree(
         patternId: child.pattern?.registry_id ?? '',
         patternVersion: child.pattern?.version ?? '',
         patternEffectClass: child.effect_class,
-        // op addresses the nest whose `parent_node` names it.
         nestId: slotNestId.get(child.id),
         slotRows: rows,
         unboundRequired: rows.filter((row) => row.required && row.value === undefined).map((row) => row.name),

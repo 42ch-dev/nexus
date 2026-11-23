@@ -61,7 +61,6 @@ async fn w01_v142_migration_idempotent() {
     // by removing full-line comments and splitting on semicolons.
     let migration_sql = include_str!("../migrations/202606110001_v142_multi_volume_pk.sql");
 
-    // from splitting statements incorrectly.
     let sql_no_comments: String = migration_sql
         .lines()
         .filter(|line| {
@@ -76,7 +75,6 @@ async fn w01_v142_migration_idempotent() {
         if sql.is_empty() {
             continue;
         }
-        // legacy table is cleaned up, and IF NOT EXISTS on indexes is safe.
         sqlx::query(sqlx::AssertSqlSafe(sql))
             .execute(&pool)
             .await
@@ -147,8 +145,6 @@ async fn w02_volume_aware_index_coverage() {
         .collect::<Vec<String>>()
         .join("\n");
 
-    // scan keeps a USING clause — e.g. "SCAN work_chapters USING COVERING
-    // INDEX …" — and is not a full table scan.
     let full_scan = plan_rows
         .iter()
         .map(|(_, _, _, detail)| detail.trim())

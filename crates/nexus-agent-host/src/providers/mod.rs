@@ -59,7 +59,6 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.protocol, pc.id
         )));
     }
-    // is empty input.
     if pc
         .command
         .as_deref()
@@ -70,8 +69,6 @@ pub fn validate_provider_config(pc: &ProviderConfig) -> HostResult<()> {
             pc.id
         )));
     }
-    // roster can emit (`opencode`, `kimi`, …): a configured provider that
-    // came from a scan row must pass the same validation at boot.
     if protocol == "native_cli"
         && !NATIVE_PROVIDER_IDS.contains(&pc.id.as_str())
         && !crate::discovery::path_scan::known_native_cli_provider_ids().any(|id| id == pc.id)
@@ -157,12 +154,6 @@ pub fn adapter_from_catalog_entry(
     let provider_config = provider_config_from_entry(entry)?;
     validate_provider_config(&provider_config)?;
 
-    // strategy implies. Dispatch below selects the adapter from
-    // `entry.protocol_kind`, while `provider_config_from_entry` derives
-    // validation from the launch strategy — so an inconsistent pair (for
-    // example a `NativeCli` entry carrying an ACP launch with the dsh-native
-    // id) would validate as one protocol and construct the other. Require
-    // agreement instead of silently constructing the wrong adapter.
     let declared = match entry.protocol_kind {
         ProtocolKind::Acp => "acp",
         ProtocolKind::NativeCli => "native_cli",

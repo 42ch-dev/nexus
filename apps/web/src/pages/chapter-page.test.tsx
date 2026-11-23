@@ -244,7 +244,6 @@ function selectTextInProse(startOffset: number, endOffset: number) {
     }
     offset += text.length;
   }
-  // toolbar positioning hook.
   range.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => {} });
   const selection = window.getSelection();
   selection?.removeAllRanges();
@@ -503,8 +502,6 @@ describe('ChapterPage (V1.79 reading surface)', () => {
 
     renderChapter();
     await screen.findByLabelText('Chapter maturation indicators');
-    // non-terminal finding count. Both resolve async (counts load after the
-    // container) so use async queries. Interpretable without tooltips.
     expect(await screen.findByLabelText('5 knowledge entries')).toBeInTheDocument();
     expect(await screen.findByLabelText('2 open findings')).toBeInTheDocument();
   });
@@ -522,7 +519,6 @@ describe('ChapterPage (V1.79 reading surface)', () => {
 
     renderChapter();
     await screen.findByText('Body prose.');
-    // patch affordance exists on the reading surface.
     expect(screen.getByRole('link', { name: /Edit outline for Chapter 1/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Save body/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit body/i })).not.toBeInTheDocument();
@@ -550,8 +546,6 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
   });
 
   it('resolves prev/next across the server page boundary by cursor-walking (qc3 W-QC3-001)', async () => {
-    // page 2; without the cursor-walk its prev/next would be silently lost and
-    // the nav would degrade to "First/Last chapter" placeholders.
     useHandlers(
       chapterDetail('draft'),
       bodyHandler(),
@@ -566,7 +560,6 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
     );
 
     renderChapter('w-123', 101);
-    // the nav no longer loses chapters past the first server page.
     expect(await screen.findByRole('link', { name: /Previous chapter: Chapter 100/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Next chapter: Chapter 102/i })).toBeInTheDocument();
   });

@@ -1,6 +1,4 @@
 /**
- * event inspector) + V1.123 P3 Task 4 (cross-surface navigation affordance).
- *
  * Three inspector shapes dispatch on `node.data.nodeKind`:
  *   • `event`  → `WorkTimelineEventInspector`     (Narrative layer)
  *   • `scene`  → `WorkTimelineMomentSceneInspector` (Moment layer)
@@ -42,9 +40,6 @@ import type { WorkTimelineNodeData } from './work-timeline-canvas-adapter';
 import type { TimelineNodeData } from '../timeline-canvas/timeline-canvas-adapter';
 
 /**
- * Outline" CTA. Accent (worldkb vs outline) discriminates Narrative vs Moment
- * feel at a glance.
- *
  * `simplify:` shared leaf shell rather than a `packages/nexus-ui` promotion.
  * The inspector title/description/anchor block are Work-Timeline-surface-
  * specific; P4 may revisit once the design system lands a generic inspector.
@@ -62,12 +57,6 @@ function WorkTimelineInspectorShell({
   accent: 'worldkb' | 'outline';
   workId: string;
   children?: React.ReactNode;
-  /**
-   * block and the Edit-in-Outline CTA (V1.123 P3 Task 4). The shell stays
-   * agnostic to the affordance's destination; the caller (e.g. the event
-   * inspector) composes the right element. Null/undefined when the
-   * per-inspector binding is absent (honest scope cut).
-   */
   crossSurfaceAffordance?: React.ReactNode;
 }) {
   const { t } = useTranslation('canvas');
@@ -148,8 +137,6 @@ function ManuscriptAnchorBlock({
 }
 
 /**
- * inspector when the Work is bound to a World.
- *
  * The orchestrator owns the navigation; this primitive only fires the
  * callback. Both `worldId` AND `onViewOnWorldTimeline` MUST be present for
  * the affordance to render (the orchestrator wires the callback only when
@@ -184,12 +171,6 @@ function ViewOnWorldTimelineAffordance({
       type="button"
       data-testid="work-timeline-view-on-world-timeline"
       data-world-id={worldId}
-      // bind (`worldEventId` — the World KB entity `key_block_id`), the CTA
-      // target deep-links to the specific World event
-      // (`?layer=narrative&event=<id>`); absent → the V1.123 surface-level
-      // jump (`?layer=narrative` only). The attribute carries the event id so
-      // the DOM exposes which target the click will land on (PD-5 three-state
-      // matrix; undefined → attribute omitted → V1.123 fallback).
       data-event-id={node.data.worldEventId}
       onClick={() => onViewOnWorldTimeline(node)}
       aria-label={t('workTimeline.inspector.viewOnWorldTimelineAria', {
@@ -223,10 +204,6 @@ export function WorkTimelineEventInspector({
   workId: string;
   /** Optional bound World id (P3 Task 4 cross-surface navigation). */
   worldId?: string;
-  /**
-   * "View on World Timeline". The orchestrator composes the URL and calls
-   * `useNavigate`; the inspector stays decoupled from routing.
-   */
   onViewOnWorldTimeline?: (node: Node<WorkTimelineNodeData>) => void;
 }) {
   const { t } = useTranslation('canvas');
@@ -271,9 +248,6 @@ export function WorkTimelineEventInspector({
 }
 
 /**
- * status (if any) + the manuscript anchor + Edit-in-Outline hand-off.
- * Outline accent mirrors the Moment scene node (Work-scoped outline-projection).
- *
  * V1.123 P3 Task 4 — scene inspectors do NOT surface the cross-surface
  * affordance: the Work-event → World-event binding axis is Narrative-only
  * (architect §3.4 — Moment-on-Outline carrier has no World-event binding
@@ -293,12 +267,6 @@ export function WorkTimelineMomentSceneInspector({
   /** Reserved for forward compatibility (P3 Task 4 — unused on Moment nodes). */
   onViewOnWorldTimeline?: (node: Node<WorkTimelineNodeData>) => void;
 }) {
-  // exist on the signature so callers (e.g. tests checking that Moment nodes
-  // do NOT surface the CTA even when the slots are wired) can pass them
-  // without TypeScript errors. If P4+ extends the cross-surface binding to
-  // scene-anchored World events, this is where the affordance would render.
-  // The underscore-prefixed binds suppress `noUnusedParameters` without
-  // adding runtime cost.
   void _worldId;
   void _onViewOnWorldTimeline;
   const { t } = useTranslation('canvas');
@@ -335,10 +303,6 @@ export function WorkTimelineMomentSceneInspector({
   );
 }
 
-/**
- * status (if any) + the chapter/scene/beat manuscript anchor + Edit-in-Outline
- * hand-off. Outline accent mirrors the Moment beat node.
- */
 export function WorkTimelineMomentBeatInspector({
   node,
   workId,
@@ -380,8 +344,6 @@ export function WorkTimelineMomentBeatInspector({
 }
 
 /**
- * node selected on the Work Timeline Brief layer.
- *
  * Work-Brief is a read-only **projection** of the bound World's Brief
  * (PD-2): Brief is World spine; the Work does NOT gain an authored Brief
  * and there is NO Work-owned Brief write flow. Mirrors the World Timeline's
@@ -406,19 +368,12 @@ export function WorkTimelineBriefEraInspector({
   worldId?: string;
 }) {
   const { t } = useTranslation('canvas');
-  // with `layoutHint: 'brief'`) — Work-Brief reuses the World Brief
-  // projection verbatim (T1). The Work surface never reads
-  // `WorkTimelineNodeData` fields on Brief nodes; read the era markers
-  // from the World carrier.
   const data = node.data as unknown as TimelineNodeData;
   const eraId = data.eraId;
   const startHint = data.startHint;
   const endHint = data.endHint;
   const worldSummary = data.worldSummary;
 
-  // `start_hint → end_hint`; fall back to whichever hint exists; fall back
-  // to the temporal-unknown label when neither is present (same format as
-  // the World Timeline Brief-era inspector).
   const span = (() => {
     if (startHint && endHint) {
       return t('workTimeline.briefEraNode.span', { start: startHint, end: endHint });
@@ -555,10 +510,6 @@ export function WorkTimelineBriefEraInspector({
 }
 
 /**
- * `node.data.nodeKind`. Returns `null` for unknown kinds so the
- * `useCanvasSurface` derived `surface.inspector` slot renders nothing when
- * the selection does not match a Work Timeline node.
- *
  * The dispatch mirrors the V1.123 P1 Timeline adapter's
  * `renderInspector` dispatch (Brief-era vs Narrative event). Architect §6
  * (read-only in V1.123): every branch renders read-only details; the

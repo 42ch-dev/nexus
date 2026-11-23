@@ -40,8 +40,6 @@ fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D
     }
 }
 
-/// artifact (v1.191 P1 T13). The anchor is built from the artifact the
-/// orchestrator loaded, never from the model's own prose.
 const SOURCE_ANCHOR_EXCERPT_CHARS: usize = 256;
 
 /// The placeholder the native callback returns when preparing the model's
@@ -192,11 +190,6 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'creator_id'".into()))?;
 
-        // engine injects the trusted `_session_id` at run admission; the
-        // extraction runs through `orchestrate_extract`, whose request type
-        // refuses an empty run id. A capability invoked outside a trusted run
-        // context refuses here — before any job claim or mutation — instead of
-        // inventing a default session.
         let run_id = input
             .get("_session_id")
             .and_then(|v| v.as_str())
@@ -228,11 +221,6 @@ impl Capability for KbExtractWork {
             }
             job
         } else {
-            // — cross-creator job_id claim test gap: claim path only tested for
-            // same-creator; cross-creator race condition not exercised in CI.
-            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S2
-            // — failure-injection test gap: no integration test exercises the
-            // insert-key-block failure path in the extract pipeline.
             nexus_local_db::next_queued_extract_job(pool, creator_id)
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("Failed to claim job: {e}")))?
@@ -244,10 +232,6 @@ impl Capability for KbExtractWork {
         };
 
         let job_id = job.job_id.clone();
-        // T13, durable §8): the stored target is what the run is admitted for,
-        // so a caller that omits `world_id` cannot make the capability skip a
-        // World-bound job. An explicit `world_id` stays an override, and the
-        // stored-state recheck still refuses a foreign World.
         let world_id = input
             .get("world_id")
             .and_then(|v| v.as_str())
@@ -260,8 +244,6 @@ impl Capability for KbExtractWork {
             .unwrap_or(&job.work_entry_id)
             .to_string();
 
-        // promote into) is a success no-op so the preset state machine can
-        // cleanly transition to done.
         if world_id.is_empty() {
             return Ok(json!({
                 "job_id": job_id,
@@ -276,7 +258,6 @@ impl Capability for KbExtractWork {
             .unwrap_or("");
 
         if work_content.is_empty() {
-            // and call acp.prompt before finalizing.
             return Ok(json!({
                 "job_id": job_id,
                 "status": "running",
@@ -352,9 +333,6 @@ impl Capability for KbExtractWork {
                 }
             };
 
-        // controlling Creator must still own the target World, and the audience
-        // is the service's in-scope default. Resolved before the model's
-        // candidate can name anything — the model never reaches this pair.
         let target = match crate::extraction_target::resolve_extraction_target(
             pool,
             &job.creator_id,
@@ -374,8 +352,6 @@ impl Capability for KbExtractWork {
             }
         };
 
-        // actual Work artifact: the text the orchestrator loaded plus the job's
-        // stored artifact locator. Never the model's own prose, never empty.
         let source_id = job
             .source_locator
             .clone()
@@ -405,10 +381,6 @@ impl Capability for KbExtractWork {
             "text": work_content,
         });
 
-        // trusted target policy; the adapter converts it to the wire candidate
-        // and the upstream orchestrator validates the run. The callback crosses
-        // to the adapter's driver thread, so its failure travels back through
-        // this slot.
         let failure: Arc<std::sync::Mutex<Option<CapabilityError>>> =
             Arc::new(std::sync::Mutex::new(None));
         let outcome = {
@@ -453,9 +425,6 @@ impl Capability for KbExtractWork {
                                 candidates: vec![prepared],
                                 method: Some("kb.extract_work".to_string()),
                                 coverage_hint: None,
-                                // proposes no relationships; SPOKE's success arm
-                                // is KE-only, so the sidecar is carried (never
-                                // dropped) and stays empty here.
                                 relationships: Vec::new(),
                             },
                         ),
@@ -502,11 +471,6 @@ impl Capability for KbExtractWork {
             );
         }
 
-        // (same ids, same governance) through the bound-tx persist seam, and the
-        // job is flipped to done in the same transaction. A refused/failed run
-        // therefore can never leave a done job without its entry, and dropping
-        // this future mid-commit (cancellation) rolls the whole thing back: zero
-        // candidate writes and no successful terminal.
         let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
         let mut tx = nexus_local_db::begin_immediate(pool)
             .await
@@ -539,8 +503,6 @@ impl Capability for KbExtractWork {
             return Err(CapabilityError::Internal(reason));
         };
 
-        // transaction: a job another actor already cancelled/finished rolls the
-        // candidates back instead of reporting success.
         match nexus_local_db::kb_extract_job::mark_done_in_tx(&mut tx, &job_id).await {
             Ok(true) => {}
             Ok(false) => {
@@ -599,7 +561,6 @@ mod tests {
 
     #[test]
     fn test_parse_extraction_response_rejects_wrong_typed_source_id() {
-        // parsing (as it always has), not be silently ignored.
         for bad in ["null", "123"] {
             let json = format!(
                 r#"{{"block_type": "Character", "canonical_name": "Elena", "body": "x", "source_work_entry_id": {bad}}}"#
@@ -746,10 +707,8 @@ mod tests {
         let rows = world_rows(&pool).await;
         assert_eq!(rows.len(), 1, "exactly the validated candidate");
         assert_eq!(rows[0].entry_id, entry_id, "same id the job reported");
-        // to shared: neither governance column is written.
         assert_eq!(rows[0].holder_entry_id, None);
         assert_eq!(rows[0].disclosure, None);
-        // model's own prose.
         let anchor = rows[0].source_anchor.as_ref().expect("source anchor");
         assert_eq!(
             anchor.excerpt.as_deref(),
@@ -823,8 +782,6 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // separator in the canonical name), so the native extractor rejects and
-        // the run never reaches persistence.
         let input = json!({
             "creator_id": CREATOR,
             "job_id": job_id,
@@ -858,7 +815,6 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // trusted target refuses before anything is written.
         sqlx::query("UPDATE kb_extract_jobs SET creator_id = ? WHERE job_id = ?")
             .bind("ctr_other")
             .bind(&job_id)
@@ -913,8 +869,6 @@ mod tests {
         let job_id = enqueue_job(&pool).await;
         let cap = KbExtractWork::with_pool(pool.clone());
 
-        // commit, then drop the run future on the timeout: a run that cannot
-        // commit must leave zero candidate rows and no `done` terminal.
         let mut blocker = nexus_local_db::begin_immediate(&pool).await.unwrap();
         sqlx::query("UPDATE kb_extract_jobs SET status = status WHERE job_id = ?")
             .bind(&job_id)

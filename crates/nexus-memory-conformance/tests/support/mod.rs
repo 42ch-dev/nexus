@@ -123,9 +123,6 @@ pub const CONTEXT: &str = "ctx_c_harbor";
 pub const OTHER_CONTEXT: &str = "ctx_c_market";
 pub const TEXT: &str = "Mira promised to return before the northern gate opens at dawn.";
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 fn manifest_with(host_id: &str, capabilities: &[&str]) -> HostCapabilityManifest {
     serde_json::from_value(json!({
         "schema_version": 1,
@@ -357,10 +354,6 @@ async fn open_endpoint_expecting(
 ) -> Result<Endpoint, EndpointSetupFailure> {
     let (addr, host) = spawn_expected_endpoint_listener(service, host_id, seed, capabilities).await;
     let port = addr.port();
-    // dial failure settles that exact task (abort + bounded join, closing a
-    // responder/socket it already returned) and confirms the port release
-    // before the original failure is re-raised; a join the bound did not
-    // confirm is reported, never claimed.
     let client_side = std::panic::AssertUnwindSafe(dial_expected_endpoint(
         addr,
         seed,
@@ -585,8 +578,6 @@ async fn settle_endpoint_listener(
     host.abort();
     match tokio::time::timeout(BOUND, host).await {
         Ok(Ok(served)) => {
-            // created (each bounded, every failure preserved) instead of
-            // letting one close failure skip the other.
             let mut failures: Vec<String> = Vec::new();
             if let Err(error) = close_responder(served.responder).await {
                 failures.push(format!(
@@ -623,9 +614,6 @@ async fn settle_endpoint_listener(
         )),
     }
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// Where a matrix run's durable state lives.
 enum Home {
@@ -899,8 +887,6 @@ impl Matrix {
             _ => &MEMORY_CAPABILITIES,
         };
         let service = build_service(&provider, &directory);
-        // settled; if the peer fails, the admin endpoint AND the provider are
-        // settled, with both errors preserved on the re-raised failure.
         let admin = match std::panic::AssertUnwindSafe(open_endpoint_with(
             Arc::clone(&service),
             &host_id,
@@ -921,7 +907,6 @@ impl Matrix {
                 }
             }
             Err(payload) => {
-                // the fixture's own bounded close can actually take ownership.
                 drop(service);
                 match settle_provider_setup(provider).await {
                     Ok(()) => std::panic::resume_unwind(payload),
@@ -967,8 +952,6 @@ impl Matrix {
                 if let Err(error) = admin.settle().await {
                     problems.push(format!("the admin session did not settle: {error}"));
                 }
-                // last provider holder this path owns; drop it before the
-                // fixture's try_unwrap close.
                 drop(service);
                 if let Err(error) = settle_provider_setup(provider).await {
                     problems.push(format!("the provider did not settle: {error}"));
@@ -1120,7 +1103,6 @@ impl Matrix {
         let provider =
             open_provider_advertised(&home, kind == Kind::Remote && advertises_reflection).await;
         let service = build_service(&provider, &directory);
-        // set up; the admin endpoint is settled before the provider.
         let admin = match std::panic::AssertUnwindSafe(open_endpoint_with(
             Arc::clone(&service),
             &host_id,
@@ -1132,7 +1114,6 @@ impl Matrix {
         {
             Ok(Ok(endpoint)) => endpoint,
             Ok(Err(failure)) => {
-                // fixture's bounded close tries to take sole ownership.
                 drop(service);
                 match settle_provider_setup(provider).await {
                     Ok(()) => panic!("the restarted admin endpoint setup failed: {failure:?}"),
@@ -1142,7 +1123,6 @@ impl Matrix {
                 }
             }
             Err(payload) => {
-                // fixture's bounded close tries to take sole ownership.
                 drop(service);
                 match settle_provider_setup(provider).await {
                     Ok(()) => std::panic::resume_unwind(payload),
@@ -1797,7 +1777,6 @@ fn assert_no_sensitive_receipt_values(
             }
         }
     }
-    // another key, while its booleans/enums are not banned as such.
     if let Some(result) = authorized_receipt.get("result") {
         collect_result_identifiers(result, &mut sensitive);
     }
@@ -1854,11 +1833,6 @@ pub fn assert_no_receipt_disclosure(
     fn walk(value: &Value, meaning: &str, receipt: &Value, allowed: &[String]) {
         match value {
             Value::Object(map) => {
-                // the ACTUAL authorized receipt (and what this request already
-                // supplied), never by a generic key count. A bare echo of the
-                // caller's requested receipt id is legal, but that same id
-                // bound to any actual protected receipt field is a disclosure
-                // association, not mere echo.
                 let authorized_id = receipt.get("receipt_id").and_then(Value::as_str);
                 let carries_authorized_id = authorized_id
                     .is_some_and(|id| map.values().any(|field| field.as_str() == Some(id)));
@@ -1952,7 +1926,6 @@ pub async fn prove_failed_endpoint_settles() {
         Arc::clone(&service),
         "c-matrix-setup-control",
         ADMIN_SEED,
-        // real listener accepted and its responder started.
         pubkey(&PEER_SEED),
         &MEMORY_CAPABILITIES,
     )
@@ -1993,10 +1966,6 @@ pub async fn prove_failed_endpoint_settles() {
         matches!(rejected, Err(CoreError::HandshakeFailed { .. })),
         "the supplied wrong expected key is rejected by hello verification of the decodable envelope: {rejected:?}"
     );
-    // server-transport close and the port release. This poll proves the test's
-    // observed client transport object and the listener-side socket object have
-    // no remaining owners; it does not by itself claim that the SDK's internal
-    // detached teardown task has completed.
     tokio::time::timeout(BOUND, async {
         while attempt.client_socket.upgrade().is_some() || server_socket.upgrade().is_some() {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -2045,9 +2014,6 @@ pub async fn prove_raw_setup_failure_settles() {
         .await
         .expect("the failed raw setup leaves the real fixture provider closeable");
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// The receipt/dedup windows the provider itself advertises.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2168,7 +2134,6 @@ impl CaptureHold {
     pub async fn release(&mut self) {
         match self {
             Self::Local { release, .. } => {
-                // peer; a later release must not wait forever.
                 let _ = tokio::time::timeout(RELEASE_BOUND, release.wait()).await;
             }
             Self::FixturePoint(hold) => hold.release(),
@@ -2287,9 +2252,6 @@ impl Matrix {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 pub fn dto<T: serde::de::DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).expect("wire-valid request")
@@ -2631,9 +2593,6 @@ impl Actor<'_> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// A raw signed session, so the exact wire object can carry shapes the typed
 /// client cannot build (an unknown op, an unknown decision action).
 pub struct RawSession {
@@ -2879,9 +2838,6 @@ impl RawSession {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Project one typed port result onto its wire shape: the success payload, or
 /// the refusal as the envelope carries it. A refusal is never a success value.
 pub fn wire<T: serde::Serialize>(result: &SpokeResult<T>) -> Value {
@@ -2960,9 +2916,6 @@ pub fn record_ids(body: &Value) -> Vec<String> {
         .map(|id| id.as_str().expect("record id").to_owned())
         .collect()
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// A capture body for an explicit subject: `scope` is the capture placement
 /// (`shared` or a context).
@@ -3096,9 +3049,6 @@ pub async fn bootstrap(matrix: &Matrix, capabilities: &[&str]) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// Capture with owned inputs, so the future can be spawned while the scenario
 /// keeps the matrix.
 pub async fn capture_with(
@@ -3189,9 +3139,6 @@ pub async fn review_with(
     wire(&client.review_candidate(&principal, dto(body)).await)
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// A Character created through the public Core actor surface, with its initial
 /// active binding. Both ids are real product identities: the Character subject
 /// and the binding context a capture is placed into.
@@ -3255,9 +3202,6 @@ async fn create_character_fixture(user_home: &std::path::Path) -> (CharacterFixt
     drop(core);
     (fixture, creator_id)
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// The provider's durable state around a read series, observed through ONE
 /// read-only connection held for the whole observation: that connection's
@@ -3580,9 +3524,6 @@ fn row_columns(row: &sqlx::sqlite::SqliteRow) -> Vec<(String, String)> {
     out
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// The dialing identity of a selection control, and the credential id the
 /// disposable home provisions for it.
 pub const SELECTION_CLIENT_SEED: [u8; 32] = [0x61; 32];
@@ -3624,8 +3565,6 @@ impl SelectionHost {
             Ok(Err(join)) => Err(format!("the selection listener task failed: {join}")),
             Err(_) => {
                 task.abort();
-                // responder here, so the caller closes it through the public
-                // route instead of losing it.
                 match tokio::time::timeout(BOUND, &mut task).await {
                     Ok(Ok(Ok(responder))) => Ok(responder),
                     Ok(Ok(Err(error))) => Err(error),
@@ -3692,8 +3631,6 @@ pub async fn serve_selection_host(
     let client_peer = peer_id(&client_seed);
     let client_pubkey = pubkey(&client_seed);
     let host_manifest = manifest_with(host_id, capabilities);
-    // `Ok(...)` tail and the `return Err(...)` arms infer
-    // `Result<Arc<ConnectResponder>, String>`.
     let task = tokio::spawn(async move {
         let accepted = tokio::time::timeout(BOUND, listener.accept()).await;
         let (tcp, address) = match accepted {
@@ -3840,7 +3777,6 @@ pub async fn open_selected_local(subject: &str, profile_kinds: &[&str]) -> Local
     })
     .await
     .expect("the supported local memory selection opens");
-    // assertion must not run while this control still owns the service.
     let observed: Result<(Value, Value, i64), String> = match core.active_principal().await {
         Ok(core_principal) => {
             let pending = core
@@ -3850,8 +3786,6 @@ pub async fn open_selected_local(subject: &str, profile_kinds: &[&str]) -> Local
                 .map_err(|error| format!("the pinned local binding serves memory: {error}"));
             match (pending, core.memory_provider_for_test()) {
                 (Ok(pending), Ok(provider)) => {
-                    // the admission maps; the Core principal is its
-                    // creator-scoped counterpart.
                     let principal = principal(core_principal.creator_id());
                     let described = wire(&provider.describe(&principal, dto(json!({}))).await);
                     let profiles = wire(

@@ -204,9 +204,6 @@ export function TimelineKeyBlockChrome({
 export interface WorkTimelineNarrativeEventChromeProps {
   title: string;
   eventId: string;
-  /**
-   * `noChapterLabel` pill.
-   */
   chapterAnchor: string | null;
   /** Resolved "No chapter anchor" (or locale equivalent). */
   noChapterLabel: string;

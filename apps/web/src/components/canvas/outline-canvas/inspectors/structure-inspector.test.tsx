@@ -95,7 +95,6 @@ describe('OutlineStructurePanel virtualization (R-V165-QC3-VIRT B6)', () => {
     );
 
     const buttons = screen.queryAllByRole('button', { name: /Chapter \d+/ });
-    // should be mounted rather than all 120.
     expect(buttons.length).toBeGreaterThan(0);
     expect(buttons.length).toBeLessThan(120);
   });

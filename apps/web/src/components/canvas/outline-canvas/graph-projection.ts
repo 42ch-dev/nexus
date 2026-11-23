@@ -1,6 +1,4 @@
 /**
- * `R-V172P0-QC1-002`).
- *
  * Holds the non-JSX projection helpers, shared constants, and conflict-state
  * types used across the outline-canvas modules. Extracted from the original
  * 825-line `outline-canvas.tsx` monolith so each canvas file stays focused
@@ -67,35 +65,16 @@ export const STATUS_VARIANT: Record<
 // supplied by the caller), never as an automatic empty-data fallback:
 // production callers pass no fixture.
 
-/**
- * and Beat node data. Matches `OutlineSceneNodeData.status` consumed by the
- * Scene/Beat node components (`scene-beat-nodes.tsx`).
- */
 export type OutlineSceneStatus = 'drafted' | 'completed';
 
-/**
- * wire item (`WorkOutline.scenes[]` → `{scene_id, chapter_id, title, status}`).
- * `chapterId` ties the scene to its parent Chapter node
- * (`chapter:<chapterId>`).
- */
 export interface SceneFixture {
   sceneId: string;
   chapterId: number;
   title: string | null;
   status: OutlineSceneStatus | null;
-  /**
-   * Timeline Moment reads bound Works' outlines; chapter numbers are
-   * Work-local, so grouping needs the Work dimension to avoid collapsing
-   * two Works' chapter 1 into one chapter region).
-   */
   workId?: string;
 }
 
-/**
- * wire item (`WorkOutline.beats[]` → `{beat_id, scene_id, title, status}`).
- * `sceneId` ties the beat to its parent Scene node (`scene:<sceneId>`,
- * Scene→Beat nesting per §5.2 Q2).
- */
 export interface BeatFixture {
   beatId: string;
   sceneId: string;
@@ -105,17 +84,12 @@ export interface BeatFixture {
   workId?: string;
 }
 
-/**
- * Timeline projections and by the Design Studio fixture components.
- */
 export interface SceneBeatFixturePayload {
   scenes: SceneFixture[];
   beats: BeatFixture[];
 }
 
 /**
- * snake_case — V1.200 DR-26) onto the camelCase projection payload.
- *
  * `workId` tags every derived scene/beat with its owning Work for
  * cross-Work composition (World Timeline Moment); omit it for the Work-local
  * projection, where provenance is the graph's own `work_id`.

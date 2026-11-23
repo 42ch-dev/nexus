@@ -164,8 +164,6 @@ function mapSessionUpdate(
 const DEFAULT_DEADLINE_MS = 5_000;
 
 /**
- * caller's `deadline_ms`.
- *
  * Every phase of the handler — protocol cancel, prompt settlement, forced
  * teardown, TERM/KILL reap — draws from this single instant. No phase may grant
  * itself a fresh default, or the handler would outlive the deadline it was given.
@@ -409,7 +407,6 @@ export class AcpProviderEngine {
       this.retainCleanupFence(fenceKey, owned);
       throw new CleanupUnconfirmedError(failureMessage);
     }
-    // stale one behind would block a later reopen for no reason.
     this.clearFencesForOwner(owned);
     return reap;
   }
@@ -452,7 +449,6 @@ export class AcpProviderEngine {
   }
 
   private routeSessionUpdate(sessionId: string, acpSessionId: string, update: unknown): void {
-    // IDs. The connection closure, not a global ACP-ID scan, owns the update.
     const session = this.sessions.get(sessionId);
     if (!session || session.owned.acpSessionId !== acpSessionId) return;
     const opId = session.activeOperationId;
@@ -547,7 +543,6 @@ export class AcpProviderEngine {
         activeOperationId: null,
         configOptions: created.configOptions ?? [],
       };
-      // control paths as subsequent operations, on this exact ACP session.
       if (request.payload.model != null) await this.setModel(session, string(request.payload.model));
       if (request.payload.mode != null) await this.setMode(session, string(request.payload.mode));
       this.sessions.set(sessionId, session);
@@ -635,7 +630,6 @@ export class AcpProviderEngine {
     };
     void task.then(release, release);
     if (operation.kind !== 'prompt') {
-      // owned task visible to shutdown while awaiting the real acknowledgement.
       await task;
     }
     return okReply(request.request_id, { operation_id: opId, session_id: sessionId });
@@ -750,11 +744,8 @@ export class AcpProviderEngine {
     if (!op) throw new Error('operation_not_found');
     const session = this.sessions.get(op.sessionId);
     if (!session?.owned.acpSessionId) throw new Error('session_not_found');
-    // prompt join, and the TERM/KILL reap all draw from it. No phase may take a
-    // fresh default, or the handler would outlive the deadline it was given.
     const deadline = handlerDeadlineMs(request.deadline_ms);
     op.cancelled = true;
-    // cancel must settle this owner's fence before acknowledging cleanup.
     if (!op.delivery?.trySetTerminal({ kind: 'finished', reason: 'cancelled' }) &&
         !this.hasCleanupFenceForOwner(session.owned)) {
       return okReply(request.request_id, { operation_id: operationId, session_id: op.sessionId });
@@ -797,11 +788,6 @@ export class AcpProviderEngine {
     if (!sessionId) throw new Error('shutdown_requires_session');
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('session_not_found');
-    // native close reaps sessions that are mid-operation). Cooperate with the
-    // owned child first: without the ACP cancel notification a blocked prompt
-    // never settles, so awaiting the prompt task would hang forever instead of
-    // reaching the owned process reap.
-    // ONE absolute deadline for the whole handler (see `handleCancel`).
     const deadline = handlerDeadlineMs(request.deadline_ms);
     if (session.activeOperationId) {
       const active = this.operations.get(session.activeOperationId);
@@ -908,7 +894,6 @@ export class AcpProviderEngine {
       sessionId,
       providerId: 'mock-acp',
       recipeGeneration: generation,
-      // placeholder since no launch path reads it here.
       cwd: '',
       owned,
       activeOperationId: null,

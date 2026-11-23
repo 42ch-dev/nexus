@@ -25,7 +25,6 @@ const AGENTS: AgentScanEntry[] = [
   },
 ];
 
-// equivalent until the lib target reaches es2024.
 function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {

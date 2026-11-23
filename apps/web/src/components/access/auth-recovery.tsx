@@ -28,16 +28,10 @@ export function AuthRecoveryGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);
 
-  /**
-   * unguarded, so it would answer 200 with or without a key. With no candidate
-   * key the probe re-reads the session cookie (bootstrap finished in another tab).
-   */
   async function probeAccess(candidate?: string) {
     setProbe('checking');
     try {
       await new BrowserClient(candidate ? { apiKey: candidate } : {}).listCreators();
-      // stale stored key, because a non-empty X-API-Key wins service-side and
-      // would keep rejecting requests (access spec §6.1).
       if (candidate) storeApiKey(candidate);
       else clearStoredApiKey();
       window.dispatchEvent(new Event(AUTHORIZED_EVENT));

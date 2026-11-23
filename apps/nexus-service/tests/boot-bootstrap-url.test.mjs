@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /**
- * at boot, and auto-opens it only when this process serves the SPA.
- *
  * Boot-level: the service is spawned as a real process (never a browser). The
  * `open:` line is a human log on stderr; stdout keeps exactly one machine line.
  * The auto-open edge is observed through a PATH shim for `open`/`xdg-open` that
@@ -46,7 +44,6 @@ function tempDir(prefix) {
 }
 
 before(() => {
-  // demand so the file also runs standalone.
   if (existsSync(join(serviceRoot, 'dist', 'main.js'))) return;
   const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
     cwd: serviceRoot,
@@ -69,10 +66,6 @@ async function waitFor(produce, describe, timeoutMs = 20_000) {
   }
 }
 
-/**
- * fixed-delay sample) keeps a reverted build red even when the shim write lands
- * late under load; a fixed 500 ms sample let it pass ~50% of runs.
- */
 async function assertOpenerNeverRan(marker, message) {
   const deadline = Date.now() + ABSENCE_WINDOW_MS;
   for (;;) {
@@ -213,7 +206,6 @@ test('--no-open prints the bootstrap URL without opening it, and its token mints
     assert.equal(stdoutLines.length, 1, `stdout must be the single ready line, got: ${JSON.stringify(stdoutLines)}`);
     assert.match(stdoutLines[0], /^NEXUS_SERVICE_READY \{/);
     assert.ok(!service.stdout.includes('[nexus-service]'), 'human logs must stay on stderr');
-    // the tokenized URL — a token in captured logs mints an 8-hour session.
     const token = new URL(url).searchParams.get('token');
     assert.ok(token, 'the bootstrap URL must carry a token');
     assert.ok(!service.stdout.includes(token), 'stdout must not carry the bootstrap token');
@@ -266,8 +258,5 @@ test('without --web-dist the URL is still printed but never opened', { skip: isW
   } finally {
     await service.stop();
   }
-  // the opener synchronously right after the `open:` print, so the shim must
-  // have written by now — but its shell write can trail under load. Poll the
-  // full absence window rather than trusting one sample.
   await assertOpenerNeverRan(marker, 'auto-open without --web-dist would land on route_not_migrated');
 });

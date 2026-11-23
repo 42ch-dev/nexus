@@ -132,10 +132,6 @@ impl Capability for AcpPrompt {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // the shared per-run map. FAIL-CLOSED: a run with no registered
-        // token refuses with `CancellationUnavailable` — a fresh token would
-        // be uncancellable by any coordinator (never mint one here). The run
-        // admission path (engine start/spawn/recovery) registers the token.
         let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
         let result = executor
@@ -218,7 +214,6 @@ mod tests {
         let executor = Arc::new(MockAcpExecutor {
             captured: std::sync::Mutex::new(None),
         });
-        // runs refuse CancellationUnavailable; production registers at admission).
         let cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
         cancels
             .write()

@@ -38,7 +38,6 @@ impl CallbackPort {
     fn spawn() -> Self {
         let module = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../packages/nexus-provider-acp/dist/index.js");
-        // implementation. Build the package in the serialized validation window.
         let script = format!(
             r"
 import {{ createAcpProvider }} from {};
@@ -76,7 +75,6 @@ for await (const line of createInterface({{ input: process.stdin }})) {{
 
     async fn exchange(&self, value: Value) -> ProviderResult<Value> {
         let mut peer = self.0.lock().await;
-        // across the response envelope construction).
         let mut bytes = serde_json::to_vec(&value).expect("peer request");
         bytes.push(b'\n');
         peer.stdin
@@ -367,7 +365,6 @@ async fn session_keeps_selected_provider_and_truthful_cancel() {
             }),
         };
         if matches!(provider, "claude-native" | "codex-native") {
-            // constrained request before testing their ordinary prompt path.
             let error = port
                 .call(call(
                     ProviderCallMethod::Execute,
@@ -472,7 +469,6 @@ async fn native_control_cancel_uses_returned_id_and_preserves_completed_result()
     let tmp = tempfile::tempdir().expect("workspace");
     let root = tmp.path().canonicalize().expect("canonical workspace");
     let fixture = root.join("control-peer.py");
-    // travel through the maintained Rust ACP adapter and real HostManager.
     std::fs::write(
         &fixture,
         r#"
@@ -553,7 +549,6 @@ for line in sys.stdin:
         if current.to_string() == op_id)
     );
 
-    // can send its separate cooperative cancellation notification.
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let log = std::fs::read_to_string(root.join("acp.jsonl")).expect("protocol log");
@@ -580,7 +575,6 @@ for line in sys.stdin:
     .await
     .expect("peer receives cancel");
 
-    // does not roll it back or relabel its retained result as Cancelled.
     let batch = port
         .next(op_id.clone(), 16, 256 * 1024)
         .await

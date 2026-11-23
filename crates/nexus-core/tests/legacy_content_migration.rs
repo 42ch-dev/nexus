@@ -675,7 +675,6 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
         assert_eq!(matched[0]["text"], text, "{family}: the exact source text");
         assert_legacy(matched[0], &expected, family);
     }
-    // stats-only narrative maps its absent narrative to empty text.
     let run_capture = records
         .iter()
         .find(|content| legacy(content)["family"] == "character_run_captures")
@@ -729,8 +728,6 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
         2
     );
 
-    // the file's body, and the source document, its frontmatter block and its
-    // body are the file's own bytes (P3-F3/R2-C1).
     for (bearer, slug) in [
         (MemoryBearerRef::Creator(CREATOR), "legacy-memory"),
         (
@@ -771,8 +768,6 @@ async fn migration_preserves_every_legacy_object_and_rerun_is_a_no_op() {
         );
     }
 
-    // so the exact body the record serves and the parser's trimmed view differ —
-    // the assertions above cannot be satisfied by the trimmed view.
     let character = MemoryBearerRef::Character {
         owner_creator_id: CREATOR,
         character_id: &env.character_id,
@@ -1016,7 +1011,6 @@ async fn migration_accepts_an_already_consumed_adoption() {
     let env = seed_legacy_home().await;
     let (core, principal) = open_core(&env).await;
 
-    // guarded transaction, so the candidate is provider-owned before the pass.
     assert!(
         core.delete_pending_review(&principal, "pend_legacy".to_string())
             .await
@@ -1028,7 +1022,6 @@ async fn migration_accepts_an_already_consumed_adoption() {
     assert_eq!(migration.status, LegacyMigrationStatus::Migrated);
     assert_eq!(migration.candidates, 3, "{migration:?}");
 
-    // outcome, not a resurrected pending candidate.
     let pending = serde_json::to_value(
         core.list_pending_reviews(&principal, None, 100)
             .await
@@ -1073,7 +1066,6 @@ async fn migration_accepts_a_memory_edit_made_before_the_pass() {
     let migration = core.migrate_legacy_content(&principal).await.unwrap();
     assert_eq!(migration.status, LegacyMigrationStatus::Migrated);
 
-    // served snapshot equals it, while a source-derived one would not.
     let rerun = core.migrate_legacy_content(&principal).await.unwrap();
     assert_eq!(rerun.status, LegacyMigrationStatus::AlreadyComplete);
     assert_eq!(rerun.digest, migration.digest, "the same served snapshot");
@@ -1141,7 +1133,6 @@ async fn a_row_without_the_legacy_identity_at_a_legacy_id_refuses_the_pass() {
     let (core, principal) = open_core(&env).await;
     core.migrate_legacy_content(&principal).await.unwrap();
 
-    // interrupted upgrade), so the pass re-enters its first-pass path.
     let record_id = "lgc:memory_fragments:frag_legacy";
     let rewritten = sqlx::query(
         "UPDATE memory_records \
@@ -1226,13 +1217,11 @@ async fn markers_turn_reads_and_adoption_provider_only() {
         !rendered.contains("frag_after_marker"),
         "a post-marker legacy row never resurfaces through the bridge: {rendered}"
     );
-    // provider candidate and the marker makes the bridge project nothing.
     assert!(matches!(
         core.delete_pending_review(&principal, "pend_after_marker".to_string())
             .await,
         Err(CoreError::NotFound { .. })
     ));
-    // rather than silently absorbing the late write.
     let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
     assert_core_conflict(refused, "idempotency_conflict");
 }
@@ -1258,7 +1247,6 @@ async fn a_failed_publication_fences_every_affected_subject_until_recovery() {
         "outcome uncertain: {failed:?}"
     );
 
-    // fences every subject it committed files for.
     assert_unreconciled(
         core.list_creator_memories(&principal).await.unwrap_err(),
         &creator_subject,
@@ -1497,7 +1485,6 @@ async fn a_provider_row_that_moved_after_the_pass_refuses_the_rerun() {
     let (core, principal) = open_core(&env).await;
     core.migrate_legacy_content(&principal).await.unwrap();
 
-    // is untouched while its revision and timestamp move.
     let record_id = "lgc:memory_fragments:frag_legacy";
     let bumped = sqlx::query(
         "UPDATE memory_records SET revision = revision + 1, \
@@ -1524,7 +1511,6 @@ async fn a_provider_row_that_moved_after_the_pass_refuses_the_rerun() {
     let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
     assert_core_conflict(refused, "idempotency_conflict");
 
-    // snapshot the completed pass recorded.
     let pool = plain_pool(&env).await;
     let content_after: String =
         sqlx::query_scalar("SELECT content_json FROM memory_records WHERE record_id = ?")
@@ -1609,7 +1595,6 @@ async fn migration_accepts_a_recapture_over_a_legacy_only_projection() {
     let character_id = env.character_id.clone();
     let binding_id = env.binding_id.clone();
 
-    // exists and no provider row does.
     let pool = plain_pool(&env).await;
     nexus_local_db::create_character_pending_review(
         &pool,
@@ -1629,7 +1614,6 @@ async fn migration_accepts_a_recapture_over_a_legacy_only_projection() {
     .unwrap();
     pool.close().await;
 
-    // the provider: the interrupted attempt's legacy row is authoritative.
     core.capture_character_pending_review(
         &principal,
         character_id.clone(),
@@ -1675,7 +1659,6 @@ async fn migration_accepts_a_recapture_over_a_legacy_only_projection() {
     );
     pool.close().await;
 
-    // refusing it with an idempotency conflict.
     let migrated = core.migrate_legacy_content(&principal).await.unwrap();
     assert_eq!(migrated.status, LegacyMigrationStatus::Migrated);
     let rerun = core.migrate_legacy_content(&principal).await.unwrap();
@@ -1707,7 +1690,6 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
     let (core, principal) = open_core(&env).await;
     let character_id = env.character_id.clone();
 
-    // removing that binding releases them and leaves the first one in place.
     let pool = plain_pool(&env).await;
     seed_world(&pool, WORLD_B).await;
     pool.close().await;
@@ -1734,8 +1716,6 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
     }
     pool.close().await;
 
-    // adopts and consumes the review, so the dependency gate stops counting
-    // either legacy row and the removal releases its provenance.
     let served = core
         .list_character_memory_fragments(
             &principal,
@@ -1767,13 +1747,6 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
     )
     .await
     .expect("dismiss the binding-local review");
-    // bookkeeping, so it may clear only `actor_world_binding_id`. The amended
-    // condition is "no **content** column changes": `character_memory_fragments`
-    // carries the writer-protocol trigger `bump_character_memory_fragments_revision`,
-    // which advances that row's `revision` audit column on *any* UPDATE (no DDL
-    // is permitted, so it is the legacy schema's own behaviour). Every other
-    // column — and the pending table, which has no such trigger — survives
-    // byte-identically.
     let pool = plain_pool(&env).await;
     let pending_table = "character_memory_pending_review";
     let fragment_table = "character_memory_fragments";

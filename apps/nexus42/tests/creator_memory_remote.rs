@@ -195,7 +195,6 @@ async fn c_111_creator_cli_uses_pinned_provider_local() {
         ],
     );
 
-    // long-term memory file: the provider owns the record projection.
     let store = provider_store(home, creator);
     let projections = walk_markdown(&store);
     assert_eq!(
@@ -565,7 +564,6 @@ mod remote {
             task.abort();
             match tokio::time::timeout(BOUND, task).await {
                 Ok(Ok(())) => {}
-                // cleanup failure.
                 Ok(Err(error)) if error.is_cancelled() => {}
                 Ok(Err(error)) => failures.push(format!("accept join: {error}")),
                 Err(_) => failures.push("accept task did not settle after abort".to_string()),
@@ -691,7 +689,6 @@ mod remote {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn c_111_creator_cli_uses_pinned_provider_remote() {
-        // credential's peer id to the operator principal holding `admin`.
         let fixture_home = TempDir::new().expect("fixture home");
         let provider = Arc::new(
             FixtureMemoryProvider::open(&fixture_home.path().join("memory.sqlite"))
@@ -713,7 +710,6 @@ mod remote {
         let creator = actor.creator_id().to_string();
         write_credential(&home, &CLIENT_SEED);
 
-        // boundary. The seeded row exists in no local store.
         let counting = Arc::new(CountingService::new(provider.server(directory.admission())));
         let service: Arc<dyn RemoteMemoryService> = counting.clone();
         let seeded_id = seed_fixture_row(&service, &client_peer, &space_id, &creator).await;
@@ -744,7 +740,6 @@ mod remote {
         .await
         .expect("the CLI selection is written");
 
-        // from every remote row, so a local fallback would be visible.
         let trap = home
             .join(".nexus42")
             .join("creators")
@@ -811,7 +806,6 @@ mod remote {
                 "the CLI's show crossed the remote provider's record read boundary"
             );
 
-            // the same pinned provider and is listed with the seeded row.
             cli_ok_remote(
                 &home,
                 &[
@@ -850,7 +844,6 @@ mod remote {
                 "the shown identity stayed the fixture's (seeded {seeded_id})"
             );
 
-            // handle owned here so teardown can abort and join the SAME task.
             let Some(task) = accept_task.as_mut() else {
                 return Err("accept task missing".to_string());
             };
@@ -962,11 +955,6 @@ mod remote {
             "the aborted task released the listener: {rebind:?}"
         );
 
-        // holder acknowledges an ACTUAL successful TCP accept and retains the
-        // accepted socket until the child is killed and reaped, so a CLI stall
-        // before the dial fails this proof instead of passing it. The fallible
-        // selection CLI runs before the holder TASK exists; every later exit
-        // returns through the common bounded holder stop below.
         let actor = DirectActor::new().await;
         let home = actor.home().to_path_buf();
         write_credential(&home, &CLIENT_SEED);
@@ -1072,8 +1060,6 @@ mod remote {
             }
         }
 
-        // error is routed through the same bounded stop, and the listener is
-        // released (rebind) before the expected failure is accepted.
         let actor = DirectActor::new().await;
         let home = actor.home().to_path_buf();
         write_credential(&home, &CLIENT_SEED);
@@ -1158,7 +1144,6 @@ async fn c_111_remote_selection_without_client_refuses_and_never_reads_local() {
     );
     assert_eq!(walk_markdown(&provider_store(home, creator)).len(), 1);
 
-    // graph: the pinned provider refuses instead of serving the local store.
     cli_ok(
         home,
         &[

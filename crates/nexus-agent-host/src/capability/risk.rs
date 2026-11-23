@@ -262,8 +262,6 @@ mod tests {
     #[test]
     fn auto_classifier_destructive_takes_precedence_over_write() {
         let classifier = AutoToolRiskClassifier::new();
-        // because destructive is checked first
-        // "force" is destructive; "update" is write
         assert_eq!(
             classifier.classify("force_update"),
             Some(ToolRisk::Destructive)

@@ -708,7 +708,6 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
 
         let result = precheck_bundle(&bundle, &local_state);
-        // Let's just verify the result
         match result {
             PrecheckResult::Valid | PrecheckResult::Invalid(_) => {}
         }
@@ -797,7 +796,6 @@ mod tests {
         let local_state = LocalState::new(5).with_delta_sequence(10);
         let auth = AuthContext::single_creator();
 
-        // there's no authenticated creator
         let result = precheck_bundle_with_auth(&bundle, &local_state, &auth);
         assert_eq!(result, PrecheckResult::Valid);
     }
@@ -833,7 +831,6 @@ mod tests {
 
     #[test]
     fn precheck_without_auth_always_passes_auth_check() {
-        // submitting_creator_id
         let bundle = valid_bundle();
         let local_state = LocalState::new(5).with_delta_sequence(10);
 

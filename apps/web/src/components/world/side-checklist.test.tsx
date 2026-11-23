@@ -1,8 +1,3 @@
-/**
- * (heading `接下来可以`, steps ①②③, `进度 {n} / 3`) and state styling:
- * done steps struck through, the first pending step highlighted, progress
- * derived from the done count.
- */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, screen } from '@testing-library/react';
 import { i18n } from '@/lib/i18n/config';

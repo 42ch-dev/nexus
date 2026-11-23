@@ -129,8 +129,6 @@ impl PeerConfigHolder {
         let mut guard = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         let previous = std::mem::replace(&mut *guard, Arc::new(snapshot));
         drop(guard);
-        // of the previous generation never runs under the lock, so it
-        // can never stall readers.
         drop(previous);
     }
 }
@@ -167,15 +165,11 @@ pub fn peer_config_digest(home: &Path) -> DigestPoll {
         match std::fs::read(&path) {
             Ok(bytes) => {
                 present = true;
-                // hash-collision reasoning, no hashing dependency). An
-                // empty file is an empty string — distinct from `null`
-                // (absent).
                 map.insert(
                     name.to_owned(),
                     serde_json::Value::String(hex_encode(&bytes)),
                 );
             }
-            // report (the file may vanish between the two).
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 map.insert(name.to_owned(), serde_json::Value::Null);
             }
@@ -262,10 +256,6 @@ pub fn reload_peer_config(
         peer_ids: loaded.peer_ids,
         collision_policy: loaded.collision_policy,
         peer_priority: loaded.peer_priority,
-        // policy is read at bridge construction (Model A child startup,
-        // Model B daemon boot), not hot-reloaded (DigestPoll watch is a
-        // non-goal this task). The boot snapshot's subset stays in force
-        // for the process lifetime.
         mcp_visibility: last_good.config.mcp_visibility.clone(),
     };
     Ok((
@@ -339,8 +329,6 @@ where
         let digest = poll().await;
         match &digest {
             DigestPoll::Unreadable(message) => {
-                // last-good — no reload, no swap, baseline intact. Log
-                // once per error-state, not every tick.
                 if poll_error_logged.as_deref() != Some(message.as_str()) {
                     tracing::warn!(
                         error = %message,
@@ -361,9 +349,6 @@ where
             tokio::time::sleep(interval).await;
             continue;
         }
-        // reload. The baseline advances ONLY on a successful apply — a
-        // failed apply keeps the PREVIOUS digest so the next poll
-        // re-attempts (transient-failure recovery; see doc above).
         match apply().await {
             Ok(event) => {
                 apply_error_logged = None;
@@ -373,8 +358,6 @@ where
                 }
             }
             Err(message) => {
-                // tick; the message-compare keeps this at ONE warn per
-                // error state despite the per-tick retry.
                 if apply_error_logged.as_deref() != Some(message.as_str()) {
                     tracing::warn!(
                         error = %message,
@@ -471,8 +454,6 @@ async fn peer_config_watch_loop(
     peer_config_watch_loop_inner(
         PEER_CONFIG_WATCH_INTERVAL,
         initial_digest,
-        // watcher's stat walk (spawn_blocking adds latency without
-        // removing the blocking-on-worker property at this size).
         || async { peer_config_digest(&home) },
         || async { apply_reload(&home, &holder, &table).await },
         || false,
@@ -494,7 +475,6 @@ async fn apply_reload(
     holder: &PeerConfigHolder,
     table: &PeerToolTable,
 ) -> Result<ConfigEvent, String> {
-    // boot-scoped diff AND the fallback if the reload fails.
     let last_good = holder.get();
     let blocking_home = home.to_path_buf();
     let (snapshot, restart_required) =
@@ -511,12 +491,6 @@ async fn apply_reload(
         "peer config reload applied (admission fields adopted; live sessions keep \
          grant-at-establish until reconnect)"
     );
-    // mutex — never the table `inner` — so a reload can never invert the
-    // rank against an in-flight admission. Order invariant (p1 QC): the
-    // table feed happens BEFORE the holder swap with no `.await` between
-    // — an admission landing between them could read the new table
-    // config against the old holder snapshot; keeping the pair adjacent
-    // bounds that skew to a few pointer writes.
     table.set_config(Some(Arc::new(snapshot.config.registry_config())));
     holder.swap(snapshot);
     Ok(ConfigEvent::Changed)
@@ -602,7 +576,6 @@ mod tests {
     #[test]
     fn digest_unreadable_when_file_is_a_directory() {
         let home = isolated_home();
-        // (EISDIR) — Unreadable, never conflated with Missing.
         std::fs::create_dir_all(connect_daemon_config_path(home.path())).expect("mkdir");
         match peer_config_digest(home.path()) {
             DigestPoll::Unreadable(message) => {
@@ -615,8 +588,6 @@ mod tests {
         }
     }
 
-    /// performs exactly one poll; the loop stops once the sequence is
-    /// consumed. `apply` records its invocations in `applies`.
     async fn drive_loop(
         initial: DigestPoll,
         sequence: Vec<DigestPoll>,
@@ -648,7 +619,6 @@ mod tests {
     #[tokio::test]
     async fn baseline_seeded_without_initial_event() {
         let baseline = DigestPoll::Tree(serde_json::json!({"daemon.json": "aa"}));
-        // the boot baseline is seeded WITHOUT emitting an initial event.
         let stats = drive_loop(
             baseline.clone(),
             vec![baseline],
@@ -664,7 +634,6 @@ mod tests {
         let baseline = DigestPoll::Missing;
         let changed = DigestPoll::Tree(serde_json::json!({"daemon.json": "bb"}));
         let applies = Arc::new(AtomicUsize::new(0));
-        // (no event storm).
         let stats = drive_loop(
             baseline,
             vec![changed.clone(), changed.clone(), changed],
@@ -681,7 +650,6 @@ mod tests {
     async fn missing_present_missing_transitions_apply_each_time() {
         let baseline = DigestPoll::Tree(serde_json::json!({"daemon.json": "aa"}));
         let applies = Arc::new(AtomicUsize::new(0));
-        // transition applies; the loop (daemon) stays alive throughout.
         let stats = drive_loop(
             baseline,
             vec![
@@ -725,10 +693,6 @@ mod tests {
         let baseline = DigestPoll::Missing;
         let corrupt = DigestPoll::Tree(serde_json::json!({"daemon.json": "cc"}));
         let applies = Arc::new(AtomicUsize::new(0));
-        // digest re-attempts on every following poll (the baseline did
-        // NOT advance — p1 QC F-001) but never re-warns (same error
-        // message) and never applies: last-good is kept, the daemon
-        // stays up.
         let stats = drive_loop(
             baseline,
             vec![corrupt.clone(), corrupt.clone(), corrupt],
@@ -746,10 +710,6 @@ mod tests {
         let baseline = DigestPoll::Missing;
         let restored = DigestPoll::Tree(serde_json::json!({"daemon.json": "dd"}));
         let applies = Arc::new(AtomicUsize::new(0));
-        // apply fails TRANSIENTLY (e.g. EACCES during the load), the
-        // file is restored to the SAME bytes D — the valid generation
-        // must still apply on the next poll (no baseline advance on the
-        // failed apply ⇒ no permanent swallow).
         let calls = Arc::new(AtomicUsize::new(0));
         let apply_calls = Arc::clone(&calls);
         let stats = drive_loop(
@@ -777,7 +737,6 @@ mod tests {
         let first = DigestPoll::Tree(serde_json::json!({"daemon.json": "cc"}));
         let second = DigestPoll::Tree(serde_json::json!({"daemon.json": "dd"}));
         let applies = Arc::new(AtomicUsize::new(0));
-        // (new digest, changed failure message) — each warns once.
         let calls = Arc::new(AtomicUsize::new(0));
         let apply_calls = Arc::clone(&calls);
         let stats = drive_loop(
@@ -804,7 +763,6 @@ mod tests {
     #[test]
     fn reload_adopts_admission_fields_and_pins_boot_fields() {
         let home = isolated_home();
-        // embedded_mcp off, FirstStays, empty allowlist).
         let last_good = boot_snapshot(PeerToolsConfig::default());
         write_daemon_config(
             home.path(),
@@ -847,11 +805,6 @@ mod tests {
     }
     #[test]
     fn reload_visibility_only_edit_signals_restart_required() {
-        // visibility-only edit must produce a named `restart_required`
-        // signal (the live MCP policy stays boot-pinned until process
-        // restart), same class as the other boot-scoped fields. Without
-        // the signal an operator who narrows the surface on disk gets a
-        // silent reload while the old (wider) subset stays in force.
         let home = isolated_home();
         let last_good = boot_snapshot(PeerToolsConfig::default());
         write_daemon_config(
@@ -909,7 +862,6 @@ mod tests {
         let fresh = holder.get();
         assert_eq!(fresh.config.peer_ids, vec!["peer-b"]);
         assert_eq!(fresh.config.tool_allowlist, vec!["tools.t3.echo"]);
-        // still sees the old generation.
         assert_eq!(in_flight.config.peer_ids, vec!["peer-a"]);
     }
 
@@ -957,10 +909,6 @@ mod tests {
             ports: None,
             invoke_timeout_ms: Some(1000),
         };
-        // admission seam test we only need the handle (no dialer). Awaited
-        // inside the caller's `#[tokio::test]` runtime — no nested
-        // `block_on`.
-        //
         // The core port is `ConnectResponderAdapter` (the type carrying the
         // `PeerResponder` impl), not the bare wire responder.
         let inner = connect_responder(options).await;
@@ -1017,9 +965,6 @@ mod tests {
             crate::table::live_reserved_tool_ids(builtin_ids.iter().cloned(), Some(&holder));
         assert!(!stale_snapshot.contains("tools.demo.compute"));
 
-        // publishes it. (`tools.<ns>.<name>` is the peer-tool grammar AND a
-        // valid capability name, so the reserved id is one a peer could
-        // actually claim.)
         nexus_capability::test_support::write_capability_dir(scan.path(), "tools.demo.compute");
         let (reg1, outcome1) =
             nexus_capability::watch::rebuild_registry_with_merge(&deps, scan.path(), &[]);
@@ -1030,7 +975,6 @@ mod tests {
         );
         holder.swap(std::sync::Arc::new(reg1));
 
-        // reserved is refused AT DECISION TIME — never against the snapshot.
         let manifest = manifest_with_tools(&["tools.demo.compute"]);
         let table = PeerToolTable::new();
         let outcome = crate::table::admit_consistent_with_reservation(
@@ -1092,8 +1036,6 @@ mod tests {
         let table = PeerToolTable::new();
         table.set_config(Some(Arc::new(holder.get().config.registry_config())));
 
-        // same-id registration is refused (first_stays — the row stays
-        // peer-a's).
         let manifest = manifest_with_tools(&["tools.t3.echo"]);
         let first = table.admit_and_register(
             "peer-a",
@@ -1148,7 +1090,6 @@ mod tests {
             crate::config::CollisionPolicy::PriorityOrder
         );
         assert_eq!(fresh.config.peer_priority, vec!["peer-b", "peer-a"]);
-        // PREEMPTS peer-a's row (priority_order, higher rank wins).
         let preempt = table.admit_and_register(
             "peer-b",
             &manifest,
@@ -1186,8 +1127,6 @@ mod tests {
             boot_digest,
             home.path().to_path_buf(),
             PeerConfigHolder::clone(&holder),
-            // reload's `set_config` feed) runs against a table this test
-            // owns — no process-global pollution (T2 review carry).
             Arc::new(PeerToolTable::new()),
             Arc::clone(&shutdown),
         );
@@ -1225,13 +1164,8 @@ mod tests {
             ..PeerToolsConfig::default()
         };
         let holder = PeerConfigHolder::new(boot_snapshot(boot));
-        // generation, cloned before the watcher dies (grant-at-establish
-        // semantics — a live clone keeps serving its generation).
         let admission = holder.get();
 
-        // panics on its second poll (the first matches the baseline). The
-        // stats output is discarded — the task shape must match the
-        // production watcher's `JoinHandle<()>`.
         let mut polled = false;
         let watch = tokio::spawn(async move {
             peer_config_watch_loop_inner(
@@ -1256,8 +1190,6 @@ mod tests {
             "a watcher panic must surface as the degraded supervision outcome"
         );
 
-        // holder was never swapped and both the pre-panic admission clone
-        // and a fresh holder read serve the boot generation.
         assert_eq!(admission.config.peer_ids, vec!["peer-a"]);
         assert_eq!(admission.config.tool_allowlist, vec!["tools.t3.echo"]);
         let fresh = holder.get();

@@ -221,8 +221,6 @@ pub async fn drive_preset_run(
             return PresetRunOutcome::MaxStepsExceeded { steps };
         }
 
-        // semantics: Failed = cancelled, WaitingForInput = external-input
-        // stop unless resume_waiting; Paused is the normal boundary).
         match engine.get_status(session_id).await {
             Ok(SessionStatus::Completed) => return PresetRunOutcome::Completed { steps },
             Ok(SessionStatus::Failed) => return PresetRunOutcome::Cancelled { steps },
@@ -257,12 +255,6 @@ pub async fn drive_preset_run(
                     steps: steps.saturating_add(1),
                 };
             }
-            // concurrent authoritative writer (control cancel, settle, or a
-            // winning drive) owns the row. This drive LOST — stop it without
-            // the blanket failure path: no Cancel signal and no failure
-            // context save against the winner's state. The durable row keeps
-            // the winner's status/revision; if this step's in-flight marker
-            // persists, A7 recovery classifies it as interrupted.
             Err(e @ EngineError::GraphFlow(graph_flow::GraphError::SessionConflict(_))) => {
                 let error = e.to_string();
                 tracing::warn!(
@@ -316,8 +308,6 @@ async fn settle_drive_failure(
     witness: Option<&FailedStepWitness>,
 ) -> FailureSettlement {
     let authoritative = record_driver_failure(workflow_store, session_id, error, witness).await;
-    // than from the presence of a store handle:
-    //
     // - `no_store_legacy`: no workflow store at all — the historical engine
     //   contract, where an ordinary `Cancel` is the cleanup and (with no
     //   store) is a side-effect-free success.
@@ -350,8 +340,6 @@ async fn settle_drive_failure(
     } else if authoritative.disposition.permits_terminal_cleanup()
         && context.permits_terminal_cleanup()
     {
-        // failure commit advanced the workflow revision AND the graph clock,
-        // and no later read may substitute for it.
         match &authoritative.committed {
             Some(record) => {
                 cleanup_failed_run(
@@ -362,7 +350,6 @@ async fn settle_drive_failure(
                 )
                 .await
             }
-            // no commit clocks, so it must not cancel anything.
             None => FailurePersistenceDisposition::NoAuthority,
         }
     } else {
@@ -449,11 +436,6 @@ async fn record_driver_failure(
     let Some(store) = workflow_store else {
         return no_authority;
     };
-    // from the durable execution version, so it holds even when this attempt
-    // has no step witness (a scripted/legacy runner failure) — and never from
-    // the mere presence of a workflow-store handle. This read only classifies;
-    // authority comes exclusively from the CAS the coupled commit performs on
-    // the witness clocks.
     match store.load_run(session_id).await {
         Ok(Some(record)) if record.execution_version < 1 => {
             return AuthoritativeSettlement {
@@ -558,8 +540,6 @@ async fn cleanup_failed_run(
         )
         .await
     {
-        // run actually reached Failed. Another terminal status is not proof
-        // of successful failure settlement and must not release dependencies.
         Ok(()) => match engine.get_status(session_id).await {
             Ok(SessionStatus::Failed) => FailurePersistenceDisposition::Committed,
             Ok(status) => {
@@ -793,25 +773,9 @@ pub async fn resume_driven_sessions(
             }
         };
 
-        //    typed-failed join. v1 typed failures are already excluded by the
-        //    boot recovery filter (status `failed` is terminal); this context-
-        //    key check is the conservative legacy (v0) projection — the DB
-        //    status column stays `running` after a typed v0 failure, so the
-        //    context keys are the only reliable failure record. Shared with
-        //    `nexus42 ops inspect` (single source of truth, qc1 W1).
         let context_value = serde_json::to_value(&session.context).ok();
         let data = context_value.as_ref().and_then(resume_rules::context_data);
 
-        // present, the authoritative v1 status/state govern the recovery
-        // class. Interrupted/uncertain in-flight work is never re-driven
-        // (even with old join keys — rule 3); human waits are never stepped
-        // at boot (rule 4); a fully committed safe boundary is
-        // reconstructable but not auto-driven outside the chain class
-        // (rule 6); corrupt/unsupported v1 metadata is unreadable/
-        // non-replayable (rule 2). Only the converge/merge class proceeds to
-        // the bounded join re-drive below. v0 rows and in-memory engines
-        // (no store) fall through to the conservative legacy cascade.
-        //
         // Round-2 fix (Critical 1): `Terminal` and `Unreadable` skip
         // immediately with their own decisions instead of falling through —
         // the legacy chain filter must never see them. A stale summary
@@ -864,8 +828,6 @@ pub async fn resume_driven_sessions(
                             decisions.push(ResumeDecision::SkippedHumanWait { session_id });
                             continue;
                         }
-                        // safe boundary is reconstructed and re-driven —
-                        // never stranded by a restart (P3 T1 rereview P1).
                         resume_rules::RecoveryClass::SafeBoundary => {
                             if let Err(e) = engine.ensure_recovered_runner(&session_id).await {
                                 tracing::warn!(
@@ -880,8 +842,6 @@ pub async fn resume_driven_sessions(
                             }
                             v1_safe_boundary = true;
                         }
-                        // >= 1` guard matched); the arms above cover all seven
-                        // classes, so `LegacyUnverified` is unreachable.
                         resume_rules::RecoveryClass::LegacyUnverified => {
                             unreachable!("v1 load_run record cannot classify LegacyUnverified")
                         }
@@ -897,9 +857,6 @@ pub async fn resume_driven_sessions(
                 }
             }
         }
-        //    typed-failed join. A v1 ConvergeMerge row was already classified
-        //    by the authoritative A7 gate above — stale `_run_status` /
-        //    `_run_error` context keys must not suppress its re-drive.
         if !v1_converge_merge
             && !v1_safe_boundary
             && data.is_some_and(resume_rules::typed_failure_keys_present)
@@ -908,7 +865,6 @@ pub async fn resume_driven_sessions(
             continue;
         }
 
-        //    boot; the A4 wait token is preserved, not auto-advanced.
         if !v1_converge_merge
             && !v1_safe_boundary
             && matches!(summary.status, SessionStatus::WaitingForInput)
@@ -918,8 +874,6 @@ pub async fn resume_driven_sessions(
             continue;
         }
 
-        //    equivalence): only sessions provably inside a converge/merge
-        //    chain are re-driven.
         if !v1_converge_merge
             && !v1_safe_boundary
             && !data.is_some_and(resume_rules::is_converge_merge_chain)
@@ -928,7 +882,6 @@ pub async fn resume_driven_sessions(
             continue;
         }
 
-        //    reconstruction stays tracked-but-not-driven.
         if !engine.has_runner(&session_id).await {
             decisions.push(ResumeDecision::SkippedNoRunner { session_id });
             continue;
@@ -1350,17 +1303,9 @@ impl WorkflowRunCoordinator {
             "recover_persisted: recovering {} persisted session(s) into in-memory tracker",
             summaries.len()
         );
-        // coordinator holds the CONCRETE `Arc<GraphFlowEngine>`, which has an
-        // inherent tracker-only `recover_sessions` (in-memory sessions map,
-        // no runner reconstruction) AND a trait impl whose
-        // `recover_sessions` delegates here. Inherent methods win on a
-        // concrete type, so naming `recover_sessions` would silently skip
-        // runner reconstruction and break the re-drive below.
         self.engine.recover_sessions_inner(summaries.clone()).await;
         let mut drivable = Vec::new();
         {
-            // sequential acquisitions on the runners RwLock stall recovery
-            // behind any writer.
             let shared = self.engine.shared_state();
             let runners = shared.runners.read().await;
             for summary in &summaries {
@@ -1595,15 +1540,12 @@ impl WorkflowRunCoordinator {
         daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
         prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
-        // sessions.
         if preset_id.starts_with("_system.") {
             return Err(RunControlError::NotEligible(
                 preset_id.to_string(),
                 format!("system preset '{preset_id}' cannot be started as a user session"),
             ));
         }
-        // durable admission below so close can never race a run row that no
-        // owner will drive.
         self.admission_fence()?;
 
         let registry = caps.get().ok_or_else(|| {
@@ -1612,11 +1554,6 @@ impl WorkflowRunCoordinator {
         let loaded = nexus_preset::resolve_preset(preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(preset_id.to_string(), e.to_string()))?;
 
-        // key governs user bundles only; the one arm `ir-only` resolves the
-        // apply below and refuses a user bundle with none before graph
-        // construction.
-        // The resolution itself is the admission port's: only the owner half
-        // reads the Creator store, and recovery re-enters through the same one.
         let admission = self
             .applied_admission
             .admit(preset_id, &loaded)
@@ -1632,10 +1569,6 @@ impl WorkflowRunCoordinator {
             });
         }
 
-        // binding role must be a declared preset role (or `default`), and
-        // every provider id must exist in the Host provider catalog. An
-        // applied document declares its own roles, and `export_preset` is the
-        // same normalisation the IR graph builder uses.
         let applied_manifest = applied
             .as_ref()
             .map(|applied| nexus_preset::export_preset(&applied.document))
@@ -1669,9 +1602,6 @@ impl WorkflowRunCoordinator {
             Some(applied) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
                     &applied.document,
-                    // bundle; any other applied document's id is not a bundle
-                    // id, so reading the embedded bundle could serve a colliding
-                    // preset's bytes.
                     nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
                     &engine_proxy,
                     &registry,
@@ -1760,7 +1690,6 @@ impl WorkflowRunCoordinator {
             return false;
         };
         if record.execution_version < 1 {
-            // no v1 terminal transition to claim.
             return true;
         }
         let has_authoritative_failure = record
@@ -1771,12 +1700,6 @@ impl WorkflowRunCoordinator {
         if !has_authoritative_failure {
             return false;
         }
-        // run itself (verified at the store boundary before it reports
-        // `Committed`). Only Failed preserves the execution error; another
-        // terminal status cannot substitute for this failure settlement.
-        // There is deliberately no coordinator-side terminal write: the
-        // previous revision-only fallback could rebase onto a newer
-        // graph-only or revision winner.
         record.status == SessionStatus::Failed
     }
 
@@ -1998,14 +1921,10 @@ impl WorkflowRunCoordinator {
             }
         }
 
-        // non-replayable `Failed` transition could not be committed is
-        // fenced. `ensure_driving` refuses re-entry until the transition is
-        // durable — the failed driver is never silently re-driven.
         if self.failed_owners.lock().await.contains(&session_id.0) {
             return Ok(DriveDisposition::NotDriving);
         }
 
-        // coordinator must not start a fresh owner for terminal/wait/interrupt.
         let store = self.workflow_store.clone();
         let record = store
             .load_run(session_id)
@@ -2015,9 +1934,6 @@ impl WorkflowRunCoordinator {
             return Ok(DriveDisposition::NotDriving);
         }
         let mut drives = self.drives.lock().await;
-        // the owner. The check and the registration share this lock, so a
-        // close that begins mid-admission can never be overtaken by a late
-        // owner registration.
         self.admission_fence()?;
         if let Some(owner) = drives.get(&session_id.0) {
             if !owner.join.is_finished() {
@@ -2026,11 +1942,6 @@ impl WorkflowRunCoordinator {
             drives.remove(&session_id.0);
         }
 
-        // drive is spawned. `try_register_live` is the reservation: it
-        // succeeds when a slot is free OR when this run already owns a ring
-        // (reuse). When the quota is exhausted the drive is refused with a
-        // typed capacity error and NO durable work is touched — a driver can
-        // never outlive its ring and silently lose every event.
         if let Some(port) = &self.run_events {
             if !port.try_register_live(&session_id.0).await {
                 return Err(RunControlError::RunEventCapacity(session_id.0.clone()));
@@ -2043,16 +1954,6 @@ impl WorkflowRunCoordinator {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(session_id.0.clone(), cancel.clone());
 
-        // gate above races a concurrent cancel: the cancel commits its intent
-        // fence and only THEN looks up which run tokens to fire, so a token
-        // published inside that window is never fired. Re-reading the durable
-        // record AFTER the token exists closes the race in both orders —
-        // either the cancel's lookup happens after this publication and fires
-        // this exact token, or this read happens after the fence commit and
-        // sees it. A withdrawn owner fires its own token (fail-closed for
-        // every prompt consumer that resolves it) and releases its live-ring
-        // reservation, so neither a live uncancelled token nor reserved
-        // capacity can outlive the refusal.
         let recheck = match store.load_run(session_id).await {
             Ok(record) => record,
             Err(error) => {
@@ -2088,18 +1989,11 @@ impl WorkflowRunCoordinator {
                 Some(&drive_cancel),
             )
             .await;
-            // `Failed` transition so the v1 record is never classified
-            // runnable again after owner cleanup. When the transition
-            // cannot be committed, the failed owner is fenced so
-            // `ensure_driving` refuses re-entry until it is durable.
             if let PresetRunOutcome::Failed { settlement, .. } = &outcome {
                 if !coordinator.persist_drive_failure(&sid, settlement).await {
                     coordinator.failed_owners.lock().await.insert(sid.0.clone());
                 }
             }
-            // terminal session status. Only the schedule whose
-            // `current_session_id` equals this run is updated; a
-            // checkpoint-before-settlement crash is reconciled at boot.
             coordinator.settle_terminal_schedule(&sid, &outcome).await;
             coordinator.publish_durable_run_state(&sid).await;
             if let Some(port) = &coordinator.run_events {
@@ -2140,8 +2034,6 @@ impl WorkflowRunCoordinator {
             if parent_cancel.is_cancelled() {
                 break;
             }
-            // drive either — the fence is checked per session at the entry,
-            // before any storage read or reconstruction.
             if self.admission_fence().is_err() {
                 break;
             }
@@ -2168,9 +2060,6 @@ impl WorkflowRunCoordinator {
             let context_value = serde_json::to_value(&session.context).ok();
             let data = context_value.as_ref().and_then(resume_rules::context_data);
 
-            // class. Only the converge/merge class proceeds to the bounded
-            // join re-drive; terminal/interrupted/human-wait/unreadable
-            // classes skip immediately.
             let mut v1_converge_merge = false;
             let mut v1_safe_boundary = false;
             if let Some(store) = workflow_store {
@@ -2208,9 +2097,6 @@ impl WorkflowRunCoordinator {
                                 decisions.push(ResumeDecision::SkippedHumanWait { session_id });
                                 continue;
                             }
-                            // committed safe boundary is reconstructed and
-                            // re-driven through the single owner — never
-                            // stranded by a restart (P3 T1 rereview P1).
                             resume_rules::RecoveryClass::SafeBoundary => {
                                 if let Err(e) =
                                     self.engine.ensure_recovered_runner(&session_id).await
@@ -2274,13 +2160,6 @@ impl WorkflowRunCoordinator {
                 continue;
             }
 
-            // drives map is the single ownership registry. A concurrent
-            // public re-entry observes the same owner.
-            // C2: the shutdown admission fence gates the recovery re-drive
-            // too. The check is INSIDE the drives-lock critical section so a
-            // close that begins mid-recovery can never be overtaken by a
-            // late owner registration (the check and the registration share
-            // the same critical section).
             let mut drives = self.drives.lock().await;
             if self.admission_fence().is_err() {
                 continue;
@@ -2295,9 +2174,6 @@ impl WorkflowRunCoordinator {
                 }
                 drives.remove(&session_id.0);
             }
-            // quota before spawning. A session that cannot reserve is left
-            // tracked-but-not-driven (its durable record is untouched); the
-            // next boot/retry reserves a freed slot.
             if let Some(port) = &self.run_events {
                 if !port.try_register_live(&session_id.0).await {
                     decisions.push(ResumeDecision::SkippedRunEventCapacity { session_id });
@@ -2330,15 +2206,11 @@ impl WorkflowRunCoordinator {
                     Some(&drive_cancel),
                 )
                 .await;
-                // non-replayable `Failed` transition (same boundary as
-                // `ensure_driving`); a failed write fences the owner.
                 if let PresetRunOutcome::Failed { settlement, .. } = &outcome {
                     if !coordinator.persist_drive_failure(&sid, settlement).await {
                         coordinator.failed_owners.lock().await.insert(sid.0.clone());
                     }
                 }
-                // terminal session status (same boundary as
-                // `ensure_driving`).
                 coordinator.settle_terminal_schedule(&sid, &outcome).await;
                 coordinator.publish_durable_run_state(&sid).await;
                 if let Some(port) = &coordinator.run_events {
@@ -2380,8 +2252,6 @@ impl WorkflowRunCoordinator {
         daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
         prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
     ) -> Result<SessionId, RunControlError> {
-        // and the policy cutover below, so close can never race a durable
-        // `driven_v1` cutover that no owner will drive.
         self.admission_fence()?;
         let row = sqlx::query_as!(
             ScheduleAdmissionRow,
@@ -2428,7 +2298,6 @@ impl WorkflowRunCoordinator {
             ));
         }
 
-        // (legacy never-started row with no owned session — C-3).
         if !matches!(row.status.as_str(), "pending" | "paused" | "running") {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
@@ -2436,22 +2305,11 @@ impl WorkflowRunCoordinator {
             ));
         }
 
-        // `execution_descriptor_json IS NULL`, no version-0 core-context
-        // record) has no frozen payload. Prepare it BEFORE the atomic
-        // cutover: resolve the preset through the shared resolver, freeze
-        // the source identity + available structured input, choose the
-        // sanctioned binding source, create the missing version-0 seed,
-        // and persist the frozen descriptor. The row stays inert until
-        // this explicit call; the cutover + owned-session claim remain
-        // atomic inside `admit_schedule`'s store transaction.
         if row.execution_descriptor_json.is_none() {
             self.prepare_legacy_row(&row, pool, nexus_home, caps)
                 .await?;
         }
 
-        // transaction). Do not UPDATE execution_policy before the payload
-        // and run row exist (C-3).
-        //
         // `legacy_opt_in = true`: this IS the explicit authorized public start
         // that spec §3 names as the sole path allowed to opt a legacy
         // never-started row in — including an admission-only `Running` row
@@ -2509,7 +2367,6 @@ impl WorkflowRunCoordinator {
         let loaded = nexus_preset::resolve_preset(&row.preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
-        //    directory presets both carry it).
         let source = loaded.source_identity.clone().ok_or_else(|| {
             RunControlError::Admission(format!(
                 "preset '{}' has no source identity; cannot prepare a legacy start",
@@ -2517,12 +2374,6 @@ impl WorkflowRunCoordinator {
             ))
         })?;
 
-        //    configured default binding provider (the same source the
-        //    supervisor/internal insertion paths use). A catalog-order
-        //    first entry is NEVER selected — a preset with no prompt roles
-        //    accepts an empty map; a preset that needs prompt roles but has
-        //    no configured default provider refuses with a typed admission
-        //    error before any session/claim is created (qc1 F-001).
         let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
         let agent_bindings = if roles.is_empty() {
             std::collections::HashMap::new()
@@ -2550,10 +2401,6 @@ impl WorkflowRunCoordinator {
                 .collect()
         };
 
-        //    `current_core_context_version` is already 0 (migration
-        //    default), so the seed row alone makes the pointer valid.
-        //    `INSERT OR IGNORE` keeps concurrent explicit starts
-        //    idempotent (the PK is (schedule_id, version)).
         let now = chrono::Utc::now().timestamp();
         let payload = serde_json::json!({ "kind": "text", "body": "" });
         let derivation = serde_json::json!({ "kind": "seed", "raw": "" });
@@ -2578,7 +2425,6 @@ impl WorkflowRunCoordinator {
         .await
         .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
 
-        //    explicit starts — the winner's identical descriptor wins).
         let descriptor = nexus_session_storage::run_state::RunDescriptorV1 {
             creator_id: row.creator_id.clone(),
             work_id: row.work_id.clone().filter(|id| !id.is_empty()),
@@ -2590,7 +2436,6 @@ impl WorkflowRunCoordinator {
             agent_bindings,
             parent_session_id: None,
             graph_name: None,
-            // RUN descriptor; this insertion-time row resolves none.
             applied: None,
             intake_mode: None,
         };
@@ -2692,8 +2537,6 @@ impl WorkflowRunCoordinator {
         prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
         legacy_opt_in: bool,
     ) -> Result<SessionId, RunControlError> {
-        // BEFORE the eligibility read and the admission transaction below, so
-        // close can never race a durable claim that no owner will drive.
         self.admission_fence()?;
         let row = sqlx::query_as!(
             ScheduleAdmissionRow,
@@ -2710,7 +2553,6 @@ impl WorkflowRunCoordinator {
         .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?
         .ok_or_else(|| RunControlError::ScheduleNotFound(schedule_id.to_string()))?;
 
-        // regardless of the stored policy.
         if row.preset_id.starts_with("_system.") {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
@@ -2728,12 +2570,6 @@ impl WorkflowRunCoordinator {
                 format!("execution_policy is '{}'", row.execution_policy),
             ));
         }
-        // `running` row is a candidate for RE-ENTRY (the owned-session branch
-        // below): the store's atomic claim writes `status='running'` WITH
-        // `current_session_id`, so a repeat caller — a second tick, an
-        // explicit start, the coordinator-backed starter — must observe and
-        // drive the SAME run instead of being refused.
-        //
         // A `running` row with NO owned run is NEVER admitted here. The
         // durable product contract is that a never-started row merely LABELLED
         // `Running` is not running at all: "Boot/tick/cron exclude legacy
@@ -2769,8 +2605,6 @@ impl WorkflowRunCoordinator {
             ));
         }
         if let Some(sid) = &row.current_session_id {
-            // actually exists; a stale claim (crash between claim and run
-            // creation) is NOT cleared — boot recovery classifies it (C-1).
             let store = nexus_session_storage::storage::sqlite::SqliteSessionStorage::new(
                 std::sync::Arc::new(pool.clone()),
             );
@@ -2793,11 +2627,6 @@ impl WorkflowRunCoordinator {
             ));
         }
 
-        // decision the supervisor tick uses. A blocked row (unfinished
-        // dependency, serial conflict, future scheduled_at) remains pending
-        // and unowned — immediate public admission must not bypass the
-        // admission matrix. The preflight is advisory; the store re-verifies
-        // the matrix inside the claim transaction (N-1).
         if !schedule_eligible(pool, &row).await? {
             return Err(RunControlError::NotEligible(
                 schedule_id.to_string(),
@@ -2842,12 +2671,6 @@ impl WorkflowRunCoordinator {
         let loaded = nexus_preset::resolve_preset(&row.preset_id, nexus_home, &registry)
             .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?;
 
-        //    the schedule row (N-3/I-6): admission reads the frozen version,
-        //    never the latest snapshot — a concurrent edit cannot change the
-        //    run payload between seed and admission. A read/migration/
-        //    corruption error FAILS CLOSED. A missing version record at ANY
-        //    pointer (including 0) is a pre-seed row and is refused — never
-        //    interpreted as a valid empty seed (N-3).
         let (core_context, core_context_version) = {
             let mgr = nexus_orchestration::schedule::derivation::CoreContextManager::new(
                 std::sync::Arc::new(pool.clone()),
@@ -2863,11 +2686,6 @@ impl WorkflowRunCoordinator {
             {
                 Ok(record) => {
                     let version = record.version.0;
-                    // under the namespace its kind owns (§6.4), so the run's
-                    // FIRST state renders `{{core_context.struct.<path>}}` for a
-                    // struct version exactly as a later boundary does — never
-                    // the structured body serialized into the text namespace
-                    // (v1.195 P0-T6).
                     (Some(record.content), version)
                 }
                 Err(
@@ -2889,11 +2707,6 @@ impl WorkflowRunCoordinator {
             }
         };
 
-        //    work_id, structured input, agent bindings, and content-addressed
-        //    source identity. The descriptor JSON (when present) carries the
-        //    frozen input/bindings/source; the schedule row carries work_id.
-        //    New rows created through the public add path persist the
-        //    descriptor at insertion.
         let (work_id, input, agent_bindings, frozen_source) = match &row.execution_descriptor_json {
             Some(bytes) => {
                 let descriptor: nexus_session_storage::run_state::RunDescriptorV1 =
@@ -2961,11 +2774,6 @@ impl WorkflowRunCoordinator {
             });
         }
 
-        // gate session POST uses. Unknown roles/providers refuse before any
-        // run row is created. The role material is the manifest of the
-        // document that will run: an applied document declares its own roles,
-        // and `export_preset` is the same normalisation the IR graph builder
-        // uses.
         let applied_manifest = applied
             .as_ref()
             .map(|applied| nexus_preset::export_preset(&applied.document))
@@ -2980,15 +2788,11 @@ impl WorkflowRunCoordinator {
 
         let session_id = format!("{}:{}", row.preset_id, uuid::Uuid::new_v4());
 
-        // dispatch + cancellation tokens) — mirrors boot.rs.
         let engine_proxy: Arc<dyn OrchestrationEngine> = self.engine.clone();
         let wired = match &applied {
             Some(applied) => {
                 nexus_orchestration::preset_runtime::build_wired_outer_graph_from_ir(
                     &applied.document,
-                    // bundle; any other applied document's id is not a bundle
-                    // id, so reading the embedded bundle could serve a colliding
-                    // preset's bytes.
                     nexus_orchestration::preset_runtime::ir_template_source(Some(&loaded)),
                     &engine_proxy,
                     &registry,
@@ -3009,9 +2813,6 @@ impl WorkflowRunCoordinator {
             .map_err(|e| RunControlError::PresetLoad(row.preset_id.clone(), e.to_string()))?,
         };
 
-        //    schedule→session identity (C-1/C-2). A concurrent admission
-        //    loses the claim inside the transaction and the run row is
-        //    rolled back with it.
         let admitted = self
             .engine
             .admit_schedule_run_with_input(
@@ -3040,12 +2841,6 @@ impl WorkflowRunCoordinator {
             }
             Err(e) => {
                 let msg = e.to_string();
-                // the store transaction: the store reports the row as
-                // already claimed ("claimed concurrently", "already owns
-                // run") or as `running` with an owned session ("status is
-                // 'running'" — the store's status gate rejects the claimed
-                // row before its re-entry check). In every case the winner's
-                // owned run is re-read and driven (single-flight).
                 if msg.contains("claimed concurrently")
                     || msg.contains("already owns run")
                     || msg.contains("status is 'running'")
@@ -3064,11 +2859,6 @@ impl WorkflowRunCoordinator {
                             self.ensure_driving(&sid).await?;
                             return Ok(sid);
                         }
-                        // another admission (v1.195 P0-T4): the row is
-                        // durably terminal with no owned run, so this
-                        // admission legitimately lost and no run may be
-                        // minted. Reporting `Admission` would project a 500
-                        // for a control race the store settled by design.
                         Some((status, None)) => {
                             return Err(RunControlError::NotEligible(
                                 schedule_id.to_string(),
@@ -3081,20 +2871,12 @@ impl WorkflowRunCoordinator {
                         None => {}
                     }
                 }
-                // the store transaction (an operator cancel/fail/settle
-                // landed in between): the admission is refused for the same
-                // reason a preflight terminal status is — not eligible.
-                // Surfacing it as `Admission` would project a 500 for a
-                // legitimate control race.
                 if msg.contains("status is 'cancelled'")
                     || msg.contains("status is 'failed'")
                     || msg.contains("status is 'completed'")
                 {
                     return Err(RunControlError::NotEligible(schedule_id.to_string(), msg));
                 }
-                // row (dependency not satisfied, not due, or the per-creator
-                // concurrency gate) — the row stays pending and unowned, the
-                // same disposition as a preflight refusal.
                 if msg.contains("fails the per-creator concurrency gate")
                     || msg.contains("dependency")
                     || msg.contains("not due")
@@ -3137,19 +2919,6 @@ impl WorkflowRunCoordinator {
         session_id: &SessionId,
         signal: RunSignal,
     ) -> Result<RunControlResult, RunControlError> {
-        // run's runner to be REATTACHED from the frozen source identity —
-        // attach on demand when recovery did not (or could not) leave a
-        // runner. A changed/missing source, corrupt child identity, or any
-        // other reconstruction failure surfaces `reconstruction_unavailable`
-        // BEFORE any signal mutates the durable wait: the human wait stays
-        // preserved and legal actions become cancel-only. The gate is
-        // evaluated for Continue AND Resume — the two signals that make a run
-        // runnable and are therefore re-driven. Continue is re-driven at the
-        // tail of this function; Resume is re-driven by the schedule resume
-        // seam AFTER it has reconciled the owning row
-        // (`ExecutionHandle::signal_schedule`), so the row can never race the
-        // fresh driver. Cancel/Pause only stop a run and need no runner.
-        //
         // The gate is idempotent and race-safe: a session already being
         // driven (or reconstructed) by another caller has a runner present
         // and passes immediately; the durable continue CAS below is still
@@ -3163,9 +2932,6 @@ impl WorkflowRunCoordinator {
             }
         }
 
-        // the session and schedule public surfaces — no per-handler error
-        // strings, no divergent 500, and the durable `interrupted` outcome is
-        // reported as a typed success instead of an engine error.
         if matches!(signal, RunSignal::Cancel) {
             return self.cancel_run(session_id).await;
         }
@@ -3182,13 +2948,6 @@ impl WorkflowRunCoordinator {
         let engine_result = self.engine.signal(session_id, engine_signal).await;
         let engine_result = match engine_result {
             Ok(()) => Ok(()),
-            // the durable winner is safe, but the losing public operation
-            // must be an exact conflict response, never a 500. Reload the
-            // authoritative row and project the exact envelope: a still-
-            // present wait keeps the A4 `workflow_wait_conflict` details
-            // (session_id, current status, current_wait_id); a
-            // cancel-requested/terminal/incompatible state is
-            // `workflow_state_conflict`.
             Err(nexus_orchestration::engine::EngineError::RevisionMismatch {
                 session_id: lost_sid,
                 ..
@@ -3242,8 +3001,6 @@ impl WorkflowRunCoordinator {
         };
         engine_result?;
 
-        // the single coordinator owner (single-flight — a duplicate consumer
-        // that lost the CAS never reaches this point).
         if matches!(signal, RunSignal::Continue { .. }) {
             self.ensure_driving(session_id).await?;
         }
@@ -3302,12 +3059,6 @@ impl WorkflowRunCoordinator {
         session_id: &SessionId,
     ) -> Result<RunControlResult, RunControlError> {
         let result = self.cancel_run_inner(session_id).await;
-        // schedule projects that same winner. This runs whether or not a
-        // drive loop is still alive to settle it — a run cancelled while no
-        // driver owns it (post-restart, or already parked) must not leave its
-        // schedule reading `running`. A no-op for a non-terminal or
-        // `Interrupted` record, so an unconfirmed cleanup never promotes its
-        // schedule to `cancelled`.
         self.settle_owning_schedule(session_id).await;
         result
     }
@@ -3475,7 +3226,6 @@ async fn schedule_eligible(
     .await
     .map_err(|e| RunControlError::ScheduleUpdate(e.to_string()))?;
 
-    // satisfy — spec §4).
     let completed: std::collections::HashSet<String> = sqlx::query_scalar!(
         r#"SELECT schedule_id as "schedule_id!" FROM creator_schedules WHERE status IN ('completed', 'cancelled')"#
     )
@@ -3587,11 +3337,6 @@ impl CoordinatorScheduleRunStarter {
 #[async_trait::async_trait]
 impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
     async fn start(&self, schedule_id: &str) -> Result<SessionId, SupervisorError> {
-        // claim, the durability checks and the drive start is what lets a
-        // concurrent owner close (which drops the owner's coordinator) never
-        // free it under an in-flight admission. A missing owner fails closed —
-        // the supervisor leaves the row pending for a later owner instead of
-        // admitting through a coordinator nobody owns.
         let coordinator = self.coordinator.upgrade().ok_or_else(|| {
             SupervisorError::Database(sqlx::Error::Protocol(format!(
                 "no live execution owner for schedule {schedule_id}: \
@@ -3643,11 +3388,8 @@ async fn validate_agent_bindings(
     let role_ids: std::collections::HashSet<&str> =
         manifest.roles.iter().map(|r| r.id.as_str()).collect();
 
-    // and inner graphs via the shared helper (same source the daemon's
-    // internal binding builder uses — they can never drift).
     let required = nexus_preset::required_prompt_roles(manifest);
 
-    // map is accepted ONLY when the preset has no prompt path at all.
     for role in &required {
         if !bindings.contains_key(role) {
             return Err(RunControlError::Admission(format!(
@@ -3699,9 +3441,6 @@ async fn validate_agent_bindings(
 #[cfg(test)]
 #[cfg(test)]
 mod tests {
-    // `preset_run` test module) and exercise private internals, so they see the
-    // parent items directly. `super::*` re-supplies the engine/storage/trait
-    // imports and the public and private items alike.
     use super::*;
     use async_trait::async_trait;
     use std::collections::VecDeque;
@@ -3847,7 +3586,6 @@ mod tests {
             );
         }
 
-        // `driver_failed` record are both durable.
         let driver_failed = |code: &str| -> RunRecord {
             let mut record = mk(SessionStatus::Failed, true);
             if let Some(state) = record.state.as_mut() {
@@ -4538,7 +4276,6 @@ mod tests {
         pool: &Arc<sqlx::SqlitePool>,
         session_id: &SessionId,
     ) {
-        // supervisor, then exercise the shared dependency admission gate.
         for (schedule_id, status, current_session_id) in [
             (
                 "failed-prerequisite",
@@ -4655,8 +4392,6 @@ mod tests {
     #[tokio::test]
     async fn resume_skips_typed_failed_session() {
         let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
-        // CONFLICT never updates status), but the context carries the
-        // failure record — the resume must NOT re-tick it.
         seed_session(
             &storage,
             "test:typed-failed",
@@ -4699,7 +4434,6 @@ mod tests {
     #[tokio::test]
     async fn resume_skips_non_converge_merge_class_session() {
         let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
-        // byte-identical to pre-T2 boot (tracked-but-not-driven).
         seed_session(&storage, "test:linear", "mid", &[]).await;
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
@@ -4827,18 +4561,9 @@ mod tests {
         );
     }
 
-    // completed / post-join sessions as live. `Context::set` never removes
-    // keys; the join gates clear them by writing `Value::Null` (deadline
-    // exceeded in `join_timeout_tick`; success-leave in the join task). A
-    // session whose join keys are all Null has LEFT the chain and must be
-    // class-negative — otherwise the resume re-drive re-executes completed
-    // sessions and auto-advances post-join `llm_judge`/`manual` waits.
     #[tokio::test]
     async fn resume_skips_completed_session_with_null_join_keys() {
         let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
-        // tracking keys by writing `Value::Null` (success-leave). Key
-        // presence alone would misclassify this session as live and
-        // re-drive it.
         seed_session(
             &storage,
             "test:completed",
@@ -4880,9 +4605,6 @@ mod tests {
     #[tokio::test]
     async fn resume_does_not_auto_advance_post_join_llm_judge_wait() {
         let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
-        // at an llm_judge/manual state. It must NOT be auto-advanced by the
-        // resume re-drive — only a LIVE join key makes a session
-        // class-positive.
         seed_session(
             &storage,
             "test:post-join-wait",
@@ -4918,9 +4640,6 @@ mod tests {
         );
     }
 
-    // cancellable — `drive_preset_run` checks the token before every step,
-    // so cancelling mid-drive stops the re-drive without exhausting the
-    // step budget.
     #[tokio::test]
     async fn resume_stops_stepping_after_cancel_fires() {
         let storage: Arc<dyn SessionStorage> = Arc::new(graph_flow::InMemorySessionStorage::new());
@@ -4931,9 +4650,6 @@ mod tests {
             &[("_join_wait_start_join", serde_json::json!(1000u64))],
         )
         .await;
-        // every step; with the token it must stop at the first check after
-        // cancel fires. Shared via `Arc` so the spawned task and the
-        // assertion below can both reach the script queue.
         let engine = Arc::new(ScriptedEngine::with_script(
             (0..1000).map(|_| Ok(paused())).collect(),
         ));
@@ -4974,7 +4690,6 @@ mod tests {
         );
     }
 
-    /// leaves the state blob NULL (corrupt/unsupported metadata).
     async fn seed_v1_row(
         pool: &sqlx::SqlitePool,
         session_id: &str,
@@ -5035,8 +4750,6 @@ mod tests {
             .await
             .expect("open pool")
             .clone_pool();
-        // the pool again is idempotent. The same adapter implements both
-        // SessionStorage and WorkflowStateStore (A2).
         let sqlite: Arc<SqliteSessionStorage> = Arc::new(SqliteSessionStorage::new(Arc::new(pool)));
         let dyn_storage: Arc<dyn SessionStorage> = sqlite.clone();
         (dyn_storage, sqlite)
@@ -5115,8 +4828,6 @@ mod tests {
                 false,
             )
             .await;
-            // classify as a human wait (L2 Important 1): the durable A4 wait
-            // token beats old join keys; daemon must not re-drive it.
             seed_v1_row(
                 &pool,
                 "v1:wait_joins",
@@ -5196,7 +4907,6 @@ mod tests {
                 .await
                 .expect("open pool");
             let pool = guarded.clone_pool();
-            // silently reinterpreted (A7 rule 2).
             sqlx::query(
                 "INSERT INTO orchestration_sessions
                 (session_id, creator_id, preset_id, preset_version, status,
@@ -5243,11 +4953,6 @@ mod tests {
 
     #[tokio::test]
     async fn resume_a7_stale_running_summary_terminal_load_skips_immediately() {
-        // (listed before the durable status transitioned terminal). The
-        // summary says running/join-resumable while `load_run` reports
-        // terminal — the session must skip immediately with SkippedTerminal
-        // and consume ZERO drive steps; old join keys must never reach
-        // `drive_preset_run`.
         let (tmp, _nexus_home, db_path) = fixture().await;
         let _ = &tmp;
         {
@@ -5271,7 +4976,6 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
-        // has already transitioned to completed.
         let sum = SessionSummary {
             session_id: SessionId("v1:stale-terminal".to_string()),
             creator_id: "ctr".to_string(),
@@ -5303,12 +5007,6 @@ mod tests {
 
     #[tokio::test]
     async fn resume_a7_stale_running_summary_unreadable_load_skips_immediately() {
-        // running/join-resumable while the durable metadata is corrupt. At
-        // the daemon boundary `load_run` surfaces corrupt v1 run-state as an
-        // error (strict deserialization) — SkippedUnreadable, zero drive
-        // steps, never falling through to legacy join evidence. (The
-        // `Unreadable` class immediate-skip in the A7 gate covers the same
-        // rows whenever `classify_recovery` yields it.)
         let (tmp, _nexus_home, db_path) = fixture().await;
         let _ = &tmp;
         {
@@ -5316,9 +5014,6 @@ mod tests {
                 .await
                 .expect("open pool");
             let pool = guarded.clone_pool();
-            // required) → `load_run` errors (non-replayable). Context is
-            // byte-valid with `data` so the failure is definitively in the
-            // v1 run metadata, not the session context.
             sqlx::query(
             "INSERT INTO orchestration_sessions
                 (session_id, creator_id, preset_id, preset_version, status,
@@ -5349,7 +5044,6 @@ mod tests {
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
         let engine =
             ScriptedEngine::with_script(vec![Ok(StepOutcome::Completed { response: None })]);
-        // would be present in a real row); the durable metadata is corrupt.
         let sum = SessionSummary {
             session_id: SessionId("v1:stale-unreadable".to_string()),
             creator_id: "ctr".to_string(),
@@ -5381,10 +5075,6 @@ mod tests {
 
     #[tokio::test]
     async fn resume_a7_v1_converge_merges_despite_stale_typed_failure_keys() {
-        // fall through the v0 typed-failure guards. Stale `_run_status` /
-        // `_run_error` context keys (leftover from an earlier v0-era
-        // failure) cannot suppress the durable A7 converge/merge re-drive —
-        // the legacy cascade runs only for v0 / no-store rows.
         let (tmp, _nexus_home, db_path) = fixture().await;
         let _ = &tmp;
         {
@@ -5392,8 +5082,6 @@ mod tests {
                 .await
                 .expect("open pool");
             let pool = guarded.clone_pool();
-            // STALE typed-failure keys (v0-era leftovers) alongside the live
-            // join keys.
             let context = br#"{"data": {
             "_converge_arrivals_j1": ["a"], "_join_wait_start_j1": 1,
             "_gate_park_join": true,
@@ -5458,11 +5146,6 @@ mod tests {
         );
     }
 
-    /// on the first `commit_transition` call (the deterministic race gate):
-    /// the injected write wins the revision CAS, so the delegated call loses
-    /// with [`EngineError::RevisionMismatch`] — exactly the interleaving
-    /// where a control signal loaded the row before a concurrent transition
-    /// committed.
     struct RaceInjectingStore {
         inner: Arc<dyn WorkflowStateStore>,
         storage: Arc<dyn SessionStorage>,
@@ -5534,8 +5217,6 @@ mod tests {
             next_state: &nexus_session_storage::run_state::RunStateV1,
         ) -> Result<nexus_session_storage::run_state::RunRecord, StorageError> {
             if !self.injected.swap(true, Ordering::SeqCst) {
-                // cancel fence commits `cancel_requested` at the SAME
-                // revision the delegated call is about to lose.
                 let record = self
                     .inner
                     .load_run(session_id)
@@ -6014,9 +5695,6 @@ mod tests {
             terminal_target: nexus_session_storage::run_state::TerminalSettlementTarget,
         ) -> Result<nexus_session_storage::run_state::SettlementResult, StorageError> {
             use nexus_session_storage::run_state::TerminalSettlementTarget;
-            // `settle_failed` cleanup writes into `settle_run`. The fault must
-            // follow the boundary it proves, or the fixture silently stops
-            // injecting and the boundary test can only ever time out.
             if matches!(
                 terminal_target,
                 TerminalSettlementTarget::Cancelled | TerminalSettlementTarget::Failed
@@ -6066,8 +5744,6 @@ mod tests {
                     .await;
             }
             if self.fault == BoundaryFault::WinnerBeatsStepMarker && self.file_once() {
-                // expected revision AND graph preimage; the delegated marker
-                // then loses.
                 self.inner
                     .mark_step_in_flight(
                         session_id,
@@ -6290,9 +5966,6 @@ mod tests {
             .await
             .expect("park at human wait");
 
-        // fence between the continue's load and its commit, so the continue
-        // loses the CAS. The coordinator must map the loss to the exact 409
-        // state conflict — never a 500.
         let err = coordinator
             .signal_run(
                 &session_id,
@@ -6313,7 +5986,6 @@ mod tests {
             other => panic!("expected StateConflict, got {other:?}"),
         }
 
-        // still waiting with cancel_requested persisted.
         let after = real_store
             .load_run(&session_id)
             .await
@@ -6334,7 +6006,6 @@ mod tests {
             "the wait is still present (the continue did not consume it)"
         );
 
-        // revision and settles cancelled.
         let result = coordinator
             .signal_run(&session_id, RunSignal::Cancel)
             .await
@@ -7976,7 +7647,6 @@ mod tests {
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
 
-        // `execution_version = 0` marker and no `_run_status`/`_run_error`.
         let session = graph_flow::Session::new_from_task("v0:recovery".to_string(), "task_1");
         session
             .context
@@ -8008,8 +7678,6 @@ mod tests {
         );
         let session_id = SessionId("v0:recovery".to_string());
 
-        // (not only via the drive's status probe): a direct step returns the
-        // typed non-replayable error and dispatches nothing.
         let step_err = engine
             .run_step(&session_id)
             .await
@@ -8020,7 +7688,6 @@ mod tests {
             "the v0 refusal must be the typed non-replayable error: {step_err}"
         );
 
-        // marker, dispatch, or failure-record fabrication.
         let outcome = drive_preset_run(
             &*engine,
             Some(&storage),
@@ -8092,7 +7759,6 @@ mod tests {
             root.context.get::<String>("_run_error")
         );
 
-        // must not dispatch anything.
         let summary = SessionSummary {
             session_id: session_id.clone(),
             creator_id: "test-creator".to_string(),
@@ -8160,7 +7826,6 @@ mod tests {
         let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_capability::CapabilityRegistry::with_builtins(),
         ));
-        // storage reports the root as absent — the seam under test.
         let seam = Arc::new(MissingRootStorage::new(real_storage.clone()));
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
@@ -8248,7 +7913,6 @@ mod tests {
             "no context failure keys may be written without authority"
         );
 
-        // coordinator owner (no terminal claim).
         let coordinator = WorkflowRunCoordinator::new(
             engine.clone(),
             real_storage.clone(),
@@ -8340,10 +8004,6 @@ mod tests {
             "the chained commit+restore failure must surface: {error}"
         );
 
-        // `NoAuthority`. With it, the commit CAS is attempted against the
-        // step's owned clocks — which the runner's own position save has
-        // since advanced past — so the honest outcome is an ownership loss
-        // (fence), never a fabricated failure/cleanup claim.
         let record = real_store
             .load_run(&session_id)
             .await
@@ -8597,7 +8257,6 @@ mod tests {
             .await
             .expect("start coordinator drive");
 
-        // separate writes: wait for BOTH before asserting the settled shape.
         wait_until("anchored settlement", || async {
             match real_store.load_run(&session_id).await {
                 Ok(Some(record)) => {
@@ -8688,8 +8347,6 @@ mod tests {
         let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
             nexus_capability::CapabilityRegistry::with_builtins(),
         ));
-        // (the coordinator's store handles the drive/failure commit), so the
-        // boundary fixture must wrap the engine's store.
         let engine = Arc::new(
             nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
                 storage.clone(),
@@ -8782,7 +8439,6 @@ mod tests {
         let storage: Arc<dyn SessionStorage> = sqlite.clone();
         let store: Arc<dyn WorkflowStateStore> = sqlite.clone();
 
-        // (the legacy evidence marker) with the context-only failure record.
         let session = graph_flow::Session::new_from_task("v0:typed-failed".to_string(), "task_1");
         session
             .context
@@ -10028,8 +9684,6 @@ mod tests {
             .expect("row")
             .state_revision;
 
-        //     the live-ring reservation — after the state load, before the
-        //     run token exists.
         let admission = tokio::spawn({
             let coordinator = coordinator.clone();
             let session_id = session_id.clone();
@@ -10044,7 +9698,6 @@ mod tests {
         )
         .await;
 
-        //     the post-fence descendant walk — before its token lookup.
         let cancel = tokio::spawn({
             let coordinator = coordinator.clone();
             let session_id = session_id.clone();
@@ -10093,7 +9746,6 @@ mod tests {
             "a committed cancel intent denies a fresh driver"
         );
 
-        //     accounting must be unchanged by the raced admission.
         cancel_release.store(true, Ordering::SeqCst);
         let cancel_result = cancel.await.expect("cancel task");
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -10189,7 +9841,6 @@ mod tests {
             _after_sequence: Option<u64>,
             _limit: usize,
         ) -> Result<crate::run_events::RunPage, crate::run_events::PageError> {
-            // registered, so a read has nothing to serve.
             Err(crate::run_events::PageError::UnknownRun(run_id.to_string()))
         }
     }
@@ -10336,7 +9987,6 @@ mod tests {
             after_sequence: Option<u64>,
             _limit: usize,
         ) -> Result<crate::run_events::RunPage, crate::run_events::PageError> {
-            // read is an empty, non-terminal, non-resyncing page.
             Ok(crate::run_events::RunPage {
                 frames: Vec::new(),
                 next_sequence: after_sequence.unwrap_or(0),

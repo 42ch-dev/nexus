@@ -68,7 +68,6 @@ fn probe_manifest() -> HostCapabilityManifest {
 }
 
 #[tokio::main]
-// ordering the probe exists to observe.
 #[allow(clippy::too_many_lines)]
 async fn main() {
     let mut addr: Option<String> = None;
@@ -168,10 +167,6 @@ async fn main() {
         .map_or_default(|ops| ops.iter().filter_map(|op| op.as_str()).collect());
     println!("SERVED_OPS={}", served_ops.join(","));
 
-    // into `op_unsupported`; the message is the observable discriminator, so
-    // report BOTH a truly unserved op and a served op this peer's `op_scope`
-    // excludes. The smoke asserts the second is specifically the op-scope
-    // denial, not request validation.
     match session.invoke("project", serde_json::json!({})).await {
         Err(spoke_connect::InvokeError::Wire(envelope)) if envelope.code == "op_unsupported" => {
             report_refusal("UNSERVED_REFUSAL", &envelope);
@@ -197,9 +192,6 @@ async fn main() {
         }
     }
 
-    // served `upsert` op (the session-alive proof after the refusal above);
-    // `--compute-session` additionally runs the real compute lane. The module
-    // bytes live host-locally (never peer-supplied).
     if let Some(world) = compute_world {
         if let Err(error) = run_retained_ops(&session, compute_session.as_deref(), &world).await {
             println!("RETAINED_OP_FAILED: {error}");
@@ -302,9 +294,6 @@ async fn run_retained_ops(
                 computed.payload
             )
         })?;
-    // cleartext-logging rule, and the proof only needs "this result belongs to
-    // THAT session". The test derives the same tag with `DefaultHasher`, so
-    // both sides must build with the same pinned toolchain.
     let session_tag = {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();

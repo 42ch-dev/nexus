@@ -1,6 +1,4 @@
 /**
- * (V1.111 P0 T4 + V1.123 P2 T5).
- *
  * Mounted once in {@link RootLayout} so the canvas-surface entry routes
  * are reachable from the command palette (⌘K) wherever the user is:
  *
@@ -38,8 +36,6 @@ import { useRegisterCommand } from '@/lib/canvas/command-registry';
 
 export function CanvasNavCommands(): null {
   const navigate = useNavigate();
-  // so `workId`/`worldId` are populated on Work- and World-scoped routes and
-  // `undefined` elsewhere.
   const { workId, worldId } = useParams<{ workId?: string; worldId?: string }>();
 
   const idsRef = useRef({ workId, worldId });
@@ -112,9 +108,6 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.worldId),
   });
 
-  // `go.world-kb`'s worldId-gating: the command surfaces only on World-scoped
-  // routes and jumps to the read-only check-findings panel at
-  // `/worlds/:worldId/findings` (PD-2 locked placement, sibling of World KB).
   useRegisterCommand({
     id: 'go.world-findings',
     labelKey: 'go.world-findings.label',
@@ -133,10 +126,6 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.worldId),
   });
 
-  // workId-gating so the command surfaces only on Work-scoped routes. Work
-  // entry stays Outline (V1.118 regression) — the command does NOT flip the
-  // `/works/:workId` index redirect; it exposes Work Timeline as a peer at
-  // `/works/:workId/timeline` reachable from ⌘K.
   useRegisterCommand({
     id: 'go.work-timeline',
     labelKey: 'go.work-timeline.label',
@@ -155,8 +144,6 @@ export function CanvasNavCommands(): null {
     available: () => Boolean(idsRef.current.workId),
   });
 
-  // `go.work-timeline`'s workId-gating; exposes the read-only moment-level
-  // inspector at `/works/:workId/inspector` from ⌘K.
   useRegisterCommand({
     id: 'go.work-inspector',
     labelKey: 'go.work-inspector.label',

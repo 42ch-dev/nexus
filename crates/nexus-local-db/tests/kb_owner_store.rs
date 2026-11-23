@@ -42,8 +42,6 @@ const BINDING_2: &str = "awb_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 /// can be removed without violating the governance FK.
 const ORPHAN_CHARACTER: &str = "chr_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
-/// guards whose scalar functions are connection-local, so fixture writes must
-/// go through the production factory rather than a raw pool.
 async fn migrated_pool() -> (SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let pool = nexus_local_db::init_pool(&dir.path().join("test.db"))
@@ -187,8 +185,6 @@ async fn world_owner_round_trip_preserves_legacy_behavior() {
         }
     );
 
-    // and an ordinary create carries no governance (shared is the absence of
-    // both columns, durable §3).
     let (kind, world_id, character_id, binding_id, holder, disclosure, extensions) =
         raw_owner_row(&pool, &entry_id).await;
     assert_eq!(kind, "world");
@@ -326,8 +322,6 @@ async fn owner_and_governance_are_immutable_through_update() {
     let err = store.update_knowledge_entry(moved).await.unwrap_err();
     assert_eq!(err, KbStoreError::ImmutableOwner(entry_id.clone()));
 
-    // authoring owns that transition, `KbStore::update` is not a transfer
-    // mechanism (durable §3).
     let mut flipped = store.get_knowledge_entry(&entry_id).await.unwrap();
     flipped.holder_entry_id = Some(character_holder.clone());
     flipped.disclosure = Some(DISCLOSURE_OWNER_PRIVATE.to_string());
@@ -462,8 +456,6 @@ fn governed_entry(
     row.holder_entry_id = holder.map(str::to_string);
     row.disclosure = disclosure.map(str::to_string);
     row.body = Some(KnowledgeEntryBody {
-        // *same* term as a visible row so a leaking search is observable in
-        // both the count and the snippet.
         summary: Some(format!("{name} beacon note")),
         ..KnowledgeEntryBody::default()
     });
@@ -557,8 +549,6 @@ async fn seed_visibility_fixture(pool: &SqlitePool) -> VisibilityFixture {
             Some(&character_1_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
-        // holder exists, the container is the Character's own) between two
-        // eligible rows.
         governed_entry(
             KnowledgeOwnerRef::character(CHARACTER_1),
             "Char1ForeignHolderPrivate",
@@ -608,7 +598,6 @@ async fn seed_visibility_fixture(pool: &SqlitePool) -> VisibilityFixture {
             Some(&character_2_holder),
             Some(DISCLOSURE_OWNER_PRIVATE),
         ),
-        // for a World-scoped Character selection.
         governed_entry(
             KnowledgeOwnerRef::world(WORLD_B),
             "WorldBShared",
@@ -724,7 +713,6 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
         "the World container pages only its eligible rows"
     );
 
-    // foreign-holder private row and the other binding's rows out.
     assert_eq!(
         paged_names(
             &store,
@@ -772,7 +760,6 @@ async fn v1191_holder_visibility_keyset_pages_skip_hidden_before_limit() {
         "the page after the cursor holds the next eligible row, not a hidden one"
     );
 
-    // selection yields nothing (no widening by asking for a foreign container).
     assert_eq!(
         visible_names(&store, &selection).await,
         {
@@ -828,7 +815,6 @@ async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
             .clone()
     };
 
-    // the selection's binding-local row.
     let admitted = store
         .list_entries_by_ids_admitted(
             &[
@@ -851,8 +837,6 @@ async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
         "an admitted id resolves to its eligible row"
     );
 
-    // creator's private World row, another Character's private World row, and a
-    // shared row of an unauthorized World.
     let hidden = store
         .list_entries_by_ids_admitted(
             &[
@@ -870,7 +854,6 @@ async fn v1191_r5_by_id_read_is_container_and_governance_scoped() {
         "a hidden id is indistinguishable from a missing one: {hidden:?}"
     );
 
-    // the selection's eligibility and not an absent or malformed row.
     for name in ["WorldCreatorPrivate", "WorldBShared"] {
         store.get_knowledge_entry(&id_of(name)).await.unwrap();
     }
@@ -932,7 +915,6 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
         );
     }
 
-    // though the row exists and matches for the unscoped path.
     let hidden_term = store
         .query(&KbQuery::new(WORLD_A).with_text_search("worldcreatorprivate"))
         .await
@@ -954,7 +936,6 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
         "a hidden match is not scored, counted or returned"
     );
 
-    // filtered view of another World.
     let foreign = store
         .query_with_scope(
             &KbQuery::new(WORLD_B).with_text_search("beacon"),
@@ -964,7 +945,6 @@ async fn v1191_holder_visibility_search_counts_and_snippets_skip_hidden() {
         .unwrap();
     assert_eq!((foreign.items.len(), foreign.total_count), (0, 0));
 
-    // World-A row but the foreign holder's.
     let management = store
         .query_with_scope(
             &KbQuery::new(WORLD_A).with_text_search("beacon"),
@@ -1034,12 +1014,9 @@ async fn v1191_holder_visibility_detail_hidden_is_absent() {
         "a binding-owned row in this Character's own binding stays readable"
     );
 
-    // to another holder, in another container (World / other Character / other
-    // binding / other World), or absent.
     let absent = read("kb_never_written").await.unwrap();
     assert_eq!(absent, None, "an absent row is absent");
     for refused in [
-        // Character's.
         "Char1ForeignHolderPrivate",
         "WorldChar1Private",
         "Char2Private",
@@ -1053,7 +1030,6 @@ async fn v1191_holder_visibility_detail_hidden_is_absent() {
         );
     }
 
-    // not own is the retained not-found shape, never a row.
     let foreign = nexus_local_db::get_actor_knowledge_entry(
         &pool,
         OTHER_CREATOR,
@@ -1069,9 +1045,6 @@ async fn v1191_holder_visibility_detail_hidden_is_absent() {
         "a foreign requested Character is not-found, got {foreign:?}"
     );
 
-    // row fails closed with `holder_state_invalid` (no provisioning, no
-    // silently derived predicate). A Character with no knowledge rows is used
-    // so the registry DELETE is not blocked by the governance FK.
     seed_character(&pool, ORPHAN_CHARACTER).await;
     sqlx::query("DELETE FROM knowledge_holders WHERE character_id = ?")
         .bind(ORPHAN_CHARACTER)
@@ -1132,8 +1105,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
             && !character_2_names.contains(&"Char1Private".to_string()),
         "a Character view never inherits another holder's private rows: {character_2_names:?}"
     );
-    // the cutover), and the Character-global row of the other Character is not
-    // binding-local.
     assert!(character_2_names.contains(&"WorldShared".to_string()));
     assert!(character_2_names.contains(&"WorldSharedBeacon".to_string()));
     assert!(
@@ -1141,8 +1112,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
         "another Character's global sharing stays in that Character's container"
     );
 
-    // creator-private World row is visible and the Characters' private rows
-    // are not: management review is never implied by an ActorView.
     let creator_scope = KnowledgeReadScope::actor_view(
         fixture.creator_holder.clone(),
         vec![
@@ -1173,7 +1142,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
     }
     assert!(!creator_names.contains(&"WorldForeignHolderPrivate".to_string()));
 
-    // owned private row is reviewable — and only those.
     let management = creator_management(&fixture);
     let management_names = visible_names(&store, &management).await;
     for expected in [
@@ -1205,7 +1173,6 @@ async fn v1191_holder_visibility_policy_matrix_two_of_each() {
          they are shared"
     );
 
-    // the other Creator's holder admits exactly that row (and only it).
     let widened = KnowledgeReadScope::creator_management(management.containers().to_vec(), {
         let mut holders = management.authorized_holders().to_vec();
         holders.push(fixture.other_creator_holder.clone());

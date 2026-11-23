@@ -11,13 +11,6 @@ import { afterAll, afterEach, beforeAll } from 'vitest';
 import { i18n } from '@/lib/i18n/config';
 import { server } from './msw-server';
 
-/**
- * in its measurement effect; jsdom does not provide one. Install a no-op polyfill
- * once so any test that indirectly mounts the canvas (e.g. `outline-page.test.tsx`
- * mounting the real page) does not throw `ReferenceError: ResizeObserver is not
- * defined`. Canvas-shell-unit tests still mock `CanvasShell` directly; this only
- * covers the indirect path. Guarded so a real (browser) implementation wins.
- */
 if (typeof globalThis.ResizeObserver === 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   globalThis.ResizeObserver = class {
@@ -27,12 +20,6 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   };
 }
 
-/**
- * `vi.spyOn` rejects spying on the undefined property the jsdom environment
- * leaves behind (theme/layout tests spy on it). Install a no-op polyfill once so
- * those spies work and guarded `window.matchMedia(...)` reads resolve to
- * `matches: false`. Guarded so a real (browser) implementation wins.
- */
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -51,10 +38,6 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   });
 }
 
-/**
- * unless `--localstorage-file` is set, which shadows jsdom's implementation.
- * ThemeProvider tests (and P2 logo wiring) need a working store.
- */
 function ensureLocalStorage() {
   if (typeof window === 'undefined') return;
   try {
@@ -88,7 +71,6 @@ function ensureLocalStorage() {
 
 ensureLocalStorage();
 
-// (SharedOptions in msw@3; the unhandled request is now surfaced as a frame).
 beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
   server.resetHandlers();

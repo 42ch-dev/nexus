@@ -1,11 +1,3 @@
-/**
- * routes and the creator-scope memory routes (P2-T2 bearer-isolated
- * authority). Every operation is a thin translation over the native family
- * surface — the stored Principal is minted natively, the per-Character
- * activity lease is admitted inside the core call, and the wire shapes are
- * the schema-owned generated DTOs (`schemas/daemon-api/characters/{memory,
- * soul,tom}/…`, `…/memory/…`).
- */
 import type {
   CountPendingReviewsQuery,
   DeletePendingReviewQuery,

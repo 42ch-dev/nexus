@@ -47,14 +47,7 @@ interface ChapterOutlineContentEditorProps {
   /** Volume query for the outline read; defaults to volume 1 server-side. */
   volume?: number;
   disabled: boolean;
-  /**
-   * `set` so the conflict modal can label the edit `chapter_outline_content`.
-   */
   onPatchChapter: (chapter: number, request: OutlinePatchChapterRequest) => void;
-  /**
-   * dirty flag once a content save commits. The orchestrator owns the canonical
-   * pending/conflict state.
-   */
   patchIsPending: boolean;
   /** True while the orchestrator has a 409 conflict modal open (for any field
    * of this chapter). When set, a failed content save keeps the editor's draft
@@ -111,7 +104,6 @@ export function ChapterOutlineContentEditor({
     content: outline.data?.content ?? '',
     editable: !disabled,
     onUpdate: handleEditorUpdate,
-    // during render, so keep the v2 behavior (re-render on every transaction).
     shouldRerenderOnTransaction: true,
   });
 
@@ -121,10 +113,6 @@ export function ChapterOutlineContentEditor({
     }
   }, [editor, disabled]);
 
-  // save state. One effect owns BOTH the ordinary load and the two forced-reset
-  // signals so they no longer race a separate reset effect (V1.76 B3 /
-  // `R-V175GREPTILE-001` — removes the chapter-switch/save-in-flight seam):
-  //
   //   - chapterNumber change: switching chapters must reload the new chapter's
   //     content even if a dirty/saving guard is left from the previous chapter
   //     (commit 3787c7b3 — otherwise the editor keeps the old chapter's prose
@@ -153,16 +141,11 @@ export function ChapterOutlineContentEditor({
       editor.commands.setContent(outline.data.content, { emitUpdate: false });
     }
     setSaveState('clean');
-    // triggers; outline.data/isFetching are load gates, not reset signals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, outline.data, outline.isFetching, contentVersion, chapterNumber, saveState]);
 
   useEffect(() => {
     if (!patchIsPending && saveState === 'saving') {
-      // refetched canonical content). On a 409 conflict -> dirty, preserving
-      // the user's draft while the conflict modal is open AND after it is
-      // dismissed (so the author can re-edit). "Use current" discards the draft
-      // via the explicit contentVersion forced-reset above.
       setSaveState(isConflicting ? 'dirty' : 'clean');
     }
   }, [patchIsPending, saveState, isConflicting]);
@@ -250,7 +233,6 @@ export function ChapterOutlineContentEditor({
 }
 
 function getMarkdown(editor: Editor): string {
-  // the tiptap-markdown storage slice has to be narrowed by hand.
   const storage = editor.storage as unknown as { markdown: MarkdownStorage };
   return storage.markdown.getMarkdown();
 }

@@ -81,8 +81,6 @@ fn engine_with(
             Arc::new(CachedModule {
                 module,
                 manifest: manifest.clone(),
-                // the entry must record the exact artifacts it was compiled
-                // from.
                 bytes_hash: nexus_wasm_host::hash_module_bytes(bytes),
                 manifest_hash: nexus_wasm_host::hash_module_bytes(
                     &serde_json::to_vec(manifest).expect("manifest serializes"),
@@ -120,19 +118,10 @@ async fn fixture_with_compute(
     .unwrap();
 
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, CREATOR, SLUG);
-    // writer protocol's engine admission is a process-wide registry keyed by
-    // DB path, so opening a second engine while this pool still holds the
-    // guard is an `OwnerBusy` refusal (the fixture is not racing another
-    // test — it is racing its own seeding pool).
     {
         let guarded = nexus_local_db::init_engine_pool(&db_path)
             .await
             .expect("engine pool init");
-        // registry row in the same transaction. The compute lane reads its input
-        // through the admitted Creator `ActorView`, and that selection resolves
-        // the stable holder (`require_creator_holder`, fail-closed), so a
-        // hand-rolled `creators` insert leaves the registry row missing and
-        // admission refuses with `holder_state_invalid` before any compute runs.
         nexus_local_db::ensure_creator_row(guarded.pool(), CREATOR, "Test")
             .await
             .expect("seed the admitted creator and its holder");
@@ -151,7 +140,6 @@ async fn fixture_with_compute(
 
     let (engine, cache) = engine_with(extra, sandbox);
 
-    // one deterministic delta and one event.
     seed_character(core.pool(), WORLD, "kb_atk", "Striker", 20, 3, 100, 100).await;
     seed_character(core.pool(), WORLD, "kb_def", "Guardian", 10, 5, 30, 50).await;
 
@@ -484,7 +472,6 @@ async fn accept_writes_new_key_blocks_through_the_store_seam() {
         Some(r#"{"summary":"Forged by compute","attributes":{"sigil":"ember"}}"#),
     );
     assert_eq!(row.get::<Option<String>, _>("source_anchor_json"), None);
-    // updated_at to the same `now`; the store seam stamps both on the record.
     let created_at = row.get::<Option<String>, _>("created_at");
     let updated_at = row.get::<Option<String>, _>("updated_at");
     assert!(created_at.is_some());
@@ -540,7 +527,6 @@ async fn accept_settles_a_governance_carrying_block_as_shared() {
 async fn accept_refuses_a_store_invalid_block_as_invalid_input() {
     let f = fixture().await;
     let mut proposals = crafted_proposals(&[], &[], None);
-    // store's own 256-byte limit is what refuses this one.
     let mut proposal = world_block_proposal("kb_overlong", WORLD);
     proposal["canonical_name"] = json!("x".repeat(300));
     proposals["new_key_blocks"] = json!([proposal]);
@@ -596,7 +582,6 @@ async fn aborted_accept_rolls_back_key_block_inserts() {
     let run_id = craft_succeeded_run(f.core.pool(), proposals).await;
     let principal = f.core.active_principal().await.unwrap();
 
-    // lose strictly after the insert ran inside the accept transaction.
     let mut builder = sqlx::QueryBuilder::new(
         "CREATE TRIGGER test_qc_flip_run_after_kb_insert \
          AFTER INSERT ON kb_key_blocks FOR EACH ROW \
@@ -719,15 +704,6 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
     use nexus_capability::{CapabilityRegistry, CapabilityRuntimeDeps};
 
     let f = fixture().await;
-    // the scanner skips the directory rather than admitting a capability with
-    // no executor. The scan is also the ONLY admission path — user
-    // capabilities are never injected directly — so this fixture writes the
-    // same bundle shape the daemon's boot scan consumes.
-    // The scanner's ROOT is the directory that CONTAINS the capability dirs
-    // (the daemon passes `nexus_home_layout::user_capabilities_dir`, which is
-    // already `<home>/.nexus42/capabilities`), so the bundle is written
-    // directly under it — an extra `capabilities/` level makes the scanner
-    // look for `<root>/<name>/capability.json` and find nothing.
     let scan_root = f.tmp.path().join("usercaps");
     write_user_capability_trio(
         &scan_root,
@@ -764,7 +740,6 @@ async fn schema_invalid_arguments_never_reach_the_capability() {
 
     let request = ToolsApi {
         tool_name: "t3.requires.thing".to_string(),
-        // the capability's `run` is ever reached.
         parameters: json!({}),
         session_id: None,
         request_id: None,
@@ -832,8 +807,6 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
 
     let before = timeline_event_count(f.core.pool()).await;
 
-    // engine-less stub reports its honest no-executor failure, never the
-    // unknown-id `not_supported`.
     for name in ["hot.kept", "hot.removed"] {
         let err = execute_tool(&context, &tool_request(name, json!({})))
             .await
@@ -844,8 +817,6 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
         );
     }
 
-    // generation is swapped into the SAME holder — what the retired watcher
-    // did on a changed digest.
     std::fs::remove_dir_all(scan_root.join("hot.removed")).unwrap();
     let (rebuilt, rebuilt_outcome) =
         CapabilityRegistry::with_runtime_deps_and_user_caps(&deps, &scan_root);
@@ -861,7 +832,6 @@ async fn hot_removed_user_capability_is_refused_with_zero_domain_effect() {
     );
     holder.swap(Arc::new(rebuilt));
 
-    // and zero domain effect…
     let err = execute_tool(&context, &tool_request("hot.removed", json!({})))
         .await
         .unwrap_err();
@@ -916,8 +886,6 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
 
     let f = fixture().await;
 
-    // canonical id. The scan admits it (the engine builtin set does not own the
-    // name), so the user lane the spine consults holds it under this id.
     let scan_root = f.tmp.path().join("colliding_usercaps");
     write_user_capability_trio(&scan_root, TOOL, r#"{"type":"object"}"#);
     let deps = CapabilityRuntimeDeps {
@@ -976,9 +944,6 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         matches!(&err, CoreError::Coded { code, .. } if code == "not_supported"),
         "an unbound canonical id must be not_supported, got {err:?}"
     );
-    // canonical reservation removed, `dispatch` reaches the peer/user branch and
-    // this count rises to 1 (the user lane's own reservation then still refuses,
-    // so the returned error alone would not detect it).
     assert_eq!(
         unbound.fallback_consultations(),
         0,
@@ -994,8 +959,6 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "a refused canonical dispatch must have zero domain effect"
     );
 
-    // and therefore must not consult the lanes either — same counter, no reset
-    // in between.
     assert!(
         !unbound.spine_resolves(&context, TOOL),
         "an unbound canonical id is not dispatchable (the allowlist gate must agree)"
@@ -1006,7 +969,6 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "the allowlist path must not reach the peer/user lanes for a canonical id"
     );
 
-    // consult the lanes there.
     assert!(
         !unbound.spine_resolves(&context, "not.a.canonical.tool"),
         "an unknown non-canonical id does not resolve"
@@ -1035,7 +997,6 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         "the dispatch path must record a real fallback consultation"
     );
 
-    // context that still holds the colliding user capability.
     let value = host_tool_registry()
         .dispatch(&request, &context, CREATOR)
         .await
@@ -1148,7 +1109,6 @@ async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
         }
     }
 
-    // fail-closed contract); a fresh token would be uncancellable.
     let session_cancels = Arc::new(std::sync::RwLock::new(std::collections::HashMap::from([(
         "extract-run".to_string(),
         tokio_util::sync::CancellationToken::new(),
@@ -1172,7 +1132,6 @@ async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
             "chapter_prose": "Lin Xia drew her blade.",
             "_creator_id": "test_creator",
             "_session_id": "extract-run",
-            // from stored state before the model runs.
             "_extract_target": {
                 "world_id": "wld_wiring",
                 "holder_entry_id": null,
@@ -1246,7 +1205,6 @@ async fn execute_tool_refuses_a_principal_from_another_core() {
         .await
         .expect("owner starts");
 
-    // was minted by another service, so this handle must not accept it.
     let other_home = f.tmp.path().join("other");
     let other_nexus = other_home.join(".nexus42");
     std::fs::create_dir_all(&other_nexus).unwrap();
@@ -1363,8 +1321,6 @@ async fn reference_refresh_is_not_admitted() {
     );
 }
 
-// and `agent_tool_production_wiring.rs`.
-//
 // The daemon's `HostToolExecutor` was a thin adapter: it built this crate's
 // `ToolContext` from its `WorkspaceState` and called the core
 // `execute_tool` spine, which is where the admission gates, the handlers, the
@@ -1449,7 +1405,6 @@ async fn nexus_tool_surface_reports_the_active_creator_and_workspace() {
         .expect("workspace info succeeds");
     assert_eq!(info["creator_id"], CREATOR);
     assert_eq!(info["workspace_slug"], SLUG);
-    // the local-only default — never a fabricated running host.
     assert_eq!(info["runtime_mode"], "local_only");
 }
 
@@ -1482,7 +1437,6 @@ async fn nexus_work_get_is_creator_scoped() {
         "the Work DTO must not leak creator_id: {value}"
     );
 
-    // from a missing one — both are `forbidden`, never `not_found`.
     sqlx::query("UPDATE works SET creator_id = 'intruder' WHERE work_id = ?")
         .bind(&work_id)
         .execute(f.core.pool())
@@ -1569,7 +1523,6 @@ async fn nexus_work_patch_enforces_the_declared_field_allowlist() {
     .await
     .expect("allowed stage_metadata keys are admitted");
 
-    // must never advance the stage.
     for refused in [
         json!({ "work_id": work_id, "current_stage": "writing" }),
         json!({ "work_id": work_id, "stage_metadata": { "current_stage": "writing" } }),
@@ -1996,7 +1949,6 @@ async fn compute_run_refusals_are_typed_and_leave_no_state() {
         "a foreign world must be an ownership denial, got {foreign:?}"
     );
 
-    // only reached on an owned world.
     let unknown_module =
         compute_run(&f.core, &f.compute, run_request(WORLD, "no-such-module")).await;
     assert!(
@@ -2069,7 +2021,6 @@ async fn compute_run_fuel_exhaustion_is_persisted_as_a_failed_run() {
 #[tokio::test]
 #[serial_test::serial]
 async fn compute_run_wall_time_exceeded_is_persisted_as_a_failed_run() {
-    // traps first via epoch interruption.
     let config = SandboxConfig {
         fuel: 100_000_000_000,
         max_memory_bytes: 64 * 1024 * 1024,
@@ -2142,8 +2093,6 @@ async fn concurrent_compute_runs_serialize_on_the_engine() {
         );
     }
 
-    // order, so both complete in >= 1500 ms; cross-tripping would finish in
-    // ~300 ms.
     assert!(
         elapsed >= Duration::from_millis(1200),
         "concurrent runs must serialize (long survives short watchdog), took {elapsed:?}"
@@ -2215,7 +2164,6 @@ async fn compute_run_reports_per_entry_detail_for_an_invalid_entry() {
         ); 0]
     );
 
-    // key would break its deserialization).
     let detail = get_compute_run(&f.core, &principal, &run_id)
         .await
         .expect("a failed run is still readable");
@@ -2461,7 +2409,6 @@ async fn list_compute_runs_orders_newest_first() {
     let b = run_succeeded(&f, &f.compute).await;
     let c = run_succeeded(&f, &f.compute).await;
 
-    // precision within the same second.
     for (run_id, ts) in [
         (&a, "2026-07-31T10:00:00.000Z"),
         (&b, "2026-07-31T10:00:01.000Z"),
@@ -2579,9 +2526,6 @@ async fn run_detail_and_foreign_run_refusals() {
         accept_compute_run(&f.core, &principal, &foreign, accept_request(json!({}))).await;
     let foreign_discard = discard_compute_run(&f.core, &principal, &foreign).await;
 
-    // of a foreign World close with the SAME 404 `not_found` shape, so a probe
-    // cannot split run existence from World ownership. `WorldOwnerDenied` stays
-    // reserved for the world-scoped routes (invoke / list / clear).
     assert_eq!(
         not_found_resource(unknown.as_ref().unwrap_err()),
         "run run_does_not_exist not found"
@@ -2601,10 +2545,6 @@ async fn run_detail_and_foreign_run_refusals() {
         format!("run {foreign} not found"),
         "an unknown id and a foreign id must close with the same refusal"
     );
-
-    // pinned inside the crate (`execution::compute::tests`) — keeping the
-    // helper (and its SQL pool) off the public surface is the point of that
-    // move, so this test asserts only the outward opacity shape above.
 
     assert!(
         nexus_local_db::compute_runs::get_run(f.core.pool(), &foreign)
@@ -2658,7 +2598,6 @@ async fn accept_rolls_back_when_a_delta_targets_another_world() {
         "a foreign delta target must refuse as invalid_input, got {err:?}"
     );
 
-    // the run is still `succeeded` (nothing was partially applied).
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(defender_hp(f.core.pool(), "kb_foreign").await, 777);
     assert_eq!(
@@ -2740,7 +2679,6 @@ async fn compute_run_branches_are_world_scoped() {
         "an unknown branch must be invalid_input, got {unknown:?}"
     );
 
-    // world is still unreachable here.
     seed_foreign_world(f.core.pool()).await;
     seed_branch_event(f.core.pool(), FOREIGN_WORLD, "fbk_other").await;
     let other_world = compute_run(
@@ -2950,7 +2888,6 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
         .await
         .unwrap();
 
-    // and the applied/discarded rows are still standing afterwards.
     let none_failed = clear_compute_runs(
         &f.core,
         &principal,
@@ -3010,7 +2947,6 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 15);
     assert_eq!(timeline_rows(f.core.pool()).await, effects_before);
 
-    // proposals intact.
     let detail = get_compute_run(&f.core, &principal, &pending)
         .await
         .expect("pending detail read");
@@ -3018,7 +2954,6 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert_eq!(detail["status"], "succeeded");
     assert!(detail["proposals"].is_object());
 
-    // this World, and the pending/foreign rows still survive it.
     let handle = open_compute_handle(&f).await;
     let door = handle
         .clear_compute_runs(
@@ -3034,7 +2969,6 @@ async fn clear_owned_terminal_history_preserves_effects_and_pending() {
     assert!(run_row_survives(f.core.pool(), &pending).await);
     assert!(run_row_survives(f.core.pool(), &foreign).await);
 
-    // terminal row is untouched.
     let refused = handle
         .clear_compute_runs(
             &principal,
@@ -3160,7 +3094,6 @@ async fn compute_facade_run_detail_and_history_are_the_authority_rows() {
         .expect("the owner runs the module")
         .run_id;
 
-    // touched.
     assert_eq!(defender_hp(f.core.pool(), "kb_def").await, 30);
     assert_eq!(timeline_event_count(f.core.pool()).await, 0);
 
@@ -3229,8 +3162,6 @@ async fn compute_facade_history_scopes_to_owned_worlds_and_validates_limit() {
         .get_compute_run(&principal, foreign.clone())
         .await
         .unwrap_err();
-    // `not_found` shape as an unknown id, never a distinguishable ownership
-    // denial.
     match refused {
         CoreError::NotFound { resource } => assert_eq!(
             resource,
@@ -3426,8 +3357,6 @@ async fn compute_run_receipt_shadows_the_run_transitions() {
         .await
         .unwrap()
         .expect("the run row");
-    // replay is reconstructable from the receipt alone — it must survive Clear
-    // deleting the run row. Its proposals are the run row's own proposals.
     let stored: serde_json::Value = serde_json::from_str(
         receipt
             .result_json
@@ -3518,7 +3447,6 @@ async fn boot_recovery_refuses_stuck_runs_uncertain_and_never_reapplies() {
         }
     }
 
-    // byte-identical to the state the crash left behind.
     for run_id in [&no_receipt, &with_receipt] {
         let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
             .await
@@ -3627,7 +3555,6 @@ async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
         }
     }
 
-    // crash left them — recovery settles nothing and runs no module.
     for run_id in [&finished_run, &failed_run] {
         let row = nexus_local_db::compute_runs::get_run(f.core.pool(), run_id)
             .await
@@ -3648,7 +3575,6 @@ async fn boot_recovery_answers_a_terminal_receipt_without_reapplying() {
 async fn execution_start_runs_the_compute_receipt_recovery_pass() {
     let f = fixture().await;
     let run_id = seed_stuck_run(&f, None).await;
-    // answer must be served from the receipt through the startup surface.
     let settled_operation = format!("op_{}", "f".repeat(32));
     let settled_run = seed_stuck_run(&f, Some(&settled_operation)).await;
     nexus_local_db::operation_receipts::settle_operation(
@@ -3725,8 +3651,6 @@ async fn boot_recovery_read_failure_is_reported_on_the_handle() {
         "a pass that read successfully is not a failure"
     );
 
-    // it scans), then boot: the decisions are still empty, but the failure is
-    // now explicit rather than silently looking like "nothing was stuck".
     let broken = fixture().await;
     sqlx::query("DROP TABLE compute_sessions")
         .execute(broken.core.pool())
@@ -3786,7 +3710,6 @@ async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_req
         "the first call runs the module exactly once"
     );
 
-    // caller-supplied id). The receipt answers it; the module does not re-run.
     let replay = compute_run(&f.core, &f.compute, request)
         .await
         .expect("the retry is answered from the receipt");
@@ -3801,7 +3724,6 @@ async fn caller_supplied_operation_id_dedupes_a_retry_and_conflicts_on_a_new_req
         "the retry must not execute the module again"
     );
 
-    // conflict, not a replay.
     let mut conflicting = run_request(WORLD, MODULE);
     conflicting.operation_id = Some(op);
     conflicting.invocation_params = serde_json::Map::from_iter([(
@@ -3841,7 +3763,6 @@ async fn finished_receipt_replay_survives_clearing_the_run_history() {
         .expect("the first call runs the module");
     assert_eq!(first.status.to_string(), "succeeded");
 
-    // terminal history: the run row is deleted, the receipt is not.
     accept_compute_run(
         &f.core,
         &principal,
@@ -3901,17 +3822,12 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
     first.operation_id = Some(op.clone());
     let mut second = run_request(WORLD, MODULE);
     second.operation_id = Some(op.clone());
-    // first-writer-wins conflict (not a replay).
     second.invocation_params = serde_json::Map::from_iter([
         ("attacker_id".to_string(), json!("kb_atk")),
         ("defender_id".to_string(), json!("kb_def")),
         ("variant".to_string(), json!(2)),
     ]);
 
-    // insert and the receipt pre-check and BEFORE `begin_operation`. The test is
-    // the barrier's third participant, so NEITHER caller proceeds until BOTH
-    // arrived — the loser's `OperationIdConflict` is therefore always the
-    // post-insert cleanup path under test, never the earlier receipt pre-check.
     let gate = Arc::new(ComputeBeginGate::new(op, 3));
     set_compute_begin_gate(Some(Arc::clone(&gate)));
     let (a, b, _barrier) = tokio::join!(
@@ -3935,8 +3851,6 @@ async fn concurrent_conflicting_first_use_leaves_no_running_loser() {
         }
     }
 
-    // `failed` (present, not deleted) — never the winner's receipt, never left
-    // `running` for boot recovery to misreport or Clear to miss.
     let (succeeded, failed, running): (i64, i64, i64) = sqlx::query_as(
         "SELECT SUM(status = 'succeeded'), SUM(status = 'failed'), \
                 SUM(status = 'running') \
@@ -4003,9 +3917,6 @@ async fn retry_against_a_live_owner_is_busy_and_never_reruns() {
     let mut request = run_request(WORLD, MODULE);
     request.operation_id = Some(op.clone());
 
-    // seam BEFORE the module executes; the second caller is a retry of the
-    // identical request (same id, same fingerprint), so the receipt is the only
-    // thing that can answer it.
     let gate = Arc::new(ComputeInFlightGate::new(op));
     set_compute_in_flight_gate(Some(Arc::clone(&gate)));
     let (owner, retry) = tokio::join!(compute_run(&f.core, &f.compute, request.clone()), async {
@@ -4065,7 +3976,6 @@ async fn retry_after_its_owner_is_gone_is_uncertain_and_never_reruns() {
     }
     set_compute_in_flight_gate(None);
 
-    // `running`, but no live owner remains.
     let (run_id, status): (String, String) = sqlx::query_as(
         "SELECT run_id, status FROM compute_sessions \
           WHERE world_id = ? AND run_id IS NOT NULL",
@@ -4120,8 +4030,6 @@ async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
     let mut b_request = run_request(WORLD, MODULE);
     b_request.operation_id = Some(op.clone());
 
-    // dropped at the in-flight seam (a crash — the process-local claim goes, the
-    // durable receipt stays).
     let gate_b = Arc::new(ComputeInFlightGate::new(op.clone()));
     set_compute_in_flight_gate(Some(Arc::clone(&gate_b)));
     let registration_b = tokio::time::timeout(GATE_WAIT, gate_b.registered.notified());
@@ -4138,7 +4046,6 @@ async fn in_flight_ownership_is_scoped_to_the_receipt_store() {
     }
     set_compute_in_flight_gate(None);
 
-    // retry must be `uncertain` (B's own owner is gone) — never store A's Busy.
     let gate_a = Arc::new(ComputeInFlightGate::new(op.clone()));
     set_compute_in_flight_gate(Some(Arc::clone(&gate_a)));
     let mut a_request = run_request(WORLD, MODULE);
@@ -4185,8 +4092,6 @@ async fn in_flight_claim_drops_are_store_scoped() {
         ("holder=B, dropper=A", false),
         ("holder=A, dropper=B", true),
     ] {
-        // (the collision an id-only key would suffer). 32 lowercase hex
-        // characters, the wire shape `validate_operation_id` enforces.
         let op = format!("op_{}", if holder_is_a { "1" } else { "2" }.repeat(32));
         let holder = if holder_is_a { &a } else { &b };
         let dropper = if holder_is_a { &b } else { &a };
@@ -4201,7 +4106,6 @@ async fn in_flight_claim_drops_are_store_scoped() {
             compute_run(&holder.core, &holder.compute, holder_request.clone()),
             async {
                 await_registered(&gate).await;
-                // on this store's seam — it registers and drops its own claim.
                 set_compute_in_flight_gate(None);
                 compute_run(&dropper.core, &dropper.compute, dropper_request)
                     .await
@@ -4343,8 +4247,6 @@ async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
         "the refusal must carry the store fault verbatim: {category}"
     );
 
-    //    still `running` — it shadows the run's own id, which is how the run row
-    //    is located without trusting the refused answer.
     let receipt =
         nexus_local_db::operation_receipts::get_operation_receipt(f.core.pool(), OPERATION_ID)
             .await
@@ -4377,8 +4279,6 @@ async fn compute_run_settlement_fault_answers_the_committed_effect_refusal() {
     );
     assert!(row.error_json.is_none());
 
-    //    `uncertain` refusal (a `running` receipt whose owner is gone) and the
-    //    module is never executed a second time.
     sqlx::query("DROP TRIGGER test_settle_fault")
         .execute(f.core.pool())
         .await

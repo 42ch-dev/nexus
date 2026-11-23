@@ -122,7 +122,6 @@ describe('buildStrategyGraphFromIr', () => {
     expect(order.indexOf('collect')).toBeLessThan(order.indexOf('collect::slot-row::topic'));
     expect(order.indexOf('collect')).toBeLessThan(order.indexOf('collect/judge'));
 
-    // children carry parent-relative positions, never manual absolute ones.
     const nested = byId.get('collect/judge');
     expect(nested?.parentId).toBe('collect');
     expect(nested?.extent).toBe('parent');
@@ -183,7 +182,6 @@ describe('buildStrategyGraphFromIr', () => {
       return edges.every((edge) => ids.has(edge.source) && ids.has(edge.target));
     };
 
-    // edge that names it keeps a source.
     const collapsed = buildStrategyGraphFromIr(document, chrome);
     const hiddenChild = collapsed.nodes.find((node) => node.id === 'collect/judge');
     expect(hiddenChild?.hidden).toBe(true);

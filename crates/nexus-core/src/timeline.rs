@@ -160,14 +160,10 @@ impl CoreService {
     ) -> CoreResult<ListTimelineEventsResponse> {
         self.verify_principal(principal)?;
         let pool = &self.inner.pool;
-        // owned → Forbidden. The denial renders with this route's retained
-        // envelopes (`world {id} not found` / `you do not own this world`).
         check_world_owner(pool, &world_id, principal.creator_id())
             .await
             .map_err(WorldOwnerGuardFailure::into_timeline_error)?;
 
-        // guards the concurrent-delete race. `root_fork_branch_id` unset →
-        // legacy `fbk_root` fallback.
         let world_row: Option<Option<String>> = sqlx::query_scalar(
             "SELECT root_fork_branch_id FROM narrative_worlds WHERE world_id = ?",
         )
@@ -181,8 +177,6 @@ impl CoreService {
             })?
             .unwrap_or_else(|| ROOT_BRANCH_FALLBACK.to_string());
 
-        // World's current branch); keep the Option for the page-query
-        // signature.
         let branch_filter = Some(
             query
                 .branch_id
@@ -197,7 +191,6 @@ impl CoreService {
             .as_deref()
             .map(decode_events_cursor)
             .transpose()?;
-        // decoded values are reborrowed here.
         let cursor_ref = cursor
             .as_ref()
             .map(|(branch, sequence)| (branch.as_str(), *sequence));
@@ -206,10 +199,6 @@ impl CoreService {
             .limit
             .unwrap_or(EVENTS_DEFAULT_PAGE_SIZE)
             .min(EVENTS_MAX_PAGE_SIZE);
-        // states `has_more` is equivalent to `next_cursor` being non-null,
-        // and a `has_more=true, next_cursor=null` response would growth-loop
-        // a keyset client (null cursor → re-request page 1). An empty page
-        // with no continuation is the only honest answer.
         if limit == 0 {
             return Ok(ListTimelineEventsResponse {
                 items: Vec::new(),
@@ -229,8 +218,6 @@ impl CoreService {
         .await
         .map_err(|e| narrative_internal("timeline_events.page", &e))?;
 
-        // page. Rows are capped by the SQL LIMIT, so this cast cannot
-        // truncate.
         #[allow(clippy::cast_possible_truncation)]
         let has_more = rows.len() as u32 > limit;
         let page_rows = rows.into_iter().take(limit as usize).collect::<Vec<_>>();
@@ -468,9 +455,6 @@ fn event_info(r: TimelineEventPageRow) -> CoreResult<TimelineEventInfo> {
         source_command_id: r.source_command_id,
         metadata: parse_json_object(r.metadata_json.as_deref()).unwrap_or_default(),
         extensions: parse_json_object(r.extensions_nexus_json.as_deref()),
-        // from `narrative_timeline_events.modules_json` (NULL → empty map,
-        // omitted from the wire via `skip_serializing_if` — schema type
-        // `object`, absent when unrecorded).
         modules: parse_json_object(r.modules_json.as_deref()).unwrap_or_default(),
         created_at: nexus_narrative::timeline_event::parse_created_at(&r.created_at)
             .unwrap_or(chrono::DateTime::UNIX_EPOCH),

@@ -1,6 +1,4 @@
 /**
- * (v241 P3.5 T3/T4) — one test per row of the plan's state table:
- *
  * - no apply yet           → Apply is offered on a listed approval; no live block
  * - an apply is live       → the live approval id and applied-at render
  * - live older than newest → a non-blocking "Newer approval available" badge
@@ -135,7 +133,6 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     expect(screen.getByTestId('apply-newer-available')).toHaveTextContent(
       'Newer approval available',
     );
-    // and Apply stays enabled.
     expect(screen.getByTestId('apply-live')).toHaveTextContent('apr_123');
     expect(applyButton()).toBeEnabled();
   });
@@ -144,7 +141,6 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
     renderDisclosure({
       onApply: vi.fn(),
       approvals: [approvalRow('apr_456', 4), approvalRow()],
-      // the live apply is older. Applying it moves forward, not back.
       appliedStatus: appliedStatus({
         newest_approval: {
           approval_id: 'apr_456',
@@ -263,8 +259,6 @@ describe('ApproveDisclosure — live apply state (compose path)', () => {
       appliedStatus: appliedStatus(),
     });
 
-    // there is no target to aim it at, so a failed read removes the control — naming the failure
-    // is the whole answer rather than offering an apply that cannot name an approval.
     expect(screen.getByTestId('apply-targets-error')).toHaveTextContent('daemon unreachable');
     expect(screen.queryByRole('button', { name: 'Apply snapshot' })).toBeNull();
   });

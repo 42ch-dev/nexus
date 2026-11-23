@@ -117,8 +117,6 @@ export function PresetProfilePage() {
   const { presetId } = useParams<{ presetId: string }>();
   const navigate = useNavigate();
   const profile = usePresetProfile(presetId);
-  // (PL-13) — the list already showed the preset, so the summary must not
-  // imply it is gone. Same query key as the catalog page: cached.
   const presets = usePresets();
 
   function handleBack() {
@@ -149,7 +147,6 @@ export function PresetProfilePage() {
       );
     }
 
-    // may still exist in the list — never a hard "not found" error (PL-13).
     const all = presets.data
       ? [...presets.data.user, ...presets.data.system, ...presets.data.embedded]
       : [];

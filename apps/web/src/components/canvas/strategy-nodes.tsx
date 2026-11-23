@@ -26,8 +26,6 @@ import {
   type NodeStatus,
 } from './presentational/node-chrome-shell';
 
-// sites (`NodeStatus` from this barrel) keep resolving. The canonical home is
-// now the presentational extract.
 export type { NodeStatus };
 
 function statusFromSession(status: string | undefined): NodeStatus | undefined {
@@ -55,11 +53,6 @@ function effectiveStatus(rawStatus: string | undefined): NodeStatus | undefined 
   return statusFromSession(rawStatus);
 }
 
-/**
- * classes live in the shared `NodeChromeShell` extract
- * (`NODE_STATUS_RING` / `NODE_STATUS_DOT`); only the human-readable label is
- * App-owned (resolved via `t()` at render time).
- */
 const STATUS_LABEL_KEYS: Record<NodeStatus, string> = {
   current: 'strategy.node.status.current',
   running: 'strategy.node.status.running',

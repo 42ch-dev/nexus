@@ -190,9 +190,6 @@ async fn candidate_after(actor: &Actor<'_>, key: &str, scope: &Value) -> String 
     support::candidate_ids(&captured)[0].clone()
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// C-090: every base surface — by-id records and candidates, receipts, profiles,
 /// reads and recall plus their counts/selection facets — enforces one grant's
 /// scope; out-of-scope probes are indistinguishable from absence and change
@@ -334,7 +331,6 @@ async fn grant_scope_covers_base_surfaces(
         "shared visibility needs the shared_access facet"
     );
 
-    //    and an absent id all answer the same NOT_FOUND class.
     for record in [&r_shared, &r_out] {
         let refused = peer.get_record(record).await;
         assert_eq!(error_code(&refused), "NOT_FOUND", "{refused}");
@@ -393,7 +389,6 @@ async fn grant_scope_covers_base_surfaces(
         .await;
     assert_eq!(error_code(&refused_shared), "NOT_AUTHORIZED");
 
-    //    new visible candidate from the denied probes.
     let after = resources.observe(observer).await;
     assert_eq!(
         resources.receipt_ids_for(observer, "memory.capture").await,
@@ -411,7 +406,6 @@ async fn grant_scope_covers_base_surfaces(
         .await
         .expect("the denied-probe observer closes");
 
-    //    the receipt tuple before any later baseline.
     let allowed = peer
         .capture(capture_body(
             "k-c090-allowed",
@@ -457,7 +451,6 @@ async fn grant_scope_covers_base_surfaces(
         .await
         .expect("the effect observer closes");
 
-    //     out-of-coverage receipt is refused with no receipt disclosure.
     let own = peer.get_receipt(&receipt).await;
     assert_eq!(own["receipt"]["receipt_id"], json!(receipt));
     let foreign_capture = admin
@@ -563,8 +556,6 @@ async fn revoke_applies_at_admission_boundary(
             revoke
         }
         Kind::Remote => {
-            // `revoke_grant` after authenticated typed admission and before its
-            // writer transaction: a real arrival, not a spawn proxy.
             let mut arrival = matrix.park_next_target("memory.grants.revoke");
             let revoke = tasks.spawn(revoke_from(
                 matrix.admin_client(),
@@ -595,7 +586,6 @@ async fn revoke_applies_at_admission_boundary(
     let admitted_candidate = support::candidate_ids(&admitted)[0].clone();
     assert_receipt_tuple(&admitted, "memory.capture", peer_id.as_str());
 
-    // later baseline can mask a missing effect.
     let effect = resources
         .open_observer(
             matrix,
@@ -1280,7 +1270,6 @@ async fn operator_bootstrap_is_callable_and_visible(
         "the operator admin grant is visible: {grants}"
     );
 
-    // runner-owned and closed by the same settle path that owns the matrix.
     let raw = resources.open_raw_admin(matrix).await;
     let invented = resources
         .invoke(
@@ -1352,7 +1341,6 @@ async fn local_operator_bootstrap_through_core() {
         let space_id = provider.space_id().to_owned();
         assert!(!space_id.is_empty(), "Core provisioning created the space");
         let described = support::wire(&provider.describe(&operator, dto(json!({}))).await);
-        // reflection family (N4-R), so the honest advertisement names both.
         assert_eq!(
             described["capabilities"],
             json!(["spoke-memory", "spoke-memory-reflection"]),

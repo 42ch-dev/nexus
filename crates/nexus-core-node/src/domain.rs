@@ -189,7 +189,6 @@ impl NativeCore {
         request_json: Buffer,
     ) -> Result<Buffer> {
         let request: PackExportRequest = decode(request_json, "request")?;
-        // with the request (v1.191 P1 T10, holder-governance.md §6).
         let include_owned_private = request.include_owned_private;
         self.json_call(principal_handle, async move |core, principal| {
             core.export_world_pack(&principal, world_id, request, include_owned_private)
@@ -314,8 +313,6 @@ impl NativeCore {
         query_json: Buffer,
     ) -> Result<Buffer> {
         let query: WireTimelineOverviewQuery = decode(query_json, "query")?;
-        // the plain string. Re-serialize through `to_string` (never a lossy
-        // debug print).
         let domain = CoreTimelineOverviewQuery {
             cursor: query.cursor.map(|cursor| cursor.to_string()),
         };
@@ -417,8 +414,6 @@ impl NativeCore {
             creative_brief: request.creative_brief,
             intake_status: request.intake_status,
             status: request.status,
-            // (`nexus_contracts::tristate`, `x-nexus-tri-state`); this boundary
-            // only names the field in its own `invalid <field>: <reason>` refusal.
             world_id: presence_string(request.world_id)
                 .map_err(|reason| Error::from_reason(format!("invalid world_id: {reason}")))?,
             story_ref: presence_string(request.story_ref)
@@ -911,8 +906,6 @@ impl NativeCore {
         .await
     }
 
-    /// applying the legacy wire defaults (`target_executor` = `none`,
-    /// `kind` = `craft`).
     fn finding_create(
         request: nexus_contracts::CreateFindingRequest,
     ) -> Result<DomainCreateFindingRequest> {

@@ -16,8 +16,6 @@ use nexus_contracts::local::orchestration::{
 use serde_json::Value;
 use std::sync::Arc;
 
-/// memory fragment queries, and prompt injection queue operations.
-///
 /// Backed by `Arc<SqlitePool>` and injected into all three creator capabilities.
 /// Follows the `KbExtractWork::with_pool` injection pattern.
 pub struct CreatorCapabilityStore {

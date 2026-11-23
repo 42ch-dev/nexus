@@ -72,8 +72,6 @@ vi.mock('@/lib/nexus/query-keys', () => ({
   queryKeys: {
     chapters: { outlines: () => ['chapters', 'outlines'], detail: () => ['chapters', 'detail'], lists: () => ['chapters', 'lists'], list: () => ['chapters', 'list'] },
     outline: { detail: () => ['outline', 'detail'] },
-    // at render even when the Work is unbound (the query is disabled on the
-    // id), so the stub must carry the family these surfaces reach for.
     worldKb: { graph: (worldId: string) => ['worldKb', 'graph', worldId] },
   },
 }));
@@ -178,9 +176,6 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     expect(screen.queryByText('Beat')).not.toBeInTheDocument();
   });
 
-  // background) must clear the derived chapter/scene/beat selections so the
-  // inspector does not stay active for a stale/deselected node. Before the fix
-  // the resolver returned early on null and left the previous selection intact.
   it('clears the Chapter inspector when the surface reports deselection after a selection', () => {
     surfaceMock.selectedNode = {
       id: 'chapter:1',
@@ -211,10 +206,6 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     expect(screen.queryByText('Chapter Inspector')).not.toBeInTheDocument();
   });
 
-  // memoized Map lookup, not `Array.find()` per render. Correctness is covered
-  // by the beat-selection test above; this case guards the memo contract:
-  // stable across re-renders with the same scenes, and rebuilt when scenes
-  // change (catches a stale `[]` dep array).
   it('keeps beatParentSceneTitle stable across re-renders and rebuilds when scenes change (AC-P1-6)', () => {
     surfaceMock.selectedNode = {
       id: 'beat:beat-1',
@@ -228,7 +219,6 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     const { rerender } = renderWithFixture();
     expect(screen.getByText('Part of Opening Scene.')).toBeInTheDocument();
 
-    // is reused; the parent scene helper remains correct.
     rerender(
       <QueryClientProvider client={queryClient}>
         <OutlineCanvas workId="wk_test" sceneBeatFixture={FIXTURE} />
@@ -236,8 +226,6 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     );
     expect(screen.getByText('Part of Opening Scene.')).toBeInTheDocument();
 
-    // rebuild (dep = fixture.scenes) and surface the new title. A stale `[]`
-    // dep would keep showing "Opening Scene".
     const renamedFixture = {
       scenes: [
         { sceneId: 'scene-1', chapterId: 1, title: 'Renamed Scene', status: 'drafted' as const },

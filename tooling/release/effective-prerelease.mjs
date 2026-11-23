@@ -81,9 +81,6 @@ export function parsePrereleaseTrailer(message) {
 }
 
 /**
- * prerelease. An absent version contributes nothing; a version the grammar
- * cannot read fails closed to prerelease, matching the trailer stance.
- *
  * @param {string | null} version Resolved release version, or null when absent.
  * @returns {boolean}
  */

@@ -65,10 +65,6 @@ function resolvePickerStatus(
   return 'ready';
 }
 
-/**
- * installed agents, then catalog-key match; otherwise use launchCommand as the
- * custom path. Returns whether a selection was applied.
- */
 function applySavedProfile(
   agents: AgentScanEntry[],
   profile: { name: string; launchCommand?: string },
@@ -147,7 +143,6 @@ export function SettingsAgentSection() {
       const launchCommand =
         (agent?.launch_command ?? customCommand.trim()) ?? undefined;
       try {
-        // the browser writes the service the same seam reads.
         if (desktop) {
           await desktop.setAgentProfile(name, launchCommand);
         } else {
@@ -174,9 +169,6 @@ export function SettingsAgentSection() {
     [client, commonT, desktop, qc, toast],
   );
 
-  // saved profile (match by command / catalog key); null/unreadable falls back
-  // to the first installed agent. Works in the browser too — the seam reads the
-  // service there.
   useEffect(() => {
     if (didInitDefault) return;
     // the error surface holds preselect until a refetch succeeds.

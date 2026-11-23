@@ -1,10 +1,3 @@
-/**
- * level over msw: every op sends the last-read `base_revision`; `nest` sends
- * its attach target and the daemon writes the connecting edge, so the canvas
- * adds no edge of its own (T3b); a 409/422 leaves the working document
- * unchanged, never auto-retries, and the 409 recovery reloads the canonical
- * candidate at the revision the daemon holds (T4).
- */
 import { renderHook, act, waitFor, fireEvent, screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -162,7 +155,6 @@ describe('useStrategyCompose', () => {
   });
 
   it('resolves a pinned slot from the available duplicate, not the first listing entry', async () => {
-    // slots. Reading its empty declaration would hide the required slot the pin really has.
     const brokenDuplicate = {
       ...PATTERN_ITEMS[0],
       package_dir: 'prompt-step-broken',
@@ -238,7 +230,6 @@ describe('useStrategyCompose', () => {
       },
     });
 
-    // canvas added no second one of its own.
     const committed = result.current.workingDocument!;
     const slot = committed.nodes.find((node) => node.id === 'prompt-step-slot');
     expect(slot?.kind).toBe('pattern_slot');
@@ -342,7 +333,6 @@ describe('useStrategyCompose', () => {
     });
     expect(result.current.workingDocument).toBe(before);
 
-    // conflict, so the next op is applied against those bytes.
     await act(async () => {
       await result.current.reload();
     });

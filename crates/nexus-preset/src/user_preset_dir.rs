@@ -213,7 +213,6 @@ pub fn load_user_preset_from_dir(
         }
     };
 
-    // (A2/A7) — content hash over the manifest + every referenced asset.
     let mut loaded = loaded;
     loaded.source_identity = Some(
         crate::loader::preset_source_identity(&loaded.manifest, Some(bundle_dir), None).map_err(

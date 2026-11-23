@@ -20,7 +20,6 @@ function makeOverview(
   total_worlds?: number,
 ): TimelineOverviewResponse {
   return {
-    // tuple union; this fixture builds a variable-length array by construction.
     worlds: worlds as TimelineOverviewResponse['worlds'],
     cursor: cursor ?? null,
     total_worlds: total_worlds ?? worlds.length,
@@ -176,8 +175,6 @@ describe('GlobalTimelineView — V1.126 P2 composite endpoint', () => {
     expect(activity).toBeInTheDocument();
   });
 
-  // response carries the NEXT cursor directly (no separate has_more flag); a
-  // non-null cursor means another page exists.
   describe('Load More pagination (V1.127 P0 T2)', () => {
     it('renders Load More when the overview returns a non-null cursor, fetches the next page with the cursor, and hides it when the cursor goes null', async () => {
       const user = userEvent.setup();

@@ -153,9 +153,6 @@ export interface UseSemanticZoomOptions<TLayer extends string> {
   onLayerChange: (layer: TLayer) => void;
   chain: SemanticZoomLayerChain<TLayer>;
   thresholds?: SemanticZoomThresholds;
-  /**
-   * this; the hook wires to `useViewport()` from `@xyflow/react`.
-   */
   getZoom?: () => number;
 }
 
@@ -194,7 +191,6 @@ export function useSemanticZoom<TLayer extends string>({
       return;
     }
     if (previousZoomRef.current === currentZoom) {
-      // for an unrelated reason). Do not fire.
       return;
     }
     previousZoomRef.current = currentZoom;

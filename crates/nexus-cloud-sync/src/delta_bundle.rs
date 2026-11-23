@@ -318,9 +318,6 @@ impl BundleBuilder {
             canon_revision: self.base_canon_revision,
         };
 
-        // separate enum copy per schema (`DeltaDeltaType` vs the bundle's
-        // `NexusDeltaDeltaType`); a JSON round-trip bridges them cleanly since
-        // the drift gate proves wire equivalence.
         let delta_values: Vec<Delta> = self
             .deltas
             .into_iter()
@@ -439,7 +436,6 @@ mod tests {
             .build()
             .expect("should build");
 
-        // LATEST_SCHEMA_VERSION may be higher due to local schemas like daemon-status-v2
         assert_eq!(bundle.schema_version, 1);
         assert_eq!(bundle.workspace_id.to_string(), "wrk_001");
         assert_eq!(bundle.world_id.to_string(), "wld_001");

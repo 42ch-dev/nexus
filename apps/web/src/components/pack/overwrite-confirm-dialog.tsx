@@ -1,6 +1,4 @@
 /**
- * (V1.152 P1 T3, DF-77).
- *
  * Shown by {@link PackPanel} before an `overwrite` import actually mutates:
  * the author must explicitly confirm that existing entries will be replaced.
  *
@@ -23,10 +21,6 @@ import { Button } from '@/components/ui/button';
 
 export interface OverwriteConfirmDialogProps {
   open: boolean;
-  /**
-   * pre-flight). Omitted when unknown — the import response details only
-   * arrive after the import, so the panel currently cannot pre-compute this.
-   */
   overwriteCount?: number;
   onConfirm: () => void;
   onCancel: () => void;

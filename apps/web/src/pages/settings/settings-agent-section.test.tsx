@@ -51,7 +51,6 @@ function makeDesktop(
 const MIXED_AGENTS = [
   {
     name: 'claude-code',
-    // renders in the default grid (priority 1).
     registry_agent_id: 'claude-native',
     launch_command: 'claude',
     installed: true,
@@ -115,7 +114,6 @@ describe('SettingsAgentSection preselect (G1)', () => {
     ).toBeInTheDocument();
     expect(screen.queryByTestId('settings-agent-browser-helper')).not.toBeInTheDocument();
 
-    // the async scan settles.
     expect(await screen.findByTestId('agent-card-claude-native')).toBeInTheDocument();
   });
 
@@ -219,7 +217,6 @@ describe('SettingsAgentSection preselect (G1)', () => {
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
-    // fallback selects the first installed) → renders preselected in the grid.
     await waitFor(() => {
       const pressed = screen
         .getAllByTestId('agent-card-select-claude-native')
@@ -315,7 +312,6 @@ describe('SettingsAgentSection preselect (G1)', () => {
     expect(await screen.findByTestId('settings-agent-profile-error')).toHaveTextContent(
       'Could not load the saved agent profile: config.toml is unreadable',
     );
-    // fallback choice.
     expect(screen.queryByTestId('agent-picker')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -384,7 +380,6 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
-    // flight, so the card is awaited rather than assumed present.
     await user.click(await screen.findByTestId('agent-card-select-claude-native'));
 
     await waitFor(() =>
@@ -433,8 +428,6 @@ describe('SettingsAgentSection preselect (G1)', () => {
   });
 
   it('AC-P2-6: Settings uses the same default-grid pipeline as Setup (no fork)', async () => {
-    // installed curated agent renders in the primary grid (visible without the
-    // More toggle) in priority order — the same contract SetupStepAgent uses.
     const agents = [
       {
         name: 'Claude',
@@ -458,8 +451,6 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
-    // cursor (priority 2) are both installed-curated → default grid, ordered by
-    // priority: claude-native before cursor. No More toggle (both installed).
     const grid = await screen.findByTestId('agent-picker-grid');
     const cardIds = Array.from(
       grid.querySelectorAll<HTMLElement>('li > div[data-testid^="agent-card-"]'),

@@ -51,8 +51,6 @@ pub mod compute;
     allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::expect_used)
 )]
 pub mod connect;
-// parser routing) are deleted with the legacy daemon composition — Electron/
-// TS owns service lifecycle.
 #[cfg(feature = "cli")]
 #[deny(clippy::unwrap_used)]
 #[cfg_attr(

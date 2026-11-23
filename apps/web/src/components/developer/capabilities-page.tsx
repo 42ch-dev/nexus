@@ -29,9 +29,6 @@ export function CapabilitiesPage() {
   const { t } = useTranslation('capabilities');
   const caps = useCapabilities();
   const [searchParams] = useSearchParams();
-  // with `?filter=<name>`; seed the local filter so the linked schema is
-  // visible on arrival. The param is a read-only seed: typing does not write
-  // it back and a later param change does not re-seed. No param → full list.
   const [filter, setFilter] = useState(() => searchParams.get('filter') ?? '');
 
   return (

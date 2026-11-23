@@ -365,14 +365,7 @@ export interface NexusClient extends CoreSliceClient {
    * access (V1.92 P1).
    */
   certFingerprint(): Promise<CertFingerprintResponse>;
-  /**
-   * `workspace_initialized` is the browser first-run gate (compass D21).
-   */
   runtimeStatus(): Promise<RuntimeStatus>;
-  /**
-   * `degraded.subsystems` drives the global service-unavailable surface
-   * (v1219-onboarding T4).
-   */
   daemonStatus(): Promise<DaemonRuntimeStatus>;
   listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse>;
   /**
@@ -380,10 +373,6 @@ export interface NexusClient extends CoreSliceClient {
    * `{ display_name: string }` and the response is {@link CreatorDetail}.
    */
   createCreator(request: { display_name: string }): Promise<CreatorDetail>;
-  /**
-   * display name. V1.117: wire shape is `{ display_name: string }`; response is
-   * {@link CreatorDetail}. No new generated request type.
-   */
   updateCreator(creatorId: string, request: { display_name: string }): Promise<CreatorDetail>;
   /** `GET /v1/daemon/creators/active` — daemon's active creator (config.toml). */
   getActiveCreator(): Promise<ActiveCreatorResponse>;
@@ -394,20 +383,10 @@ export interface NexusClient extends CoreSliceClient {
   // the daemon rejects a foreign Character with 404. These are the management
   // surface (lifecycle + World bindings), distinct from the creator-scoped
   // memory/soul methods further down and from the per-character memory family.
-  /**
-   * Characters (daemon default 50, max 100).
-   */
   listCharacters(query?: ListCharactersQuery): Promise<ListCharactersResponse>;
-  /**
-   * active ActorWorldBinding; `world_id` must be an owned World.
-   */
   createCharacter(request: CreateCharacterRequest): Promise<CreateCharacterResponse>;
   /** `GET /v1/daemon/characters/{character_id}` — one Character. */
   getCharacter(characterId: string): Promise<CharacterDetail>;
-  /**
-   * semantics: `undefined` keeps, `null` clears (`image_uri` / `persona`),
-   * a value replaces. `expected_revision` mismatch is the native 409.
-   */
   patchCharacter(characterId: string, request: UpdateCharacterRequest): Promise<CharacterDetail>;
   /** `POST /v1/daemon/characters/{character_id}/archive` — CAS on `expected_revision`. */
   archiveCharacter(
@@ -419,9 +398,6 @@ export interface NexusClient extends CoreSliceClient {
     characterId: string,
     request: CharacterLifecycleRequest,
   ): Promise<CharacterDetail>;
-  /**
-   * Character to a World; `owner_creator_id` is never sent.
-   */
   addCharacterBinding(
     characterId: string,
     request: AddCharacterBindingRequest,
@@ -433,10 +409,6 @@ export interface NexusClient extends CoreSliceClient {
   ): Promise<ListCharacterBindingsResponse>;
   /** `GET /v1/daemon/characters/{character_id}/bindings/{binding_id}`. */
   getCharacterBinding(characterId: string, bindingId: string): Promise<CharacterBindingDetail>;
-  /**
-   * `world_sheet_entry_id` is mutable (`null` unlinks, omission keeps); a stale
-   * `expected_revision` is the native 409.
-   */
   patchCharacterBinding(
     characterId: string,
     bindingId: string,
@@ -463,9 +435,6 @@ export interface NexusClient extends CoreSliceClient {
     characterId: string,
     query?: ListCharacterPendingReviewsQuery,
   ): Promise<ListCharacterPendingReviewsResponse>;
-  /**
-   * `binding_id` scopes the count to one binding-local queue.
-   */
   countCharacterPendingReviews(
     characterId: string,
     query?: CountCharacterPendingReviewsQuery,
@@ -475,10 +444,6 @@ export interface NexusClient extends CoreSliceClient {
     characterId: string,
     pendingId: string,
   ): Promise<DeleteCharacterPendingReviewResponse>;
-  /**
-   * bounded batch (≤ 50 rows) through the shared review pipeline; `has_more`
-   * means re-issue to drain the remainder.
-   */
   reviewCharacterMemory(
     characterId: string,
     request: ReviewCharacterMemoryRequest,
@@ -488,36 +453,19 @@ export interface NexusClient extends CoreSliceClient {
     characterId: string,
     query?: ListCharacterMemoryFragmentsQuery,
   ): Promise<ListCharacterMemoryFragmentsResponse>;
-  /**
-   * — explicit, revision-checked promotion of one binding-local fragment to
-   * shared Character memory (stale `expected_revision` → 409).
-   */
   promoteCharacterFragment(
     characterId: string,
     fragmentId: string,
     request: PromoteCharacterFragmentRequest,
   ): Promise<PromoteCharacterFragmentResponse>;
-  /**
-   * regenerates the cached whole-Character SOUL narrative. Synthesis is
-   * explicit: it runs only with `force_regenerate: true` and a passing
-   * insufficient-data gate.
-   */
   reflectCharacterSoul(
     characterId: string,
     request: CharacterSoulNarrativeRequest,
   ): Promise<CharacterSoulNarrativeResponse>;
-  /**
-   * Character's ToM belief rows. `binding_id` and `world_id` are required wire
-   * members; rows are read only through authorized carriers.
-   */
   listCharacterTom(
     characterId: string,
     query: ListCharacterTomQuery,
   ): Promise<ListCharacterTomResponse>;
-  /**
-   * a carrier entry under that carrier's OCC revision. Scope is admitted from
-   * stored rows, never from the payload.
-   */
   recordCharacterTom(
     characterId: string,
     request: RecordCharacterTomRequest,
@@ -535,10 +483,6 @@ export interface NexusClient extends CoreSliceClient {
   ): Promise<ListCharacterKnowledgeResponse>;
   /** `GET /v1/daemon/characters/{character_id}/knowledge/{entry_id}` — character-scoped read. */
   getCharacterKnowledge(characterId: string, entryId: string): Promise<KnowledgeEntryDetail>;
-  /**
-   * character-scoped update of `canonical_name`/`summary`/`audience` under an
-   * `expected_revision` CAS.
-   */
   patchCharacterKnowledge(
     characterId: string,
     entryId: string,
@@ -552,15 +496,7 @@ export interface NexusClient extends CoreSliceClient {
     entryId: string,
     query: DeleteKnowledgeEntryQuery,
   ): Promise<void>;
-  /**
-   * policy is server-chosen from the admitted context; the payload carries no
-   * policy, holder or viewpoint.
-   */
   viewActorKnowledge(request: ViewRequest): Promise<ViewResponse>;
-  /**
-   * creation is the only create: the owner is resolved from stored rows and
-   * `audience` is the sole governance input.
-   */
   createActorKnowledgeEntry(
     request: AddKnowledgeEntryRequest,
   ): Promise<AddKnowledgeEntryResponse>;
@@ -572,33 +508,13 @@ export interface NexusClient extends CoreSliceClient {
   setActiveWorkspace(
     request: SetActiveWorkspaceRequest,
   ): Promise<SetActiveWorkspaceResponse>;
-  /**
-   * (I-000063). The core owns slug validation, root exclusivity and atomicity;
-   * success does not activate the workspace.
-   */
   createWorkspace(request: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse>;
 
   scanAgents(request?: ScanRequest): Promise<ScanResponse>;
-  /**
-   * (authoritative `provider_id` + `protocol_kind`). The scan response adds
-   * install state and launch commands on top of these ids.
-   */
   listAgentHostProviders(): Promise<AgentHostProvidersResponse>;
-  /**
-   * profile (I-000064). `profile: null` means none was saved yet.
-   */
   getAgentProfile(): Promise<AgentProfileResponse>;
-  /**
-   * profile on the service (browser path; the desktop IPC path is unchanged).
-   */
   saveAgentProfile(profile: AgentProfile): Promise<AgentProfileResponse>;
-  /**
-   * (native defaults when the file does not exist yet).
-   */
   getAgentHostConfig(): Promise<AgentHostConfig>;
-  /**
-   * document; the daemon validates it and returns the persisted document.
-   */
   saveAgentHostConfig(config: AgentHostConfig): Promise<AgentHostConfig>;
 
   /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
@@ -611,18 +527,12 @@ export interface NexusClient extends CoreSliceClient {
   createWorld(request: CreateWorldRequest): Promise<CreateWorldResponse>;
   /** `PATCH /v1/daemon/works/{work_id}` — status/stage/archive (free-string status). */
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse>;
-  /**
-   * children (chapters, findings, pool entries, etc.). V1.129 P2
-   * (R-V1126P0-T2-001). Returns 204 No Content on success.
-   */
   deleteWork(workId: string): Promise<void>;
 
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse>;
   /** `GET /v1/daemon/orchestration/sessions/{session_id}`. */
   getSession(sessionId: string): Promise<SessionDetailResponse>;
   /**
-   * retained/live observation frames as an `AsyncIterable`.
-   *
    * SSE fetch-stream reader (never browser `EventSource` — it cannot carry
    * `X-API-Key`, hides the route's pre-header typed JSON refusals behind an
    * opaque `onerror`, and re-subscribes past deliberate terminal ends). The
@@ -642,24 +552,11 @@ export interface NexusClient extends CoreSliceClient {
   listSchedules(query?: ListSchedulesQuery): Promise<ListSchedulesResponse>;
   /** `GET /v1/daemon/orchestration/schedules/{schedule_id}`. */
   inspectSchedule(scheduleId: string): Promise<InspectScheduleResponse>;
-  /**
-   * Strategy). V1.70 canvas Idea→Run promotion: the generated TS type + daemon
-   * route already existed (V1.67 G2 pattern); only the TS client surface was
-   * missing. No schema/codegen change (`wire_contracts_changed: FALSE`).
-   */
   addSchedule(request: AddScheduleRequest): Promise<AddScheduleResponse>;
-  /**
-   * lifecycle signal (resume / advance / pause). V1.70 canvas Idea→Resume
-   * steering promotion.
-   */
   signalSchedule(
     scheduleId: string,
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse>;
-  /**
-   * append/merge steering context (an Idea) into a running schedule's core
-   * context. V1.70 canvas Idea→Steer promotion.
-   */
   editCoreContext(
     scheduleId: string,
     request: EditCoreContextRequest,
@@ -681,21 +578,12 @@ export interface NexusClient extends CoreSliceClient {
    * on the generated `CoreSliceClient`.
    */
   getWorkFinding(workId: string, findingId: string): Promise<FindingDetailResponse>;
-  /**
-   * (status transition / target_executor / inline edit). Server enforces the
-   * 6-state lifecycle adjacency (HTTP 422 `INVALID_TRANSITION` on illegal
-   * transitions); last-writer-wins, no OCC (D1b). V1.77 promotion.
-   */
   updateFinding(
     workId: string,
     findingId: string,
     patch: UpdateFindingRequest,
   ): Promise<FindingDetailResponse>;
 
-  /**
-   * `target_executor` for up to 100 findings. Creator-scoped; partial success
-   * model with `not_found`/`conflict` arrays in the HTTP 200 response. V1.91 P1.
-   */
   batchUpdateFindings(request: BatchUpdateFindingsRequest): Promise<BatchUpdateFindingsResponse>;
 
   listPresets(): Promise<ListPresetsResponse>;
@@ -712,11 +600,6 @@ export interface NexusClient extends CoreSliceClient {
   /** `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
   deletePreset(presetId: string): Promise<void>;
 
-  /**
-   * profile (trigger lanes, states, roles, capabilities, declared signals)
-   * for any resolvable preset. The app-side type mirrors the hand-coded Rust
-   * DTO 1:1 (camelCase); unknown ids resolve to 404 (PL-2).
-   */
   getPresetProfile(presetId: string): Promise<PresetProfileResponse>;
 
   strategyPatchState(
@@ -742,46 +625,20 @@ export interface NexusClient extends CoreSliceClient {
   ): Promise<SimulationTrajectory>;
   /** `GET /v1/daemon/strategies/{strategy_id}/workflow-ir` — the installed strategy as candidate IR. */
   getStrategyWorkflowIr(strategyId: string): Promise<WorkflowDocument>;
-  /**
-   * compose row, else the revision-`0` import projection. Its `revision` is the CAS base to
-   * reload and re-apply against; the read never writes.
-   */
   getStrategyCandidate(strategyId: string): Promise<WorkflowDocument>;
-  /**
-   * (`nest` / `unnest` / `replace_subtree` / `bind_slot`). The response document is
-   * the committed candidate at `new_revision` and replaces the client's copy.
-   */
   composeStrategy(
     strategyId: string,
     request: StrategyComposeRequest,
   ): Promise<StrategyComposeResponse>;
-  /**
-   * into an immutable snapshot, or refuse with a named reason. Approve does not apply,
-   * schedule or execute.
-   */
   approveStrategy(
     strategyId: string,
     request: StrategyApproveRequest,
   ): Promise<ApprovedStrategySnapshot>;
-  /**
-   * snapshot as the strategy's running identity. The body names the approval by its
-   * content hash only; the response is the appended apply row. A repeat of the current
-   * approval and an approval whose bytes moved are 409 conflicts.
-   */
   applyStrategy(
     strategyId: string,
     request: StrategyApplyRequest,
   ): Promise<NonNullable<StrategyAppliedStatus['current_apply']>>;
-  /**
-   * strategy's newest approval, each null when absent. Newness is `candidate_revision`,
-   * never either timestamp.
-   */
   getStrategyApplied(strategyId: string): Promise<StrategyAppliedStatus>;
-  /**
-   * read's total order (`items[0]` is its `newest_approval`). This is the read that makes
-   * rollback reachable: Apply can name any listed approval's content hash, not only the
-   * newest.
-   */
   listStrategyApprovals(strategyId: string): Promise<StrategyApprovals>;
   /**
    * `cursor`/`limit` select the page; a caller that needs every package follows
@@ -842,37 +699,10 @@ export interface NexusClient extends CoreSliceClient {
     request: WorldKbPatchRelationshipRequest,
   ): Promise<WorldKbPatchRelationshipResponse>;
 
-  /**
-   * (mental pair + rule-derived). Newest-first, 500-cap with an honest
-   * `truncated` flag. Spoke vocabulary verbatim (`info|warning|error` severity,
-   * `open|resolved|dismissed` status — no nexus remap). Read-only surface
-   * (PD-2): the panel never writes.
-   */
   listWorldFindings(worldId: string): Promise<WorldFindingsListResponse>;
 
-  /**
-   * (V1.166 AR-3). Author-metadata list in `canonical_name ASC, rule_id ASC`
-   * order, 500-cap with an honest `truncated` flag; each item projects the
-   * spoke Rule vocabulary verbatim plus the AR-2 constraint carrier
-   * first-class. `archived` rows are omitted by default (V1.198 §13);
-   * `includeArchived: true` reveals the retained rows.
-   */
   listWorldRules(worldId: string, includeArchived?: boolean): Promise<WorldRulesListResponse>;
-  /**
-   * (V1.169 P1, AR-5). The request is the AR-2 constraint carrier plus
-   * author metadata; the daemon mints `rule_id` server-side and applies the
-   * AR-3 create defaults (`status` → `active`, `kind` → `rule`,
-   * `severity_hint` → NULL → evaluation `warning`, `target_entry_types` →
-   * `[]`). 400 `invalid_input` carries the AR-2 field-level `details`
-   * (`{ field, reason }`) that the authoring form echoes onto the matching
-   * field.
-   */
   createWorldRule(worldId: string, body: WorldRuleCreateRequest): Promise<WorldRuleResponse>;
-  /**
-   * (V1.169 P1, AR-3/AR-5): `constraint` is whole-carrier replacement,
-   * absent fields stay unchanged, no null-clearing. `status: "deprecated"`
-   * is the Deactivate recovery (product lock — no DELETE route).
-   */
   updateWorldRule(
     worldId: string,
     ruleId: string,
@@ -882,9 +712,6 @@ export interface NexusClient extends CoreSliceClient {
   getComputeModules(): Promise<ListModulesResponse>;
   /** `GET /v1/daemon/compute/modules/{module_id}` — full module manifest. */
   getComputeModule(moduleId: string): Promise<ModuleDetail>;
-  /**
-   * mutable runtime state of a computable KeyBlock plus computability flag + OCC version.
-   */
   getKeyBlockState(worldId: string, keyBlockId: string): Promise<WorldKbKeyBlockStateResponse>;
 
   /**
@@ -892,10 +719,6 @@ export interface NexusClient extends CoreSliceClient {
    * review-then-accept, `status: "failed"` carries an honest error.
    */
   runCompute(request: RunRequest): Promise<RunResponse>;
-  /**
-   * succeeded Run's proposals. `request` omitted/`null` accepts everything;
-   * the client still sends a `{}` JSON body (axum `Json` extractor).
-   */
   acceptRun(runId: string, request?: RunAcceptRequest | null): Promise<RunAcceptResponse>;
   /** `POST /v1/daemon/compute/runs/{run_id}/discard` — drop a succeeded Run's proposals. */
   discardRun(runId: string): Promise<DiscardRunResponse>;
@@ -903,105 +726,41 @@ export interface NexusClient extends CoreSliceClient {
   listRuns(query?: ListRunsQuery): Promise<RunListResponse>;
   /** `GET /v1/daemon/compute/runs/{run_id}` — full detail incl. proposals/error. */
   getRun(runId: string): Promise<RunDetail>;
-  /**
-   * terminal runs (`applied|discarded|failed`) for an owned World. Running and
-   * succeeded (needs-review) rows are never deleted.
-   */
   clearRuns(query: ClearRunsQuery): Promise<ClearRunsResponse>;
 
-  /**
-   * per-World timeline log events (production `narrative_timeline_events`
-   * storage; machine-written families like `compute_result` carry compute
-   * provenance in `extensions`). Omitted filters take the daemon defaults:
-   * status `canon`, branch = the World's current branch (root fallback).
-   */
   getTimelineEvents(
     worldId: string,
     query?: ListTimelineEventsQuery,
   ): Promise<ListTimelineEventsResponse>;
-  /**
-   * (V1.162 P1 T2 route, thin delegate to the `fork.create` capability): a
-   * new `branch_id` within the owned World diverging from the picked
-   * fork-point event on the stated parent branch. The response carries the
-   * new `branch_id` (+ parent + fork-point + `created_at`) which the World
-   * Timeline consumes immediately for the PD-6 post-create landing.
-   * 422 (`invalid_input`) = bad / non-existent fork point; 403 = foreign
-   * World (should not occur from an owned World Timeline).
-   */
   createFork(worldId: string, request: CreateForkRequest): Promise<CreateForkResponse>;
 
   // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`
   // that does not match the active creator in config.toml with 403. The UI is
   // consume-only. V1.186 removed the obsolete session-capture producer and its
   // POST route; retained GET/count/DELETE methods expose compatible stored rows.
-  /**
-   * KB + timelines (FK `ON DELETE CASCADE`). Works that referenced the World
-   * are preserved with `world_id = NULL` (architect lock — V1.129 P2).
-   * Returns 204 No Content on success.
-   */
   deleteWorld(worldId: string): Promise<void>;
-  /**
-   * Worlds with per-World era/event counts and last activity timestamp.
-   * V1.126 P2: replaces the N=5–10 parallel `kb/graph` fan-out in the global
-   * Timeline view with one composite call.
-   */
   getTimelineOverview(cursor?: string): Promise<TimelineOverviewResponse>;
-  /**
-   * pending-review list for the active creator (default 50, max 250; cursor is
-   * the opaque `next_cursor` from a previous page).
-   */
   listPendingReviews(
     creatorId: string,
     query?: Omit<ListPendingReviewsQuery, 'creator_id'>,
   ): Promise<ListPendingReviewsResponse>;
-  /**
-   * count for the active creator, surfaced as a badge on the Memory page header.
-   */
   countPendingReviews(creatorId: string): Promise<CountPendingReviewsResponse>;
-  /**
-   * delete one pending-review row; echoes the path `pending_id`. A missing or
-   * non-owned row surfaces as an error envelope, not `success: false`.
-   */
   deletePendingReview(
     pendingId: string,
     creatorId: string,
   ): Promise<DeletePendingReviewResponse>;
-  /**
-   * for the active creator's entire pending queue. Shipped behavior: the
-   * passthrough classifier promotes/fragments/drops each pending row and returns
-   * `{ promoted, fragmented, dropped }` (no LLM-backed summarizer).
-   */
   reviewMemory(request: ReviewRequest): Promise<ReviewResponse>;
-  /**
-   * memory fragments for the active creator (NOT paginated; optional
-   * case-insensitive `keyword` LIKE filter, default 50, max 250). Fragments are
-   * produced only by the `reviewMemory` route — no manual CRUD on this surface.
-   */
   listMemoryFragments(
     creatorId: string,
     query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
   ): Promise<ListMemoryFragmentsResponse>;
-  /**
-   * whole-Creator SOUL narrative (V1.81). With `force_regenerate` absent/false
-   * the endpoint returns the current cache state (`ungenerated` / `current` /
-   * `stale` / `insufficient_data`); with `force_regenerate: true` it
-   * regenerates the narrative and returns the fresh synthesis. Per-world
-   * narratives are out of scope (the narrative is world-agnostic by contract).
-   */
   reflectSoulNarrative(request: SoulNarrativeRequest): Promise<SoulNarrativeResponse>;
 
-  /**
-   * progress for the current creator on a chapter. Returns `scroll_progress=0`
-   * with a server-generated `updated_at` when no progress has been saved.
-   */
   getReadingProgress(workId: string, chapter: number, volume?: number): Promise<ReadingProgressResponse>;
   /** `PUT /v1/daemon/reading/progress` — upsert scroll progress. */
   putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse>;
   /** `DELETE /v1/daemon/reading/progress?work_id=&chapter=` — delete progress. */
   deleteReadingProgress(workId: string, chapter: number, volume?: number): Promise<void>;
-  /**
-   * a chapter. No pagination; per-chapter counts are expected to stay small.
-   */
   listReadingAnnotations(workId: string, chapter: number, volume?: number): Promise<ReadingAnnotationListResponse>;
   /** `POST /v1/daemon/reading/annotations` — create a highlight annotation. */
   createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation>;
@@ -1013,31 +772,10 @@ export interface NexusClient extends CoreSliceClient {
   /** `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete annotation. */
   deleteReadingAnnotation(annotationId: string): Promise<void>;
 
-  /**
-   * inspector packet for one moment (activation trace + slot map + budget +
-   * directive status). Read-only observation: the assembled prompt bytes are
-   * never modified (AC-I6).
-   */
   inspectMoment(request: MomentInspectRequest): Promise<MomentInspectResponse>;
-  /**
-   * Directive for an owned scope (the author write surface; DF-76). A `set`
-   * without `replace` when a directive is already active in the scope
-   * surfaces as a 409 conflict (no silent overwrite, CLI `--replace`
-   * discipline). Returns the inserted/showed row on `set`/`show`, `{}` on
-   * `clear`.
-   */
   momentDirective(request: MomentDirectiveRequest): Promise<MomentDirectiveResponse>;
 
-  /**
-   * lore as a Narrative Knowledge Pack (opaque spoke envelope; entries and
-   * relations are opaque objects). The response round-trips through
-   * `importPack`.
-   */
   exportPack(worldId: string, request?: PackExportRequest): Promise<PackExportResponse>;
-  /**
-   * Knowledge Pack into a World under a collision policy (skip / rename /
-   * overwrite). Returns per-atom-type counts plus a details list.
-   */
   importPack(worldId: string, request: PackImportRequest): Promise<PackImportResponse>;
 }
 

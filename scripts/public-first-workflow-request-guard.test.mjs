@@ -94,10 +94,6 @@ const DENIED_CATEGORIES = new Set([
 const CHILD_TIMEOUT_MS = 30_000;
 
 
-/**
- * what happened, including the identity of what the guard forwarded. It never
- * prints anything but its single JSON result line.
- */
 const ENTRY_SOURCE = `import { chmodSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -210,10 +206,6 @@ process.stdout.write(
 );
 `;
 
-/**
- * fetch" and records exactly what the guard forwarded — the only way to prove
- * the headers/body/signal objects reached the transport by reference.
- */
 const SPY_SOURCE = `const realFetch = globalThis.fetch;
 globalThis.__nexusGuardProbe = { records: [] };
 globalThis.fetch = (input, init) => {
@@ -222,11 +214,6 @@ globalThis.fetch = (input, init) => {
 };
 `;
 
-/**
- * the fd was opened for) and the moment a dispatch reaches the transport. The
- * fs wrappers are installed before the guard loads, so the guard's own named
- * `node:fs` bindings are the wrappers.
- */
 const SYNC_SPY_SOURCE = `import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 
@@ -254,12 +241,6 @@ globalThis.fetch = (input, init) => {
 };
 `;
 
-/**
- * the first call and reports that count, `stuck` reports zero bytes forever.
- * The guard must finish the write (or deny) rather than sync a truncation, so
- * the stub records writes, `fsyncSync` calls and the dispatch in ONE ordered
- * trace: only that order proves the sync follows a complete payload.
- */
 const writeStubSource = (mode) => `import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { basename } from 'node:path';
@@ -338,17 +319,10 @@ const SYNC_SPY_PATH = join(FIXTURE_ROOT, 'sync-spy.mjs');
 const STRIP_PATH = join(FIXTURE_ROOT, 'strip-fetch.mjs');
 const SHORT_WRITE_PATH = join(FIXTURE_ROOT, 'short-write.mjs');
 const STUCK_WRITE_PATH = join(FIXTURE_ROOT, 'stuck-write.mjs');
-/**
- * shebang, exec'd directly rather than through `node <entry>`.
- */
 const SHEBANG_ENTRY_PATH = join(FIXTURE_ROOT, 'shebang-entry.mjs');
 const LOCK_FETCH_PATH = join(FIXTURE_ROOT, 'lock-fetch.mjs');
 const FREEZE_FETCH_PATH = join(FIXTURE_ROOT, 'freeze-fetch.mjs');
 const LOCK_EVENTS_PATH = join(FIXTURE_ROOT, 'lock-events.mjs');
-/**
- * a second entry inside it, so the in-package drift label can be exercised
- * without reading the operator's real installation.
- */
 const FAKE_PACKAGE_ROOT = join(FIXTURE_ROOT, 'installed-dsh-package');
 const PACKAGE_ENTRY_PATH = join(FAKE_PACKAGE_ROOT, 'lib', 'bin.mjs');
 const PACKAGE_CHILD_PATH = join(FAKE_PACKAGE_ROOT, 'lib', 'spawned-child.mjs');
@@ -388,12 +362,6 @@ after(() => {
 });
 
 
-/**
- * data fixture): `ok` answers 200 JSON, `redirect302` answers a same-origin
- * redirect, `status429` answers a rate-limit response, `reset` destroys the
- * socket once the request arrived. Every request that reaches it is recorded,
- * so a denied dispatch is observable as "the endpoint saw nothing".
- */
 function startEndpoint(mode) {
   const requests = [];
   const server = createServer((request, response) => {
@@ -551,9 +519,6 @@ function readMarker(attemptDir) {
   return JSON.parse(readFileSync(markerPath, 'utf8'));
 }
 
-/**
- * remove the attempt directory and later reads work normally.
- */
 function restoreAttemptDir(attemptDir) {
   const eventsDir = join(attemptDir, 'events');
   if (existsSync(eventsDir)) chmodSync(eventsDir, 0o700);
@@ -615,7 +580,6 @@ test('one dsh-runtime POST is admitted, forwarded opaque, and recorded', async (
     assert.equal(endpoint.requests[0].headers['x-test-marker'], 'marker-1');
     assert.equal(endpoint.requests[0].body, secretBody);
 
-    // headers/body/signal objects, with only `redirect` forced.
     const transport = child.result.transport;
     assert.equal(transport.dispatches, 1);
     assert.equal(transport.first.urlSameValue, true);
@@ -682,8 +646,6 @@ test(
       assert.equal(firstAttempt(child).status, 200);
       assert.equal(endpoint.requests.length, 1);
 
-      // rest before syncing: one ordered trace proves nothing was synced while
-      // the payload was still incomplete.
       const entries = child.result.trace;
       const kinds = entries.map((entry) => entry.kind);
       const writes = entries.filter((entry) => entry.kind === 'write');
@@ -692,7 +654,6 @@ test(
       assert.equal(writes[0].wrote < writes[0].requested, true, JSON.stringify(entries));
       const firstSync = kinds.indexOf('sync');
       assert.equal(kinds.lastIndexOf('write') < firstSync, true, JSON.stringify(entries));
-      // by the time the sync runs.
       const writtenBeforeSync = entries
         .slice(0, firstSync)
         .filter((entry) => entry.kind === 'write')
@@ -738,7 +699,6 @@ test(
       assert.equal(endpoint.requests.length, 0);
       assert.equal(existsSync(join(attemptDir, 'spent')), true);
       assert.equal(statSync(join(attemptDir, 'spent')).size, 0);
-      // same child is denied, so a zero-byte `spent` can never reach ALLOW.
       assert.equal(child.result.attempts[1].error?.code, 'attempt_already_spent');
       const events = summarize(readEvents(attemptDir));
       assert.equal(events.admitted.length, 0);
@@ -897,7 +857,6 @@ test('a 302 answer is not followed, so it cannot become a second request', async
     assert.equal(attempt.status, undefined);
     assert.equal(typeof attempt.error?.message, 'string');
 
-    // contacted, and the transport was dispatched exactly once.
     assert.deepEqual(
       endpoint.requests.map((request) => request.target),
       [MODEL_TARGET],
@@ -973,7 +932,6 @@ test('a connection reset spends the authorization and is never retried', async (
 test('an unexpected endpoint is denied before any network and spends nothing', async () => {
   await withEndpoint('ok', async (endpoint) => {
     await withEndpoint('ok', async (otherOrigin) => {
-      // not the path or the host suffix.
       const attemptDir = makeAttemptDir();
       const child = await runGuardChild({
         attemptDir,
@@ -1127,9 +1085,6 @@ test('a child process inside the installed package tree is denied as package_chi
 
 test('the guard refuses to run when the ceiling cannot be locked', async () => {
   await withEndpoint('ok', async (endpoint) => {
-    // into the locked accessor. A replaceable wrapper would be a silent bypass —
-    // a later assignment would drop the guard and the evidence produced before
-    // the drop could still authorize the run — so the child fails closed.
     for (const [label, lockPreload] of [
       ['nonconfigurable-writable', LOCK_FETCH_PATH],
       ['frozen', FREEZE_FETCH_PATH],
@@ -1176,9 +1131,6 @@ test('an unrecordable denial is terminal for the attempt, not a silent zero-deni
     assert.equal(child.result.transport.dispatches, 1);
     assert.equal(child.result.attempts[1].error?.code, 'attempt_already_spent');
 
-    // as one admitted / zero denied with a spent slot — a clean-looking receipt
-    // for an attempt in which an unexpected call was in fact refused. The marker
-    // is what disqualifies it.
     const events = summarize(readEvents(attemptDir));
     assert.equal(events.admitted.length, 1);
     assert.equal(events.denied.length, 0);
@@ -1190,7 +1142,6 @@ test('an unrecordable denial is terminal for the attempt, not a silent zero-deni
     assert.equal(marker.kind, 'denied');
     assert.equal(typeof marker.pid, 'number');
     assert.equal(typeof marker.at, 'string');
-    // from the request.
     assert.deepEqual(Object.keys(marker).sort(), ['at', 'kind', 'pid', 'reason', 'schema']);
     const markerText = readFileSync(join(attemptDir, 'evidence-failed'), 'utf8');
     for (const needle of [endpoint.url, endpoint.origin, '127.0.0.1', MODEL_TARGET, 'authorization']) {
@@ -1211,7 +1162,6 @@ test('when neither an event nor the marker can be written the child is terminate
     const marker = readMarker(attemptDir);
     restoreAttemptDir(attemptDir);
 
-    // runtime could catch and continue from, so the child dies.
     assert.equal(marker, null, 'a marker should have been impossible here');
     assert.equal(child.result, null, 'the guard let the child continue');
     assert.equal(child.code, 78, `exit ${child.code} (signal ${child.signal})`);
@@ -1232,7 +1182,6 @@ test('an unrecordable admission is never dispatched', async () => {
     restoreAttemptDir(attemptDir);
     assertChildRan(child, 'unrecordable-admission');
 
-    // it must not reach the transport at all.
     assert.equal(firstAttempt(child).error?.code, 'evidence_write_failed');
     assert.equal(child.result.transport.dispatches, 0);
     assert.equal(endpoint.requests.length, 0);
@@ -1240,7 +1189,6 @@ test('an unrecordable admission is never dispatched', async () => {
     const events = summarize(readEvents(attemptDir));
     assert.equal(events.loaded.length, 1);
     assert.equal(events.admitted.length, 0);
-    // disqualified by the marker rather than by a missing event.
     assert.equal(existsSync(join(attemptDir, 'spent')), true);
     const marker = readMarker(attemptDir);
     assert.notEqual(marker, null, 'the unrecordable admission left no trace');
@@ -1263,7 +1211,6 @@ test('a loaded record that cannot be persisted taints the attempt and blocks dis
     restoreAttemptDir(attemptDir);
     assertChildRan(child, 'locked-events');
 
-    // attempt is disqualified by the marker rather than by a missing event.
     assert.equal(firstAttempt(child).error?.code, 'evidence_write_failed');
     assert.equal(child.result.transport.dispatches, 0);
     assert.equal(endpoint.requests.length, 0);
@@ -1324,7 +1271,6 @@ test('an unusable guard environment fails closed without creating anything', asy
     );
     assert.equal(existsSync(join(missingUrlDir, 'spent')), false);
 
-    // precedes the request gate, so the child cannot post its way in.
     const wrongPathDir = makeAttemptDir();
     const wrongPathUrl = `${endpoint.origin}/models`;
     const wrongPath = await runGuardChild({
@@ -1352,11 +1298,7 @@ test('an unusable guard environment fails closed without creating anything', asy
       summarize(readEvents(queryDir)).loaded[0].problems.includes('allowed_url_has_query_or_fragment'),
     );
 
-    // origin and is not HTTPS either: a configuration refusal, so a mis-set
-    // selected URL can never become cleartext egress.
     const insecureTransportDir = makeAttemptDir();
-    // case hermetic: even a guard that wrongly admitted it could only ever dial
-    // the local host, and the connection is refused instantly.
     const cleartextUrl = 'http://0.0.0.0:1/chat/completions';
     const insecureTransport = await runGuardChild({
       attemptDir: insecureTransportDir,
@@ -1373,7 +1315,6 @@ test('an unusable guard environment fails closed without creating anything', asy
     );
     assert.equal(existsSync(join(insecureTransportDir, 'spent')), false);
 
-    // guard must never be able to recreate the evidence directory.
     const absentDir = join(makeAttemptDir(), 'never-created');
     const absent = await runGuardChild({
       attemptDir: absentDir,
@@ -1434,7 +1375,6 @@ test('the ceiling cannot be replaced and keeps denying after a tamper attempt', 
     assert.equal(tamper.configurable, false);
     assert.equal(tamper.stillFunction, true);
 
-    // guard's, and it still denies.
     const after = child.result.attempts.find((attempt) => attempt.label === 'after-tamper');
     assert.equal(after.error?.code, 'unexpected_url');
     assert.equal(child.result.transport.dispatches, 0);
@@ -1461,7 +1401,6 @@ test('guard evidence carries no secret, no URL and only the contract fields', as
     });
     assertChildRan(child, 'evidence');
 
-    // request that never happened.
     assert.equal(endpoint.requests.length, 1);
     assert.equal(endpoint.requests[0].headers.authorization, secretHeader);
     assert.equal(endpoint.requests[0].body, secretBody);

@@ -248,7 +248,6 @@ async fn init_workspace(
         &display_name,
     )
     .await?;
-    // commit together, so a concurrent writer cannot land between them.
     select_workspace_via_core(
         &user_home,
         &creator_id,
@@ -675,8 +674,6 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
 
     match cmd {
         CreatorWorkspaceCommand::List => {
-            // operational `meta.json`); this leaf filters to the active creator
-            // and marks the selected slug.
             let home = CoreHomeService::open(user_home()?).map_err(map_core_error)?;
             let resp = home.list_workspaces().await.map_err(map_core_error)?;
 
@@ -727,7 +724,6 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
                 &workspace_name,
             )
             .await?;
-            // handle commit together (see `init_workspace`).
             select_workspace_via_core(&home, creator_id, &workspace_slug, Some(&creative_root))
                 .await?;
             println!("✓ Workspace {workspace_slug:?} created for creator {creator_id}.");
@@ -738,8 +734,6 @@ async fn run_creator_workspace(config: &CliConfig, cmd: CreatorWorkspaceCommand)
         CreatorWorkspaceCommand::Use { workspace_slug } => {
             validate_workspace_slug(&workspace_slug)?;
 
-            // this creator and commits the selection (guarded state-DB init +
-            // `creators` row + `config.toml`).
             select_workspace_via_core(&user_home()?, creator_id, &workspace_slug, None).await?;
             println!("✓ Active workspace slug for {creator_id} set to: {workspace_slug}");
             Ok(())
@@ -843,7 +837,6 @@ async fn register_creator(
         }
     };
 
-    // generic platform-side expiry response.
     let now_after_solve = chrono::Utc::now();
     if now_after_solve > buffered_expiry {
         return Err(CliError::ChallengeExpired {
@@ -919,7 +912,6 @@ async fn register_creator(
 async fn register_local_creator(name: String) -> Result<()> {
     crate::commands::local_creator_bootstrap::bootstrap_local_creator(Some(name)).await?;
 
-    // exit marker so the register flow still names its mode.
     println!("  Local-only (no platform) — no platform account created.");
 
     Ok(())
@@ -982,9 +974,6 @@ async fn submit_with_retry(
 /// Tries to extract a user access token from the auth store.
 /// If no token is found, returns an error suggesting the user authenticate.
 fn obtain_auth_token(auth_store: &auth::AuthStore) -> Result<String> {
-    // non-empty access_token as a proxy for the user's auth token.
-    // A dedicated user token field (or platform session) would be more robust.
-    // This is sufficient for the current CLI-only registration flow.
     if let Some(creators) = &auth_store.creators {
         for state in creators.values() {
             if !state.access_token.is_empty() {
@@ -1197,7 +1186,6 @@ fn list_rows(
             .map(|r| (r.creator_id.as_str(), r))
             .collect();
 
-    // from V1.16 behavior).
     let mut all_ids: Vec<String> = cache.creators.keys().cloned().collect();
     if let Some(creators) = &auth_store.creators {
         for id in creators.keys() {
@@ -1220,7 +1208,6 @@ fn list_rows(
             let local_row = local_by_id.get(id.as_str()).copied();
             let (handle, display_name) = local_row.map_or_else(
                 || {
-                    // first, the CLI cache as the per-field fallback.
                     let core = core_home.map_or_default(|home| core_identity(home, &id));
                     let entry = creator_identity::get_creator_identity(cache, &id);
                     (
@@ -1327,9 +1314,6 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
     };
     let auth_store = crate::auth::AuthStore::load()?;
 
-    // owner cannot open degrades like the local-identity read above — the
-    // platform rows still render from the CLI-local cache instead of the
-    // listing failing over a source it has a fallback for.
     let core_home = match core_owned_home() {
         Ok(home) => Some(home),
         Err(err) => {
@@ -1366,10 +1350,6 @@ async fn list_creators(_config: &CliConfig, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    // platform values unchanged (local HANDLE renders `-`, PL-6). The CREATOR
-    // ID column is padded to the widest id in the listing (never narrower
-    // than the pre-existing 19), so 21-char `ctr_local*` ids align and
-    // platform-only listings keep the V1.176 layout byte-for-byte.
     let id_width = creator_id_column_width(&rows);
     println!(
         "{:<id_width$} {:<14} {:<21} {:<8} ACTIVE",
@@ -1433,7 +1413,6 @@ fn logout_creator(config: &CliConfig) -> Result<()> {
         }
     }
 
-    // creator: a concurrent A→B switch must survive this logout.
     CliConfig::mutate(|config| {
         if config.active_creator_id.as_deref() == Some(creator_id.as_str()) {
             config.active_creator_id = None;
@@ -2033,7 +2012,6 @@ mod tests {
             };
         };
 
-        // focuses on platform connectivity and error shaping, not challenge solving)
         let verify_result = client
             .verify_creator(
                 &register_response.verification.verification_code,
@@ -2249,8 +2227,6 @@ mod tests {
             "expected a ctr_local* identity, got {active}"
         );
 
-        // `creators` row must exist so `creator world create` passes its FK
-        // precheck — same resolution seam as `creator world create`.
         let db_path = crate::config::resolve_state_db_path(&config).expect("resolve state db path");
         let pool = crate::db::Schema::init(&db_path)
             .await
@@ -2271,7 +2247,6 @@ mod tests {
             "workspace creators row must exist for the registered local creator"
         );
 
-        // a persistent (non-anonymous, non-platform) local identity.
         let resolved = crate::commands::system::identity::resolve_active_identity()
             .await
             .expect("resolve active identity")
@@ -2514,7 +2489,6 @@ mod tests {
     #[test]
     fn creator_id_column_width_fits_widest_id_floor_19() {
         assert_eq!(creator_id_column_width(&[]), 19);
-        // layout stays byte-for-byte on a platform-only listing.
         let platform = ListRow {
             creator_id: "ctr_platabc".to_string(),
             handle: Some("alice".to_string()),
@@ -2523,7 +2497,6 @@ mod tests {
             origin: "platform",
         };
         assert_eq!(creator_id_column_width(std::slice::from_ref(&platform)), 19);
-        // column so HANDLE / ORIGIN stay aligned on local rows.
         let local = ListRow {
             creator_id: "ctr_localf0d65930e496".to_string(),
             handle: None,

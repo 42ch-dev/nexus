@@ -195,8 +195,6 @@ pub async fn orchestrate_check_world_scoped<F>(
 where
     F: FnOnce(CheckRunInput) -> SpokeResult<Vec<Finding>>,
 {
-    // (AR-1): they would punch a hole in world binding via spoke's
-    // by-`rule_id` priority over resolved refs.
     if !request.rules.is_empty() {
         return reject(
             SpokeRejectCode::InvalidInput,
@@ -207,7 +205,6 @@ where
 
     let pool = adapter.pool.clone();
 
-    // world's active rules (status filter at this boundary; storage order).
     if request.rule_refs.is_empty() {
         let rows = match list_rules_by_world(&pool, world_id).await {
             Ok(rows) => rows,
@@ -226,8 +223,6 @@ where
             .collect();
     }
 
-    // every resolvable row is owned by `world_id`. Unknown ids (no row)
-    // are not foreign — they pass through to spoke subset-omit (gate 4).
     if !request.rule_refs.is_empty() {
         let rows = match get_spoke_rules_by_ids(&pool, &request.rule_refs).await {
             Ok(rows) => rows,
@@ -255,13 +250,6 @@ where
             );
         }
 
-        // not the port, owns the status filter, and it covers explicit refs as
-        // well as automatic inclusion — so an archived tombstone (or any other
-        // non-active status) can never enter check scope by being named
-        // explicitly. Resolvable non-active refs are dropped here, before spoke
-        // resolves anything, so they evaluate nothing and persist nothing.
-        // Unknown ids keep passing through verbatim: spoke's subset-omit owns
-        // them (gate 5).
         let known_ids: HashSet<&str> = rows.iter().map(|row| row.rule_id.as_str()).collect();
         let active_ids: HashSet<&str> = rows
             .iter()
@@ -274,7 +262,6 @@ where
         });
     }
 
-    // subset-omit); world-scoped active refs run the spoke orchestrator.
     orchestrate_check(adapter, request, run_checker).await
 }
 
@@ -362,7 +349,6 @@ mod tests {
             "list_rules",
         );
 
-        // error — spoke semantics).
         assert_eq!(rules.len(), 2, "missing ref must be omitted");
         let mut ids: Vec<&str> = rules.iter().map(|r| r.rule_id.as_str()).collect();
         ids.sort_unstable();
@@ -477,7 +463,6 @@ mod tests {
         }
     }
 
-    /// order / status tests need control over both).
     async fn seed_rule_full(
         pool: &sqlx::SqlitePool,
         rule_id: &str,
@@ -560,7 +545,6 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn world_scoped_auto_include_expands_active_only_in_storage_order() {
         let (pool, _dir) = fresh_pool().await;
-        // expansion is exactly [rul_a, rul_d].
         seed_rule_full(&pool, "rul_b", "wld_1", "Beta", "draft").await;
         seed_rule_full(&pool, "rul_arch", "wld_1", "Archived", "archived").await;
         seed_rule_full(&pool, "rul_a", "wld_1", "Alpha", "active").await;
@@ -634,7 +618,6 @@ mod tests {
         seed_rule_full(&pool, "rul_draft", "wld_1", "Draft", "draft").await;
         seed_rule_full(&pool, "rul_deprecated", "wld_1", "Deprecated", "deprecated").await;
 
-        // the filter belongs to the wrapper, not to the port.
         let adapter = scoped(pool);
         let raw = unwrap_ok(
             adapter.list_rules(&["rul_archived".to_string()]).await,

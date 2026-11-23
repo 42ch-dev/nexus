@@ -162,7 +162,6 @@ export function resolveScalar(value, doc, index, sourcePath, seen = new Set(), t
         `[projectDesign] empty scalar at ${sourcePath} — a mapped token must resolve to a non-empty value (fail closed, no silent omission).`,
       );
     }
-    // resolve the target; callers that need a sub-member pass the member path.
     if (/^\{[^}]+\}$/.test(value)) {
       const ref = value.slice(1, -1).trim();
       return resolveRef(ref, doc, index, sourcePath, seen, trace);
@@ -188,7 +187,6 @@ export function resolveScalar(value, doc, index, sourcePath, seen = new Set(), t
     }
     return value;
   }
-  // than serializing "[object Object]".
   throw new Error(
     `[projectDesign] non-scalar value at ${sourcePath}: ${JSON.stringify(value).slice(0, 120)} — ` +
       `expected a scalar string/number or a "{ref}" / compound recipe.`,
@@ -216,17 +214,6 @@ function resolveRef(refPath, doc, index, sourcePath, seen, trace) {
   );
 }
 
-/**
- * DESIGN paths only (never a copied palette). Each entry:
- *   - cssVar : the exact existing CSS custom-property name to emit
- *   - source : dot-path into the parsed theme document
- *   - get    : extraction rule:
- *                'scalar'        — value is a scalar (refs/compounds resolved)
- *                {member}        — value is a recipe; use that member field
- *                'fontSize'       — whole-role ref; use .fontSize
- *                'color-of'       — compound "{typography.X} @ {colors.Y}" -> color member
- * Returns the CSS value via resolveScalar.
- */
 function buildProjection(doc) {
   const index = indexPaths(doc);
 
@@ -554,7 +541,6 @@ function emitBlock(doc, entries, index, indent = '  ', brandAlias = false) {
     }
     const value = projectValue(doc, entry, index);
     if (value === '') {
-      // defensive guard so a future regression cannot silently drop a var.
       throw new Error(
         `[projectDesign] ${entry.cssVar} resolved to an empty value (${entry.source}) — fail closed, no silent omission.`,
       );

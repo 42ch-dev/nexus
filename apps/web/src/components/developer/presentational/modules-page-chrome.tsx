@@ -112,10 +112,6 @@ export interface ModulesPageChromeProps {
   list: ModulesListView;
   selectedId: string | null;
   onSelect: (moduleId: string) => void;
-  /**
-   * the "select a module" prompt. The wiring decides which studio fills the
-   * panel's own `runStudio` slot.
-   */
   detail: ReactNode;
 }
 

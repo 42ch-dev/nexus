@@ -291,7 +291,6 @@ const CAPABILITY_BEARING: &str = r#"{
 
 #[test]
 fn a_capability_bearing_document_simulates_without_resolving_the_capability() {
-    // against, so the walk can only read the declared action.
     let trajectory = simulate_document(&document(CAPABILITY_BEARING))
         .expect("a capability-bearing document still simulates");
 

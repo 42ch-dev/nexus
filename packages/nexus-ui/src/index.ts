@@ -1,24 +1,3 @@
-/**
- * and promoted pure presentational primitives.
- * V1.87 ships: `<NexusLogo>` and `<NexusMark>`.
- * V1.99 P0 ships: `<Button>`, `<Badge>`, `<Card>` (+ sub-primitives).
- * V1.100 P2 ships: `<Input>`, `<Label>`, `<Textarea>`.
- * V1.101 P2 ships: `<Select>`.
- * V1.106 P0 ships: `<Toast>` (+ ToastProvider / Toaster / useToast).
- * V1.129 P1 ships: `<TransportErrorBlock>`.
- * V1.137 P2 ships: `<Tabs>` (+ TabsList / TabsTrigger / TabsContent).
- * V1.147 P1 ships: Compute Run Studio primitives (`<RunFormFields>`,
- * `<EntityPickerField>`, `<ProposalSections>`, `<RunStatusBadge>`, `<RunsTable>`).
- * V1.147 P2 ships: compute-on-Timeline primitives (`<ComputeResultNodeChrome>`,
- * `<ComputeInspectorSections>`).
- * VI logo upgrade ships: timeline `<NexusMark>`, `logoVariants.text`,
- * Studio-only `<NexusLogoVariant>` specimens.
- * V1.148 P1 ships: `<Dialog>` (+ trigger/close/content), `<Sheet>` (+ trigger/close/content),
- * `<Table>` primitives, `<States>` (Spinner/LoadingState/EmptyState/UnavailableState/ErrorState),
- * `<EmptyCreateCard>`.
- * V1.149 P1 ships: L2 patterns `<ListStateContainer>`, `<ConfirmDialog>`,
- * `<FormDialog>` (+ `<FormSection>`).
- */
 
 // Consumers (apps/web, apps/design-studio) import or re-export from here;
 // deep imports from @42ch/nexus-ui/src/* are forbidden.
@@ -76,7 +55,6 @@ export {
   type ToastVariant,
 } from './components/toast';
 
-// (Studio fixture → app wiring across gates + toasts + settings).
 export {
   TransportErrorBlock,
   type TransportErrorBlockProps,
@@ -147,9 +125,6 @@ export {
   type SettingsLayoutProps,
   type SettingsLayoutSection,
 } from './components/settings-layout';
-// responsive split, caller-owned regions, no open/close state) and the
-// read-only detail parts (FieldRow null-hide rows + DetailCard over the
-// promoted Card primitives). HubCard stays app-side per plan D5 decision.
 export {
   ListDetailShell,
   type ListDetailShellProps,

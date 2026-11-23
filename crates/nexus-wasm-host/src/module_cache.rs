@@ -470,7 +470,6 @@ mod tests {
             "same-id different-manifest-hash lookup must miss (manifest changed)"
         );
 
-        // Arc — the timing-independent no-recompile observable).
         let second = cache
             .get_or_compile(&engine, "basic-combat", bytes, manifest)
             .expect("cache hit");
@@ -479,8 +478,6 @@ mod tests {
             "unchanged artifacts must reuse the compiled module"
         );
 
-        // manifest (e.g. new sandbox overrides / schemas) ⇒ miss ⇒ fresh
-        // compile serving the NEW manifest settings.
         let manifest_v2 = {
             let mut value: serde_json::Value =
                 serde_json::from_str(manifest).expect("embedded manifest parses");
@@ -500,9 +497,6 @@ mod tests {
             "the fresh entry serves the NEW manifest settings"
         );
 
-        // OVERWRITTEN (the cache's only eviction), never duplicated. The
-        // replacement is a minimal valid wasm module (magic + version, zero
-        // sections) — different bytes that still compile.
         let changed: &[u8] = b"\0asm\x01\0\0\0";
         let fourth = cache
             .get_or_compile(&engine, "basic-combat", changed, &manifest_v2)

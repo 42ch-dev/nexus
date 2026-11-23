@@ -120,8 +120,6 @@ describe('ChapterNav — volume chip', () => {
     expect(screen.getByText('Volume 2')).toBeInTheDocument();
 
     rerender(
-      // same provider stack (MemoryRouter etc.) because `rerender` is bound to
-      // the same container.
       <ChapterNav
         workId="work-1"
         prev={null}

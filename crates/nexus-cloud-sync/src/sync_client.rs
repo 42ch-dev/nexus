@@ -897,9 +897,6 @@ mod tests {
 
         let body = mock_response.to_string();
 
-        // we test deserialization instead. The integration test with
-        // a real mock server is covered by the push_response tests above.
-
         let push_response: PushResponse = serde_json::from_str(&body).expect("parse mock response");
         assert!(push_response.success);
         assert_eq!(push_response.world_revision, Some(6));

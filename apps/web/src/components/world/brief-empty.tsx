@@ -1,7 +1,3 @@
-/**
- * first Brief: final prompt + example copy (product-owned) and the
- * `+ 写 Brief` action that mounts the inline {@link BriefEditor}.
- */
 import { useTranslation } from 'react-i18next';
 
 export interface BriefEmptyProps {

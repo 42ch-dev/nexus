@@ -45,9 +45,6 @@ describe('CanvasShellTimelineBadge — V1.123 P3 Task 2 visual prominence', () =
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveTextContent('Timeline');
     expect(badge).toHaveAttribute('aria-label', 'Timeline surface — central instrument');
-    // badge reads as part of the Timeline surface family (mirrors the
-    // per-surface accent pattern: strategy=purple, outline=amber,
-    // worldkb=teal, timeline=blue).
     expect(badge.style.color).toBe('var(--color-canvas-timeline-accent)');
   });
 
@@ -57,8 +54,6 @@ describe('CanvasShellTimelineBadge — V1.123 P3 Task 2 visual prominence', () =
     );
 
     const badge = screen.getByTestId('canvas-shell-timeline-badge');
-    // and aria-hidden so screen readers don't double-announce (the badge
-    // label + aria-label are the SR surface).
     const dot = badge.querySelector('[aria-hidden="true"]');
     expect(dot).not.toBeNull();
     expect((dot as HTMLElement).style.backgroundColor).toBe(
@@ -71,7 +66,6 @@ describe('CanvasShellTimelineBadge — V1.123 P3 Task 2 visual prominence', () =
       <CanvasShellTimelineBadge label="Timeline" ariaLabel="Timeline surface" />,
     );
     const badge = screen.getByTestId('canvas-shell-timeline-badge');
-    // context without sighted-only cues (the accent dot is aria-hidden).
     expect(badge).toHaveAttribute('role', 'status');
   });
 });
@@ -98,9 +92,6 @@ describe('CanvasNavCommands — go.timeline registration (V1.123 P3 Task 2)', ()
   });
 
   it('keeps go.timeline always available (no workId / worldId gating)', () => {
-    // `go.timeline` targets `/timeline` — a primary-nav route with no path
-    // params. The command MUST be reachable from any route (one-click
-    // reachability per AC-V1123-16).
     renderInRouter(<CanvasNavCommands />);
 
     const cmd = getCommands().find((c) => c.id === 'go.timeline');
@@ -109,7 +100,6 @@ describe('CanvasNavCommands — go.timeline registration (V1.123 P3 Task 2)', ()
   });
 
   it('preserves existing canvas nav commands (additive only)', () => {
-    // new global Timeline entry (V1.122 / V1.123 P2 regression).
     renderInRouter(<CanvasNavCommands />);
 
     const ids = new Set(getCommands().map((c) => c.id));

@@ -7,7 +7,6 @@ export type WizardStep = 'entrance' | 'agent' | 'workspace' | 'done';
 type StepDef = { id: WizardStep; key: string };
 
 const STEP_DEFS: StepDef[] = [
-  // the remaining steps can frame themselves for the chosen layout.
   { id: 'entrance', key: 'setup:progress.entrance' },
   { id: 'agent', key: 'setup:progress.agent' },
   { id: 'workspace', key: 'setup:progress.workspace' },

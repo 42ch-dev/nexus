@@ -169,7 +169,6 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     let control_read = unsafe {
         GetSecurityDescriptorControl(descriptor_pointer, &raw mut control, &raw mut revision)
     };
-    // transition before the DACL/protection derivation below.
     let read = owner_read & group_read & dacl_read & control_read;
     if read == 0 {
         return Err(io::Error::last_os_error());
@@ -180,7 +179,6 @@ pub fn apply(policy: &WindowsPolicy, file: &File) -> io::Result<()> {
     } else {
         ptr::null()
     };
-    // inheritable, or the replacement silently changes the effective policy.
     let protection = if control & SE_DACL_PROTECTED != 0 {
         PROTECTED_DACL_SECURITY_INFORMATION
     } else {
@@ -398,12 +396,8 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has no verifiable owner or DACL",
         ));
     }
-    // ends at the bytes the second query actually wrote (`needed`), not at
-    // the allocation's spare capacity or padding.
     let descriptor_end = (descriptor.as_ptr() as usize).checked_add(needed as usize);
     let owner_start = owner as usize;
-    // `SID` representation (revision, count, identifier authority, one
-    // subauthority slot) must lie inside the returned bytes.
     if !descriptor_end.is_some_and(|end| {
         owner_start
             .checked_add(std::mem::size_of::<SID>())
@@ -414,7 +408,6 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
             "credential file has an invalid owner security identifier",
         ));
     }
-    // enclosure, before any unbounded SID validator or comparison.
     let owner_count = advertised_subauthority_count(owner);
     if !descriptor_end.is_some_and(|end| {
         sid_required_length(owner_count).is_some_and(|required| {
@@ -487,12 +480,6 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
         match header.AceType {
             ACCESS_DENIED_ACE_TYPE => {}
             ACCESS_ALLOWED_ACE_TYPE => {
-                // `AceSize` does not cover the header, the mask and the
-                // complete minimal `SID` structure (revision, subauthority
-                // count, identifier authority and one subauthority slot)
-                // cannot be classified and refuses. The record's full
-                // count-dependent enclosure is checked after the bounded
-                // count read below.
                 let needed_extent = std::mem::size_of::<ACE_HEADER>()
                     + std::mem::size_of::<u32>()
                     + std::mem::size_of::<SID>();
@@ -512,9 +499,6 @@ pub fn grants_only_to_trusted_principals(file: &File) -> io::Result<()> {
                 // the fixed SID structure is readable before validation.
                 let allowed = unsafe { &*ace.as_ptr().cast::<ACCESS_ALLOWED_ACE>() };
                 let sid = ptr::from_ref(&allowed.SidStart).cast_mut().cast::<c_void>();
-                // prefix was proved readable by the extent guard above, and
-                // only then is the complete count-dependent enclosure
-                // checked, before any unbounded SID validator or comparison.
                 let trustee_count = advertised_subauthority_count(sid);
                 if !record_encloses_sid(header.AceSize as u32, trustee_count) {
                     return Err(io::Error::new(

@@ -169,7 +169,6 @@ describe('FormDialog', () => {
 
     const form = document.querySelector('form')!;
     fireEvent.submit(form);
-    // dialog stays mounted and no reload wipes its state.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 

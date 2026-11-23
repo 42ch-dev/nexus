@@ -140,11 +140,6 @@ mod tests {
 
     #[test]
     fn checked_written_rejects_ret_exceeding_out_cap() {
-        // be trusted (from_raw_parts would read past the leaked buffer) —
-        // rejected as OutputTooSmall, the same condition as the `-2`
-        // sentinel. (Tested on the helper: call_host itself writes into
-        // shim::alloc'd buffers whose host-target pointers are truncated,
-        // so the guard logic is exercised without touching linear memory.)
         assert_eq!(checked_written(0, 16), Ok(0));
         assert_eq!(checked_written(16, 16), Ok(16));
         assert_eq!(checked_written(17, 16), Err(HostError::OutputTooSmall));

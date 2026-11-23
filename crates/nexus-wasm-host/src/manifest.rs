@@ -36,10 +36,6 @@ use nexus_contracts::generated::daemon_api::compute::module_detail::{
     ModuleDetail, ModuleDetailHostFunctionsItem, ModuleDetailSchemas,
 };
 
-// `verify_wasm_sha256`) moved to the shared `nexus-module-manifest` crate.
-// This module re-exports them so every existing importer (`host.rs`,
-// `compute.rs`, `module_cache.rs`, `registry.rs`, daemon handlers, tests)
-// keeps compiling unchanged.
 pub use nexus_module_manifest::{HostFunction, ModuleManifest, ModuleSchemas};
 
 fn json_object_to_map(value: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
@@ -310,7 +306,6 @@ mod tests {
 
     #[test]
     fn wasm_sha256_field_is_backward_compat_absent() {
-        // verification is skipped (legacy stat-fence fallback).
         let json = r#"{
             "module_id": "legacy-mod",
             "name": "Legacy Module",

@@ -14,7 +14,6 @@ const OWNED_WORLD: &str = "wld_owned";
 const FOREIGN_WORLD: &str = "wld_foreign";
 
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str) {
-    // ActorView/KB read scope fails closed (`holder_state_invalid`) on a raw
     nexus_local_db::ensure_creator_row(pool, owner, "Test")
         .await
         .expect("seed creator");

@@ -6,7 +6,6 @@ import fs from 'fs';
  * Works from both dist/ (compiled) and src/ (ts-node) contexts.
  */
 export function resolveFromRoot(...segments: string[]): string {
-  // When source: __dirname = tooling/codegen/src → go up 3 levels
   const root = path.resolve(__dirname, '..', '..', '..');
   return path.join(root, ...segments);
 }

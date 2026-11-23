@@ -51,12 +51,6 @@ export function WorksInspirationPage() {
   const errorToast = useErrorToast();
 
   const [title, setTitle] = useState('');
-  /**
-   * tracks the LATEST call, so two overlapping promotes re-enabled row A while
-   * B was pending and the server (which checks status once) could mint two
-   * Works from one idea. Own the lock here instead: the first promote holds it
-   * until it settles, and every promote button is disabled while held.
-   */
   const [promotingItemId, setPromotingItemId] = useState<string | null>(null);
   const inspiration = useWorkInspiration({ limit: DEFAULT_PAGE_SIZE });
   const addMutation = useAddWorkInspiration();
@@ -120,7 +114,6 @@ export function WorksInspirationPage() {
   }
 
   function handlePromote(row: InspirationPoolRow) {
-    // promote at a time, whichever row asked.
     if (promotingItemId !== null) return;
     setPromotingItemId(row.itemId);
     promoteMutation.mutate(row.itemId, {

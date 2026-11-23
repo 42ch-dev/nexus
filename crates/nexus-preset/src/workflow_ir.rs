@@ -215,7 +215,6 @@ pub fn import_preset_bundle(
     references.sort_by(|a, b| a.1.cmp(&b.1));
     references.dedup_by(|a, b| a.1 == b.1);
 
-    // rule the loader/validator enforce (`assert_template_file_safe`) applies to every source.
     for (_, path) in &references {
         if let Err(reason) = crate::loader::assert_template_file_safe(path) {
             return Err(refuse(format!("unsafe asset path `{path}`: {reason}")));
@@ -304,7 +303,6 @@ fn document_from_manifest(
     }
 
     let effect_summary = nexus_workflow_ir::effect_summary(&nodes);
-    // whose markers disagree with the header still projects, so validation can report the defect.
     let terminal = if header.terminal.is_empty() {
         manifest
             .states
@@ -454,9 +452,6 @@ fn push_next_edges(
     match &state.next {
         None => {}
         Some(NextTarget::Linear(to)) => {
-            // passes, which is what the IR calls that node's `default` edge (and the only edge a
-            // static walk may follow out of an `llm_judge` node). A `linear` edge here would
-            // leave the judge with no branch to follow.
             let kind = if is_judged(state) {
                 WorkflowEdgeKind::Default
             } else {
@@ -815,7 +810,6 @@ fn role_ir(role: &crate::manifest::PresetRoleDefinition) -> WorkflowRoleDefiniti
 }
 
 fn state_effect(state: &StateDefinition) -> WorkflowNodeEffectClass {
-    // and a judge exit calls a capability; v0 has no capability-effect catalog, so worst case.
     let mut rank = if state.enter.is_empty() { 0 } else { 3 };
     if matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. })) {
         rank = rank.max(3);
@@ -1078,8 +1072,6 @@ fn next_from_edges(
         return Ok(None);
     };
 
-    // next; projecting it back as [`NextTarget::Linear`] keeps the round trip byte-identical and
-    // keeps the builder's outer topology on the same edge it had before.
     if judged && edges.len() == 1 && matches!(first.kind, WorkflowEdgeKind::Default) {
         return Ok(Some(NextTarget::Linear(first.to.clone())));
     }
@@ -1563,7 +1555,6 @@ states:
             "a judged state's unconditional advance is the branch a run takes: its default edge"
         );
 
-        // edge would project as branches-with-no-rules, which wires no outer edge at all.
         let exported = export_preset(&document).expect("export");
         assert_eq!(
             serde_json::to_value(&exported).expect("exported json"),

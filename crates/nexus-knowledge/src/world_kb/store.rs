@@ -365,9 +365,6 @@ impl Default for InMemoryKbStore {
     }
 }
 
-// match the future SQLite backend (see the trait docs) and this in-memory
-// impl mirrors it. The methods perform no real async I/O, so clippy 1.98's
-// `unused_async_trait_impl` (new in 1.98, toolchain drift) is silenced.
 #[allow(clippy::unused_async_trait_impl)]
 impl KbStore for InMemoryKbStore {
     async fn insert_knowledge_entry(
@@ -399,8 +396,6 @@ impl KbStore for InMemoryKbStore {
         let created_at = kb.created_at.clone();
 
         {
-            // — concurrent-uniqueness race: InMemoryKbStore check+insert is not
-            // atomic under concurrent access; acceptable for single-user daemon.
             let mut blocks = self.write_blocks()?;
             Self::check_uniqueness(&blocks, &kb.owner, &kb.canonical_name, kb.block_type, None)?;
             blocks.insert(entry_id.clone(), kb);
@@ -428,8 +423,6 @@ impl KbStore for InMemoryKbStore {
         &self,
         world_id: &str,
     ) -> Result<Vec<KnowledgeEntryRecord>, KbStoreError> {
-        // World-owned active records match (Character/binding rows carry a
-        // `None` world_id and are excluded).
         let items: Vec<KnowledgeEntryRecord> = self
             .read_blocks()?
             .values()
@@ -571,14 +564,10 @@ impl KbStore for InMemoryKbStore {
                 .get(&kb.entry_id)
                 .ok_or_else(|| KbStoreError::NotFound(kb.entry_id.clone()))?;
 
-            // knowledge is explicit create/copy work.
             if existing.owner != kb.owner {
                 return Err(KbStoreError::ImmutableOwner(kb.entry_id.clone()));
             }
 
-            // transaction is the only writer of holder_entry_id/disclosure, so
-            // an ordinary update (compute, promote, sync) cannot transfer or
-            // clear an existing private audience.
             if existing.holder_entry_id != kb.holder_entry_id
                 || existing.disclosure != kb.disclosure
             {
@@ -1196,10 +1185,6 @@ mod tests {
         assert_eq!(result.total_count, 1);
     }
 
-    // omission/explicit semantics, the closed native pair, reserved-key
-    // rejection, read-selection construction, and the ordinary store path's
-    // refusal to move governance.
-
     use crate::world_kb::knowledge_entry::{
         reject_reserved_authoring_keys, resolve_authored_governance, validate_native_governance,
         KnowledgeAudience, KnowledgeAuthoringOp, KnowledgeGovernance, ReservedAuthoringKey,
@@ -1378,7 +1363,6 @@ mod tests {
             assert_eq!(&parsed, audience);
         }
 
-        // schemas and the generated DTOs use hyphenated tags only.
         assert!(
             serde_json::from_value::<KnowledgeAudience>(
                 serde_json::json!({ "kind": "author_only" })

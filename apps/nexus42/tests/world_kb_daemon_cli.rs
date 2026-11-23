@@ -308,10 +308,6 @@ async fn entity_patch_stale_version_surfaces_conflict() {
     );
     assert!(!out.status.success(), "stale patch should fail");
     let err = stderr(&out);
-    // daemon HTTP route. The locked direct-core error contract keeps the same
-    // structured `world_kb_conflict` surface: the stable code, the row's
-    // current version, the caller's expected version (so a stale CAS names
-    // BOTH sides), the entity, and the recovery hint. Exit code stays 76.
     assert!(err.contains("world_kb_conflict"), "code missing: {err}");
     assert!(
         err.contains("current_version:"),
@@ -398,9 +394,6 @@ async fn kb_graph_json_emits_dto_verbatim() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn kb_graph_notes_relationship_cap_when_hit() {
-    // relationships with no wire `truncated` flag; when the count hits the cap
-    // the human output must state plainly that the graph may be truncated (the
-    // note itself is honest about the missing flag).
     let fixture = DirectFixture::new().await;
     let world_id = create_world(&fixture);
     let entity_id = seed_entity(&fixture, &world_id).await;
@@ -456,13 +449,11 @@ async fn pack_export_and_dry_run_without_server() {
     let entries = pack["entries"].as_array().expect("entries array");
     assert_eq!(entries.len(), 1, "the seeded entity must be exported");
     assert_eq!(entries[0]["entry_id"], entity_id);
-    // explicit `--include-owned-private` intent.
     assert!(
         text.contains("shared rows only"),
         "scope line missing: {text}"
     );
 
-    // replaced, and nothing is written — the body still reads as stored.
     let dry = kb_cli(
         &fixture,
         &[
@@ -562,7 +553,6 @@ async fn pack_import_quarantines_unmapped_holder_without_server() {
         err.contains("rejected"),
         "a quarantined atom is not a plain success: {err}"
     );
-    // importing Creator's own holder (and nothing under any other).
     assert_eq!(
         stored_governance(&fixture, "kb_governed_foreign").await,
         None,

@@ -58,7 +58,6 @@ async fn seed_llm_pending() -> (tempfile::TempDir, sqlx::SqlitePool, String) {
         "source_quote": "...the eastern gate groaned open...",
     })
     .to_string();
-    // connection (`&mut SqliteConnection`) since the T13 writer-protocol change.
     let mut conn = pool.acquire().await.expect("acquire workspace connection");
     let row = insert_pending_with_llm(
         &mut conn,
@@ -116,11 +115,6 @@ async fn adopt_succeeds_on_llm_extracted_candidate() {
 /// machine consumers see the LLM extraction metadata (cli-spec §6.2G).
 #[tokio::test]
 async fn adopt_json_output_includes_llm_metadata() {
-    // in integration tests; instead we verify the underlying data path: the
-    // candidate carries the metadata and adopt promotes it cleanly. The
-    // --json formatter reads the same KbExtractPromotion fields this test
-    // asserts on. (The exact println formatting is covered by the
-    // extract_llm_metadata unit test in kb.rs.)
     let (_dir, pool, job_id) = seed_llm_pending().await;
     kb_adopt(&pool, OWNER, &job_id, None, true)
         .await

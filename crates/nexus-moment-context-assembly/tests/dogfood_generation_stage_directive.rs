@@ -220,8 +220,6 @@ async fn assemble(
 
 #[tokio::test]
 async fn dogfood_produce_places_all_slots_and_directive() {
-    // directive injects between Timeline and World KB (above lore, below
-    // system — Q1 lock).
     let (ctx, store, _narrative) = assemble(GenerationStage::Produce).await;
     let full = ctx.to_full_context();
 

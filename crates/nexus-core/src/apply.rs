@@ -425,8 +425,6 @@ impl CoreService {
 
         let current_apply = current_apply(&self.inner.pool, strategy_id).await?;
 
-        // row this response reports: resolving a second `current_apply` could pair the document
-        // with another apply's identity in one body. The outer `Err` propagates as above.
         let (applied_document, applied_document_refusal) = match current_apply.as_ref() {
             None => (None, None),
             Some(apply) => match verified_apply_document(
@@ -536,11 +534,6 @@ impl CoreService {
     ) -> CoreResult<AppliedStrategy> {
         self.verify_principal(principal)?;
 
-        // naming an embedded or system id records a row nothing ever reads — a successful apply
-        // that changes nothing. The source is the LOADER's answer through the resolver the intake
-        // shares; a preset that does not resolve at all is equally not a user bundle. Validation
-        // uses the builtin catalog, the one every other Canvas strategy read validates against
-        // (`imported_strategy_document`, approve, simulate).
         let user_preset = nexus_preset::resolve_preset(
             strategy_id,
             self.nexus_home(),
@@ -561,11 +554,6 @@ impl CoreService {
         let apply_id = format!("apl_{}", uuid::Uuid::new_v4());
         let applied_at = chrono::Utc::now().to_rfc3339();
 
-        // the current row as this statement sees it, the already-current refusal is the absence of
-        // any successor-less row naming this approval, and the schedule precondition rides in the
-        // same statement so an apply cannot land for a strategy that lost its schedule. A
-        // superseded approval passes the guard, which is what makes rollback a normal apply.
-        //
         // Both current-row picks order by `applied_at DESC, apply_id DESC` — the same total order
         // [`current_apply`] reports — so a strategy holding two successor-less rows (only an
         // admitted non-core writer can create that) still names one defined row everywhere.
@@ -629,9 +617,6 @@ impl CoreService {
         strategy_id: &str,
         approval_content_hash: &str,
     ) -> CoreResult<(String, String)> {
-        // content is legal, and the request names the strategy it applies to. `approval_id`
-        // breaks the tie so a hash only foreign strategies carry names the same strategy on every
-        // read: `UNIQUE (strategy_id, content_hash)` already rules out a tie inside one strategy.
         let Some((approval_id, approval_strategy_id, stored_hash, document_json, pins_json)) =
             sqlx::query_as::<_, (String, String, String, String, String)>(
                 "SELECT approval_id, strategy_id, content_hash, document_json, pins_json \
@@ -659,7 +644,6 @@ impl CoreService {
             .into_error());
         }
 
-        // column: an approval whose document moved no longer proves the hash it promises.
         let document: WorkflowDocument = serde_json::from_str(&document_json).map_err(|error| {
             apply_internal(format!(
                 "approval `{approval_id}` document does not decode: {error}"
@@ -676,14 +660,9 @@ impl CoreService {
             .into_error());
         }
 
-        // unchanged `id@version` leaves this hash intact. The frozen pin snapshot is the second,
-        // narrower guard, and it runs before buildability so a moved pin is named as the pin it is.
         verify_pins(self.nexus_home(), &document, &pins_json)
             .map_err(|failure| pin_apply_refusal(&approval_id, failure).into_error())?;
 
-        // same document with `IrTemplateSource::OwnSource`, so a document the builder refuses
-        // would apply, report itself applied, and then fail at its first build (I-000448). Same
-        // predicate, same reason, before the row exists.
         if let Err(reason) = validate_ir_buildability(&document, IrTemplateSource::OwnSource) {
             return Err(ApplyRefusal::DocumentUnbuildable {
                 builder_reason: reason.to_string(),
@@ -763,8 +742,6 @@ impl CoreService {
 /// `_system.` id names no strategy.
 #[must_use]
 pub fn is_user_preset(strategy_id: &str, loaded: &nexus_preset::LoadedPreset) -> bool {
-    // engine's preset trait entries classify through the same function — one
-    // rule for both sides of the intake gate.
     nexus_home_layout::strategy_intake::is_user_strategy_bundle(
         strategy_id,
         matches!(

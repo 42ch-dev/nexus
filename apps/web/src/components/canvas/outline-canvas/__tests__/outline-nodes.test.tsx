@@ -116,5 +116,4 @@ describe('OutlineChapterNode status pill AA text step', () => {
   });
 });
 
-// stubs Handle to null; Position is used in the fixture props).
 void Handle;

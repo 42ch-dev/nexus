@@ -152,7 +152,6 @@ impl TimelineEvent {
             ));
         }
 
-        // Event's sequence_no must be greater than all existing canon events in the branch
         let max_canon_sequence = branch_events
             .iter()
             .filter(|e| e.status == TimelineEventStatus::Canon.as_str())
@@ -421,7 +420,6 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
                 .expect("canonical_name fallback chain guarantees a non-empty value")
         };
 
-        // failure; SQLite datetime('now') is normalized to RFC3339 first.
         let created_at = parse_created_at(&d.created_at);
 
         let mut extensions: std::collections::HashMap<
@@ -433,7 +431,6 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
             ns.insert("world_id".into(), Value::String(d.world_id.clone()));
             ns.insert("branch_id".into(), Value::String(d.branch_id.clone()));
             ns.insert("event_type".into(), Value::String(d.event_type.clone()));
-            // own lifecycle status semantics on the spoke type).
             ns.insert("timeline_status".into(), Value::String(d.status.clone()));
             ns.insert("sequence_no".into(), Value::Number(d.sequence_no.into()));
             if let Some(cmd) = d.source_command_id.as_ref() {
@@ -454,11 +451,6 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
             description: d.summary,
             extensions,
             fork_id: None,
-            // typed map. None → empty map (spoke serializes empty away via
-            // skip_serializing_if = is_empty); Some → serde round-trip into the
-            // spoke HashMap<TimelineEventModulesKey, TimelineEventModulesValue>.
-            // Malformed modules (e.g. a non-object) is a bug and panics here
-            // rather than silently dropping data at the seam.
             modules: d
                 .modules
                 .map_or_else(std::collections::HashMap::new, |value| {
@@ -472,7 +464,6 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
             participant_entry_ids: d.affected_key_block_ids.unwrap_or_default(),
             schema_version: std::num::NonZeroU64::new(u64::from(d.schema_version))
                 .expect("schema_version >= 1"),
-            // author free-form sort keys; sequence_no is the canonical order).
             sort_key: Some(d.sequence_no.to_string()),
             source_anchor: None,
             timeline_event_id: d.timeline_event_id,
@@ -484,8 +475,6 @@ impl From<TimelineEvent> for SpokeTimelineEvent {
 
 impl From<SpokeTimelineEvent> for TimelineEvent {
     fn from(s: SpokeTimelineEvent) -> Self {
-        // subsequent field moves out of `s` are not blocked by outstanding
-        // borrows (same ordering convention as KnowledgeEntryRecord↔KnowledgeEntry).
         let (
             world_id,
             branch_id,
@@ -530,7 +519,6 @@ impl From<SpokeTimelineEvent> for TimelineEvent {
             )
         };
 
-        // spoke label is the nexus title carrier).
         let title = Some(String::from(s.canonical_name));
 
         Self {
@@ -550,12 +538,6 @@ impl From<SpokeTimelineEvent> for TimelineEvent {
                 Some(s.participant_entry_ids)
             },
             source_command_id,
-            // Option<Value>. Empty spoke map ≡ unrecorded (None) per spoke
-            // handbook — an explicit empty object cannot round-trip through
-            // the non-Option spoke `modules` map (it collapses to None);
-            // non-empty → the map serialized back to a JSON object
-            // (keys/values are spoke transparent/untagged newtypes, so
-            // content is preserved verbatim).
             modules: if s.modules.is_empty() {
                 None
             } else {
@@ -774,7 +756,6 @@ mod tests {
         evt.add_affected_kb("kb_loc_ashford");
         evt.source_command_id = Some("cmd_abc123".to_string());
         evt.status = TimelineEventStatus::Canon.as_str().to_string();
-        // `to_rfc3339()` on the reverse path is byte-identical.
         evt.created_at = "2026-07-28T12:00:00+00:00".to_string();
 
         let spoke: SpokeTimelineEvent = evt.clone().into();
@@ -800,7 +781,6 @@ mod tests {
 
     #[test]
     fn spoke_seam_forward_packs_extensions_nexus_correctly() {
-        // type; title maps to canonical_name (not extensions).
         let mut evt = TimelineEvent::new("wld_abc", "fbk_main", TimelineEventType::StoryAdvance, 7);
         evt.title = Some("Treaty Signing".to_string());
         evt.summary = Some("Peace at last.".to_string());
@@ -829,8 +809,6 @@ mod tests {
 
     #[test]
     fn spoke_seam_canonical_name_falls_back_to_summary_then_id() {
-        // summary is also absent, to timeline_event_id. This guarantees the
-        // spoke required field (minLength 1) is always satisfied.
         let mut evt_no_title =
             TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
         evt_no_title.summary = Some("Summary-only event".to_string());
@@ -876,8 +854,6 @@ mod tests {
 
     #[test]
     fn spoke_seam_empty_vecs_round_trip_to_none() {
-        // to None (empty ≡ None contract for caused_by_event_ids and
-        // affected_key_block_ids).
         let evt = TimelineEvent::new("wld_x", "fbk_y", TimelineEventType::StateUpdate, 1);
         let spoke: SpokeTimelineEvent = evt.into();
         let roundtripped: TimelineEvent = spoke.into();

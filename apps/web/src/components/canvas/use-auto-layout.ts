@@ -75,9 +75,6 @@ function computeDagreLayout<TNodeData extends Record<string, unknown>>(
   const absolute = new Map<string, { x: number; y: number; width: number; height: number }>();
   for (const node of nodes) {
     const label = graph.node(node.id) as DagreNodeLabel | undefined;
-    // (compound-graph ranker edge cases). Fall back to the origin and the
-    // node's own dimensions so the layout never crashes on a missing or
-    // partial label (R-V1114P0QC2-M001).
     const fallback = nodeDimensions(node);
     const width = label?.width ?? fallback.width;
     const height = label?.height ?? fallback.height;
@@ -142,10 +139,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
       return { nodes, isLayouting: false, relayout };
     }
 
-    // from the last layout run. Any deviation marks the surface as dirty and
-    // suppresses automatic re-layouts. This loop is read-only: refs are updated
-    // in the layout effect below so strict-mode double-invocation cannot leak
-    // state between memo runs.
     let hasManualPosition = hasManualPositionRef.current;
     for (const node of nodes) {
       if (manualNodeIdsRef.current.has(node.id)) continue;
@@ -161,8 +154,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
 
     const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
     const isFirstLayout = !initialLayoutDoneRef.current;
-    // (hasSuppliedPositions). On first open, respect those positions and skip
-    // dagre; the author can still trigger an explicit relayout() (W003).
     const hasSuppliedPositions = options.hasSuppliedPositions === true;
     const shouldLayout =
       isRelayout || (isFirstLayout && !hasManualPosition && !hasSuppliedPositions);
@@ -180,7 +171,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
       return;
     }
 
-    // of the memo above.
     for (const node of nodes) {
       if (manualNodeIdsRef.current.has(node.id)) continue;
       const last = lastLayoutPositionsRef.current.get(node.id);
@@ -198,10 +188,6 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
     const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
     const firstCheckpoint = !initialLayoutDoneRef.current;
 
-    // there is nothing to snapshot — manual-drag detection continues to use
-    // the existing baseline. On the first checkpoint, snapshot even when dagre
-    // was skipped (supplied-positions mode) so subsequent manual drags can be
-    // detected against the preserved baseline (W003).
     if (!layoutApplied && !firstCheckpoint) {
       return;
     }

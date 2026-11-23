@@ -37,7 +37,6 @@ pub fn classify_operation(operation: &str) -> OperationCategory {
             OperationCategory::LocalWithPlatformEnhancement
         }
 
-        // Unknown operations fail-open (allow) as conservative default; log warning
         _ => OperationCategory::LocalOnly,
     }
 }

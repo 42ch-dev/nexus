@@ -298,11 +298,9 @@ mod tests {
     #[tokio::test]
     async fn guarded_admission_permits_engine_owner_writes() {
         let (_dir, pool) = fresh_engine_pool().await;
-        // but assert directly here for the guard contract).
         upsert_operation(&pool, "op-g", "sess-g", "mock-acp", "running")
             .await
             .expect("engine owner must be admitted");
-        // must fence it. Using a distinct file avoids the retained engine guard.
         let direct_dir = tempfile::tempdir().unwrap();
         let direct_path = direct_dir.path().join("direct.db");
         let direct = crate::open_pool(&direct_path)

@@ -145,7 +145,6 @@ fn oversized_unexported_memory_module() -> Vec<u8> {
 #[test]
 fn memory_cap_covers_unexported_memories() {
     let engine = WasmEngine::new().unwrap();
-    // unexported memory (64 pages = 4 MiB) exceeds it.
     let module = engine
         .load_module(&oversized_unexported_memory_module())
         .unwrap();

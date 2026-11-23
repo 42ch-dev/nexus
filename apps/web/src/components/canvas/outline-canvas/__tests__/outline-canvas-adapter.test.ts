@@ -94,9 +94,6 @@ describe('OutlineCanvasAdapter — shape', () => {
 
   it('omits dagre layoutOptions (compound-graph ranker bug — projected positions used directly)', () => {
     const adapter = makeAdapter();
-    // when an edge targets a node that has children via setParent (the Outline
-    // projection creates volume→chapter edges where chapter nodes have scene/
-    // beat children). The projection's built-in grid layout supplies positions.
     expect(adapter.layoutOptions).toBeUndefined();
   });
 
@@ -218,7 +215,6 @@ describe('OutlineCanvasAdapter.projectGraph — projection equivalence', () => {
   });
 
   it('reads translateFallback from the context ref at projection time', () => {
-    // projectGraph call, not capture it at creation time.
     const ctx = makeCtx();
     ctx.translateFallback = (c) => `Kapitel ${c}`;
     const ctxRef: MutableRefObject<OutlineCanvasAdapterContext> = { current: ctx };
@@ -258,9 +254,6 @@ describe('OutlineCanvasAdapter.summarizeGraph', () => {
   });
 
   it('reports not-loaded when outline is absent in the payload', () => {
-    // requires a concrete outline. The orchestrator (T1b) is responsible for
-    // not calling summarizeGraph before data is loaded (isLoading gate).
-    // This test documents the contract: summarizeGraph receives a loaded graph.
     const o = outline();
     const adapter = makeAdapter({ t: T_STUB });
     const summary = adapter.summarizeGraph({

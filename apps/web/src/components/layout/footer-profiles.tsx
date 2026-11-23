@@ -181,19 +181,14 @@ function CreateCreatorDialog({
   const create = useCreateCreator();
   const [displayName, setDisplayName] = useState('');
 
-  // transport error from a previous attempt does not haunt the next visit.
   useEffect(() => {
     if (open) {
       setDisplayName('');
       create.reset();
     }
-    // reactive trigger we want here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // a NexusClientError carrying a `kind`, surface the per-kind headline + body
-  // + CTA from the spec table. HTTP errors (no `kind`) are left to the global
-  // toast via `useCreateCreator.onError` — the dialog only owns transport UX.
   const transportKind: TransportErrorKind | null =
     create.error instanceof NexusClientError && create.error.kind
       ? create.error.kind
@@ -205,7 +200,6 @@ function CreateCreatorDialog({
      mutate({ display_name: displayName.trim() });
   }
 
-  // forcing the user to retype the name.
   function mutate(payload: { display_name: string }) {
     create.mutate(payload, {
       onSuccess: () => {
@@ -216,8 +210,6 @@ function CreateCreatorDialog({
   }
 
   function handleRetry() {
-    // holds the payload the user originally submitted — retry re-sends the
-    // same value (spec AC-V1129-P0-3).
     const name = displayName.trim();
     if (!name) return;
      mutate({ display_name: name });
@@ -228,7 +220,6 @@ function CreateCreatorDialog({
     navigate('/settings/advanced#connection');
   }
 
-  // only on the kinds the spec lists.
   const primaryCta = primaryCtaForKind(transportKind ?? 'unknown');
   const secondaryCta = secondaryCtaForKind(transportKind ?? 'unknown');
 
@@ -257,10 +248,6 @@ function CreateCreatorDialog({
               <Button
                 type="button"
                 variant="primary"
-                // click handler must agree. `openConnectionSettings` navigates,
-                // `useDesktopApp` is informational (no-op — body copy carries
-                // the instruction), `retry` re-submits. Mirror of the secondary
-                // CTA branching below.
                 onClick={
                   primaryCta === 'openConnectionSettings'
                     ? handleOpenConnectionSettings
@@ -323,9 +310,6 @@ function CreateCreatorDialog({
   );
 }
 
-/**
- * present; secondary is `null` when the spec table lists only one CTA.
- */
 type CreateCreatorCta = 'retry' | 'openConnectionSettings' | 'useDesktopApp';
 
 function primaryCtaForKind(kind: TransportErrorKind): CreateCreatorCta {

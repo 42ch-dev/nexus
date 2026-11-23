@@ -120,7 +120,6 @@ function createWorkspace(crates, { lockfile = true, afterLock } = {}) {
   return root;
 }
 
-// core's own direct spoke-operations edge.
 function domainCrates({ coreDeps = {}, coreDevDeps = {}, extra = {} } = {}) {
   return {
     'nexus-core': {
@@ -141,8 +140,6 @@ function runGuard(args, { env: envExtra } = {}) {
     timeout: 180_000,
     killSignal: 'SIGKILL',
   });
-  // ordinary nonzero refusal — `status: null` would satisfy `notEqual(…, 0)`
-  // silently in the negative tests. Surface the abort condition explicitly.
   if (run.error || run.signal) {
     throw new Error(
       `guard run aborted: error=${run.error ? (run.error.code ?? run.error.message) : 'none'} signal=${run.signal ?? 'none'}`,
@@ -155,9 +152,6 @@ function domainRun(root) {
   return runGuard(['--cohort', 'domain', '--manifest-path', path.join(root, 'Cargo.toml')]);
 }
 
-// core imports the tool grammar from. The adapter's own `default` turns the
-// compute half on, so core's edge must pin `default-features = false` — that is
-// what keeps the WASM plane out of the catalog cohort.
 function catalogCrates({ coreDeps = {}, extra = {} } = {}) {
   return domainCrates({
     coreDeps: { 'nexus-spoke-adapter': ', default-features = false', ...coreDeps },
@@ -189,9 +183,6 @@ test('domain cohort passes on a domain-shaped workspace', () => {
 });
 
 test('a missing provider forwarding edge is refused', () => {
-  // workspace member; only nexus-memory-provider -> spoke-operations is gone.
-  // The forward half must stay green so the failure is attributable to the
-  // provider's required edge, not to the whole graph having collapsed.
   const root = createWorkspace({
     'nexus-core': { deps: { 'nexus-memory-provider': null, 'spoke-operations': null } },
     'nexus-memory-provider': { deps: {} },
@@ -248,8 +239,6 @@ test('catalog cohort passes on a catalog-shaped workspace', () => {
   const run = catalogRun(root);
 
   assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
-  // matching a zero-row "success" — the exact false-green the domain cohort
-  // shipped before R3.
   assert.match(run.stdout, /ok: nexus-core <default> resolves 3 distinct dependency package\(s\)/);
   assert.match(run.stdout, /ok: nexus-core v0\.1\.0 feats=\[default\] for nexus-core <default>/);
   assert.match(run.stdout, /ok: nexus-memory-provider v0\.1\.0 feats=\[default\] for nexus-core/);
@@ -284,9 +273,6 @@ test('catalog cohort fails when its graph is empty', () => {
 });
 
 test('catalog cohort fails when a positive pin resolves no row', () => {
-  // exact-one probe resolves no row at all. The pin must fail and must never
-  // print its `ok:` line, so the happy-path `ok:` assertions above can never be
-  // satisfied by an empty result set.
   const root = createWorkspace({
     'nexus-core': { deps: { 'spoke-operations': null, 'nexus-spoke-adapter': null } },
     'nexus-memory-provider': { deps: { 'spoke-operations': null } },
@@ -302,10 +288,6 @@ test('catalog cohort fails when a positive pin resolves no row', () => {
 });
 
 
-// manifests are raw because the shape under test IS the feature wiring: a
-// selector's forwarding edge, core's optional simulator dep and the plain
-// store dep that gives each selection a non-empty census.
-//
 // `plainDep` / `computeLeaf` exist so a case can make ONE negative root
 // vacuous: the compute row needs a dep of its own, the no-default row needs a
 // non-optional one, and each control must be provably able to fail.
@@ -360,7 +342,6 @@ ${extraDeps}`;
         'nexus42',
         'cli',
         true,
-        // the Connect-only row's package-absence probe can fail.
         connectSimulatorDep
           ? 'nexus-workflow-simulate = { path = "../nexus-workflow-simulate" }'
           : '',
@@ -372,7 +353,6 @@ ${extraDeps}`;
         'nexus-core-node',
         'host',
         nodeForwards,
-        // containment, never the earlier exact-one probe.
         nodeIndependentSimulator
           ? 'nexus-workflow-simulate = { path = "../nexus-workflow-simulate" }'
           : '',
@@ -397,15 +377,10 @@ test('authoring cohort passes and reads the checked-in consumer', () => {
   assert.match(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus-core-node <default>/);
   assert.match(run.stdout, /ok: nexus-workflow-simulate single version \(0\.1\.0\) for nexus42/);
   assert.match(run.stdout, /ok: nexus-workflow-simulate single version \(0\.1\.0\) for nexus-core-node/);
-  // carries its own positive census on the same root and selection.
   assert.match(run.stdout, /ok: nexus-core --features compute resolves \d+ distinct dependency package\(s\)/);
   assert.match(run.stdout, /ok: nexus-workflow-simulate absent from nexus-core --features compute/);
   assert.match(run.stdout, /ok: nexus-core --no-default-features resolves \d+ distinct dependency package\(s\)/);
   assert.match(run.stdout, /ok: nexus-workflow-simulate absent from nexus-core --no-default-features/);
-  // the pinned core sets are the real consumer's (`test-hooks` is the checker's
-  // own `observable` feature, selecting the lane-consultation counter). The
-  // version is NOT pinned: it is the real package's, and a routine bump with an
-  // unchanged feature set must stay green.
   assert.match(
     run.stdout,
     /ok: nexus-core v\S+ feats=\[execution,nexus-connect,operation-id,test-hooks\] for authoring-cohorts <default>/,
@@ -420,7 +395,6 @@ test('authoring cohort passes and reads the checked-in consumer', () => {
 });
 
 test('the compute negative row fails when its root graph is vacuous', () => {
-  // alone, which `assert_empty` would otherwise report as "absent".
   const root = createWorkspace(authoringCrates({ plainDep: false, computeLeaf: false }));
   const run = authoringRun(root);
 
@@ -434,7 +408,6 @@ test('the compute negative row fails when its root graph is vacuous', () => {
 });
 
 test('the no-default negative row fails when its root graph is vacuous', () => {
-  // no-default census.
   const root = createWorkspace(authoringCrates({ plainDep: false }));
   const run = authoringRun(root);
 
@@ -460,13 +433,10 @@ test('dropping the native selector authoring edge fails the cohort', () => {
     run.stdout,
     /nexus-workflow-simulate expected in nexus-core-node graph, but absent/,
   );
-  // the native selector rather than to a collapsed fixture.
   assert.match(run.stdout, /ok: nexus-core selects feature strategy-authoring for nexus42/);
 });
 
 test('a native selector with the simulator but without the authoring feature fails on containment', () => {
-  // and the ONLY possible failure is feature containment. Without that check a
-  // "selected the simulator some other way" graph would green the cohort.
   const root = createWorkspace(
     authoringCrates({ nodeForwards: false, nodeIndependentSimulator: true }),
   );
@@ -494,7 +464,6 @@ test('a compute selection that links the simulator fails the cohort', () => {
 });
 
 test('a Connect-only selection that forwards authoring fails the cohort', () => {
-  // it, so the feature probe must be the row's FIRST half and it must fire.
   const root = createWorkspace(authoringCrates({ connectForwards: true }));
   const run = authoringRun(root);
 
@@ -508,7 +477,6 @@ test('a Connect-only selection that forwards authoring fails the cohort', () => 
 });
 
 test('a Connect-only selection that links the simulator directly fails the cohort', () => {
-  // only the package-absence probe can catch the run-only row.
   const root = createWorkspace(authoringCrates({ connectSimulatorDep: true }));
   const run = authoringRun(root);
 
@@ -558,7 +526,6 @@ test('a manifest without the probed package fails', () => {
 test('an invalid feature dependency fails through real Cargo resolution', () => {
   const root = createWorkspace(domainCrates(), {
     afterLock: (dir) => {
-      // propagate Cargo's verdict rather than read an empty tree as absence.
       writeFileSync(
         path.join(dir, 'nexus-core', 'Cargo.toml'),
         manifestFor('nexus-core', {
@@ -593,8 +560,6 @@ test('Cargo failure on a broken manifest propagates', () => {
 });
 
 test('the full matrix still runs without --cohort (manifest override reaches it)', () => {
-  // every probe: the fixture has no `nexus42`, so the first exact-one pin
-  // fails there instead of silently passing an absent product cohort.
   const root = createWorkspace(domainCrates());
   const run = runGuard(['--manifest-path', path.join(root, 'Cargo.toml')]);
 
@@ -622,9 +587,6 @@ function policyRun(root, opts) {
 }
 
 test('policy cohort passes on a policy-shaped workspace', () => {
-  // (the standalone module-sdk/manifest/test crates are outside `-p` reach);
-  // the fixture mirrors them as dependency-free leaves so the inverted
-  // probes resolve.
   const root = createWorkspace({
     'nexus-compute-policy': { deps: {} },
     'nexus-contracts': { deps: {} },
@@ -636,7 +598,6 @@ test('policy cohort passes on a policy-shaped workspace', () => {
   const run = policyRun(root);
 
   assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
-  // the eleven subsumed back-edge probes no longer print anything.
   assert.match(
     run.stdout,
     /ok: nexus-compute-policy --all-features --target all resolves with zero dependencies \(root only\)/,
@@ -647,10 +608,6 @@ test('policy cohort passes on a policy-shaped workspace', () => {
 });
 
 test('a deliberate forbidden policy edge is rejected nonzero', () => {
-  // crate; the zero-dependency leaf pin must refuse through actual
-  // resolution, not a string match. The positive root stays resolvable so
-  // the failure is attributable to the forbidden edge alone — the refusal
-  // names the offending dependency in its resolved tree.
   const root = createWorkspace({
     'nexus-compute-policy': { deps: { 'nexus-wasm-host': null } },
     'nexus-wasm-host': { deps: {} },
@@ -674,7 +631,6 @@ test('each forbidden policy back-edge fails the cohort', async (t) => {
 
       assert.notEqual(run.status, 0, `a real nexus-compute-policy -> ${pkg} edge was accepted`);
       assert.match(run.stdout, /graph pin failed/);
-      // names the offending dependency in the dumped (prefix-none) tree.
       assert.match(run.stdout, /must resolve with ZERO dependencies, got 2/);
       assert.match(run.stdout, new RegExp(`${pkg} v0\\.1\\.0`));
     });
@@ -697,10 +653,6 @@ test('a public package gaining a private-policy edge fails the cohort', () => {
 });
 
 test('a feature-scoped policy edge is caught by the widened selectors', () => {
-  // feature (`special`), so the pre-fix host-default selectors passed this
-  // workspace; the widened `--all-features --target all` leaf pin must
-  // refuse it. (Observed both ways: the same fixture passes exit 0 under
-  // the pre-fix selectors — see task-2-report QC fix round.)
   const root = createWorkspace({
     'nexus-compute-policy': {
       manifest: [
@@ -740,10 +692,6 @@ test('a feature-scoped policy edge is caught by the widened selectors', () => {
 });
 
 test('ASCII rendering cannot hide a real dependency row from the census', () => {
-  // children as `|-- pkg v…`; the round-1 glyph-stripping matcher ignored
-  // those rows and the zero-dependency pin false-greened. The `--prefix
-  // none` census is rendering-independent, so this test FAILS against the
-  // old matcher (it asserted a green run) and passes against the new one.
   const root = createWorkspace({
     'nexus-compute-policy': { deps: { 'nexus-wasm-host': null } },
     'nexus-wasm-host': { deps: {} },
@@ -760,15 +708,12 @@ test('ASCII rendering cannot hide a real dependency row from the census', () => 
   assert.match(ascii.stdout, /must resolve with ZERO dependencies, got 2/);
   assert.match(ascii.stdout, /nexus-wasm-host v0\.1\.0/);
 
-  // not depend on rendering.
   const unicode = policyRun(root);
   assert.notEqual(unicode.status, 0, unicode.stdout);
   assert.match(unicode.stdout, /must resolve with ZERO dependencies, got 2/);
 });
 
 test('a target-scoped policy edge is caught by --target all', () => {
-  // `cfg(windows)`, so host-target selectors never see it; the widened
-  // `--target all` leaf pin must.
   const root = createWorkspace({
     'nexus-compute-policy': {
       manifest: [
@@ -804,13 +749,7 @@ test('a target-scoped policy edge is caught by --target all', () => {
 });
 
 test('a failing census leaves no temp files behind', () => {
-  // must fail, so the script exits through `fail` with the EXIT trap armed.
-  // A valid graph (the round-2 shape) would let Cargo succeed, run the
-  // success-path `rm`, clear the trap, and stay green even if the trap were
-  // deleted — hiding exactly the regression this test exists to catch. A
-  // valid workspace with NO lockfile under `--locked` is that failure.
   const guardTmp = mkdtempSync(path.join(tmpdir(), 'nexus-graph-pins-guard-tmp-'));
-  // run (green or red) leaks the directory itself.
   fixtures.push(guardTmp);
   const root = createWorkspace(
     {
@@ -832,7 +771,6 @@ test('a failing census leaves no temp files behind', () => {
   assert.deepEqual(readdirSync(guardTmp), [], `temp files leaked: ${readdirSync(guardTmp)}`);
 });
 
-// (v1.249 C4), in script order.
 const CONNECT_FORBIDDEN = [
   'nexus-core',
   'nexus-orchestration',
@@ -841,11 +779,6 @@ const CONNECT_FORBIDDEN = [
   'graph-flow',
 ];
 
-// capability crate plus the WS transport; the capability crate binds
-// `nexus-wasm-host` only behind its `wasm` feature; the native host selects the
-// factory's full feature set on core. `execution` forwards through
-// `nexus-connect/peer-tools` (not `dep:`) so core keeps the implicit
-// `nexus-connect` feature the native pin asserts.
 function capabilityCrates({ connectDeps = {}, capabilityDeps = {}, extra = {} } = {}) {
   return {
     'nexus-connect': {
@@ -873,7 +806,6 @@ function capabilityCrates({ connectDeps = {}, capabilityDeps = {}, extra = {} } 
         'operation-id = []',
         'execution = ["operation-id", "nexus-connect/peer-tools"]',
         'compute = ["execution", "dep:nexus-wasm-host"]',
-        // synthetic core declares what the real one forwards.
         'strategy-authoring = ["execution"]',
       ],
       deps: { 'nexus-connect': ', optional = true', 'nexus-wasm-host': ', optional = true' },
@@ -914,9 +846,6 @@ test('capability cohort passes on a capability-shaped workspace', () => {
 test('each forbidden Connect-plane edge fails the cohort', async (t) => {
   for (const pkg of CONNECT_FORBIDDEN) {
     await t.test(pkg, () => {
-      // with the very edge under test, and this case must attribute the
-      // failure to the Connect row, so the library-only shape drops the native
-      // host and keeps core a leaf.
       const crates = capabilityCrates({ connectDeps: { [pkg]: null } });
       delete crates['nexus-core-node'];
       crates['nexus-core'] = { deps: {} };
@@ -931,8 +860,6 @@ test('each forbidden Connect-plane edge fails the cohort', async (t) => {
 });
 
 test('an unconditional WASM edge fails the explicit no-default row first', () => {
-  // the `--no-default-features` row (which runs first) is already red — a
-  // feature cannot be the only thing keeping the host out.
   const run = capabilityRun(
     createWorkspace(
       capabilityCrates({
@@ -952,8 +879,6 @@ test('an unconditional WASM edge fails the explicit no-default row first', () =>
 });
 
 test('a `default`-selected WASM edge fails the default row only', () => {
-  // default selection. Probing both configurations with `--no-default-features`
-  // would leave this fixture green; the separate default row is what catches it.
   const run = capabilityRun(
     createWorkspace(
       capabilityCrates({
@@ -999,10 +924,6 @@ test('the capability cohort fails when its graph is empty', () => {
 });
 
 
-// links the core domain, the explicit spoke compute (`nexus-spoke-adapter/
-// compute` → the WASM host) and the Connect transport; the enabled
-// `nexus-connect` library links its capability/transport planes and no core.
-//
 // The switches exist so ONE fixture case can make exactly one row fail:
 // `forgotCompute` drops the explicit compute edge, `connectHostAddsCli` makes
 // the selector imply the CLI cohort, `productCoreDep` drops the app's core edge
@@ -1117,7 +1038,6 @@ test('connect cohort passes on a connect-shaped workspace', () => {
   const run = connectRun(createWorkspace(connectCrates()));
 
   assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
-  // domain/storage and the explicit spoke compute.
   assert.match(
     run.stdout,
     /ok: nexus42 --no-default-features --features connect-host resolves \d+ distinct dependency package\(s\)/,
@@ -1148,7 +1068,6 @@ test('connect cohort passes on a connect-shaped workspace', () => {
   assert.match(run.stdout, /graph pins OK \(cohort: connect\)$/m);
 });
 
-// script order.
 const CONNECT_PRODUCT_FORBIDDEN = [
   'nexus-orchestration',
   'nexus-execution',
@@ -1178,7 +1097,6 @@ test('each forbidden Connect product edge fails the cohort', async (t) => {
   }
 });
 
-// (v1.249 C4/S6), in script order.
 const CONNECT_LIBRARY_FORBIDDEN = [
   'nexus-core',
   'nexus-orchestration',
@@ -1191,9 +1109,6 @@ test('each forbidden Connect library back-edge fails the cohort', async (t) => {
   for (const pkg of CONNECT_LIBRARY_FORBIDDEN) {
     await t.test(pkg, () => {
       const crates = connectCrates({ libraryDeps: { [pkg]: null } });
-      // `nexus-connect` dependency; flatten core to a leaf so the injected
-      // library edge is not a manifest cycle. All product rows still resolve
-      // (the app's direct edges carry the positive rows).
       crates['nexus-core'] = {
         features: ['default = []', 'connect-host = []', 'operation-id = []'],
         deps: {},

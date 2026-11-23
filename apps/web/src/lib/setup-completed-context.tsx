@@ -28,10 +28,6 @@ interface SetupCompletedContextValue {
    * Safe with SetupGate because `true` is applied optimistically.
    */
   markCompleted: () => void;
-  /**
-   * a successful retry so a recovered service resolves the gate without a page
-   * reload (v1219-onboarding T4).
-   */
   refresh: () => Promise<void>;
 }
 
@@ -60,7 +56,6 @@ export function SetupCompletedProvider({
 }: SetupCompletedProviderProps) {
   const desktop = useDesktopCapabilities();
   const client = useNexusClient();
-  // paints the shell nor redirects to the wizard before the real answer lands.
   const [completed, setCompletedState] = useState(initialCompleted ?? false);
   const [isLoading, setIsLoading] = useState(initialCompleted === undefined);
   const mounted = useRef(false);
@@ -73,10 +68,6 @@ export function SetupCompletedProvider({
         : await isWorkspaceInitialized(client);
       if (mounted.current) setCompletedState(value);
     } catch {
-      // surface owns this state (plan v1219-onboarding T4), so the gate stays
-      // unresolved instead of silently claiming an initialized shell. Desktop:
-      // a missing/refused IPC command is a host-contract break, not a service
-      // outage; fail open so it never strands the app on the wizard.
       if (mounted.current && desktop) setCompletedState(true);
     } finally {
       if (mounted.current) setIsLoading(false);
@@ -94,8 +85,6 @@ export function SetupCompletedProvider({
   const setCompleted = useCallback(
     async (value: boolean) => {
       if (!desktop) {
-        // what flips the derived gate (compass D21). `false` only reflects the
-        // always-reachable wizard route.
         setCompletedState(value ? await isWorkspaceInitialized(client) : false);
         return;
       }
@@ -117,8 +106,6 @@ export function SetupCompletedProvider({
   );
 
   const markCompleted = useCallback(() => {
-    // unreachable) and must not surface as an unhandled rejection — the gate
-    // simply keeps its current value.
     void setCompleted(true).catch(() => undefined);
   }, [setCompleted]);
 

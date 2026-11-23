@@ -176,7 +176,6 @@ async fn get_body_rejects_escaped_body_path() {
     assert_eq!(body.content, "body content");
     assert!(body.read_only);
 
-    // rejected on the read path before the file is opened.
     sqlx::query("UPDATE work_chapters SET body_path = '../creative-evil/evil.md' WHERE work_id = ? AND chapter = 1")
         .bind(&fx.work_id)
         .execute(&fx.pool)
@@ -196,7 +195,6 @@ async fn get_body_rejects_escaped_body_path() {
     };
     assert_eq!(field, "chapter_body_path_forbidden");
 
-    // the target is read (canonicalize resolves it beyond the root).
     let link_dir = fx.creative_root.join("Works/test-novel/Stories");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&evil_target, link_dir.join("link.md")).unwrap();
@@ -305,7 +303,6 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
     };
     assert_eq!(field, "chapter_structure_edit_blocked");
 
-    // is created; the outside sibling stays untouched.
     let now = chrono::Utc::now().to_rfc3339();
     nexus_local_db::work_chapters::update_outline_path(
         &fx.pool,
@@ -352,7 +349,6 @@ async fn published_chapter_mutation_blocked_and_content_survives() {
 async fn chapter_patch_updates_slug_volume_and_rejects_title() {
     let fx = setup().await;
 
-    // reachable at the queried (default) volume.
     let err = fx
         .core
         .patch_chapter(
@@ -541,7 +537,6 @@ async fn outline_patch_conflict_and_locked_reread() {
         "refetch the work outline and reapply"
     );
 
-    // must persist the fresh body observed at the locked re-read.
     std::fs::write(&outline_path, format!("{frontmatter}fresh body\n")).unwrap();
     fx.core
         .patch_outline_chapter(
@@ -796,7 +791,6 @@ async fn ref_less_work_all_write_routes_refuse_typed() {
             .await,
     );
 
-    // must not fabricate a Work directory.
     assert!(
         !fx.creative_root.join("Works").exists(),
         "no refused write may create a Work directory"
@@ -1416,7 +1410,6 @@ async fn timeline_world_event_binding_refusals_leave_outline_unchanged() {
         "does not exist in the Work's bound World",
     );
 
-    // stored binding — never a payload claim — decides membership.
     assert_outline_validation(
         "foreign-World referent",
         fx.core
@@ -1580,9 +1573,6 @@ async fn timeline_world_event_binding_refuses_a_foreign_stored_world() {
     let revision = outline_revision(&fx).await;
     let content_before = std::fs::read_to_string(&outline_path).unwrap();
 
-    // reassigned to another creator. The Work's binding is never trusted from
-    // the payload, and the guard refuses before the referent read.
-    //
     // `narrative_worlds.owner_creator_id` is `NOT NULL`
     // (`crates/nexus-local-db/migrations/20260524_narrative_worlds.sql:10`), so
     // the guard's unowned branch is not constructible; the foreign-owner state
@@ -1664,7 +1654,6 @@ async fn timeline_world_event_binding_accepts_a_referent_past_the_graph_cap() {
     let referent = "kb_0000e006";
     create_kb_entity(&fx, &world_id, referent, "Beyond Cap", "event").await;
 
-    // (`created_at ASC LIMIT 500`) closes its window before the referent.
     for index in 0..500 {
         sqlx::query(
             r"INSERT INTO kb_key_blocks
@@ -1846,8 +1835,6 @@ async fn timeline_world_event_binding_on_a_published_chapter_keeps_the_unbind_re
         .await
         .unwrap();
     let event_id = event_id_by_title(&fx, "Pinned").await;
-    // referent is exactly what a re-typed World event leaves behind on a
-    // published chapter.
     fx.core
         .patch_timeline_event(
             &fx.principal,
@@ -1882,7 +1869,6 @@ async fn timeline_world_event_binding_on_a_published_chapter_keeps_the_unbind_re
     );
     let published_content = std::fs::read_to_string(&outline_path).unwrap();
 
-    // names the sanctioned unbind path.
     assert_outline_validation(
         "published bind",
         fx.core
@@ -1902,7 +1888,6 @@ async fn timeline_world_event_binding_on_a_published_chapter_keeps_the_unbind_re
         "unbind_world_event",
     );
 
-    // `base_revision` is the typed conflict, not a published-chapter refusal.
     let err = fx
         .core
         .patch_timeline_event(
@@ -1939,7 +1924,6 @@ async fn timeline_world_event_binding_on_a_published_chapter_keeps_the_unbind_re
         "a refused mutation on a published chapter must not rewrite the outline file"
     );
 
-    // path — one revision bump, no chapter content or structure touched.
     let cleared = fx
         .core
         .patch_timeline_event(
@@ -1969,8 +1953,6 @@ async fn timeline_world_event_binding_on_a_published_chapter_keeps_the_unbind_re
         "the sanctioned unbind must clear the stored referent from the outline"
     );
 
-    // chapter with the typed ownership denial before any chapter-status read,
-    // leaving the outline revision and the file content untouched.
     let other_creator = "other-author";
     nexus_local_db::creators::ensure_creator_row(&fx.pool, other_creator, "Other Author")
         .await
@@ -2106,7 +2088,6 @@ async fn outline_frontmatter_delimiter_edges() {
     )
     .unwrap();
 
-    // frontmatter would fail YAML parsing and the patch would be rejected.
     fx.core
         .patch_outline_chapter(
             &fx.principal,
@@ -2127,8 +2108,6 @@ async fn outline_frontmatter_delimiter_edges() {
         "body must survive: {final_content}"
     );
 
-    // file falls back to a default frontmatter with the raw content preserved
-    // as body (identical to the daemon-era `split_frontmatter` None path).
     std::fs::write(&outline_path, "---\ntitle: test\n---more\nbody").unwrap();
     fx.core
         .patch_outline_chapter(
@@ -2316,7 +2295,6 @@ async fn retained_outline_scene_beat_authoring_round_trip() {
 
     let opening = authored_scene(&fx, 0, 1, "Opening Scene").await;
     assert_minted_id(&opening, "scn_");
-    // from the canonical outline, not from the patch response envelope.
     assert_eq!(
         outline_revision(&fx).await,
         1,
@@ -2787,8 +2765,6 @@ fn assert_lock_conflict(resource: &str, work_id: &str, holder: &str) {
 #[tokio::test]
 async fn locked_work_refuses_conflicting_holder() {
     let fx = setup().await;
-    // refused as a lock conflict naming the holder that already owns the Work.
-    // Neither label is asserted — only the conflict class is.
     let holder = nexus_local_db::cli_holder("core");
     let acquired = nexus_local_db::acquire_runtime_lock(
         &fx.pool,
@@ -2841,7 +2817,6 @@ async fn locked_work_refuses_conflicting_holder() {
     };
     assert_lock_conflict(&resource, &fx.work_id, &holder);
 
-    // the holder is still the one that acquired the lock.
     let unchanged = fx
         .core
         .chapter_detail(
@@ -2863,7 +2838,6 @@ async fn locked_work_refuses_conflicting_holder() {
         Some(holder.as_str())
     );
 
-    // is gone once it returns.
     assert!(nexus_local_db::release_runtime_lock(
         &fx.pool,
         fx.principal.creator_id(),
@@ -2974,9 +2948,6 @@ async fn work_chronology_projects_flag_by_ref_or_id() {
     fx.pool.close().await;
     fx.core.close().await.unwrap();
 }
-
-// from the retired daemon runtime fixtures (`outline_api.rs`,
-// `outline_patch.rs`, `chapters_api.rs`). ───────────────────────────────────
 
 /// Current work-level outline revision (the OCC base of every canvas patch).
 async fn outline_revision(fx: &Fixture) -> u64 {

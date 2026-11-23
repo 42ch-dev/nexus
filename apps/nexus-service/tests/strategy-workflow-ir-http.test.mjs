@@ -6,13 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * family mounts it at the Strategy tier and hands the path id to the core authority, which
- * projects the installed preset through the existing `nexus-preset` import adapter. The core
- * resolution and the schema round-trip are proven in
- * `crates/nexus-core/tests/simulation_services.rs`; this target proves the HTTP contract.
- */
-
 let routes;
 let HttpError;
 

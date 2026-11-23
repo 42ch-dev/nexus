@@ -84,8 +84,6 @@ impl NexusAdapter<'_> {
     ) -> SpokeResult<Vec<TimelineEvent>> {
         let pool = self.pool.clone();
         let world_id = scope.scope_id.clone();
-        // looked up via the typify ExtensionKey newtype — mirrors the
-        // `scope_query_port::list_timeline_events` extraction.
         let branch_id = scope
             .extensions
             .as_ref()
@@ -99,7 +97,6 @@ impl NexusAdapter<'_> {
             &pool,
             &world_id,
             branch_id.as_deref(),
-            // set so the spoke helper can build a correct stable tail.
             &[],
         )
         .await
@@ -114,24 +111,11 @@ impl NexusAdapter<'_> {
             }
         };
 
-        // (un-listed events) is appended in deterministic sequence order —
-        // matching the V1.143 T2/T3 stable-tail semantics the gateways
-        // established (`list_timeline_events_scoped` with a branch already
-        // returns sequence_no order; the re-sort keeps parity for the
-        // no-branch / cross-branch case).
         let mut sorted = rows;
         sorted.sort_by_key(|e| e.sequence_no);
 
-        // conversion seam (the `From<nexus_narrative::TimelineEvent>` impl
-        // in nexus-narrative). Call-boundary §7 preserved: the spoke helper
-        // receives only spoke wire types. The `Vec<TimelineEvent>`
-        // annotation pins the `Into` target to the spoke type.
         let spoke_events: Vec<TimelineEvent> = sorted.into_iter().map(Into::into).collect();
 
-        // synchronous — no DB I/O inside). The helper returns the reordered
-        // spoke events directly; since our return type is already spoke,
-        // we surface its `SpokeResult` verbatim (Ok or Reject) with no
-        // reverse conversion — the read-only ordering cannot mutate fields.
         order_timeline_events_by_ids(&spoke_events, &ordered_ids)
     }
 }
@@ -164,18 +148,6 @@ fn reject<T>(code: SpokeRejectCode, message: impl Into<String>, details: Value) 
         details: details_map,
     })
 }
-
-//
-// in-memory `InMemoryNarrativeGateway::get_timeline_ordered` tests and
-// `nexus-local-db`'s `SqliteNarrativeGateway::get_timeline_ordered` parity
-// tests). The adapter is SQLite-backed (`NexusAdapter`), so the T3
-// storage path is the natural migration target; the same five named
-// assertions are preserved: explicit-ids-first + sequence tail, unknown-id
-// reject, duplicate-id reject, shuffled-storage ordering, and the no-mutation
-// regression. The gateway methods + their original tests were removed in
-// Task 3 of this plan (along with `narrative` + `local-db` direct
-// `spoke-operations` ordering deps) — this facet is the sole surviving
-// ordered-timeline coverage.
 
 #[cfg(test)]
 mod tests {
@@ -248,17 +220,12 @@ mod tests {
             .expect("\"nexus\" matches the ^[a-z][a-z0-9_-]*$ namespace regex")
     }
 
-    // order; remaining events appended in sequence_no order (stable tail).
-    // Storage is seeded with shuffled sequence_no assignments to prove the
-    // ordering is driven solely by the explicit id list + sequence tail, not
-    // by insertion/storage order.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_explicit_ids_then_sequence_tail() {
         let (pool, _dir) = fresh_pool().await;
         seed_world_shuffled(&pool).await;
 
         let adapter = NexusAdapter::new_host(pool);
-        // evt_4 seq2) form the stable tail in sequence_no order.
         let ordered = match adapter
             .list_timeline_events_ordered(
                 &ordered_scope("wld_ord", Some("fbk_root")),
@@ -284,7 +251,6 @@ mod tests {
             vec!["evt_3", "evt_1", "evt_5", "evt_2", "evt_4"],
             "explicit ids first in requested order, then stable tail in sequence_no order"
         );
-        // that branch_id in extensions.nexus (conversion seam).
         let key = nexus_te_key();
         assert!(ordered.iter().all(|e| {
             e.extensions
@@ -314,10 +280,6 @@ mod tests {
             "manual",
         )
         .await;
-        // (SQLite datetime('now'), NOT RFC3339). The forward nexus→spoke
-        // conversion sets canonical_name = id (the fallback chain) and parses
-        // created_at to Option<DateTime<Utc>>. A lossy reverse would corrupt
-        // both; returning the helper's spoke output preserves both exactly.
         seed::event(&pool, "evt_1", "wld_nomut", "fbk_root", "story_advance", 1).await;
         seed::event(&pool, "evt_2", "wld_nomut", "fbk_root", "story_advance", 2).await;
 
@@ -343,8 +305,6 @@ mod tests {
         assert_eq!(ordered.len(), 2);
         assert_eq!(ordered[0].timeline_event_id, "evt_1");
 
-        // title=NULL/summary=NULL row it falls back to the event id — the
-        // ordering op must not synthesize anything else.
         assert_eq!(ordered[0].canonical_name, b1.canonical_name);
         assert_eq!(
             ordered[0].canonical_name.to_string(),
@@ -355,8 +315,6 @@ mod tests {
         assert_eq!(ordered[0].description, b1.description);
     }
 
-    // (InvalidInput — the validation-error class at the spoke boundary).
-    // No panic; the helper's reject flows through verbatim.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_rejects_unknown_ids() {
         let (pool, _dir) = fresh_pool().await;
@@ -380,9 +338,6 @@ mod tests {
         );
     }
 
-    // reject (InvalidInput). The spoke `order_timeline_events_by_ids` helper
-    // rejects `orderedIds contains duplicate timeline_event_id values`; this
-    // asserts the facet propagates that reject rather than de-duplicating.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_rejects_duplicate_ids() {
         let (pool, _dir) = fresh_pool().await;
@@ -410,12 +365,6 @@ mod tests {
         );
     }
 
-    // the full world set in `sequence_no` order. The spoke helper passes its
-    // input through verbatim when no explicit ids pin the head (the ordered-id
-    // set is empty, so the entire input forms the "stable tail"); the facet
-    // pre-sorts by `sequence_no`, so the result is the sequence-ordered view of
-    // the shuffled fixture (seq1→evt_2, seq2→evt_4, seq3→evt_1, seq4→evt_5,
-    // seq5→evt_3). Asserts no reject + exact sequence ordering.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_empty_ids_returns_full_sequence_sorted() {
         let (pool, _dir) = fresh_pool().await;
@@ -448,12 +397,6 @@ mod tests {
         );
     }
 
-    // `extensions.nexus.branch_id` widens the world query to ALL branches (no
-    // branch filter in `list_timeline_events_scoped`). Events from every branch
-    // of the world are returned in stable `sequence_no` order — the facet's
-    // pre-sort flattens the cross-branch `(branch_id, sequence_no)` storage
-    // order into a single sequence_no order. Uses empty `ordered_ids` to
-    // isolate the scope-filter behavior from the explicit-id ordering path.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_no_branch_scope_returns_all_branches_in_sequence_order() {
         let (pool, _dir) = fresh_pool().await;
@@ -532,7 +475,6 @@ mod tests {
         );
     }
 
-    /// `InternalError`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn list_timeline_events_ordered_on_dropped_table_surfaces_internal_error() {
         let (pool, _dir) = fresh_pool().await;

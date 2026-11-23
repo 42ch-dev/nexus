@@ -63,7 +63,6 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
         pagination: { limit: 20, has_more: false },
       }),
     );
-    // optimistic window is observable (not racy).
     let releasePatch!: () => void;
     const patchGate = new Promise<void>((resolve) => {
       releasePatch = resolve;
@@ -84,14 +83,11 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     expect(await screen.findByText('open')).toBeInTheDocument();
     expect(listSpy).toHaveBeenCalledTimes(1);
 
-    // list (after its cancelQueries await), so the status flips while the PATCH
-    // is still in-flight (patchInFlight holds the response open).
     fireEvent.click(screen.getByRole('button', { name: /triage/i }));
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('triaged'));
 
     expect(patchBody).toEqual({ status: 'triaged' });
 
-    // triggering a refetch.
     releasePatch();
     await waitFor(() => {
       expect(listSpy).toHaveBeenCalledTimes(2);
@@ -99,7 +95,6 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
   });
 
   it('rolls back the optimistic patch when the server rejects the transition', async () => {
-    // INVALID_TRANSITION (an illegal transition bypassed the UI guards).
     let listCount = 0;
     useHandlers(
       http.get('/v1/daemon/works/:workId/findings', () => {
@@ -124,16 +119,11 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /triage/i }));
 
-    // snapshotted open state once the 422 lands.
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('open'));
     await waitFor(() => expect(listCount).toBeGreaterThanOrEqual(2));
   });
 
   it('does not invalidate other Works findings lists on settle (qc3 W-QC3-P0-001)', async () => {
-    // finding between filter views of w1) but must NOT touch w2's list. The
-    // global findings-list prefix is no longer invalidated.
-    // Vitest 4's bare `vi.fn()` overload types as `Mock<Constructable | Procedure>`
-    // (not callable); name the callable shape instead.
     const listSpies: Record<string, Mock<() => Response>> = {};
     const listFor = (workId: string) => {
       listSpies[workId] ??= vi.fn(() =>
@@ -144,9 +134,6 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
       );
       return listSpies[workId];
     };
-    // until we release it, so the optimistic window is observable — not racy
-    // against the settle → invalidate → refetch chain under React 19's
-    // synchronous store batching.
     let releasePatch!: () => void;
     const patchGate = new Promise<void>((resolve) => {
       releasePatch = resolve;
@@ -196,7 +183,6 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     expect(listSpies['w1']).toHaveBeenCalledTimes(1);
     expect(listSpies['w2']).toHaveBeenCalledTimes(1);
 
-    // PATCH is held in-flight; w2's list is untouched.
     fireEvent.click(screen.getByRole('button', { name: /triage w1/i }));
     await waitFor(() => expect(screen.getByTestId('w1-status')).toHaveTextContent('triaged'));
     expect(listSpies['w2']).toHaveBeenCalledTimes(1);

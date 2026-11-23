@@ -43,7 +43,6 @@ fn validate_slug_inner(s: &str, label: &str) -> Result<String, CapabilityError> 
             s.len()
         )));
     }
-    // of the character class check below).
     if s.contains("..") || s.contains('/') || s.contains('\\') || s.contains('\0') {
         return Err(CapabilityError::InputInvalid(format!(
             "{label} contains path-traversal or separator characters"

@@ -78,19 +78,12 @@ use spoke_schemas::finding::ExtensionKey;
 impl FindingPort for NexusAdapter<'_> {
     #[allow(clippy::too_many_lines)] // one linear domain operation
     async fn put_findings(&self, findings: Vec<SpokeFinding>) -> SpokeResult<Vec<SpokeFinding>> {
-        // family carries KE references (the world route's `target_entry_id`),
-        // so a host-only adapter rejects instead of writing them.
         if let Err(reject) = self.require_read_scope("put_findings") {
             return SpokeResult::Reject(reject);
         }
         let pool = self.pool.clone();
         let mut persisted: Vec<SpokeFinding> = Vec::with_capacity(findings.len());
 
-        // mid-batch failure rolls back every earlier insert. Without this,
-        // each insert auto-committed independently and the caller would
-        // receive a Reject while the preceding findings stayed persisted
-        // (a retry would then hit UNIQUE errors on those rows). `tx` drops
-        // uncommitted on any early `return` below → automatic rollback.
         let mut tx = match pool.begin().await {
             Ok(tx) => tx,
             Err(e) => {
@@ -106,9 +99,6 @@ impl FindingPort for NexusAdapter<'_> {
             let ext = extract_nexus_extension(&finding);
             let finding_id = finding.finding_id.clone();
 
-            // key — `work_id` → legacy work path (byte-identical), `world_id`
-            // → world path. Both or neither rejects `INVALID_INPUT` naming
-            // the finding.
             match (ext.work_id.as_deref(), ext.world_id.as_deref()) {
                 (Some(_), None) => {
                     let nexus_finding = match map_spoke_to_nexus(&finding) {
@@ -125,11 +115,6 @@ impl FindingPort for NexusAdapter<'_> {
                     }
                 }
                 (None, Some(world_id)) => {
-                    // row that cites this world and (optionally) one entry in
-                    // it — both must be inside the bound selection. A hidden
-                    // target id is refused with the same unknown-target shape,
-                    // so the caller cannot use findings to probe for rows it
-                    // cannot read.
                     if !self.admits_container(&KnowledgeOwnerRef::world(world_id)) {
                         return reject(
                             SpokeRejectCode::InvalidInput,
@@ -141,13 +126,8 @@ impl FindingPort for NexusAdapter<'_> {
                         );
                     }
                     if let Some(target) = finding.target_entry_id.as_deref() {
-                        // THIS WORLD. A multi-world selection admits rows from
-                        // several containers, so admission alone is not enough —
-                        // a cross-world entry would otherwise be readable
-                        // through the finding.
                         let ke_target_world_ok = match self.load_admitted_entry(target).await {
                             Ok(Some(record)) => record.world_id() == Some(world_id),
-                            // knowledge target of this world.
                             Ok(None) => false,
                             Err(e) => {
                                 return reject(
@@ -157,13 +137,6 @@ impl FindingPort for NexusAdapter<'_> {
                                 );
                             }
                         };
-                        // evaluator's findings legitimately target this world's
-                        // TIMELINE EVENTS (`rules_eval.rs` observer_cardinality),
-                        // which carry their own world authorization. A target
-                        // that is neither an admitted KE of this world nor one of
-                        // this world's timeline events is refused with the
-                        // unknown-target shape, so the hidden-KE contract
-                        // (hidden == absent) is unchanged.
                         let timeline_target_ok = if ke_target_world_ok {
                             false
                         } else {
@@ -233,7 +206,6 @@ impl FindingPort for NexusAdapter<'_> {
             persisted.push(finding);
         }
 
-        // point nothing is durably persisted; a failure here rolls back.
         if let Err(e) = tx.commit().await {
             return reject(
                 SpokeRejectCode::InternalError,
@@ -326,13 +298,9 @@ async fn insert_world_finding_tx(
         .source_anchor
         .as_ref()
         .map(|sa| serde_json::to_string(sa).unwrap_or_default());
-    // realistically fail, and the fallbacks honor the DDL defaults (mirrors
-    // the adapter's `unwrap_or_default` storage convention).
     let text_position_json =
         serde_json::to_string(&f.text_position).unwrap_or_else(|_| "{}".to_string());
     let extensions_json = serde_json::to_string(&f.extensions).unwrap_or_else(|_| "{}".to_string());
-    // (fail-closed) rather than wrapping — no realistic schema version reaches
-    // this, but a corrupted/hostile wire payload must not silently wrap.
     let schema_version = i64::try_from(f.schema_version.get()).map_err(|_| {
         LocalDbError::ValidationError(format!(
             "world finding schema_version {} exceeds the i64 domain",
@@ -503,8 +471,6 @@ struct NexusExtension {
 /// `Finding`. Returns `NexusExtension { ..None }` when the namespace
 /// is absent (the caller treats missing required fields as reject).
 fn extract_nexus_extension(finding: &SpokeFinding) -> NexusExtension {
-    // construction is infallible at runtime (mirrors the V1.139
-    // `ExtensionKey` pattern).
     let Ok(key) = ExtensionKey::try_from("nexus") else {
         return NexusExtension {
             work_id: None,
@@ -787,7 +753,6 @@ mod tests {
         seed_work(&pool).await;
 
         let adapter = scoped(pool);
-        // specifically about the missing work_id.
         let spoke: SpokeFinding = serde_json::from_value(json!({
             "schema_version": 1,
             "finding_id": "fnd_no_work",
@@ -886,8 +851,6 @@ mod tests {
         let adapter = scoped(pool.clone());
 
         let first = spoke_finding("fnd_rb_first", "info", "open", None, None);
-        // UNIQUE violation. Distinct severity so the two fixtures are
-        // clearly separate objects.
         let second = spoke_finding("fnd_rb_first", "warning", "open", None, None);
 
         match adapter.put_findings(vec![first, second]).await {
@@ -901,7 +864,6 @@ mod tests {
             SpokeResult::Ok(_) => panic!("expected reject on duplicate finding_id mid-batch"),
         }
 
-        // W-1 transaction wrap, `fnd_rb_first` would be committed here.
         assert_finding_absent(&pool, "fnd_rb_first").await;
     }
 

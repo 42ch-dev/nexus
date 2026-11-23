@@ -24,9 +24,6 @@ export interface TextSelectionState {
   clear: () => void;
 }
 
-/**
- * all text nodes in document order.
- */
 function pointToOffset(container: HTMLElement, node: Node, nodeOffset: number): number {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   let offset = 0;
@@ -41,9 +38,6 @@ function pointToOffset(container: HTMLElement, node: Node, nodeOffset: number): 
   return offset;
 }
 
-/**
- * full text content.
- */
 function getSelectionOffsets(container: HTMLElement, range: Range): TextSelection {
   const startOffset = pointToOffset(container, range.startContainer, range.startOffset);
   const endOffset = pointToOffset(container, range.endContainer, range.endOffset);

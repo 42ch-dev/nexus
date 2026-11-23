@@ -51,16 +51,12 @@ pub async fn queue_extract(
     work_id: Option<&str>,
     chapter: Option<i32>,
 ) -> Result<()> {
-    // so the legacy refusal wording is the one the caller reads. The producer
-    // refuses the same input fail-closed for every other transport.
     if let Some(ch) = chapter {
         if ch < 1 {
             return Err(CliError::Other("Chapter number must be >= 1".to_string()));
         }
     }
 
-    // migration/engine writer), so the enqueue leaf takes the engine admission;
-    // the direct-writer pool cannot write that table.
     let core = open_engine_owned_core(config).await?;
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;

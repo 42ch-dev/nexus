@@ -105,7 +105,6 @@ function forkChrome(
 ) {
   const state = {
     eventsByBranch: {
-      // no compute events — the marker must not project as a node).
       [FORK_BRANCH_ID]: [FORK_MARKER],
       [ROOT_BRANCH_ID]: [...(over.initialEvents ?? [COMPUTE_EVENT])],
     } as Record<string, unknown[]>,
@@ -137,7 +136,6 @@ function forkChrome(
         state.lineageFetchCount += 1;
         await state.lineageResponseGate;
       }
-      // the degraded-badge path is exercisable.
       if (
         state.lineageFailures > 0 &&
         url.searchParams.get('event_type') === 'fork_created'
@@ -145,12 +143,6 @@ function forkChrome(
         state.lineageFailures -= 1;
         return HttpResponse.json({ error: 'boom' }, { status: 500 });
       }
-      // `event_type` / `status` / `branch_id`. The lineage hook reads
-      // `event_type=fork_created&status=canon`; the canvas reads
-      // `event_type=compute_result&status=canon`. A branch whose store
-      // holds only other families must return ZERO markers for the
-      // fork_created read — exactly the P1 projection contract
-      // (`0-or-1` marker; root has no marker).
       const eventType = url.searchParams.get('event_type');
       const status = url.searchParams.get('status');
       const branchEvents = state.eventsByBranch[branchId ?? ROOT_BRANCH_ID] ?? [];
@@ -224,7 +216,6 @@ afterEach(() => {
 
 describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
   it('fork_badge_shown_for_forked_branch — marker present → badge + parent + fork-point rendered', async () => {
-    // URL, the T1 mirror). Its store carries the canon fork_created marker.
     const { state } = renderForkChrome({ branch: FORK_BRANCH_ID });
 
     const badge = await screen.findByTestId('fork-lineage-badge');
@@ -241,7 +232,6 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     );
     expect(within(badge).getByTestId('fork-lineage-open-parent')).toBeInTheDocument();
 
-    // only (the marker row is consumed by the lineage hook, not projected).
     await waitFor(() => expect(state.lastEventsUrl).not.toBeNull());
     expect(
       new URL(state.lastEventsUrl!, 'http://localhost').searchParams.get('branch_id'),
@@ -251,7 +241,6 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
   it('fork_badge_hidden_for_root_branch — no marker → no badge / no fork chrome', async () => {
     const { state } = renderForkChrome();
 
-    // chrome is absent — nothing world-level drives it.
     await waitFor(() => expect(state.lastEventsUrl).not.toBeNull());
     expect(
       new URL(state.lastEventsUrl!, 'http://localhost').searchParams.get('branch_id'),
@@ -265,7 +254,6 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     renderForkChrome({ branch: FORK_BRANCH_ID });
 
     const badge = await screen.findByTestId('fork-lineage-badge');
-    // edit, no branch-compare affordance exists anywhere in the chrome.
     const buttons = within(badge).getAllByRole('button');
     expect(buttons).toHaveLength(1);
     expect(buttons[0]).toHaveAttribute('data-testid', 'fork-lineage-open-parent');
@@ -280,16 +268,11 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     const badge = await screen.findByTestId('fork-lineage-badge');
     fireEvent.click(within(badge).getByTestId('fork-lineage-open-parent'));
 
-    // `?branch=` (root = no param) instead of setting the root id. The
-    // timeline-events reads re-key to the parent with NO `branch_id` param
-    // (the daemon defaults to the World root) — the observable branch-
-    // context switch; mirrors T1's PD-6 assertion.
     await waitFor(() => {
       const url = new URL(state.lastEventsUrl!, 'http://localhost');
       expect(url.searchParams.get('branch_id')).toBeNull();
     });
 
-    // parent Timeline is not a fork).
     await waitFor(() =>
       expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument(),
     );
@@ -299,8 +282,6 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     const { state } = renderForkChrome({ branch: FORK_BRANCH_ID });
     state.lineageFailures = 1;
 
-    // only in-canvas return path); it degrades with a retry instead. It
-    // must never collapse to the "not a fork" state.
     const badge = await screen.findByTestId('fork-lineage-badge');
     expect(badge).toHaveTextContent(/lineage unavailable/i);
     expect(within(badge).getByTestId('fork-lineage-unavailable')).toBeInTheDocument();
@@ -368,15 +349,11 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
     state.lineageFailures = 100;
     fireEvent.click(within(badge).getByTestId('fork-lineage-open-parent'));
 
-    // to root WITHOUT `branch_id` (root = no param — the daemon default).
     await waitFor(() => {
       const url = new URL(state.lastEventsUrl!, 'http://localhost');
       expect(url.searchParams.get('branch_id')).toBeNull();
     });
 
-    // degraded fork badge (the guard only degrades on a NON-ROOT branch).
-    // Before Bugbot 2 the hop set `?branch=<rootId>`, making
-    // `activeBranchId` truthy on root → the degraded badge appeared.
     await waitFor(() =>
       expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument(),
     );
@@ -400,8 +377,6 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
       expect(screen.queryByTestId('fork-lineage-badge')).not.toBeInTheDocument(),
     );
 
-    // branch follows — derived from searchParams every render, so there is
-    // no state left to desync. The fork chrome is back.
     act(() => nav.navigate!(-1));
     await waitFor(() => {
       const url = new URL(state.lastEventsUrl!, 'http://localhost');
@@ -416,8 +391,6 @@ describe('TimelineCanvas fork lineage chrome (V1.162 P2 T2)', () => {
   });
 
   it('empty_state_no_flash_while_events_loading — EmptyState is gated on the events fetch (qc3 S-1)', async () => {
-    // switch refetch the canvas must not claim the timeline is empty on a
-    // branch that HAS events (the "No events yet" flash is the S-1 bug).
     const { state } = renderForkChrome({
       kbEntities: [],
       initialEvents: [COMPUTE_EVENT],

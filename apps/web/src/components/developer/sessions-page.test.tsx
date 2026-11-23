@@ -1,6 +1,4 @@
 /**
- * cards.
- *
  * Each card is one link to the session's run view: short id as the title,
  * status pill, then Preset / Creator. `current_task_id` is deliberately not
  * rendered (the run view owns it). The list keeps the server's F-F1 order; the
@@ -124,7 +122,6 @@ describe('SessionsPage', () => {
     );
   });
 
-  // whole card carries the run id in the path and its accessible name.
   it('opens the run view from the card through its single link', async () => {
     listSessions(ONE_SESSION);
 
@@ -150,7 +147,6 @@ describe('SessionsPage', () => {
     expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
-  // sessions must never appear — an idle daemon shows the empty state.
   it('renders the empty state when only _system.* sessions come back (defensive filter)', async () => {
     listSessions([
       {

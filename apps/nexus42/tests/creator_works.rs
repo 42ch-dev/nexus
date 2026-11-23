@@ -199,8 +199,6 @@ fn works_reconcile_chapters_help_yes_does_not_promise_inline_preview() {
     );
 }
 
-// — direct local path (v1.193 P0-T2)
-
 /// Run the real `nexus42` binary against a hermetic `HOME` from a working
 /// directory that contains no workspace marker.
 fn hermetic_cli(
@@ -330,9 +328,7 @@ fn seed_selected_local_creator(home: &std::path::Path, cwd: &std::path::Path) {
 #[test]
 fn workspace_init_and_demo_seed_are_local_and_idempotent() {
     let home = tempfile::tempdir().expect("temp home");
-    // workspace marker (`.nexus42`), so the child runs from a clean tree.
     let cwd = tempfile::tempdir().expect("temp cwd");
-    // every platform instead of resolving a documents directory.
     let creative_root = home.path().join("creative");
 
     let nexus_dir = home.path().join(".nexus42");
@@ -635,7 +631,6 @@ fn creator_status_renders_core_owned_identity() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // identity cache, not the CLI.
     patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
 
     let status = hermetic_cli(home.path(), cwd.path(), &["creator", "status"]);
@@ -698,12 +693,9 @@ fn creator_list_renders_core_owned_identity() {
     let cwd = tempfile::tempdir().expect("temp cwd");
     seed_selected_local_creator(home.path(), cwd.path());
 
-    // creator the CLI metadata cache knows by id only.
     patch_core_identity(home.path(), "local", CORE_OWNED_DISPLAY_NAME);
     patch_core_identity(home.path(), "ctr_coreonly", CORE_ONLY_DISPLAY_NAME);
 
-    // fallback. Seeded as JSON: its production writer resolves `HOME` from
-    // this process's environment, which a shared test binary must not mutate.
     let cli_cache = serde_json::json!({
         "creators": {
             "local": {
@@ -756,7 +748,6 @@ fn creator_list_renders_core_owned_identity() {
         "creator list must render a core-held identity the CLI cache lacks: {list_stdout}"
     );
 
-    // (the human table above is asserted by content, not by column offsets).
     let json = hermetic_cli(home.path(), cwd.path(), &["creator", "list", "--json"]);
     let json_output = combined_output(&json);
     assert!(
@@ -790,8 +781,6 @@ fn creator_list_renders_core_owned_identity() {
         "creator list must not consult a daemon (stdout+stderr): {list_output}{json_output}"
     );
 }
-
-// (v1.193 P0-T5)
 
 /// Parse a `--json` child's stdout, failing the case with both streams when the
 /// payload is not the expected JSON document.
@@ -872,8 +861,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         })
     };
 
-    // writes the dead-port literal below; re-reading the file keeps the
-    // `active_creator_id` / workspace keys `workspace init` committed.
     let config_path = home.path().join(".nexus42").join("config.toml");
     let seeded_config = std::fs::read_to_string(&config_path).expect("read the seeded config.toml");
     assert!(
@@ -1173,12 +1160,6 @@ fn work_pool_and_work_inspiration_do_not_cross_write() {
         "works use must leave the selected Work as the pool `active` row: {selected}"
     );
 
-    // selection reads `novel_pool_entries` — which holds this Work as `active`
-    // — and not the Work's own `works.status` column, which a promotion leaves
-    // at `draft` (R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE; the selector
-    // discriminating regression is
-    // [`omitted_work_id_uses_pool_active_entry`]). The read must stay on the
-    // direct core: the retired leaf resolved the active Work with a daemon call.
     let omitted_id_status = hermetic_cli(
         home.path(),
         cwd.path(),
@@ -1218,8 +1199,6 @@ const POOL_ITEM_TITLE: &str = "Pool-only idea";
 
 /// Note appended to the Work's own `inspiration_log`.
 const WORK_NOTE: &str = "Work-side note";
-
-// (v1.194 P2-T1 — R-V1193-P0T5-OMITTED-ID-POOL-ACTIVE)
 
 /// Title of the first Work promoted by [`omitted_work_id_uses_pool_active_entry`].
 const POOL_ACTIVE_ALPHA_TITLE: &str = "Alpha pool idea";
@@ -1396,7 +1375,6 @@ fn omitted_work_id_uses_pool_active_entry() {
     let beta = promote_pool_idea(home.path(), cwd.path(), POOL_ACTIVE_BETA_TITLE);
     assert_ne!(alpha, beta, "each promotion must create its own Work");
 
-    // `draft`, so no Work in this fixture satisfies the retired selector.
     for work_id in [&alpha, &beta] {
         let work = work_status_json(home.path(), cwd.path(), work_id);
         assert_eq!(
@@ -1434,8 +1412,6 @@ fn omitted_work_id_uses_pool_active_entry() {
         .expect("the pool entry carries its id")
         .to_string();
 
-    // becomes the pool listing's newest row, which is what discriminates the
-    // `status = 'active'` filter from a first-row read.
     let archive_queued = hermetic_cli(
         home.path(),
         cwd.path(),

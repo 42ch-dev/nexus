@@ -36,8 +36,6 @@ try {
     : REPO_ROOT;
   const pair = await loadDesignPair(repoRoot);
   const out = projectDesign(pair);
-  // after ALL writes succeed, replace the targets (atomic as a set), so a
-  // failure mid-loop cannot leave mixed-generation output.
   const staged = [];
   try {
     for (const { rel, field } of OUTPUTS) {

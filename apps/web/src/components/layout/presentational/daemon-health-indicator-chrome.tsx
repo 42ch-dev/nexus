@@ -12,9 +12,6 @@ export interface DaemonHealthIndicatorChromeProps {
   state: HealthState;
   /** True when the active client is pointed at a remote endpoint. */
   isRemote?: boolean;
-  /**
-   * a plain badge without a hit target.
-   */
   href?: string;
   /** Optional link renderer for app routers (e.g. react-router NavLink). */
   renderLink?: (props: { href: string; children: ReactNode }) => ReactNode;

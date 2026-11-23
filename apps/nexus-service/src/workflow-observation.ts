@@ -1,7 +1,4 @@
 /**
- * `GET /v1/daemon/orchestration/sessions/{run_id}/events` identity over the
- * native subscription authority P1-T1 built.
- *
  * This module is a TRANSPORT, not an authority. It authorizes nothing itself:
  * `subscribeWorkflowEvents` resolves the run's stored root ownership in core
  * before any ring, epoch or cursor is consulted, so an absent, foreign or
@@ -65,14 +62,10 @@ export async function streamWorkflowEvents(
         : { run_id: runId, last_event_id: lastEventId },
     );
     const subscriptionId = subscription.subscription_id;
-    // answer a second release can get, so both callers ignore it.
     const release = () => {
       void service.core.releaseWorkflowEvents(principal, subscriptionId).catch(() => undefined);
     };
     res.once('close', release);
-    // frame in one stream (a stored oversize-gap record plus the retention
-    // gap), so this writer must not collapse control frames the way the Host
-    // hub's single-slot model does.
     const writer = new SseWriter(res, NO_STREAM_END, { collapseControlFrames: false });
     const pullGate = { initialReleased: false };
     try {
@@ -84,9 +77,6 @@ export async function streamWorkflowEvents(
       });
       for (;;) {
         if (clientDisconnected(res)) return;
-        // holds the frames, so a reader that has not caught up must not be
-        // pulled ahead of. The pull itself blocks until a frame, a stream end
-        // or the release above wakes it.
         if (!(await gatePullUntilDrain(res, pullGate, writer))) return;
         let batch: CoreWorkflowEventBatch;
         try {

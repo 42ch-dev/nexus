@@ -100,9 +100,6 @@ describe('entrance registry (AR-15)', () => {
     expect(matchEntranceRouteRule('/strategies/preset-1')?.path).toBe(
       '/strategies/:presetId',
     );
-    // `/profile` segment inherits the canvas rule's `allowDeepLink` via
-    // longest-prefix match. No separate registry row (App.tsx: "no registry
-    // change"); a dedicated rule would be a second deep-link mechanism.
     expect(matchEntranceRouteRule('/strategies/preset-1/profile')?.path).toBe(
       '/strategies/:presetId',
     );
@@ -123,7 +120,6 @@ describe('entrance registry (AR-15)', () => {
     expect(matchEntranceRouteRule('/findings')).toBeNull();
     expect(matchEntranceRouteRule('/memory')).toBeNull();
     expect(matchEntranceRouteRule('/strategiesx')).toBeNull();
-    // matching — the `/settings/*` rules are section rules, not path rules.
     expect(matchEntranceRouteRule('/settings/agent')).toBeNull();
     expect(matchEntranceRouteRule('/modules')?.visibility).toBe('develop-only');
   });

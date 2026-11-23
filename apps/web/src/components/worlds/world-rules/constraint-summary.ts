@@ -27,11 +27,6 @@ function isScalar(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 
-/**
- * family string plus every other scalar operand as `key: value`, sorted for
- * deterministic output. Non-scalar members (objects/arrays/null) are skipped
- * — they cannot be summarized as a one-liner.
- */
 function genericSummary(family: string, constraint: Record<string, unknown>): string {
   const operands = Object.entries(constraint)
     .filter(([key, value]) => key !== 'family' && isScalar(value))
@@ -63,7 +58,6 @@ export function renderConstraintSummary(constraint: Constraint): string | null {
       return genericSummary(family, constraint);
     case 'required_field': {
       if (typeof moduleKey === 'string' && moduleKey.length > 0) {
-        // otherwise the module row alone is still honest partial info).
         return typeof field === 'string' && field.length > 0
           ? `${family}: ${moduleKey}.${field}`
           : `${family}: ${moduleKey}`;
@@ -81,8 +75,6 @@ export function renderConstraintSummary(constraint: Constraint): string | null {
       return genericSummary(family, constraint);
     }
     default:
-      // spoke carrier is a closed set this iteration, but rows written by
-      // future tooling must not crash the section (defensive contract).
       return genericSummary(family, constraint);
   }
 }

@@ -18,9 +18,6 @@ import type { NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { ToastProvider, Toaster } from '@/lib/use-toast';
 
-/**
- * re-fire handlers unexpectedly and errors surface immediately (no retry delay).
- */
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
@@ -37,10 +34,6 @@ export const noopClient = {
 
 interface RenderInAppOptions extends Omit<RenderOptions, 'wrapper'> {
   client?: NexusClient;
-  /**
-   * to simulate the browser build — `useDesktopCapabilities()` returns `null`
-   * and native affordances hide.
-   */
   desktop?: DesktopCapabilities | null;
   queryClient?: QueryClient;
   initialRouterEntries?: string[];

@@ -231,18 +231,10 @@ pub fn map_core_error(err: CoreError) -> CliError {
             status: 403,
             message: resource,
         },
-        // (`errors.rs`): `Forbidden { resource: "world {world_id}", reason }`
-        // at status 403 — so the direct-core caller sees the same family the
-        // HTTP route emits.
         CoreError::WorldOwnerDenied { world_id, reason } => CliError::Api {
             status: 403,
             message: format!("world {world_id}: {reason}"),
         },
-        // authority. Mirrors the daemon adapter's per-variant status and
-        // `[code] message` envelope, which is exactly what
-        // `DaemonClient::parse_error_response` renders for the `preset`
-        // command family over the wire — one preset error must not read
-        // differently depending on which transport reached it.
         CoreError::Preset(error) => map_preset_error(error),
         // {resource}` at 404 (`NexusApiError::NotFound`), and
         // `DaemonClient::parse_error_response` is what every HTTP caller read.
@@ -256,9 +248,6 @@ pub fn map_core_error(err: CoreError) -> CliError {
         CoreError::InvalidInput { field, reason } => {
             CliError::Other(format!("invalid input ({field}): {reason}"))
         }
-        // structured per-entry object and the daemon renders it as a 422
-        // `invalid_input` envelope, so a direct-core caller reports the same
-        // status and code with the object verbatim.
         CoreError::InputValidation { details } => CliError::Api {
             status: coded_status("invalid_input"),
             message: format!("[invalid_input] input validation failed: {details}"),
@@ -292,13 +281,7 @@ pub fn map_core_error(err: CoreError) -> CliError {
             holder_name: "workspace writer".to_string(),
             stale: false,
         },
-        // daemon adapter renders it at the status its own table assigns; a
-        // direct-core caller sees the same code and family.
         CoreError::Coded { code, message } => map_coded_refusal(&code, &message),
-        // `PeerToolDenied` variant at 400, with the peer's finer wire code in
-        // `details.wire_code`. A direct-core caller gets the same public code
-        // and status, and the wire code is kept in the message so it is not
-        // silently dropped — mirroring how `DaemonClient` surfaces it.
         CoreError::PeerDenied {
             code,
             wire_code,
@@ -335,9 +318,6 @@ pub fn map_core_error(err: CoreError) -> CliError {
             status: coded_status("invalid_input"),
             message,
         },
-        // the CLI. The whitelisted effective code, the effective retry class
-        // and an allowlisted peer wire code are rendered from the typed
-        // fields, never re-parsed back out of a formatted string.
         CoreError::MemoryProviderRefused {
             code,
             wire_code,
@@ -466,12 +446,6 @@ fn map_already_approved(conflict: &nexus_core::StrategyAlreadyApprovedError) -> 
 /// transport.
 fn coded_status(code: &str) -> u16 {
     match code {
-        // adds the two frozen durable-operation refusal codes to the same
-        // family: the first writer's receipt is durable
-        // (`operation_id_conflict`) and an `uncertain` answer means the
-        // operation's state cannot be determined (never retry blindly). An
-        // exact 409 keeps both honest instead of degrading them to the 400
-        // `invalid_input` fallback.
         "conflict" | "operation_id_conflict" | "uncertain" | "operation_in_progress" => 409,
         "invalid_state"
         | "invalid_transition"
@@ -504,13 +478,10 @@ fn coded_status(code: &str) -> u16 {
 fn map_preset_error(error: nexus_core::PresetError) -> CliError {
     use nexus_core::PresetError;
     match error {
-        // whose status and public code are both code-driven. Mirroring the same
-        // two tables keeps the outcome identical on either transport.
         PresetError::Rejected { code, message } => CliError::Api {
             status: preset_rejected_status(&code),
             message: format!("[{}] Bad request: {message}", preset_rejected_code(&code)),
         },
-        // `details.field` is appended by `parse_error_response`.
         PresetError::InvalidInput { field, reason } => CliError::Api {
             status: 400,
             message: format!("[invalid_input] Invalid input: {reason} (field: {field})"),
@@ -523,12 +494,10 @@ fn map_preset_error(error: nexus_core::PresetError) -> CliError {
             status: 409,
             message: format!("[conflict] Conflict: {message}"),
         },
-        // travels in `details` (not rendered by the CLI envelope).
         PresetError::Forbidden { reason, .. } => CliError::Api {
             status: 403,
             message: format!("[forbidden] Forbidden: {reason}"),
         },
-        // `code` is internal classification, deliberately not leaked.
         PresetError::Internal { message, .. } => CliError::Api {
             status: 500,
             message: format!("[internal] Internal error: {message}"),
@@ -890,7 +859,6 @@ mod direct_writer_lifetime {
         let (home, db_path) = selected_home().await;
         let core = open_writer(home.path()).await;
 
-        // later success cannot be vacuous.
         assert!(
             acquire_store_reset_fence(&db_path).is_err(),
             "a live direct writer refuses the store's exclusive fence"
@@ -934,16 +902,11 @@ mod direct_writer_lifetime {
             "the core is closed when finish_direct returns"
         );
 
-        // process-local writer, so dropping the closed service leaves no live
-        // admission on the store and the exclusive fence is granted. A rejected
-        // path that skipped the close would leave the guard retained and keep
-        // this refused — for the life of the process, not just this call.
         drop(core);
         let fence = acquire_store_reset_fence(&db_path)
             .expect("finish_direct released the direct writer in this process");
         drop(fence);
 
-        // commits the revision the seeded one left behind.
         let reopened = open_writer(home.path()).await;
         let principal = reopened.active_principal().await.expect("active principal");
         let committed = reopened

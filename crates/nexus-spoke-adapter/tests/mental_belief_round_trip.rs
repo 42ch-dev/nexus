@@ -95,7 +95,6 @@ fn mental_and_belief_survive_spoke_roundtrip_verbatim() {
 
     assert_eq!(roundtripped.modules, Some(original_modules));
 
-    // modules_json.
     let mental: MentalFieldsRaw = roundtripped
         .parse_mental_fields()
         .expect("modules.mental parses after round-trip");
@@ -148,9 +147,6 @@ fn world_state_info_point_roundtrips_with_world_row() {
 
 #[test]
 fn paper_alias_row_is_not_produced_and_does_not_round_trip_as_is() {
-    // OmniToM paper aliases, not handbook fields (TL-5 / PD-5). The parse
-    // type has no fields for them, so a paper-alias row never round-trips
-    // through the typed form.
     let alias_row = json!({
         "actor": "kb_bo",
         "proposition": "The marble is in the box",
@@ -170,14 +166,12 @@ fn paper_alias_row_is_not_produced_and_does_not_round_trip_as_is() {
         parsed.source, None,
         "`mental_source` must not map to `source`"
     );
-    // does not round-trip as-is.
     let emitted: Value = serde_json::to_value(&parsed).unwrap();
     assert_ne!(emitted, alias_row);
     assert!(emitted.get("actor").is_none());
     assert!(emitted.get("knowledge_access").is_none());
     assert!(emitted.get("mental_source").is_none());
 
-    // parses to handbook fields unpopulated and never re-emits the aliases.
     let mut entry = bo_entry();
     entry.modules = Some(json!({ "belief": [alias_row] }));
     let rows = entry.parse_belief_rows();

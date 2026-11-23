@@ -89,8 +89,6 @@ impl ResolvedExtractionPort {
 #[async_trait]
 impl ExtractionPort for ResolvedExtractionPort {
     async fn load_extraction_input(&self, request: &ExtractRequest) -> SpokeResult<Value> {
-        // caller wiring error, not something to paper over with the bundle at
-        // hand.
         if request.run_id.as_str() != self.input.run_id {
             let mut details = Map::new();
             details.insert("field".into(), Value::String("run_id".into()));
@@ -182,8 +180,6 @@ where
 {
     let request_run_id = request.run_id.as_str().to_owned();
 
-    // upstream's fixed `SpokeResult<ExtractionResult>` callback shape, so the
-    // callback hands it back through this slot.
     let native_output: Arc<Mutex<Option<NativeExtractionOutput>>> = Arc::new(Mutex::new(None));
     let response = {
         let slot = Arc::clone(&native_output);
@@ -265,8 +261,6 @@ where
     Fut: Future<Output = SpokeResult<ExtractionResult>> + Send + 'static,
 {
     let (result_tx, result_rx) = tokio::sync::oneshot::channel::<SpokeResult<ExtractResponse>>();
-    // signal the driver's `select!` observes, so the orchestrator future (and
-    // the native callback) is dropped when this future is.
     let (_cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
     let spawned = std::thread::Builder::new()
@@ -590,7 +584,6 @@ mod tests {
                 let mut prepared =
                     prepare_extract(prepare_input("char_lin_xia", KnowledgeGovernance::shared()))
                         .expect("prepare");
-                // to hand back a success carrying a non-provisional entry.
                 prepared.record.status = "confirmed".to_string();
                 spoke_ok(NativeExtractionOutput {
                     candidates: vec![prepared],
@@ -643,7 +636,6 @@ mod tests {
         let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let started = Arc::new(AtomicUsize::new(0));
 
-        // spawns a task, so a dropped future stops before any persist.
         let cancelled = tokio::time::timeout(
             Duration::from_millis(20),
             extract_candidates(request(RUN_ID), admitted_bundle(RUN_ID), {

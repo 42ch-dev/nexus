@@ -402,7 +402,6 @@ pub async fn append_event_in_tx(
 ///
 /// Same error variants as [`append_event_in_tx`].
 #[allow(clippy::too_many_arguments)]
-// add indirection for one caller (the Accept path).
 pub async fn append_event_canon_with_extensions_in_tx(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     world_id: &str,
@@ -919,11 +918,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_canon_with_extensions_in_tx_writes_canon() {
-        // the Timeline as a `canon` event — the projection reads canon only.
-        // Folds the former `append_event_with_extensions_in_tx` assertions
-        // (provenance column + affected_key_block_ids_json) into the canon
-        // helper's test — the provisional-with-provenance writer was deleted
-        // pre-1.0 (QC S-dead: the canon helper owns the only provenance write).
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
@@ -980,9 +974,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_canon_with_extensions_in_tx_persists_modules_json() {
-        // via the canon Accept path must survive the SQLite write→read cycle
-        // byte-for-byte — including unknown keys inside the observation object
-        // (mirrors Task 3's AC-V1164-3 seam gate).
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
@@ -1030,7 +1021,6 @@ mod tests {
             "modules_json must persist the observation payload verbatim"
         );
 
-        // get_event single read) deserialize modules back to the same Value.
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let expected: serde_json::Value = serde_json::from_str(modules_str).unwrap();
 
@@ -1055,8 +1045,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_writes_null_modules_json() {
-        // modules = unrecorded per spoke handbook), and the read path maps
-        // NULL → None.
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
@@ -1106,10 +1094,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_persists_observation_modules_json() {
-        // a `modules.observation` payload; `append_event` must persist it
-        // verbatim in `modules_json` and both read paths (get_event +
-        // get_timeline) must surface it back — the checker-consumed log
-        // round-trip (AC-V165-7).
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
@@ -1178,10 +1162,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_provisional_visible_in_check_scope() {
-        // checker's scope read (`list_timeline_events_scoped`, backing
-        // `ScopeQueryPort::list_timeline_events`) filters world/branch/ids
-        // only — no status filter — so the provisional observation event must
-        // appear in the check scope with its modules intact.
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 
@@ -1234,7 +1214,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_event_in_tx_leaves_extensions_null() {
-        // extensions param) writes NULL, not a default object.
         let (_dir, pool) = fresh_pool().await;
         seed_creator(&pool).await;
 

@@ -302,7 +302,6 @@ impl CoreService {
             .inner
             .character_fences
             .try_acquire_activity(character_id)?;
-        // guard, so this status/epoch pair is exact for the lease's lifetime.
         let stored = require_character_row(pool, principal.creator_id(), character_id).await?;
         if stored.status != "active" {
             return Err(CoreError::ActorConflict {
@@ -340,7 +339,6 @@ impl CoreService {
             .inner
             .character_fences
             .try_acquire_transition(&character_id)?;
-        // exact for material-vs-no-op session retirement (§11.3.2–§11.3.3).
         let stored = require_character_row(pool, principal.creator_id(), &character_id).await?;
         Ok(crate::actor_fence::CharacterTransitionLease::new(
             parts,
@@ -390,9 +388,6 @@ impl CoreService {
                 CharacterStatus::Active
             }
         };
-        // admission paths use, before the lifecycle write. The storage layer
-        // re-resolves it inside the transaction, so the archive/restore commit
-        // still fails closed on a registry that changed under the fence.
         require_actor_holder(
             &self.inner.pool,
             principal.creator_id(),
@@ -773,8 +768,6 @@ impl CoreService {
                 },
             )
             .await?;
-        // same exported read the admission paths use (the storage layer
-        // re-resolves it inside its own transaction).
         require_actor_holder(
             &self.inner.pool,
             principal.creator_id(),
@@ -1115,7 +1108,6 @@ impl CoreActorAdmission {
                     .await?;
             }
         }
-        // admission path — a normal read never provisions a missing holder.
         require_actor_holder(&self.pool, caller_creator_id, &actor).await?;
         let view = self
             .views

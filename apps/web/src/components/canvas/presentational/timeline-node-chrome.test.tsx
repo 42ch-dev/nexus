@@ -32,7 +32,6 @@ const EXTRACT_SOURCE_PATH = path.resolve(__dirname, 'timeline-node-chrome.tsx');
 describe('timeline-node-chrome presentational boundary', () => {
   it('does not import the React Flow package', () => {
     const source = readFileSync(EXTRACT_SOURCE_PATH, 'utf8');
-    // extract (comments included — keep the file greppable-clean).
     expect(source).not.toMatch(/@xyflow\/react/);
   });
 

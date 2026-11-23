@@ -126,10 +126,6 @@ impl CliConfigSnapshot {
         }
         let text = match std::fs::read_to_string(json_path) {
             Ok(text) => text,
-            // an *empty* legacy migration first: it renames the JSON away and
-            // creates no TOML. Under this lock that is the documented "no legacy
-            // document" state, not a read fault. Every other I/O error (and
-            // every parse error below) is still returned unchanged.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self::default());
             }
@@ -142,8 +138,6 @@ impl CliConfigSnapshot {
         match serde_json::from_str::<Self>(&text) {
             Ok(cfg) => {
                 let toml_str = toml::to_string_pretty(&cfg)?;
-                // lock-free `ReadOnly` snapshot, I-000291) must never see a
-                // truncated `config.toml` from this legacy migration.
                 crate::config_lock::publish_document(nexus_root, &toml_str)?;
                 std::fs::rename(json_path, nexus_root.join("config.json.migrated"))?;
                 Ok(cfg)
@@ -187,8 +181,6 @@ impl CliConfigSnapshot {
     fn parse_legacy_document(json_path: &Path) -> Result<Self, anyhow::Error> {
         let text = match std::fs::read_to_string(json_path) {
             Ok(text) => text,
-            // existence test and this read: the documented "no legacy document"
-            // state, not a read fault.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self::default());
             }
@@ -485,7 +477,6 @@ mod tests {
 
         arrived.recv().expect("the migration reached the hold");
 
-        // renamed away and no TOML is created.
         {
             let _lock = crate::config_lock::acquire(&root).expect("the migration lock");
             std::fs::rename(root.join("config.json"), root.join("config.json.migrated"))

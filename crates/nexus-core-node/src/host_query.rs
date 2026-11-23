@@ -89,8 +89,6 @@ pub fn deny_actor_provider_ids(
     }
     if let Some(raw) = operation_id {
         if let Ok(uuid) = Uuid::parse_str(raw) {
-            // check, and a terminal record keeps its operation id until the
-            // core's bounded eviction.
             if authority.owns_actor_operation(&HostOperationId(uuid)) {
                 return Err(forbidden_actor_id("operation", raw));
             }
@@ -224,8 +222,6 @@ pub async fn dispatch_host_query(
             let health = response
                 .health
                 .ok_or_else(core_error::open_reason_internal)?;
-            // represented in the core-authorized native registry, so a collision
-            // cannot double-count a session or its operation.
             let native = native_session_rows(&authority, &principal, None).await?;
             let js = js_sessions_snapshot(state);
             let unique_js: Vec<&JsSessionRecord> = js
@@ -392,7 +388,6 @@ pub async fn dispatch_host_query(
                     scan: None,
                 });
             }
-            // interrupted, read through the CoreService-owned journal.
             if let Some(core) = state.journal_core() {
                 if let Ok(Some((operation_id, session_id, _provider_id, status))) =
                     core.provider_operation_row_internal(raw).await

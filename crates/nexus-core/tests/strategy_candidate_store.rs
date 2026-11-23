@@ -88,7 +88,6 @@ async fn a_first_write_at_base_zero_inserts_revision_one_and_mirrors_it() {
         .await
         .unwrap();
 
-    // writer of the embedded revision.
     assert_eq!(committed.revision, 1);
     assert_eq!(committed.document.revision, 1);
     assert_eq!(committed.document.meta.description, "composed");
@@ -472,8 +471,6 @@ async fn a_document_the_walk_cannot_simulate_is_refused_with_its_reason() {
 #[tokio::test]
 async fn a_bundle_declaring_an_embedded_preset_id_is_refused_by_name() {
     let (tmp, core, principal) = setup().await;
-    // embedded id would shadow that preset for compose and approve. The id the host ships is not
-    // a partner's to claim, so the import refuses instead of writing the row.
     let bundle = tmp.path().join(EMBEDDED);
     let before = write_bundle(&bundle, &partner_bundle_as(EMBEDDED, "shadow fixture"));
 

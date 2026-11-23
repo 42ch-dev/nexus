@@ -247,7 +247,6 @@ async fn approve_freezes_one_snapshot_bound_to_the_simulated_content() {
 #[tokio::test]
 async fn a_resolved_fragment_with_a_dangling_edge_is_refused_by_approve() {
     let setup = setup().await;
-    // `inner` is not a pin mismatch — it is a fragment bytes the approval has to read.
     write_declaring_package(
         &setup.home,
         "inner",
@@ -438,7 +437,6 @@ async fn a_pin_whose_package_is_absent_is_refused_naming_the_pin() {
         .expect("the nest records the resolved pin");
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // scanned hash to compare, and the refusal must not pretend there is one.
     std::fs::remove_dir_all(setup.home.join("patterns").join("gone-step")).unwrap();
 
     let error = setup
@@ -495,7 +493,6 @@ async fn an_unresolvable_pin_refuses_before_the_slots_it_declares() {
     let revision = composed.candidate.revision;
     let trajectory = simulate(&setup.core, &setup.principal, &composed.candidate.document).await;
 
-    // so the pin it recorded cannot be confirmed.
     std::fs::remove_file(
         setup
             .home

@@ -157,7 +157,6 @@ export function SuggestedRelationshipsPane({
       const result = await onPromoteAll(sorted);
       setPromoteAllStatus({ kind: 'done', result });
     } catch {
-      // item as failed so the user sees a failure message.
       setPromoteAllStatus({ kind: 'done', result: { succeeded: 0, failed: sorted.length } });
     }
   }

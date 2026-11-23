@@ -125,7 +125,6 @@ export function PathContextMenu({
       await desktop[action](path);
       toast({ variant: 'success', title: commonT(successKey) });
     } catch (err) {
-      // plain-language copy verbatim (design-req §6.4 / DESIGN.md rule).
       const title = isOutsideWorkspaceError(err)
         ? commonT('toast.pathNotOpened')
         : commonT(errorKey);

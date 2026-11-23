@@ -250,7 +250,6 @@ fn stub_directive() -> ActiveDirective {
 
 #[tokio::test]
 async fn directive_injects_regardless_of_stage() {
-    // (which gates ALL lore slots — the directive is not lore).
     for stage in [
         GenerationStage::Produce,
         GenerationStage::Persist,
@@ -285,7 +284,6 @@ async fn directive_injects_regardless_of_stage() {
             "{stage}: exactly one lifecycle call per injecting assemble"
         );
 
-        // system_maintenance.
         if stage == GenerationStage::Persist {
             assert!(
                 !full.contains("### Style (Post-History)"),

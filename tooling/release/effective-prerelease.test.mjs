@@ -87,7 +87,6 @@ test("effectivePrerelease is toggle OR 'signing unimplemented'", () => {
 });
 
 test("a suffixed release version forces a prerelease regardless of toggle or signing", () => {
-  // implemented and an explicit `prerelease: false`, alpha/rc stays prerelease.
   assert.equal(effectivePrerelease(false, true, "0.2.0-alpha.1"), true);
   assert.equal(effectivePrerelease(false, true, "0.2.0-rc.1"), true);
   assert.equal(effectivePrerelease(false, false, "0.2.0-rc.1"), true);

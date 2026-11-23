@@ -1,6 +1,4 @@
 /**
- * `/setup`.
- *
  * Reached when the derived browser first-run gate finds no initialized
  * workspace (compass D21), and always directly reachable as the re-run entry.
  * The identity choice is the entrance: it selects the rail registry
@@ -52,14 +50,8 @@ export function WizardShell() {
 
   const [choice, setChoice] = useState<EntranceId | null>(null);
   const [step, setStep] = useState<WizardStep>('identity');
-  // creator while the first request is still in flight.
   const creatorRequest = useRef<Promise<string> | null>(null);
 
-  /**
-   * (D25: the creator's `default` workspace directory is created by creator
-   * bootstrap, never by a workspace-create call). Runs before the agent step so
-   * the choice can be persisted under `nexus-agent-profile:<creator_id>` (D27).
-   */
   function ensureCreator(): Promise<string> {
     if (activeCreatorId) return Promise.resolve(activeCreatorId);
     creatorRequest.current ??= (async () => {
@@ -103,11 +95,6 @@ export function WizardShell() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.workspaces.all });
   }
 
-  /**
-   * workspace is already selected server-side when this runs, so a failure
-   * here is a status-refresh failure, with its own copy — never the
-   * workspace-selection toast. Returns false when the user should stay put.
-   */
   async function refreshGateOrReport(): Promise<boolean> {
     try {
       await setCompleted(true);
@@ -124,10 +111,6 @@ export function WizardShell() {
     }
   }
 
-  /**
-   * by the shell (the same path both finishes use) so it is never misreported
-   * as a World-creation failure. Returns false when the user should stay put.
-   */
   async function selectWorkspaceOrReport(): Promise<boolean> {
     try {
       await selectDefaultWorkspace();

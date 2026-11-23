@@ -102,7 +102,6 @@ fn a_bundle_that_is_not_embedded_is_refused() {
         "the refusal names the mismatch: {error}"
     );
 
-    // the identity and not about the manifest.
     loaded.source_identity = Some(embedded_identity);
     embedded_workflow_document(&loaded).expect("the embedded identity constructs");
 }

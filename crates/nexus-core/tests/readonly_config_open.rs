@@ -424,7 +424,6 @@ async fn a_sealed_readonly_open_loads_a_legacy_snapshot_without_migrating() {
     let opened = CoreService::open(home.options(CoreAccess::ReadOnly)).await;
     drop(sealed);
 
-    // read-only open refuses as `auth_required`/`uninitialized`.
     let core = opened.expect("a read-only open must load the legacy snapshot");
     core.close().await.expect("close");
 

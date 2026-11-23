@@ -318,8 +318,6 @@ async fn pending_review_rejects_foreign_world_and_inactive_binding() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // World belongs to another Creator, one inactive. Repository write
-    // validation must still refuse them.
     for (binding_id, world_id, status) in [
         (
             "awb_ffffffffffffffffffffffffffffffff",
@@ -372,7 +370,6 @@ async fn pending_review_session_unique_per_character() {
     create_character_pending_review(&pool, OWNER, &pending("pend_1", &s.char_a, None))
         .await
         .unwrap();
-    // (Creator capture parity, `INSERT OR IGNORE`); no extra row is written.
     let dup = CharacterPendingReviewRecord {
         pending_id: "pend_dup".to_string(),
         session_id: "sess_pend_1".to_string(),
@@ -414,7 +411,6 @@ async fn foreign_keys_reject_unknown_character_and_cross_character_binding() {
     .unwrap_err();
     assert!(err.to_string().contains("FOREIGN KEY"), "{err}");
 
-    // even if the caller bypasses repository validation.
     let err = sqlx::query(
         "INSERT INTO character_memory_fragments \
          (fragment_id, session_id, character_id, actor_world_binding_id, created_at) \
@@ -689,7 +685,6 @@ async fn narrative_fragment_stats_are_scope_bounded() {
     let (shared, cached) = character_soul_narrative_fragment_stats(&pool, OWNER, &s.char_a, None)
         .await
         .unwrap();
-    // returned cache row is present alongside the freshly computed stats.
     assert!(cached.is_some());
     assert_eq!(shared.fragment_count, 2);
     assert_eq!(shared.distinct_keyword_count, 2);
@@ -1087,7 +1082,6 @@ async fn binding_local_reads_require_exact_binding_tuple() {
     .await
     .unwrap();
 
-    // binding's local scope.
     assert!(
         get_character_pending_review(&pool, OWNER, &s.char_a, Some(&s.binding_a2), "pend_b1")
             .await
@@ -1158,9 +1152,6 @@ async fn inactive_binding_rows_remain_readable_as_retained_data() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // raw-insert a binding-local row under it. Retained reads tolerate the
-    // inactive binding because the stored tuple still points at an existing
-    // owned World; only mutators require liveness.
     sqlx::query(
         "INSERT INTO actor_world_bindings \
          (binding_id, character_id, world_id, status, created_at, updated_at) \
@@ -1215,7 +1206,6 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // admission refuses cross-state worlds, so insert directly).
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
@@ -1276,8 +1266,6 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     );
     assert_eq!(table_count(&pool, "character_memory_fragments").await, 0);
 
-    // retained reads still return it (World exists and is owned; liveness is
-    // not part of the read rule).
     sqlx::query(
         "INSERT INTO character_memory_fragments \
          (fragment_id, session_id, character_id, actor_world_binding_id, created_at) \
@@ -1311,7 +1299,6 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     .unwrap()
     .is_some());
 
-    // mutation.
     let err = remove_binding(
         &pool,
         OWNER,
@@ -1354,7 +1341,6 @@ async fn list_limits_are_clamped_to_one_documented_bound() {
             1
         );
     }
-    // because 3 < MAX).
     assert_eq!(
         list_character_pending_reviews(
             &pool,
@@ -1588,7 +1574,6 @@ async fn archived_character_retained_reads_and_mutators_inactive() {
             .unwrap();
     assert_eq!(stats.fragment_count, 1);
 
-    // unchanged.
     let err = delete_character_pending_review(&pool, OWNER, &seed.char_a, pending_id)
         .await
         .unwrap_err();
@@ -1640,7 +1625,6 @@ async fn retained_reads_fail_closed_for_foreign_or_missing_world() {
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
-    // Creator (raw-inserted; public admission refuses this shape).
     sqlx::query(
         "INSERT INTO actor_world_bindings \
          (binding_id, character_id, world_id, status, created_at, updated_at) \
@@ -1651,7 +1635,6 @@ async fn retained_reads_fail_closed_for_foreign_or_missing_world() {
     .execute(&pool)
     .await
     .unwrap();
-    // a dangling tuple (drift/corruption); retained reads must fail closed.
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \

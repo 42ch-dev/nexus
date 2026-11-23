@@ -150,9 +150,6 @@ const FRAGMENT_DIGEST: &str =
 /// provider's.
 const OVER_LIMIT_BODY_BYTES: usize = 70_000;
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 fn manifest(host_id: &str) -> HostCapabilityManifest {
     serde_json::from_value(json!({
         "schema_version": 1,
@@ -270,9 +267,6 @@ async fn responder_of(
         .expect("the responder task is bounded")
         .expect("the responder task completed")
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// One disposable user home, bootstrapped through the real public home
 /// contract: a registered Creator, a selected workspace (which materializes the
@@ -596,9 +590,6 @@ impl Provider {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 async fn core_db(env: &Env) -> SqlitePool {
     SqlitePool::connect_with(SqliteConnectOptions::new().filename(env.state_db()))
         .await
@@ -642,9 +633,6 @@ async fn object_facts(pool: &SqlitePool, binding_id: &str) -> Vec<(String, Strin
     })
     .collect()
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// Withhold every legacy memory surface for the rest of the lifecycle and
 /// occupy the real long-term discovery paths with a pre-existing regular file.
@@ -739,9 +727,6 @@ async fn assert_no_local_memory(env: &Env) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// One durable provider record row.
 #[derive(Debug)]
 struct ProviderRecord {
@@ -822,9 +807,6 @@ async fn provider_receipts(pool: &SqlitePool, op: &str) -> i64 {
     )
     .await
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 async fn create_world(core: &CoreService, principal: &Principal, title: &str) -> String {
     core.create_world(principal, dto(json!({ "title": title })))
@@ -925,9 +907,6 @@ fn classified_refusal(
     }
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
     let env = Env::boot("R3 Record Owner").await;
@@ -936,7 +915,6 @@ async fn creator_record_reads_and_writes_run_on_the_remote_provider() {
     let principal = core.active_principal().await.expect("active principal");
     let subject_id = legacy::creator_subject_id(&env.creator_id);
 
-    // the whole lifecycle below.
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
     let pool = provider.pool().await;
@@ -1028,7 +1006,6 @@ async fn creator_create_commits_one_provider_record(
         json!(format!("prn_{}", peer_id(&CLIENT_SEED))),
         "the provider sees the authenticated peer's opaque principal, not a credential id"
     );
-    // used; neither is content the provider is asked to store.
     for column in ["content_json", "provenance_json"] {
         for secret in [CREDENTIAL_ID, hex(&CLIENT_SEED).as_str()] {
             assert_eq!(
@@ -1069,7 +1046,6 @@ async fn creator_list_and_slug_read_serve_the_pinned_space(
     assert_eq!(listed["scope"]["visibility"], json!("shared"));
     assert_eq!(listed["content"]["text"], json!(BODY));
 
-    // authored-kind list resolves the record, both in the pinned space.
     let got = core
         .get_creator_memory(principal, SLUG)
         .await
@@ -1107,8 +1083,6 @@ async fn creator_update_and_stale_read_are_exact(
     );
     assert_eq!(provider_receipts(pool, "memory.records.update").await, 1);
 
-    // `version_mismatch` shape, and the provider is untouched. (The provider's
-    // own stale-revision CAS is reached in the promotion target below.)
     let stale = core
         .update_creator_memory(principal, SLUG, BODY, Some(&expected))
         .await
@@ -1252,9 +1226,6 @@ async fn read_only_core_refuses_creator_record_writes(
     );
     responder_of(ro_responder).await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// Rewrites the committed promotion receipt one provider returns, so the Core
 /// is shown a schema-valid answer that belongs to another request. It changes
@@ -1407,7 +1378,6 @@ async fn character_fragment_promotion_runs_on_the_remote_provider() {
     )
     .await;
 
-    // its revision-checked write: the caller's DTO revision 0 is now stale.
     let (adapter, sdk_responder) =
         second_writer_edit_makes_the_caller_revision_stale(&provider, &second).await;
 
@@ -1726,7 +1696,6 @@ async fn stale_and_archived_promotions_are_refused(
     assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 2);
     pool.close().await;
 
-    // archived Character is refused there, before any provider read or write.
     core.transition_character(
         principal,
         dto::<CoreCharacterTransitionRequest>(json!({
@@ -1762,9 +1731,6 @@ async fn stale_and_archived_promotions_are_refused(
     pool.close().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// N2's adoption maps a reviewed `FragmentOnly` product **to** a `fact` record;
 /// it never makes every protocol `fact` a Nexus Character fragment, and it never
 /// lets a user lose a fragment silently. This case drives the real signed public
@@ -1798,7 +1764,6 @@ async fn rewritten_and_provider_native_facts_are_not_character_fragments() {
     let (adapter, sdk_responder) = provider.sdk_session().await;
     let memory_principal = Provider::memory_principal();
 
-    // served as a fragment.
     let native_id = provider_native_fact_is_not_a_family_row(
         &core,
         &principal,
@@ -2151,7 +2116,6 @@ async fn valid_fragment_promotes_and_stays_representable(
     assert!(promoted.fragment.binding_id.is_none());
     assert_eq!(promoted.fragment.revision, 1);
     assert_eq!(promoted.fragment.session_id.as_str(), control_session);
-    // representation, not a binding-scoped fact.
     let shared = core
         .list_character_memory_fragments(principal, character_id.to_owned(), None, 50, 0)
         .await
@@ -2179,7 +2143,6 @@ async fn valid_fragment_promotes_and_stays_representable(
         SpokeResult::Ok(_) => {}
         SpokeResult::Reject(reject) => panic!("the post-promotion rewrite commits: {reject:?}"),
     }
-    // unproven rather than falsely claimed as known, and still never an Internal.
     let retried = core
         .promote_character_fragment(principal, character_id.to_owned(), control.to_owned(), 1)
         .await
@@ -2201,9 +2164,6 @@ async fn valid_fragment_promotes_and_stays_representable(
     assert_eq!(provider_receipts(&pool, "memory.records.promote").await, 1);
     pool.close().await;
 }
-
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 
 /// The page window is counted in FAMILY rows. Interleaved generic records — a
 /// provider-native `fact`, and a `fact` whose own metadata names the *unrelated*
@@ -2239,8 +2199,6 @@ async fn fragment_page_windows_count_only_the_family() {
     let (native_id, unrelated_id) =
         create_generic_family_records(&adapter, &provider, &subject_id, &binding_a).await;
 
-    // never served and never consumes a slot, so `offset`/`has_more` describe
-    // the three fragments alone.
     family_pages_skip_generic_records(
         &core,
         &principal,
@@ -2260,7 +2218,6 @@ async fn fragment_page_windows_count_only_the_family() {
     )
     .await;
 
-    // fragments, so a small first page never reaches it.
     let damaged_id =
         create_damaged_fragment_record(&adapter, &provider, &subject_id, &binding_b).await;
     review_family_binding(
@@ -2350,8 +2307,6 @@ async fn create_generic_family_records(
         .as_str()
         .expect("the provider-assigned record id")
         .to_string();
-    // family string that is not the Character one is not Character-fragment
-    // origin, so this must stay a generic record.
     let unrelated = match adapter
         .create_record(
             &memory_principal,
@@ -2587,9 +2542,6 @@ async fn pages_and_promotion_report_the_damaged_fragment(
     pool.close().await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// One real causal window inside one Core call.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ProbeBoundary {
@@ -2734,14 +2686,11 @@ async fn an_independently_signed_writer_competes_at_both_causal_windows() {
     let cas_record = &race.cas_record;
     let commit_record = &race.commit_record;
 
-    // read and before the promotion, so the promotion meets the real provider
-    // CAS. The provider/D18 observations run before any session cleanup.
     let (cas_refused, cas_handles) =
         run_writer_before_promotion_cas(&env, &provider, character_id, cas_record).await;
     assert_pre_cas_window_refusal(&env, &provider, cas_record, binding_id, &cas_refused).await;
     close_race_handles(&provider, cas_handles).await;
 
-    // committed and before the original response returns.
     let (promoted, commit_handles) =
         run_writer_after_promotion_commit(&env, &provider, character_id, commit_record).await;
     assert_committed_promotion_state(
@@ -3136,9 +3085,6 @@ async fn assert_committed_promotion_state(
     );
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn recall_and_record_reads_use_the_pinned_remote_space() {
     let env = Env::boot("R3 Recall Owner").await;
@@ -3163,7 +3109,6 @@ async fn recall_and_record_reads_use_the_pinned_remote_space() {
         .expect("the provider-assigned record id")
         .to_string();
 
-    // SDK's own signed session against the same durable provider.
     recall_over_the_signed_session(&provider, &subject_id, &record_id).await;
 
     let pool = provider.pool().await;
@@ -3251,8 +3196,6 @@ async fn recall_over_the_signed_session(provider: &Provider, subject_id: &str, r
         "the authorized set is non-empty"
     );
 
-    // pinned space is the provider's own, never a local default that would answer
-    // here.
     match adapter
         .recall(
             &memory_principal,
@@ -3273,9 +3216,6 @@ async fn recall_over_the_signed_session(provider: &Provider, subject_id: &str, r
     responder_of(sdk_responder).await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn remote_record_refusals_stay_static_without_peer_text() {
     let env = Env::boot("R3 Refusal Owner").await;
@@ -3286,8 +3226,6 @@ async fn remote_record_refusals_stay_static_without_peer_text() {
 
     let (trap, dirs) = arm_legacy_traps(&env, None).await;
 
-    // refuses: the refusal is genuinely the provider's, mapped by the safe
-    // whitelist rather than copied through.
     let sentinel = "r3-peer-text-sentinel";
     let oversized = format!("{sentinel}{}", "x".repeat(OVER_LIMIT_BODY_BYTES));
     let refused = core
@@ -3310,8 +3248,6 @@ async fn remote_record_refusals_stay_static_without_peer_text() {
         "the provider's own message never travels with a refusal: {shown}"
     );
 
-    // the retained slug read renders as `None` (the same whitelisted class drives
-    // the shortcut), and a second miss writes nothing.
     assert!(core
         .get_creator_memory(&principal, "r3-never-written")
         .await

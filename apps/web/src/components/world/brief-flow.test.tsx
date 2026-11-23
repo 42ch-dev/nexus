@@ -1,7 +1,4 @@
 /**
- * editor → saved card over the World app surface, locking the acceptance
- * contract:
- *
  *   - Empty state shows the final prompt + example copy and the
  *     `+ 写 Brief` action; clicking it mounts the editor.
  *   - `保存 Brief` is disabled while the trimmed text is empty (no dialog,
@@ -55,7 +52,6 @@ function graph(entities: WorldKbEntityProjection[]): WorldKbGraphResponse {
   return { entities, source_anchors: [], relationships: [] };
 }
 
-// equivalent until the lib target reaches es2024.
 function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -97,9 +93,6 @@ function renderWorld(
 
 const BRIEF_TEXT = '一个魔法正在消亡的低魔奇幻世界';
 
-/**
- * `title`, edit patches as the merged `body.attributes.world_summary`.
- */
 function patchSummary(request: {
   patch: { title?: string; body?: { attributes?: Record<string, unknown> } };
 }): string {
@@ -420,7 +413,6 @@ describe('Brief flow — no flash / no lost rows (fix round 1)', () => {
         body: { attributes: { world_summary: BRIEF_TEXT } },
       }),
     ]);
-    // stays pending until the test releases it.
     let releaseRefetch: (g: WorldKbGraphResponse) => void = () => {};
     let read = 0;
     const graphFn = () => {
@@ -438,7 +430,6 @@ describe('Brief flow — no flash / no lost rows (fix round 1)', () => {
     await user.click(screen.getByTestId('world-brief-save'));
 
     await waitFor(() => expect(patchEntity).toHaveBeenCalledTimes(1));
-    // does not leave edit mode until the awaited graph refetch resolves.
     expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
     expect(screen.queryByTestId('world-brief-empty')).not.toBeInTheDocument();
 
@@ -754,7 +745,6 @@ describe('Brief flow — QC fix wave', () => {
             patch: { body?: { attributes?: Record<string, unknown> } };
           },
         ) => {
-          // re-fail deterministically.
           if (request.expected_version !== 2) return Promise.reject(conflict());
           graphRef.current = eraV2(patchSummary({ patch: request.patch }));
           return Promise.resolve({ entity: { key_block_id: 'kb-era-1' } });
@@ -814,7 +804,6 @@ describe('Brief flow — QC fix wave', () => {
     await user.click(screen.getByTestId('world-brief-save'));
 
     await waitFor(() => expect(patchEntity).toHaveBeenCalledTimes(1));
-    // already persisted and announced.
     expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
     expect(isUnlocked(CREATOR, 'work')).toBe(true);
     expect(
@@ -864,7 +853,6 @@ describe('Brief flow — QC fix wave', () => {
       expect(screen.queryByTestId('world-brief-card')).not.toBeInTheDocument(),
     );
 
-    // not a silent create.
     expect(screen.getByTestId('world-brief-editor')).toBeInTheDocument();
     expect(screen.getByTestId('world-brief-input')).toHaveValue(BRIEF_TEXT);
     await user.click(screen.getByTestId('world-brief-save'));

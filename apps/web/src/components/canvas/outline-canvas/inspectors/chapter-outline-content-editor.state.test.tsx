@@ -21,7 +21,6 @@ import { useState } from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 
-// churn on every render (keeps the test focused on save-state transitions).
 vi.mock('@/api/queries', () => {
   const data = {
     work_id: 'w1',
@@ -41,7 +40,6 @@ vi.mock('@/api/queries', () => {
   };
 });
 
-// can synthesize a user edit (the real path that flips clean -> dirty).
 let editorOnUpdate: (() => void) | undefined;
 const mockChainRun = vi.fn();
 const mockChain = {
@@ -75,11 +73,6 @@ vi.mock('tiptap-markdown', () => ({ Markdown: {} }));
 
 import { ChapterOutlineContentEditor } from './chapter-outline-content-editor';
 
-/**
- * TRUE synchronously when `onPatchChapter` is invoked (as `patchChapter.isPending`
- * does on `mutate()`), and `settle(withConflict)` resolves the mutation
- * (pending=false, and on a 409 conflict=true).
- */
 interface HarnessProps {
   chapterNumber?: number;
   contentVersion?: number;
@@ -149,7 +142,6 @@ describe('ChapterOutlineContentEditor — save-state transitions (V1.76 B2 / R-V
   it('transitions saving -> clean when the patch succeeds (patchIsPending drops, no conflict)', () => {
     render(<Harness />);
 
-    // save callback, so 'saving' visibly persists (as it does in the real app).
     editContent();
     expect(saveStateLabel()).toBe('Unsaved changes');
     clickSave();
@@ -168,14 +160,12 @@ describe('ChapterOutlineContentEditor — save-state transitions (V1.76 B2 / R-V
     expect(saveStateLabel()).toBe('Saving…');
 
     act(() => controls.settle(true));
-    // to the stale server snapshot while the conflict modal is open.
     expect(saveStateLabel()).toBe('Unsaved changes');
   });
 
   it('resets to clean on chapterNumber switch (unblocks content-sync for the new chapter)', () => {
     const { rerender } = render(<Harness chapterNumber={1} />);
 
-    // chapter-switch reset — the V1.75 3787c7b3 cross-chapter corruption fix).
     editContent();
     expect(saveStateLabel()).toBe('Unsaved changes');
 

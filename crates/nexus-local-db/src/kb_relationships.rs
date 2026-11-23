@@ -257,11 +257,6 @@ pub async fn update_relationship_in_tx(
     .await?;
 
     if result.rows_affected() == 0 {
-        // mismatch before falling into the generic OCC classification. The
-        // caller's revision may have been perfectly valid — the WORLD moved
-        // (e.g. a second Connect process / the daemon on the same workspace
-        // DB). `world_id` is NOT NULL on `kb_relationships` (migration
-        // 202606290001), so a present row always carries its stored world.
         let stored_world: Option<String> =
             sqlx::query_scalar("SELECT world_id FROM kb_relationships WHERE relationship_id = ?")
                 .bind(relationship_id)
@@ -410,11 +405,6 @@ pub async fn list_relationships_for_world(
     include_suggested: bool,
     limit: i64,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    // conditional WHERE clause). The default (`false`) branch pushes
-    // `needs_review = 0` into SQL so SQLite uses
-    // `idx_kb_relationships_world_id_needs_review` and skips hidden rows. The
-    // `LIMIT ?` is pushed down (qc3 W-QC3-P1-001) so the cap bounds the DB
-    // read + decode, not just the final projection.
     let rows = if include_suggested {
         sqlx::query_as!(
             KbRelationshipRow,
@@ -587,9 +577,6 @@ pub async fn list_confirmed_relationships_paginated(
     limit: i64,
     cursor: Option<&RelationshipCursor>,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    // the keyset predicate `(updated_at < ? OR (updated_at = ? AND
-    // relationship_id < ?))`; the no-cursor branch omits it. Both use bind
-    // params only — no string interpolation.
     let rows = if let Some(c) = cursor {
         sqlx::query_as!(
             KbRelationshipRow,
@@ -742,7 +729,6 @@ pub async fn upsert_extraction_relationship(
     .await?;
 
     if existing_id.is_some() {
-        // the revision (avoids churn on rescan).
         return Ok(false);
     }
 
@@ -976,10 +962,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_cas_rejects_row_in_foreign_world() {
-        // world-verified preimage (wld_test) is stale — another writer moved
-        // the row to wld_other without bumping the revision, so the pre-fix
-        // id+revision CAS would have succeeded. The world-aware predicate
-        // must deny with WorldConflict, NOT a plain VersionMismatch.
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
         seed::world_with(
@@ -1015,14 +997,12 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
-        // row (the OCC `existing` snapshot the update path would carry).
         let existing = get_relationship(&pool, &rel_id).await.unwrap();
         assert_eq!(
             existing.world_id, world_id,
             "gate-check precondition: row is in the claimed world"
         );
 
-        // worlds between the gate-check and the CAS, revision untouched.
         sqlx::query!(
             "UPDATE kb_relationships SET world_id = ? WHERE relationship_id = ?",
             "wld_other",
@@ -1179,8 +1159,6 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        // (no truncation), then pass `2` and observe the truncation sentinel
-        // shape (rows.len() == limit).
         let rows = list_relationships_for_world(&pool, &world_id, true, 3)
             .await
             .unwrap();
@@ -1201,7 +1179,6 @@ mod tests {
         let (_dir, pool) = fresh_pool().await;
         let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
 
-        // (lexicographic order == chronological order for the fixed format).
         let mut tx = pool.begin().await.unwrap();
         for i in 0..5 {
             let ts = format!("2026-08-{:02}T00:00:00+00:00", i + 1);
@@ -1230,8 +1207,6 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        // `limit + 1` per the `list_relationships_for_world` convention; a
-        // result of `limit + 1` rows means the graph continues past the page.
         let rows = list_confirmed_relationships_paginated(&pool, &world_id, 3, None)
             .await
             .unwrap();
@@ -1240,7 +1215,6 @@ mod tests {
         assert_eq!(rows[1].relationship_id, "rel_pg3");
         assert_eq!(rows[2].relationship_id, "rel_pg2", "probe row present");
 
-        // probe), strictly after the cursor (no overlap, no gap).
         let cursor = RelationshipCursor {
             updated_at: rows[1].updated_at.clone(),
             relationship_id: rows[1].relationship_id.clone(),
@@ -1277,7 +1251,6 @@ mod tests {
     #[tokio::test]
     async fn resolve_entity_by_canonical_name_with_block_type() {
         let (_dir, pool) = fresh_pool().await;
-        // with canonical_name == id.
         let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
 
         let resolved =

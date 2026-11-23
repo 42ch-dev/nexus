@@ -4,7 +4,6 @@ import { cn } from './utils';
 
 describe('cn', () => {
   it('keeps text-white when a custom font-size token is also present', () => {
-    // `text-button-*` tokens as text-color utilities.
     expect(cn('text-white text-button-14')).toMatch(/\btext-white\b/);
     expect(cn('text-white text-button-14')).toMatch(/\btext-button-14\b/);
     expect(cn('text-button-14 text-white')).toMatch(/\btext-white\b/);

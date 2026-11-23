@@ -60,9 +60,6 @@ export const CARGO_LOCK_PATH = "Cargo.lock";
  * product version. It is not a version surface — nothing writes it.
  */
 export const VERSION_BRACKETS_PATH = "tooling/release/version-brackets.json";
-/**
- * network, lockfile written by Cargo itself.
- */
 const CARGO_LOCK_REGEN_ARGS = ["update", "--workspace", "--offline"];
 /** Human-readable form of the regen vehicle for messages and docs. */
 export const CARGO_LOCK_REGEN_COMMAND = `cargo ${CARGO_LOCK_REGEN_ARGS.join(" ")}`;

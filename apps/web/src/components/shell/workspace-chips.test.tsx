@@ -1,6 +1,4 @@
 /**
- * — product-behaviour tests:
- *
  *  - One workspace chip per `display_name`; a fresh creator sees exactly one,
  *    plus the trailing 「＋新建工作区」 chip.
  *  - The active chip reflects the daemon's active workspace, matched by
@@ -168,8 +166,6 @@ async function openCreatePanel() {
 describe('WorkspaceChips', () => {
   beforeEach(async () => {
     window.localStorage.clear();
-    // changeLanguage on mount; pin the stored preference so the shell copy is
-    // the zh-CN one these assertions read.
     window.localStorage.setItem('nexus-web-locale', 'zh-CN');
     activeCreator = 'creator-a';
     activeSlug = 'default';
@@ -218,7 +214,6 @@ describe('WorkspaceChips', () => {
   });
 
   it('matches creator_id + slug: with creator-b active, only creator-b’s default chip is active', async () => {
-    // creator filter and the client-side match must not light creator-a's chip.
     useWorkspaceHandlers({
       items: [DEFAULT_WS, CREATOR_B_DEFAULT_WS],
       activeCreatorId: 'creator-b',
@@ -325,7 +320,6 @@ describe('WorkspaceChips', () => {
       ]),
     );
 
-    // reflects it as active.
     await waitFor(() =>
       expect(screen.queryByTestId('workspace-create-panel')).not.toBeInTheDocument(),
     );

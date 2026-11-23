@@ -328,7 +328,6 @@ check(
   'confounded',
 );
 
-// result must have been launched through LaunchServices.
 check(
   'C6: valid:true with a recorded confounder is confounded',
   state(
@@ -800,10 +799,6 @@ function electronSize(archKey) {
   };
 }
 
-/**
- * historical SEC-1 release observation. Signing-only predicates are not part
- * of the unsigned product fixture.
- */
 function packageGate(archKey, identity, appIdentity) {
   const appRealpath = appIdentity.dir;
   return {
@@ -894,9 +889,6 @@ function maintenanceTrace() {
   };
 }
 
-/**
- * (keyed by path below the evidence root) so a case can break exactly one thing.
- */
 function buildMatrix(name, mutate = () => {}) {
   const root = join(DECISION_FIXTURES, name, 'iterations');
   const evidence = join(root, 'v1.189', 'guides', 'evidence');
@@ -918,7 +910,6 @@ function buildMatrix(name, mutate = () => {}) {
     put(`native-binary-${arch.suffix}/binary-inspection.json`, binaryInspection(arch.target, receipt.artifact.sha256));
   }
   for (const arch of GUI) {
-    // are exercised against actual bytes rather than a fabricated digest.
     const appIdentity = makeAppBundle(evidence, arch.key);
     context.apps[arch.key] = appIdentity;
     put(`electron-${arch.key}/runtime-lifecycle.json`, runtimeProof(arch.key, IDENTITY, appIdentity.dir, appIdentity));
@@ -996,8 +987,6 @@ for (const label of ['status-only-flip-install', 'status-only-flip-package', 'st
   check(`F-001 unsupported failure (${label}) records no FAIL row`, failedRows.length, 0);
 }
 
-// structural fields are absent is an incomplete producer, not a measurement —
-// it must block, and it must never create a FAIL row or force a no-go.
 {
   const root = buildMatrix('unsupported-fail-missing-checks', (docs) => {
     const proof = docs['install-macarm22/install-proof.json'];
@@ -1230,9 +1219,6 @@ check(
     /tracked_descendants_gone: trackedSurvivors\.length === 0/.test(RUNTIME_SRC),
   true,
 );
-// calls minimatch(filename, unpack, { matchBase: true }), and minimatch treats
-// braces as expansion, so a `{**/*.node}` pattern matches nothing and silently
-// packs the native payload inside the asar.
 const PACKAGE_SRC = readFileSync(join(__dirname, '..', 'scripts', 'package.mjs'), 'utf8');
 check(
   'W1: the asar unpack pattern is a bare glob for the native payload',

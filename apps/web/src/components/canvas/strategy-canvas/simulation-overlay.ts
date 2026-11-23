@@ -17,7 +17,6 @@ export function applyTrajectoryOverlay(
 ): Node<StrategyNodeData>[] {
   if (!trajectory) return nodes;
 
-  // so a signal colliding with a state id must not attach to that node.
   const waitByNode = new Map<string, 'manual'>();
   for (const wait of trajectory.predicted_waits) {
     if (wait.reason === 'manual') waitByNode.set(wait.subject, wait.reason);

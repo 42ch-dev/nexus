@@ -1,10 +1,3 @@
-/**
- * riding beside the Brief layer (prototype onboarding-v3 S4). Three
- * product-owned steps; only step ① (`写完 Brief`) is wired this iteration —
- * steps ②③ ship with their module rebuilds and stay pending. The first
- * pending step is highlighted as `next`; done steps are struck through; the
- * footer reads `进度 {n} / 3`.
- */
 import { useTranslation } from 'react-i18next';
 
 export interface SideChecklistProps {

@@ -87,8 +87,6 @@ function focusInsideContainer(
 
 describe('useTimelineShortcut — descriptor export', () => {
   it('exports a stable human-readable descriptor for documentation surfaces', () => {
-    // surface. It is also what the test asserts against so the chord form
-    // is locked.
     expect(TIMELINE_SHORTCUT_DESCRIPTOR).toBe('g t');
   });
 });
@@ -130,9 +128,6 @@ describe('useTimelineShortcut — chord firing (g then t)', () => {
   });
 
   it('calls preventDefault on both g and the confirming t (chord owns the keys)', () => {
-    // into a non-text region (the page background) while waiting for the
-    // confirm key. The same applies to the confirming `t` once the chord
-    // fires — the keypress is "consumed" by the chord, not by the page.
     const handler = vi.fn();
     renderHook(() => useTimelineShortcut(handler));
 
@@ -197,7 +192,6 @@ describe('useTimelineShortcut — modifier-suppression (chord is bare-key only)'
   });
 
   it('does NOT fire on Shift+g Shift+t (shift counts as a modifier)', () => {
-    // shift-modified shortcuts. Shift cancels the chord outright.
     const handler = vi.fn();
     renderHook(() => useTimelineShortcut(handler));
     dispatchKey('g', { shift: true });
@@ -242,8 +236,6 @@ describe('useTimelineShortcut — conflict-avoidance (shared with useHotkey)', (
   });
 
   it('is suppressed inside a [data-command-palette-ignore] subtree', () => {
-    // wrapper (same contract as `useHotkey`). The chord MUST honor the same
-    // opt-out so it never steals keys from the canvas.
     const handler = vi.fn();
     const cleanup = focusInsideContainer('div', { 'data-command-palette-ignore': '' });
     renderHook(() => useTimelineShortcut(handler));

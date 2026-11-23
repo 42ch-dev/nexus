@@ -29,7 +29,6 @@ export function resolveEntranceBounce(
 ): string | null {
   if (entrance === 'developer') return null; // Develop never bounces
 
-  // existing machinery and check section-level visibility (AR-19).
   if (isSettingsDrivenPath(pathname)) {
     const resolved = resolveSettingsLocation(pathname, hash);
     if (resolved) {
@@ -71,7 +70,6 @@ export function EntranceGuard({ children }: { children: ReactNode }) {
     ? `${location.pathname}${location.search}${location.hash}`
     : null;
 
-  // guard stops bouncing (redirect landed or the user moved on).
   useEffect(() => {
     if (bounceKey === null) {
       lastBouncedKey.current = null;

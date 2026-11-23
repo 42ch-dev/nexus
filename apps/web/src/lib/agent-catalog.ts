@@ -11,16 +11,8 @@ export interface AgentOverride {
   docsUrl?: string;
   installUrl?: string;
   iconUrl?: string;
-  /**
-   * More list (hard exclude). Used for ACP wrappers (P2: `claude-acp`,
-   * `codex-acp`).
-   */
   excludeFromPicker?: boolean;
   priority?: number;
-  /**
-   * description for this key (P2: native Claude/Codex). EN-only product
-   * string — does not enter locale catalogs.
-   */
   description?: string;
 }
 
@@ -31,11 +23,6 @@ export interface AgentCatalogOverrides {
 }
 
 export interface AgentCatalogItem {
-  /**
-   * whitelist lookup and the default-grid / more-agents split. MAY be shared
-   * by more than one scan row (e.g. two `claude` installs both resolve to
-   * `claude-native`). Use {@link pickerId} for selection.
-   */
   id: string;
   /**
    * Collision-safe selection handle, unique per scan row. Equals {@link id}
@@ -53,9 +40,6 @@ export interface AgentCatalogItem {
   installed: boolean;
   installUrl?: string | null;
   docsUrl?: string | null;
-  /**
-   * or the More list. Mirrors {@link AgentOverride.excludeFromPicker}.
-   */
   excludeFromPicker: boolean;
   priority?: number;
   registryAgentId?: string | null;
@@ -89,8 +73,6 @@ const NATIVE_LAUNCH_MAP: Record<string, string> = {
 };
 
 /**
- * logic in `launchCommandMatches` (`apps/web/src/api/queries.ts`).
- *
  * The daemon PATH-scan emits the **full resolved binary path** (e.g.
  * `/usr/local/bin/claude`) as `launch_command`. To match the
  * `NATIVE_LAUNCH_MAP` (keyed on bare names like `claude`), we normalise to
@@ -123,8 +105,6 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
   const whitelistUrl = resolveInstallUrl(key);
   return {
     id: key,
-    // happens at the list level in `resolveCatalogItems` (needs full-set
-    // context).
     pickerId: key,
     name: entry.name,
     displayName: agentOverride?.displayName ?? entry.name,

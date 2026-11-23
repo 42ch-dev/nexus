@@ -85,9 +85,6 @@ export function ConflictModal({
       serverValue: canonicalNext,
     });
   }
-  // server-side prompt edits without a separate template-read contract.
-  // Only treat the prompt as conflicted when the user actually changed it AND
-  // the changedFields list confirms the conflict was on the prompt path.
   if (draft.promptBody && changedFields.includes('promptBody')) {
     serverChanges.push({
       id: 'promptBody',

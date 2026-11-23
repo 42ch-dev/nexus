@@ -92,7 +92,6 @@ function renderWorld(initialPath = `/worlds/${WORLD_ID}`, client?: NexusClient) 
 
 beforeEach(() => {
   cleanup();
-  // product-owned Chinese copy assertions below hold.
   window.localStorage.setItem('nexus-web-locale', 'zh-CN');
   return i18n.changeLanguage('zh-CN');
 });

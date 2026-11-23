@@ -31,8 +31,6 @@ describe('CanvasSurfaceKind — V1.122 P1 T1 adds "timeline" peer surface', () =
   });
 
   it('CanvasSurfaceAdapter accepts a synthetic adapter with surfaceKind: "timeline"', () => {
-    // surface is the shared `CanvasSurfaceAdapter` interface. A minimal
-    // adapter declaring the Timeline surface MUST satisfy it.
     const synthetic: CanvasSurfaceAdapter<
       { entities: never[] },
       { [key: string]: unknown },

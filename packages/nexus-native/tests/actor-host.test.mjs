@@ -9,9 +9,6 @@ import { after, before, describe, test } from 'node:test';
 import { isNativeCoreErrorCode, openCore, parseNativeCoreError } from '../dist/index.js';
 
 /**
- * real native core, the real attached Host authority, and the real service
- * composition underneath.
- *
  * Fixtures are local and deterministic: one ephemeral home seeded by the
  * crate's own wire-fixture binary (an owned World plus its Creator) with the
  * selected-workspace registration the product's create path writes, and two
@@ -214,8 +211,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     const viewpoint = { world_id: WORLD, binding_id: bindingId };
     const session = await core.hostCreateSession(principal, {
       provider_id: MAIN_PROVIDER,
-      // boundary, which is the registered creative root (not the nexus root the
-      // wire omits to).
       cwd: creativeRoot,
       actor_ref: { actor_kind: 'character', character_id: characterId },
       viewpoint,
@@ -242,7 +237,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     assert.equal(outcome.finish_reason, 'end_turn');
     assert.deepEqual(outcome.capture, { status: 'disabled', pending_id: null, code: null });
 
-    // its own end_turn — a fabricated projection cannot carry them.
     const batch = await core.nextHostEvents(principal, mainSessionId, mainOperationId, 16, 65_536);
     assert.equal(batch.operation_id, mainOperationId);
     const texts = batch.events.filter((event) => event.MessageDelta).map((e) => e.MessageDelta.text);
@@ -255,7 +249,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       JSON.stringify(batch.events),
     );
 
-    // the same bounded not_found, never a cross-session leak.
     await assert.rejects(
       () => core.nextHostEvents(principal, mainSessionId, randomUUID(), 16, 65_536),
       (error) => isNativeCoreErrorCode(error, 'not_found'),
@@ -264,7 +257,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       () => core.hostCharacterOperation(principal, randomUUID()),
       (error) => isNativeCoreErrorCode(error, 'not_found'),
     );
-    // handle this open did not mint is refused before anything else runs.
     await assert.rejects(
       () => core.hostCharacterOperation(`p:9:${CREATOR}:default`, mainOperationId),
       /invalid principal handle/,
@@ -296,7 +288,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     assert.equal(outcome.finish_reason, 'cancelled');
     assert.deepEqual(outcome.capture, { status: 'disabled', pending_id: null, code: null });
 
-    // conflict, never a fabricated second success.
     await assert.rejects(
       () => core.hostCancelOperation(principal, started.operation_id),
       (error) => {
@@ -327,7 +318,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     const outcome = await waitForOutcome(core, principal, started.operation_id);
     assert.equal(outcome.run_status, 'cancelled');
 
-    // a released Actor session can never be resurrected as provider-only.
     await assert.rejects(
       () =>
         core.providerCall({
@@ -376,7 +366,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       'a refused Actor id must not reach the provider lane at all',
     );
 
-    // end: the arbitrary id launches, prompts and terminates on the same peer.
     const rawSessionId = randomUUID();
     const launched = await core.providerCall({
       request_id: randomUUID(),
@@ -420,8 +409,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       payload: {},
     });
 
-    // the core never indexed, and the lane's own refusal is what answers an
-    // unknown operation id.
     const adapterSessionId = 'legacy-adapter-session';
     const legacy = await core.providerCall({
       request_id: randomUUID(),
@@ -451,7 +438,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     core = await openCore({ ...OPEN_OPTIONS, user_home: home }, providers.callbacks);
     const reopenedPrincipal = await core.activePrincipal();
 
-    // after the reopen, never inferred as a success from provider-only state.
     await assert.rejects(
       () => core.hostCharacterOperation(reopenedPrincipal, mainOperationId),
       (error) => isNativeCoreErrorCode(error, 'not_found'),
@@ -462,13 +448,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     );
   });
 
-  /**
-   * refusal must be typed (`details.category`), so no consumer has to match the
-   * human message. Exercised in the binding the service itself opens
-   * (`direct_writer` + `allow_uninitialized`), and the authority's presence is
-   * observed first — the native binding holds ONE open per process, so the
-   * suite's core is taken down and restored around it.
-   */
   test('host absence is a typed category in the domain-only binding, and a live authority stays untyped', async () => {
     await core.close();
     const domain = await openCore({
@@ -479,8 +458,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
     try {
       const domainPrincipal = await domain.activePrincipal();
 
-      // code/status and carries NO absence category, so the discriminator is
-      // categorical instead of a blanket `invalid_input`/400 marker.
       await assert.rejects(
         () => domain.hostQuery({ query: 'get_session', session_id: randomUUID() }),
         (error) => {
@@ -491,7 +468,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
           return true;
         },
       );
-      // also not absence.
       await assert.rejects(
         () => domain.hostCharacterOperation(domainPrincipal, randomUUID()),
         (error) => isNativeCoreErrorCode(error, 'not_found'),
@@ -501,8 +477,6 @@ describe('native Actor Host surface (P0-T5)', { concurrency: 1 }, () => {
       assert.equal(report.cleanup_confirmed, true, JSON.stringify(report));
     }
 
-    // `invalid_input`/400 (degraded readiness is not a client fault) and the
-    // typed category is what names the absence.
     await assert.rejects(
       () => domain.hostQuery({ query: 'health' }),
       (error) => {

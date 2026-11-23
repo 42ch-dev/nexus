@@ -110,8 +110,6 @@ describe('AuthRecoveryGate', () => {
 
     expect(await screen.findByText('intended destination')).toBeInTheDocument();
 
-    // ClientProvider rebuilds (which reads this store) sends no X-API-Key and
-    // the valid session cookie wins service-side.
     expect(sentKeys).toEqual([null]);
     expect(window.localStorage.getItem('nexus-api-key')).toBeNull();
     expect(readStoredApiKey()).toBeNull();

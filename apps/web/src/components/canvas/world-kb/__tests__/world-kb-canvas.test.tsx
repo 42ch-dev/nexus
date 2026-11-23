@@ -72,8 +72,6 @@ describe('patchFromForm (reapply payload shape)', () => {
     expect('title' in patch).toBe(false);
   });
 
-  // conflicting submit intended. The captured form predates any concurrent
-  // writes, so including the other dialect would overwrite them.
   it('mental-only reapply omits belief entirely (a concurrent belief write survives)', () => {
     const patch = patchFromForm(
       form({
@@ -173,8 +171,6 @@ const mocks = vi.hoisted(() => {
     source_anchor_count: 0,
     created_at: '2026-06-29T00:00:00Z',
   } as unknown as WorldKbCandidateProjection;
-  // hook result each render and feeds it into a useMemo + setNodes effect — a
-  // fresh `data` object per render would retrigger that effect forever.
   const graphData = { entities: [] as unknown[], source_anchors: [] as unknown[], relationships: [] as unknown[] };
   return {
     promoteMutate,
@@ -196,7 +192,6 @@ const mocks = vi.hoisted(() => {
     },
     patchResult: { mutate: vi.fn(), isPending: false },
     relationshipResult: { mutate: vi.fn(), isPending: false },
-    // resolve to the same mutate stub so call order is deterministic.
     promoteResult: { mutate: promoteMutate, isPending: false },
   };
 });
@@ -213,7 +208,6 @@ vi.mock('@/lib/canvas/use-world-kb-data', async (importOriginal) => {
   };
 });
 
-// (jsdom has no ResizeObserver); the alt-view row click is the selection path.
 vi.mock('../use-view-preference', () => ({
   useReducedMotionPreference: () => true,
 }));
@@ -242,22 +236,17 @@ describe('promote conflict reapply onError (V1.73 greploop iter 3)', () => {
     const user = userEvent.setup();
     render(<WorldKbCanvas worldId="w-1" />);
 
-    //    the name only appears in the alt-view row).
     await user.click(await screen.findByText('Elena Vale'));
 
-    //    conflict modal at version 5.
     await user.click(screen.getByRole('button', { name: /Adopt candidate/i }));
     await rejectLastPromoteAsConflict(5);
     expect(
       await screen.findByText('5', { selector: 'span.font-mono' }),
     ).toBeInTheDocument();
 
-    //    fix's onError must store v9 as the new currentVersion.
     await user.click(screen.getByRole('button', { name: /^Reapply$/i }));
     await rejectLastPromoteAsConflict(9);
 
-    //    version). Without the onError fix the state stays stale at 5 and this
-    //    assertion fails — the conflict would never resolve without dismissing.
     await user.click(screen.getByRole('button', { name: /^Reapply$/i }));
     const lastRequest = (
       mocks.promoteMutate.mock.calls.at(-1) as [unknown, unknown]

@@ -475,8 +475,6 @@ impl CoreService {
         })?;
         let strategy_id = imported.document.id.as_str().to_owned();
 
-        // resolution, so a row under an id the host already serves would shadow that preset for
-        // compose and approve. Any other id defines a new strategy; see the doc comment.
         if strategy_id.starts_with("_system.")
             || nexus_preset::list_embedded_presets().contains(&strategy_id)
         {

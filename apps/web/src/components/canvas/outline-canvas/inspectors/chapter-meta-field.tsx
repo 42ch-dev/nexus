@@ -1,6 +1,4 @@
 /**
- * `R-V175QC1-S001`).
- *
  * Extracted from `chapter-inspector.tsx` to keep that file ≤240 lines
  * (V1.73 split cap). Pure presentational — label/control wrapper + the shared
  * DESIGN.md input class. No behavior.

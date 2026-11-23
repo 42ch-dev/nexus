@@ -207,8 +207,6 @@ states:
 
 #[tokio::test]
 async fn expression_routes_to_synthetic_when_registry_unwired() {
-    // inject_registry_refresh_context uses the synthetic fallback
-    // (source = "synthetic"). The first branch should match.
     let action = run_expression_route(REGISTRY_DEP_YAML, &[]).await;
     assert_goto(&action, "synthetic_path");
 }

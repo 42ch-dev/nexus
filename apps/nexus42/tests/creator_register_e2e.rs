@@ -167,7 +167,6 @@ async fn creator_register_verify_rejected_returns_user_visible_error() {
         .mount(&mock)
         .await;
 
-    // Both auto-retry attempts will get wrong_answer back
     Mock::given(method("POST"))
         .and(path("/api/v1/creators/verify"))
         .respond_with(ResponseTemplate::new(200).set_body_string(include_str!(
@@ -246,9 +245,6 @@ async fn creator_register_twice_does_not_double_write_credentials() {
     let creds_after_second = std::fs::read_to_string(home.path().join(".nexus42/auth.json"))
         .expect("read auth.json after second run");
 
-    // so the second run will re-register (the mock always returns the same
-    // creator_id). The credential file should still be valid (not corrupted).
-    //
     // Regardless of success/failure on second run, the credential for
     // crt_e2e_test_12345 must still contain a valid api_key (no data loss).
     let creds_json: serde_json::Value =
@@ -271,7 +267,6 @@ async fn creator_register_twice_does_not_double_write_credentials() {
         "api_key should retain its correct value after second run"
     );
 
-    // other creator entries in the auth store).
     assert!(
         creators.contains_key("crt_seed_token"),
         "seed token entry must not be lost after second run"
@@ -347,7 +342,6 @@ async fn creator_register_does_not_overwrite_existing_credential() {
     let _stdout2 = String::from_utf8_lossy(&output2.stdout);
     let _stderr2 = String::from_utf8_lossy(&output2.stderr);
 
-    // credential for crt_e2e_test_12345 must still be the ORIGINAL key.
     let creds_after_second = std::fs::read_to_string(home.path().join(".nexus42/auth.json"))
         .expect("read auth.json after second run");
     let second_json: serde_json::Value =
@@ -492,7 +486,6 @@ async fn creator_register_positional_syntax_rejected_with_migration_hint() {
     )
     .expect("write config.json");
 
-    // (without --name flag)
     let output = cli_cmd(home.path())
         .args(["creator", "register", "My Agent"])
         .output()

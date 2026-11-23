@@ -102,11 +102,6 @@ impl SourceAnchor {
     }
 }
 
-// conversions were removed — those `nexus_contracts::domain::*` types were deleted in P0
-// (`key-block.schema.json` removed). The spoke-side anchor mapping now lives in
-// `knowledge_entry.rs` (`nexus_anchor_to_spoke` / `spoke_anchor_to_nexus`), the wire-boundary
-// conversion seam. This `SourceAnchor` remains the nexus domain value object used by validation.
-
 #[cfg(test)]
 mod tests {
     use super::*;

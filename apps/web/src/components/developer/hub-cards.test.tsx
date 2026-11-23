@@ -1,7 +1,3 @@
-/**
- * per-card loading / error isolation (`正在加载…` / `加载失败：{reason}`), and
- * the Agent card's saved-profile query state.
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { delay, http, HttpResponse } from 'msw';
 import { screen } from '@testing-library/react';
@@ -123,7 +119,6 @@ describe('HubCards', () => {
     expect(screen.getByTestId('hub-card-agent-version')).toHaveTextContent('1.2.3');
     expect(screen.getByTestId('hub-card-agent')).toHaveTextContent('Connected');
 
-    // (`completed` is terminal).
     expect(await screen.findByTestId('hub-card-harness-counts')).toHaveTextContent(
       '2 presets · 2 running',
     );

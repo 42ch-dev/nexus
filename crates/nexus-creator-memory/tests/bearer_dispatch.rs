@@ -188,7 +188,6 @@ fn character_memory_roundtrip_and_scope_isolation() {
     let loaded = memory_io::load_memory(&home, character(), "bridge-crossing").unwrap();
     assert!(loaded.body.contains("bridge crossing"));
 
-    // owner all see nothing.
     assert_eq!(
         memory_io::list_memories(&home, creator()).unwrap(),
         [] as [std::string::String; 0]

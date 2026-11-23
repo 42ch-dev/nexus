@@ -114,7 +114,6 @@ async function runGit(cwd, args) {
     const { stdout } = await execFileAsync('git', args, {
       cwd,
       encoding: 'utf8',
-      // no interactive credential prompt (this tool is not an authentication UI).
       env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
       maxBuffer: 32 * 1024 * 1024,
     });
@@ -137,7 +136,6 @@ async function gitOut(cwd, args, owner) {
 }
 
 function parseArgs(argv) {
-  // argument, so a stray `--help` can never silently swallow the rest.
   if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) return { help: true };
   let worktree;
   for (let index = 0; index < argv.length; index += 1) {
@@ -199,12 +197,6 @@ async function readDeclaredModules(repoDir, owner) {
 
 /**
  * Read one repository's index and fail closed on a submodule-relevant conflict.
- *
- * working tree. An index that still carries an unmerged `.gitmodules` entry or an
- * unmerged gitlink describes a conflict that was never resolved, and
- * `readDeclaredModules` cannot see it once the file is gone. Returns the
- * committed (stage 0) gitlink paths so the caller can prove that `.gitmodules`
- * actually declares them.
  */
 async function readIndexSubmoduleState(repoDir, scope, owner) {
   const out = await gitOut(repoDir, ['ls-files', '-s', '-z'], owner);
@@ -290,8 +282,6 @@ async function validateSubmodule(record, worktreeGitDir, owner) {
   if (unmerged !== '') {
     throw new RefusalError(`${owner}: submodule '${record.path}' at ${record.dir} has unmerged index entries; resolve the conflict before initializing submodules`);
   }
-  // not-yet-initialized nested submodule) out of the dirt verdict; the nested
-  // submodule is judged by its own validated state.
   const dirty = firstLine(await gitOut(record.dir, ['status', '--porcelain', '--ignore-submodules=all'], owner));
   if (dirty !== '') {
     throw new RefusalError(`${owner}: submodule '${record.path}' at ${record.dir} has local changes (${dirty}); refusing to touch it`);
@@ -398,7 +388,6 @@ function groupMissing(records, checkout) {
   }
   const groupsToInitialize = [];
   for (const group of groups.values()) {
-    // ones, and an already initialized submodule is never passed to Git.
     const entries = group.entries.filter(({ record }) =>
       !group.entries.some(other => other.record !== record && record.path.startsWith(`${other.record.path}/`)));
     groupsToInitialize.push({ repoDir: group.repoDir, entries });
@@ -409,10 +398,6 @@ function groupMissing(records, checkout) {
 async function initializeMissing(groups, mutation) {
   for (const group of groups) {
     const paths = group.entries.map(entry => entry.relInRepo);
-    // failure. The flag is set BEFORE the command runs because a native command that fails part-way
-    // through its own work has still changed the tree; it does not by itself mean something is
-    // initialized (the command can complete no submodule at all), which is why the refusal class is
-    // decided by re-observing the checkout instead.
     mutation.attempted = true;
     const result = await runGit(group.repoDir, ['submodule', 'update', '--init', '--recursive', '--', ...paths]);
     if (!result.ok) {
@@ -421,12 +406,6 @@ async function initializeMissing(groups, mutation) {
   }
 }
 
-/**
- * read-only re-inspection rather than inferred from this run's own bookkeeping — a native command
- * that failed part-way through its work leaves state that no bookkeeping recorded. `null` means the
- * re-inspection itself could not be completed, which is reported as an unknown state, never as an
- * empty one.
- */
 async function initializedPathsAt(worktree) {
   try {
     const state = await inspect(worktree);
@@ -440,13 +419,6 @@ function writeStdout(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-/**
- * run's intent: `init.refuse.partial` means at least one submodule is initialized there and
- * `initialized_paths` lists those paths, while `init.refuse.preflight` means the report names no
- * initialized path — no mutation was attempted, or the attempted command completed no submodule —
- * and `initialized_paths` is `null` when nothing could be enumerated because the checkout could not
- * be re-read (an unknown state, never reported as an empty one).
- */
 async function refusal(worktree, reason, mutation) {
   const initializedPaths = mutation.attempted ? await initializedPathsAt(worktree) : null;
   const partial = initializedPaths !== null && initializedPaths.length > 0;
@@ -471,7 +443,6 @@ async function run() {
   }
   const worktree = await canonicalize(options.worktree);
   if (!worktree) return await refusal(options.worktree, `not an existing path: ${options.worktree}`, { attempted: false });
-  // which is read from the checkout re-observed after a failure (see `refusal`).
   const mutation = { attempted: false };
   try {
     let state = await inspect(worktree);
@@ -526,8 +497,6 @@ try {
     process.stderr.write(`init-worktree-submodules: ${error.message}\n\n${USAGE}`);
     process.exitCode = 2;
   } else {
-    // refusal object was impossible too (for example stdout is already gone).
-    // Operational failures inside `run()` are normalized into that JSON object.
     process.stderr.write(`init-worktree-submodules: fatal: ${error?.stack ?? error}\n`);
     process.exitCode = 1;
   }

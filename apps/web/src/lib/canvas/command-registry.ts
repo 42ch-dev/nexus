@@ -40,11 +40,6 @@ export interface Command {
   readonly icon?: LucideIcon;
   /** Fired when the user activates the command (Enter/click). */
   readonly handler: () => void;
-  /**
-   * tracked by the store — `available()` is render-time dynamic and the store
-   * only emits on register/unregister). Commands whose `available` returns
-   * `false` are hidden regardless of the query. Omit to always show.
-   */
   readonly available?: () => boolean;
 }
 
@@ -56,8 +51,6 @@ export interface Command {
 const commandMap = new Map<string, Command>();
 const listeners = new Set<() => void>();
 
-// stable reference between changes (returning a fresh array each call would
-// trigger an infinite re-render loop).
 let commandSnapshot: readonly Command[] = [];
 
 function rebuildSnapshot(): void {
@@ -150,8 +143,6 @@ export function useRegisterCommand(command: Command): void {
   useEffect(() => {
     registerCommand(command);
     return () => unregisterCommand(command.id);
-    // by design (see docblock); depending on the whole `command` object would
-    // re-register on every render if the caller passes an inline literal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [command.id]);
 }

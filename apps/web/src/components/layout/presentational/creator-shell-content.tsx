@@ -200,8 +200,6 @@ function InlineWorkForm({
   const worldIdField = `${uid}-sidebar-create-work-world`;
   const profileId = `${uid}-sidebar-create-work-profile`;
 
-  // World, the create is unambiguous — select it automatically so the author
-  // is not forced through a one-option selector.
   useEffect(() => {
     if (worldId === '' && worlds.length === 1) {
       setWorldId(worlds[0].value);
@@ -371,9 +369,6 @@ export type CreatorShellContentProps =
       'data-testid'?: string;
     };
 
-/**
- * outside the mode-switching parent.
- */
 function CreatorShellInlineCreate({
   testId,
   canCreateWorld,

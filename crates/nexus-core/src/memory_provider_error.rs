@@ -25,9 +25,6 @@ impl From<ProviderError> for CoreError {
     fn from(error: ProviderError) -> Self {
         match error {
             ProviderError::Internal(reason) => Self::Internal { category: reason },
-            // entry point (`memory: migrate-legacy needs the workspace writer`),
-            // which is what the retained 403 `Forbidden` slot renders; the
-            // variant has no separate resource id to split out.
             ProviderError::ReadOnly(reason) => Self::Forbidden { resource: reason },
             ProviderError::NotAuthorized(reason) => Self::ForbiddenReason {
                 resource: "memory: migrate-legacy".to_string(),
@@ -37,8 +34,6 @@ impl From<ProviderError> for CoreError {
                 code: IDEMPOTENCY_CONFLICT_CODE.to_string(),
                 message: error.message(),
             },
-            // `message()` already appends "not found" for the wire, so routing
-            // it here would render `not found: space abc not found`.
             ProviderError::NotFound(target) => Self::NotFound { resource: target },
             other => Self::Internal {
                 category: other.message(),

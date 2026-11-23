@@ -12,7 +12,6 @@
 //! `computable_port.rs` are gated behind `#[cfg(not(...))]` accordingly.
 
 fn main() {
-    // `unexpected_cfgs` in the library source.
     println!("cargo::rustc-check-cfg=cfg(nexus_spoke_adapter_no_wasm_target)");
 
     if !has_wasm_target() {

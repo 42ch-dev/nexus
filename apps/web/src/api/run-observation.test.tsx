@@ -1,6 +1,4 @@
 /**
- * replay/live/gap/terminal state machine and the bounded reconnect policy.
- *
  * Every case drives a stubbed `AsyncIterable` client injected through
  * `ClientProvider`, so no network (and no msw handler) is involved: the hook
  * consumes only `NexusClient.subscribeWorkflowEvents`.
@@ -130,10 +128,6 @@ async function wait(ms: number): Promise<void> {
   });
 }
 
-/**
- * buffer is mutated in place ahead of React's commit, so a wait on the buffer
- * alone can pass while `result.current` is still the previous snapshot.
- */
 async function waitForCursor(
   probe: { result: { current: RunObservationResult } },
   cursor: string,
@@ -145,10 +139,6 @@ async function waitForCursor(
   });
 }
 
-/**
- * the layout effect that records here never runs for it: an entry with a stale
- * identity's frames is therefore a frame that reached the UI.
- */
 const committedFrames: Array<{ phase: RunObservationPhase; cursors: string[] }> = [];
 
 describe('useRunObservation — replay/live handoff', () => {
@@ -238,7 +228,6 @@ describe('useRunObservation — replay/live handoff', () => {
     const { client, calls } = stubClientFor([
       (options) => fullWindow(options),
       async function* reentry(options: SubscribeOptions) {
-        // replay-side frame), then the run appends for real past the handoff.
         yield hostEvent('e1:301');
         await wait(300);
         yield hostEvent('e1:302');
@@ -265,7 +254,6 @@ describe('useRunObservation — replay/live handoff', () => {
       ).toEqual(['e1:302']),
     );
 
-    // frame appended after the handoff would sit outside the live tail.
     const { events, liveFrom } = reentry.result.current;
     expect(calls[1].lastEventId).toBe('e1:300');
     expect(events).toHaveLength(256);
@@ -279,8 +267,6 @@ describe('useRunObservation — replay/live handoff', () => {
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
       async function* delayedReplay(options: SubscribeOptions) {
-        // timer armed before the stream connects would already have declared the
-        // view live here, mislabeling this whole replay burst as the live tail.
         await wait(300);
         yield runState('e1:3');
         yield hostEvent('e1:4');
@@ -321,9 +307,6 @@ describe('useRunObservation — replay/live handoff', () => {
   });
 
   it('hands a busy re-entry burst off at the catch-up frame total while frames keep arriving', async () => {
-    // than the settle window, so neither the quiet gap nor the 1 s total can end
-    // the catch-up. Only the hard frame total can, and it must still hand off —
-    // the 64th catch-up frame is the first live-tail frame (QC3-002).
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
       async function* busyReplay(options: SubscribeOptions) {
@@ -347,7 +330,6 @@ describe('useRunObservation — replay/live handoff', () => {
       expect(reentry.result.current.events).toHaveLength(72),
     );
 
-    // and the six frames after it keep arriving live rather than replaying.
     expect(calls[1].lastEventId).toBe('e1:2');
     expect(reentry.result.current.liveFrom).toBe(65);
     expect(cursorOf(reentry.result.current.events[reentry.result.current.liveFrom])).toBe('e1:66');
@@ -358,9 +340,6 @@ describe('useRunObservation — replay/live handoff', () => {
 
 describe('useRunObservation — gap recovery', () => {
   it('keeps consuming the same stream after a gap instead of reconnecting into the hole it reported', async () => {
-    // same stream (workflow-observation.ts forwards the ring in order and then
-    // blocks for the next batch). Aborting at the gap would discard that
-    // retained span and reconnect into the range whose gap was just reported.
     async function* gappedThenTail(options: SubscribeOptions) {
       yield runState('e1:1');
       yield hostEvent('e1:2');
@@ -380,7 +359,6 @@ describe('useRunObservation — gap recovery', () => {
       expect(probe.result.current.events.map(cursorOf)).toContain('e1:3'),
     );
 
-    // stream that reported it.
     expect(calls).toHaveLength(1);
     expect(calls[0].signal.aborted).toBe(false);
     expect(probe.phases).toContain('gapped');
@@ -391,7 +369,6 @@ describe('useRunObservation — gap recovery', () => {
 
   it('reconnects from the cursor a gapped stream advanced to, never from the gap itself', async () => {
     const { client, calls } = stubClientFor([
-      // ends: the cursor it moved to is what a reconnect must ask from.
       () => frames(GAP, hostEvent('e1:1'), hostEvent('e1:2')),
       (options) => openStream(options, hostEvent('e1:3')),
     ]);
@@ -405,11 +382,6 @@ describe('useRunObservation — gap recovery', () => {
   });
 
   it('rests honestly gapped when a gapped stream THROWS at the gap, charging no attempt', async () => {
-    // reader can throw. The attempt still ended with its last DATA cursor at the
-    // gap it reported, so a resubscribe would ask the ring for exactly the range
-    // whose gap was just reported. The no-advance guard must cover any ended
-    // attempt — not only a clean EOF — so the view rests gapped and the budget
-    // is untouched.
     const { client, calls } = stubClientFor([
       async function* script() {
         yield runState('e1:1');
@@ -434,8 +406,6 @@ describe('useRunObservation — gap recovery', () => {
   });
 
   it('stays honestly gapped when the stream ends at the gap, and retry() re-arms', async () => {
-    // gapped range: reconnecting would re-report the same gap. The hook reports
-    // it once and rests — no attempt is spent on a reconnect that cannot help.
     const { client, calls } = stubClientFor([() => frames(runState('e1:1'), GAP)]);
 
     const probe = observeRun(client, 'run-gap-exhausted');
@@ -454,9 +424,6 @@ describe('useRunObservation — gap recovery', () => {
 
 describe('useRunObservation — bounded reconnect episodes', () => {
   it('exhausts the retry budget on a repeated gap-then-advance episode instead of reconnecting forever', async () => {
-    // reconnect is individually productive, so only the monotonic budget can end
-    // the episode — and it must, rather than resetting on each productive-looking
-    // attempt (QC3-001).
     const { client, calls } = stubClientFor(
       [0, 1, 2, 3].map((attempt) => () => frames(GAP, hostEvent(`e1:${attempt + 1}`))),
     );
@@ -490,10 +457,6 @@ describe('useRunObservation — bounded reconnect episodes', () => {
   });
 
   it('never resets the reconnect budget for a long productive attempt — only retry() re-arms it', async () => {
-    // would need, and only then dies. No outcome buys extra attempts: the budget
-    // is strictly monotonic, so the episode still exhausts at the fixed total and
-    // the hook rests in `error` — only the user's explicit retry() re-arms it
-    // (QC3-001).
     const { client, calls } = stubClientFor([
       async function* productive() {
         yield runState('e1:1');
@@ -663,8 +626,6 @@ describe('useRunObservation — retention bounds', () => {
   });
 
   it('advances the publish revision when an inline gap lands on a full window', async () => {
-    // retained length either — so length/lastEventId are unsafe memoization
-    // keys. The revision must still move (QC3-003).
     async function* full(options: SubscribeOptions) {
       for (let sequence = 1; sequence <= 256; sequence += 1) yield hostEvent(`e1:${sequence}`);
       yield GAP;
@@ -700,7 +661,6 @@ describe('useRunObservation — retention bounds', () => {
     const reentry = observeRun(client, 'run-idle');
     clock.mockRestore();
 
-    // restored history and no cursor (an honest re-fetch, not a stale window).
     expect(reentry.result.current.phase).toBe('connecting');
     expect(reentry.result.current.events).toEqual([]);
     expect(reentry.result.current.lastEventId).toBeNull();
@@ -714,9 +674,6 @@ describe('useRunObservation — retention bounds', () => {
 
 describe('useRunObservation — connection-scoped retention', () => {
   it('starts cold when the same run is re-observed over a different connection', async () => {
-    // different connection. The frames a previous connection retained must not
-    // be shown under it before its own subscription has been authorized, so a
-    // new connection re-subscribes cursorless with no restored history.
     const first = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
     ]);
@@ -740,17 +697,11 @@ describe('useRunObservation — connection-scoped retention', () => {
   });
 
   it('renders cold on an in-place client replacement — never a frame of the old connection', async () => {
-    // hook's own state survives the identity change and the subscription effect
-    // only runs after the render that saw the new client. The snapshot must be
-    // discarded synchronously with that change: the first commit under the new
-    // connection must already be cold, with no frame of the old connection's
-    // events shown before the new subscription publishes.
     const oldConnection = stubClientFor([
       (options) => openStream(options, runState('e1:1'), hostEvent('e1:2')),
     ]);
     const sent: { client: NexusClient } = { client: oldConnection.client };
 
-    // anything publishes: nothing is delivered until this test releases it.
     let releaseNew: (() => void) | undefined;
     const newStreamReady = new Promise<void>((resolve) => {
       releaseNew = resolve;
@@ -809,8 +760,6 @@ describe('useRunObservation — connection-scoped retention', () => {
   });
 
   it('renders cold when the observed run changes — never a frame of the previous run', async () => {
-    // runs on one live connection must not commit the previous run's frames
-    // under the new run id before that run's own subscription publishes.
     const { client, calls } = stubClientFor([
       (options) => openStream(options, runState('e1:1')),
       (options) => openStream(options, runState('e1:9')),

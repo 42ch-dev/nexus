@@ -179,7 +179,6 @@ where
         }
     }
 
-    // the for loop above falls through on the last iteration.
     unreachable!("with_cas_retry exhausted max_attempts — last iteration should have returned Err")
 }
 
@@ -353,7 +352,6 @@ mod tests {
         .await;
 
         assert!(result.is_ok(), "retry should succeed: {result:?}");
-        // vs actual 1, second succeeds after re-reading).
         assert!(attempts >= 1, "expected at least 1 attempt, got {attempts}");
     }
 

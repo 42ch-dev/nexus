@@ -9,11 +9,6 @@ import test from 'node:test';
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const verifier = join(scriptsDir, '..', 'scripts', 'verify-package.mjs');
 
-/**
- * and the mocked Info.plist below both carry it, so the verifier's
- * `CFBundleShortVersionString === receipt.version` check stays anchored to the
- * real release version instead of a drifting literal.
- */
 const PRODUCT_VERSION = (() => {
   const manifest = JSON.parse(
     readFileSync(new URL('../resources/product.json', import.meta.url), 'utf8'),
@@ -29,9 +24,6 @@ function writeExecutable(path, source) {
   chmodSync(path, 0o755);
 }
 
-/**
- * per-test overrides for the layout files under test.
- */
 function buildLayoutFixture(root, { productJson, includeIcon = true, includeRuntimeIcon = true } = {}) {
   const packageDir = join(root, 'darwin-arm64');
   const appPath = join(packageDir, 'Nexus.app', 'Contents');
@@ -143,8 +135,6 @@ test('resources layout without the app icon fails package verification', () => {
 test('resources layout without the runtime app icon fails package verification', () => {
   const root = mkdtempSync(join(tmpdir(), 'nexus-verify-package-'));
   try {
-    // changed host loads for the Dock image (resources/icons/app-icon.png) is
-    // not: static verification must reject such a package.
     const { packageDir, commandBin } = buildLayoutFixture(root, { includeRuntimeIcon: false });
 
     const result = runVerifier(packageDir, commandBin);
@@ -194,10 +184,6 @@ test('missing minimum-macOS load command fails package verification', () => {
     writeFileSync(join(appPath, 'Info.plist'), 'fixture plist');
     writeFileSync(join(appPath, 'MacOS', 'Nexus'), 'missing-minos Mach-O fixture');
 
-    // `verifyResourcesLayout`, so this fixture trips the minos check without
-    // ever consulting the resources layout — no layout seeding is needed here.
-
-    // verifier's real CLI path: file reports Mach-O, otool reports no floor.
     writeExecutable(join(commandBin, 'file'), '#!/bin/sh\nprintf "%s\\n" "Mach-O 64-bit executable arm64"\n');
     writeExecutable(join(commandBin, 'otool'), '#!/bin/sh\nprintf "%s\\n" "Load command 0"\n');
     writeExecutable(join(commandBin, 'plutil'), `#!/bin/sh\nprintf "%s\\n" '{"CFBundleIdentifier":"io.nexus42.desktop","CFBundleName":"Nexus","CFBundleShortVersionString":"${PRODUCT_VERSION}"}'\n`);

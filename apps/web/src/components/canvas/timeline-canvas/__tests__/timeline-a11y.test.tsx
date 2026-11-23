@@ -160,7 +160,6 @@ describe('TimelineCanvasAdapter.renderAltView — non-spatial sortable table', (
       current: {
         worldId: 'world-7',
         client: makeMockClient(),
-        // `title asc`, so the initial render re-orders to A → Z.
         nodes: [a, b],
         selectedNodeId: null,
         onSelectNode,

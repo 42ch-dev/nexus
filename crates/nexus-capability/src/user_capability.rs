@@ -355,7 +355,6 @@ impl UserCapability {
     #[allow(clippy::unused_self, clippy::needless_pass_by_value)]
     #[cfg(feature = "wasm")]
     pub fn to_compute_input(&self, input: Value) -> Result<ComputeInput, CapabilityError> {
-        // input has no parameter surface to forward.
         let invocation: serde_json::Map<String, Value> =
             input.as_object().cloned().ok_or_else(|| {
                 CapabilityError::InputInvalid("capability input must be a JSON object".to_string())
@@ -449,9 +448,6 @@ impl Capability for UserCapability {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        // runnable — the ONLY path that returns the existing
-        // WorkerUnavailable variant (no new CapabilityError; exhaustive
-        // matches keep compiling).
         #[cfg(feature = "wasm")]
         {
             return self.run_wasm(input);
@@ -487,7 +483,6 @@ impl UserCapability {
 
         let compute_input = self.to_compute_input(input)?;
 
-        // run()-time (dir edited after admission) is an InputInvalid.
         let manifest_path = self.dir.join("manifest.json");
         let manifest_json = std::fs::read_to_string(&manifest_path).map_err(|e| {
             CapabilityError::InputInvalid(format!(
@@ -507,14 +502,6 @@ impl UserCapability {
             ))
         })?;
 
-        // on-disk module bytes before `get_or_compile`. Admission (gate 3)
-        // guaranteed manifest `wasm_sha256` == descriptor `wasmSha256` == the
-        // bytes' digest; this closes the TOCTOU gap where a capability dir is
-        // edited AFTER admission — the cache is keyed by bytes-hash and would
-        // otherwise compile unverified bytes. `verify_wasm_sha256` is the one
-        // content-hash implementation (`nexus-module-manifest`); a mismatch —
-        // or a manifest whose declared hash no longer equals the descriptor's
-        // admitted hash — fails closed as `InputInvalid`.
         let manifest: nexus_module_manifest::ModuleManifest = serde_json::from_str(&manifest_json)
             .map_err(|e| {
                 CapabilityError::InputInvalid(format!(
@@ -543,12 +530,6 @@ impl UserCapability {
         let module = cached.module.clone();
         let mut manifest = cached.manifest.clone();
 
-        // manifest before `compute` — the invocation sandbox is resolved as
-        // `min(manifest_override, host_default)` in `WasmEngine::resolve_sandbox`
-        // (compute.rs L71-82), so folding each present descriptor bound in
-        // via `min(existing, descriptor)` tightens the effective sandbox to
-        // the capability's ceiling. Absent descriptor fields leave the
-        // manifest/host value untouched.
         if let Some(sandbox) = &self.sandbox {
             if let Some(fuel) = sandbox.fuel {
                 manifest.max_fuel = Some(manifest.max_fuel.map_or(fuel, |m| m.min(fuel)));
@@ -919,8 +900,6 @@ mod tests {
 
     #[test]
     fn accept_underscores_inside_segments() {
-        // segment is rejected (`my_cap.pull` installs to `my_cap.pull/`, which
-        // the scanner reads).
         for name in ["my_cap.pull", "normal.cap", "foo._bar", "a.b_c"] {
             let json = format!(
                 r#"{{ "name": "{name}", "inputSchema": "{{}}", "outputSchema": "{{}}",
@@ -1120,7 +1099,6 @@ mod tests {
         );
     }
 
-    /// mapping is stateless, T2's executor supplies the handles).
     #[cfg(feature = "wasm")]
     fn cap() -> UserCapability {
         UserCapability::new(
@@ -1281,7 +1259,6 @@ mod tests {
             "new_key_blocks": [],
             "battle_report": {"kind": "combat"}
         });
-        // mapping then re-serializes it — the envelope must round-trip.
         let output: nexus_wasm_host::ComputeOutput = serde_json::from_value(output_json.clone())
             .expect("fixture must deserialize into ComputeOutput");
 
@@ -1362,10 +1339,6 @@ mod tests {
         // carries it into the compute envelope's world_ref (the module emits
         // it on the timeline event, which the wire validates as `^wld_…$`).
         input.insert("worldId".to_string(), raw["world_ref"]["world_id"].clone());
-        // (snake_case) — the keys basic-combat's `select_combatants` reads
-        // (manifest `schemas.invocation`). Lifted to the capability input
-        // surface so the real selector branch is exercised (S-2: the previous
-        // inert camelCase `attackerId`/`defenderId` only hit the fallback).
         input.insert("attacker_id".to_string(), serde_json::json!("kb_atk"));
         input.insert("defender_id".to_string(), serde_json::json!("kb_def"));
         Value::Object(input)
@@ -1400,7 +1373,6 @@ mod tests {
 
         assert_eq!(out["battle_report"]["kind"], "combat");
 
-        //    (matches basic_combat.rs L79-86).
         let delta = out["state_delta"]
             .as_array()
             .unwrap()
@@ -1527,8 +1499,6 @@ mod tests {
     async fn run_rejects_module_bytes_changed_after_admission() {
         let tmp = tempfile::tempdir().unwrap();
         stage_capability_dir(tmp.path(), "combat.cap", None);
-        // still declare the ORIGINAL admitted hash — the admission-time
-        // pairing no longer matches the on-disk pair).
         std::fs::write(
             tmp.path().join("combat.cap/basic-combat.wasm"),
             b"tampered module bytes",
@@ -1597,7 +1567,6 @@ mod tests {
     #[test]
     fn clamp_resolves_exact_bytes_on_non_aligned_cap() {
         const MIB: usize = 1024 * 1024;
-        // defaults so only the memory cap is the variable under test.
         let defaults = nexus_compute_policy::SandboxConfig::default();
         let base = nexus_compute_policy::SandboxConfig {
             fuel: defaults.fuel,
@@ -1622,7 +1591,6 @@ mod tests {
             base,
         );
         assert_eq!(lowered.max_memory_bytes, 2 * MIB);
-        // result, never the byte-cap floor of an independent MiB min.
         let clamped = SandboxOverrides {
             fuel: None,
             memory_mib: Some(64),
@@ -1647,7 +1615,6 @@ mod tests {
             clamped.memory_mib,
             Some(nexus_compute_policy::DEFAULT_MEMORY_MIB)
         );
-        // a MiB-recomputed shadow).
         assert_eq!(
             nexus_compute_policy::SandboxConfig::default().max_memory_bytes,
             64 * 1024 * 1024

@@ -1,6 +1,4 @@
 /**
- * chrome.
- *
  * Each shipped work profile (`novel`, `essay`, `game-bible`, `script`) maps
  * markdown elements to distinct, token-driven components. All styling is
  * delegated to DESIGN.md `reading-chrome-*` tokens via the CSS classes in

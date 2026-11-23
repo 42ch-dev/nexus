@@ -1,6 +1,4 @@
 /**
- * the engine repair page.
- *
  * `{home}/agent-host/config.toml` is owned by the native core
  * (`load_config` / `save_config`); this family is the HTTP seam only. GET
  * returns the native defaults when the file is missing, PUT forwards the full
@@ -78,11 +76,6 @@ function requirePositiveInteger(value: unknown, path: string): void {
   }
 }
 
-/**
- * path re-validates the same document. Without it a malformed entry would
- * surface as the sanitized `internal` 500 instead of a 400 that names the
- * offending field.
- */
 function parseAgentHostConfig(body: unknown): AgentHostConfig {
   const config = requireRecord(body, 'config');
   rejectUnknownKeys(config, CONFIG_KEYS, 'config');
@@ -191,12 +184,6 @@ export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHos
   }
 }
 
-/**
- * selected provider — readiness reads only enabled entries, so leaving a
- * replaced provider enabled would keep claiming an owner the user retired. A
- * document that already selects exactly that provider is returned untouched, so
- * a no-op save disables nothing.
- */
 function withReplacementSelected(config: AgentHostConfig): AgentHostConfig {
   const selected = config.providers.findLastIndex((provider) => provider.enabled !== false);
   if (selected < 0) {
@@ -229,9 +216,7 @@ export function putAgentHostConfig(
   body: unknown,
 ): Promise<AgentHostConfig> {
   const config = parseAgentHostConfig(body);
-  // save+restart must never interleave with a first-run selection.
   return withSelectionLock(service, async () => {
-    // owns readiness and the entries it replaced are disabled.
     const next = withReplacementSelected(config);
     assertLaunchableProviders(next);
     try {
@@ -240,9 +225,6 @@ export function putAgentHostConfig(
       throw mapNativeError(error);
     }
 
-    // re-establish the owner, then publish the fresh facts. A failed restart is
-    // a typed 503 — the old facts stay untouched, so nothing claims readiness
-    // the probe did not produce.
     let facts: EngineOwnerFacts;
     try {
       facts = (await service.core.restartExecutionOwner()) as EngineOwnerFacts;

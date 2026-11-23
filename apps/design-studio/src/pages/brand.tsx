@@ -44,9 +44,6 @@ interface LogoDisplay {
   description: string;
   /** Recommended surface per DESIGN.md §Logo Usage. */
   panelBgClass: string;
-  /**
-   * on dark hero panels (img-embedded `currentColor` resolves to black).
-   */
   invertForDark?: boolean;
 }
 
@@ -348,11 +345,6 @@ function ChronosShellMini({
   logo: ReactNode;
 }) {
   const isDark = mode === 'dark';
-  // brand-chronos note); only its label paint differs — white on light,
-  // cobalt on dark — so the label names the titlebar treatment, never the
-  // document (F-004). The content area below follows the document theme:
-  // light/dark parity for the shell comes from the Compare view, not a
-  // nested `.dark` scope.
   return (
     <div
       className="border border-gray-alpha-300 rounded-card overflow-hidden bg-background-100"

@@ -98,15 +98,11 @@ impl Capability for TimelineEventAppend {
 
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
-        // transaction so a rename failure cannot leave the event under the
-        // auto-allocated id.
         let mut tx = pool
             .begin()
             .await
             .map_err(|e| CapabilityError::Internal(format!("begin tx: {e}")))?;
 
-        // same transaction as the append so the collision guard is consistent
-        // with the insert.
         if let Some(ref explicit_id) = parsed.event_id {
             // SAFETY: EXISTS check against known narrative_timeline_events schema.
             let exists: i64 = sqlx::query_scalar(
@@ -283,9 +279,6 @@ mod tests {
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
     }
 
-    // inside one transaction. Verifies the explicit id is the one persisted in
-    // the DB (not the transient auto-allocated id) and that no orphan row
-    // remains.
     #[tokio::test]
     async fn timeline_event_append_explicit_id_persists_atomically() {
         let (_dir, pool) = fresh_pool().await;
@@ -323,7 +316,6 @@ mod tests {
         .unwrap();
         assert_eq!(row_id, "evt_atomic_1");
 
-        // auto-allocated id was left behind.
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM narrative_timeline_events WHERE world_id = ?")
                 .bind(&world_id)

@@ -26,8 +26,6 @@ function seedHome() {
 }
 
 /**
- * valid TOML holding default-safe values.
- *
  * `escape: false` points the link inside the expected config directory (the
  * config path stays where the host expects it). `escape: true` points it outside
  * that directory: `validate_host_admission` still reads it through the link and
@@ -219,8 +217,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
 
   test('host start failure after a successful core open leaves no owner', async () => {
     const binding = require(nodePath);
-    // expected config directory opens, so the failure below is attributable to
-    // the escaped config path and nothing else about the fixture.
     const control = binding.open(
       JSON.stringify({
         user_home: seedHostConfigHome(false),
@@ -234,9 +230,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     );
     await control.close();
 
-    // `validate_host_admission` (before the core opens) and rejected only by
-    // `HostManager::start`'s config-path canonicalization — after the core has
-    // already opened, which is the rollback branch under test.
     let failure = null;
     try {
       binding.open(
@@ -255,7 +248,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     assert.equal(wire.code, 'forbidden');
     assert.equal(wire.details?.category, 'policy_denied');
 
-    // reports the truth of the newly started host.
     const validHome = seedHome();
     const core = binding.open(
       JSON.stringify({ user_home: validHome, access: 'engine_owner', allow_uninitialized: false }),
@@ -278,7 +270,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
     const binding = require(nodePath);
     binding.forceUnconfirmedCleanup(true);
     try {
-      //    rollback's cleanup reports unconfirmed, so its owners are retained.
       let failure = null;
       try {
         binding.open(
@@ -297,12 +288,6 @@ describe('callback lifecycle', { concurrency: 1 }, () => {
       assert.equal(wire.code, 'forbidden');
       assert.equal(wire.details?.category, 'policy_denied');
 
-      //    retained owners survive (never replaced or dropped). Distinct fresh
-      //    homes are used, so a denial can only come from the environment-wide
-      //    retained-owner fence rather than from one home's own resources. The
-      //    fence's reason is not a wire envelope, so the binding classifies it as
-      //    `internal`/`open_failed`; that classification (never its message text)
-      //    is what separates this denial from the config-path rejection above.
       const validHome = seedHome();
       for (const candidate of [validHome, seedHome()]) {
         let denied = null;

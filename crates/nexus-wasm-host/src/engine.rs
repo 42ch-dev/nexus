@@ -66,16 +66,9 @@ impl WasmEngine {
         config.consume_fuel(true);
         config.epoch_interruption(true);
         config.debug_info(false);
-        // proposals by default. Preserve the v46 module-admission set: the
-        // Nexus module ABI is core Wasm, and accepting these proposals would
-        // silently widen what the sandbox admits.
         config.wasm_gc(false);
         config.wasm_function_references(false);
         config.wasm_exceptions(false);
-        // default (it is part of the `WASM3` default feature set). Keep the v48
-        // admission set here too: `i64.add128` / `i64.mul_wide_*` are not part
-        // of the Nexus module ABI, so modules using them must stay rejected at
-        // load time rather than becoming silently admissible.
         config.wasm_wide_arithmetic(false);
 
         let engine = Engine::new(&config)?;

@@ -91,9 +91,6 @@ describe('SelectionSubmenu', () => {
     }
   });
 
-  // position:fixed and its coordinates are derived once from the anchor rect,
-  // so resize/scroll moves the anchor under the popover. Dismiss (not
-  // reposition) is the chosen UX — submenu is cheap to reopen.
   describe('layout-change dismiss (V1.127 P0 T4)', () => {
     it('dismisses on window resize via onClose', () => {
       const anchor = document.createElement('button');
@@ -119,9 +116,6 @@ describe('SelectionSubmenu', () => {
     });
 
     it('dismisses on scroll of an ancestor scroll container via onClose (capture listener)', () => {
-      // lives inside a scroll container that is NOT `window`. `scroll` does
-      // not bubble, so the listener captures on `window` — the capture phase
-      // descends root → target, so a scroll on any descendant reaches it.
       const scrollContainer = document.createElement('div');
       const anchor = document.createElement('button');
       scrollContainer.appendChild(anchor);

@@ -80,7 +80,6 @@ mod tests {
 
     #[test]
     fn empty_visible_subset_is_absent() {
-        // surface to deny-all — it stays byte-identical (all visible).
         let policy = VisibilityPolicy::from_visible(Vec::<String>::new());
         assert_eq!(policy, VisibilityPolicy::absent());
         assert!(policy.is_visible("nexus.workspace.info"));

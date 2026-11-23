@@ -157,8 +157,6 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
     let existing = existing_document(&target)?;
 
     if existing.is_some() {
-        // would silently detach that path instead of updating it. The count is
-        // read natively on every platform, and an indeterminate count refuses.
         if nexus_config_metadata::link_count(&target)? > 1 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -168,7 +166,6 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
                 ),
             ));
         }
-        // directory and must not replace a document this process may not write.
         let _authorized = std::fs::OpenOptions::new().write(true).open(&target)?;
     }
 
@@ -177,8 +174,6 @@ pub fn publish_document_at(requested_path: &Path, contents: &str) -> std::io::Re
         None => None,
     };
 
-    // document can live outside the nexus home, and a cross-filesystem rename
-    // would not be atomic (or would fail outright).
     let parent = target.parent().unwrap_or(requested_path);
     let staging = nexus_config_metadata::create_staging(
         &parent.join(format!(".nexus42-{}.tmp", uuid::Uuid::new_v4())),
@@ -253,7 +248,6 @@ fn stage_document(
 ) -> std::io::Result<()> {
     let mut file = file;
     file.write_all(contents.as_bytes())?;
-    // rename must not leave a shorter, empty-looking document.
     file.sync_all()?;
     nexus_config_metadata::apply_after_write(policy, file, staging)
 }
@@ -295,8 +289,6 @@ fn resolve_publication_target(requested: &Path) -> std::io::Result<PathBuf> {
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 if followed == MAX_SYMLINK_HOPS {
-                    // `PermissionDenied` kind is what the native binding maps to
-                    // `forbidden` (see `existing_document`).
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         "too many symbolic links in the config document path",
@@ -349,7 +341,6 @@ pub(crate) static STAGING_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(()
 #[cfg(test)]
 fn after_staging(staging_directory: &Path) {
     let armed = {
-        // slot is advisory test state, so a poisoned lock is still usable.
         let mut slot = AFTER_STAGING
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -416,8 +407,6 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
     loop {
         match lock_options().open(&path) {
             Ok(mut file) => {
-                // mtime. The whole line is the ownership proof release checks
-                // before unlinking.
                 if let Err(write_error) = write_token(&mut file, &token) {
                     // Contract §3: a tokenless lock is unusable. Close the
                     // handle and unlink the file we just created instead of
@@ -446,9 +435,6 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
                 match age {
                     None => {}
                     Some(age) if age > STALE_AFTER => {
-                        // unlink and create, leaving two live holders, and a
-                        // live slow holder can lose its lock here. Accepted only
-                        // because all five writers are user-paced.
                         let started = *steal_since.get_or_insert_with(SystemTime::now);
                         match std::fs::remove_file(&path) {
                             Ok(()) => {}
@@ -468,7 +454,6 @@ pub fn acquire(nexus_home: &Path) -> std::io::Result<ConfigLock> {
                                 }
                             }
                         }
-                        // hot-loop the create/stat cycle.
                         std::thread::sleep(backoff);
                         backoff = (backoff * 2).min(BACKOFF_CAP);
                     }
@@ -544,9 +529,7 @@ pub fn probe_authority(nexus_home: &Path) -> LockAuthority {
             }
             LockAuthority::Writer
         }
-        // writer lock.
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => LockAuthority::Exists,
-        // absence must come from a separate stat, not from the denial.
         Err(_) => match std::fs::symlink_metadata(&path) {
             Err(stat_error) if stat_error.kind() == std::io::ErrorKind::NotFound => {
                 LockAuthority::ReadOnlyHome
@@ -759,7 +742,6 @@ mod tests {
 
         let guard = super::acquire(&home).expect("lock");
         let owned = std::fs::read_to_string(&lock).expect("held lock");
-        // different line.
         std::fs::write(&lock, format!("999999 foreign {owned}")).expect("foreign lock");
         drop(guard);
 
@@ -778,7 +760,6 @@ mod tests {
         let lock = lock_path(&home);
 
         let guard = super::acquire(&home).expect("lock");
-        // new owner's file.
         std::fs::write(&lock, "999999 stolen\n").expect("new owner's lock");
         drop(guard);
 
@@ -1016,7 +997,6 @@ mod tests {
         let path = config_path(&home);
         std::fs::write(&path, "active_creator_id = \"ctr_old\"\n").expect("document");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("mode");
-        // atomic replacement must carry over.
         let acl = std::process::Command::new("chmod")
             .arg("+a")
             .arg("nobody deny read")
@@ -1187,7 +1167,6 @@ mod tests {
         arrived
             .recv_timeout(Duration::from_secs(30))
             .expect("the publisher reached the staging boundary");
-        // failing operation while the original document is still in place.
         let staging_directory = only_staging_directory(&home);
         std::fs::remove_file(staging_directory.join("config.toml"))
             .expect("the staged file was removed at the boundary");
@@ -1246,12 +1225,10 @@ mod tests {
             .recv_timeout(Duration::from_secs(30))
             .expect("the publisher reached the staging boundary");
         let staging_directory = only_staging_directory(&home);
-        // the rename into the home is the native failure being sampled.
         let sample_source = tmp.path().join("sample-source");
         std::fs::write(&sample_source, "sample").expect("sample source");
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o500))
             .expect("the home stops accepting directory writes");
-        // moving the staged file or the document.
         let primary = std::fs::rename(&sample_source, home.join("sample-target"))
             .expect_err("the home does not accept a rename");
         release.send(()).expect("release the publisher");
@@ -1260,7 +1237,6 @@ mod tests {
             .join()
             .expect("publisher thread")
             .expect_err("the rename cannot write into the home");
-        // the home is still non-writable.
         let cleanup = std::fs::remove_dir(&staging_directory)
             .expect_err("the leftover directory cannot be removed yet");
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755))

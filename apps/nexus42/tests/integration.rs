@@ -447,7 +447,6 @@ fn retired_creator_workspace_clone_is_unknown() {
         );
     }
 
-    // advertise the removed leaf.
     let help = Command::cargo_bin("nexus42")
         .unwrap()
         .env("HOME", home)
@@ -861,7 +860,6 @@ fn persistent_identity_create_converges_workspace_row() {
         .stdout(predicate::str::contains("Created persistent identity"))
         .stdout(predicate::str::contains("Set as active identity."));
 
-    // its FK precheck immediately after the persistent-identity bootstrap.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -1181,7 +1179,6 @@ fn anonymous_identity_does_not_materialize_workspace_row() {
         .success()
         .stdout(predicate::str::contains("Created anonymous identity"));
 
-    // workspace-scoped writer must refuse it with the selection class.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -1248,7 +1245,6 @@ fn creator_list_mixed_local_and_platform() {
         .stdout(predicate::str::contains("Created persistent identity"));
     let local_id = single_persistent_id(home);
 
-    // byte-stable (id/handle/display unchanged).
     let human = Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -1261,8 +1257,6 @@ fn creator_list_mixed_local_and_platform() {
         stdout.contains("ORIGIN"),
         "table must gain the ORIGIN header: {stdout}"
     );
-    // column offset — a plain substring would already match `ctr_local*` ids
-    // (which embed "local") and "Alice Platform" (which embeds "platform").
     let header_line = stdout
         .lines()
         .find(|l| l.contains("ORIGIN"))
@@ -1346,7 +1340,6 @@ fn creator_list_excludes_anonymous_identity() {
     let tmp = TempDir::new().unwrap();
     let home = tmp.path();
 
-    // non-empty while the anonymous identity is active.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("creator")
@@ -1360,7 +1353,6 @@ fn creator_list_excludes_anonymous_identity() {
         .stdout(predicate::str::contains("Created persistent identity"));
     seed_platform_cache(home, "ctr_platabc", "alice", "Alice Platform");
 
-    // `local_identities` row, no workspace row).
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -1627,8 +1619,6 @@ fn persistent_identity_create_nameless_first_mint() {
             "nameless mint stores no name"
         );
 
-        // the test's HOME (the child binary's HOME env does not change this
-        // process), so use `paths::state_db_path` with the explicit home.
         let db_path = nexus42::paths::state_db_path(home, &rows[0].creator_id, "default");
         let workspace_pool = nexus42::db::Schema::init(&db_path)
             .await

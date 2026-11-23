@@ -153,7 +153,6 @@ test('a stale published record cannot make the response name another instance', 
   const home = tempHome();
   const server = await startServer(home, { workspaceInitialized: true, creatorId: 'ctr_a', workspaceSlug: 'default', engineEpoch: 1 });
   const { createDiscoveryRecord, publishDiscovery } = await import(join(serviceRoot, 'dist/discovery.js'));
-  // describe the process answering the request.
   const stale = createDiscoveryRecord({
     instanceId: 'inst-replaced',
     userHome: home,

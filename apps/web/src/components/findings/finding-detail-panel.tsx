@@ -42,10 +42,6 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
   const updateFinding = useUpdateFinding();
   const [form, setForm] = useState<InlineForm>(() => formFromFinding(finding));
 
-  // finding.updated_at: the server bumps it on every status transition, which
-  // would silently discard unsaved inline edits mid-triage. The status field is
-  // read directly from finding.status (not form state), so it stays live without
-  // a re-sync. resetInline() remains the manual re-sync from server state.
   useEffect(() => {
     setForm(formFromFinding(finding));
   }, [finding.finding_id]);
@@ -153,10 +149,6 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
   );
 }
 
-/**
- * string. Convert defensively (already-ISO passes through; numbers are treated
- * as epoch seconds).
- */
 function formatIso(ts: number | string | undefined | null): string | undefined {
   if (ts === undefined || ts === null) return undefined;
   if (typeof ts === 'string') return ts;

@@ -426,7 +426,6 @@ mod tests {
 
     #[test]
     fn merge_path_prepends_extras_and_dedupes() {
-        // about merge/split round-tripping, not about a `:`-joined literal.
         let existing = env::join_paths(["/usr/bin", "/bin", "/opt/homebrew/bin"]).unwrap();
         let extras = vec![
             PathBuf::from("/opt/homebrew/bin"),

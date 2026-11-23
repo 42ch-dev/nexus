@@ -603,7 +603,6 @@ async fn fix1_last_chapter_marks_work_complete() {
     work.stage_status = "active".to_string();
     seed_work(&pool, &work).await;
 
-    // sees no remaining chapters → WorkComplete.
     seed_chapters(&pool, "wrk_fix1d", "test-novel", 3, 3).await;
 
     insert_driver_schedule(

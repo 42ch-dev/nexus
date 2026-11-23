@@ -110,8 +110,6 @@ async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_betw
     use nexus_orchestration::GraphFlowEngine;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // resolve is the probe (the real builtins are absent from this
-    // registry, so any bypass fails the run instead of passing silently).
     let first_hits = Arc::new(AtomicUsize::new(0));
     let first_caps = recording_registry(&first_hits);
     assert!(
@@ -131,8 +129,6 @@ async fn preflight_t1_recording_registries_are_per_run_and_isolate_dispatch_betw
         "one reachable capability, one dispatch"
     );
 
-    // engine resolved the first engine's registry instead, the dispatch
-    // below would land in `first_hits` and leave `second_hits` at zero.
     let second_hits = Arc::new(AtomicUsize::new(0));
     let second_caps = recording_registry(&second_hits);
     assert!(

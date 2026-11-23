@@ -104,9 +104,6 @@ async fn fixture() -> Fixture {
     let guarded = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("engine pool init");
-    // materialized with it: the compute seam reads its module input through the
-    // admitted Creator `ActorView`, which resolves that stable holder
-    // (`require_creator_holder`, fail-closed) before any invocation runs.
     nexus_local_db::ensure_creator_row(guarded.pool(), CREATOR, "Test")
         .await
         .expect("seed the admitted creator and its holder");

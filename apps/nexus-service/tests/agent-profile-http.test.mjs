@@ -19,12 +19,6 @@ import { parse, stringify } from 'smol-toml';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
-/**
- * (`GET/PUT /v1/daemon/agent-host/profile`) over the real in-process service and
- * the real daemon home. Persistence is observed through a full service close +
- * reopen on the same home; the desktop IPC path is not involved.
- */
-
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), 'nexus-service-agent-profile-'));
   const seed = spawnSync(
@@ -48,7 +42,6 @@ async function jsonFetch(url, { method = 'GET', body } = {}) {
 
 async function startProfileService(home) {
   const { startService } = await import(join(serviceRoot, 'dist/index.js'));
-  // other service suites running in parallel.
   return startService({ home, host: '127.0.0.1', port: 0, allowRemote: false, domainOnly: true });
 }
 
@@ -179,7 +172,6 @@ describe('agent-profile (I-000064)', () => {
   });
 
   test('other daemon-home config keys survive the profile write', async () => {
-    // core already owns), then verify the profile write preserves it.
     const configPath = configPathFor(home);
     const raw = readFileSync(configPath, 'utf8');
     const before = parse(raw);
@@ -193,7 +185,6 @@ describe('agent-profile (I-000064)', () => {
     assert.equal(saved.status, 200);
 
     const afterDoc = parse(readFileSync(configPath, 'utf8'));
-    // a service-side profile write (same file, whole-document rewrite).
     assert.equal(afterDoc.active_creator_id, before.active_creator_id);
     assert.deepEqual(
       afterDoc.active_workspace_slug_by_creator,
@@ -242,7 +233,6 @@ describe('agent-profile (I-000064)', () => {
       profile: { name: 'claude-code', launch_command: '/custom/claude --flag' },
     });
 
-    // leak into the new profile.
     const switched = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
       method: 'PUT',
       body: { name: 'codex-cli' },
@@ -274,7 +264,6 @@ describe('agent-profile (I-000064)', () => {
     const after = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`);
     assert.deepEqual(after.payload, before.payload);
 
-    // the 200-code-point name bound, and exactly 200 is accepted.
     const emoji = '\u{1F600}';
     const overEmoji = await jsonFetch(`${baseUrl}${PROFILE_URL_PATH}`, {
       method: 'PUT',
@@ -294,7 +283,6 @@ describe('agent-profile (I-000064)', () => {
   test('a failed write leaves no temp file and no partial config', async () => {
     const { writeAgentProfile } = await import(join(serviceRoot, 'dist/agent-profile.js'));
     const brokenHome = mkdtempSync(join(tmpdir(), 'nexus-agent-profile-broken-'));
-    // the failure lands at the write itself, not before it.
     const configDir = join(brokenHome, '.nexus42');
     mkdirSync(configDir, { recursive: true });
     const configPath = join(configDir, 'config.toml');
@@ -302,7 +290,6 @@ describe('agent-profile (I-000064)', () => {
     writeFileSync(configPath, seeded, 'utf8');
     const originalError = console.error;
     try {
-      // must not leave a `.tmp` behind or truncate the existing document.
       chmodSync(configDir, 0o500);
       console.error = () => {};
       await assert.rejects(() => writeAgentProfile(brokenHome, { name: 'claude-code' }));

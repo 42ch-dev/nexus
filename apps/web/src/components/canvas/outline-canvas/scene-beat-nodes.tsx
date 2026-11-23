@@ -29,10 +29,6 @@ import type {
 import { SCENE_STATUS_LABEL_KEYS } from './graph-projection';
 import { NodeChromeShell } from '../presentational/node-chrome-shell';
 
-// node component module (T1 defined them here; T2 promoted the canonical
-// definitions to `rf-projection.ts` — the projection SSOT — so the data
-// payloads carry the identity fields `workId` / `sceneId` / `chapterId` /
-// `beatId` the projection needs to emit `parentId` + `extent`).
 export type {
   OutlineBeatNodeData,
   OutlineSceneNodeData,
@@ -48,11 +44,6 @@ function sceneStatusColorVar(status: OutlineSceneStatus): string {
   return `var(${SCENE_STATUS_TOKEN_VAR[status]})`;
 }
 
-/**
- * recipe as the chapter pill in outline-nodes.tsx: label-12 text on the 12%
- * status tint uses the hue's existing `-1000` step (drafted → blue-1000,
- * completed → green-1000; no new tokens).
- */
 const SCENE_STATUS_TEXT_TOKEN_VAR: Record<OutlineSceneStatus, string> = {
   drafted: '--color-blue-1000',
   completed: '--color-green-1000',

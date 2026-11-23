@@ -663,9 +663,6 @@ describe('RuleForm — submit attempts start from a clean error slate (bugbot 67
     await waitFor(() => expect(screen.getByText('Min must not exceed max.')).toBeInTheDocument());
     expect(capture.body).toBeUndefined();
 
-    // field error, so the Min message is still stale) and resubmit: the
-    // server rejects a *different* field, so the stale Min message must not
-    // survive next to the new echo.
     fireEvent.change(screen.getByLabelText('Max observers'), { target: { value: '9' } });
     submit();
 
@@ -694,7 +691,6 @@ describe('RuleForm — submit attempts start from a clean error slate (bugbot 67
     submit();
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    // linger next to the submitted fields.
     expect(screen.queryByText('Min must not exceed max.')).not.toBeInTheDocument();
   });
 });
@@ -1048,7 +1044,6 @@ describe('RuleForm — edit mode: severity honesty (stored hint, no inert Defaul
 
     const severity = screen.getByLabelText('Severity') as HTMLSelectElement;
     expect(severity.value).toBe('warning');
-    // (no null-clearing, AR-3) — the option is not rendered.
     expect(screen.queryByRole('option', { name: 'Default (warning)' })).not.toBeInTheDocument();
     expect(
       screen.getByText('Stored severity: warning. Pick another value to change it.'),

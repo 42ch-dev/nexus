@@ -1,6 +1,3 @@
-/**
- * (v1219-onboarding T4, access spec §6.3).
- */
 import { describe, expect, it } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

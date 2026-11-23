@@ -62,7 +62,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const creatorId = useActiveCreatorId();
 
   const listQuery = useQuery({
-    // workspace, so the creator id is part of the key and the query param.
     queryKey: queryKeys.workspaces.list({ creator_id: creatorId }),
     queryFn: async () =>
       client.listWorkspaces({ creator_id: creatorId ?? undefined, limit: 100 }),
@@ -76,8 +75,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         creator_id: creatorId ?? undefined,
       }),
     onSuccess: (_data, workspaceSlug) => {
-      // is workspace-scoped now, so drop all of it rather than tracking which
-      // families happen to be mounted.
       void qc.invalidateQueries();
       const name =
         listQuery.data?.items.find((w) => w.workspace_slug === workspaceSlug)?.display_name ??
@@ -91,7 +88,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const active = activeQuery.data ?? null;
     return {
       workspaces,
-      // a slug-only match would light the wrong creator's chip (QC W).
       activeWorkspace:
         workspaces.find(
           (w) =>

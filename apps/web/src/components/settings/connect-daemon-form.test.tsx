@@ -41,7 +41,6 @@ describe('ConnectDaemonForm', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-block')).toHaveTextContent('SHA256:aa:bb:cc');
     });
-    // text-[13px]).
     const fingerprintBlock = screen.getByTestId('fingerprint-block');
     expect(fingerprintBlock).toHaveClass('text-copy-13');
     expect(fingerprintBlock.className).not.toContain('text-[13px]');
@@ -107,7 +106,6 @@ describe('ConnectDaemonForm', () => {
   it('reconnects with the retained credential without re-entering the key (desktop redacted load)', async () => {
     const setConfig = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
-    // only hasApiKey presence.
     const saved: ConnectionConfig = {
       endpointUrl: 'https://remote.example:8420',
       apiKey: '',
@@ -366,9 +364,6 @@ describe('ConnectDaemonForm', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
-    // network) render the promoted <TransportErrorBlock>. The classifier's
-    // long-form diagnostic rides the primitive's detail line so actionable
-    // text ("use the Nexus desktop app") survives.
     await waitFor(() => {
       const block = screen.getByTestId('transport-error-block');
       expect(block).toHaveAttribute('data-kind', 'network');
@@ -399,8 +394,6 @@ describe('ConnectDaemonForm', () => {
     await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
     await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
 
-    // only fires on status=0). Legacy inline region renders with the
-    // daemon's error.message; the primitive is NOT mounted.
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('Fingerprint lookup failed.');
     });
@@ -427,7 +420,6 @@ describe('ConnectDaemonForm', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/The API key from the daemon machine/i)).toBeInTheDocument();
     expect(screen.getByText('nexus42 daemon api-key')).toBeInTheDocument();
-    // text-[13px]).
     expect(screen.getByText('nexus42 daemon api-key')).toHaveClass('text-copy-13');
   });
 });

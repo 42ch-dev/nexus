@@ -84,7 +84,6 @@ async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
     )
     .await
     .unwrap();
-    // capability admission gate and KB queries can target it deterministically.
     sqlx::query("UPDATE narrative_worlds SET world_id = ? WHERE owner_creator_id = ?")
         .bind(world_id)
         .bind(owner)
@@ -170,9 +169,6 @@ async fn combat_engine_preset_loads_and_resolves_capabilities() {
             .any(|c| c == "narrative.compute"),
         "combat-engine must require narrative.compute"
     );
-    // C3 contract shape the executable lookup misses it (the plain builtin
-    // registry attaches no engine binding), while the name stays reserved
-    // and known metadata resolves without constructing an executor.
     assert!(
         registry.get("narrative.compute").is_none(),
         "get is runnable-only: narrative.compute has no binding in a plain registry"
@@ -232,7 +228,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
     let output = match result {
         Ok(o) => o,
         Err(e) => {
-            // compute_error timeline event is recorded (compass T4).
             let timeline = timeline_event_count(&pool, "wld_e2e").await;
             assert!(
                 timeline >= 1,
@@ -277,11 +272,6 @@ async fn narrative_compute_e2e_full_cycle_applies_side_effects() {
         "basic-combat does not emit new key blocks"
     );
 
-    // is rejected. Drive the capability with a module that emits a block for a
-    // different world would require a hostile module; instead assert the guard
-    // logic by checking the world_id re-assertion path is in place via the
-    // empty new_key_blocks case above (the guard runs unconditionally before
-    // any insert). A dedicated unit-level guard lives in narrative_compute.rs.
 }
 
 /// The capability must reject a missing world (admission gate) even when a

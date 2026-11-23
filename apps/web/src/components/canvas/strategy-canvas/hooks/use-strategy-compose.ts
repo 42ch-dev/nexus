@@ -60,9 +60,6 @@ interface CommittedCandidate {
   diagnostics: StrategyComposeResponse['validation_summary'];
 }
 
-/**
- * structure (nodes, edges, nests) is the daemon's alone.
- */
 interface ComposeChrome {
   containment: Record<string, string>;
   expandedSlots: ReadonlySet<string>;
@@ -100,12 +97,6 @@ function freshId(base: string, taken: (id: string) => boolean): string {
  */
 const MAX_PATTERN_PAGES = 20;
 
-/**
- * unbound-slot check) need every package, so follow `next_cursor` until the
- * service says there is no more. A walk that cannot finish — the cap or a failed
- * page — is a query error the surface shows, never a short list it presents as
- * the whole registry: a missing package reads as "no such pattern" at both gates.
- */
 async function listAllPatterns(client: NexusClient): Promise<ListPatternsResponse> {
   const items: ListPatternsResponse['items'] = [];
   let cursor: string | undefined;
@@ -133,8 +124,6 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     staleTime: 30_000,
   });
 
-  // for a strategy that has never been composed. Committed compose responses
-  // replace it.
   const seedQuery = useQuery({
     queryKey: ['canvas', 'strategy-compose', 'seed', presetId],
     queryFn: () => client.getStrategyCandidate(presetId),
@@ -212,14 +201,9 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     [applyResponse, client, presetId],
   );
 
-  /**
-   * holds and drop the stale conflict, so the user reapplies the op against
-   * current bytes instead of the revision they no longer have.
-   */
   const reload = useCallback(async () => {
     try {
       const document = await client.getStrategyCandidate(presetId);
-      // newer bytes; installing the older response would seed a fresh 409.
       setCommitted((prev) =>
         prev && prev.document.revision > document.revision
           ? prev
@@ -228,7 +212,6 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
       setConflict(null);
       setRefusal(null);
     } catch (error) {
-      // name the failure in the dialog instead of rejecting into a void click.
       setRefusal({
         reason: 'reload_failed',
         message: error instanceof Error ? error.message : 'Reload failed.',
@@ -237,10 +220,6 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
     }
   }, [client, presetId]);
 
-  /**
-   * region and the connecting edge (`attach_to`), so the committed candidate is
-   * what Simulate walks; only the spatial grouping is canvas chrome.
-   */
   const nestPattern = useCallback(
     async ({ attachNodeId, package: pkg }: NestTarget) => {
       if (!committedDocument) return;
@@ -266,7 +245,6 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
       });
       setChrome((prev) => ({
         ...prev,
-        // graph position for a nested region).
         containment: attachToSlot
           ? { ...prev.containment, [slotNodeId]: attachNodeId }
           : prev.containment,
@@ -330,7 +308,6 @@ export function useStrategyCompose(presetId: string, enabled: boolean) {
       if (node.kind !== 'pattern_slot') continue;
       const pinned = (entry: ListPatternsResponse['items'][number]) =>
         entry.id === node.pattern?.registry_id && entry.version === node.pattern?.version;
-      // mirroring the daemon's package index, so a broken duplicate cannot hide a readable package.
       const summary =
         summaries.find((entry) => entry.available && pinned(entry)) ??
         summaries.find((entry) => pinned(entry));

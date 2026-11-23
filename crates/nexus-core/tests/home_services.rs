@@ -162,7 +162,6 @@ async fn register_display_name_is_validated_and_collision_checked() {
         Err(CoreError::InvalidInput { field, .. }) if field == "display_name"
     ));
 
-    // same persistent identity instead of minting a second one.
     let first = register_named(&svc, "Duplicate Author").await;
     let second = register_named(&svc, "Duplicate Author").await;
     assert_eq!(first, second);
@@ -190,7 +189,6 @@ async fn select_denies_invalid_path_and_foreign_workspace() {
         );
     }
 
-    // though a directory exists on disk.
     let creator_b = register_named(&svc, "Second Author").await;
     let foreign = SetActiveWorkspaceRequest {
         creator_id: Some(creator_b.clone()),
@@ -238,7 +236,6 @@ async fn stale_old_selection_cannot_mutate() {
     let principal = core.active_principal().await.expect("principal");
     assert!(core.active_principal().await.is_ok());
 
-    // old selection on disk.
     let _creator_b = register_named(&svc, "Second Author").await;
 
     let result = core
@@ -283,7 +280,6 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
     let status = core.outbox_status(&principal).await.expect("status");
     assert!(status.entries.is_empty());
 
-    // conflicted/failed queue left behind by an interrupted push).
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, &creator, "default");
     let pool = nexus_cloud_sync::pool::OutboxPool::new(
         &db_path,
@@ -384,9 +380,6 @@ async fn outbox_status_and_resolve_operate_on_the_workspace_outbox() {
 async fn concurrent_same_name_registration_surfaces_collision_not_internal_failure() {
     for _round in 0..3 {
         let (tmp, svc) = home().await;
-        // migrates the global store, so the storm below races only the
-        // display-name mint (the TOCTOU branch under test), not the
-        // fresh-database migration bookkeeping.
         let _warmup = register_named(&svc, "Warmup Author").await;
         let svc = std::sync::Arc::new(svc);
         let display = "Race Author";
@@ -416,7 +409,6 @@ async fn concurrent_same_name_registration_surfaces_collision_not_internal_failu
                         "byte-exact collision surface required, got: {reason}"
                     );
                 }
-                // unrelated outcome of racing inits.
                 Err(CoreError::OwnerBusy | CoreError::Busy) => {}
                 Err(other) => panic!(
                     "concurrent registration must not surface an internal failure: {other:?}"
@@ -473,7 +465,6 @@ async fn select_workspace_failure_keeps_previous_selection_and_principal() {
     .expect("open core");
     let principal = core.active_principal().await.expect("principal");
 
-    // directory, so the guarded initialization cannot open it.
     materialize_operational_dir(&user_home, &creator, "broken");
     let broken_db = nexus_home_layout::workspace_state_db_path(&user_home, &creator, "broken");
     std::fs::create_dir_all(&broken_db).unwrap();
@@ -622,7 +613,6 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
     .expect("select");
     let db_path = nexus_home_layout::workspace_state_db_path(&user_home, &creator, "default");
 
-    // diagnostics must NOT initialize/migrate the store into existence.
     std::fs::remove_file(&db_path).unwrap();
     assert!(matches!(
         svc.storage_status().await,
@@ -633,8 +623,6 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
         "storage_status must never initialize the DB"
     );
 
-    // unhealthy status carrying the reason — versions are None, never a
-    // faked zero-version healthy result.
     let empty = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(
@@ -656,7 +644,6 @@ async fn storage_status_never_initializes_and_reports_faults_honestly() {
         "unmigrated store has no versions"
     );
 
-    // healthy/empty report.
     std::fs::write(&db_path, b"definitely not a sqlite database").unwrap();
     assert!(
         matches!(svc.storage_status().await, Err(CoreError::Internal { .. })),
@@ -737,7 +724,6 @@ async fn logout_does_not_clear_a_selection_switched_while_it_waited() {
     let (tmp, svc) = home().await;
     let creator_a = register_named(&svc, "Logout Alpha").await;
     let creator_b = register_named(&svc, "Logout Beta").await;
-    // the current selection.
     let nexus_home = tmp.path().join(".nexus42");
     let config_path = nexus_home.join("config.toml");
     std::fs::write(
@@ -767,7 +753,6 @@ async fn logout_does_not_clear_a_selection_switched_while_it_waited() {
         "logout must wait for config.toml.lock"
     );
 
-    // logout must not clear it when it finally gets the lock.
     std::fs::write(
         &config_path,
         format!("active_creator_id = \"{creator_b}\"\n"),

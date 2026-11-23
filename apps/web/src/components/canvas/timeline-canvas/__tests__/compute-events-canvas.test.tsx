@@ -159,12 +159,6 @@ function TimelineReturnLink() {
   );
 }
 
-/**
- * appends the compute_result event (simulating the daemon's Accept write).
- * The journey then navigates back to the Timeline — a different route, so the
- * canvas remounts and refetches the log; `useAcceptRun`'s `timeline.all`
- * invalidation only covers a canvas that stays mounted.
- */
 function computeTimelineJourney(
   over: { initialEvents?: unknown[]; kbEntities?: unknown[]; branch?: string } = {},
 ) {
@@ -192,8 +186,6 @@ function computeTimelineJourney(
       if (url.searchParams.get('event_type') === 'compute_result') {
         state.lastEventsUrl = request.url;
       }
-      // `has_more: true` + a second page can be exercised (review F1
-      // regression: the canvas auto-fetches remaining pages).
       const limit = Number(url.searchParams.get('limit')) || 100;
       const cursorRaw = url.searchParams.get('cursor');
       const cursor = cursorRaw ? Number(cursorRaw) : 0;
@@ -330,7 +322,6 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
   });
 
   it('auto-fetches remaining events pages — nodes from page 2 render (review F1)', async () => {
-    // `fetchNextPage` for its snapshot projection.
     const events = Array.from({ length: 105 }, (_, i) => ({
       ...COMPUTE_EVENT,
       id: `evt_page_${i}`,
@@ -347,8 +338,6 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
   });
 
   it('shows an honest cap note when the compute-event projection hits the 500 ceiling (V1.147 P3 T2)', async () => {
-    // `has_more`, so the projection is capped and the canvas must say so
-    // instead of silently dropping the older events.
     const events = Array.from({ length: 520 }, (_, i) => ({
       ...COMPUTE_EVENT,
       id: `evt_cap_${i}`,
@@ -423,7 +412,6 @@ describe('TimelineCanvas compute-on-Timeline (V1.147 P2 T3)', () => {
     await user.click(screen.getByTestId('run-studio-run'));
     await screen.findByTestId('proposal-section-report');
 
-    // omits `branch_id` (the daemon defaults to the World's root).
     expect(state.runBodies[0]).toMatchObject({
       world_id: 'world-7',
       module_id: 'basic-combat',

@@ -211,7 +211,6 @@ export function validateRuleForm(state: RuleFormState): Partial<Record<RuleFormE
     }
   }
 
-  // disables the axis, this guard keeps the mirror honest).
   if (state.family === 'observer_cardinality' && state.targetEntryTypes.length > 0) {
     errors.target_entry_types = 'targetTypesConflict';
   }

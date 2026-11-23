@@ -90,8 +90,6 @@ async fn duplicate_fire_prevention_same_schedule_admitted_once() {
         "schedule should be Running after first tick (admitted)"
     );
 
-    // Duplicate prevention is handled by tick_clocked()'s re-entrancy guard
-    // and the status check in the UPDATE WHERE clause.
     supervisor.tick_clocked(1000).await.unwrap();
     assert_eq!(
         supervisor.status_of("S02").await.unwrap(),
@@ -134,8 +132,6 @@ async fn mixed_batch_admits_due_and_keeps_future_pending() {
 async fn dst_clock_jump_recomputes_next_run() {
     let (_dir, pool) = common::arc_pool_dir_first().await;
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
-
-    // Real time: 02:00 → 03:00 (spring forward)
 
     let schedule = make_schedule("S05", "creator-4", Some(9000));
     supervisor.insert_pending(schedule).await.unwrap();

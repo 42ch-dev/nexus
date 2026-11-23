@@ -200,7 +200,6 @@ impl CliConfig {
     }
 
     fn load_from_nexus_home(nexus: &Path) -> anyhow::Result<Self> {
-        // first so a plain read does not contend with the other writers.
         if toml_entry_absent(&nexus.join("config.toml"))? && nexus.join("config.json").exists() {
             Self::migrate_legacy_json(nexus)?;
         }
@@ -342,7 +341,6 @@ impl CliConfig {
         nexus: &Path,
         run: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
-        // lock is taken; `None` therefore means it never ran it.
         let mut outcome: Option<anyhow::Result<T>> = None;
         nexus_core::with_config_lock(nexus, || {
             outcome = Some(run());
@@ -374,8 +372,6 @@ impl CliConfig {
             Self::migrate_legacy_json_locked(&nexus)?;
             let mut config = Self::read_document_for_mutation(&nexus)?;
             let outcome = run(&mut config)?;
-            // `ReadOnly` snapshot, I-000291) must never see a truncated
-            // document and read "no `[memory_provider]`" as the local default.
             nexus_home_layout::config_lock::publish_document(
                 &nexus,
                 &toml::to_string_pretty(&config)?,
@@ -1197,7 +1193,6 @@ platform_url = "https://direct.api.io"
 
         let (_home, nexus_dir) = isolated_nexus_dir();
         let lock_path = nexus_dir.join("config.toml.lock");
-        // this writer's helper.
         std::fs::write(&lock_path, "foreign holder\n").expect("foreign lock");
 
         let done = Arc::new(AtomicBool::new(false));
@@ -1256,8 +1251,6 @@ platform_url = "https://direct.api.io"
             "the CLI write must wait for config.toml.lock"
         );
 
-        // its selection and its `agent_profile` table must survive the CLI's
-        // write that follows.
         std::fs::write(
             &config_path,
             "active_creator_id = \"ctr_foreign\"\n\n[agent_profile]\nname = \"codex-cli\"\n",
@@ -1345,7 +1338,6 @@ platform_url = "https://direct.api.io"
             "the migration must not write config.toml while the lock is held"
         );
 
-        // that document (and its foreign table) alone.
         std::fs::write(
             &config_path,
             "active_creator_id = \"ctr_new\"\n\n[agent_profile]\nname = \"codex-cli\"\n",
@@ -1530,12 +1522,10 @@ platform_url = "https://direct.api.io"
     fn preflight_acceptance_is_mutation_acceptance() {
         let (_home, nexus_dir) = isolated_nexus_dir();
 
-        // working).
         CliConfig::preflight_document(&nexus_dir)
             .expect("the preflight accepts an absent document");
         CliConfig::mutate(|_| Ok(())).expect("the mutation accepts an absent document");
 
-        // the same refusal.
         std::fs::write(nexus_dir.join("config.toml"), "not toml {{{{").expect("seed corrupt");
         let preflight = CliConfig::preflight_document(&nexus_dir)
             .expect_err("the preflight must refuse a corrupt document");
@@ -1547,8 +1537,6 @@ platform_url = "https://direct.api.io"
             "one refusal rule means one refusal text"
         );
 
-        // document path, the portable dangling-link stand-in — refuses both
-        // with the same read refusal.
         std::fs::remove_file(nexus_dir.join("config.toml")).expect("drop the corrupt document");
         std::fs::create_dir(nexus_dir.join("config.toml")).expect("seed the unreadable entry");
         let preflight = CliConfig::preflight_document(&nexus_dir)

@@ -83,8 +83,6 @@ pub async fn handle_findings(config: &CliConfig, command: FindingsCommand) -> Re
         }
     }
     .await;
-    // seam released the writer, so an accepted/pruned/listed finding is never
-    // reported ahead of a close that did not settle.
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
     }
@@ -175,15 +173,10 @@ async fn handle_findings_accept(
         ))
     })?;
 
-    //    port pins the registered creative root and refuses any other, so the
-    //    read path, the reported path and the port input must all name it —
-    //    the operational workspace dir (`~/.nexus42/.../workspaces/<slug>`)
-    //    is a different tree and would be refused on every write.
     let executor = work_artifact_executor_or_error(core).await?;
     let ws_dir = workspace_root_or_error(executor.as_ref())?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
 
-    //    the bytes land under the Work lock and the shared durability path.
     let timestamp = chrono::Utc::now().to_rfc3339();
     let outcome = nexus_capability::rules_layers::append_rule_suggestion(
         executor.as_ref(),
@@ -201,7 +194,6 @@ async fn handle_findings_accept(
         ))
     })?;
 
-    //    already resolved).
     let already_resolved = finding.status == "resolved";
     let resolved_now = if already_resolved {
         false
@@ -363,10 +355,6 @@ async fn handle_findings_list(
         .await
         .map_err(map_core_error)?;
     if json {
-        // elements and `pagination` the cursor envelope. The core carriers are
-        // the same shapes the generated wrapper nests (its element/pagination
-        // types are re-declared per schema file and are not constructible from
-        // the core's carriers), so the body is assembled from them directly.
         return Ok(Some(serde_json::to_string_pretty(&serde_json::json!({
             "items": resp.items,
             "pagination": resp.pagination,
@@ -420,8 +408,6 @@ async fn handle_findings_set_status(
     target_executor: Option<&str>,
     json: bool,
 ) -> Result<Option<String>> {
-    // `update_finding` deliberately leaves that check to its caller, so the
-    // read the retired route performed happens here — before any write.
     core.get_work(principal, work_id.to_string())
         .await
         .map_err(map_core_error)?;
@@ -544,7 +530,6 @@ async fn handle_rules_reset(
         ))
     })?;
 
-    // the diff, the dry-run report and the port write must all name that tree.
     let executor = work_artifact_executor_or_error(core).await?;
     let ws_dir = workspace_root_or_error(executor.as_ref())?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
@@ -552,8 +537,6 @@ async fn handle_rules_reset(
         .join(work_ref)
         .join("AGENTS.md");
 
-    // create it. A read failure for an existing-but-corrupt file is also
-    // treated as "absent" so the atomic reset can still recover it.
     let current: Option<String> = std::fs::read_to_string(&agents_md_path).ok();
     let scaffold = nexus_capability::rules_layers::render_default_agents_md(work_ref);
     let would_change = current.as_deref().is_none_or(|c| c != scaffold);
@@ -625,7 +608,6 @@ async fn handle_rules_reset(
 
     if !yes {
         if json {
-            // that confirmation is required and exit without writing.
             return Ok(Some(
                 serde_json::to_string_pretty(&serde_json::json!({
                     "work_id": resolved_work_id,

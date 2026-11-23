@@ -62,8 +62,6 @@ export function CreatorCreatePanel() {
   const canCreateWorld = useMemo(() => hasCreateWorldClient(client), [client]);
   const createWorld = useCreateWorld();
   const createWork = useCreateWork();
-  // `world_id` with 400 `world_id_required`). The inline Work form therefore
-  // renders a required World selector fed by the narrative-worlds read model.
   const narrativeWorlds = useNarrativeWorlds();
   const worldOptions = useMemo(
     () =>
@@ -195,11 +193,6 @@ export function Sidebar() {
     setActiveTab(tab);
   }
 
-  // the registry (labels are `shell` i18n keys, resolved here). Create omits
-  // the EL §3 hide-table surfaces; Develop shows the full Control Room + hub.
-  // The Creator|Orchestrator tabs stay untouched — entrance is a separate
-  // axis (`tabFromPathname` unchanged), so the groups render in the
-  // orchestrator nav slot exactly like the V1.94 orchestrator groups did.
   const navGroups: ShellNavGroup[] = useMemo(
     () =>
       ENTRANCE_BY_ID[entrance].navGroups.map((group) => ({

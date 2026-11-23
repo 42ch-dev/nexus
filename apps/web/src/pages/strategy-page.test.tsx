@@ -18,9 +18,6 @@ function LocationDisplay() {
   return <div data-testid="location">{location.pathname}</div>;
 }
 
-// returning its internal `ErrorState` while the page-level Back stays visible.
-// `vi.hoisted` keeps the object reference stable inside the hoisted mock
-// factory.
 const canvasMock = vi.hoisted(() => ({ error: false }));
 
 function StrategyRoutes() {

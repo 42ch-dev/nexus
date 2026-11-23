@@ -43,8 +43,6 @@ export function CreateScheduleDialog({
     }
   }, [open]);
 
-  // `system` group is intentionally excluded — system presets are the
-  // operator's boot sessions, not authorable schedule targets (F-012).
   const presetOptions = [
     ...(presets.data?.user ?? []),
     ...(presets.data?.embedded ?? []),
@@ -66,7 +64,6 @@ export function CreateScheduleDialog({
       });
       onOpenChange(false);
     } catch {
-      // inline message below keeps the dialog from closing silently.
       setError(t('create.genericError'));
     }
   }
@@ -80,7 +77,6 @@ export function CreateScheduleDialog({
             {presets.isLoading ? (
               <p className="text-copy-13 text-gray-700">{t('create.presetLoading')}</p>
             ) : presets.isError ? (
-              // retry), not as "no presets available".
               <div className="flex flex-col gap-2">
                 <p className="text-copy-13 text-red-1000">{t('create.presetError')}</p>
                 <Button

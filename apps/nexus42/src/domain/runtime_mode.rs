@@ -84,8 +84,6 @@ impl DomainRuntimeMode {
     /// Calculate degradation depth from a target mode.
     /// 0 = same mode, 1 = one level down, 2 = two levels down.
     #[must_use]
-    // arms are the only way to express the depth table without duplicate
-    // match-arm bodies, and no further nesting is possible for these tuples.
     #[allow(clippy::unnested_or_patterns)]
     pub const fn degradation_depth_to(&self, target: &Self) -> u32 {
         match (self.0, target.0) {

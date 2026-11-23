@@ -1,9 +1,3 @@
-/**
- * assembly observation) and the moment directive (thin set/show/clear
- * wrapper) over the P2-T2 context authority. Every operation is a thin
- * translation over the native family surface; ownership of the observed
- * World and directive scopes stays in the single Rust core authority.
- */
 import type {
   MomentDirectiveRequest,
   MomentDirectiveResponse,

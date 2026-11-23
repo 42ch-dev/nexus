@@ -1,6 +1,4 @@
 /**
- * redacted store).
- *
  * The config shape is a client-side only data model — it is never sent to the
  * daemon as a wire payload. Storage backends differ by platform:
  *   - Web SPA: localStorage (trust boundary equals the SPA itself); the actual
@@ -123,12 +121,6 @@ class DesktopConnectionStorage implements ConnectionStorage {
   }
 }
 
-/**
- * requires. The browser localStorage record must carry the actual key —
- * an active keyless remote record would otherwise build an unauthenticated
- * remote BrowserClient. (The desktop redacted shape is constructed from the
- * typed bridge result, never from this validator.)
- */
 function isValidWebConnectionConfig(value: unknown): value is ConnectionConfig {
   if (value === null || typeof value !== 'object') return false;
   const c = value as Record<string, unknown>;

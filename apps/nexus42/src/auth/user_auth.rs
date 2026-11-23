@@ -61,7 +61,6 @@ pub async fn login(config: &CliConfig) -> Result<()> {
                         i64::try_from(token_response.expires_in).unwrap_or(0),
                     );
 
-                // — the token came from the platform over HTTPS).
                 let user_id = extract_user_id_from_jwt(&token_response.access_token)
                     .unwrap_or_else(|| {
                         tracing::warn!(
@@ -724,7 +723,6 @@ mod tests {
         }
 
         let result = refresh_access_token(&config).await;
-        // or get an error from a concurrent test's stale auth.json
         if let Err(CliError::Other(msg)) = result {
             assert!(
                 msg.contains("No refresh token") || msg.contains("invalid"),

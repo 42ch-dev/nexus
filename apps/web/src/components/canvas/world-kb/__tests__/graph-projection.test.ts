@@ -105,8 +105,6 @@ describe('layoutNodes', () => {
     const candidateX = nodes.find((n) => n.id === 'candidate:c')!.position.x;
     const entityXs = nodes.filter((n) => n.id.startsWith('entity:')).map((n) => n.position.x);
     expect(candidateX).toBeGreaterThan(Math.max(...entityXs));
-    // after all 18 possible BlockTypes. A large unused gap would force fitView
-    // to zoom out and push entities offscreen on a small world.
     const neighbor = layoutNodes(
       [entity({ key_block_id: 'a', block_type: 'character' }), entity({ key_block_id: 'n', block_type: 'organization' })],
       [],

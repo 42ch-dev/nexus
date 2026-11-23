@@ -34,7 +34,6 @@ export function WorkspaceChips() {
         className="flex flex-wrap items-center gap-2"
       >
         {workspaces.map((workspace) => {
-          // comparison would light the wrong creator's chip (QC W).
           const active =
             activeWorkspace !== null &&
             workspace.creator_id === activeWorkspace.creator_id &&

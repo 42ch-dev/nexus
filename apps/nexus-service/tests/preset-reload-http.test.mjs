@@ -9,13 +9,6 @@ import { after, before, describe, test } from 'node:test';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serviceRoot = join(__dirname, '..');
 
-/**
- * over the real in-process service and core. The endpoint is read-through: it
- * re-resolves the manifest from disk on every call, so the test proves it by
- * changing the disk between calls (create → resolves, edit → no longer
- * resolves, delete → not_found) rather than by asserting a mock.
- */
-
 const PRESET_ID = 'reload-probe';
 const PRESET_YAML = `revision: 1
 preset:
@@ -89,7 +82,6 @@ describe('preset reload (POST /v1/daemon/presets/{id}:reload)', () => {
     assert.equal(reloaded.status, 200, reloadedBody);
     assert.deepEqual(JSON.parse(reloadedBody), { id: PRESET_ID, reloaded: true });
 
-    // longer resolves. A cached load would still answer 200 here.
     writeFileSync(join(bundleDir(home), 'preset.yaml'), 'revision: [unclosed\n', 'utf8');
     const broken = await fetch(url, { method: 'POST' });
     assert.equal(broken.status, 404, await broken.text());

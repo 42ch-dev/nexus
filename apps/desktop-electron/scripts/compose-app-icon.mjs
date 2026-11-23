@@ -100,8 +100,6 @@ try {
   rmSync(iconsetDir, { recursive: true, force: true });
 }
 
-// packaging-only `.icns`; regenerate it from the icns so a logo change updates
-// both. `sips` converts the icns to the committed 512x512 RGB PNG shape.
 execFileSync('/usr/bin/sips', ['-s', 'format', 'png', '-z', '512', '512', icnsPath, '--out', appIconPath], { stdio: 'inherit' });
 
 console.log(

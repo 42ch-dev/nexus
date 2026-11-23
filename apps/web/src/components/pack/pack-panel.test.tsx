@@ -39,13 +39,10 @@ const packMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/api/queries', async (importOriginal) => {
-  // hoisted above the test's static imports, so a statically imported
-  // `useMutation` binding would be uninitialized inside the factory.
   const mod = await importOriginal<typeof QueriesModule>();
   const { useMutation } = await import('@tanstack/react-query');
   return {
     ...mod,
-    // real so the Blob-download path is exercised end to end (V1.151 pattern).
     useImportPack: () =>
       useMutation({
         mutationFn: async (vars: ImportVars) => {
@@ -124,7 +121,6 @@ describe('PackPanel — export (T5)', () => {
       }),
     );
 
-    // mechanics (object-URL round-trip + anchor click) are observable.
     const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:pack');
     const revokeObjectURL = vi.fn();
     URL.createObjectURL = createObjectURL;
@@ -137,7 +133,6 @@ describe('PackPanel — export (T5)', () => {
       if (tagName === 'a') {
         capturedAnchor = el as HTMLAnchorElement;
         el.addEventListener('click', (event) => {
-          // the blob: href — prevent it; the click itself is what we assert.
           event.preventDefault();
           anchorClick();
         });
@@ -151,7 +146,6 @@ describe('PackPanel — export (T5)', () => {
 
       await user.click(screen.getByTestId('pack-export-button'));
 
-      // ("export with defaults"), then the envelope is downloaded.
       await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
       expect(exportBody).toEqual({});
       expect(createObjectURL).toHaveBeenCalledTimes(1);
@@ -316,7 +310,6 @@ describe('PackPanel — import guards & state lifecycle (QC fix wave)', () => {
       'You do not have permission to import into this World.',
     );
 
-    // belongs to the old file, not the new (unsubmitted) one.
     await user.upload(screen.getByTestId('pack-file-input'), PACK_FILE_B);
 
     expect(screen.queryByTestId('pack-import-errors')).toBeNull();

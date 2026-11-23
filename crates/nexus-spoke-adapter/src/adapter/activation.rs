@@ -336,7 +336,6 @@ struct ActivationConfigRaw {
 
 impl From<ActivationConfigRaw> for ActivationConfig {
     fn from(raw: ActivationConfigRaw) -> Self {
-        // `key` (spec §2.2 "Prefer `keys` when both present").
         let keys = raw.keys.or(raw.key).unwrap_or_default();
         Self {
             keys,
@@ -394,7 +393,6 @@ fn match_key(
                 return Err(MatchKeyError::OverlongKey);
             }
             let re = regex::Regex::new(key).map_err(|_| MatchKeyError::InvalidRegex)?;
-            // defense-in-depth — the engine is linear-time regardless).
             let capped = truncate_chars(scan_raw, MAX_REGEX_SCAN_CHARS);
             Ok(re.is_match(capped))
         }
@@ -513,7 +511,6 @@ pub fn apply_activation(
 ) -> ActivationResult {
     let mut pass = run_primary_pass(entries, scan_text, constant_seed_ids);
     sort_matched(&mut pass.matched);
-    // `cap`/`remaining` = `None` (no hop budget active).
     let primary_tokens_est: usize = pass
         .matched
         .iter()
@@ -577,7 +574,6 @@ pub fn apply_activation_with_hops(
     hop: &HopConfig,
 ) -> ActivationResult {
     let mut primary = run_primary_pass(entries, scan_text, constant_seed_ids);
-    // for the inspector budget section.
     let primary_tokens_est: usize = primary
         .matched
         .iter()
@@ -586,7 +582,6 @@ pub fn apply_activation_with_hops(
     let mut hop_tokens_est: usize = 0;
 
     if !edges.is_empty() && hop.max_hops > 0 {
-        // timeline; the engine reserves the primary-matched KB estimate.
         let budget = hop
             .max_hop_tokens
             .map(|b| b.saturating_sub(primary_tokens_est));
@@ -598,8 +593,6 @@ pub fn apply_activation_with_hops(
             .iter()
             .map(|entry| (entry.entry_id.clone(), entry.clone()))
             .collect();
-        // pre-marked visited, so hop expansion never re-pulls an entry that
-        // is already in `matched` — and never traverses through it.
         let pre_visited: Vec<String> = primary
             .matched
             .iter()
@@ -608,7 +601,6 @@ pub fn apply_activation_with_hops(
         let expanded = expand_relation_hops(&primary.seed_ids, &pre_visited, &pool, edges, &config);
         hop_tokens_est = expanded.tokens_consumed;
 
-        // also stay in `unmatched` — matched ∩ unmatched = ∅ after this.
         let pulled_ids: HashSet<String> = expanded
             .pulled
             .iter()
@@ -640,7 +632,6 @@ pub fn apply_activation_with_hops(
             .collect(),
         unmatched: primary.unmatched,
         trace: primary.trace,
-        // is what the hop budget has left after primary + hop spends.
         budget: Some(ActivationBudget {
             primary_tokens_est,
             hop_tokens_est,
@@ -693,7 +684,6 @@ pub fn expand_relation_hops(
     edges: &[HopEdge],
     config: &HopConfig,
 ) -> HopExpandResult {
-    // §5 adjacency rule), so both endpoints carry the edge.
     let mut adjacency: HashMap<&str, Vec<&HopEdge>> = HashMap::new();
     for edge in edges {
         adjacency
@@ -707,7 +697,6 @@ pub fn expand_relation_hops(
     let mut pulled: Vec<KnowledgeEntryRecord> = Vec::new();
     let mut hop_trace: Vec<ActivationTraceEntry> = Vec::new();
     let mut remaining = config.max_hop_tokens.unwrap_or(usize::MAX);
-    // entries — surfaced on the result for the inspector budget section.
     let mut tokens_consumed: usize = 0;
 
     let mut frontier: Vec<String> = seeds.to_vec();
@@ -831,7 +820,6 @@ fn run_primary_pass(
             source_relation_id: None,
         });
 
-        // `constant` — NOT neutral entries (spec §5 seed rule).
         if accepted
             && activation.as_ref().is_some_and(|cfg| {
                 is_constant_seed(cfg, &entry_id, constant_seed_ids) || !cfg.keys.is_empty()
@@ -900,7 +888,6 @@ fn evaluate_entry(
     scan_lower: &str,
     caller_seed_ids: &[String],
 ) -> (bool, String) {
-    // `constant_seeds` self-id, or caller-supplied seed ids.
     if is_constant_seed(cfg, entry_id, caller_seed_ids) {
         let seed_source = if cfg.constant {
             "constant"
@@ -1121,7 +1108,6 @@ mod tests {
 
     #[test]
     fn test_secondary_absent_ignores_logic_and_all_any_hit_fires() {
-        // must NOT require all primary keys — any primary hit fires.
         let entries = vec![entry_with_activation(
             "kb_2",
             "Royal Guard",
@@ -1139,7 +1125,6 @@ mod tests {
 
     #[test]
     fn test_secondary_absent_ignores_logic_not_any_any_hit_fires() {
-        // primary-any fires (handbook: logic ignored).
         let entries = vec![entry_with_activation(
             "kb_3",
             "Orc Warlord",
@@ -1200,7 +1185,6 @@ mod tests {
 
     #[test]
     fn test_and_all_with_secondary_requires_all_primary_and_all_secondary() {
-        // ("Royal Guard" / "Protector of the throne").
         let entries = vec![entry_with_activation(
             "kb_6",
             "Royal Guard",
@@ -1324,7 +1308,6 @@ mod tests {
 
     #[test]
     fn test_whole_word_requires_boundary() {
-        // scan text alone (self-match would defeat the boundary check).
         let entries = vec![entry_with_activation(
             "kb_12",
             "The Monarch",
@@ -1344,13 +1327,8 @@ mod tests {
 
     #[test]
     fn test_whole_word_cjk_char_boundary_safe_advance() {
-        // `start + 1` bytes, slicing mid-char for multi-byte keys — this
-        // panicked with "byte index 1 is not a char boundary" for
-        // `whole_word_match("王", "王宫")`. "王" inside the CJK word "王宫" is
-        // not a whole word → must not match, and must not panic.
         assert!(!whole_word_match("王", "王宫"));
 
-        // past the failed boundary and find the later standalone occurrence.
         assert!(whole_word_match("王", "王宫。王"));
 
         assert!(!whole_word_match("宫", "王宫"));
@@ -1401,7 +1379,6 @@ mod tests {
 
     #[test]
     fn test_regex_scan_text_truncated_to_64k() {
-        // head (stable prefix) — and must not panic on huge scan text.
         let scan = format!("harbor {}", "y".repeat(70 * 1024));
         let entries = vec![entry_with_activation(
             "kb_16",
@@ -1415,11 +1392,6 @@ mod tests {
 
     #[test]
     fn test_regex_catastrophic_pattern_completes_in_bounded_time() {
-        // non-matching run of 'a's drives a backtracking engine to
-        // exponential worst-case time — qc2 measured >1.5s on 28 chars. The
-        // `regex` crate is linear-time by construction, so this must return
-        // promptly; the test reaching its assertions at all is the regression
-        // guard (a backtracking engine would hang on the 5k 'a' scan below).
         let scan = format!("{}!", "a".repeat(5000));
         let entries = vec![entry_with_activation(
             "kb_redos",
@@ -1643,7 +1615,6 @@ mod tests {
 
     #[test]
     fn test_ordering_missing_priority_order_default_to_zero() {
-        // explicit positive and negative priorities.
         let entries = vec![
             entry_with_activation(
                 "kb_o51",
@@ -1674,8 +1645,6 @@ mod tests {
 
     #[test]
     fn test_ordering_neutral_only_keeps_original_order() {
-        // returns the original order — the engine-level byte-equivalence
-        // guarantee (spec §1 / §4).
         let entries = vec![
             entry_with_activation("kb_nA", "Neutral A", "No modules", None),
             entry_with_activation(
@@ -1895,7 +1864,6 @@ mod tests {
 
     #[test]
     fn test_activation_unknown_fields_ignored() {
-        // `activation` are ignored, not rejected.
         let entries = vec![entry_with_activation(
             "kb_uf",
             "Unknown Fields",
@@ -2006,7 +1974,6 @@ mod tests {
 
     #[test]
     fn test_expand_relation_hops_pre_visited_blocks_pull_and_traversal() {
-        // never pulled, and the BFS does not traverse through them.
         let mut pool = HashMap::new();
         for id in ["kb_a", "kb_b", "kb_c"] {
             let entry = entry_with_activation(id, id, "summary", None);
@@ -2259,9 +2226,6 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_budget_stops_mid_expansion() {
-        // remaining 8. B (60 chars → 15 tokens) exceeds → skipped; C
-        // (8 chars → 2 tokens) fits → pulled. Per-entry gate, not level-stop:
-        // the over-budget edge comes FIRST and C is still pulled.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2356,9 +2320,6 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_no_keyword_refire_on_pulled() {
-        // graph hop. The accepted trace row for B is the hop row (graph
-        // reason), not a key-match reason — proving pulled entries are never
-        // re-evaluated against modules.activation (spec Q5).
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2449,8 +2410,6 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_pulled_sorts_in_non_constant_band() {
-        // same keys (not automatically demoted). B (pulled, priority 100)
-        // outranks A (primary hit, priority 5).
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2629,8 +2588,6 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_neutral_only_no_seeds_no_pulls() {
-        // pull ⇒ identical to the P0 activation result (byte-equivalence
-        // guarantee holds under hops; spec §1).
         let entries = vec![
             entry_with_activation("kb_n1", "Neutral A", "No modules.", None),
             entry_with_activation("kb_n2", "Neutral B", "No modules.", None),
@@ -2651,10 +2608,6 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_neutral_matched_not_pulled_again() {
-        // `modules.activation`) is graph-adjacent to it AND already in
-        // `matched` from the primary pass (neutral ⇒ always included). Hop
-        // expansion must not pull it a second time — every entry_id appears
-        // exactly once in `matched`.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2702,7 +2655,6 @@ mod tests {
 
     #[test]
     fn test_apply_activation_with_hops_pulled_entry_removed_from_unmatched() {
-        // also remain in `unmatched` — matched ∩ unmatched = ∅.
         let entries = vec![
             entry_with_activation(
                 "kb_a",
@@ -2723,7 +2675,6 @@ mod tests {
                 Some(activation_primary(&["elf"], "and_any")),
             ),
         ];
-        // adjacent) → kb_c legitimately stays unmatched.
         let edges = vec![edge("kb_a", "kb_b", "located_in")];
         let result = apply_activation_with_hops(
             &entries,

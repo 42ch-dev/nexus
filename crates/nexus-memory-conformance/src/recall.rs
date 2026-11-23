@@ -685,9 +685,6 @@ impl FixtureMemoryProvider {
             }
         };
 
-        // in UTF-8 bytes of the serialized content. An oversized first item is
-        // surfaced whole instead of being silently dropped; any later item that
-        // does not fit is deferred to the next page.
         let limit = usize::try_from(request.budget.max_items.get()).map_err(internal_failure)?;
         let max_bytes = match request.budget.max_bytes {
             Some(budget) => Some(usize::try_from(budget.get()).map_err(internal_failure)?),
@@ -771,7 +768,6 @@ impl FixtureMemoryProvider {
         let subject_id = request.subject_id.as_str();
         require_op_admitted(conn, "memory.profile.get", space_id).await?;
 
-        // payload never names a requester.
         let grants = load_grants(conn, space_id).await?;
         if !any_capability_admits(&grants, principal_id, space_id, now, subject_id) {
             return Err(not_authorized(
@@ -828,11 +824,6 @@ impl FixtureMemoryProvider {
         require_op_admitted(conn, "memory.profile.update", space_id).await?;
 
         let grants = load_grants(conn, space_id).await?;
-        // per-context record, so its write must cover shared document access.
-        // `reads_shared` is the published facet for exactly that; the plain
-        // `requirement()` helper (no contexts, no shared facet) would accept a
-        // context-restricted grant without `shared_access`, letting a principal
-        // replace trusted text it cannot even read.
         let profile_write = GrantRequirement {
             capability: "profile_write",
             subject_id: Some(subject_id),
@@ -922,7 +913,6 @@ impl FixtureMemoryProvider {
             }
         };
 
-        // no effect and therefore leave the marker alone.
         bump_snapshot(conn, space_id).await?;
         Ok(ProfileChange {
             profile_kind,
@@ -1447,7 +1437,6 @@ mod tests {
             .expect("covered context");
         assert_eq!(sorted_ids(&page), vec!["rec_a"]);
 
-        // still never to subject_all.
         scenario
             .grant(LIMITED, &["recall"], Some(&["ctx-a"]), Some(true))
             .await;
@@ -1550,8 +1539,6 @@ mod tests {
             )
             .await;
 
-        // hold its serialized content, but the first item is surfaced whole
-        // instead of being dropped.
         let page = recall_with_budget(&scenario, budget(10, Some(1)), None).await;
         assert_eq!(recalled_ids(&page), vec!["rec_one"]);
         assert_eq!(page.overflow_record_id.as_deref(), Some("rec_one"));
@@ -1568,8 +1555,6 @@ mod tests {
         assert!(!page.truncated);
         assert!(page.next_cursor.is_none());
 
-        // in characters: a one-character multi-byte body is larger than one
-        // character of budget.
         let one = content_serialized_bytes(&json!({ "text": "é" }));
         let two = content_serialized_bytes(&json!({ "text": "zz" }));
         assert!(one > 1, "a multi-byte body must serialize to more bytes");
@@ -1665,7 +1650,6 @@ mod tests {
             SpokeRejectCode::CursorInvalid
         );
 
-        // cursor is refused instead of silently resuming over new state.
         scenario.grant(STRANGER, &["recall"], None, None).await;
         let request = recall_request(
             &scenario.space_id,
@@ -1790,7 +1774,6 @@ mod tests {
     }
 
     async fn provenance_filter_is_anded_with_the_selection(scenario: &Scenario) {
-        // placement: a record placed in ctx-a is filtered by its origin.
         scenario
             .insert_record(
                 "rec_origin",
@@ -2094,7 +2077,6 @@ mod tests {
     }
 
     async fn profile_reads_follow_the_grant_coverage(scenario: &Scenario) {
-        // but only profile_write admits the write (§7.24).
         scenario.grant(CLIENT, &["recall"], None, None).await;
         let page = scenario
             .provider
@@ -2211,10 +2193,6 @@ mod tests {
             .expect("authorized update");
         assert_eq!(change.revision, 2);
 
-        // write grant must cover shared document access exactly as the read
-        // does. A context-restricted grant without shared access never reaches
-        // the CAS: no create, no replace, and no bytes, revision or marker
-        // change.
         scenario
             .grant(LIMITED, &["profile_write"], Some(&["ctx-a"]), None)
             .await;
@@ -2277,7 +2255,6 @@ mod tests {
     }
 
     async fn disjoint_contexts_are_never_unioned(scenario: &Scenario, document: &str) {
-        // shared coverage.
         scenario
             .grant(LIMITED, &["profile_write"], Some(&["ctx-b"]), None)
             .await;
@@ -2305,7 +2282,6 @@ mod tests {
     }
 
     async fn the_shared_facet_admits_the_write(scenario: &Scenario) {
-        // control: the document is read and written again.
         scenario
             .grant(LIMITED, &["profile_write"], Some(&["ctx-a"]), Some(true))
             .await;
@@ -2425,7 +2401,6 @@ mod tests {
         record_before: &str,
         profile_before: &str,
     ) {
-        // recall never rewrote an authored document.
         scenario
             .provider
             .profile_update(
@@ -2500,7 +2475,6 @@ mod tests {
     }
 
     async fn caller_rollback_discards_the_staged_profile(scenario: &Scenario, baseline: u64) {
-        // step: the mutation owns no commit of its own.
         let mut transaction = scenario
             .provider
             .store()
@@ -2587,7 +2561,6 @@ mod tests {
     }
 
     async fn a_frozen_space_refuses_only_the_write(scenario: &Scenario) {
-        // write, leaving no effect behind.
         let freeze: MemorySpacesFreezeRequest = serde_json::from_value(json!({
             "space_id": scenario.space_id,
             "expected_revision": 1,

@@ -370,7 +370,6 @@ pub fn structural_refusal(
             violations: violations.iter().map(ToString::to_string).collect(),
         });
     }
-    // declared, so the pin is the root cause and must be the refusal.
     if let Some(unconfirmed) = diagnostics.into_iter().find(|finding| {
         matches!(
             finding,
@@ -468,8 +467,6 @@ impl CoreService {
         let revision = i64::try_from(candidate.revision)
             .map_err(|_| approval_internal("revision does not fit the row column"))?;
 
-        // revision this approval verified (an absent row is revision 0). A compose that commits in
-        // between makes the predicate fail, so it wins and this writer gets the typed conflict.
         let written = sqlx::query(
             "INSERT INTO strategy_approvals \
              (approval_id, strategy_id, content_hash, candidate_revision, document_json, \

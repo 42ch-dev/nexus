@@ -183,9 +183,6 @@ async function signalBoundProcessTree(
   }
   const pid = owned.boundIdentity.pid;
   if (isWindows()) {
-    // parent/child relation via `taskkill /T /F`. The identity re-check above
-    // gates it, so a recycled PID is never signalled. `signal` is not applicable
-    // — `taskkill /F` is the forceful path both callers converge on.
     await runAsync(WIN32_TASKKILL, win32TreeKillCommand(pid));
     return;
   }

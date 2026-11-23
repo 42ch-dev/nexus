@@ -766,12 +766,9 @@ mod tests {
         }
         std::fs::write(&path, "this is not valid toml {{{{").expect("write failed");
 
-        // silently downgraded to defaults or to an empty document, which
-        // `save_toml_edit` would then write back over the author's rules.
         assert!(PermissionPolicy::load(workspace_root).is_err());
         assert!(PermissionPolicy::load_toml_edit(workspace_root).is_err());
 
-        // author's bytes survive verbatim.
         assert!(PermissionPolicy::new()
             .save_toml_edit(workspace_root)
             .is_err());

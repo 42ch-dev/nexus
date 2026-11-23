@@ -124,7 +124,6 @@ describe('toast queue + Toaster rendering', () => {
 
     const button = screen.getByRole('button', { name: 'Dismiss notification' });
     act(() => button.click());
-    // plays, then unmounts after TOAST_EXIT_MS (mirrors --duration-exit).
     expect(screen.getByText('Click me away')).toBeInTheDocument();
     act(() => {
       vi.advanceTimersByTime(140); // mirrors --duration-exit (see TOAST_EXIT_MS in toast.tsx)
@@ -204,7 +203,6 @@ describe('error-envelope → toast path (W-1 end-to-end)', () => {
     };
     const error = NexusClientError.fromBody(400, envelope);
 
-    // becomes the description so the actionable text reaches the user.
     act(() =>
       toast({
         variant: 'error',
@@ -239,9 +237,6 @@ describe('error-envelope → toast path (W-1 end-to-end)', () => {
 });
 
 describe('useErrorToast classified transport body (V1.129 P1)', () => {
-  /**
-   * toast queue reflects the bridge's actual output.
-   */
   function ErrorToastProbe({
     onReady,
   }: {

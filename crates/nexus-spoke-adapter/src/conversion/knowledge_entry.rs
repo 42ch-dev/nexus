@@ -67,7 +67,6 @@ use crate::extensions::{
     refuse_legacy_creator_only, set_created_from_command_id, set_nexus_extras, set_owner,
     set_provenance, take_nexus_body,
 };
-// request` (production code sets the carrier in nexus-daemon-runtime, not here).
 #[cfg(test)]
 use crate::extensions::set_nexus_body;
 use crate::ops::{assert_revision, transition_status};
@@ -89,10 +88,6 @@ use crate::{SpokeReject, SpokeResult};
 /// drift, not a runtime input error.
 #[must_use]
 pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledgeEntry {
-    // field maps onto its spoke counterpart; computable bool→map and attributes
-    // object→Vec<BodyAttribute> are shape conversions (see module doc).
-    // spoke-operations does not consume body content, but the round-trip now
-    // preserves it for any caller that reads the spoke type.
     let body = entry.body.as_ref();
     let state_map = body
         .and_then(|b| b.state.clone())
@@ -112,8 +107,6 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
     };
     let summary = body.and_then(|b| b.summary.clone());
     let tags = body.and_then(|b| b.tags.clone()).unwrap_or_default();
-    // Vec<BodyAttribute>. Null/array/object values have no spoke slot and are
-    // dropped; the trait_type newtype is regex-validated by spoke.
     let attributes = body
         .and_then(|b| b.attributes.as_ref())
         .and_then(Value::as_object)
@@ -124,8 +117,6 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
         });
     let spoke_body = SpokeKnowledgeEntryBody {
         attributes,
-        // `None`, while 0.14.1 omitted an *empty* map — so the empty case
-        // must map to `None` rather than emitting `"computable": {}`.
         computable: (!computable_map.is_empty()).then(|| computable_map.into()),
         state: state_map,
         summary,
@@ -174,8 +165,6 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
             .map(Into::into),
     };
 
-    // emit `world_id`; Character/binding owners emit their typed key and never
-    // a fabricated `world_id`. Preserves unknown keys per spec §2.2.
     set_owner(&mut spoke, &entry.owner);
     set_created_from_command_id(&mut spoke, entry.created_from_command_id.clone());
     set_provenance(
@@ -208,16 +197,7 @@ pub fn spoke_to_knowledge_record(
     entry: SpokeKnowledgeEntry,
 ) -> Result<KnowledgeEntryRecord, KbError> {
     let mut s = entry;
-    // never leaks into product-local extras ([`get_nexus_extras`]) or the
-    // persisted `extensions` column. Spoke's typed BodyAttributeValue drops
-    // null/array/object attribute values; this carrier (stashed on the
-    // persist-path upsert request in `build_spoke_upsert_request`) is the
-    // authoritative, lossless nexus body that the persist writes (V1.143
-    // Greptile P1 — body fidelity).
     let lossless_body_value = take_nexus_body(&mut s);
-    // still carries `extensions.nexus.creator_only` — `false` included — is
-    // refused with the stable reason before anything reads it. It is neither
-    // interpreted as governance nor carried as an unknown extra.
     refuse_legacy_creator_only(&s)?;
     // Fail closed when absent, ambiguous, or malformed (non-string/null owner
     // key) — a spoke entry with anything other than exactly one valid owner
@@ -225,33 +205,21 @@ pub fn spoke_to_knowledge_record(
     // *narrative container* axis; the wire-level holder governance below is a
     // separate axis (durable §1).
     let owner = get_owner(&s)?;
-    // one-to-one mapping of `KnowledgeEntry.owner` / `.disclosure` onto the
-    // native `holder_entry_id` / `disclosure` columns. No normalization: an
-    // absent wire field is an absent native column (shared), an `owner-private`
-    // disclosure without a holder is refused by the storage rule, and unknown
-    // disclosure vocabulary is carried verbatim here and refused/quarantined
-    // by its owning boundary (never rewritten to shared).
     let holder_entry_id = s.owner.as_ref().map(|holder| holder.as_str().to_string());
     let disclosure = s
         .disclosure
         .as_ref()
         .map(|value| value.as_str().to_string());
-    // field moves out of `s` are not blocked by outstanding borrows.
     let created_from_command_id = get_created_from_command_id(&s).map(String::from);
     let (source_work_id, source_chapter, source_provenance_kind) = get_provenance(&s);
     let source_work_id = source_work_id.map(String::from);
     let source_provenance_kind = source_provenance_kind.map(String::from);
-    // (owned Map; borrow ends before `s.body` is moved).
     let extensions_nexus_extras = get_nexus_extras(&s).map(Value::Object);
     let entry_type = s.entry_type.clone();
     let canonical_name = s.canonical_name.to_string();
-    // exceeds the domain u32 range is rejected, never silently normalized to 1.
     let schema_version = u32::try_from(s.schema_version.get())
         .map_err(|_| KbError::UnsupportedSchemaVersion(s.schema_version.get()))?;
 
-    // map back; body is `None` only when every field is empty/None. Used only
-    // when no lossless carrier is present (e.g. spoke entries that did not
-    // originate from a `KnowledgeEntryRecord` forward conversion).
     let SpokeKnowledgeEntryBody {
         attributes,
         computable,
@@ -279,7 +247,6 @@ pub fn spoke_to_knowledge_record(
             computable: has_computable.then_some(true),
         })
     };
-    // reconstruction when no carrier was stashed.
     let body = lossless_body_value
         .and_then(|v| serde_json::from_value::<KnowledgeEntryBody>(v).ok())
         .or(spoke_derived_body);
@@ -288,9 +255,6 @@ pub fn spoke_to_knowledge_record(
         schema_version,
         entry_id: s.entry_id,
         owner,
-        // value is read straight from `KnowledgeEntry.owner` / `.disclosure`
-        // and never synthesized, so a wire entry with no governance stays
-        // shared.
         holder_entry_id,
         disclosure,
         block_type: entry_type_to_block_type(&entry_type)?,
@@ -312,8 +276,6 @@ pub fn spoke_to_knowledge_record(
     })
 }
 
-/// (`snake_case`).
-///
 /// `pub(crate)` because the adapter's scoped filters compare the same wire
 /// vocabulary the conversion seam emits (`Scope.entry_types`); the serde
 /// representation stays the single source of truth.
@@ -407,12 +369,6 @@ fn spoke_anchor_to_nexus(a: &SpokeSourceAnchor) -> SourceAnchor {
         summary: None,
     })
 }
-
-//
-// round-trip. The nexus domain carries modules as a JSON object
-// (`Option<Value>`); the spoke wire type uses `HashMap<ModulesKey,
-// ModulesValue>`. These helpers convert between the two representations,
-// preserving unknown namespaces verbatim.
 
 /// Forward: nexus `modules` JSON → spoke `HashMap<ModulesKey, ModulesValue>`.
 ///
@@ -528,8 +484,6 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
             ));
         }
 
-        // spoke-operations. Map the reject back to nexus's `RevisionMismatch`
-        // to preserve observable behavior.
         let current_rev = self.revision.unwrap_or(0);
         if matches!(
             assert_revision(base_revision, current_rev),
@@ -567,12 +521,6 @@ impl KnowledgeEntryRecordSpokeExt for KnowledgeEntryRecord {
             ));
         }
 
-        // spoke-operations. `transition_status` enforces the cross-product
-        // transition table (spec §1.5). The revision bump follows the nexus
-        // convention (transition_status does not bump revision; that is the
-        // promote-specific `apply_promote` path, not used here because the
-        // spoke codegen inlines a distinct `PromoteRequest.candidate` type
-        // that is not the data `KnowledgeEntry` — see T3 report).
         apply_spoke_status_transition(self, KeyBlockStatus::Confirmed.as_str())?;
         self.revision = Some(current_rev + 1);
         Ok(())
@@ -851,11 +799,6 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    //
-    // round-trips ALL 5 typed body fields plus unknown `extensions.nexus`
-    // extras in both directions. Each field that previously dropped
-    // (summary / attributes / tags / computable) now survives.
-
     #[test]
     fn spoke_seam_roundtrips_all_five_body_fields() {
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
@@ -888,8 +831,6 @@ mod tests {
         );
         assert_eq!(body.state.as_ref().unwrap()["character"]["current_hp"], 80);
         assert_eq!(body.computable, Some(true));
-        // as f64 in spoke's BodyAttributeValue, so an integer nexus value
-        // round-trips as a float (28 → 28.0); the numeric value is preserved.
         let attrs = body
             .attributes
             .as_ref()
@@ -902,12 +843,6 @@ mod tests {
 
     #[test]
     fn spoke_seam_drops_null_array_object_attribute_values() {
-        // only models string/number/boolean. Null/array/object members have no
-        // spoke slot and are dropped on the general forward conversion
-        // (documented loss of the spoke typed body). The persist path
-        // (`build_spoke_upsert_request` → orchestrator → `put_update`) carries
-        // the full body losslessly via the `_nexus_body` carrier instead — see
-        // `spoke_seam_carrier_preserves_full_body_on_reverse`.
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Item, "Backpack");
         kb.body = Some(KnowledgeEntryBody {
             attributes: Some(serde_json::json!({
@@ -933,12 +868,6 @@ mod tests {
 
     #[test]
     fn spoke_seam_carrier_preserves_full_body_on_reverse() {
-        // `extensions.nexus._nexus_body` carrier (set in `build_spoke_upsert_
-        // request`) so `put_update`'s reverse conversion recovers it losslessly
-        // instead of the spoke-truncated body (V1.143 Greptile P1 — body
-        // fidelity). This proves the recovery: a spoke entry carrying the full
-        // body round-trips null/array/object attribute values that the spoke
-        // typed body alone cannot represent.
         let full_body = KnowledgeEntryBody {
             summary: Some("Backpack summary".to_string()),
             attributes: Some(serde_json::json!({
@@ -1019,7 +948,6 @@ mod tests {
 
     #[test]
     fn spoke_seam_summary_only_roundtrips_without_state_or_computable() {
-        // were non-empty, dropping a summary-only body. Now summary alone survives.
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Scene, "Forest");
         kb.body = Some(KnowledgeEntryBody {
             summary: Some("A dark forest".to_string()),
@@ -1035,8 +963,6 @@ mod tests {
 
     #[test]
     fn spoke_seam_extensions_nexus_extras_roundtrip() {
-        // KnowledgeEntryRecord.extensions_nexus_extras and survive the spoke seam both
-        // ways (spec §2.2 round-trip rule 2).
         let mut kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
         kb.extensions_nexus_extras =
             Some(serde_json::json!({"custom_label": "villain-arc", "priority": 7}));

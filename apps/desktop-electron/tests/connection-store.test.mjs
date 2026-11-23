@@ -61,9 +61,6 @@ const unavailableStorage = {
   },
 };
 
-/**
- * `ConnectionStore.persist` refuses before publication.
- */
 const encryptOnlyStorage = {
   isEncryptionAvailable: () => true,
   encryptString: (plain) => xorCipher(0x5a).encryptString(plain),
@@ -84,9 +81,6 @@ function makeDeps(t, overrides = {}) {
 
 const BASE_CONFIG = { endpointUrl: ENDPOINT, hasApiKey: true, active: true };
 
-/**
- * can overlap two mutations at a real await boundary instead of a sleep.
- */
 function holdNextPublication(t) {
   let armed = null;
   const deps = makeDeps(t, {
@@ -117,10 +111,6 @@ function holdNextPublication(t) {
   };
 }
 
-/**
- * when it belongs to no other group. Without one a staged-and-renamed file
- * always inherits the process egid, so a captured-group assertion cannot fail.
- */
 function foreignGroup() {
   const egid = process.getegid?.();
   return process.getgroups?.().find((gid) => gid !== egid) ?? null;
@@ -251,8 +241,6 @@ test('cleared tombstone survives a failed encryption attempt non-destructively',
   const markerPath = join(deps.filePath, '..', 'connection-config.cleared');
   assert.equal(existsSync(markerPath), true);
 
-  // keep the import path closed and survive untouched — nothing encrypted,
-  // nothing written, marker bytes intact, no legacy source removed.
   let cleanups = 0;
   const reopened = await ConnectionStore.open({
     ...deps,
@@ -300,8 +288,6 @@ test('legacy migration removes both sources only after the encrypted store is pe
     ...deps,
     readLegacy: async () => readFileSync(legacyPath, 'utf8'),
     cleanupLegacy: async () => {
-      // source is removed the encrypted store must exist on disk, must not
-      // contain the plaintext, and must decrypt again.
       const onDisk = JSON.parse(readFileSync(deps.filePath, 'utf8'));
       observed.push({
         plaintextOnDisk: readFileSync(deps.filePath, 'utf8').includes('sk-legacy'),
@@ -343,7 +329,6 @@ test('legacy migration removes nothing when encryption or the encrypted write is
   assert.ok(readFileSync(deniedLegacy, 'utf8').includes('sk-legacy'), 'the legacy source is preserved');
   assert.equal(existsSync(denied.filePath), false, 'nothing was written in the clear');
 
-  // publication, so the legacy source must survive that too.
   const unreadable = makeDeps(t, { storage: encryptOnlyStorage });
   const unreadableLegacy = join(unreadable.filePath, '..', 'connection_config.json');
   writeFileSync(unreadableLegacy, JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy' }));
@@ -367,7 +352,6 @@ test('a refused legacy cleanup still activates the encrypted store and keeps the
   const legacyPath = join(deps.filePath, '..', 'connection_config.json');
   writeFileSync(legacyPath, JSON.stringify({ endpointUrl: ENDPOINT, apiKey: 'sk-legacy', active: true }));
 
-  // /usr/bin/security failure — neither may surface.
   const refusal = Object.assign(new Error('security: sk-legacy could not be removed'), {
     code: 1,
     stderr: 'security: SecKeychainItemDelete: sk-legacy\n',
@@ -415,7 +399,6 @@ test('a normal reopen finishes an interrupted legacy cleanup idempotently', asyn
   assert.equal(refused.getAuth()?.apiKey, 'sk-legacy');
   assert.equal(errorCode(refused.legacyCleanupFailure), 'legacy_credential_cleanup_failed');
 
-  // authoritative — and it completes the cleanup the first open could not.
   const cleanups = [];
   const reopenDeps = {
     ...deps,
@@ -493,8 +476,6 @@ test('encryption unavailable aborts legacy import with structured error and no p
   assert.equal(existsSync(deps.filePath), false, 'legacy secret must never be written in the clear');
   assert.equal(cleanups, 0, 'a refused import removes no legacy source');
 });
-
-// direct-set, persisted and legacy boundaries
 
 test('rejected endpoint values never write or replace the stored connection config', async (t) => {
   const deps = makeDeps(t);
@@ -582,7 +563,6 @@ test('a persisted remote endpoint with a trailing slash reloads verbatim with it
     { action: 'replace', value: 'sk-remote' },
   );
 
-  // projects the exact origin that desktop auth pins.
   const reopened = await ConnectionStore.open(deps);
   assert.deepEqual(await reopened.get(), { endpointUrl: stored, hasApiKey: true, active: true });
   assert.deepEqual(reopened.getAuth(), { endpointOrigin: ENDPOINT, apiKey: 'sk-remote' });
@@ -644,7 +624,6 @@ test('an unreadable existing store differs from an absent one: no legacy import,
   assert.equal(await unreadable.get(), null);
   assert.equal(statSync(deps.filePath).isDirectory(), true, 'the unreadable bytes are preserved');
 
-  // and only then remove the legacy sources.
   const absentDeps = makeDeps(t);
   let absentReads = 0;
   let absentCleanups = 0;
@@ -806,8 +785,6 @@ test('a write-denied store refuses, keeps ciphertext and state, and never leaks 
         () => null,
         (rejection) => rejection,
       );
-    // regression that put the key in `details` would pass a message-only
-    // assertion.
     wire = await publishDocument(deps.filePath, '{"credential":"sk-envelope-secret"}').then(
       () => null,
       (rejection) => parseNativeCoreError(rejection),
@@ -825,7 +802,6 @@ test('a write-denied store refuses, keeps ciphertext and state, and never leaks 
   assert.ok(!surfaces.includes('sk-live-secret'), 'the stored plaintext key never surfaces');
   assert.ok(!surfaces.includes('sk-next-secret'), 'the refused plaintext key never surfaces');
   assert.equal(wire?.code, 'forbidden', 'the native refusal is a policy refusal');
-  // content-free; a populated one fails here.
   assert.deepEqual(wire?.details ?? {}, {}, 'the refusal envelope carries no details');
   assert.ok(
     !JSON.stringify(wire).includes('sk-envelope-secret'),
@@ -856,8 +832,6 @@ test('an existing 0640 store keeps its mode and group on set', async (t) => {
   assert.equal(store.getAuth()?.apiKey, 'sk-1');
 });
 
-// on every platform while the store file itself stays removable — the shape in
-// which the removal order is directly observable.
 function blockMarker(t) {
   const deps = makeDeps(t);
   mkdirSync(join(dirname(deps.filePath), 'connection-config.cleared'));
@@ -906,7 +880,6 @@ test('after a refused clear the next open loads the store and imports no legacy 
 });
 
 
-// these two hang at `hold.started`, which the timeout turns into a failure.
 test('a completed clear is not undone by an earlier in-flight save', { timeout: 10_000 }, async (t) => {
   const { deps, arm } = holdNextPublication(t);
   const store = await ConnectionStore.open(deps);
@@ -923,8 +896,6 @@ test('a completed clear is not undone by an earlier in-flight save', { timeout: 
   assert.equal(existsSync(deps.filePath), false, 'the earlier save did not republish the store');
 });
 
-// credential, so a queued `keep` over a still-`sk-old` state is what republishes
-// the replaced key when the derivation reads state before the gate resolves.
 test('a keep queued behind a held replace retains the published key', { timeout: 10_000 }, async (t) => {
   const { deps, arm } = holdNextPublication(t);
   const store = await ConnectionStore.open(deps);

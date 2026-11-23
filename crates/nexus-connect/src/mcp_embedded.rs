@@ -244,7 +244,6 @@ impl<B: McpBackend + Clone + 'static> EmbeddedMcpServer<B> {
     /// Returns [`EmbeddedMcpError::Shutdown`] when shutdown was requested,
     /// and [`EmbeddedMcpError::SessionLimit`] when the budget is exhausted.
     pub fn establish(&self) -> Result<EmbeddedSession, EmbeddedMcpError> {
-        // establish must not consume budget it can never hold a session in.
         if self.shutdown.requested() {
             return Err(EmbeddedMcpError::Shutdown);
         }

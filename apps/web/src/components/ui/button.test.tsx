@@ -5,7 +5,6 @@ import { Button } from './button';
 
 describe('Button', () => {
   it('renders a native button with its accessible label', () => {
-    // contract is a real <button> whose accessible name comes from children.
     render(<Button variant="primary" size="default">Continue</Button>);
     const btn = screen.getByRole('button', { name: 'Continue' });
     expect(btn.tagName).toBe('BUTTON');
@@ -29,10 +28,6 @@ describe('Button', () => {
   });
 
   it('applies the token-backed primary rest/hover/active recipe', () => {
-    // recipe is only observable through the token-backed utility classes on
-    // the rendered element. Asserted minimally — rest fill, hover fill,
-    // active fill, and the light/dark label pair — instead of pinning the
-    // full class string, so size/layout utilities don't churn this test.
     render(<Button variant="primary">Continue</Button>);
     const btn = screen.getByRole('button', { name: 'Continue' });
     expect(btn.className).toMatch(/\bbg-blue-700\b/);

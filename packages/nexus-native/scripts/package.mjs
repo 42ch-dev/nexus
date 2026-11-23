@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /**
- * target packages plus the `@42ch/nexus-native` loader package.
- *
  * Contract (frozen by P2, consumed unchanged here):
  *   - artifact path inside a target package: `native/nexus_core_node.node`
  *   - adjacent manifest:                     `native/compatibility.json`
@@ -67,10 +65,6 @@ const PLATFORM_ARCHIVE_ENTRIES = [
   'package/native/compatibility.json',
 ];
 const LOADER_ARCHIVE_REQUIRED = ['package/package.json', 'package/dist/index.js', 'package/dist/loader.js'];
-/**
- * the workspace-root LICENSE into every packed package; it is verified against
- * the root file below and is never allowed to stand in for the payload pair.
- */
 const PACKER_INJECTED_ENTRIES = ['package/LICENSE'];
 
 const USAGE = `usage: node ${SCRIPT} --target <rust-triple> --out <dir>
@@ -99,9 +93,6 @@ function archiveReceipt(path, tag) {
   }
 }
 
-/**
- * otherwise be read as a green result by the matrix summary.
- */
 function writeFailReceipt(message, detail) {
   if (!state.receiptPath) return;
   try {
@@ -138,8 +129,6 @@ function run(command, args, options = {}) {
     cwd: options.cwd ?? ROOT,
     env: options.env ?? process.env,
     encoding: 'utf8',
-    // files. Inline `node -e` payloads are always spawned with shell: false
-    // so their quoting is never re-interpreted.
     shell: options.shell ?? (IS_WIN && command !== process.execPath),
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -235,10 +224,6 @@ function evidenceHeader(startedAt, target) {
   };
 }
 
-/**
- * `compatibility.json` is read out of the real binary, so a foreign-arch or
- * foreign-libc artifact would either need fabricated metadata or a
- */
 function assertNativeHost(target, spec) {
   if (process.platform !== spec.os) {
     fail(`target ${target} requires a ${spec.os} host`, { host: process.platform });
@@ -381,10 +366,6 @@ function tarRead(tarball, entry) {
   return tar(['-xzOf', tarball, entry]).stdout;
 }
 
-/**
- * into a manifest or the compatibility document, and no `workspace:` protocol
- * may survive into an installable archive.
- */
 function assertNoHostPaths(text, label, checks) {
   for (const check of checks) {
     if (text.includes(check)) fail(`${label} leaks a build-host path`, { needle: check });
@@ -521,8 +502,6 @@ const unexpectedPlatformEntries = platformEntries.filter(
 if (unexpectedPlatformEntries.length > 0) {
   fail(`${platformPack.name} carries entries outside the frozen payload`, { unexpectedPlatformEntries });
 }
-// (verified byte-identical below); record it instead of rejecting the packer's
-// own behaviour, and keep rejecting every other extra entry.
 const packerInjectedEntries = platformEntries
   .filter((entry) => PACKER_INJECTED_ENTRIES.includes(entry))
   .map((entry) => ({

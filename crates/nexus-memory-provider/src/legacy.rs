@@ -274,8 +274,6 @@ pub(super) async fn records_in_tx(
     let Some(owner) = owner_of(tx, roots, space_id, subject, subject_id).await? else {
         return Ok(Vec::new());
     };
-    // (D-7), so a request for other kinds cannot serve one: the files stay
-    // unopened and a malformed one cannot break the read.
     let long_term = if kinds.is_empty()
         || kinds
             .iter()
@@ -322,9 +320,6 @@ pub(super) async fn record_by_id_in_tx(
     let Some(owner) = id_owner(tx, roots, &family, &components).await? else {
         return Ok(None);
     };
-    // identity a writer open would have created (fix round 2, finding F2):
-    // when a subject already names the bearer, that canonical subject wins and
-    // this absent one projects nothing.
     let subject_id = match subject_of(tx, roots, space_id, &owner).await? {
         Some(subject) => subject.subject_id,
         None => owner.canonical_subject_id(roots),
@@ -338,7 +333,6 @@ pub(super) async fn record_by_id_in_tx(
         }
         _ => LongTerm::None,
     };
-    // damaged sibling fragment cannot fail a read of another memory.
     let fragments = match family.as_str() {
         FAMILY_MEMORY_FRAGMENTS | FAMILY_CHARACTER_FRAGMENTS => {
             let Some(fragment_id) = components.first() else {
@@ -885,7 +879,6 @@ async fn creator_fragments(
                     "keywords": keywords_json(&keywords)?,
                     "ttl": ttl,
                     "world_id": world_id,
-                    // row's `created_at` above only carries its time for order.
                     "created_at": raw_created_at,
                 }},
             });
@@ -980,7 +973,6 @@ async fn character_fragments(
                     occurred_at: None,
                     created_at: created_at.clone(),
                     updated_at: created_at,
-                    // 0→1 promotion step the DTOs expose survives the bridge.
                     revision: revision.saturating_add(1),
                 },
             )
@@ -1025,9 +1017,6 @@ async fn creator_narratives(
                 FAMILY_MEMORY_NARRATIVES,
                 &[scope_id.as_deref().unwrap_or(NULL_COMPONENT)],
                 row,
-                // Character's binding-scoped one: the provider's placement
-                // invariant is "context visibility iff a context id", so a
-                // shared row could not carry the World it belongs to.
                 binding_visibility(scope_id.as_deref()),
                 scope_id.clone().into_iter().collect(),
             )
@@ -1222,10 +1211,6 @@ fn long_term_records(
     for slug in slugs {
         let (memory, document) = memory_io::load_memory_source(&roots.home, bearer, &slug)
             .map_err(|error| legacy_error(&error))?;
-        // only the known frontmatter fields, so the file's own bytes travel with
-        // the projection and a rewrite of bytes the view drops still changes the
-        // migration manifest (P5-F3). The served text is the file's body, while
-        // the parsed frontmatter still names the record's identity and kind.
         let spans =
             long_term_memory::source_spans(&document).map_err(|error| legacy_error(&error))?;
         let frontmatter = document[spans.frontmatter].to_string();
@@ -1234,8 +1219,6 @@ fn long_term_records(
         let updated_at = normalize_timestamp(&memory.frontmatter.updated_at);
         let record_id = external_id(family, &[owner_key, slug.as_str()]);
         let content = json!({
-            // parser trims a leading blank line or indentation the author wrote,
-            // and the migration preserves the authored body exactly (R2-C1).
             "text": body,
             "structured": { "nexus_legacy": {
                 "family": family,
@@ -1350,7 +1333,6 @@ async fn creator_pending_reviews(
                     "world_id": world_id,
                     "task_kind": task_kind,
                     "raw_digest": raw_digest,
-                    // row's `created_at` only carries its time for order.
                     "created_at": created_at,
                 }},
             });
@@ -1568,7 +1550,6 @@ pub(super) async fn migration_snapshot(
         candidates.extend(owner_candidates);
         profiles.extend(owner_profile);
     }
-    // the rows a re-run compares are stable however the source rows are paged.
     records.sort_by(|left, right| left.record_id.cmp(&right.record_id));
     candidates.sort_by(|left, right| left.candidate_id.cmp(&right.candidate_id));
     profiles.sort_by(|left, right| {
@@ -1921,7 +1902,6 @@ mod tests {
 
     #[test]
     fn external_id_escapes_separators_and_null_components() {
-        // rejected), so the separator must be escaped for the id to parse back.
         let id = external_id(
             "character_long_term",
             &["chr_ab", "a:b/../c", NULL_COMPONENT],
@@ -1948,7 +1928,6 @@ mod tests {
             normalize_timestamp("2026-11-02 08:05:00"),
             "2026-11-02T08:05:00Z"
         );
-        // their real times (NXM-5 QC1-F1).
         assert_eq!(
             normalize_timestamp("2026-11-02T08:05:00.123+02:00"),
             "2026-11-02T06:05:00.123Z"

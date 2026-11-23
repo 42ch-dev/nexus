@@ -202,9 +202,6 @@ describe('WorkTimelineCanvasAdapter.projectGraphForLayer — Narrative projectio
 
     expect(e1.position.x).toBeLessThan(e2.position.x);
     expect(e2.position.x).toBeLessThan(eNone.position.x);
-    // undated tail stays on the axis per architect §7 — Work Timeline
-    // has no Context-cluster lane; chapter-unbound events tail right
-    // rather than cluster below.
     expect(e1.position.y).toBe(0);
     expect(e2.position.y).toBe(0);
     expect(eNone.position.y).toBe(0);
@@ -254,8 +251,6 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
   it("declares surfaceKind: 'work-timeline' and defaultLayer: 'narrative'", () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
 
-    // string literal to a real CanvasSurfaceKind enum value; until then
-    // the adapter casts so the contract stays type-compatible).
     expect(adapter.surfaceKind).toBe('work-timeline');
     expect(adapter.defaultLayer).toBe('narrative');
   });
@@ -277,8 +272,6 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
       timeline_events: [event({ event_id: 'evt-1' })],
     });
 
-    // (Task 3 covers the populated Moment path; here we verify the
-    // delegation switch alone).
     const adapter = createWorkTimelineCanvasAdapter(
       { current: makeContext() },
       'moment',
@@ -291,12 +284,6 @@ describe('WorkTimelineCanvasAdapter — adapter shape + default layer', () => {
   it('registers the Narrative event node type and NO fork marker (Task 2 minimum; Task 3 adds scene/beat)', () => {
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
 
-    // + beat nodes (verified in moment-projection.test.tsx). The Task 2
-    // invariant under test here is: (1) the Narrative event node is
-    // registered; (2) NO fork marker exists (V1.122 §8 + V1.123 §9
-    // forbid fork markers on either Timeline surface). The full registry
-    // shape (3 entries) is verified at Task 3; here we enforce the
-    // Narrative invariant without freezing Task 3's additive extension.
     expect(adapter.nodeTypes['work-timeline-narrative-event']).toBeDefined();
     expect(Object.keys(adapter.nodeTypes).some((k) => k.includes('fork'))).toBe(false);
   });
@@ -329,8 +316,6 @@ describe('WorkTimelineCanvasAdapter.summarizeGraph — honest a11y summary', () 
     const adapter = createWorkTimelineCanvasAdapter({ current: makeContext() });
     const summary = adapter.summarizeGraph(g);
 
-    // honestly even when events carry realizes_chapter_id (chapter order
-    // is a structural hint, not a temporal chronology).
     expect(summary.toLowerCase()).toMatch(/order|chronology|inferred/);
   });
 

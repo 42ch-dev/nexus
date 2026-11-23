@@ -6,11 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * live registry rows in the hand-coded local wire shape (`camelCase` schemas).
- * The native lane is stubbed at the `ServiceCore.core` seam the handler reads.
- */
-
 let routes;
 
 before(async () => {
@@ -98,7 +93,6 @@ describe('capabilities route (CAP-001 / I-000125)', () => {
     const service = {
       domainOnly: true,
       core: {
-        // bare reason; the transport folds that into a generic 500 `internal`.
         listCapabilities: async () => {
           probed += 1;
           throw new Error('execution owner not started');

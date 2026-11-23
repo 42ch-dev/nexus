@@ -51,7 +51,6 @@ function makeClient({
       return Promise.resolve({ workspace_initialized: workspaceInitialized });
     },
     scanAgents: () => Promise.resolve({ agents: AGENTS }),
-    // on advance; the daemon-global profile it reads back is empty by default.
     getAgentProfile: () =>
       profileReadFails
         ? Promise.reject(new Error('profile read failed'))
@@ -186,7 +185,6 @@ describe('WizardShell', () => {
     const { client } = makeClient({ profileReadFails: true });
     renderShell({ client });
 
-    // scan-recommended default instead of dead-ending on the profile gate.
     await reachWorldStep(user);
   });
 

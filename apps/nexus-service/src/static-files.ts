@@ -7,10 +7,6 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { HttpError } from './errors.js';
 
-/**
- * lands on the repo root from both `src/` (tsx) and `dist/` (compiled), the
- * same module-relative derivation `routes.ts` uses for its manifest.
- */
 const BUILT_WEB_INDEX = new URL('../../../apps/web/dist/index.html', import.meta.url);
 
 /**
@@ -65,10 +61,6 @@ interface StaticHit {
   assets: boolean;
 }
 
-/**
- * plain miss (ENOENT / directory) and the SPA fallback applies. Traversal
- * refusals throw so the caller's single error envelope reports them.
- */
 async function resolveInsideRoot(
   root: string,
   rootReal: string,
@@ -86,13 +78,6 @@ async function resolveInsideRoot(
   const candidate = resolve(root, relPath);
   const rel = relative(root, candidate);
   if (rel.startsWith('..') || isAbsolute(rel)) throw notFound();
-  // admission guard (`/../dist/v1/y` folds to `/dist/v1/y` there) lands back
-  // on `<root>/v1/y` here. Refuse that class so static content can never
-  // shadow the API-key-gated `/v1/` namespace, whatever the guard or layout.
-  // The decision is a pure string fold made before `stat`, so it holds on
-  // every host: lowercase (an ASCII fold suffices for the `v1` literal) plus
-  // per-segment trim of trailing dots/spaces, the Win32 normalization that
-  // would otherwise resolve `/v1./y` onto `/v1/y`.
   const folded = rel
     .split(sep)
     .map((segment) => segment.replace(/[. ]+$/, '').toLowerCase())
@@ -112,8 +97,6 @@ async function resolveInsideRoot(
     return null;
   }
   if (real !== rootReal && !real.startsWith(rootReal + sep)) throw notFound();
-  // actually served, not the raw first request segment: `/assets/../index.html`
-  // normalizes to the root `index.html` and must not inherit the assets tier.
   return { real, assets: rel.split(sep)[0] === 'assets' };
 }
 
@@ -123,10 +106,6 @@ export type StaticFileHandler = (
   pathname: string,
 ) => Promise<void>;
 
-/**
- * on an already-open file surfaces before any response byte is written.
- * Rejects on a read failure; resolves at EOF.
- */
 function probeFirstChunk(stream: Readable): Promise<void> {
   return new Promise<void>((resolveProbe, rejectProbe) => {
     function cleanup() {
@@ -167,10 +146,7 @@ export function createStaticFileHandler(options: {
 }): StaticFileHandler {
   const root = resolve(options.root);
   const fallback = resolve(options.fallback);
-  // against a path that is itself a symlink.
   const rootReal = realpathSync(root);
-  // escaping the root must be refused like a direct hit, never served. Its
-  // realpath is what gets read (same swap-window shrink as a direct hit).
   let safeFallback: string | null = null;
   try {
     const fallbackReal = realpathSync(fallback);
@@ -190,7 +166,6 @@ export function createStaticFileHandler(options: {
     if (file === null) throw notFound();
     const cache = hit?.assets ? 'public, max-age=3600' : 'no-store';
     if (!hit) {
-      // non-file `index.html` is a clean 404 miss, never a served body (§5).
       let stats: Stats;
       try {
         stats = await stat(file);
@@ -199,22 +174,16 @@ export function createStaticFileHandler(options: {
       }
       if (!stats.isFile()) throw notFound();
     }
-    // shared `sendError` envelope without the asset's framing, or a keep-alive
-    // socket would inherit a stale `Content-Length` (§6).
     const handle = await open(file, 'r');
     let size: number;
     try {
-      // `Content-Length` and the streamed bytes describe one file object (§6).
       size = (await handle.stat()).size;
     } catch (error) {
       await handle.close();
       throw error;
     }
-    // the framing and the body can never come from different file objects.
     const body = method === 'GET' ? handle.createReadStream() : null;
     if (body) {
-      // opened file must reach the shared `sendError` envelope, rather than being
-      // swallowed onto an already-destroyed response (§6).
       try {
         await probeFirstChunk(body);
       } catch (error) {
@@ -237,7 +206,6 @@ export function createStaticFileHandler(options: {
     try {
       await pipeline(body, res);
     } catch {
-      // the connection rather than append an envelope to a short, framed body (§6).
       res.destroy();
     }
   };

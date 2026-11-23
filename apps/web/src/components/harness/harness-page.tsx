@@ -1,6 +1,4 @@
 /**
- * page inside the new shell.
- *
  * Reads only existing daemon endpoints (no new aggregation contract):
  * - catalog rows from `usePresets()` through the shared
  *   `filterVisiblePresets` (user + embedded + system, `_system.*` internals
@@ -63,7 +61,6 @@ export function HarnessPage() {
     [presets.data],
   );
 
-  // cache keys of the canvas/profile pages, so both drill-downs are cache hits.
   const profiles = useQueries({
     queries: catalogPresets.map((preset) => presetProfileQueryOptions(preset.id, client)),
   });
@@ -82,7 +79,6 @@ export function HarnessPage() {
     return counts;
   }, [sessions.data]);
 
-  // a truncated walk marks the count as a lower bound.
   const runningStateFor = (presetId: string): PresetRunningState => {
     if (sessions.isError) return { status: 'error' };
     if (!sessions.data) return { status: 'loading' };
@@ -93,11 +89,6 @@ export function HarnessPage() {
     };
   };
 
-  /**
-   * (`GET /v1/daemon/presets/{id}`). The dialog opens pre-filled with THAT
-   * path — the row button means this preset, not a blank form — and stays
-   * editable.
-   */
   async function openValidate(preset: PresetSummary) {
     try {
       const detail = await client.getPreset(preset.id);
@@ -168,8 +159,6 @@ export function HarnessPage() {
                 onOpenProfile={() =>
                   navigate(`/strategies/${encodeURIComponent(preset.id)}/profile`)
                 }
-                // file exists to validate, so the row renders no button (the
-                // same source gate Delete already uses).
                 onValidate={
                   preset.source === 'embedded' ? undefined : () => void openValidate(preset)
                 }

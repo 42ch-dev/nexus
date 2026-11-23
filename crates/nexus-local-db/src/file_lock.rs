@@ -34,7 +34,6 @@ fn diagnostic_holder_name(holder_name: &str) -> String {
 }
 
 fn sha256(input: &[u8]) -> String {
-    // cube roots of the first 64 primes).
     #[rustfmt::skip]
     const K: [u32; 64] = [
         0x428a_2f98, 0x7137_4491, 0xb5c0_fbcf, 0xe9b5_dba5, 0x3956_c25b, 0x59f1_11f1, 0x923f_82a4, 0xab1c_5ed5,
@@ -53,7 +52,6 @@ fn sha256(input: &[u8]) -> String {
         data.push(0);
     }
     data.extend_from_slice(&bit_len.to_be_bytes());
-    // roots of the first eight primes.
     let mut state = [
         0x6a09_e667u32,
         0xbb67_ae85,
@@ -286,7 +284,6 @@ fn write_lock_metadata_to_path(path: &Path, body: &str) {
 pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, FileLockError> {
     let lock_path = lock_file_path(work_dir);
 
-    // silently swallow permission-denied or disk-full failures.
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -299,8 +296,6 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         .open(&lock_path)?;
 
     let raw_fd = fd.as_raw_fd();
-    // API requires ownership of the inner file descriptor. Use the deprecated
-    // function for now since we need to keep the `File` alive for heartbeat.
     #[allow(deprecated)]
     let locked = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::LockExclusiveNonblock).is_err();
     if locked {
@@ -308,10 +303,6 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         let now = now_ms();
         let (holder_pid, holder_name, expires_at_ms) =
             metadata.unwrap_or_else(|| (0, "unknown".to_string(), 0));
-        // another live process holds the flock, the lock is genuinely held;
-        // reporting holder_name="unknown" with stale=false keeps the conflict
-        // information conservative. The 60 s heartbeat window absorbs the small
-        // risk of a partially-written metadata file (R-V151Q1-09).
         let stale =
             expires_at_ms > 0 && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000;
 
@@ -665,7 +656,6 @@ mod tests {
     async fn stale_holder_warning_redacts_secret_bearing_identity() {
         let (_dir, work_dir) = sample_work_dir();
         let lock_path = lock_file_path(&work_dir);
-        // FX-A2 still echoed; it must be fingerprinted like any other holder.
         let holder = "cli:secret-token-value";
         let expires = now_ms().saturating_sub(120_000);
         std::fs::write(&lock_path, format!("99999:{holder}:{expires}")).unwrap();
@@ -685,7 +675,6 @@ mod tests {
 
     #[test]
     fn diagnostic_holder_name_always_fingerprints() {
-        // `cli:`-prefixed secret — the case FX-A2 still echoed verbatim.
         for holder in [
             "cli:secret-token-value",
             "bad\nholder",

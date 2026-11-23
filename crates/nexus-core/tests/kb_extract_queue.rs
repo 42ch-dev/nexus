@@ -126,7 +126,6 @@ async fn queue_get_and_list_round_trip() {
     assert!(job.work_id.is_none());
     assert_ne!(job.created_at, "");
 
-    // non-failed job comes back unchanged.
     let again = core
         .queue_kb_extract(&principal, params("kb_alpha", "wld_1"))
         .await

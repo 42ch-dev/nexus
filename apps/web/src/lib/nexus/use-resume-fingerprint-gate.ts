@@ -12,11 +12,6 @@ export type ResumeFingerprintGateState =
   | {
       status: 'fetch-failed';
       message: string;
-      /**
-       * throw was a {@link NexusClientError} produced by the browser-client
-       * classifier; absent for unexpected non-transport errors. Drives the
-       * gate's per-kind recovery UX via `<TransportErrorBlock>`.
-       */
       kind?: TransportErrorKind;
     };
 
@@ -76,8 +71,6 @@ export function useResumeFingerprintGate(
       const served = response.fingerprint;
 
       if (served === '' || served === null || served === undefined) {
-        // paired with a loopback-only daemon — treat this as a mismatch so the
-        // user must re-pin or revert to local.
         setState({ status: 'mismatch', served: served ?? null });
         return;
       }

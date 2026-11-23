@@ -1,7 +1,4 @@
 /**
- * panel stays under the 250-line module-size discipline (V1.78 qc1 S-002,
- * mirroring the V1.74 A10 split pattern).
- *
  * Owns the title / description / severity / kind / rule_suggestion form and
  * the minimal-diff PATCH builder. The parent retains mutation orchestration
  * and form state so this module stays a pure presentational slice.

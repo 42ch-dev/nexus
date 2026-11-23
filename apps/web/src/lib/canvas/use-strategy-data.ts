@@ -1,6 +1,4 @@
 /**
- * surface and Idea steering affordance.
- *
  * Write mutations (state, transition, prompt template) live next to the
  * inspector sections that own them so each section can save independently and
  * surface its own partial-failure UI (R-V171P0-QC1-004).
@@ -69,9 +67,6 @@ export function useDerivedCreatorId(presetId: string | undefined): string | unde
 function useErrorToast() {
   const { toast } = useToast();
   const { t } = useTranslation('common');
-  /**
-   * knows more than the raw failure (Steer's partial append, W5).
-   */
   return (error: unknown, key: string, descriptionOverride?: string) => {
     const description =
       descriptionOverride ??
@@ -121,11 +116,6 @@ export interface SteerIdeaArgs {
   idea: string;
 }
 
-/**
- * committed as a durable core context version, but the follow-up resume signal
- * was refused. The committed version is never rolled back or re-appended, so
- * the caller must report the resume refusal and refresh the visible version.
- */
 class SteerResumeRefusedError extends Error {
   readonly appendedVersion: number;
   readonly refusal: unknown;
@@ -185,7 +175,6 @@ export function useSteerStrategy() {
     },
     onError: (error, args) => {
       if (error instanceof SteerResumeRefusedError) {
-        // context version is not stale. The Idea is not re-appended.
         void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
         errorToast(
           error,

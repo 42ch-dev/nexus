@@ -51,9 +51,6 @@
 //! spoke-only.)
 
 pub mod adapter;
-// validator + evaluator read path). Sole consumer of the carrier grammar at
-// the spoke-adapter boundary (spoke-type handling + carrier types stay here;
-// evaluator logic is daemon-side).
 pub mod constraint;
 pub mod conversion;
 pub mod extensions;
@@ -84,49 +81,22 @@ pub mod manifest;
 /// validation rules, and round-trip guarantees.
 pub mod pack;
 
-// `NexusAdapter` through the single spoke-adapter import boundary
-// (spec §7.4 import path: `nexus_spoke_adapter::NexusAdapter`).
 pub use adapter::NexusAdapter;
 
-// surface): the peer's manifest + the nexus-local `last_seen` observation
-// metadata (not part of the spoke wire type; the `HostManifestPort` trait
-// surface stays manifest-only).
 pub use adapter::host_manifest_port::ObservedPeerHost;
 
-// the adapter's `SpokeReject` carries (spec §3.2 — fixed `world_conflict`
-// wire spelling). Host mappings (Connect ErrorEnvelope, daemon HTTP) use it
-// instead of re-sniffing the details marker.
 pub use adapter::knowledge_entry_port::is_world_conflict_reject;
 
-// missing-module-identity reject (`module_identity_missing` details marker
-// on `resolve_module_id`'s InvalidInput) — the Connect compute gate
-// classifies the defined `module_not_found` denial by marker, never by
-// message sniffing.
 #[cfg(feature = "compute")]
 pub use adapter::computable_port::is_module_identity_missing_reject;
 
-// path-safety check — the Connect gate's host-store check and the adapter's
-// user-module loader route through it so gate and execution guard cannot
-// drift.
 #[cfg(feature = "compute")]
 pub use adapter::computable_port::is_safe_module_id;
 
-// `assemble_moment` wiring site) + the scoped-read result type. Re-exported so
-// the MCA composition root (`apps/nexus42`) constructs it through the single
-// spoke-adapter import boundary (spec §7.4 V1.145 P2 amendment).
 pub use adapter::mca_read::{ScopedKbRead, SpokeBackedKbStore};
 
-//
-// spoke types that appear in the public API surface, so they do not need a
-// direct `spoke-schemas` / `spoke-operations` dependency just to spell the
-// operand types. These mirror `spoke_operations`' own `pub use spoke_schemas`.
-
 pub use spoke_operations::{ExtensionMap, SpokeReject, SpokeRejectCode, SpokeResult};
-// module names it `ExtensionKey`, so the types cannot be re-exported side by
-// side. Re-export the crate instead: consumers spell
-// `spoke_schemas::<module>::ExtensionKey` for the map they hold.
 pub use spoke_schemas;
-// no nexus logic (call-boundary invariant §7 preserved).
 pub use spoke_operations::{
     filter_timeline_events_by_moment_scale, order_timeline_events_by_ids,
     order_timeline_events_by_precedes, OrderTimelineEventsByPrecedesOptions,
@@ -141,12 +111,6 @@ pub use spoke_schemas::{
     UpsertRequest, UpsertResponse,
 };
 
-//
-// the orchestrate_* entrypoints; the adapter stays the import boundary.
-// Re-exports only — no nexus logic, no parallel types (call-boundary
-// invariant §7 preserved). Coverage: 8 port traits + 4 composition/adapter
-// alias groups + 4 adapter aliases + 9 orchestrate_* entrypoints + the
-// `CheckRunInput` orchestrator parameter type.
 pub use spoke_operations::{
     orchestrate_assemble, orchestrate_check, orchestrate_compute, orchestrate_fork_assemble,
     orchestrate_fork_check, orchestrate_project, orchestrate_promote, orchestrate_relate,
@@ -156,43 +120,19 @@ pub use spoke_operations::{
     RuleQueryPort, ScopeQueryPort,
 };
 
-// lives in `nexus-connect::peer_tools` (v1.244; `nexus-core::execution`
-// before that), so a consumer needs the tool-grammar and manifest validators
-// WITHOUT taking a
-// direct `spoke-operations` edge. Re-exported here rather than widening the
-// registry's own dependency set: the adapter stays the single spoke import
-// boundary (call-boundary invariant above).
 pub use spoke_operations::{
     parse_tool_capability_id, validate_manifest_tools, validate_tool_arguments, ToolDescriptor,
 };
 
-// product source loader, its operand/result types and the `orchestrate_extract`
-// entrypoint. `ExtractionPort` is deliberately NOT a member of
-// `BaselinePorts` / `FullPorts` upstream (it is a standalone injected boundary,
-// like `ToolInvokePort`), so re-exporting it here adds no baseline/full port
-// obligation and the adapter's own port impls stay unchanged. T12 owns the
-// production wrapper that actually calls `orchestrate_extract`.
 pub use spoke_operations::{
     orchestrate_extract, ExtractRunInput, ExtractionPort, ExtractionResult,
 };
 
-// `orchestrate_extract` for nexus: an injected admitted source bundle
-// (`ResolvedExtractionInput` → `ResolvedExtractionPort`) plus the native
-// callback (`NativeExtractionOutput`), returning the upstream-validated
-// response with the prepared candidates and the relationship sidecar
-// (`ExtractCandidatesOutcome`). Persistence stays with the caller, so the
-// `ExtractionPort` here is still standalone — not a `BaselinePorts` /
-// `FullPorts` member.
 pub use extraction::{
     extract_candidates, ExtractCandidatesOutcome, NativeExtractionOutput, ResolvedExtractionInput,
     ResolvedExtractionPort,
 };
 
-// at the spoke import boundary, spoke untouched): pre-expands empty
-// `rule_refs` to the check world's `status=active` rules and fail-closes on
-// foreign-world refs before delegating to spoke `orchestrate_check`. Both
-// production callers (daemon `check.rs`, Connect `invoke.rs` Route::Check)
-// cross this single choke point.
 pub use adapter::knowledge_entry_port::put_knowledge_entry_in_tx;
 pub use adapter::rule_query_port::orchestrate_check_world_scoped;
 

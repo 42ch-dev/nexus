@@ -529,7 +529,6 @@ async fn dogfood_world_a_activation_hops_end_to_end() {
     assert_eq!(kb_text.matches("Cove Keeper").count(), 1);
     assert_eq!(kb_text.matches("Tide Pool").count(), 1);
 
-    // the two pulled entries. Seagull is the single rejected entry.
     assert_eq!(trace.len(), 12, "one primary trace row per entry");
     for (id, rows) in &trace {
         let accepted = rows.iter().filter(|r| r.accepted).count();

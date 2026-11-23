@@ -102,7 +102,6 @@ async fn fresh_env() -> OutlineEnv {
     let db_path = workspace_state_db_path(fixture.home.path(), &creator_id, WORKSPACE_SLUG);
     let creative_root = fixture.home.path().join("creative");
 
-    // `local_root` — the same key the CLI's own workspace registration writes.
     std::fs::create_dir_all(&creative_root).expect("materialize creative root");
     std::fs::write(
         operational_workspace_dir(fixture.home.path(), &creator_id, WORKSPACE_SLUG)
@@ -118,8 +117,6 @@ async fn fresh_env() -> OutlineEnv {
     )
     .expect("write meta.json");
 
-    // through the core seam, which owns the ids, the ownership rows and the
-    // work directory.
     let core = CoreService::open(CoreOpenOptions {
         user_home: fixture.home.path().to_path_buf(),
         access: CoreAccess::DirectWriter,
@@ -160,7 +157,6 @@ async fn fresh_env() -> OutlineEnv {
         .work_id;
     core.close().await.expect("seed core closes");
 
-    // in after the Work row (the row carries the Work foreign key).
     let pool = nexus_local_db::init_engine_pool(&db_path)
         .await
         .expect("workspace pool")
@@ -333,13 +329,11 @@ async fn outline_patch_stale_revision_surfaces_conflict() {
     let err = stderr(&out);
     assert!(err.contains("outline_conflict"), "stderr: {err}");
     assert!(err.contains("409"), "stderr should carry status 409: {err}");
-    // conflicting path, recovery hint.
     assert!(err.contains("current_revision"), "stderr: {err}");
     assert!(err.contains("node_id"), "stderr: {err}");
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 
-    // exactly as the rejected write found them.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 0"), "{on_disk}");
     assert!(on_disk.contains("volume_id: 1"), "{on_disk}");
@@ -463,7 +457,6 @@ async fn chapter_patch_stale_revision_surfaces_conflict() {
     assert!(err.contains("conflicting_path"), "stderr: {err}");
     assert!(err.contains("recovery_hint"), "stderr: {err}");
 
-    // untouched.
     let on_disk = env.stored_outline();
     assert!(on_disk.contains("outline_revision: 0"), "{on_disk}");
     assert!(!on_disk.contains("stale"), "{on_disk}");
@@ -473,7 +466,6 @@ async fn chapter_patch_stale_revision_surfaces_conflict() {
 async fn chapter_patch_invalid_slug_surfaces_validation_failed() {
     let env = fresh_env().await;
 
-    // outline_validation_failed family (the invalid-field path).
     let out = env.cli(&[
         "creator",
         "works",
@@ -527,8 +519,6 @@ async fn chapter_patch_no_set_field_fails_fast() {
 async fn chapter_patch_content_file_writes_outline_prose() {
     let env = fresh_env().await;
 
-    // target (the core derives `Works/<ref>/Outlines/chapters/ch01-outline.md`
-    // for a chapter row with no stored `outline_path`).
     let chapter_outline = env.chapter_outline_path();
     std::fs::create_dir_all(chapter_outline.parent().expect("chapter outline parent"))
         .expect("create chapter outline dirs");
@@ -710,7 +700,6 @@ fn chapter_help_pins_outline_node_route_distinction() {
         .stdout
         .clone();
     let text = String::from_utf8(output).expect("help output is UTF-8");
-    // V1.65 chapter-content distinction (AR-84).
     assert!(text.contains("chapters/:n/patch"), "{text}");
     assert!(text.contains("V1.65"), "{text}");
     assert!(text.contains("outline"), "{text}");

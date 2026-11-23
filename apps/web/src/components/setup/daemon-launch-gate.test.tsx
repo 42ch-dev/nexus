@@ -212,13 +212,10 @@ describe('DaemonLaunchGate', () => {
       await vi.advanceTimersByTimeAsync(25_000);
     });
 
-    // <TransportErrorBlock> for kind=timeout. Headline + body come from the
-    // primitive; the diagnostic message rides the detail line.
     const block = await screen.findByTestId('transport-error-block');
     expect(block).toHaveAttribute('data-kind', 'timeout');
     expect(block).toHaveTextContent('The daemon took too long to respond');
     expect(screen.getByText(/taking longer than expected/i)).toBeInTheDocument();
-    // runs before the router mounts).
     expect(screen.getByTestId('transport-error-primary')).toHaveAttribute(
       'data-cta',
       'retry',
@@ -296,11 +293,9 @@ describe('DaemonLaunchGate', () => {
 
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
-    // would not rerun main; recovery consumes the controller's readiness.
     expect(startDaemon).not.toHaveBeenCalled();
     expect(reloadSpy).not.toHaveBeenCalled();
 
-    // live controller).
     await waitFor(() => expect(onDaemonStatusChanged.mock.calls.length).toBeGreaterThanOrEqual(2));
 
     status = { state: 'running', port: 8420, version: 'test' };
@@ -348,7 +343,6 @@ describe('DaemonLaunchGate', () => {
     await user.click(screen.getByRole('button', { name: /^Reset$/i }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
 
-    // does not re-run, and no success reload happens.
     await waitFor(() => expect(screen.getByText('sidecar crashed')).toBeInTheDocument());
     expect(onDaemonStatusChanged.mock.calls.length).toBe(subscribeCallsBefore);
     expect(startDaemon).not.toHaveBeenCalled();

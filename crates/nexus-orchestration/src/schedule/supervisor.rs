@@ -374,7 +374,6 @@ impl ScheduleSupervisor {
 
         for row in &active_rows {
             let schedule = row.to_schedule();
-            // execution capacity) nor become admission candidates.
             if row.execution_policy != EXECUTION_POLICY_DRIVEN_V1 {
                 continue;
             }
@@ -386,7 +385,6 @@ impl ScheduleSupervisor {
                         .insert(schedule.id);
                 }
                 ScheduleStatus::Pending => {
-                    // scheduled_at_cutoff filters by scheduled_at <= cutoff OR scheduled_at IS NULL
                     let due = match (scheduled_at_cutoff, &schedule.scheduled_at) {
                         (None, _) => true,             // on-demand tick: admit all pending
                         (Some(_cutoff), None) => true, // no scheduled_at: on-demand schedule
@@ -422,9 +420,6 @@ impl ScheduleSupervisor {
 
         pending_with_deps.sort_by(|a, b| a.0.created_at.cmp(&b.0.created_at));
 
-        // each admission so that Serial schedules don't all get admitted
-        // in the same tick. Concurrency checks are scoped per-creator (H1).
-        //
         // A3: when a daemon `ScheduleRunStarter` is injected, an admitted
         // `driven_v1` row is handed to `starter.start` (which atomically
         // creates the owned v1 run + schedule→session identity then drives
@@ -460,8 +455,6 @@ impl ScheduleSupervisor {
                         started.push((creator_id.clone(), sid.clone()));
                     }
                     Err(e) => {
-                        // (no session was created); it stays pending for a
-                        // later tick / explicit start.
                         tracing::warn!(
                             schedule_id = %sid,
                             error = %e,
@@ -471,13 +464,10 @@ impl ScheduleSupervisor {
                     }
                 }
             } else {
-                // the historical status-only flip so admission-gate tests
-                // remain meaningful. Production always injects a starter.
                 started.push((creator_id.clone(), sid.clone()));
                 status_flip.push((creator_id, sid));
             }
 
-            // see this one as running (important for Serial).
             running_by_creator_so_far
                 .entry(candidate.creator_id.clone())
                 .or_default()
@@ -555,9 +545,6 @@ impl ScheduleSupervisor {
         .fetch_optional(&*self.pool)
         .await?;
 
-        // atomic path — source settlement + auto-chain child commit in ONE
-        // transaction keyed by source_run_id. Non-driven rows (tests,
-        // legacy) keep the sequential path below.
         if let Some(row) = &schedule_row {
             if let Some(source_run_id) = &row.current_session_id {
                 return self
@@ -661,11 +648,6 @@ impl ScheduleSupervisor {
         let executor: Option<&Arc<dyn nexus_capability::WorkspaceExecutor>> =
             (*self.workspace_executor).as_ref();
 
-        // when a `novel-chapter-review` schedule completes. This is the
-        // **single code path** covering both the auto-chain driver and
-        // on-demand `creator run novel-chapter-review <work_id>` runs.
-        // R-V147P0-06 (V1.48 P0 T3): preset id hoisted to `preset_ids`
-        // SSOT — single source shared with the allowlist and findings hook.
         if preset_id == nexus_preset::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID {
             if let Err(e) =
                 auto_chain::persist_review_findings_for_schedule(&self.pool, schedule_id, ws_path)
@@ -678,9 +660,6 @@ impl ScheduleSupervisor {
                 );
             }
         }
-        // declarations from chapter outlines into
-        // `Works/<work_ref>/Outlines/foreshadowing.md` after a
-        // `novel-writing` produce run completes.
         if preset_id == nexus_preset::preset_ids::NOVEL_WRITING_PRESET_ID {
             if let Err(e) = auto_chain::promote_foreshadowing_for_schedule(
                 &self.pool,
@@ -697,11 +676,6 @@ impl ScheduleSupervisor {
                 );
             }
 
-            // finalized chapter prose, diff against confirmed World KB rows,
-            // and write an advisory log under
-            // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
-            // inserted into kb_extract_jobs. Best-effort: errors are logged
-            // and do NOT fail the terminal transition.
             if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
                 &self.pool,
                 schedule_id,
@@ -718,10 +692,6 @@ impl ScheduleSupervisor {
                 );
             }
         }
-        // §4.4): review-time KB candidate extraction. When a
-        // `novel-review-master` schedule completes, scan the current
-        // chapter prose for capitalized noun phrases and insert
-        // `kb_extract_jobs` rows with `promotion_status='pending'`.
         if preset_id == nexus_preset::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID {
             if let Err(e) = quality_loop::extract_kb_candidates_for_review(
                 &self.pool,
@@ -790,12 +760,6 @@ impl ScheduleSupervisor {
                 })
             })?;
 
-        //    equals the run is updated. Any non-terminal status settles
-        //    (running, paused, pending): a paused-after-reconcile-error row
-        //    (P1-1) must still reach its durable terminal, and the live
-        //    terminal callback races nothing here because the row's owned
-        //    session is already terminal. Terminal rows are excluded so a
-        //    duplicate callback never rewrites a settled row.
         let source_result = sqlx::query(
             "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
              WHERE schedule_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')
@@ -828,7 +792,6 @@ impl ScheduleSupervisor {
                     Some(*next_volume),
                     work_id.as_str(),
                 )),
-                // after commit.
                 _ => None,
             };
             if let Some((stage, chapter, volume, work_id)) = child_spec {
@@ -864,14 +827,8 @@ impl ScheduleSupervisor {
             }
         }
 
-        // callback (source_run_id conflict) must not re-run completion hooks,
-        // mark Work complete, or re-hand the child to the starter (Greptile P2).
-        // Ownership is keyed on the source UPDATE row count — not merely
-        // whether the child INSERT conflicted.
         let mut transitioned = source_transitioned;
         if conflict {
-            // source_run_id unique index. Roll back (the source settlement
-            // flips back with it) and load the already-created child.
             drop(tx);
             let existing: Option<String> = sqlx::query_scalar(
                 "SELECT schedule_id FROM creator_schedules WHERE source_run_id = ?",
@@ -879,7 +836,6 @@ impl ScheduleSupervisor {
             .bind(source_run_id)
             .fetch_optional(&*self.pool)
             .await?;
-            // transaction already settled it.
             let settled = sqlx::query(
                 "UPDATE creator_schedules SET status = ?, terminated_at = ?, updated_at = ?
                  WHERE schedule_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')
@@ -904,7 +860,6 @@ impl ScheduleSupervisor {
             tx.commit().await?;
         }
 
-        // WorkComplete, tick.
         self.remove_from_running_cache(schedule_id, creator_id)
             .await;
         self.release_schedule_lock(schedule_id, creator_id).await;
@@ -1003,8 +958,6 @@ impl ScheduleSupervisor {
                 }
             };
 
-        // volume-aware evaluator to correctly handle cross-volume auto-chain
-        // (Plan Goal 4 / AC2). For all other stages, the flat evaluator suffices.
         let action = if work.current_stage == "persist" && work.stage_status == "complete" {
             match auto_chain::evaluate_after_persist_volume_aware(&self.pool, &work).await {
                 Ok(vol_action) => vol_action,
@@ -1054,7 +1007,6 @@ impl ScheduleSupervisor {
                 Some,
             )
         } else {
-            // may be enqueued (empty map passes the completeness gate).
             let caps = nexus_capability::CapabilityRegistry::with_builtins();
             if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
                 let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
@@ -1134,8 +1086,6 @@ impl ScheduleSupervisor {
                 }
             };
 
-        // volume-aware evaluator to correctly handle cross-volume auto-chain
-        // (Plan Goal 4 / AC2). For all other stages, the flat evaluator suffices.
         let action = if work.current_stage == "persist" && work.stage_status == "complete" {
             match auto_chain::evaluate_after_persist_volume_aware(&self.pool, &work).await {
                 Ok(vol_action) => vol_action,
@@ -1184,8 +1134,6 @@ impl ScheduleSupervisor {
                         "auto-chain: next chapter (volume-aware)"
                     );
                 }
-                // `novel-writing` preset input includes `volume` template var.
-                // Next chapter starts at produce stage
                 if let Err(e) = self
                     .enqueue_auto_chain_step(
                         creator_id,
@@ -1279,10 +1227,6 @@ impl ScheduleSupervisor {
     ) -> Result<(), SupervisorError> {
         use crate::auto_chain::{self, AutoChainError};
 
-        // the configured default provider. A preset with prompt roles and
-        // no provider refuses the enqueue (never a drive-enabled row with an
-        // empty binding map); a preset with no prompt roles accepts an empty
-        // map.
         let Some(preset_id) = crate::stage_gates::preset_for_stage(stage) else {
             return Ok(());
         };
@@ -1302,7 +1246,6 @@ impl ScheduleSupervisor {
                 return Ok(());
             }
         } else {
-            // may be enqueued (empty map passes the completeness gate).
             let caps = nexus_capability::CapabilityRegistry::with_builtins();
             if let Ok(loaded) = nexus_preset::load_embedded_preset(preset_id, &caps) {
                 let roles = nexus_preset::required_prompt_roles(&loaded.manifest);
@@ -1478,26 +1421,16 @@ impl ScheduleSupervisor {
         let scheduled_at = schedule.scheduled_at;
         let label = schedule.label;
 
-        // is drive-enabled (`driven_v1`); `_system.*` internal presets are
-        // explicitly `system_inert`. The migration default (`legacy_inert`)
-        // is reserved for pre-cutover rows that must stay inert until an
-        // explicit public `schedule start`.
         let execution_policy = if preset_id.starts_with("_system.") {
             EXECUTION_POLICY_SYSTEM_INERT
         } else {
             EXECUTION_POLICY_DRIVEN_V1
         };
 
-        // execution descriptor commit in ONE transaction so a concurrent
-        // tick can never observe a partially seeded `driven_v1` row.
         let mut tx = nexus_local_db::begin_immediate(&self.pool)
             .await
             .map_err(|e| SupervisorError::Database(sqlx::Error::Protocol(e.to_string())))?;
 
-        // `Schedule` DTO has no work_id field, so the row's `work_id`
-        // column is derived from the descriptor here (work-linked adds
-        // must freeze work_id into the schedule row, not only the
-        // descriptor).
         let descriptor_work_id: Option<String> = execution_descriptor
             .and_then(|bytes| {
                 serde_json::from_slice::<nexus_session_storage::run_state::RunDescriptorV1>(bytes)
@@ -1549,12 +1482,6 @@ impl ScheduleSupervisor {
             .await?;
         }
 
-        // core-context record in the SAME transaction — a `driven_v1` row
-        // is never observable before its seed/version is durable, and a
-        // seed failure rolls the whole row back (no orphaned drive-enabled
-        // schedule). The public add path is user-initiated, so the record
-        // carries the user author (mirrors `CoreContextManager::apply_seed`
-        // with `CoreContextAuthor::User`).
         if let Some(seed_text) = seed_text {
             let payload = serde_json::json!({ "kind": "text", "body": seed_text });
             let content_bytes = serde_json::to_vec(&payload).map_err(|e| {
@@ -1739,16 +1666,6 @@ impl ScheduleSupervisor {
                 nexus_session_storage::SessionStatus::Completed => ScheduleStatus::Completed,
                 nexus_session_storage::SessionStatus::Failed => ScheduleStatus::Failed,
                 nexus_session_storage::SessionStatus::Cancelled => ScheduleStatus::Cancelled,
-                // (A5): the schedule row is deliberately left non-terminal
-                // so public inspect projects the run's
-                // `execution.recovery_class: "interrupted"` from the durable
-                // session instead of a fabricated `cancelled` (qc2 F-002).
-                // `creator_schedules.status` has no `interrupted` variant and
-                // an unmapped string projects as `Pending` (re-runnable), so
-                // writing a status string here would be strictly worse.
-                // Non-terminal (incl. `Interrupted`): the schedule stays
-                // running and is paused by `resume_running_as_paused` (or
-                // re-driven by recovery).
                 _ => continue,
             };
             if let Err(e) = self
@@ -1874,14 +1791,11 @@ impl ScheduleSupervisor {
         .execute(&*self.pool)
         .await?;
         if cancelled.rows_affected() == 1 {
-            // set; drop any stale cache entry all the same.
             self.remove_from_running_cache(schedule_id, creator_id)
                 .await;
             return Ok(ScheduleCancelDisposition::Cancelled);
         }
 
-        // creator). The DURABLE row is the winner — read it once and report
-        // exactly what it says.
         let row: Option<(String, Option<String>)> = sqlx::query_as(
             "SELECT status, current_session_id FROM creator_schedules
               WHERE schedule_id = ? AND creator_id = ?",
@@ -1942,8 +1856,6 @@ impl ScheduleSupervisor {
             ));
         }
 
-        // into a driven run; only an explicit public `schedule start` opts
-        // them in (C-3).
         let policy: String = sqlx::query_scalar(
             "SELECT execution_policy FROM creator_schedules WHERE schedule_id = ?",
         )
@@ -1993,10 +1905,6 @@ impl ScheduleSupervisor {
 
         for r in &active_rows {
             let s = r.to_schedule();
-            // legacy/system-inert `Running` rows (historical admission-only
-            // rows with no owned session) are inert and must not block an
-            // eligible driven schedule's resume. Same invariant as
-            // `tick_inner` and the coordinator admission matrix.
             if s.status == ScheduleStatus::Running
                 && r.execution_policy == EXECUTION_POLICY_DRIVEN_V1
             {
@@ -2025,9 +1933,6 @@ impl ScheduleSupervisor {
         }
 
         if should_run {
-            // coordinator (the caller drives it); a driven row without an
-            // owned session goes through the normal admission path. Never
-            // produce `running` without an owned session.
             let _owned_session: Option<String> = sqlx::query_scalar(
                 "SELECT current_session_id FROM creator_schedules WHERE schedule_id = ?",
             )
@@ -2074,7 +1979,6 @@ impl ScheduleSupervisor {
             .await?;
 
             if result.rows_affected() == 0 {
-                // the status. Return current DB status without touching cache.
                 let current = self.status_of(schedule_id).await?;
                 return Ok(match current {
                     ScheduleStatus::Running => "running".to_string(),
@@ -2204,7 +2108,6 @@ impl ScheduleRow {
                 u32::try_from(self.current_core_context_version).unwrap_or_default(),
             ),
             current_session_id: self.current_session_id.clone(),
-            // as Option<String> in the domain type. Conversion via .to_string() is safe.
             scheduled_at: self.scheduled_at.map(|t| t.to_string()),
             label: self.label.clone(),
             created_at: self.created_at.to_string(),
@@ -2916,9 +2819,6 @@ mod tests_t9 {
 
     #[tokio::test]
     async fn r1_cancel_pause_failure_does_not_block_cancel() {
-        // returns false for non-pausable states (already paused), and the cancel
-        // operation should still succeed. The HTTP handler in schedules.rs
-        // translates pause errors to warn! logs and continues with cancel.
         let sup = test_supervisor_with_db().await;
         let pool = sup.pool();
 
@@ -3021,10 +2921,6 @@ mod tests_t9 {
 
     #[tokio::test]
     async fn r2_concurrent_resume_toctou_exercises_rows_affected_zero() {
-        // concurrently on a Paused schedule. A barrier ensures both spawned tasks
-        // pass the initial "status == paused" check before either issues its
-        // UPDATE. Only one UPDATE can match `WHERE status = 'paused'`; the
-        // loser hits `rows_affected() == 0` and returns the current DB status.
         let sup = test_supervisor_with_db().await;
 
         insert_schedule(&sup, "R2-CONC-S1", "pending").await;
@@ -3160,8 +3056,6 @@ mod tests_t9 {
         let sup = test_supervisor_with_db().await;
         let now = chrono::Utc::now().timestamp();
 
-        // blob — the previous recovery pass hit a transient storage error
-        // while loading it.
         let descriptor = serde_json::to_vec(&nexus_session_storage::run_state::RunDescriptorV1 {
             creator_id: "test-creator".to_string(),
             work_id: None,
@@ -3195,7 +3089,6 @@ mod tests_t9 {
         .await
         .expect("insert durable terminal run");
 
-        // after the earlier (failed) settlement pass (P1-1 shape).
         sqlx::query(
             "INSERT INTO creator_schedules
                 (schedule_id, creator_id, preset_id, preset_version, status,
@@ -3210,8 +3103,6 @@ mod tests_t9 {
         .await
         .expect("insert paused driven schedule");
 
-        // row. The row must NOT be excluded: still paused, still
-        // non-terminal, still inside the scan.
         let count = sup
             .reconcile_terminal_schedules()
             .await
@@ -3223,8 +3114,6 @@ mod tests_t9 {
             "a reconcile error must never flip the row terminal"
         );
 
-        // retried and settles from the durable terminal — paused rows are
-        // inside the reconcile scan and errors never permanently exclude.
         let good_state =
             serde_json::to_vec(&nexus_session_storage::run_state::RunStateV1::default())
                 .expect("run state json");

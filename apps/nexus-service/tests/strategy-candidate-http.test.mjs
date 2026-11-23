@@ -6,13 +6,6 @@ import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/**
- * mounts it at the Strategy tier and hands the path id to the core authority, which serves the
- * stored compose row when one exists and the revision-0 import projection otherwise. The store
- * semantics are proven in `crates/nexus-core/tests/strategy_candidate_store.rs` and end to end in
- * `strategy-compose-http.test.mjs`; this target proves the HTTP contract.
- */
-
 let routes;
 let HttpError;
 

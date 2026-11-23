@@ -13,14 +13,11 @@ use crate::errors::Result;
 use clap::Subcommand;
 
 use crate::config::CliConfig;
-// governance and findings — runs on the typed core seam ([`crate::core`]).
 use crate::core::{finish_direct, map_core_error, open_direct_core};
 use nexus_home_layout;
-// (the core report is not a wire type).
 use nexus_contracts::daemon_api::findings::{
     StaleFindingEntry as StaleFindingWire, StaleFindingsResponse as StaleFindingsWire,
 };
-// carriers are not wire types (they still hold the stored `creator_id`).
 use nexus_contracts::{
     AppendInspirationRequest, ListWorksQuery, ReleaseCompletionLockRequest,
     WorkInspirationAddResponse, WorkInspirationListResponse, WorkPoolListResponse,
@@ -670,8 +667,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
     .await;
     let (work, open_findings, stale) = finish_direct(&core, outcome).await?;
 
-    // (it replaced the daemon's field-for-field copy), and every reader below
-    // treats an absent nullable key and an explicit `null` identically.
     let resolved_id = work.work_id.clone();
     let resp = serde_json::to_value(&work)?;
 
@@ -695,8 +690,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
 
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        // fails the status command.
-        //
         // R-V146P0-QC3-S3: rendered from the enrichment read taken inside the
         // admitted writer (`fetch_stale_findings`), so the banner never costs a
         // second read and a degraded stale read still leaves the status output
@@ -753,7 +746,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
 
             let profile_tag = " (novel)".to_string();
 
-            // from the enrichment read taken inside the admitted writer.
             if work_status == "completed" {
                 let updated_at = resp
                     .get("updated_at")
@@ -792,8 +784,6 @@ async fn handle_status(config: &CliConfig, work_id: Option<String>, json: bool) 
                 println!("auto_chain_enabled: {auto_chain}");
                 println!("driver_schedule_id: {driver}");
                 if interrupted {
-                    // removed with the incomplete Creator runner; the flag stays
-                    // reported, but no CLI remediation command is advertised.
                     println!("auto_chain_interrupted: true");
                 }
 
@@ -919,7 +909,6 @@ async fn handle_inspire(
             .append_work_inspiration(
                 &principal,
                 resolved_id.clone(),
-                // passed `http` for its own surface.
                 "inspire",
                 AppendInspirationRequest {
                     note: note.to_string(),
@@ -1051,8 +1040,6 @@ async fn handle_reconcile_chapters(
             None => active_work_id_core(&core, &principal).await?,
         };
 
-        // computes the report without the runtime lock and without any
-        // filesystem/DB write (overlay §8.2).
         if dry_run {
             let report = reconcile(&core, &principal, &resolved_id, true).await?;
             return Ok((resolved_id, ReconcileOutcome::Reconciled(report, true)));
@@ -1305,8 +1292,6 @@ async fn handle_pool(config: &CliConfig, action: PoolAction) -> Result<()> {
         }
     }
     .await;
-    // seam released the writer, so a promoted/archived entry is never reported
-    // ahead of a close that did not settle.
     if let Some(text) = finish_direct(&core, outcome).await? {
         println!("{text}");
     }
@@ -1390,8 +1375,6 @@ async fn handle_pool_promote(
     )];
 
     if set_default {
-        // retired adapter issued this selection as a second control request;
-        // the core promotes to `active` on both paths.
         core.select_work(principal, work_id.to_string())
             .await
             .map_err(map_core_error)?;
@@ -1553,7 +1536,6 @@ async fn handle_inspiration_promote(
     )];
 
     if set_default {
-        // row; this is the retained `works use` selection on its own request.
         core.select_work(principal, promoted.work_id.clone())
             .await
             .map_err(map_core_error)?;
@@ -1682,8 +1664,6 @@ async fn fetch_open_findings(
             if let Ok(serde_json::Value::Array(items)) = serde_json::to_value(&resp.items) {
                 FindingsResult::Fetched(items)
             } else {
-                // status command degrades instead of reporting a findings list it
-                // cannot render.
                 tracing::warn!(
                     work_id = %work_id,
                     "open findings read could not be rendered; degrading to Unavailable"
@@ -1715,7 +1695,6 @@ async fn fetch_stale_findings(
         .list_stale_findings(principal, STALE_FINDINGS_THRESHOLD_SECS)
         .await
         .map_err(|error| {
-            // read must not vanish into `None` without a trace.
             tracing::warn!(
                 error = %error,
                 "stale findings read failed; degrading to None"
@@ -1833,8 +1812,6 @@ fn enrich_status_json(
             "findings".to_string(),
             serde_json::Value::Array(arr.to_vec()),
         );
-        // distinguish "exactly 50 open findings" from "50+ open findings".
-        // Omitted when not at the cap (consumers treat absence as not-truncated).
         if is_truncated {
             obj.insert(
                 "findings_truncated".to_string(),
@@ -1957,8 +1934,6 @@ impl FindingsSummary {
 ///   the removed runner — no CLI preset dispatch entrance is claimed)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult) {
-    // helper so the test helper `capture_findings_output` cannot drift from
-    // production. This wrapper only prints each rendered line.
     for line in format_findings_summary_lines(result) {
         println!("{line}");
     }
@@ -1991,7 +1966,6 @@ fn format_findings_summary_lines(result: &FindingsResult) -> Vec<String> {
         return vec!["findings: none open".to_string()];
     }
 
-    // Truncated: "findings: 50+ open (...)"
     let count_display = if summary.is_truncated {
         format!("{}+", summary.open_count)
     } else {
@@ -2046,8 +2020,6 @@ const CHAPTER_PATH_HINT_CAP: usize = 50;
 /// `CHAPTER_PATH_HINT_CAP` to prevent tail latency on large works; a
 /// summary line covers chapters beyond the cap.
 fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
-    // cannot be resolved (no active creator, no home dir, etc.), on-disk
-    // hints are silently skipped — the table still renders normally.
     let ws_dir = operational_workspace_dir_from_config();
 
     println!();
@@ -2065,7 +2037,6 @@ fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
     let total_chapters = chapters.len();
     let hint_cap = total_chapters.min(CHAPTER_PATH_HINT_CAP);
 
-    // threshold log below surfaces slow loops without spamming fast SSDs.
     let hint_loop_elapsed_ms = {
         let span = tracing::info_span!("chapter_path_hints", total_chapters, capped = hint_cap,);
         let _enter = span.enter();
@@ -2220,10 +2191,6 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
     if work_ref.starts_with('(') {
         return;
     }
-    // helper instead of re-implementing the config → creator_id → workspace_slug →
-    // home → operational_workspace_dir lookup inline. The helper has identical
-    // best-effort semantics (None on any resolution failure); the prior ad-hoc
-    // block was a verbatim duplicate of that resolution chain.
     let Some(ws_dir) = operational_workspace_dir_from_config() else {
         return;
     };
@@ -2377,9 +2344,6 @@ mod tests {
     }
 
     fn capture_findings_output(findings: &[serde_json::Value]) -> String {
-        // test helper cannot drift from `print_findings_summary`. The slice is
-        // wrapped into `FindingsResult::Fetched`; the `Unavailable` branch is
-        // covered directly by `format_findings_summary_lines` unit tests.
         let result = FindingsResult::Fetched(findings.to_vec());
         format_findings_summary_lines(&result).join("\n")
     }
@@ -2394,9 +2358,6 @@ mod tests {
 
     #[test]
     fn format_findings_summary_lines_unavailable_branch() {
-        // Unavailable branch (previously only reachable via the production
-        // `print_findings_summary`, never via the test helper). Pins the
-        // one-line degradation output.
         let lines = format_findings_summary_lines(&FindingsResult::Unavailable);
         assert_eq!(lines.len(), 1, "Unavailable renders exactly one line");
         assert_eq!(lines[0], "findings: unavailable (daemon error)");
@@ -2404,9 +2365,6 @@ mod tests {
 
     #[test]
     fn format_findings_summary_lines_parity_with_capture_helper() {
-        // delegates to the shared formatter, so its output must equal
-        // `format_findings_summary_lines(...).join("\n")` byte-for-byte.
-        // A representative populated case proves no formatting drifted.
         let findings = vec![
             finding_json("blocker", "Continuity error", "→ write"),
             finding_json("major", "Plot hole", "→ brainstorm"),
@@ -2450,7 +2408,6 @@ mod tests {
 
     #[test]
     fn display_findings_completed_work_shows_summary() {
-        // path too — same formatting, just inserted before the "complete" message.
         let findings = vec![finding_json("info", "Nice-to-have", "→ none")];
         let output = capture_findings_output(&findings);
         assert!(output.contains("findings: 1 open"));
@@ -2575,12 +2532,6 @@ mod tests {
 
     #[test]
     fn enrich_novel_preserves_full_finding_element_shape_verbatim() {
-        // `finding_json` helper and only spot-checked `severity` /
-        // `routing_hint`. Assert full element-shape fidelity: a finding
-        // carrying every list-API field must survive `enrich_status_json`
-        // byte-for-byte (verbatim round-trip), proving no field is dropped,
-        // renamed, or coerced. Guards against a future enrich impl that
-        // re-serializes a subset of fields.
         let full = full_finding_json();
         let findings = vec![full.clone()];
         let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
@@ -2593,7 +2544,6 @@ mod tests {
             arr[0], full,
             "enrich must preserve the full finding element verbatim (no field drop/rename/coerce)"
         );
-        // regression message points at the right field.
         assert_eq!(
             arr[0].get("chapter").and_then(serde_json::Value::as_i64),
             Some(7)
@@ -2628,13 +2578,11 @@ mod tests {
 
     #[test]
     fn enrich_novel_unavailable_findings_omits_key() {
-        // rather than fabricating an empty array (graceful degradation).
         let out = enrich_status_json(novel_work_resp(), None, None);
         assert!(
             out.get("findings").is_none(),
             "findings key omitted when unavailable"
         );
-        // were not fetched at all.
         assert!(
             out.get("findings_truncated").is_none(),
             "findings_truncated omitted when findings unavailable"
@@ -2643,9 +2591,6 @@ mod tests {
 
     #[test]
     fn enrich_findings_truncated_marker_set_when_at_limit() {
-        // there may be more open findings beyond the fetched page. Surface
-        // a `findings_truncated: true` flag so JSON consumers can detect
-        // the cap (qc3 F-003).
         let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
             .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
             .collect();
@@ -2660,7 +2605,6 @@ mod tests {
 
     #[test]
     fn enrich_findings_truncated_omitted_when_below_limit() {
-        // distinguish "truncation known to be false" from "not applicable".
         let findings = vec![
             finding_json("major", "Plot hole", "→ write"),
             finding_json("minor", "Typo", "→ none"),
@@ -2749,14 +2693,11 @@ mod tests {
 
     #[test]
     fn format_stale_banner_none_when_zero() {
-        // (no empty sentinel noise). The human status path now routes through
-        // `format_stale_banner`, so the zero-suppression is unit-testable.
         assert_eq!(format_stale_banner(0, 96 * 60 * 60), None);
     }
 
     #[test]
     fn format_stale_banner_some_when_stale_count_positive() {
-        // computed whole-hour threshold and the spec citation.
         let banner = format_stale_banner(7, 96 * 60 * 60).expect("banner for stale_count>0");
         assert!(
             banner.contains("7 finding(s) stale"),
@@ -2774,7 +2715,6 @@ mod tests {
 
     #[test]
     fn format_stale_banner_computes_hours_from_seconds() {
-        // (integer division). 345600s = 96h; 7200s = 2h.
         assert!(format_stale_banner(1, 345_600).unwrap().contains(">96h"));
         assert!(format_stale_banner(1, 7_200).unwrap().contains(">2h"));
     }
@@ -2823,24 +2763,16 @@ mod tests {
 
     #[test]
     fn print_completion_lock_hint_no_ops_when_work_ref_is_placeholder() {
-        // short-circuit before any workspace-dir resolution. Asserts the
-        // early-return branch is preserved after routing through the shared
-        // `operational_workspace_dir_from_config` helper.
-        // Best-effort: cannot panic regardless of config state.
         print_completion_lock_hint("(no ref)", "wrk_test");
     }
 
     #[test]
     fn print_completion_lock_hint_no_ops_when_workspace_unresolvable() {
-        // active creator/workspace (the default test-env state), the shared
-        // helper returns None and the hint is skipped without panicking.
-        // Pins that the deduplicated resolution path degrades gracefully.
         print_completion_lock_hint("MYNOVEL", "wrk_test");
     }
 
     #[test]
     fn display_unavailable_findings() {
-        // not "none open". This tests the logic that print_findings_summary uses.
         let result = FindingsResult::Unavailable;
         let output = match result {
             FindingsResult::Unavailable => "findings: unavailable (daemon error)".to_string(),
@@ -2938,8 +2870,6 @@ mod tests {
 
     #[test]
     fn works_reopen_rejects_removed_extend_chapters_flag() {
-        // carries `total_planned_chapters`, so the parser must refuse it
-        // instead of silently dropping it.
         let result = WorksCli::try_parse_from([
             "nexus42",
             "reopen",
@@ -3057,7 +2987,6 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_body_missing_on_disk() {
-        // and mention body_path.
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(Some("Works/my-novel/Stories/ch01-intro.md"), None);
         let hint = chapter_path_missing_hint(&ch, dir.path());
@@ -3106,7 +3035,6 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_no_paths_configured_no_hint() {
-        // check; daemon has not assigned file paths yet).
         let dir = tempfile::tempdir().expect("tempdir");
         let ch = chapter_with_paths(None, None);
         let hint = chapter_path_missing_hint(&ch, dir.path());
@@ -3137,17 +3065,11 @@ mod tests {
 
     #[test]
     fn chapter_path_missing_hint_exists_failure_is_silent() {
-        // panicking) for unreadable / permission-denied paths. The hint
-        // surfaces "missing on disk" for such cases too — reconcile is the
-        // correct remediation regardless. This test pins the "swallow"
-        // behavior: a path pointing into a tempdir that was just removed
-        // still yields Some (treated as missing), never panics.
         let dir = tempfile::tempdir().expect("tempdir");
         let dir_path = dir.path().to_path_buf();
         let ch = chapter_with_paths(Some("nonexistent/ch01.md"), None);
         drop(dir);
         let hint = chapter_path_missing_hint(&ch, &dir_path);
-        // best-effort), but the inner file definitely does not → Some.
         assert!(
             hint.is_some(),
             "missing file surfaces as Some (best-effort, never panics)"
@@ -3172,9 +3094,6 @@ mod tests {
 
     #[test]
     fn chapter_path_hint_cap_only_first_50_chapters_get_hints() {
-        // every chapter would emit a ⚠ hint (and incur a synchronous
-        // `exists()` syscall). The cap bounds the inspected set at
-        // `CHAPTER_PATH_HINT_CAP` and summarizes the remainder.
         let dir = tempfile::tempdir().expect("tempdir");
         let chapters: Vec<serde_json::Value> = (1..=60)
             .map(|i| chapter_with_paths(Some(&format!("Works/x/Stories/ch{i:02}.md")), None))
@@ -3196,7 +3115,6 @@ mod tests {
             "all 50 capped chapters have missing body_path → 50 hints"
         );
 
-        // chapters WOULD have generated hints if the cap weren't in place.
         let would_have_hinted = chapters[hint_cap..]
             .iter()
             .filter_map(|ch| chapter_path_missing_hint(ch, dir.path()))
@@ -3215,8 +3133,6 @@ mod tests {
 
     #[test]
     fn chapter_path_hint_cap_not_triggered_under_50() {
-        // no summary line is rendered, and the existing per-chapter
-        // behavior is fully preserved.
         let chapters: Vec<serde_json::Value> = (1..=10)
             .map(|i| chapter_with_paths(Some(&format!("Works/x/Stories/ch{i:02}.md")), None))
             .collect();

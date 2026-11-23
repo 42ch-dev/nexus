@@ -3,10 +3,6 @@
 interface ImportMetaEnv {
   /** Daemon URL for dev proxy fallback resolution (see vite.config.ts). */
   readonly VITE_DAEMON_URL?: string;
-  /**
-   * `import.meta.env` member, so an unset/other value is a compile-time `false`
-   * in production and the proof page + its lazy chunk are tree-shaken out.
-   */
   readonly VITE_RFT_NATIVE_PROOF?: string;
 }
 

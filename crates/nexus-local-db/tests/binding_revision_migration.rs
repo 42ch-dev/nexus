@@ -131,9 +131,6 @@ async fn binding_revision_migration_upgrades_populated_v21_db() {
         .unwrap();
     assert_eq!(pre_count, 1);
 
-    // writer). Applying the remaining migrations through the protocol-admitted
-    // factory is what a real upgrade does; the raw pool itself must not write
-    // guarded tables afterwards (asserted in `writer_protocol.rs`).
     drop(pre_pool);
     let pool = nexus_local_db::init_pool(&dir.path().join("test.db"))
         .await

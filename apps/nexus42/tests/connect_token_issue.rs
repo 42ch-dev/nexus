@@ -65,7 +65,6 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // chatter).
     let stdout = String::from_utf8(out.stdout).expect("utf8 stdout");
     let proof: Value = serde_json::from_str(stdout.trim()).expect("stdout parses as token JSON");
     assert_eq!(proof["v"], 1, "wire version 1");
@@ -97,7 +96,6 @@ fn token_issue_prints_verifiable_token_and_no_secrets() {
     .expect("token verifies green");
     assert_eq!(granted, vec!["spoke-baseline".to_string()]);
 
-    // carry only the public issuer peer id — never key material).
     assert!(!stdout.contains("issuer.key"), "key path must not leak");
     assert!(!stdout.contains("-----BEGIN"), "no PEM-style key material");
     assert!(!stdout.contains("ed25519"), "no key-encoding labels leak");
@@ -184,7 +182,6 @@ fn token_issue_rejects_exp_within_skew_window() {
 
 #[test]
 fn token_issue_rejects_empty_sub_and_aud() {
-    // still be usage errors (exit non-zero, message names the flag).
     let tmp = TempDir::new().expect("tempdir");
     for (flag, sub, aud) in [
         ("--sub", "", "audience-peer"),

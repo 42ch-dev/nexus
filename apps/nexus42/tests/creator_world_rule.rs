@@ -518,7 +518,6 @@ async fn add_on_foreign_world_rejected_no_write() {
         "named reject naming the world, got: {msg}"
     );
 
-    // is asserted on the owned World staying empty.
     assert!(stored_rules(&env, WORLD).await.is_empty());
 }
 

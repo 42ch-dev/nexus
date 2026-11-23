@@ -283,13 +283,6 @@ pub fn validate_body(
         }
     }
 
-    // `novel_category` / `game_bible_category` / `script_category`
-    // enforcement (entity-scope-model §5.1.1 — V1.123 implementation note,
-    // reaffirmed V1.159): their `body.attributes` are freeform world-shape
-    // markers. Profile-category hints carried on such bodies are advisory
-    // only — warn, never reject. This is what makes the era-create payload
-    // (`era_type` / `world_summary`, no profile category) valid under
-    // `ValidationMode::Novel` for the daemon's patch-entity create path.
     if is_cross_profile_block_type(block_type) {
         if let Some(attrs) = body.and_then(|b| b.attributes.as_ref()) {
             if attrs.get("novel_category").is_some()
@@ -627,8 +620,6 @@ fn validate_structured_body(
             }));
         }
     }
-    // specific state key — the block is computable but the state shape is
-    // module-defined (additionalProperties: true in the wire schema).
 
     Ok(())
 }

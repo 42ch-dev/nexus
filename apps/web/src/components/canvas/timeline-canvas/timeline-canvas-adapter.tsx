@@ -1,7 +1,4 @@
 /**
- *  + V1.123 P1 T2 (Brief layer projection) + V1.156 P1 T1 (Moment layer
- *  projection).
- *
  * Projects a World's `WorldKbGraphResponse` onto a left-to-right when-axis
  * (the World-building hero surface, `CanvasSurfaceKind = "timeline"`).
  *
@@ -141,18 +138,9 @@ export interface ComputeNodePayload {
   /**
    */
   moduleVersion: string;
-  /**
-   * map at projection time (falls back to `moduleId` when the registry has
-   * not loaded the module — honest for preset-path modules absent locally).
-   */
   moduleName: string;
   /** Run correlation id — direct lane only (absent for preset-path nodes). */
   runId?: string;
-  /**
-   * daemon stamps only these two today; unknown kinds resolve to
-   * `undefined` (the UI falls back to the direct-lane label — `simplify:`
-   * a new kind needs a catalog entry when one ships).
-   */
   sourceKind?: 'direct_invoke' | 'preset';
   /** Module event summary — the report digest (e.g. the damage line). */
   reportDigest?: string;
@@ -193,18 +181,7 @@ export interface ComputeNodePayload {
 export interface TimelineNodeData extends WorldKbEntityProjection {
   /** React Flow requires an index signature on node data. */
   [key: string]: unknown;
-  /**
-   * partitions; `'brief'` is the V1.123 P1 T2 Brief-era partition; `'compute'`
-   * is the V1.147 P2 machine-written compute-result partition (Narrative
-   * only — the Brief layer never projects compute nodes).
-   */
   layoutHint: 'event' | 'context' | 'brief' | 'compute';
-  /**
-   * when it is a non-empty string. Undefined when not declared by the
-   * KeyBlock body — the entity then clusters in the temporal-unknown group.
-   * Narrative layer only (V1.122). Compute nodes carry the machine
-   * `created_at` of the log event instead.
-   */
   occurredAtHint?: string;
   /**
    * Read from `body.attributes` per architect §2.3 + §8 (`era_id`,
@@ -219,9 +196,6 @@ export interface TimelineNodeData extends WorldKbEntityProjection {
   endHint?: string;
   /** Optional world-shape summary line for the era card. */
   worldSummary?: string;
-  /**
-   * only when `layoutHint === 'compute'`. See {@link ComputeNodePayload}.
-   */
   compute?: ComputeNodePayload;
 }
 
@@ -250,11 +224,6 @@ export type TimelineEntityPatch = {
   body?: Record<string, unknown>;
   aliases?: string[];
   block_type?: WorldKbEntityProjection['block_type'];
-  /**
-   * `observation` dialect is authored from this surface today; the value
-   * replaces the complete stored `modules.observation`, sibling dialect keys
-   * preserved by the daemon's first-level merge).
-   */
   modules?: WorldKbEntityPatchWire['modules'];
 };
 
@@ -308,21 +277,8 @@ export type TimelineConflictInfo =
  */
 export interface TimelineCanvasAdapterContext {
   worldId: string;
-  /**
-   * `projectGraph` / `summarizeGraph` (the projection is a pure function of
-   * the graph). T4 routes writes through `onPatchEntity` (which the
-   * orchestrator wires to `usePatchWorldKbEntity`) — the client object is
-   * not read directly from this slot at write time. The slot exists so the
-   * T2/T4 isolation tests can assert negative invocation against every
-   * forbidden method on a single mocked client.
-   */
   client?: unknown;
   /**
-   * `NexusClient.worldKbPatchEntity` (V1.73) only. The orchestrator owns the
-   * React Query mutation; the adapter calls this from the inspector's submit
-   * handler. Undefined in T2 (projection-only) and in tests that don't wire
-   * writes.
-   *
    * The callback MAY return a `Promise` that settles when the underlying
    * mutation resolves or rejects (the orchestrator wires it to
    * `usePatchWorldKbEntity().mutateAsync`). The inspector awaits the return
@@ -338,30 +294,9 @@ export interface TimelineCanvasAdapterContext {
     patch: TimelineEntityPatch,
     dirtyFields: TimelinePatchField[],
   ) => Promise<void> | void;
-  /**
-   * the daemon returns 409 / 422. The orchestrator renders the
-   * world-kb-flavored conflict modal from the structured info and refetches
-   * the canonical graph. Undefined when no write hook is wired.
-   */
   onConflict?: (info: TimelineConflictInfo) => void;
-  /**
-   * supplies the post-projection, post-layout node array so the alt-view
-   * table reads the same rows the canvas renders. Mirrors the V1.114 World
-   * KB ctxRef pattern (`ctx.nodes`). Optional in T2/T4 tests that don't
-   * render the alt-view; the wrapper treats `undefined` as an empty list.
-   */
   nodes?: Node<TimelineNodeData>[];
-  /**
-   * orchestrator owns selection state (it surfaces from `useCanvasSurface`)
-   * and passes the id through so the alt-view highlights the matching row.
-   */
   selectedNodeId?: string | null;
-  /**
-   * clicks / keyboard-activates an alt-view row. The orchestrator selects
-   * the matching React Flow node so the inspector that owns the
-   * `kb.patch_entity` write path opens. The alt-view performs NO writes
-   * itself (architect-locked §4.2 — selection-only, inspector-owned writes).
-   */
   onSelectNode?: (nodeId: string) => void;
   /**
    * When present, the World Timeline event inspector surfaces a "View in
@@ -376,33 +311,13 @@ export interface TimelineCanvasAdapterContext {
    */
   boundWorkId?: string;
   /**
-   * deep-link). When the SELECTED World Narrative event's `key_block_id`
-   * matches a realizing Work outline `timeline_events[].world_event_id`,
-   * this slot carries the matching outline `event_id` (PD-7 single
-   * deterministic target — most-recently-updated realizing Work, then
-   * stable `event_id`). The inspector's CTA target then deep-links to
-   * `/works/:workId/timeline?layer=narrative&event=<id>`.
-   *
    * Undefined when no event-level match exists for the current selection —
    * the V1.123 surface-level fallback (`boundWorkId` +
    * `onViewInWorkTimeline` → `?layer=narrative` only) applies instead
    * (PD-5 honest three-state matrix).
    */
   boundWorkEventId?: string;
-  /**
-   * event-level deep-link. When `boundWorkEventId` is set, the CTA
-   * navigates to THIS work (the PD-7 winner), which can differ from the
-   * surface-level fallback `boundWorkId` in multi-Work Worlds. Exposed so
-   * the CTA's `data-work-id` matches the actual navigation target. Undefined
-   * → the surface-level `boundWorkId` applies (V1.123 semantics preserved).
-   */
   boundWorkEventWorkId?: string;
-  /**
-   * user clicks "View in Work Timeline" on a World Timeline Narrative event.
-   * The orchestrator navigates to `/works/:workId/timeline?layer=narrative`
-   * (Moment layer one click away per plan §"Cross-surface navigation URL
-   * contract"). Undefined when no realizing Work is bound.
-   */
   onViewInWorkTimeline?: () => void;
   /**
    * Fires with the full run id + module id when the author activates "Open
@@ -421,14 +336,6 @@ export interface TimelineCanvasAdapterContext {
    */
   onCreateFork?: (eventId: string) => void;
   /**
-   * carrier). The `WorkOutline` wire exposes no scenes/beats today (the
-   * Moment layer is a read/projection of Work-owned Moments into the World
-   * Timeline — product semantics PD-3, NOT a World Moment authoring
-   * surface); the orchestrator injects Design Studio / test fixtures at the
-   * projection call site. When undefined or empty, the Moment layer emits
-   * honest empty-state (zero nodes). Mirrors the Work Timeline adapter's
-   * `sceneBeatFixture` slot. DR-26 tracks the future wire extension.
-   *
    * V1.156 P1 fix-wave 1 (F3) — the adapter factory's captured
    * `sceneBeatFixture` parameter takes precedence over this slot at
    * projection time (the orchestrator passes the fixture through the memo
@@ -443,25 +350,10 @@ export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
   TimelineNodeData,
   TimelineEdgeData
 > & {
-  /**
-   * from the graph (`buildEraTree`, Task 1) and renders the vertical
-   * time-band model (spec §3.3.3 V1.159 amendment) that supersedes the
-   * V1.123 horizontal era sweep on the Brief layer. The returned panel is
-   * read-only; band selection routes through the ctxRef `onSelectNode`
-   * hand-off so the era inspector opens exactly like a React Flow node
-   * click. Absent on non-Timeline adapters (`useCanvasSurface` surfaces it
-   * as `null`); frontend-local — no wire contract change.
-   */
   renderBriefTimeBands?(graph: TimelineGraph): ReactNode;
 };
 
 /**
- * (T4 — Batch 1 reviewer note), so `useAutoLayout` honors these positions on
- * first open and does NOT collapse the chronology onto dagre's generic graph
- * layout. The author can still trigger an explicit `relayout()` to re-run
- * dagre LR (e.g. when the graph grows too dense to read on the supplied
- * lanes).
- *
  * The metrics encode a deliberate three-lane layout:
  *   - WHEN_AXIS_Y (0)        — dated events, sorted left→right by `occurred_at`.
  *   - CONTEXT_CLUSTER_Y (-)  — non-event entities (characters / scenes / ...).
@@ -480,12 +372,6 @@ const EVENT_STEP_X = 280;
 const CONTEXT_STEP_X = 220;
 
 /**
- * top-to-bottom by chapter order; beats stack top-to-bottom inside each
- * scene. The X coordinate groups scenes by chapter region so the
- * chapter→scene→beat hierarchy reads spatially. IDENTICAL to the Work
- * Timeline Moment layer metrics — World-Moment feel ≡ Work-Moment feel
- * (V1.123 layer-feel §2.4; same carrier, same node types).
- *
  * `simplify:` deterministic vertical stack mirroring the Work Timeline
  * adapter. P4 may swap in a richer manuscript-aware layout (anchored
  * scene-card grid) per layer-feel §9.
@@ -525,14 +411,6 @@ const NARRATIVE_LAYOUT_OPTIONS = {
   direction: 'LR' as const,
   hasSuppliedPositions: true,
 };
-/**
- * direction) with tighter rankSep / nodeSep so the chapter→scene→beat
- * hierarchy reads as a dense manuscript stack. Mirrors the Work Timeline
- * Moment layer options exactly (layer-feel §2.4). The
- * `hasSuppliedPositions: true` flag is preserved so the adapter's
- * deterministic stack survives first open; these values only take effect on
- * an explicit `relayout()`.
- */
 const MOMENT_LAYOUT_OPTIONS = {
   direction: 'TB' as const,
   rankSep: 60,
@@ -543,18 +421,8 @@ const MOMENT_LAYOUT_OPTIONS = {
 const NODE_ID_PREFIX = 'entity:';
 /** V1.147 P2 T3 — compute log-event node id prefix (`compute:<event_id>`). */
 const COMPUTE_NODE_ID_PREFIX = 'compute:';
-/**
- * are NOT KB entities; the id is namespaced so it can never collide with a
- * real `entity:` node and never reaches the `kb.patch_entity` write path.
- */
 const COMPUTE_KEY_BLOCK_PREFIX = 'log:';
 
-/**
- * (`entity:<key_block_id>`). V1.163 P1 Task 2 — exported so the
- * orchestrator's inbound `?event=` focus selects the same node id the
- * Narrative projection emits (architect lock: referent = World KB entity
- * `key_block_id`).
- */
 export function nodeIdOf(keyBlockId: string): string {
   return `${NODE_ID_PREFIX}${keyBlockId}`;
 }
@@ -563,12 +431,6 @@ function computeNodeIdOf(eventId: string): string {
   return `${COMPUTE_NODE_ID_PREFIX}${eventId}`;
 }
 
-/**
- * Moment layer prefixes (`wt-scene:` / `wt-beat:`) — the Moment nodes reuse
- * the Work Timeline node components + `WorkTimelineNodeData` carrier, so the
- * ids stay namespaced the same way (stable across refetches, no collision
- * with `entity:` / `compute:` World Timeline ids).
- */
 const MOMENT_SCENE_NODE_ID_PREFIX = 'wt-scene:';
 const MOMENT_BEAT_NODE_ID_PREFIX = 'wt-beat:';
 
@@ -581,10 +443,6 @@ function momentBeatNodeId(beatId: string): string {
 }
 
 /**
- * ONLY `body.attributes.occurred_at` (free-form string) is honored — never
- * `updated_at`, `canonical_name`, `version`, or `sequence_no`. Non-string
- * values and empty strings are treated as absent.
- *
  * Type narrowing: `WorldKbEntityProjection.body` is `Record<string, unknown>`;
  * `body.attributes` is therefore `unknown`. We narrow via `typeof object`
  * before reading `occurred_at` so the access is type-safe.
@@ -597,10 +455,6 @@ function occurredAtOf(entity: WorldKbEntityProjection): string | undefined {
 }
 
 /**
- * + §8 (`era_id`, `start_hint`, `end_hint`, `world_summary` — all freeform).
- * Non-string values and empty strings are treated as absent. Used by the
- * Brief projection to populate the era card + Brief-era inspector (Task 4).
- *
  * Type narrowing mirrors `occurredAtOf` — `body.attributes` is `unknown`
  * until narrowed.
  */
@@ -626,8 +480,6 @@ function extractEraAttributes(entity: WorldKbEntityProjection): {
 }
 
 /**
- * Timeline nodes + edges for the given layer.
- *
  * V1.123 P1 T2 — the layer parameter selects the active projection:
  *   - `'narrative'` (default) — V1.122 event timeline + Context clusters.
  *   - `'brief'`               — V1.123 Brief-era sweep (era markers only).
@@ -682,11 +534,6 @@ export function projectTimelineGraph(
     return projectBriefLayer(graph);
   }
   if (layer === 'moment') {
-    // carrier (`WorkTimelineNodeData` is structurally narrower than the
-    // adapter's `TimelineNodeData` base). Cast is deliberate cross-surface
-    // reuse — same carrier + same node components as the Work Timeline
-    // Moment layer (V1.123 layer-feel §2.4); see `projectMomentLayer`.
-    //
     // V1.200 DR-26 — the World is identified by the orchestrator's supplied
     // `worldId` (never by the first KB entity, which an empty KB graph does
     // not have); the carrier `fixture` is the composed bound-Work payload.
@@ -740,8 +587,6 @@ export function projectBriefLayer(graph: TimelineGraph): {
     (e) => e.block_type === 'era',
   );
 
-  // `body.attributes.start_hint`. Mirrors the V1.122 dated/undated event
-  // split so the Brief sweep reads as "earliest era on the left".
   const datedEras: Array<{
     entity: WorldKbEntityProjection;
     startHint: string;
@@ -758,7 +603,6 @@ export function projectBriefLayer(graph: TimelineGraph): {
   datedEras.sort((a, b) => {
     if (a.startHint < b.startHint) return -1;
     if (a.startHint > b.startHint) return 1;
-    // deterministic across refetches.
     return a.entity.key_block_id.localeCompare(b.entity.key_block_id);
   });
 
@@ -773,8 +617,6 @@ export function projectBriefLayer(graph: TimelineGraph): {
     });
   });
 
-  // continuing the X spread from the rightmost dated era — same convention
-  // as the V1.122 undated event cluster.
   const undatedOriginX = ORIGIN_X + datedEras.length * EVENT_STEP_X;
   undatedEras.forEach((entity, i) => {
     nodes.push({
@@ -785,9 +627,6 @@ export function projectBriefLayer(graph: TimelineGraph): {
     });
   });
 
-  // after entity nodes so existing tests that access nodes[0] pass unchanged).
-  // Only added when at least one dated era exists (eras with start_hint).
-  // If all eras are undated, omit the spine — no temporal axis to render.
   if (datedEras.length > 0) {
     const eraBounds: BriefSpineConfig['eraBounds'] = datedEras.map(({ entity, startHint }) => {
       const { eraId, endHint } = extractEraAttributes(entity);
@@ -813,7 +652,6 @@ export function projectBriefLayer(graph: TimelineGraph): {
     });
   }
 
-  // minimal density, era sweep only). Edges belong to the Narrative layer.
   return { nodes, edges: [] };
 }
 
@@ -834,11 +672,6 @@ function eraEntityToTimelineNodeData(
 }
 
 /**
- * with a single V1.123 additive change: era entities (`block_type='era'`)
- * are EXCLUDED from Context clusters per architect §5.2 (Context clusters =
- * entities.filter(e => !['event','era'].includes(e.block_type))). They are
- * Brief-layer-only markers.
- *
  * V1.147 P2 T3 — compute merge: canon compute_result log events are appended
  * to the Narrative projection as `timeline-compute-result` nodes (see
  * `mergeComputeEvents`).
@@ -860,7 +693,6 @@ function projectNarrativeLayer(
     if (e.block_type === 'event') {
       eventEntities.push(e);
     } else if (e.block_type !== 'era') {
-      // clusters on the Narrative layer — they are Brief-layer-only markers.
       contextEntities.push(e);
     }
   }
@@ -878,7 +710,6 @@ function projectNarrativeLayer(
   datedEvents.sort((a, b) => {
     if (a.occurredAt < b.occurredAt) return -1;
     if (a.occurredAt > b.occurredAt) return 1;
-    // deterministic across refetches.
     return a.entity.key_block_id.localeCompare(b.entity.key_block_id);
   });
 
@@ -914,11 +745,6 @@ function projectNarrativeLayer(
     });
   });
 
-  // family) after the authored KB block. Two event families coexist on the
-  // Narrative when-axis: `entity:<kb_id>` (author KB `block_type=event`) and
-  // `compute:<event_id>` (compute log events). The families are disjoint by
-  // storage + node id, so a KB event and a compute log event can never
-  // double-render the same story beat.
   const computeNodes = mergeComputeEvents(
     events ?? [],
     graph,
@@ -928,8 +754,6 @@ function projectNarrativeLayer(
   );
   nodes.push(...computeNodes);
 
-  // appended after entity nodes so existing tests pass unchanged).
-  // Only added when the layer has event data.
   if (datedEvents.length > 0) {
     const tickTimestamps: NarrativeSpineConfig['tickTimestamps'] = datedEvents.map(
       ({ occurredAt }) => occurredAt,
@@ -967,9 +791,6 @@ function entityToTimelineNodeData(
 }
 
 /**
- * `canvas-strategy-surface.md` §3.3.3 V1.156 amendment). Completes the
- * World Timeline 3-layer matrix (Brief + Narrative + Moment).
- *
  * Mirrors the Work Timeline adapter's `projectMomentLayer` EXACTLY — same
  * node-id prefix (`wt-scene:` / `wt-beat:`), same layout metrics, same
  * fixture-slot pattern, same node types (World-Moment feel ≡ Work-Moment
@@ -1015,14 +836,6 @@ interface MomentChapterGroup {
   scenes: SceneFixture[];
 }
 
-/**
- * distinct. Bound-Work ids are `wrk_<uuid>` (nexus-core `works.rs`) and the
- * spine segment is a 60–280px decoration strip, so the label only needs
- * enough of the id to tell two Works apart. Truncating each id independently
- * would give two ids sharing a long prefix (`…0001` / `…0002`) the same
- * visible label, so handles extend together until distinct, falling back to
- * the full id when no shorter prefix separates them.
- */
 function disambiguatedWorkHandles(workIds: string[]): Map<string, string> {
   const bare = workIds.map((id) => (id.startsWith('wrk_') ? id.slice(4) : id));
   const maxLen = Math.max(...bare.map((b) => b.length));
@@ -1043,13 +856,9 @@ function projectMomentLayer(
   edges: Edge<TimelineEdgeData>[];
 } {
   if (!fixture || (fixture.scenes.length === 0 && fixture.beats.length === 0)) {
-    // contract is to emit zero nodes; the orchestrator renders the
-    // empty-state panel when the active layer has no projectable data.
     return { nodes: [], edges: [] };
   }
 
-  // bound Works that each own a chapter 1 must not collapse into one chapter
-  // region (V1.200 DR-26 provenance rule).
   const groupsByKey = new Map<string, MomentChapterGroup>();
   for (const scene of fixture.scenes) {
     const key = `${scene.workId ?? ''}#${scene.chapterId}`;
@@ -1073,7 +882,6 @@ function projectMomentLayer(
   const emittedSceneIds = new Set<string>();
   const nodes: Node<WorkTimelineNodeData>[] = [];
 
-  // region so the chapter→scene→beat hierarchy reads spatially).
   groups.forEach((group, groupIdx) => {
     const sortedScenes = [...group.scenes].sort((a, b) => a.sceneId.localeCompare(b.sceneId));
     sortedScenes.forEach((scene, sceneIdx) => {
@@ -1100,9 +908,6 @@ function projectMomentLayer(
     });
   });
 
-  // column next to / below their scene. Beats whose sceneId is absent
-  // from the emitted scenes are dropped (mirrors V1.108 rf-projection
-  // orphan guard).
   const beatsByScene = new Map<string, BeatFixture[]>();
   for (const beat of fixture.beats) {
     if (!emittedSceneIds.has(beat.sceneId)) continue;
@@ -1111,7 +916,6 @@ function projectMomentLayer(
     else beatsByScene.set(beat.sceneId, [beat]);
   }
 
-  // scene's position.
   const scenePositionById = new Map<string, { x: number; y: number; chapterId: number }>();
   for (const node of nodes) {
     if (node.data.nodeKind === 'scene') {
@@ -1160,11 +964,6 @@ function projectMomentLayer(
   // Mirrors the Work Timeline Moment spine (same rhythm break from the
   // Brief+Narrative time-span convention).
   if (groups.length > 0) {
-    // whenever two bound Works own the same chapter — both segments rendered
-    // an identical "Ch. 1" (qc2 F-7 / qc3 F-002). A chapter number shared by
-    // more than one Work names its owner (handles unique across that
-    // chapter's owners) so the spine reads unambiguously; a Work-unique
-    // chapter keeps the compact label.
     const chapterOwners = new Map<number, string[]>();
     for (const group of groups) {
       if (!group.workId) continue;
@@ -1206,17 +1005,9 @@ function projectMomentLayer(
     });
   }
 
-  // scene is encoded spatially by the vertical stack (layer-feel §2.4).
-  // `realizes_event` light links (beat → Narrative event) are P4 polish.
   return { nodes, edges: [] };
 }
 
-/**
- * (`extensions.compute = { module_id, module_version, run_id, source_kind }`).
- * The T1 route parses `extensions_nexus_json`; P0 Accept stamps
- * `source_kind: "direct_invoke"` (preset-path stamping lands separately).
- * Unknown shapes are treated as absent (no fabricated provenance).
- */
 interface ComputeProvenanceShape {
   module_id?: unknown;
   module_version?: unknown;
@@ -1315,7 +1106,6 @@ export function mergeComputeEvents(
   const mergeable = events.filter(isMergeableComputeEvent);
   if (mergeable.length === 0) return [];
 
-  // never rebuilds it per event (O(entities) once, then O(events) lookups).
   const graphById = new Map(
     (graph.entities ?? []).map((e) => [e.key_block_id, e.canonical_name]),
   );
@@ -1349,8 +1139,6 @@ export function mergeComputeEvents(
     });
   });
 
-  // the KB undated cluster (review F2): `kbUndatedCount` shifts the X base so
-  // the two families never stack on identical coordinates.
   const undatedOriginX =
     computeStartX + dated.length * EVENT_STEP_X + kbUndatedCount * EVENT_STEP_X;
   undated.forEach((event, i) => {
@@ -1448,11 +1236,6 @@ const RELATIONSHIP_KIND_LABELS: Record<string, string> = {
   custom: 'Custom',
 };
 
-/**
- * the World KB helper; inlined here so the Timeline adapter stays
- * dependency-free of the World KB relationship module (T2 ships no new
- * public dependency on a sibling surface — projection reuses DTOs only).
- */
 function relationshipLabel(rel: WorldKbRelationshipProjection): string {
   if (rel.relation_type === 'custom' && rel.custom_label) return rel.custom_label;
   return RELATIONSHIP_KIND_LABELS[rel.relation_type] ?? rel.relation_type;
@@ -1538,11 +1321,6 @@ export function summarizeTimelineGraph(
 
   let summary = `Timeline: ${parts.join(', ')}.`;
 
-  // adapter performs no date parsing in MVP, so every rendered event
-  // ordering is inferred. The disclaimer is present whenever event entities
-  // are rendered (block_type=event), and omitted only for zero-event graphs
-  // (which surface their own honest empty-state copy via <EmptyState> per
-  // §7).
   if (events.length > 0) {
     summary = `${summary} ${ORDERING_DISCLAIMER}`;
   }
@@ -1551,9 +1329,6 @@ export function summarizeTimelineGraph(
 }
 
 /**
- * supplied context ref (V1.114 §3.3.1 "stable factory that reads from a
- * mutable `React.RefObject` context").
- *
  * The returned object MUST stay referentially stable across renders —
  * `useCanvasSurface` memoises on `adapter` and would otherwise re-project on
  * every orchestrator state change. The factory is therefore called once per
@@ -1621,25 +1396,10 @@ export function createTimelineCanvasAdapter(
     surfaceKind: 'timeline',
     nodeTypes: {
       ...timelineNodeTypes,
-      // components + `WorkTimelineNodeData` carrier (no new node component
-      // family per V1.123 layer-feel §2.4). Only the two Moment types are
-      // picked from the Work registry — the Work Narrative event node is NOT
-      // registered here (the World Narrative layer keeps its own
-      // `timeline-event` node).
       'work-timeline-moment-scene': workTimelineNodeTypes['work-timeline-moment-scene'],
       'work-timeline-moment-beat': workTimelineNodeTypes['work-timeline-moment-beat'],
     },
-    // edge components. The default React Flow renderer surfaces the label +
-    // stroke styling emitted by `deriveTimelineEdges`; the architect lock
-    // forbids ForeshadowEdge / RealizesEdge / ForkFromEdge (Work-outline
-    // kinds).
     edgeTypes: undefined,
-    // carries wider `rankSep` + smaller `nodeSep` than the V1.122 Narrative
-    // default so an explicit `relayout()` produces the horizontal era sweep
-    // feel (layer-feel §2.2); Moment prefers a vertical scene-stack (TB
-    // direction, tight density — mirrors the Work Timeline Moment layer).
-    // The supplied positions win on first open (`hasSuppliedPositions:
-    // true`); these options only kick in on explicit relayout.
     layoutOptions:
       activeLayer === 'brief'
         ? BRIEF_LAYOUT_OPTIONS
@@ -1648,12 +1408,6 @@ export function createTimelineCanvasAdapter(
           : NARRATIVE_LAYOUT_OPTIONS,
 
     projectGraph(graph) {
-      // for V1.122 backward compat (the V1.122 regression suite verifies
-      // event timeline projection unchanged). Task 3 passes `'brief'` when
-      // the World entry has era data; the canvas component rebuilds the
-      // adapter via `useMemo([activeLayer], ...)` so layer swap triggers a
-      // fresh projection through `useCanvasSurface`.
-      //
       // V1.147 P2 T3 — the captured `timelineEvents` merge into the Narrative
       // projection; Brief ignores them. `computeModuleNames` resolves module
       // display names from the registry map (module_id fallback).
@@ -1677,44 +1431,22 @@ export function createTimelineCanvasAdapter(
         timelineEvents,
         computeModuleNames,
         sceneBeatFixture ?? ctxRef.current.sceneBeatFixture,
-        // never from the first KB entity (empty KB graphs have none).
         ctxRef.current.worldId,
       );
     },
 
     adaptConflict(_error) {
-      // null is consistent with the V1.74 World KB adapter: the Strategy-
-      // specific `ConflictModalProps` shape does not fit world-kb-flavored
-      // conflicts, so the orchestrator renders `WorldKbEntityConflictModal`
-      // directly from the structured info.
       return null;
     },
 
     renderInspector(node) {
-      // inspector that surfaces the era markers (`eraId`, `startHint`,
-      // `endHint`, `worldSummary`) prominently. The generic Narrative
-      // inspector (title + body JSON editor) remains the path for event
-      // + context nodes (V1.122 regression). The dispatch discriminates
-      // on `layoutHint` rather than `node.type` so the inspector stays
-      // decoupled from the React Flow node-type registry.
       const data = node.data as TimelineNodeData;
       if (data.layoutHint === 'brief') {
         return <TimelineBriefEraInspector node={node} ctxRef={ctxRef} />;
       }
-      // version + provenance + digests + Open Run). Compute nodes MUST NOT
-      // reach the KB inspector: they are log events, not KB entities, and
-      // the `kb.patch_entity` write path is KB-only.
       if (data.layoutHint === 'compute') {
         return <TimelineComputeInspector node={node} ctxRef={ctxRef} />;
       }
-      // `WorkTimelineNodeData` carrier (`nodeKind: 'scene' | 'beat'`, no
-      // `layoutHint`, no `key_block_id`). They MUST NOT reach the generic
-      // KB `TimelineInspector` below: its Save fires `kb.patch_entity` from
-      // `node.data.key_block_id` — absent on Moment nodes → `entity_id:
-      // undefined`, a guaranteed-failing write request on a read/projection
-      // layer (PD-3 violation). Dispatch to the read-only Moment inspector
-      // instead (layer-feel parity with Work-Moment — both selectable, both
-      // read-only inspector).
       const momentData = node.data as unknown as WorkTimelineNodeData;
       if (momentData.nodeKind === 'scene' || momentData.nodeKind === 'beat') {
         return renderTimelineMomentInspector(
@@ -1729,17 +1461,9 @@ export function createTimelineCanvasAdapter(
     },
 
     summarizeGraph(graph) {
-      // count when events are present.
       return summarizeTimelineGraph(graph, timelineEvents);
      },
 
-    // amendment). Builds the era forest from the SAME graph read the Brief
-    // projection consumes (`entities[block_type=era]` + `relationships`
-    // parent_era edges — Task 1) and renders `<BriefTimeBands />`, which
-    // supersedes the V1.123 flat era sweep on the Brief layer. Selection
-    // routes through the existing ctxRef `onSelectNode` hand-off (T5), so a
-    // band click selects the matching React Flow node and opens the era
-    // inspector — selection-only, no writes (architect-locked §4.2).
     renderBriefTimeBands(graph) {
       const tree = buildEraTree(
         graph.entities ?? [],
@@ -1756,9 +1480,6 @@ export function createTimelineCanvasAdapter(
 }
 
 /**
- * the orchestrator-owned ctxRef at render time. Mirrors the V1.114 World KB
- * `WorldKbAltViewWrapper` recipe.
- *
  * Selection hand-off: row click / Enter invokes `ctxRef.current.onSelectNode`,
  * which the orchestrator wires to a React Flow node selection. The inspector
  * that opens as a result owns the `kb.patch_entity` write path — the alt-view
@@ -1771,14 +1492,6 @@ function TimelineAltViewWrapper({
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>;
 }) {
   const ctx = ctxRef.current;
-  // (`canonical_name` / `block_type` / `occurred_at` / anchor count /
-  // `updated_at` columns). Moment scene/beat nodes (the
-  // `WorkTimelineNodeData` carrier) and the decoration spine carry none of
-  // those fields; passing them through rendered blank rows and crashed the
-  // Kind sort (`block_type` undefined → `localeCompare` TypeError). Filter
-  // to KB-entity rows (nodes that carry a `block_type`) so the table stays
-  // functional for Brief/Narrative and honest on Moment (no non-entity
-  // rows, no row-click into the Moment inspector from the table).
   const entityNodes = (ctx.nodes ?? []).filter(
     (n) => typeof n.data.block_type === 'string',
   );
@@ -1791,10 +1504,6 @@ function TimelineAltViewWrapper({
   );
 }
 
-/**
- * returns under `world_kb_conflict` (HTTP 409). Mirrors the V1.73 contract
- * reused verbatim (no Timeline-specific DTO).
- */
 interface WorldKbConflictDetailsShape {
   current_version?: number;
   entity_id?: string;
@@ -1802,16 +1511,10 @@ interface WorldKbConflictDetailsShape {
   recovery_hint?: string;
 }
 
-/**
- * returns under `world_kb_validation_failed` (HTTP 422).
- */
 interface WorldKbValidationDetailsShape {
   validation_summary?: { errors?: string[] };
 }
 
-/**
- * reused verbatim — no new code is introduced.
- */
 type WorldKbErrorCode =
   | 'world_kb_conflict'
   | 'world_kb_validation_failed';
@@ -1822,10 +1525,6 @@ interface NexusClientErrorLike {
   details?: unknown;
 }
 
-/**
- * loose (no `instanceof` coupling) so the extractor is pure and trivially
- * testable against plain object fixtures.
- */
 function asNexusClientError(error: unknown): NexusClientErrorLike | null {
   if (typeof error !== 'object' || error === null) return null;
   const e = error as Record<string, unknown>;

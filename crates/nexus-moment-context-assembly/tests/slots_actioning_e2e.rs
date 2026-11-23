@@ -86,7 +86,6 @@ async fn seed_slot_fixture(kb: &InMemoryKbStore) {
             "kb_uk",
             serde_json::json!({"constant": true, "priority": 10, "position_hint": "sideways"}),
         ),
-        // priority (V1.149 spec §4 within-slot rule).
         (
             "LoreMidC",
             "kb_m3",

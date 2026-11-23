@@ -34,7 +34,6 @@ pub enum SyncError {
     #[error("outbox max retries exceeded: {id} (retried {retries} times)")]
     OutboxMaxRetriesExceeded { id: String, retries: u64 },
 
-    /// representable domain; fail-closed boundary rejection.
     #[error("invalid input: {0}")]
     InvalidInput(String),
 

@@ -375,7 +375,6 @@ impl Outbox {
         let next_retry_at = match retry_after {
             RetryAfterPolicy::AtTime(t) => Some(t.to_rfc3339()),
             RetryAfterPolicy::AfterSeconds(secs) => {
-                // fail closed rather than wrap negative on the i64 timeline.
                 let secs_i64 = i64::try_from(*secs).map_err(|_| {
                     SyncError::InvalidInput(format!(
                         "retry_after AfterSeconds({secs}) exceeds the i64 timeline"
@@ -449,7 +448,6 @@ impl Outbox {
         .fetch_one(&mut *tx)
         .await?;
 
-        // closed (never become a huge u64).
         let retry_count = u64::try_from(retry_count_row).map_err(|_| {
             SyncError::InvalidInput(format!(
                 "outbox retry_count is negative for {outbox_entry_id}: {retry_count_row}"
@@ -478,8 +476,6 @@ impl Outbox {
 
         let delay_secs =
             BASE_RETRY_DELAY_SECS.saturating_mul(2u64.saturating_pow(retry_count.min(30) as u32));
-        // cap, but a corrupted/externally-injected value must fail closed
-        // rather than wrap negative.
         let delay_secs_i64 = i64::try_from(delay_secs).map_err(|_| {
             SyncError::InvalidInput(format!(
                 "outbox backoff delay exceeds the i64 timeline: {delay_secs}"
@@ -602,7 +598,6 @@ impl Outbox {
     /// page must be bounded), and the specific error type if the operation
     /// fails.
     pub async fn list_page(&self, limit: i64) -> SyncResult<Vec<OutboxEntry>> {
-        // unbounded, so non-positive limits are rejected up front.
         if limit <= 0 {
             return Err(SyncError::InvalidInput(format!(
                 "outbox page limit must be positive: {limit}"
@@ -973,7 +968,6 @@ mod tests {
         let outbox = Outbox::new_in_memory().await.expect("create outbox");
         let cmd = make_test_command();
         let entry_id = outbox.append(&cmd).await.expect("append");
-        // negative on the chrono timeline.
         let err = outbox
             .mark_conflicted_with_retry(
                 &entry_id,
@@ -1042,7 +1036,6 @@ mod tests {
         assert_eq!(entry.delivery_state, DeliveryState::Ready);
         assert_eq!(entry.retry_count, Some(0));
 
-        // instantly exceeding max retries again.
         outbox
             .mark_failed(&entry_id, "persistent error")
             .await
@@ -1057,7 +1050,6 @@ mod tests {
         let cmd = make_test_command();
         outbox.append(&cmd).await.expect("append");
 
-        // guarantee a bounded page by rejecting non-positive limits.
         for limit in [0, -1, -100] {
             assert!(
                 matches!(
@@ -1574,8 +1566,6 @@ mod tests {
         let entry_id = outbox.append(&cmd).await.expect("append");
 
         outbox.mark_sent(&entry_id).await.expect("mark_sent");
-
-        // For this test, we verify that the state remains consistent after a failed operation
 
         let result = outbox.mark_sent(&entry_id).await;
         assert!(result.is_err());

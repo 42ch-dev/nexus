@@ -263,8 +263,6 @@ async fn pack_import_notes_are_not_printed_before_the_seam_settles() {
     let fixture = DirectFixture::new().await;
     let (world_id, _) = seed_world_and_entity(fixture.home.path()).await;
     let lorebook = fixture.home.path().join("lorebook.json");
-    // a Warning note, so the run has output of its own before it reaches the
-    // core.
     std::fs::write(
         &lorebook,
         serde_json::json!({
@@ -495,7 +493,6 @@ fn anonymous_selection_is_refused_at_every_kb_entrance() {
             "--title",
             "Absent",
         ],
-        // core route, so both owe the same admission.
         &["creator", "world", "kb", "list", "wld_absent", "--json"],
         &[
             "creator",
@@ -594,9 +591,6 @@ async fn unreadable_workspace_db_is_not_reported_as_an_unset_selection() {
         db_path.display()
     );
 
-    // metadata lookup fail with `ELOOP` — a `NotFound`-free metadata error, and
-    // one that does not depend on the test's uid (unlike a permission-only
-    // probe, which root bypasses).
     std::fs::remove_file(&db_path).expect("clear the materialized db");
     std::os::unix::fs::symlink(&db_path, &db_path).expect("self-referential db entry");
     assert!(

@@ -11,7 +11,6 @@ import type { ReactNode } from 'react';
 
 import { renderInApp } from '@/test/test-providers';
 
-// re-exported from the real module so the component's type imports resolve.
 vi.mock('@xyflow/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@xyflow/react')>();
   return {
@@ -99,9 +98,6 @@ describe('OutlineSceneNode', () => {
     expect(container.textContent).toContain('Completed');
   });
 
-  // tint must use the hue's `-1000` AA step, not the raw `*-700` status color
-  // (fails AA on light tints). Same recipe as the chapter pill in
-  // outline-nodes.tsx.
   it('renders the status chip text on the hue-1000 AA step', () => {
     const { container } = renderInApp(
       <OutlineSceneNode {...sceneProps({ title: 'S1', status: 'drafted' })} />,
@@ -163,5 +159,4 @@ describe('outlineNodeTypes registration', () => {
   });
 });
 
-// stubs Handle to null; Position is used in the fixture props).
 void Handle;

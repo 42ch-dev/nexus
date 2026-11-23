@@ -231,7 +231,6 @@ async fn compute_distinct_keyword_count(
             }
         }
         if distinct.len() >= DISTINCT_KEYWORD_THRESHOLD {
-            // decoding as soon as we have 20 distinct keywords.
             return Ok(DISTINCT_KEYWORD_THRESHOLD);
         }
     }
@@ -416,7 +415,6 @@ pub async fn soul_narrative_fragment_stats(
     )
     .await?;
 
-    // freshly-persisted row (G3: fingerprint cache hit on next poll).
     let cached = if cached.is_some() {
         cached
     } else {

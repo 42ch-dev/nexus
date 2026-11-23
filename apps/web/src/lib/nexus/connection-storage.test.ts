@@ -113,8 +113,6 @@ describe('WebConnectionStorage', () => {
   });
 
   it('clears an active remote entry with a missing API key (never loads keyless remote mode)', async () => {
-    // web backend must never load an active remote record without the actual
-    // key — that would build an unauthenticated BrowserClient.
     window.localStorage.setItem(
       'nexus-connection-config-v1',
       JSON.stringify({ endpointUrl: 'https://remote.example:8420', active: true, hasApiKey: true }),

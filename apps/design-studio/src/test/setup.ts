@@ -10,12 +10,6 @@ import { beforeEach } from 'vitest';
 
 import { i18n } from '@/lib/i18n/config';
 
-/**
- * `vi.spyOn` rejects spying on the undefined property the jsdom environment
- * leaves behind (the gallery fixtures spy on it). Install a no-op polyfill once
- * so those spies work and guarded `window.matchMedia(...)` reads resolve to
- * `matches: false`. Guarded so a real (browser) implementation wins.
- */
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -34,9 +28,6 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
   });
 }
 
-/**
- * jsdom's implementation. ThemeProvider tests need a working store.
- */
 function ensureLocalStorage() {
   if (typeof window === 'undefined') return;
   try {
@@ -70,10 +61,6 @@ function ensureLocalStorage() {
 
 ensureLocalStorage();
 
-/**
- * English before each test so assertions against the English source catalog are
- * stable regardless of localStorage/system locale state.
- */
 beforeEach(() => {
   i18n.changeLanguage('en');
 });

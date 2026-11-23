@@ -364,16 +364,6 @@ impl KnowledgeEntryRecord {
         self.owner.world_id()
     }
 
-    // to spoke-operations (`confirm` / `deprecate` / `merge_into` / `delete`)
-    // moved to `nexus_spoke_adapter::conversion::KnowledgeEntryRecordSpokeExt`. They
-    // could not stay here because they call spoke-operations through the
-    // adapter, and keeping them would preserve the `nexus-knowledge →
-    // nexus-spoke-adapter` dependency edge (spec §8 dep-graph reversal). The
-    // `KnowledgeEntryRecord ↔ spoke KnowledgeEntry` conversion seam likewise moved to
-    // `nexus_spoke_adapter::conversion` (free functions `knowledge_record_to_spoke` /
-    // `spoke_to_knowledge_record` — orphan rule forbids the `From` impls here). This
-    // crate now owns only the pure domain aggregate + its non-spoke methods.
-
     /// Check if this KB is in confirmed state.
     #[must_use]
     pub fn is_confirmed(&self) -> bool {
@@ -466,11 +456,6 @@ impl KnowledgeEntryRecord {
 }
 
 // ── Native holder governance (v1.191 P1 T2, durable §§1/3) ────────────────
-//
-// validation of the two governance columns, and the raw-input gate that keeps
-// legacy/reserved keys from being silently dropped by deserialization.
-// Admission (`nexus-core`) resolves *which* holder a private audience names;
-// this module owns only the closed input contract and the column shape.
 
 /// The one disclosure value the core knows (`owner-private`).
 ///
@@ -768,14 +753,6 @@ pub fn reject_reserved_authoring_keys(raw: &serde_json::Value) -> Result<(), Res
 }
 
 // ── Mental-layer dialect raw types (V1.164 P2 T1, l5-mind) ────────────────
-//
-// and `modules.belief` (proposition array) dialects, following the
-// `ActivationConfigRaw` precedent (`nexus-spoke-adapter/src/adapter/
-// activation.rs`): serde types over the handbook shape where the
-// authoritative source is `modules_json` JSON — parse what the handbook
-// names, leave the rest in the raw JSON. Handbook:
-// spoke `domain-profile-mental-state.md`; field-vocabulary copy frozen by the
-// V1.164 mental-layer product locks (local record).
 //
 // Handbook field names are LOCKED (TL-5 / PD-5): `holder` / `access` /
 // `source` — never the OmniToM paper aliases `actor` / `knowledge_access` /
@@ -1084,14 +1061,8 @@ pub fn validate_belief_module<'a>(value: impl Into<AuthoredModuleValue<'a>>) -> 
             ));
             continue;
         };
-        // alone through the handbook raw type, so member names and their
-        // serde reasons come from `BeliefPropositionRaw` itself. An unknown
-        // key is ignored by serde (PD-13) and never fails this probe; only a
-        // mistyped handbook member does.
         let mut mistyped = false;
         for (member, member_value) in members {
-            // generic map deserializer, so no per-member object is built and an
-            // unknown key stays ignored (PD-13).
             let probe = MapDeserializer::new(std::iter::once((member.as_str(), member_value)));
             if let Err(error) = BeliefPropositionRaw::deserialize(probe) {
                 errors.push(module_error(
@@ -1502,8 +1473,6 @@ mod tests {
 
     #[test]
     fn test_paper_alias_row_is_not_produced_and_does_not_round_trip() {
-        // `actor` / `knowledge_access` / `mental_source` is not produced by
-        // the parse type and does not round-trip as-is.
         let alias_row = serde_json::json!({
             "actor": "kb_bo",
             "proposition": "The marble is in the box",
@@ -1516,7 +1485,6 @@ mod tests {
         assert_eq!(parsed.holder, None);
         assert_eq!(parsed.access, None);
         assert_eq!(parsed.source, None);
-        // (the typed form is handbook-names only).
         let emitted = serde_json::to_value(&parsed).unwrap();
         assert_ne!(emitted, alias_row);
         assert!(emitted.get("actor").is_none());
@@ -1634,7 +1602,6 @@ mod tests {
 
     #[test]
     fn validate_belief_module_pins_field_mapped_prefix() {
-        // legal row ahead of it reports nothing.
         assert_eq!(
             validate_belief_module(&serde_json::json!([
                 {"holder": "kb_ana", "proposition": "raining", "order": 1, "truth": "True"},
@@ -1710,7 +1677,6 @@ mod tests {
 
     #[test]
     fn validate_observation_module_shape_rules() {
-        // absent key and an unknown inner key.
         assert_eq!(
             validate_observation_module(&serde_json::json!({"observers": []})),
             [] as [std::string::String; 0]
@@ -1759,7 +1725,6 @@ mod tests {
     #[test]
     fn belief_member_probe_does_not_materialise_a_singleton_object() {
         const MEMBER: &str = "unknown_belief_member";
-        // unknown leaf objects, each leaf its own allocation.
         let payload = {
             let mut member_payload = serde_json::Map::new();
             for key in 0..64 {
@@ -1784,7 +1749,6 @@ mod tests {
 
         let _ = allocation_counter::measure(|| {});
 
-        // deep copy of the member value.
         let singleton_copy = allocation_counter::measure(|| {
             let singleton = serde_json::Value::Object(
                 std::iter::once((MEMBER.to_string(), black_box(&payload).clone())).collect(),
@@ -1795,9 +1759,6 @@ mod tests {
             black_box(validate_belief_module(black_box(&module)));
         });
 
-        // instead of against absolute counts, so allocator/profile drift that
-        // moves both readings together does not flake while a copy
-        // re-appearing on the measured path still fails.
         assert!(
             singleton_copy.count_total > measured.count_total * COPY_MARGIN,
             "the belief-member probe copied the member payload: {measured:?} vs singleton copy {singleton_copy:?}"

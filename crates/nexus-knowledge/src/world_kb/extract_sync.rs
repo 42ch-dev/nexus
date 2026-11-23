@@ -152,7 +152,6 @@ where
 {
     let mut diff = compute_kb_diff(old_rows, new_extracted);
 
-    // build the full KnowledgeEntryRecord (compute_kb_diff only carries ids/names).
     let mut applied: Vec<KbSyncUpdate> = Vec::with_capacity(diff.updated.len());
     for update in diff.updated.drain(..) {
         let Some(old_kb) = old_rows.iter().find(|kb| kb.entry_id == update.entry_id) else {
@@ -168,7 +167,6 @@ where
         };
 
         let mut refreshed = old_kb.clone();
-        // owner to the world (v1.184 P1 — owner is otherwise immutable).
         refreshed.owner = KnowledgeOwnerRef::world(world_id.to_string());
         refreshed.body = Some(new_body);
         refreshed.updated_at = Some(chrono::Utc::now().to_rfc3339());

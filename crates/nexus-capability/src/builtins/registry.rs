@@ -223,8 +223,6 @@ fn is_blocked_ip(ip: &IpAddr) -> bool {
             v4.is_private()
                 || v4.is_loopback()
                 || v4.is_link_local()
-                // `is_link_local()` already covers this on most platforms,
-                // but we double-check for clarity.
                 || v4.octets()[0] == 169 && v4.octets()[1] == 254
         }
         IpAddr::V6(v6) => {
@@ -368,20 +366,11 @@ impl Capability for RegistryRefresh {
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
         REFRESH_TOTAL.fetch_add(1, Ordering::Relaxed);
 
-        // parameter was removed from the contract — it was a documented
-        // no-op (the synthetic path is always fresh; the CDN path always
-        // fetches) but the help text advertised it as bypassing cache
-        // freshness, which was misleading. The input is still parsed so
-        // callers that historically sent `{"force": ...}` do not break
-        // (serde ignores unknown fields by default).
         let _parsed: RegistryRefreshInput = serde_json::from_value(input)
             .map_err(|e| CapabilityError::InputInvalid(format!("registry.refresh input: {e}")))?;
 
-        // invocation (not per retry) so the field is deterministic across the
-        // retry lifecycle of a single refresh call.
         let now = Utc::now().to_rfc3339();
 
-        // fetch → response phases.
         let span = tracing::info_span!(
             "registry_refresh",
             cdn_configured = self.cdn_config.is_some(),
@@ -429,8 +418,6 @@ impl Capability for RegistryRefresh {
                         retry_count: cdn.max_retries,
                         fallback_reason,
                     };
-                    // (the capability returned valid data) but the failure counter
-                    // captures the CDN miss.
                     REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
                     REFRESH_FAILURE_TOTAL.fetch_add(1, Ordering::Relaxed);
                     return serde_json::to_value(output)
@@ -439,7 +426,6 @@ impl Capability for RegistryRefresh {
             }
         }
 
-        // effectively a cache hit (no network round-trip).
         tracing::debug!("serving embedded synthetic snapshot");
         REFRESH_CACHE_HIT_TOTAL.fetch_add(1, Ordering::Relaxed);
         REFRESH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
@@ -501,7 +487,6 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
         }
     }
 
-    // connection pooling + keep-alive. Per-request timeout is applied below.
     let timeout = Duration::from_millis(cdn.timeout_ms);
     let client = SHARED_CDN_CLIENT.clone();
 
@@ -509,8 +494,6 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
 
     for attempt in 0..=cdn.max_retries {
         if attempt > 0 {
-            // uniform in [0, min(8 s, 500 ms · 2^attempt)). No additive base
-            // and no second cap — the helper is the single authority.
             let backoff_ms = retry_jitter_ms(attempt);
             tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
         }
@@ -536,7 +519,6 @@ async fn fetch_from_cdn(cdn: &CdnConfig) -> Result<(u32, u32), CdnError> {
                         },
                         Err(e) => {
                             last_err = e;
-                            // serving a too-large payload, retrying won't help.
                             if matches!(last_err, CdnError::BodyTooLarge) {
                                 break;
                             }
@@ -659,8 +641,6 @@ mod tests {
     async fn registry_refresh_synthetic_deterministic() {
         let cap = RegistryRefresh::new();
 
-        // capability_count, source, and snapshot_version. generated_at will
-        // differ (timestamp), but the rest must be identical.
         let out1 = cap.run(serde_json::json!({"force": false})).await.unwrap();
         let out2 = cap.run(serde_json::json!({"force": false})).await.unwrap();
 
@@ -727,7 +707,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn network_mode_falls_back_on_bad_url() {
-        // by the scheme guard or IP block, and fall back to synthetic.
         let config = CdnConfig {
             url: "https://127.0.0.1/nonexistent".to_string(),
             timeout_ms: 1_000,
@@ -810,7 +789,6 @@ mod tests {
     fn retry_jitter_samples_stay_within_attempt_band() {
         assert_eq!(retry_jitter_ms_with(1, &mut || 0), 0);
         assert_eq!(retry_jitter_ms_with(3, &mut || 0), 0);
-        // for power-of-two bounds, so pin the true residue).
         assert_eq!(
             retry_jitter_ms_with(1, &mut || u64::MAX),
             u64::MAX % expected_jitter_bound(1)
@@ -819,7 +797,6 @@ mod tests {
             retry_jitter_ms_with(3, &mut || u64::MAX),
             u64::MAX % expected_jitter_bound(3)
         );
-        // escaping it.
         let mut s = 0u64;
         let mut stepped = || {
             s = s.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -843,12 +820,6 @@ mod tests {
                 assert!(j < bound, "jitter {j} ms escapes band [0, {bound})");
             }
         }
-        // every containment assert — the samples must vary. Checked at
-        // attempt 5 (bound 8000): on hosts with coarse clock granularity
-        // (µs-scale ticks quantize subsec_nanos to multiples of 1000, which
-        // collapse bound ≤ 4000 samples without being dead), consecutive
-        // 1000 ns ticks still change `nanos % 8000`; only a constant clock
-        // yields a single distinct value.
         let mut distinct: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for _ in 0..1000 {
             distinct.insert(retry_jitter_ms(5));
@@ -863,8 +834,6 @@ mod tests {
 
     #[test]
     fn retry_jitter_cap_binds_from_attempt_five() {
-        // under RETRY_CAP_MS regardless of entropy.
-        // Max entropy lands at the top of the capped band (exact residue).
         assert_eq!(
             retry_jitter_ms_with(5, &mut || u64::MAX),
             u64::MAX % RETRY_CAP_MS
@@ -881,10 +850,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn generated_at_is_set_once_per_invocation() {
-        // so a single invocation yields exactly one timestamp value. We
-        // verify the field is present and well-formed; retry-path determinism
-        // is structurally guaranteed because `now` is bound before the
-        // fetch/retry loop.
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();
         let ts = out["generatedAt"].as_str().expect("generatedAt present");
@@ -925,7 +890,6 @@ mod tests {
 
     #[test]
     fn help_text_documents_https_and_public_requirement() {
-        // removed from the help text (it was a documented no-op).
         let help = registry_refresh_help_text();
         assert!(help.contains("https://"), "help must mention HTTPS scheme");
         assert!(
@@ -955,11 +919,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_rejects_unknown_field_silently() {
-        // schema, an unknown field like `unknownField` is silently ignored
-        // (serde default). The capability still runs and serves synthetic.
-        // This documents the current contract: extra fields are ignored,
-        // the schema's `additionalProperties:false` is advisory at the
-        // Rust deserialization layer (wire validation happens upstream).
         let cap = RegistryRefresh::new();
         let out = cap
             .run(serde_json::json!({"unknownField": "x"}))
@@ -971,9 +930,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_tolerates_historical_force_field() {
-        // `{"force": true}` (the removed parameter) must not break — serde
-        // ignores unknown fields by default. This is the backward-compat
-        // guarantee after the force parameter was removed from the contract.
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({"force": true})).await.unwrap();
         assert_eq!(out["source"], "synthetic");

@@ -81,9 +81,6 @@ async fn all_record_ids(actor: &Actor<'_>) -> Vec<String> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// C-020: a capture receipt names its candidate and never the captured text;
 /// the candidate is visible via `candidates.list` and excluded from recall.
 async fn capture_receipt_is_content_free(matrix: Matrix) {
@@ -280,7 +277,6 @@ async fn midcommit_crash_resolves_uncertain_receipt(matrix: Matrix) {
         "the rolled-back attempt left no pending receipt"
     );
 
-    // not, so the original receipt and effect are durable before the restart.
     matrix.arm_lost_response();
     let original = capture_body("k-c024-original", TEXT, &shared_scope());
     let lost = matrix.admin().capture(original.clone()).await;
@@ -388,7 +384,6 @@ async fn foreign_capture_persists_nothing(matrix: &Matrix, resources: &mut Owned
         "the refused foreign capture created no durable receipt for its key"
     );
 
-    // commits and owns exactly the one new durable receipt and candidate.
     let peer_id = matrix.peer_principal().principal_id.clone();
     admin
         .grant(grant_body("capture", &peer_id, "k-c025-grant"))
@@ -817,9 +812,6 @@ async fn c_029_reconnect_preserves_principal_and_receipt_remote() {
     reconnect_preserves_principal_and_receipt(Matrix::remote().await).await;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-
 /// C-030: candidate pages are bounded, complete and equal to the authorized set;
 /// a real inaccessible candidate and a missing id are indistinguishable.
 async fn candidate_pages_are_bounded_and_scoped(matrix: Matrix) {
@@ -890,7 +882,6 @@ async fn candidate_pages_are_bounded_and_scoped(matrix: Matrix) {
         "the scoped page is exactly the seeded authorized candidate in its context"
     );
 
-    // the same NOT_FOUND-class refusal (C-102 anti-oracle).
     let inaccessible = matrix.peer().get_candidate(&seeded[1]).await;
     let missing = matrix.peer().get_candidate("cnd_never_existed").await;
     assert_eq!(error_code(&inaccessible), "NOT_FOUND", "{inaccessible}");
@@ -931,8 +922,6 @@ async fn review_consumes_and_creates_atomically(matrix: Matrix) {
         json!(TEXT),
         "a pending candidate still carries its proposed body: {captured_shell}"
     );
-    // which the public pending projection exposes. Compute it before the body is
-    // scrubbed; the consumed shell must retain exactly this value.
     let expected_digest =
         match spoke_operations::jcs_sha256_hex(&captured_shell["candidate"]["proposed"]["content"])
         {
@@ -1069,8 +1058,6 @@ async fn changed_target_under_a_retained_key_is_a_conflict(matrix: Matrix) {
         .await;
     assert!(is_committed(&dismissed), "{dismissed}");
 
-    // must answer with the digest conflict even though the named candidate
-    // row does not exist.
     let changed = admin
         .dismiss_candidate(dismiss_body("cand_i305_absent", 1, "k-i305-dismiss"))
         .await;
@@ -1099,7 +1086,6 @@ async fn i305_changed_target_under_a_retained_key_is_a_conflict_remote() {
 async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
     bootstrap(&matrix, &[]).await;
     let peer_id = matrix.peer_principal().principal_id.clone();
-    // capture scope (the single-grant rule).
     let granted = matrix
         .admin()
         .grant(json!({
@@ -1110,10 +1096,6 @@ async fn concurrent_review_has_exactly_one_effect(matrix: Matrix) {
         .await;
     assert!(is_committed(&granted), "{granted}");
 
-    // kept ALIVE across each fence whenever the case is an observation
-    // cancellation: with a live release sender, a stale arm would park the fence
-    // until the arm bound, so a prompt refusal is causal. A dropped handle's
-    // closed sender would proceed anyway and is therefore never used as proof.
     stage_remote_target_arm_lifecycle(&matrix).await;
 
     let captured = matrix
@@ -1184,7 +1166,6 @@ async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
         drop(observation);
 
-        // the replacement is the one the fence really pauses on.
         let admin = matrix.admin();
         let old = matrix.park_next_target("memory.subjects.fence");
         let mut replacement = matrix.park_next_target("memory.subjects.fence");
@@ -1207,7 +1188,6 @@ async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
             .expect("the replaced fence completes");
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
 
-        // really dropped, and the fence reaches its ordinary refusal boundedly.
         let admin = matrix.admin();
         let mut loss = matrix.park_next_target("memory.subjects.fence");
         let fence = admin.fence_subject(
@@ -1228,7 +1208,6 @@ async fn stage_remote_target_arm_lifecycle(matrix: &Matrix) {
             .expect("the fence completes boundedly after controller loss");
         assert_eq!(error_code(&refused), "REVISION_CONFLICT", "{refused}");
 
-        // refuses boundedly, and the late release returns instead of hanging.
         let admin = matrix.admin();
         let mut expiry =
             matrix.park_next_target_bounded("memory.subjects.fence", Duration::from_secs(2));
@@ -1260,12 +1239,6 @@ async fn race_two_reviews_at_the_same_candidate(
     matrix: &Matrix,
     candidate_id: &str,
 ) -> (Value, Value) {
-    //   peer review's disposition acquisition reports that it is really about to
-    //   block on that section — a provider-side acknowledgment of ITS arrival,
-    //   not elapsed time and not an OS lock-wait claim.
-    // - Fixture: the held review is acknowledged at its exact op-targeted handler
-    //   admission; the peer review runs to a durable committed receipt before the
-    //   release, which is its real arrival and effect.
     let mut arrival = match matrix.kind() {
         Kind::Local => matrix.park_next_admission(),
         Kind::Remote => matrix.park_next_target("memory.candidates.review"),
@@ -1285,8 +1258,6 @@ async fn race_two_reviews_at_the_same_candidate(
     let mut peer_completed = None;
     match matrix.kind() {
         Kind::Local => {
-            // review's acquisition reports that it is really about to block on
-            // that section — a provider-side acknowledgment of ITS arrival.
             let waiter = Arc::new(tokio::sync::Notify::new());
             matrix.report_disposition_waits(Arc::clone(&waiter));
             peer_task = Some(tokio::spawn(support::review_with(
@@ -1348,12 +1319,9 @@ async fn review_inherits_scope_and_requires_dual_promote_grant(matrix: Matrix) {
 
     separate_grants_are_not_a_review_admission(&matrix, &candidate_id, &peer_id).await;
 
-    //    and the created record inherits the context placement verbatim.
     let record_id =
         dual_grant_promotes_with_inherited_context(&matrix, &candidate_id, &peer_id).await;
 
-    //    may read the context-placed record but cannot promote it (no `promote`
-    //    coverage), and the state never widens.
     shared_promotion_needs_dual_authority(&matrix, &record_id).await;
     matrix.shutdown().await;
 }
@@ -1697,7 +1665,6 @@ async fn binding_local_review_cannot_widen_visibility(matrix: Matrix, character:
         .await;
     assert_eq!(own_binding["total_authorized"], json!(1), "{own_binding}");
 
-    // unauthorized attempt changes nothing.
     let peer_id = matrix.peer_principal().principal_id.clone();
     let reader = admin
         .grant(json!({

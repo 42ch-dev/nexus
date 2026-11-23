@@ -61,8 +61,6 @@ async fn seed_v181_schema(pool: &sqlx::SqlitePool) {
 async fn v181_creator_narrative_survives_as_null_world_id() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    // by a raw pool; the upgrade itself then runs through the production
-    // admitted factory (which is what a real upgrade does).
     seed_v181_schema_raw(&db_path).await;
     let pool = init_pool(&db_path).await.unwrap();
 
@@ -87,8 +85,6 @@ async fn v181_creator_narrative_survives_as_null_world_id() {
 async fn partial_unique_index_blocks_duplicate_creator_level_row() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    // by a raw pool; the upgrade itself then runs through the production
-    // admitted factory (which is what a real upgrade does).
     seed_v181_schema_raw(&db_path).await;
     let pool = init_pool(&db_path).await.unwrap();
 

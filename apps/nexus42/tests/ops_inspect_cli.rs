@@ -635,7 +635,6 @@ fn inspect_list_mode_renders_rows_and_count() {
     assert!(!text.contains("ses_done"), "terminal rows excluded: {text}");
     assert!(text.contains('2'), "trailing count line: {text}");
 
-    // honest total.
     let output = nexus42(home.path())
         .args(["ops", "inspect", "--json"])
         .assert()
@@ -757,7 +756,6 @@ fn inspect_detail_cancelled_with_live_join_keys_is_not_resumable() {
     let parsed: Value = serde_json::from_slice(&output).expect("valid json");
     let obj = parsed.as_object().unwrap();
 
-    // status row is never a re-drive candidate, even with live join keys.
     assert_eq!(obj["db_status"], json!("cancelled"));
     assert_eq!(
         obj["live_join_keys"],
@@ -935,7 +933,6 @@ fn inspect_human_run_error_truncation_is_marked() {
 fn inspect_detail_shape_anomaly_wording_is_distinct_from_corrupt() {
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
-    // not byte corruption.
     let ctx = b"{\"data\": \"not-an-object\"}";
     run_async(async {
         let pool = create_db(&db_path).await;
@@ -956,8 +953,6 @@ fn inspect_detail_shape_anomaly_wording_is_distinct_from_corrupt() {
         .clone();
     let parsed: Value = serde_json::from_slice(&output).expect("valid json");
     let obj = parsed.as_object().unwrap();
-    // but the machine flag differs: valid JSON is byte-readable, so
-    // `context_readable: true` with the shape anomaly in the explanation.
     assert_eq!(obj["context_readable"], json!(true));
     assert_eq!(obj["resumable"]["verdict"], json!("unknown"));
     assert_eq!(obj["resumable"]["rule"], json!("context_unreadable"));
@@ -1054,8 +1049,6 @@ fn inspect_list_shape_anomaly_and_corrupt_pin_context_readable_flag() {
 fn inspect_v1_interrupted_wins_over_old_join_keys_and_never_retries() {
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
-    // plus live converge/merge join keys in context — A7 rule 3: in-flight
-    // wins over old join keys; never auto-retried.
     let ctx = chain_context();
     run_async(async {
         let pool = create_db(&db_path).await;
@@ -1094,8 +1087,6 @@ fn inspect_v1_interrupted_wins_over_old_join_keys_and_never_retries() {
         json!(["_converge_arrivals_j1", "_join_wait_start_j1"]),
         "old join keys are preserved but must not override the interrupted class"
     );
-    // verdict — the legacy context-key cascade (which would say 'yes') is
-    // only the v0 projection and must not hide v1 interrupted work.
     assert_eq!(parsed["resumable"]["verdict"], json!("no"));
     assert_eq!(parsed["resumable"]["rule"], json!("interrupted"));
     assert_eq!(parsed["resumable"]["runner_check"], json!("not_applicable"));
@@ -1145,7 +1136,6 @@ fn inspect_v1_human_wait_stays_distinct_and_preserves_wait_token() {
             },
         )
         .await;
-        // only offers `continue` when that source still verifies (P1-C).
         let caps = nexus_capability::CapabilityRegistry::with_builtins();
         let loaded =
             nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
@@ -1332,7 +1322,6 @@ fn inspect_v1_completed_is_terminal_without_live_runner() {
     let db_path = seed_home_config(home.path());
     run_async(async {
         let pool = create_db(&db_path).await;
-        // mark — terminal still wins over interrupted evidence (A7 rule 1).
         seed_session(
             &pool,
             &SeedRow {
@@ -1364,7 +1353,6 @@ fn inspect_v1_completed_is_terminal_without_live_runner() {
     assert_eq!(parsed["resumable"]["verdict"], json!("no"));
     assert_eq!(parsed["resumable"]["rule"], json!("terminal_status"));
 
-    // must also render the terminal class.
     let human = nexus42(home.path())
         .args(["ops", "inspect", "ses_done"])
         .assert()
@@ -1454,7 +1442,6 @@ fn inspect_v1_list_mode_recovery_classes_and_read_only() {
             },
         )
         .await;
-        // only offers `continue` when that source still verifies (P1-C).
         let caps = nexus_capability::CapabilityRegistry::with_builtins();
         let loaded =
             nexus_preset::load_embedded_preset("memory-augmented", &caps).expect("embedded preset");
@@ -1577,8 +1564,6 @@ async fn set_v1_metadata(
 
 #[test]
 fn inspect_v1_terminal_wins_with_absent_state_blob() {
-    // a corrupt blob must still classify Terminal for authoritative
-    // completed/failed/cancelled (A7 rule 1 beats rule 2).
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     run_async(async {
@@ -1642,10 +1627,6 @@ fn inspect_v1_terminal_wins_with_absent_state_blob() {
 
 #[test]
 fn inspect_v1_structurally_corrupt_state_is_unreadable_in_list_and_detail() {
-    // (`{"cancel_requested":"false"}` — string where bool required) must be
-    // Unreadable in BOTH modes; list must not label it SafeBoundary/
-    // HumanWait/ConvergeMerge. Also proves list/detail parity through the
-    // single canonical classifier.
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     let structural = br#"{"cancel_requested":"false"}"#;
@@ -1706,7 +1687,6 @@ fn inspect_v1_structurally_corrupt_state_is_unreadable_in_list_and_detail() {
 
 #[test]
 fn inspect_v1_unsupported_execution_versions_are_unreadable() {
-    // versions are unsupported — never coerced to legacy_unverified or v1.
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     let state = run_state(None, false, false);
@@ -1721,7 +1701,6 @@ fn inspect_v1_unsupported_execution_versions_are_unreadable() {
                 &SeedRow::new(id, "preset_x", "running", Some("task_1"), &ctx),
             )
             .await;
-            // unsupported version.
             set_v1_metadata(&pool, id, version, Some(&state)).await;
         }
         pool.close().await;
@@ -1772,7 +1751,6 @@ fn inspect_v1_unsupported_execution_versions_are_unreadable() {
 
 #[test]
 fn inspect_v1_human_wait_token_beats_old_join_keys() {
-    // the row classifies HumanWait (not ConvergeMerge) and stays `no`.
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     let chain = chain_context();
@@ -1821,7 +1799,6 @@ fn inspect_v1_human_wait_token_beats_old_join_keys() {
 
 #[test]
 fn inspect_v0_stray_state_bytes_stay_legacy_no_wait_id() {
-    // interpreted through v1 wait semantics — no wait_id, legacy_unverified.
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     let wait_state = run_state(None, false, true); // carries wait-tok-1
@@ -1854,7 +1831,6 @@ fn inspect_v0_stray_state_bytes_stay_legacy_no_wait_id() {
 
 #[test]
 fn inspect_list_human_output_names_recovery_class() {
-    // row, just like JSON list and detail do.
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     let chain = chain_context();
@@ -1911,16 +1887,11 @@ fn inspect_list_human_output_names_recovery_class() {
 
 #[test]
 fn inspect_v1_corrupt_metadata_with_readable_context_is_unreadable_metadata() {
-    // readable (`{}`) but whose durable run-state metadata is structurally
-    // invalid must NOT be mapped to the legacy `context_unreadable` wording —
-    // the explanation must name the non-replayable v1 metadata explicitly,
-    // and the rule must be `unreadable_metadata`.
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     let structural = br#"{"cancel_requested":"false"}"#;
     run_async(async {
         let pool = create_db(&db_path).await;
-        // the v1 metadata governs, and it is corrupt.
         seed_session(
             &pool,
             &SeedRow::new("ses_meta", "preset_x", "running", Some("task_1"), b"{}"),
@@ -1979,9 +1950,6 @@ fn inspect_v1_corrupt_metadata_with_readable_context_is_unreadable_metadata() {
 
 #[test]
 fn inspect_v1_terminal_with_stale_wait_bytes_has_no_wait_id() {
-    // is human_wait. A terminal row carrying stale wait bytes (the durable
-    // state still holds an old wait token) must not advertise a usable wait
-    // token — the class is terminal and the row must not suggest resume.
     let home = tempfile::TempDir::new().unwrap();
     let db_path = seed_home_config(home.path());
     run_async(async {

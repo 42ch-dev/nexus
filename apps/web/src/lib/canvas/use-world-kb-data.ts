@@ -96,12 +96,6 @@ export function usePatchWorldKbEntity(worldId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId ?? '') });
     },
     onError: (error) => {
-      // inspector renders inline field errors. Mirror the promotion path's
-      // non-conflict guard (extended to also skip 422 validation) so everything
-      // else (500/403/dropped network) is surfaced as a toast instead of being
-      // silently swallowed. Both guards check `instanceof NexusClientError`, so
-      // the real client errors (which ARE instances) are excluded; the per-call
-      // handler still owns the 409/422 UX paths.
       if (!isWorldKbConflictError(error) && !isWorldKbValidationError(error)) {
         errorToast(error, 'error.couldNotSaveWorldKbEntity');
       }

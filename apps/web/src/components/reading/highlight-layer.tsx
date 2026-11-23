@@ -60,7 +60,6 @@ function wrapRange(range: Range, color: ReadingAnnotationColor) {
 function applyHighlights(container: HTMLElement, annotations: ReadingAnnotation[], bodyLength: number) {
   clearHighlights(container);
 
-  // overlaps are applied in document order.
   const inBounds = annotations
     .filter((a) => a.end_offset <= bodyLength)
     .sort((a, b) => a.start_offset - b.start_offset || a.end_offset - b.end_offset);

@@ -34,8 +34,6 @@ impl Schema {
                 }
             })?;
         }
-        // shares the co-boot migration retry/backoff (open pool + migrations
-        // with transient-retry + seed versions, in one call).
         nexus_local_db::init_pool(db_path).await
     }
 }

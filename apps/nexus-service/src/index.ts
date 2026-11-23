@@ -35,9 +35,6 @@ export interface CloseOwnerOptions {
   teardownListener?: (server: Server, deadlineMs: number) => Promise<void>;
   /** Runs once the listener is down (e.g. removing a unix socket file). */
   afterListenerStopped?: () => void;
-  /**
-   * unconfirmed close retains the published record so diagnostics survive.
-   */
   removeDiscovery?: () => Promise<unknown>;
 }
 
@@ -65,8 +62,6 @@ export function createCloseOwner(options: CloseOwnerOptions): () => Promise<Core
       const attempt = (async (): Promise<CoreCloseReport> => {
         const deadline = Date.now() + budgetMs;
         const server = options.getServer();
-        // close in the same turn. Awaiting the listener first would spend the
-        // budget twice.
         const listener = server?.listening
           ? teardown(server, deadline).then(() => options.afterListenerStopped?.())
           : Promise.resolve();
@@ -76,8 +71,6 @@ export function createCloseOwner(options: CloseOwnerOptions): () => Promise<Core
           try {
             await options.removeDiscovery();
           } catch (error) {
-            // stale-but-replaced-on-next-start record, which must not turn a
-            // confirmed close into a reported failure.
             console.error('[nexus-service] discovery removal failed:', error);
           }
         }

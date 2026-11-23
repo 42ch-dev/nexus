@@ -61,7 +61,6 @@ function makeFakeElectron() {
   const forkCalls = [];
   let dialogResponse = 2;
   let openDialogResult = { canceled: true, filePaths: [] };
-  // pending or rejected native dialog installs its own responder.
   let messageBoxHandler = null;
 
   const session = {
@@ -218,8 +217,6 @@ function makeFakeElectron() {
     decryptString: (bytes) => new TextDecoder().decode(bytes).slice(4),
   };
 
-  // PNG/JPEG only. The default fake reports a decodable image so the identity
-  // path reaches `dock.setIcon`; tests that own the failure case patch it.
   const nativeImage = { createFromPath: (path) => ({ isEmpty: () => false, path }) };
 
   return {
@@ -247,7 +244,6 @@ function makeFakeElectron() {
     setOpenDialogResult: (result) => {
       openDialogResult = result;
     },
-    // (pending / rejected), keeping the dialogCalls recording above.
     setMessageBoxHandler: (handler) => {
       messageBoxHandler = handler;
     },
@@ -255,8 +251,6 @@ function makeFakeElectron() {
 }
 
 const product = loadProductIdentity(RESOURCES_DIR);
-// preflight enforces the same cross-file agreement); deriving it keeps the
-// suite green across version bumps instead of pinning a literal.
 const electronPackageVersion = JSON.parse(
   readFileSync(join(RESOURCES_DIR, '..', 'package.json'), 'utf8'),
 ).version;
@@ -270,7 +264,6 @@ async function makeHost(overrides = {}) {
     patchElectron,
     ...hostOverrides
   } = overrides;
-  // responder (pending / rejected) on the injected Electron surface.
   if (typeof patchElectron === 'function') patchElectron(electron);
   const paths = {
     resourcesDir: RESOURCES_DIR,
@@ -290,8 +283,6 @@ async function makeHost(overrides = {}) {
   const disposedGenerations = [];
   const protocolCalls = [];
   const networkHooks = [];
-  // before any window is created (scheme privilege is bootstrap-only,
-  // pre-ready — composeDesktopHost has no registerSchemes seam at all).
   electron.lifecycleEvents = [];
   const { BrowserWindow: FakeBrowserWindow } = electron;
   electron.BrowserWindow = class extends FakeBrowserWindow {
@@ -324,8 +315,6 @@ async function makeHost(overrides = {}) {
       attachNetworkHooks: (sessionArg, getActiveAuth) => {
         networkHooks.push({ session: sessionArg, getActiveAuth });
       },
-      // default legacy adapter has neither a source nor anything to remove.
-      // Tests that own the migration pass their own adapter.
       legacyCredentials: {
         read: async () => null,
         cleanup: async () => {},
@@ -393,7 +382,6 @@ test('product identity loads from resources/product.json and applies to the app'
   assert.equal(app.name, 'Nexus');
   assert.equal(app.paths.get('userData'), join(appData, 'io.nexus42.desktop'));
   if (process.platform === 'darwin') {
-    // is never handed to `dock.setIcon` (nativeImage cannot decode it).
     assert.deepEqual(decoded, [join(RESOURCES_DIR, 'icons', 'app-icon.png')]);
     assert.deepEqual(app.dock.icons, [icon]);
   }
@@ -500,9 +488,6 @@ test('production window policy and protocol registration', async () => {
     [...DESKTOP_OPERATIONS].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
   );
 
-  // window was created. Scheme privilege is registered exactly once,
-  // pre-ready, by the bootstrap — composeDesktopHost exposes no
-  // registerSchemes seam, so no second registration can happen after ready.
   assert.deepEqual(electron.lifecycleEvents, ['protocol', 'window']);
   assert.deepEqual(protocolCalls, [
     {
@@ -581,8 +566,6 @@ test('renderer crash replaces only the renderer: generation bumps, stale senders
 });
 
 test('delayed registration race: the superseded in-flight registration loses and the active window owns the channel (QC1 F-001)', async () => {
-  // so a renderer-crash replacement starts (and would bind) while the stale
-  // registration is still in flight — the exact interleaving QC1 F-001 flags.
   let releaseFirstRegistration;
   const firstRegistrationGate = new Promise((resolve) => {
     releaseFirstRegistration = resolve;
@@ -602,10 +585,6 @@ test('delayed registration race: the superseded in-flight registration loses and
   assert.equal(calls.length, 1);
   assert.equal(events.length, 0, 'generation 1 registration is still in flight');
 
-  // registration is unresolved. The replacement must NOT bind the sole
-  // invoke channel while the stale registration is still in flight — it
-  // waits, then the stale registration is disposed before the active one
-  // binds.
   const gone = calls[0].window.webContents.listeners.get('render-process-gone');
   gone();
   await new Promise((resolve) => setImmediate(resolve));
@@ -640,9 +619,6 @@ test('second-instance focuses the sole window and never spawns a duplicate servi
   assert.equal(ipcCalls.length, 1);
   assert.equal(forkCalls.length, 0);
 
-  // never recreates a window and never spawns a duplicate service.
-  // (Window recreation is owned only by the guarded `activate` and
-  // renderer-crash paths.)
   electron.windows[0].destroyed = true;
   host.focusExistingWindow();
   secondInstance();
@@ -669,7 +645,6 @@ test('global web-contents-created lockdown denies window.open, non-app navigatio
 
   assert.deepEqual(windowOpenResult, { action: 'deny' });
 
-  // origins); the app origin is allowed through for both events.
   for (const eventName of ['will-navigate', 'will-redirect']) {
     const denied = { preventDefault: () => (denied.prevented = true) };
     listeners.get(eventName)(denied, 'https://evil.example/phish');
@@ -930,8 +905,6 @@ test('a valid remote connection config projects its exact origin, auth and CSP, 
 test('an invalid stored connection config can never omit the CSP', async () => {
   const userDataDir = mkdtempSync(join(root, 'corrupt-user-data-'));
   const storePath = join(userDataDir, 'connection-config.enc');
-  // returned the literal "null" for it, and the CSP builder then threw inside
-  // the header listener — leaving the response without any policy.
   writeFileSync(
     storePath,
     JSON.stringify({ version: 1, config: { endpointUrl: 'about:blank', active: true, hasApiKey: true } }),
@@ -941,7 +914,6 @@ test('an invalid stored connection config can never omit the CSP', async () => {
   assert.equal(await host.handlers.get_connection_config(), null);
   assert.equal(networkHooks[0].getActiveAuth(), null);
 
-  // Electron callback) with the restrictive local-origin policy.
   const listener = sessionHooks.headersReceivedCalls[0][1];
   let response = null;
   listener(
@@ -961,8 +933,6 @@ test('an invalid stored connection config can never omit the CSP', async () => {
   host.dispose();
 });
 
-// ordered host migration and the sanitized failure
-
 test('legacy credential cleanup adapter targets exactly the old keychain item and app-data JSON, idempotently', async () => {
   const appData = mkdtempSync(join(root, 'legacy-appdata-'));
   const legacyDir = join(appData, 'io.nexus42.desktop');
@@ -973,7 +943,6 @@ test('legacy credential cleanup adapter targets exactly the old keychain item an
   writeFileSync(neighbour, '{"keep":true}');
 
   const commands = [];
-  // keychain. `delete` reports the documented errSecItemNotFound (exit 44).
   const adapter = createLegacyCredentialAdapter(appData, {
     platform: 'darwin',
     runSecurity: async (args) => {
@@ -1065,7 +1034,6 @@ test('host migration removes the legacy sources only after the encrypted store i
         read: async () =>
           JSON.stringify({ endpointUrl: 'https://remote.example:9000', apiKey: 'sk-legacy', active: true }),
         cleanup: async () => {
-          // on disk, carry no plaintext, and decrypt again.
           const onDisk = readFileSync(storePath, 'utf8');
           observed.push({
             plaintextOnDisk: onDisk.includes('sk-legacy'),
@@ -1090,7 +1058,6 @@ test('host migration removes the legacy sources only after the encrypted store i
   });
   host.dispose();
 
-  // source — and re-runs the idempotent removal.
   const cleanups = [];
   const { host: reopened } = await makeHost({
     paths: { userDataDir },
@@ -1146,7 +1113,6 @@ test('a refused legacy cleanup does not fail host startup and surfaces only the 
     hasApiKey: true,
   });
 
-  // migration is NOT reported as clean while the plaintext source remains.
   const failure = host.connectionStore.legacyCleanupFailure;
   assert.ok(failure !== null, 'the refused cleanup is observable');
   assert.equal(errorCode(failure), 'legacy_credential_cleanup_failed');
@@ -1181,7 +1147,6 @@ test('a corrupt connection store surfaces the stderr diagnostic and one window-l
   }
   const { host, dialogCalls } = composed;
 
-  // classification code plus the sanitized message, under the fixed prefix.
   assert.equal(stderr.length, 1);
   assert.match(
     stderr[0],
@@ -1281,7 +1246,6 @@ test('an unreadable store names the unreadable classification, and a fresh insta
   fresh.host.dispose();
 });
 
-// has not answered the dialog, and a dialog failure must never fail boot.
 test('a pending warning dialog never blocks startup: the window is usable before the user dismisses it', async () => {
   const dir = mkdtempSync(join(root, 'store-pending-dialog-'));
   const userDataDir = join(dir, 'userData');
@@ -1310,7 +1274,6 @@ test('a pending warning dialog never blocks startup: the window is usable before
           );
         },
       }),
-      // host uncomposed for as long as the user stays away from the dialog.
       new Promise((_, reject) => {
         deadline = setTimeout(
           () => reject(new Error('composition awaited the pending warning dialog')),
@@ -1389,7 +1352,6 @@ test('a healthy existing store adds no surface (acceptance criterion 3)', async 
   const dir = mkdtempSync(join(root, 'store-healthy-'));
   const userDataDir = join(dir, 'userData');
   mkdirSync(userDataDir, { recursive: true });
-  // credential the injected safeStorage stub can decrypt.
   writeFileSync(
     join(userDataDir, 'connection-config.enc'),
     JSON.stringify({

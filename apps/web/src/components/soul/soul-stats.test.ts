@@ -40,7 +40,6 @@ describe('fragmentKeywords', () => {
   it('degrades to empty for missing / malformed / non-string items', () => {
     expect(fragmentKeywords(frag())).toEqual([]);
     expect(fragmentKeywords(frag({ keywords: [] }))).toEqual([]);
-    // a non-array shape defensively.
     expect(fragmentKeywords(frag({ keywords: undefined }))).toEqual([]);
     expect(
       fragmentKeywords(frag({ keywords: ['ok', '', '  '] as unknown as string[] })),
@@ -109,7 +108,6 @@ describe('bucketByTime', () => {
     ]);
     const last = buckets[buckets.length - 1]!;
     const kws = last.keywords.map((k) => k.keyword);
-    // composition shifts across the timeline.
     expect(kws).toContain('fading');
     expect(kws).toContain('newcomer');
   });

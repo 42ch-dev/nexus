@@ -35,10 +35,6 @@ export interface EntityConflictState {
   /** Raw form captured at conflict time, used to reapply the user's edit. */
   reapplyForm: EntityEditForm;
   dirtyFields: EntityField[];
-  /**
-   * reapply must rewrite only these dialects — the other dialect may have
-   * changed concurrently while the modal was open (L2-T2-001).
-   */
   dirtyDialects: ModuleDialect[];
   currentVersion: number;
 }

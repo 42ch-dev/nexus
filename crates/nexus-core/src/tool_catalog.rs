@@ -321,8 +321,6 @@ pub(crate) fn tool_input_schema() -> &'static str {
                                 the path instead.",
             }),
         );
-        // wire schema keeps owning which request fields are required, and the
-        // rendered envelope stays what it was before the move.
         let required = root["required"]
             .as_array_mut()
             .expect("the generate request schema declares required");
@@ -440,7 +438,6 @@ static HOST_TOOL_CATALOG: LazyLock<[HostToolMetadata; 29]> = LazyLock::new(|| {
                               exhaustion the result is the `lint_exhausted` payload with one \
                               actionable correction per violation, and nothing was persisted.",
                 input_schema: tool_input_schema(),
-                // its own `$ref`-addressed schema and cannot be carried here verbatim.
                 output_schema: None,
             },
             failure_mode: FailureMode::Forbidden,

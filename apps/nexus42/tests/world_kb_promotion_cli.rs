@@ -303,7 +303,6 @@ async fn kb_adopt_failure_rolls_back_insert() {
     let (_dir, pool) = fresh_pool().await;
     let candidate = seed_pending(&pool, "Race Candidate").await;
 
-    // our adopt tx reaches mark_confirmed.
     mark_confirmed(&pool, &candidate.job_id).await.unwrap();
 
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
@@ -350,7 +349,6 @@ async fn kb_adopt_failure_rolls_back_insert() {
          persist after rollback, got: {blocks:?}"
     );
 
-    // and our failed adopt did not duplicate or corrupt the promotion row.
     let row = get_promotion(&pool, &candidate.job_id)
         .await
         .unwrap()
@@ -397,7 +395,6 @@ async fn kb_reject_writes_log_under_work_ref_path() {
         "R-V150KBED-05: log must exist under Works/{WORK_REF}/Logs/kb/rejected/"
     );
 
-    //    WORK_ID (the opaque DB id the old code used).
     let log_path = ref_entries[0].path();
     let log_path_str = log_path.to_string_lossy();
     assert!(
@@ -427,8 +424,6 @@ async fn kb_reject_writes_log_under_work_ref_path() {
 async fn kb_reject_fails_when_work_ref_missing() {
     let (dir, pool) = fresh_pool().await;
 
-    // resolve_work_ref_for_log returns "work_id does not exist"). We bypass
-    // seed_pending to control the work_id, and insert directly via the DAO.
     let candidate = insert_pending(
         &pool,
         OWNER,

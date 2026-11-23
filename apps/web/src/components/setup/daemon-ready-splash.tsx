@@ -5,10 +5,6 @@ import { Button } from '@/components/ui/button';
 import { TransportErrorBlock, type TransportErrorKind } from '@42ch/nexus-ui';
 
 interface DaemonReadySplashProps {
-  /**
-   * renders the "Starting daemon…" waiting state. When set, the splash renders
-   * the promoted `<TransportErrorBlock>` for the matching kind.
-   */
   errorKind: TransportErrorKind | null;
   /** Optional caller-supplied detail line (e.g., the daemon's last detail). */
   errorMessage?: string;
@@ -67,14 +63,10 @@ export function DaemonReadySplash({
           <>
             <TransportErrorBlock
               kind={errorKind}
-              // an English fallback for Studio). Self-contained here because
-              // this extract is Studio-shared via @web-setup/*.
               title={tShell(`profile.createError.${errorKind}.headline`)}
               body={tShell(`profile.createError.${errorKind}.body`)}
               primaryCtaLabel={tCommon(primaryCtaLocaleKey(errorKind))}
               onRetry={onRetry}
-              // route is available, so onOpenSettings is intentionally omitted
-              // and the Open Connection Settings CTA stays hidden.
               detail={errorMessage}
             />
             {onResetLocalDatabase ? (

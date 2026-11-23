@@ -302,8 +302,6 @@ async fn publish_execution_owner(
         .await
     {
         Ok(handle) => Some(handle.engine_epoch()),
-        // reports as "no engine epoch": the admission pinned no usable creative
-        // root, so the caller publishes the null sentinel.
         Err(ExecutionOpenError::Workspace(CoreError::Uninitialized)) => None,
         Err(ExecutionOpenError::Workspace(err)) => {
             return Err(core_error::napi_error_from_domain(err));
@@ -367,8 +365,6 @@ impl NativeCore {
             .inner
             .host_authority()
             .ok_or_else(core_error::napi_error_host_not_started)?;
-        // the admitted pinned-root configuration: readiness and the hosted
-        // execution owner borrow that same instance instead of a second one.
         publish_execution_owner(&core, providers, host.manager()).await
     }
 
@@ -406,8 +402,6 @@ impl NativeCore {
 
         core.retire_execution().await;
 
-        // then run the manager start against the SAME manager the authority
-        // exposes, so `selected_providers_ready` reads the saved selection.
         let admission = crate::lifecycle::validate_host_admission(&home)
             .map_err(core_error::napi_error_from_wire)?;
         let principal = core
@@ -445,8 +439,6 @@ impl NativeCore {
         publish_execution_owner(&core, providers, manager).await
     }
 
-    /// registry rows the established owner's engine reads.
-    ///
     /// Rows use the hand-coded local wire shape (`camelCase` schemas,
     /// `capability-info.ts`), not the schema-facing generated DTO; the service
     /// owns pagination/sort so this lane stays a passthrough.
@@ -1303,7 +1295,6 @@ mod tests {
 
     #[test]
     fn unprobed_or_unavailable_selected_provider_is_not_ready() {
-        // unavailable) — or probed and unavailable: both are not ready.
         let config = AgentHostConfig {
             providers: vec![configured("dsh-native", true)],
             ..AgentHostConfig::default()
@@ -1332,7 +1323,6 @@ mod tests {
             &only_disabled,
             &catalog(vec![entry("dsh-native", true)])
         ));
-        // never substitutes for an unavailable selected one.
         let both = AgentHostConfig {
             providers: vec![configured("dsh-native", true), configured("mock-acp", true)],
             ..AgentHostConfig::default()

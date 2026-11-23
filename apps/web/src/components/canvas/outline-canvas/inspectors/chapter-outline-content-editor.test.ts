@@ -16,9 +16,6 @@ import { Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown, type MarkdownStorage } from 'tiptap-markdown';
 
-// the minimal surface so a headless Editor can mount and serialize without a
-// real layout pass. (Same workaround class as the chapter-page test mock, but
-// here we exercise the REAL editor so the round-trip is actually proven.)
 beforeAll(() => {
   const noopRect = { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, toJSON: () => ({}) };
   const proto = Element.prototype;
@@ -34,7 +31,6 @@ beforeAll(() => {
 
 function makeEditor(initial: string): Editor {
   return new Editor({
-    // adds Link, Underline, ListKeymap and TrailingNode — disabled in both).
     extensions: [
       StarterKit.configure({
         link: false,
@@ -51,7 +47,6 @@ function makeEditor(initial: string): Editor {
 
 function roundTrip(md: string): string {
   const editor = makeEditor(md);
-  // the tiptap-markdown storage slice has to be narrowed by hand.
   const storage = editor.storage as unknown as { markdown: MarkdownStorage };
   const out = storage.markdown.getMarkdown();
   editor.destroy();
@@ -74,7 +69,6 @@ describe('V1.75 A4 — TipTap <-> markdown round-trip (outline content parity)',
   });
 
   it('preserves a mixed markdown outline document (V1.65 parity sample)', () => {
-    // same shape an author would draft in the retiring V1.65 editor.
     const md = [
       '# Chapter 3 — The Harbor',
       '',
@@ -105,8 +99,6 @@ describe('V1.75 A4 — TipTap <-> markdown round-trip (outline content parity)',
   });
 
   it('is stable across repeated round-trips (no drift)', () => {
-    // to the first. This guards against tiptap-markdown re-escaping or
-    // re-formatting on each save (which would cause phantom dirty states).
     const md = '## Beats\n\n- one\n- two\n\n**bold** _italic_\n\n> quote\n';
     const once = roundTrip(md);
     const twice = roundTrip(once);

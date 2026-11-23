@@ -1,12 +1,9 @@
 /**
- * `onboarding-v3.html` S3).
- *
  * Presentation only: the shell owns the finish sequence (creator bootstrap →
  * workspace selection → `createWorld`), so a rejected finish leaves this step
  * mounted with the draft and the product copy. There is no client-side
  * first-run marker — the gate flips from the selected/default workspace state
  * (compass D21/D25).
- *
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -52,7 +49,6 @@ export function StepFirstWorld({ onBack, onFinish }: StepFirstWorldProps) {
   const [showRoot, setShowRoot] = useState(false);
   const activeWorkspace = useActiveWorkspaceQuery();
 
-  // workspace (D25 — the base note claims no absolute path).
   const workspaceRoot = activeWorkspace.data?.creative_root ?? null;
   const trimmed = name.trim();
 

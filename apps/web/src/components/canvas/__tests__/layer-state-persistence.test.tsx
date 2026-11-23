@@ -36,9 +36,6 @@ import type {
 import { TimelineCanvas } from '../timeline-canvas/timeline-canvas';
 import { WorkTimelineCanvas } from '../work-timeline-canvas/work-timeline-canvas';
 
-// internal history. To assert that a layer swap writes `?layer=` back to the
-// URL, we mount a tiny spy component inside the router that records
-// `useLocation().search` into a mutable ref.
 function makeLocationSpy() {
   const captured: { search: string } = { search: '' };
   function LocationSpy() {
@@ -91,8 +88,6 @@ function makeWorldMockClient(graph: WorldKbGraphResponse): NexusClient {
     patchTimelineEvent: vi.fn(),
     patchOutlineStructure: vi.fn(),
     patchOutlineChapter: vi.fn(),
-    // complete works enumeration) must RESOLVE: an unresolved / failed read is
-    // no longer rendered as "no bound Works". An empty page = no bound Works.
     listWorks: vi.fn().mockResolvedValue({
       items: [],
       pagination: { limit: 20, has_more: false },
@@ -122,17 +117,12 @@ function makeWorkMockClient(
   } as unknown as NexusClient;
 }
 
-// canvas inside the same `MemoryRouter`. The spy records `location.search`
-// into a mutable ref on every render so the test can assert after a layer
-// swap that the URL was updated.
-
 describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)', () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
   it('restores the Narrative layer from URL ?layer=narrative even when era data exists', async () => {
-    // override the default so the user returns to the layer they left.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -163,11 +153,6 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
   });
 
   it('restores the Moment layer from URL ?layer=moment (V1.156 — World-Moment restriction lifted)', async () => {
-    // World Timeline (the V1.123 "moment is Work-only" restriction is
-    // lifted — both surfaces render all three layers). The URL must restore
-    // the Moment layer even though era data exists (default would otherwise
-    // be Brief). No fixture → the surface renders the honest Moment empty-
-    // state, but the active layer is Moment.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -196,11 +181,6 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
   });
 
   it('ignores invalid layer values (?layer=bogus) and falls back to the era-derived default', async () => {
-    // the World Timeline. Unknown values must fall back to the era-derived
-    // default (era data present → Brief). This suite's old invalid-value
-    // test was repurposed into the moment-restore test above, unpinning the
-    // `urlLayerOverride` null-branch on World; the Work Timeline suite
-    // retains its own invalid-value test (`?layer=brief` → Narrative).
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -268,13 +248,10 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
       );
     });
 
-    // or a peer-surface round-trip.
     expect(captured.search).toContain('layer=narrative');
   });
 
   it('writes ?layer=moment back to the URL when the user swaps to the Moment tab (V1.156)', async () => {
-    // on the World Timeline. A swap into Moment must write `?layer=moment`
-    // so the choice survives a refresh or a peer-surface round-trip.
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -316,11 +293,6 @@ describe('TimelineCanvas — layer-state persistence via URL ?layer= (P4 Task 6)
   });
 
   it('clears the URL param when the user swaps back to the default layer', async () => {
-    // the URL should NOT carry ?layer=narrative — it would be redundant with
-    // the default-derived layer and would prevent the surface from tracking
-    // graph changes. The test asserts the URL drops the narrative param
-    // (either to `?layer=brief` or to no param at all — both signal "not on
-    // Narrative"). The contract surface is "URL no longer says narrative".
     const graph: WorldKbGraphResponse = {
       entities: [
         eraEntity({
@@ -418,9 +390,6 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
   });
 
   it('restores the Brief layer from URL ?layer=brief (V1.156 — Work-Brief restriction lifted)', async () => {
-    // Timeline (the V1.123 "Brief is World-only" restriction is lifted —
-    // both surfaces render all three layers). The URL must restore the
-    // Brief layer when the Work is bound to a World with era markers.
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,
@@ -463,8 +432,6 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
   });
 
   it('ignores unknown layer values (?layer=bogus) and falls back to the Narrative default', async () => {
-    // the Work Timeline. Unknown values must fall back to the surface
-    // default (Narrative — architect §7.3 UX-risk override).
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,
@@ -552,8 +519,6 @@ describe('WorkTimelineCanvas — layer-state persistence via URL ?layer= (P4 Tas
   });
 
   it('writes ?layer=brief back to the URL when the user swaps to the Brief tab (V1.156)', async () => {
-    // on the Work Timeline. A swap into Brief must write `?layer=brief` so
-    // the choice survives a refresh or a peer-surface round-trip.
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,

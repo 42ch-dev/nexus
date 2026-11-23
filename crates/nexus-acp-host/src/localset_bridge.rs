@@ -440,7 +440,6 @@ impl ControlRelay {
                     return true;
                 }
                 if state.queue.len() >= MAX_CONTROL_QUEUE {
-                    // a caller floods it with distinct task ids.
                     state.pending_cancels.remove(task_id);
                     state.refused += 1;
                     return false;
@@ -969,21 +968,14 @@ impl LocalSetBridge {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
-            // rather than manufacturing a snapshot of its own. The owner
-            // publishes on every exit path, so this returns as soon as it does.
             if let Some(evidence) = self.await_settlement(deadline).await {
                 return evidence;
             }
-            // observed state — never claim a settlement the owner did not make,
-            // and never join a thread the owner still owns.
             warn!("LocalSet shutdown settlement not published before deadline");
             return self.evidence_from_state();
         }
         self.counters.shutting_down.store(true, Ordering::SeqCst);
 
-        // failed-open bridge, and a started bridge all reach the single
-        // `publish_settled` below, so concurrent losers always observe the same
-        // settlement instead of waiting out their deadline.
         let control = {
             let guard = self.runtime.lock().ok();
             guard.and_then(|g| g.as_ref().map(|rt| rt.control.clone()))
@@ -1000,7 +992,6 @@ impl LocalSetBridge {
                 let mut ack_rx = ack_rx;
                 let mut acked = None;
                 while Instant::now() < ack_deadline {
-                    // instead of burning the whole close budget.
                     if !self.runtime_thread_alive() {
                         break;
                     }
@@ -1021,7 +1012,6 @@ impl LocalSetBridge {
                 self.evidence_from_state()
             }
         } else {
-            // open): trivially settled.
             self.evidence_from_state()
         };
 
@@ -1036,8 +1026,6 @@ impl LocalSetBridge {
         let stats = self.counters.stats();
         let thread_alive = self.runtime_thread_alive();
         ShutdownEvidence {
-            // existed: it may have been taken by an earlier bounded join and
-            // retained. Only an unspawned thread counts as trivially joined.
             joined_cleanly: !self.counters.thread_started()
                 || (self.counters.thread_joined() && !thread_alive),
             thread_alive,
@@ -1046,7 +1034,6 @@ impl LocalSetBridge {
             active_tasks: stats.active_tasks,
             owned_tasks: stats.owned_tasks,
             control_tasks: stats.control_tasks,
-            // live counters *are* the observable snapshot.
             queued_at_shutdown: stats.pending_requests,
             queued_bytes_at_shutdown: stats.pending_bytes,
             active_at_shutdown: stats.active_tasks,
@@ -1057,7 +1044,6 @@ impl LocalSetBridge {
     }
 
     fn runtime_thread_alive(&self) -> bool {
-        // still (or may still be) running even though the runtime slot is empty.
         if let Ok(slot) = self.retained_thread.lock() {
             if let Some(handle) = slot.as_ref() {
                 return !handle.is_finished();
@@ -1136,17 +1122,14 @@ impl LocalSetBridge {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
             .is_err()
         {
-            // one. Symmetric with the async path.
             if let Some(evidence) = self.await_settlement_sync(deadline) {
                 return evidence;
             }
             warn!("LocalSet sync shutdown settlement not published before deadline");
-            // the owning caller still owns.
             return self.evidence_from_state();
         }
         self.counters.shutting_down.store(true, Ordering::SeqCst);
 
-        // released before `evidence_from_state` touches it again.
         let control = {
             let guard = self.runtime.lock().ok();
             guard.and_then(|g| g.as_ref().map(|rt| rt.control.clone()))
@@ -1615,7 +1598,6 @@ fn run_localset_thread(
                 let mut aborted_ids: Vec<u64> = Vec::new();
 
                 loop {
-                    // still wakes the select below (no lost wake).
                     let notified = control.notify.notified();
                     tokio::pin!(notified);
                     notified.as_mut().enable();
@@ -1660,8 +1642,6 @@ impl Drop for LocalSetBridge {
             return;
         }
         if tokio::runtime::Handle::try_current().is_ok() {
-            // executor. Ask the owning thread to stop without blocking and hand
-            // its handle to the tracked fallback owner — never a silent detach.
             self.counters.shutting_down.store(true, Ordering::SeqCst);
             self.shutdown_claimed.store(true, Ordering::Release);
             if let Some(rt) = self.runtime.lock().ok().and_then(|mut guard| guard.take()) {
@@ -1671,7 +1651,6 @@ impl Drop for LocalSetBridge {
             }
             return;
         }
-        // shutdown itself still runs with its bounded join.
         let _ = self.shutdown_sync();
     }
 }
@@ -1722,7 +1701,6 @@ mod tests {
             evidence.unsettled_pending()
         );
 
-        // is now empty — taking the handle is not joining it.
         let again = bridge.shutdown().await;
         assert!(
             !again.is_settled(),
@@ -1766,7 +1744,6 @@ mod tests {
             Some(&a),
             "the returned evidence must be the published settlement"
         );
-        // published result can never be overwritten.
         let mut usurper = a.clone();
         usurper.pending_requests = 99;
         assert!(
@@ -1809,7 +1786,6 @@ mod tests {
     fn control_relay_is_bounded_and_coalesces_cancels() {
         let relay = ControlRelay::new();
 
-        // often when many waiters are dropped, and nothing may accumulate.
         for _ in 0..10_000 {
             assert!(relay.push(ControlMessage::Cancel { task_id: 7 }));
         }
@@ -1879,8 +1855,6 @@ mod tests {
     /// which joins it — no `Drop` panic and no orphan.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn drop_inside_tokio_tracks_the_thread_instead_of_detaching_it() {
-        // assertion uses the monotonic "ever tracked" count rather than the live
-        // list size (which the reaper may drain at any moment).
         let tracked_before = abandoned_threads_tracked_total();
         {
             let bridge = LocalSetBridge::new();

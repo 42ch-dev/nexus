@@ -139,7 +139,6 @@ pub async fn apply_state_delta_in_tx(
             ));
         }
 
-        // highest-risk write path, so its SQL must be offline-validated).
         let Some(row) = read_kb_state_in_tx(tx, target_id)
             .await
             .map_err(|e| CapabilityError::Internal(format!("kb read for delta: {e}")))?
@@ -153,7 +152,6 @@ pub async fn apply_state_delta_in_tx(
         let body_json_str = row.body_json;
         let target_world_id = row.world_id;
 
-        // must reject the whole Accept (caller rolls back the TX).
         if target_world_id != world_id {
             return Err(CapabilityError::InputInvalid(format!(
                 "state_delta target '{target_id}' belongs to world '{target_world_id}', \
@@ -202,7 +200,6 @@ pub async fn apply_state_delta_in_tx(
             CapabilityError::Internal(format!("serialize updated body for '{target_id}': {e}"))
         })?;
 
-        // that somehow changed worlds mid-TX cannot be written either).
         let affected = update_kb_state_in_tx(tx, target_id, world_id, &updated_body_json)
             .await
             .map_err(|e| {

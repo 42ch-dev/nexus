@@ -154,7 +154,6 @@ describe('projectOutlineGraph', () => {
         { event_id: 'e1', title: 'E1', realizes_chapter_id: 5 },
       ],
     });
-    // dangling-edge filter. Pass chapter 5 so the realizes edge is not dropped.
     const { edges } = projectOutlineGraph(o, [chapter({ chapter: 5 })]);
     const realizes = edges.filter((e) => (e.data as { relation: string }).relation === 'realizes_event');
     expect(realizes).toHaveLength(1);
@@ -193,8 +192,6 @@ describe('projectOutlineGraph', () => {
     expect(edges).toEqual([]);
   });
 
-  // loaded), edges that would point at non-existent chapter nodes must be
-  // filtered out so the graph never shows dangling edges.
   it('filters out dangling contains/realizes edges when chapter nodes are missing', () => {
     const o = outline({
       volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1, 2, 3] }],

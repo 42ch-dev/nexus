@@ -217,7 +217,6 @@ describe('BriefTimeBands', () => {
 
     const { container } = renderBands(tree);
 
-    // default (expanded). The depth-1 age band owns the Early Epoch child.
     const toggles = screen.getAllByTestId('brief-time-band-toggle');
     expect(toggles).toHaveLength(1);
     const toggle = toggles[0] as HTMLElement;

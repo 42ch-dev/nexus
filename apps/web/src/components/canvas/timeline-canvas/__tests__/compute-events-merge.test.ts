@@ -1,6 +1,4 @@
 /**
- * T3). Verifies the plan Global Constraints merge discipline:
- *
  *   - Two event families coexist on the Narrative layer: author KB
  *     `block_type=event` entities (existing `entity:<kb_id>` path) and
  *     machine-written `event_type=compute_result` log events
@@ -114,7 +112,6 @@ describe('Narrative merge of compute_result events', () => {
     expect(merged[0]?.id).toBe('compute:evt_compute_1');
     expect(merged[0]?.type).toBe('timeline-compute-result');
 
-    // same story beat.
     const ids = nodes.map((n) => n.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -181,7 +178,6 @@ describe('Narrative merge of compute_result events', () => {
       entity({ key_block_id: 'kb-undated-2', block_type: 'event', canonical_name: 'Mystery two' }),
     ]);
     const events = [
-      // temporal-unknown lane.
       computeEvent({ id: 'evt_undated_compute', created_at: 'not-a-date' }),
     ];
 

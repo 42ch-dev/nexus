@@ -192,10 +192,6 @@ async fn list_world_rules(
     world_id: String,
     include_archived: bool,
 ) -> CoreResult<WorldRulesListResponse> {
-    // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
-    // just beyond the cap so `truncated` below stays honest without ever
-    // loading the full set. The caller-selected status omission travels with
-    // the query, so the probe and the cap both count selected rows.
     let excluded_status = (!include_archived).then_some(ARCHIVED_STATUS);
     let rows = list_rules_by_world_limited(pool, &world_id, excluded_status, WORLD_RULES_PROBE)
         .await
@@ -230,7 +226,6 @@ fn row_to_item(r: SpokeRuleRow) -> WorldRulesListResponseRulesItem {
         description: r.description,
         severity_hint: r.severity_hint,
         status: r.status,
-        // (all-types) targeting, same lenient read as the findings route.
         target_entry_types: serde_json::from_str::<Vec<String>>(&r.target_entry_types_json)
             .unwrap_or_default(),
         // Absent/malformed → empty map (the wire omits it via the
@@ -321,9 +316,6 @@ async fn create_world_rule(
     world_id: String,
     req: WorldRuleCreateRequest,
 ) -> CoreResult<WorldRuleResponse> {
-    // consumer) — the daemon never parses carriers itself. The
-    // member-aware error projects onto the closed `constraint.*` envelope
-    // vocabulary (no message string-sniffing).
     let constraint =
         parse_carrier_json_member(&Value::Object(req.constraint.clone())).map_err(|e| {
             CoreError::InvalidInput {
@@ -332,9 +324,6 @@ async fn create_world_rule(
             }
         })?;
 
-    // entry_type) — combining with target_entry_types is rejected on the
-    // effective pair (both fresh at create), never silently ignored (CLI
-    // parity, rule.rs:197-207).
     if !req.target_entry_types.is_empty()
         && matches!(constraint, Constraint::ObserverCardinality { .. })
     {
@@ -347,7 +336,6 @@ async fn create_world_rule(
         });
     }
 
-    // — all entry types in check scope — but [""] is not).
     if req.target_entry_types.iter().any(|t| t.trim().is_empty()) {
         return Err(CoreError::InvalidInput {
             field: "target_entry_types".to_string(),
@@ -355,7 +343,6 @@ async fn create_world_rule(
         });
     }
 
-    // type-only per AR-1 so these surface through the envelope).
     let canonical_name = req.canonical_name.trim().to_string();
     if canonical_name.is_empty() {
         return Err(CoreError::InvalidInput {
@@ -371,7 +358,6 @@ async fn create_world_rule(
         });
     }
     let status = req.status.as_deref().unwrap_or("active");
-    // an existing rule, never an authoring state, so it is refused here.
     if !matches!(status, "draft" | "active" | "deprecated") {
         return Err(CoreError::InvalidInput {
             field: "status".to_string(),
@@ -395,8 +381,6 @@ async fn create_world_rule(
         }
     }
 
-    // hyphens), minted server-side — immutable, path-addressed, never a
-    // DTO field.
     let rule_id = format!("rul_{}", uuid::Uuid::new_v4().simple());
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -418,7 +402,6 @@ async fn create_world_rule(
         severity_hint: req.severity_hint.clone(),
         status: Some(status.to_string()),
         source_anchor_json: None,
-        // fresh at create with the carrier verbatim (rule.rs:230).
         extensions_json: json!({ "nexus": { "constraint": req.constraint } }).to_string(),
         created_at: Some(now_epoch),
         updated_at: Some(now_epoch),
@@ -524,8 +507,6 @@ async fn rule_write_gate_boundary(rule_id: &str) {
 /// stands, `updated_at` included, so replaying the archive is invisible.
 #[allow(clippy::missing_errors_doc)]
 #[allow(clippy::too_many_lines)]
-// would obscure the contract order it documents (works.rs patch_work
-// precedent).
 async fn update_world_rule(
     pool: &sqlx::SqlitePool,
     world_id: String,
@@ -533,10 +514,6 @@ async fn update_world_rule(
     req: WorldRuleUpdateRequest,
     presence: RulePatchPresence,
 ) -> CoreResult<WorldRuleResponse> {
-    // re-read sequence. The write lock is taken up front, so a competing
-    // archive commits before this read or waits behind this write — neither
-    // request can act on a stale preimage.
-    //
     // One expression on purpose: the `test-hooks` write-lock rendezvous
     // (compiled out of production builds) is the last statement before the
     // lock acquisition, so the archive/edit race regression hands over the lock
@@ -553,9 +530,6 @@ async fn update_world_rule(
             })?
     };
 
-    // world-scoped (filter below): a rule_id owned by a different world —
-    // even another world of the same creator — is 404 naming only the id,
-    // with no existence leak (AR-6).
     let Some(current) = get_rule_in_tx(&mut tx, &rule_id)
         .await
         .map_err(|e| CoreError::Internal {
@@ -568,38 +542,18 @@ async fn update_world_rule(
         });
     };
 
-    // status-only request that produced it. The guard runs straight after the
-    // scoped lookup — before the typed empty-PATCH test — so a supplied member
-    // the generated DTO collapses (an empty `{}` / `[]`, an explicit `null`, or
-    // a `status` exit) is still refused by name instead of being discarded into
-    // the empty-PATCH or archive-only shapes.
     guard_archived_patch(
         current.status.as_deref() == Some(ARCHIVED_STATUS),
         &req,
         presence,
     )?;
 
-    // row is a **no-write** success. The shared update statement refreshes
-    // `updated_at` on every matched row, so letting the repeat reach the write
-    // path would mutate the stored row — and the caller-visible response —
-    // without changing its content. Only the exact repeat short-circuits here:
-    // the guard above already refused every other archived-row shape by name,
-    // and a raw `{}` (no supplied member at all) still falls through to the
-    // empty-PATCH rejection below. No write, so no re-read either — the current
-    // row is already the state this commit publishes.
     if current.status.as_deref() == Some(ARCHIVED_STATUS)
         && req.status.as_deref() == Some(ARCHIVED_STATUS)
     {
         return Ok(item_to_response(row_to_item(current)));
     }
 
-    // fail-early beats a no-op write that would still refresh updated_at.
-    // `constraint` counts as present only when non-empty (typify's
-    // generated `Map` treats absent and `{}` identically via
-    // `skip_serializing_if = Map::is_empty`; an empty carrier is invalid
-    // anyway, so it cannot be a legitimate PATCH payload). A raw `{}` carries
-    // no supplied member either, so it reaches this branch on an archived row
-    // too and keeps naming `patch`.
     if req.canonical_name.is_none()
         && req.statement.is_none()
         && req.severity_hint.is_none()
@@ -616,7 +570,6 @@ async fn update_world_rule(
         });
     }
 
-    // assembly (whole-carrier replacement, AR-3).
     let provided_constraint = if req.constraint.is_empty() {
         None
     } else {
@@ -630,17 +583,12 @@ async fn update_world_rule(
         )
     };
 
-    // or stored family (via the read-side projection), target set =
-    // provided or stored; rejected on `target_entry_types` regardless of
-    // which side each half came from (the pair rule, not grammar — the
-    // daemon writes no second parser, AR-7).
     let effective_observer_cardinality = if let Some(c) = provided_constraint {
         matches!(c, Constraint::ObserverCardinality { .. })
     } else {
         let stored = constraint_from_extensions(current.extensions_json.as_str());
         stored.get("family").and_then(Value::as_str) == Some("observer_cardinality")
     };
-    // degrades to the empty set.
     let stored_targets =
         serde_json::from_str::<Vec<String>>(&current.target_entry_types_json).unwrap_or_default();
     let effective_target_types: &[String] =
@@ -655,7 +603,6 @@ async fn update_world_rule(
         });
     }
 
-    // replace, AR-3).
     if let Some(targets) = req.target_entry_types.as_ref() {
         if targets.iter().any(|t| t.trim().is_empty()) {
             return Err(CoreError::InvalidInput {
@@ -691,9 +638,6 @@ async fn update_world_rule(
         None => None,
     };
     if let Some(status) = req.status.as_deref() {
-        // (create still refuses it). An archived *row* never reaches this
-        // branch with a non-archived value — the terminal guard above already
-        // refused the status exit.
         if !matches!(status, "draft" | "active" | "deprecated" | ARCHIVED_STATUS) {
             return Err(CoreError::InvalidInput {
                 field: "status".to_string(),
@@ -720,7 +664,6 @@ async fn update_world_rule(
         }
     }
 
-    // spoke-vocabulary-free (sole-consumer rule).
     let mut update = RuleUpdate {
         canonical_name,
         statement,
@@ -739,11 +682,6 @@ async fn update_world_rule(
         extensions_json: None,
     };
 
-    // overwritten — the rest of the nexus namespace and all other
-    // namespaces survive. Malformed stored extensions_json → 500
-    // fail-closed (storage corruption; rows written by CLI/API are always
-    // valid JSON — same spirit as host_manifest_port's corrupt-row
-    // contract).
     if !req.constraint.is_empty() {
         update.extensions_json = Some(
             replace_constraint_in_extensions(current.extensions_json.as_str(), &req.constraint)
@@ -751,7 +689,6 @@ async fn update_world_rule(
         );
     }
 
-    // distinguish) → 404 naming only the id (AR-6).
     if !update_rule_in_tx(&mut tx, &world_id, &rule_id, &update)
         .await
         .map_err(|e| CoreError::Internal {
@@ -763,7 +700,6 @@ async fn update_world_rule(
         });
     }
 
-    // commit is about to publish, never a concurrent writer's state.
     let Some(row) = get_rule_in_tx(&mut tx, &rule_id)
         .await
         .map_err(|e| CoreError::Internal {
@@ -828,9 +764,6 @@ fn guard_archived_patch(
             "statement",
             presence.contains(RulePatchPresence::STATEMENT) || req.statement.is_some(),
         ),
-        // explicit null counts: `presence` records the key while the typed
-        // value is the absent member). An absent status is not an offender —
-        // the supplied content member is the one named.
         (
             "status",
             (presence.contains(RulePatchPresence::STATUS) || req.status.is_some())
@@ -911,9 +844,6 @@ mod findings {
         pool: &sqlx::SqlitePool,
         world_id: String,
     ) -> CoreResult<WorldFindingsListResponse> {
-        // `LIMIT ?` (Bugbot 4bad2fca) — the +1 probe returns the single row
-        // just beyond the cap so `truncated` below stays honest without ever
-        // loading the full set.
         let rows = list_world_findings_by_world(pool, &world_id, WORLD_FINDINGS_PROBE)
             .await
             .map_err(|e| CoreError::Internal {
@@ -958,7 +888,6 @@ mod findings {
             suggested_fix: r.suggested_fix,
             text_position: parse_json_object(Some(r.text_position_json.as_str()))
                 .unwrap_or_default(),
-            // (incl. the stamped `extensions.nexus.world_id` / `creator_id`).
             extensions: parse_json_object(Some(r.extensions_json.as_str())).unwrap_or_default(),
             created_at: epoch_to_rfc3339(r.created_at),
             updated_at: epoch_to_rfc3339(r.updated_at),

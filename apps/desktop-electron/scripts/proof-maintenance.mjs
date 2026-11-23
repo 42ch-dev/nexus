@@ -119,7 +119,6 @@ function main() {
   const checks = [];
   const record = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), detail });
 
-  // not silently move the pin (that would be an unreviewed dependency change).
   record('pin_is_target', pinned === args.to, { pinned, target: args.to });
 
   const install = run('pnpm', ['install', '--frozen-lockfile']);

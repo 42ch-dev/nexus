@@ -71,10 +71,6 @@ pub(crate) enum WorkPath<'a> {
 #[must_use]
 pub(crate) fn classify_work_path(path: &str) -> WorkPath<'_> {
     let mut components = Path::new(path).components();
-    // normalized away), so without dropping it `./Works/<ref>/x.md` would fall
-    // through as `NonWork` — the generic guarded write with no port, lock or
-    // boundary re-check — and `./works/<ref>/x.md` would skip the case-variant
-    // refusal.
     while components.clone().next() == Some(Component::CurDir) {
         components.next();
     }
@@ -224,15 +220,11 @@ fn check_works_boundary(
         .unwrap_or_else(|_| workspace_root.to_path_buf());
     let works_dir = canonical_root.join("Works");
     let allowed = works_dir.join(work_ref);
-    // `Works/<work_ref>` yet, the nearest existing ancestor is the workspace
-    // root or its `Works` directory itself.
     let works_path = workspace_root.join("Works");
     let mut probe = target;
     loop {
         match probe.canonicalize() {
             Ok(canonical) => {
-                // ancestors, not merely a lower symlink that resolves to one of
-                // them (e.g. `Works/demo/Leak -> …/Works`).
                 let first_write_ancestor = (probe == workspace_root && canonical == canonical_root)
                     || (probe == works_path && canonical == works_dir);
                 if !canonical.starts_with(&allowed) && !first_write_ancestor {
@@ -317,7 +309,6 @@ impl FsWorkArtifactPort {
             ),
         };
 
-        // so it runs on the blocking pool, never on an async worker thread.
         let workspace_root = write.workspace_root.to_path_buf();
         let work_ref = write.work_ref.to_string();
         let probe_target = target.clone();
@@ -354,11 +345,6 @@ impl FsWorkArtifactPort {
 
 impl WorkArtifactPort for FsWorkArtifactPort {
     async fn commit(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
-        // the executor adapter): `rel_child` must name a path BELOW
-        // `Works/<work_ref>/`. An absolute path replaces that base, and a `..`
-        // walks out of the Work subtree — and the boundary probe below stops at
-        // the first EXISTING ancestor, so with `Works/<work_ref>` absent it
-        // would approve a target inside a sibling Work's tree.
         if write.rel_child.is_absolute()
             || write
                 .rel_child
@@ -381,11 +367,6 @@ impl WorkArtifactPort for FsWorkArtifactPort {
                         .to_string(),
             });
         };
-        // rest of the process resolves that same config to the default
-        // partition (`workspace_slug_for_creator`), so the port must agree
-        // instead of refusing the creator's own Work. A recorded value that
-        // names no partition is an explicit (broken) selection: refuse rather
-        // than silently act on the default one the user never chose.
         let workspace_slug = match workspace_slug_selection(&self.nexus_home, &creator_id) {
             WorkspaceSlugSelection::Unselected(default_slug) => default_slug,
             WorkspaceSlugSelection::Recorded(slug) => {
@@ -417,24 +398,18 @@ impl WorkArtifactPort for FsWorkArtifactPort {
             ),
         })?;
 
-        // from enqueue until the schedule is terminal, so acquiring here would
-        // always refuse the Work's own writes. That holder is the Work's single
-        // writer for its lifetime: write under it and leave it untouched.
         let current_holder =
             nexus_local_db::runtime_lock::current_holder(&self.pool, &creator_id, &work_id)
                 .await
                 .map_err(|e| NexusApiError::Internal {
                     category: format!("DATABASE_ERROR: runtime_lock holder read failed: {e}"),
                 })?;
-        // the calling run's identity, so it covers every tool writer.
         if current_holder.as_deref().is_some_and(|holder| {
             holder.starts_with(nexus_local_db::runtime_lock::SCHEDULE_HOLDER_PREFIX)
         }) {
             return self.write_locked(&write).await;
         }
 
-        // existing fresh holder — including this process's own in-flight
-        // `tool:fs_write` — refuses with the lock's own `work_locked:` reason.
         let lock = WorkLock::acquire(&self.pool, &creator_id, &work_id, "tool:fs_write").await?;
         let result = self.write_locked(&write).await;
         lock.release().await;
@@ -446,7 +421,6 @@ impl WorkArtifactPort for FsWorkArtifactPort {
         request: WorkReconcile<'_>,
         recheck: &(dyn Fn() -> Result<(), NexusApiError> + Send + Sync),
     ) -> Result<ReconcileReport, NexusApiError> {
-        // before any walk, lock or write.
         work_chapters::ensure_novel_profile(&self.pool, request.work_id)
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -468,10 +442,6 @@ impl WorkArtifactPort for FsWorkArtifactPort {
             return Ok(diff.to_report());
         }
 
-        // read-phase failure above never acquires the lock at all. The
-        // unlocked walk is the stale-read window, so the caller's
-        // principal/workspace check re-runs immediately before the lock: a
-        // refusal takes no lock and writes nothing.
         recheck()?;
         let lock = RuntimeLockGuard::acquire(
             &self.pool,
@@ -491,7 +461,6 @@ impl WorkArtifactPort for FsWorkArtifactPort {
 
         let result = self.apply_reconcile(&request, &diff).await;
 
-        // reconcile must never leave the Work unwritable until the TTL.
         lock.release().await;
         let held_ms = (chrono::Utc::now() - acquired_at).num_milliseconds().max(0);
         tracing::info!(
@@ -563,7 +532,6 @@ impl WorkArtifactPort for RecordingWorkArtifactPort {
         Ok(())
     }
 
-    // read, so it refuses rather than reporting an invented empty diff.
     #[allow(clippy::unused_async_trait_impl)]
     async fn reconcile(
         &self,
@@ -757,7 +725,6 @@ mod tests {
             classify_work_path("/Works/demo/x.md"),
             WorkPath::NonWork
         ));
-        // literal `Works` tree and the read path refuses the same spelling.
         assert!(matches!(
             classify_work_path("works/demo/x.md"),
             WorkPath::CaseVariantWorks
@@ -788,8 +755,6 @@ mod tests {
             }
             other => panic!("expected an artifact, got {other:?}"),
         }
-        // component, so classifying it away is what stops `./Works/…` from
-        // falling through as `NonWork` and skipping the port.
         assert!(matches!(
             classify_work_path("./notes/plain.md"),
             WorkPath::NonWork
@@ -863,9 +828,6 @@ mod tests {
 
     #[tokio::test]
     async fn commit_refuses_an_unusable_recorded_workspace_selection() {
-        // (broken) selection: the port refuses rather than acting on the
-        // default partition they never chose. An empty record is *not* this
-        // case — it is the "never chose" state (`Unselected`).
         let fixture = fixture_selecting_workspace(true, Some("..")).await;
 
         let error = fixture
@@ -893,10 +855,6 @@ mod tests {
 
     #[tokio::test]
     async fn commit_writes_without_a_recorded_workspace_selection() {
-        // blank recorded value is the same "never chose" state. The rest of
-        // the process resolves both to the default partition
-        // (`workspace_slug_for_creator`), so the port must agree instead of
-        // refusing the creator's own Work.
         for active_slug in [None, Some("")] {
             let fixture = fixture_selecting_workspace(true, active_slug).await;
 
@@ -924,7 +882,6 @@ mod tests {
         let fixture = fixture(true).await;
         let absolute_child = fixture.workspace.path().join("outside.md");
 
-        // refused here — before any Work lookup, lock or directory creation.
         for rel_child in [
             PathBuf::from("../sibling/Stories/ch1.md"),
             absolute_child.clone(),
@@ -1032,7 +989,6 @@ mod tests {
     #[tokio::test]
     async fn commit_releases_the_lock_when_the_write_fails() {
         let fixture = fixture(true).await;
-        // `create_dir_all` fail after the lock is held.
         std::fs::create_dir_all(fixture.workspace.path().join("Works/demo")).expect("work dir");
         std::fs::write(fixture.workspace.path().join("Works/demo/Stories"), b"file")
             .expect("blocking file");
@@ -1059,8 +1015,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn commit_refuses_symlinks_aliasing_the_first_write_ancestors() {
-        // directory must not borrow the first-write ancestor exception and
-        // create bytes outside the addressed Work.
         for link_to_works_dir in [false, true] {
             let fixture = fixture(true).await;
             std::fs::create_dir_all(fixture.workspace.path().join("Works/demo")).expect("work dir");

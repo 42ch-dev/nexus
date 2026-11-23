@@ -48,15 +48,10 @@ use crate::core::{finish_direct, map_core_error, open_direct_core};
 use crate::errors::Result;
 use crate::CliError;
 use clap::Subcommand;
-// every `$ref` target to its standalone module, so import each type from the module
-// that owns it.
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_exit_when::PresetProfileExitWhen;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_lanes::PresetProfileLanes;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_next::PresetProfileNext;
 use nexus_contracts::generated::core::orchestration_presets::preset_profile_response::PresetProfileResponse;
-// generated `preset_management` response (its `source` enum displays the real
-// `embedded` / `system` / `user` label), so the CLI reads that type directly
-// instead of the retired daemon client's private copy.
 use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
     WorkflowDocument, WorkflowNodeKind,
 };
@@ -219,7 +214,6 @@ async fn list_presets(
     let core = open_direct_core(config).await?;
     let outcome = async {
         let principal = core.active_principal().await.map_err(map_core_error)?;
-        // silently degrading the list to no presets (F-001 reliability nit).
         let response = core
             .list_presets(&principal)
             .await
@@ -669,7 +663,6 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 
     let file_path = std::path::Path::new(path);
 
-    // path form keeps resolving through the YAML bundle rules below.
     if file_path
         .file_name()
         .is_some_and(|name| name.to_string_lossy().ends_with(".ir.json"))
@@ -683,8 +676,6 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
         return validate_workflow_ir_file(file_path);
     }
 
-    // `infer_bundle_root`: only a file literally named `preset.yaml` has a
-    // bundle root; a directory argument points at its preset.yaml).
     let (preset_yaml_path, bundle_root) = if file_path.is_dir() {
         (file_path.join("preset.yaml"), Some(file_path.to_path_buf()))
     } else {
@@ -726,12 +717,10 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
-    //     loader would reject).
     for problem in loader_validate_manifest_compat(&manifest, &caps) {
         errors.push(format!("{}: {}", problem.path, problem.error));
     }
 
-    //     when the target resolves to a bundle root.
     let asset_result = bundle_root
         .as_deref()
         .map_or_else(PresetValidationResult::default, |root| {
@@ -775,8 +764,6 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     let document: WorkflowDocument = serde_json::from_str(&json)
         .map_err(|e| CliError::Other(format!("workflow IR parse error: {e}")))?;
 
-    // check below it is trustworthy: refuse it instead of letting the
-    // exporter's refusal fall silent (the wording mirrors `export_preset`).
     if document.ir_version > SUPPORTED_IR_VERSION {
         return Ok(validation_response(
             document.id.as_str(),
@@ -793,17 +780,12 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
-    // dependency targets, duplicate node ids, nest bindings, nest depth). They
-    // run on every IR document, including the IR-only shapes that have no
-    // manifest projection for the loader-level checks to inspect.
     for violation in structural_violations(&document) {
         errors.push(format!("{}: {violation}", violation_path(&violation)));
     }
 
     let caps = CapabilityRegistry::with_builtins();
 
-    // projected back to run the same check the YAML path always runs; IR-only
-    // shapes (joins, nest groups, pattern slots) have no manifest projection.
     if let Ok(manifest) = export_preset(&document) {
         for problem in loader_validate_manifest_compat(&manifest, &caps) {
             errors.push(format!("{}: {}", problem.path, problem.error));
@@ -871,7 +853,6 @@ fn violation_path(violation: &Violation) -> String {
             format!("nests.{nest}.parent_node")
         }
         Violation::IncompleteNestChild { nest, .. } => format!("nests.{nest}.child"),
-        // suffices for the document-wide nest violations.
         Violation::EmptyNestId { .. }
         | Violation::NestCycle { .. }
         | Violation::NestDepthExceeded { .. } => "nests".to_string(),
@@ -1354,7 +1335,6 @@ mod tests {
 
     #[test]
     fn list_rows_include_user_presets_with_real_source_labels() {
-        // real source (not a blanket "embedded").
         let rows = build_preset_rows(&grouped_fixture(), None);
         assert_eq!(rows.len(), 3);
         assert!(rows.contains(&(

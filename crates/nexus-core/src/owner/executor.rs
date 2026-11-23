@@ -190,8 +190,6 @@ fn map_session_error(err: SessionError) -> CapabilityError {
         SessionError::ActiveWorkspaceMismatch { .. } => {
             CapabilityError::InputInvalid("session workspace root mismatch".into())
         }
-        // cannot arise from an executor call (the bundle takes the lease before
-        // the executor exists), so this arm is only here for exhaustiveness.
         SessionError::AuthorityBusy => {
             CapabilityError::PermanentExternal("workspace authority busy".into())
         }
@@ -284,18 +282,11 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        // selection was a home.
         if matches!(self.work_artifact, WorkArtifactBinding::Unbound) {
             return Err(CapabilityError::InputInvalid(
                 "work artifact commit not wired".into(),
             ));
         }
-        // so its owning root arrives empty. Resolve any relative/empty input
-        // against the ONE canonical root this executor was built for, then
-        // require the result to BE that root: a caller-supplied directory
-        // (or a `..` out of the workspace) must be refused before any
-        // directory or byte mutation, or it becomes the authority the port
-        // approves writes under.
         let Ok(canonical_root) = Path::new(&self.canonical_workspace_root).canonicalize() else {
             return Err(CapabilityError::Internal(
                 "workspace root does not resolve".into(),
@@ -319,11 +310,6 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.workspace_root
             )));
         }
-        // path replaces the base entirely, and a `..` walks out of the Work
-        // subtree. The port re-checks the same shape for every caller; this
-        // copy refuses on the capability surface before the root canonicalize
-        // and the pool work, so a builtin gets an `InputInvalid` naming its own
-        // input field.
         let rel_child = Path::new(&input.rel_child);
         if rel_child.is_absolute()
             || rel_child
@@ -335,8 +321,6 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
                 input.rel_child
             )));
         }
-        // executor records the write, a production one commits it over the
-        // shared pool. No second writer and no new public surface.
         self.commit_into_selected_port(WorkArtifactWrite {
             workspace_root: &requested_root,
             work_ref: &input.work_ref,
@@ -514,8 +498,6 @@ mod tests {
         let unrelated = tempfile::tempdir().expect("unrelated directory");
         let (_pool, executor) = seam(home.path(), workspace.path()).await;
 
-        // boundary probe would otherwise stop at the `Works` first-write
-        // ancestor and approve this target.
         let err = executor
             .commit_work_artifact(WorkArtifactCommitInput {
                 workspace_root: workspace.path().to_string_lossy().into_owned(),

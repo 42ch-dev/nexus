@@ -159,12 +159,6 @@ fn scan_user_capabilities_inner(
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return outcome,
         Err(e) => {
-            // the directory as empty — but mark the outcome TRANSIENT
-            // (Bugbot High, V1.176 PR wave): a successful digest poll
-            // followed by a FAILED rescan (EACCES/EMFILE race) must never
-            // read as deletions. The watcher's merge then carries last-good
-            // for every name this scan did not re-admit — the same I-1
-            // semantics as the per-entry `read_dir` error below.
             outcome.transient = true;
             tracing::warn!(
                 error = %e,
@@ -175,17 +169,11 @@ fn scan_user_capabilities_inner(
         }
     };
 
-    // directory name (S-003/M2 — `read_dir` order is not guaranteed).
     let mut entries: Vec<std::fs::DirEntry> = Vec::new();
     for entry in read {
         match entry {
             Ok(e) => entries.push(e),
             Err(e) => {
-                // scan may have MISSED names — mark the outcome transient so
-                // the watcher's merge keeps last-good for every name this
-                // scan did not re-admit (an incomplete scan must never read
-                // as a deletion; no capability name exists for a skip
-                // record). Logged at warn (AR-35 all-skips-logged).
                 outcome.transient = true;
                 tracing::warn!(
                     error = %e,
@@ -202,7 +190,6 @@ fn scan_user_capabilities_inner(
         let dir_name = match entry.file_name().into_string() {
             Ok(name) => name,
             Err(bad) => {
-                // skip with a warn + record (S-002, AR-35 all-skips-logged).
                 let lossy = bad.to_string_lossy();
                 skip(
                     &mut outcome,
@@ -219,13 +206,6 @@ fn scan_user_capabilities_inner(
             continue;
         }
 
-        // snapshot BEFORE the descriptor read, so the watcher's baseline
-        // is scan-time ground truth. Any edit landing after this capture
-        // diverges the first poll from the baseline and triggers a
-        // rebuild — the baseline and the registry content can never
-        // disagree about the state the scan observed (a later re-read of
-        // the filesystem could absorb an edit made between the scan and
-        // the baseline derivation). Recorded only on admission below.
         let files = dir_file_digest(&path);
 
         let descriptor_path = path.join("capability.json");
@@ -237,13 +217,6 @@ fn scan_user_capabilities_inner(
             }
         };
 
-        // rest skipped + logged. Checked BEFORE the dir-name mismatch check
-        // (M1 QC wave): the mismatch guard fires on a dir whose descriptor
-        // name differs from its dir name; the duplicate guard must fire when
-        // a later dir declares a name already admitted — otherwise it would
-        // be structurally unreachable and its skip reason never exercised.
-        // `contains` (not `insert`) here: a mismatched entry must not reserve
-        // its declared name for later entries.
         if admitted_names.contains(&descriptor.name) {
             skip(
                 &mut outcome,
@@ -265,13 +238,6 @@ fn scan_user_capabilities_inner(
             continue;
         }
 
-        // emitted — collision (builtin wins, gate 1), module-file presence
-        // (gate 2), `wasm_sha256` pairing (gate 3, AR-39) — fail-closed per
-        // candidate; a rejected candidate is a named skip (never a panic,
-        // never a boot failure, never half-registered — AC-V172-2). The
-        // admitted descriptor carries the clamped sandbox (gate 4, AR-38).
-        // The name is reserved only on admission — a rejected candidate must
-        // not reserve its declared name for later entries.
         let descriptor = match admit(&descriptor, &path, builtin_names) {
             Ok(admitted) => admitted.descriptor,
             Err(e) => {
@@ -281,10 +247,6 @@ fn scan_user_capabilities_inner(
         };
         admitted_names.insert(descriptor.name.clone());
 
-        // manifest.json + <module-id>.wasm) and the daemon-wide engine/cache.
-        // The engine arm passes Some/Some so run() executes the module; the
-        // engine-less arm passes None/None (AR-44) so run() returns
-        // WorkerUnavailable.
         #[cfg(feature = "wasm")]
         let admitted_cap = UserCapability::new_with_executor(
             &descriptor,
@@ -295,8 +257,6 @@ fn scan_user_capabilities_inner(
         #[cfg(not(feature = "wasm"))]
         let admitted_cap = UserCapability::new(&descriptor, path);
         outcome.admitted.push(admitted_cap);
-        // captured above rides the outcome so the watcher's baseline is
-        // scan-time ground truth (see `digest_from_admitted`).
         outcome.admitted_stats.push(AdmittedCapabilityStats {
             name: descriptor.name,
             files,
@@ -573,12 +533,9 @@ mod tests {
         );
     }
 
-    // not filesystem `read_dir` order. The admitted order equals sorted dir
-    // names regardless of creation order.
     #[test]
     fn scan_order_is_sorted_by_directory_name() {
         let tmp = tempfile::tempdir().unwrap();
-        // sorted order.
         write_capability_dir(tmp.path(), "zeta.cap");
         write_capability_dir(tmp.path(), "alpha.cap");
         write_capability_dir(tmp.path(), "mike.cap");

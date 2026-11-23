@@ -166,7 +166,6 @@ async fn seed(actor: &DirectActor) -> RnAct4Graph {
     );
 
     let world_w3 = actor.create_world("RN-ACT-4 World Three Later").await;
-    // across the Character's active bindings, so W3 must see it without a copy.
     let bind_a_w3 = actor.add_binding(&character_a, &world_w3).await;
 
     RnAct4Graph {
@@ -462,8 +461,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     let a_w1 = view_character_cli(&actor, &g.character_a, &g.world_w1, &g.bind_a_w1);
     let a_w2 = view_character_cli(&actor, &g.character_a, &g.world_w2, &g.bind_a_w2);
     let b_w1 = view_character_cli(&actor, &g.character_b, &g.world_w1, &g.bind_b_w1);
-    // Character-owned row is shared across the Character's bindings, never
-    // copied into the new World's container.
     let later = view_character_cli(&actor, &g.character_a, &g.world_w3, &g.bind_a_w3);
     let creator = view_creator_cli(&actor, &g.creator_id, &g.world_w1);
 
@@ -508,8 +505,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         named_item(&creator_i, NAME_W1_SECRET)["entry_id"],
         g.ke_w1_secret
     );
-    // pair. `W1Secret` is authored `author-only`, i.e. the Creator's own holder
-    // with an owner-private disclosure; the retired boolean is gone.
     assert_eq!(
         named_item(&creator_i, NAME_W1_SECRET)["disclosure"],
         DISCLOSURE_OWNER_PRIVATE
@@ -560,7 +555,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         named_item(&creator_i, NAME_B_SHARE)["entry_id"],
         g.ke_b_share
     );
-    // management review: the revision and status the CLI projects are one row's.
     assert_eq!(
         named_item(&a_w1_i, NAME_A_SHARE)["revision"],
         named_item(&creator_i, NAME_A_SHARE)["revision"]
@@ -602,8 +596,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
     let view_a = || view_character_ids(&actor, &g.character_a, &g.world_w1, &g.bind_a_w1);
     let view_b = || view_character_ids(&actor, &g.character_b, &g.world_w1, &g.bind_b_w1);
 
-    // Character and to the Creator's management review, hidden from every other
-    // Character.
     let private_entry = add_character_private(&actor, &g.character_a, NAME_A_PRIVATE);
     let a_private = page_index(&view_character_cli(
         &actor,
@@ -626,8 +618,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         "the Creator's management review keeps an owned private row"
     );
 
-    // revision CAS. The row is Character-owned, so clearing its disclosure is
-    // not a container move: it stays in its owner's container only.
     let shared = edit_audience(&actor, &g.character_a, &private_entry, 0, "shared", None);
     assert!(shared["item"]["holder_entry_id"].is_null());
     assert!(shared["item"]["disclosure"].is_null());
@@ -647,8 +637,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         "clearing a disclosure must not leak an owner-scoped row to another Character"
     );
 
-    // character-private → shared, each move under the graph-read CAS preimage,
-    // with the Actor KnowledgeView following every one of them.
     let author_only = patch_entity_audience(
         &actor,
         &g.world_w1,
@@ -665,7 +653,6 @@ async fn rn_act4_five_views_share_row_identity_without_copies() {
         author_only["entity"]["disclosure"],
         DISCLOSURE_OWNER_PRIVATE
     );
-    // lose the row, and the management review keeps it.
     assert!(!view_a().contains(&g.ke_w1_public));
     assert!(!view_b().contains(&g.ke_w1_public));
     let creator_author_only = page_index(&view_creator_cli(&actor, &g.creator_id, &g.world_w1));

@@ -254,9 +254,6 @@ function inspectDarwin(artifact, spec, findings) {
   findings.minimum_os_source = minosMatches[0] ? 'LC_BUILD_VERSION.minos' : versionMinMatches[0] ? 'LC_VERSION_MIN_MACOSX.version' : null;
   findings.deployment_target_env = process.env.MACOSX_DEPLOYMENT_TARGET ?? null;
 
-  // artifact's own identity (a Rust cdylib built by cargo carries its absolute
-  // build path there), not a load dependency, so classify from the load
-  // commands and drop the id from the dependency list.
   const idCommand = /cmd LC_ID_DYLIB[\s\S]{0,240}?\n\s*name ([^\s(]+)/.exec(loadCommands.stdout);
   findings.install_name = idCommand?.[1] ?? null;
   findings.install_name_is_build_path = Boolean(findings.install_name?.startsWith('/'));
@@ -310,8 +307,6 @@ function inspectLinux(artifact, spec, findings) {
   findings.rpath = [...dynamic.stdout.matchAll(/\((?:RPATH|RUNPATH)\)\s+Library (?:rpath|runpath): \[([^\]]+)\]/g)].map((m) => m[1]);
 
   const versionInfo = run('readelf', ['--version-info', artifact], { forceNoShell: true });
-  // definitions (`.gnu.version_d`) describe symbols this library exports and
-  // must not be mixed into the requirement.
   const needsStart = versionInfo.stdout.indexOf('Version needs section');
   const definitionsStart = versionInfo.stdout.indexOf('Version definition section');
   const needsScope =

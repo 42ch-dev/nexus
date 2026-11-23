@@ -49,7 +49,6 @@ async fn seed_pending(pool: &sqlx::SqlitePool) -> String {
         "canonical_name": "CAS Test Character",
     })
     .to_string();
-    // connection (`&mut SqliteConnection`) since the T13 writer-protocol change.
     let mut conn = pool.acquire().await.expect("acquire workspace connection");
     let row = insert_pending_with_llm(
         &mut conn,
@@ -111,9 +110,6 @@ async fn test_kb_adopt_stale_preimage_returns_version_conflict() {
                 "expected E_VERSION in error: {display}"
             );
         }
-        // (adopt succeeds first). That's acceptable — this is a best-effort
-        // race test. The deterministic DAO-level test below covers the
-        // version-conflict path exhaustively.
         Ok(()) => {}
         other => panic!("unexpected error from kb_adopt: {other:?}"),
     }
@@ -159,7 +155,6 @@ async fn test_kb_adopt_already_confirmed_returns_error() {
 
 #[tokio::test]
 async fn test_cas_version_mismatch_direct() {
-    // that kb_adopt calls. This is the pure CAS unit test at the DAO level.
     let (_dir, pool) = fresh_pool().await;
     let job_id = seed_pending(&pool).await;
 

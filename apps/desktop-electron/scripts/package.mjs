@@ -291,7 +291,6 @@ function appFileManifest(appPath) {
 }
 
 function readdirSyncSafe(path) {
-  // manifest traversal easy to audit against symlink checks.
   return readdirSync(path, { withFileTypes: true }).filter((entry) => !entry.isSymbolicLink());
 }
 function statSafe(path) { return statSync(path).size; }

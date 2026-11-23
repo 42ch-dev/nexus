@@ -218,9 +218,6 @@ async fn cron_skips_disabled_role() {
         summary.fired, 0,
         "disabled roles must not fire: {summary:?}"
     );
-    // are disabled above, and `review` is absent from this two-role blob so it
-    // deserialises to `None`. All three are clean no-match skips — the test's
-    // intent ("disabled roles don't fire") still holds via `fired == 0`.
     assert_eq!(summary.skipped_no_match, 3);
 }
 
@@ -257,7 +254,6 @@ async fn cron_skips_runtime_locked() {
         &schedule_blob("* * * * *", "* * * * *", true, true),
     )
     .await;
-    // UPDATE to simulate an in-progress FL-E driver holding the lock.
     sqlx::query("UPDATE works SET runtime_lock_holder = ? WHERE work_id = ?")
         .bind("daemon:schedule:ACH123")
         .bind("wrk_locked")
@@ -284,7 +280,6 @@ async fn cron_skips_completion_locked() {
         &schedule_blob("* * * * *", "* * * * *", true, true),
     )
     .await;
-    // UPDATE to simulate a finalized Work.
     sqlx::query("UPDATE works SET completion_locked_at = ? WHERE work_id = ?")
         .bind("2026-06-18T12:00:00Z")
         .bind("wrk_done")
@@ -383,7 +378,6 @@ async fn set_schedule_json_tx_rejects_stale_preimage() {
 
     set_schedule(&pool, "wrk_cas", "{\"v\":\"B\"}").await;
 
-    // pre-image None → must fail because the row now holds "{\"v\":\"B\"}".
     let mut tx = pool.begin().await.unwrap();
     let applied = works::set_schedule_json_tx(
         &mut tx,
@@ -508,8 +502,6 @@ async fn set_schedule_json_tx_missing_work_errors() {
 async fn partial_index_used_in_schedule_json_scan() {
     let (_dir, pool) = test_pool().await;
 
-    // detail) — the first three are INTEGER, the fourth is TEXT. We decode
-    // all four and inspect the `detail` column for the index name.
     let rows: Vec<(i64, i64, i64, String)> = sqlx::query_as(
         "EXPLAIN QUERY PLAN \
          SELECT work_id FROM works \
@@ -650,7 +642,6 @@ fn schedule_blob_review(
 async fn cron_fires_review_role_enqueues_review_master() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_fire_review");
-    // and disabled so the single fire is unambiguously the review role.
     seed_work(
         &pool,
         &work,
@@ -669,9 +660,6 @@ async fn cron_fires_review_role_enqueues_review_master() {
         "one novel-review-master schedule should be enqueued"
     );
 
-    // prefix and `cron:review:<work>` label (NOT the stale-findings `RVM` /
-    // `auto-review-master:` shape). This is the Option A contract: one uniform
-    // enqueue path preserves the trigger origin in the schedule row.
     let (schedule_id, label): (String, String) = sqlx::query_as(
         "SELECT schedule_id, label FROM creator_schedules \
          WHERE work_id = 'wrk_fire_review' AND preset_id = 'novel-review-master'",
@@ -716,7 +704,6 @@ async fn cron_review_respects_per_work_gating() {
         &schedule_blob_review("0 3 * * *", "0 4 * * *", "* * * * *", false, false, true),
     )
     .await;
-    // UPDATE to simulate a finalized Work (mirrors `cron_skips_completion_locked`).
     sqlx::query("UPDATE works SET completion_locked_at = ? WHERE work_id = ?")
         .bind("2026-06-18T12:00:00Z")
         .bind("wrk_review_gated")
@@ -755,7 +742,6 @@ async fn cron_review_respects_idempotency() {
         &schedule_blob_review("0 3 * * *", "0 4 * * *", "* * * * *", false, false, true),
     )
     .await;
-    // idempotency guard (`has_active_role_schedule`) sees it.
     let now_ts = chrono::Utc::now().timestamp();
     sqlx::query(
         "INSERT INTO creator_schedules \
@@ -797,7 +783,6 @@ async fn cron_review_respects_idempotency() {
 async fn cron_review_graceful_when_no_review_role_configured() {
     let (_dir, pool) = test_pool().await;
     let work = test_work("wrk_no_review");
-    // `None` via `#[serde(default)]`, so the evaluator no-ops it cleanly.
     seed_work(
         &pool,
         &work,

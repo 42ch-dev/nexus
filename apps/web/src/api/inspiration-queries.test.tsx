@@ -1,6 +1,4 @@
 /**
- * invalidation set (v1.222 P1 T1).
- *
  * The stale-Works-list risk on promote is the reason these cases exist: promote
  * is a server-side Work create, so it must invalidate `works.lists()` in
  * addition to `inspiration.lists()`. Add/archive must not touch `works`.

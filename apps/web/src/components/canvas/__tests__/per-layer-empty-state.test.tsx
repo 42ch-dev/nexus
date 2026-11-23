@@ -85,10 +85,6 @@ function makeWorkMockClient(outline: WorkOutline): NexusClient {
 }
 
 async function setI18nLanguage(language: 'en' | 'zh-CN') {
-  // renderInApp) resolves to the target language. The provider's mount
-  // effect calls `i18n.changeLanguage(resolvedLocale)` based on the stored
-  // preference, so changing the i18n singleton alone is not enough — the
-  // provider's effect would override it.
   if (typeof window !== 'undefined') {
     window.localStorage.setItem('nexus-web-locale', language);
   }
@@ -102,7 +98,6 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
   });
 
   it('renders the honest Brief-empty copy + Switch to Narrative CTA in English', async () => {
-    // explicitly switches to it (default layer is Narrative without era data).
     const graph: WorldKbGraphResponse = {
       entities: [
         worldEntity({
@@ -130,8 +125,6 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
     const emptyState = await screen.findByTestId('timeline-brief-empty-state');
     expect(emptyState).toBeInTheDocument();
 
-    // hatch back to Narrative. Per layer-feel §7, the body must mention
-    // "Switch to Narrative" so the user has an actionable next step.
     expect(emptyState).toHaveTextContent('No era markers yet');
     expect(emptyState).toHaveTextContent('Switch to Narrative');
 
@@ -176,7 +169,6 @@ describe('TimelineCanvas — Brief empty-state copy (P4 Task 7)', () => {
     fireEvent.click(screen.getByTestId('timeline-layer-tab-brief'));
     const emptyState = await screen.findByTestId('timeline-brief-empty-state');
 
-    // escape hatch (translated).
     expect(emptyState).toHaveTextContent('尚无纪元标记');
     expect(emptyState).toHaveTextContent('切换到叙事');
 
@@ -192,7 +184,6 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
   });
 
   it('renders the honest Moment-empty copy + Switch to Narrative CTA in English', async () => {
-    // renders zero nodes when the user switches to it.
     const outline: WorkOutline = {
       work_id: 'work-1',
       outline_revision: 1,
@@ -222,8 +213,6 @@ describe('WorkTimelineCanvas — Moment empty-state copy (P4 Task 7)', () => {
     const emptyState = await screen.findByTestId('work-timeline-moment-empty-state');
     expect(emptyState).toBeInTheDocument();
 
-    // purpose + escape hatch back to Narrative. Per layer-feel §7, the body
-    // must reference switching to Narrative for events.
     expect(emptyState).toHaveTextContent('No scene or beat data yet');
     expect(emptyState).toHaveTextContent('Narrative');
 

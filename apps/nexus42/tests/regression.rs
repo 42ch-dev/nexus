@@ -72,7 +72,6 @@ fn r1_anonymous_identity_active_session() {
         .assert()
         .success();
 
-    // (ephemeral means it won't persist to list in a new session)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("system")
@@ -288,11 +287,6 @@ fn r3_context_assemble_moment_executes_without_placeholder_skip() {
         .assert()
         .success();
 
-    // `assemble-moment` fails closed in `creator_view_scope` ("an admitted
-    // knowledge view requires a World: pass `--world-id wld_...`"; re-smoked on
-    // the real binary in v1.194 P2-T2), so the R3 chain materializes a World and
-    // names it.
-    //
     // The refusal is now pinned at the CLI exit path by
     // `r3_context_assemble_moment_worldless_refuses` (I-000039), closing the
     // v1.194 P2-T2 finding F-T2-1 coverage gap on
@@ -351,7 +345,6 @@ fn r3_context_assemble_moment_worldless_refuses() {
     let workspace = tmp.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // must be in place for the refusal — not a missing-creator error — to fire.
     Command::cargo_bin("nexus42")
         .unwrap()
         .args([
@@ -466,7 +459,6 @@ fn r5_platform_guard_blocks_sync_push() {
         .assert()
         .success();
 
-    // entrance; the hidden top-level `sync` alias is gone)
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("platform")
@@ -528,7 +520,6 @@ fn r5_platform_guard_sync_status_works() {
         .assert()
         .success();
 
-    // With no active creator configured, it should still respond gracefully.
     Command::cargo_bin("nexus42")
         .unwrap()
         .arg("platform")

@@ -124,10 +124,6 @@ function healthHandler() {
 }
 
 function renderModalApp(initialRouterEntries: string[]) {
-  // agent, full rail, all sections). Post-entrance-split that surface is the
-  // DEVELOP tree (plan QC W-2) — render on the developer entrance so the
-  // pinned behavior stays valid; the Create variant (filtered rail + first
-  // visible section) is covered by settings-section-frame.test.tsx.
   window.localStorage.setItem('nexus-entrance', 'developer');
   return renderInApp(
     <>
@@ -347,7 +343,6 @@ describe('Settings modal primary', () => {
     function DirtySourceHost() {
       const { registerDirtySource } = useSettingsModal();
       useEffect(() => {
-        // applies a blocked leave (open flickers false before restore).
         registerDirtySource('test-dirty-route', true);
         return () => registerDirtySource('test-dirty-route', false);
       }, [registerDirtySource]);

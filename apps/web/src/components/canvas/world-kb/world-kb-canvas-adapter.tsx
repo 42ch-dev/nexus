@@ -1,7 +1,4 @@
 /**
- * Flow nodes/edges and renders surface-specific chrome (inspectors, alt-view,
- * a11y summary).
- *
  * V1.114 P0 T3: the adapter implements the shared {@link CanvasSurfaceAdapter}
  * interface so the orchestrator delegates projection, node types, summary, and
  * alt-view to the surface. The returned adapter object is stable; it reads
@@ -58,20 +55,8 @@ export interface WorldKbSurfaceGraph {
  */
 export interface WorldKbCanvasAdapterContext {
   worldId: string;
-  /**
-   * inspector via InspectorPanel). The adapter's `renderInspector(node)` does
-   * NOT route from this field — `node.data` is the authority
-   * (R-V1114P0QC1-W002).
-   */
   selection: Selection;
-  /**
-   * entity projection for ANY entity node from `node.data.keyBlockId`. This is
-   * cross-node graph context, not per-node data.
-   */
   entities: WorldKbEntityProjection[];
-  /**
-   * projection from `node.data.candidateId`. Cross-node graph context.
-   */
   candidates: WorldKbCandidateProjection[];
   /** Confirmed (non-rejected) entities — PromotionInspector merge targets. */
   confirmedEntities: WorldKbEntityProjection[];
@@ -137,7 +122,6 @@ export function createWorldKbCanvasAdapter(
   ctxRef: MutableRefObject<WorldKbCanvasAdapterContext>,
 ): WorldKbCanvasAdapter {
   return {
-    // 'world-kb-relationships'; this surface is the entity projection.
     surfaceKind: 'world-kb-entities',
     nodeTypes: worldKbNodeTypes,
     edgeTypes: undefined,
@@ -170,16 +154,9 @@ export function createWorldKbCanvasAdapter(
     },
 
     adaptConflict(_error) {
-      // and are handled by WorldKbCanvasConflicts; no single query-level conflict
-      // modal exists for this surface.
       return null as ConflictModalProps | null;
     },
 
-    // CanvasSurfaceAdapter would let surfaces own edge (relationship) selection
-    // inspectors. Currently the relationship inspector stays orchestrator-owned
-    // via InspectorPanel (R-V1114P0QC1-W002 known gap). Do NOT expand the
-    // interface this iteration (YAGNI) — add the optional method when a second
-    // surface needs edge-inspector routing.
     renderInspector(node) {
       return <WorldKbInspectorWrapper ctxRef={ctxRef} node={node} />;
     },

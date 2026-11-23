@@ -71,11 +71,6 @@ function assertRealDirectory(path: string): void {
   }
 }
 
-/**
- * follows a planted symlink (it fails with EEXIST instead), and an existing
- * real directory — including a legacy permissive one — is forced back to
- * `mode` before anything is written beneath it.
- */
 function ensureRealDir(path: string, mode: number): void {
   try {
     mkdirSync(path, { mode });
@@ -198,10 +193,6 @@ export async function withServiceStartLock<T>(home: string, fn: () => Promise<T>
           );
         }
       } else if (readLockTokenBytes(path) === raw) {
-        // holds the exact bytes just judged stale: re-reading immediately
-        // before the unlink closes the window where a successor's fresh
-        // O_EXCL lock (a uuid this process never generated) could be deleted
-        // and let two starts proceed concurrently.
         rmSync(path, { force: true });
       }
       await wait(LOCK_RETRY_DELAY_MS);

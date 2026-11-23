@@ -55,17 +55,12 @@ use super::work_artifact::{
 };
 use crate::content::resolve_guarded_path_async;
 use crate::error::{CoreError, CoreResult};
-// named `NexusApiError`. It IS the same type as `CoreError` — the daemon's
-// adapter renders the HTTP envelope — so the alias keeps the extracted bodies
-// readable without a 200-site rename that would obscure the diff.
 use crate::error::CoreError as NexusApiError;
 use crate::service::CoreService;
 use crate::tool_catalog::{
     host_tool_catalog, lookup_host_tool, Access, AdmissionGate, HostToolId, HostToolMetadata,
 };
 use crate::{ArchivePoolRequest, PromotePoolRequest, WorkDetails, WorkPatchRequest};
-// DTO (the schema lane's authority, item 3); the daemon's handwritten copy it was
-// moved from — plus its response envelope — is deleted, not shadowed.
 use nexus_connect::peer_tools;
 use nexus_contracts::{FindingsApi, ToolsApi};
 use nexus_home_layout::active_context::{read_active_creator_id, read_active_workspace_slug};
@@ -434,7 +429,6 @@ pub async fn execute_tool(
 /// `not_supported` must find it.
 fn err_code(err: &CoreError) -> &str {
     match err {
-        // memory code, the same classification the caller receives.
         CoreError::Coded { code, .. }
         | CoreError::PeerDenied { code, .. }
         | CoreError::MemoryProviderRefused { code, .. } => code,
@@ -502,9 +496,6 @@ pub(crate) async fn admission_pipeline(
                     "tool_execution", "active workspace required for nexus.* tools",
                 ),
             })?;
-
-        // (Work, schedule, etc. include creator/workspace predicates in SQL).
-        // Path-based bounds for fs/* tools are checked below.
 
         let workspace_path_str = context.workspace_path().unwrap_or_default();
         if !workspace_path_str.is_empty() {
@@ -724,8 +715,6 @@ async fn execute_work_patch(
                     reason: "each entry must include a 'text' or 'note' field".into(),
                 })?;
 
-            // (`{"at", "note"}`); per-entry `source` sidecar values from the
-            // legacy host-tool payload are normalized away by the authority.
             core.append_work_inspiration(
                 &principal,
                 work_id.to_string(),
@@ -879,8 +868,6 @@ async fn execute_strategy_generate(
         })?;
 
     let core = context.core()?;
-    // creator the service hands out as its principal; no caller-supplied
-    // identity crosses this seam.
     let principal = core.active_principal().await?;
     let outcome = core
         .generate_strategy_candidate(
@@ -893,7 +880,6 @@ async fn execute_strategy_generate(
         .await;
     match outcome {
         Ok(outcome) => Ok(outcome.wire()),
-        // tool's result. Anything else is a refusal and stays one.
         Err(CoreError::InputValidation { details })
             if details.get("code").and_then(Value::as_str) == Some("lint_exhausted") =>
         {
@@ -946,8 +932,6 @@ async fn execute_context_assemble(
         "assembled_at": chrono::Utc::now().to_rfc3339()
     }))
 }
-
-// same classification and answer from these, so the two cannot disagree.
 
 /// A case-variant `Works` spelling: neither half routes it.
 fn case_variant_works_refusal(path_str: &str) -> NexusApiError {
@@ -1045,7 +1029,6 @@ async fn execute_read_file(
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
         .await
         .map_err(|e| match e {
-            // not an escape, so it keeps a not-found answer.
             NexusApiError::InvalidInput { ref field, .. }
                 if field == "chapter_path_unresolvable" =>
             {
@@ -1374,7 +1357,6 @@ async fn execute_world_snapshot_get(
 
     ensure_world_accessible_for_creator(context.pool(), creator_id, world_id).await?;
 
-    // so the core composes its own rather than reaching into a transport.
     let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
     let world_state = gw.get_world_state(world_id).await.map_err(
         |e: nexus_narrative::NarrativeError| match e {
@@ -1412,7 +1394,6 @@ async fn execute_timeline_recent_get(
         .unwrap_or(100)
         .min(500);
 
-    // so the core composes its own rather than reaching into a transport.
     let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(context.pool().clone());
     let mut events = gw.get_timeline(world_id, None, Some(limit)).await.map_err(
         |e: nexus_narrative::NarrativeError| NexusApiError::Internal {
@@ -1442,9 +1423,6 @@ async fn execute_kb_snapshot_read(
 
     ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
 
-    // admitted Creator ActorView (durable §4.1/§4.2), so another holder's
-    // `owner-private` World row is not in the snapshot and an unresolvable
-    // selection refuses instead of falling back to the World listing.
     let selection = crate::actor_knowledge::ActorKnowledgeViewService::new(pool.clone())
         .actor_view_scope(
             creator_id,
@@ -1783,7 +1761,6 @@ async fn execute_kb_snapshot_write(
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),
             })?;
-        // request-level world_id (prevents cross-world block payload bypass).
         if kb.world_id() != Some(world_id) {
             return Err(NexusApiError::Forbidden {
                 resource: format!(
@@ -1806,14 +1783,9 @@ async fn execute_kb_snapshot_write(
     if let Some(port) = context.recording_knowledge_entry.as_deref() {
         let mut suppressed = Vec::with_capacity(records.len());
         for kb in records {
-            // simulation that never writes still has to establish them, or it
-            // panics on the caller input production refuses. No extension
-            // document exists on this path (nothing is built or inserted).
             kb_store
                 .validate_key_block(&kb, None)
                 .map_err(|e| kb_store_refusal(&e))?;
-            // preview asks the store's own predicate rather than recording a
-            // `Put` production would refuse.
             kb_store
                 .check_key_block_id_free(&kb)
                 .await
@@ -1919,8 +1891,6 @@ async fn execute_manuscript_chapter_update(
             .ok_or_else(|| NexusApiError::Internal {
                 category: format!("WORKSPACE_PATH_ERROR: {}", "workspace path not available"),
             })?;
-        // (set by seed_chapters), which follows Works/{work_ref}/Stories/{slug}.md.
-        // Fall back to constructing the path if the chapter has no body_path yet.
         let canonical_path = chapter_exists
             .as_ref()
             .and_then(|cr| cr.body_path.clone())
@@ -1930,8 +1900,6 @@ async fn execute_manuscript_chapter_update(
                 format!("Works/{wr}/Stories/{ch_nn}-{ch_nn}.md")
             });
 
-        // resolve inside the workspace root. The port below re-checks the
-        // narrower `Works/<work_ref>/` boundary itself.
         resolve_guarded_path_async(
             Path::new(&workspace_root).to_path_buf(),
             canonical_path.clone(),
@@ -1962,7 +1930,6 @@ async fn execute_manuscript_chapter_update(
                 content,
             })
             .await?;
-        // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
         Some(canonical_path)
     } else {
         None
@@ -2209,8 +2176,6 @@ async fn execute_finding_resolve(
     let core = context.core()?;
     let principal = core.active_principal().await?;
 
-    // work-write gate, lifecycle transition validation and the not-found
-    // mapping all live in the core; this boundary keeps only the payload.
     core.update_finding(
         &principal,
         finding_id.to_string(),
@@ -2254,7 +2219,6 @@ async fn execute_pool_entry_manage(
 
     match action {
         "add" | "promote" => {
-            // (`resolve_owned_work`) and the write gate for promotion.
             core.promote_work_pool_entry(
                 &principal,
                 PromotePoolRequest {
@@ -2265,7 +2229,6 @@ async fn execute_pool_entry_manage(
             .await?;
         }
         "remove" | "archive" => {
-            // archive mutation itself goes through the core authority.
             let entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
                 context.pool(),
                 creator_id,
@@ -2483,11 +2446,6 @@ async fn execute_manuscript_read_range(
     let workspace_root_path = Path::new(&workspace_root);
     let abs_body = workspace_root_path.join(&body_path);
 
-    // within the workspace root before reading. Delegates to the same canonical
-    // helper used by fs/* and the manuscript write path. `must_exist` preserves
-    // the existing read-path semantics: an existing file is canonicalized before
-    // the component-wise prefix check; a missing-but-in-bounds file falls through
-    // to the existing FILE_READ_FAILED behavior below.
     let must_exist = abs_body.exists();
     let abs_body = resolve_guarded_path_async(
         workspace_root_path.to_path_buf(),
@@ -2496,7 +2454,6 @@ async fn execute_manuscript_read_range(
     )
     .await
     .map_err(|e| match e {
-        // body-path validation failure.
         NexusApiError::Coded { message, .. } => NexusApiError::InvalidInput {
             field: "body_path".into(),
             reason: message,
@@ -2637,8 +2594,6 @@ async fn execute_manuscript_write(
         })?;
     let workspace_root_path = Path::new(&workspace_root);
 
-    // within the workspace root before any FS op. The port below re-checks the
-    // narrower `Works/<work_ref>/` boundary itself.
     resolve_guarded_path_async(workspace_root_path.to_path_buf(), body_path.clone(), false)
         .await
         .map_err(|e| match e {
@@ -2669,7 +2624,6 @@ async fn execute_manuscript_write(
         })
         .await?;
 
-    // failure rolls the metadata back (the bytes already committed above).
     let word_count = content.split_whitespace().count();
     let now = chrono::Utc::now().to_rfc3339();
     let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
@@ -3171,12 +3125,6 @@ impl CapabilityRegistry {
     ) -> Result<serde_json::Value, NexusApiError> {
         let row = self.lookup(&req.tool_name);
         if row.is_none() {
-            // path and on the allowlist (`spine_resolves`) alike. A reserved
-            // builtin id refuses even when this build binds no handler for it
-            // (feature-gated binding), so the reservation is not left to each
-            // lane's own namespace rules — the user lane's name rule admits
-            // `fs/*` ids, so its occupancy of a canonical name must never decide
-            // the call.
             if !self.canonical_miss(&req.tool_name) {
                 self.note_fallback_consultation();
                 // Peer arm (AR-68 #4): reverse-invoke the owning responder.
@@ -3197,11 +3145,6 @@ impl CapabilityRegistry {
         }
         let row = row.expect("row present");
 
-        // names every recognized `AdmissionGate` variant, so a new variant
-        // fails to compile here rather than shipping without a decision. It
-        // checks the DECLARATION, not that each gate has a runtime enforcement
-        // path — enforcement lives in `admission_pipeline`, the handlers and
-        // the caller, as the gate split above states.
         for gate in row.metadata.admission {
             debug_assert!(
                 matches!(
@@ -3247,7 +3190,6 @@ async fn dispatch_peer_tool(
     use peer_tools::PeerInvokeError;
     match peer_tools::invoke_peer_tool(entry, req.parameters.clone()).await {
         Ok(value) => Ok(value),
-        // plain client-input error.
         Err(PeerInvokeError::Denied {
             wire_code: None,
             message,
@@ -3255,7 +3197,6 @@ async fn dispatch_peer_tool(
             code: "invalid_input".to_string(),
             message,
         }),
-        // the public code stays the spine's `not_supported`.
         Err(PeerInvokeError::Denied {
             wire_code: Some(wire_code),
             message,
@@ -3290,9 +3231,6 @@ fn validate_user_cap_arguments(schema_json: &str, arguments: &Value) -> Result<(
         return Err("Tool arguments must be a JSON object".to_string());
     };
     let Ok(schema) = serde_json::from_str::<Value>(schema_json) else {
-        // JSON object; a parse failure here means the descriptor changed
-        // after admission — fail closed as invalid_input rather than
-        // dispatching unvalidated.
         return Err("capability input schema is not a JSON object".to_string());
     };
     if schema.get("type") != Some(&Value::String("object".to_string())) {
@@ -3369,9 +3307,6 @@ pub fn user_cap_catalog_admission(
     if name.starts_with("nexus.") {
         return Err(UserCapCatalogRefusal::ReservedNamespace);
     }
-    // of truth with the peer arm — the local `matches_tools_grammar` mirror
-    // was removed; spoke grammar is `tools.<ns>.<tool_id>` with ns
-    // `^[a-z][a-z0-9_-]*$` and tool_id `^[a-z0-9][a-z0-9_-]*$`).
     if matches!(parse_tool_capability_id(name), SpokeResult::Ok(_)) {
         return Err(UserCapCatalogRefusal::ReservedNamespace);
     }
@@ -3576,7 +3511,6 @@ mod tests {
         let workspace = tempfile::tempdir().expect("temp workspace");
         std::fs::write(
             home.path().join("config.toml"),
-            // this selection (or the process default when none is recorded).
             format!(
                 "active_creator_id = \"{CREATOR}\"\n\
                  active_workspace_slug_by_creator = {{ {CREATOR} = \"default\" }}\n"
@@ -3722,7 +3656,6 @@ mod tests {
         std::fs::write(&target, "the original chapter\n").expect("seed the chapter");
         let before = entry_snapshot(fixture.workspace.path());
 
-        // recording port.
         let context = ToolContext::new_simulated(
             fixture.pool.clone(),
             fixture.context.nexus_home.clone(),
@@ -3802,7 +3735,6 @@ mod tests {
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!("SELECT json_array({rendered}) FROM kb_key_blocks ORDER BY key_block_id");
-        // caller input — the only reason a statically-typed query is unavailable.
         sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
             .fetch_all(pool)
             .await
@@ -3875,9 +3807,6 @@ mod tests {
         .await
         .expect("the simulated write succeeds");
 
-        // purpose: it is the claim this test exists to prove, so a run that
-        // writes must fail HERE. Select `recording_knowledge_entry: None` and
-        // this is the assertion that goes red, not the `written` count.
         assert_eq!(
             kb_rows(&fixture.pool).await,
             before,
@@ -3958,7 +3887,6 @@ mod tests {
         );
         let before = kb_rows(&fixture.pool).await;
 
-        // panic" alone would let the next refactor reintroduce the panic.)
         let cases = [
             (
                 "disclosure",
@@ -4270,7 +4198,6 @@ mod tests {
         );
         assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
 
-        // this spelling instead of writing around it on the guarded path.
         nexus_local_db::acquire_runtime_lock(
             &fixture.pool,
             CREATOR,
@@ -4305,7 +4232,6 @@ mod tests {
     #[tokio::test]
     async fn fs_leading_curdir_case_variant_spelling_is_refused_on_write_and_read() {
         let fixture = fixture(true).await;
-        // by the target being absent — on a case-sensitive volume or not.
         for tree in ["works", "Works"] {
             let dir = fixture
                 .workspace
@@ -4455,7 +4381,6 @@ mod tests {
     #[tokio::test]
     async fn execute_write_file_is_not_reentrant_for_tool_fs_write() {
         let fixture = fixture(true).await;
-        // uuid per acquire, so a second write refuses instead of re-entering.
         nexus_local_db::acquire_runtime_lock(
             &fixture.pool,
             CREATOR,
@@ -4513,8 +4438,6 @@ mod tests {
         let fixture = fixture(true).await;
         let case_variant = format!("works/{WORK_REF}/Stories/ch1.md");
         let exact = format!("Works/{WORK_REF}/Stories/ch1.md");
-        // never by the target being absent — the answer stays the same on a
-        // case-sensitive and a case-insensitive volume.
         std::fs::create_dir_all(
             fixture
                 .workspace
@@ -4551,7 +4474,6 @@ mod tests {
             .expect_err("a case-variant read refuses");
         assert_case_variant_works_refusal(read_error, &case_variant);
 
-        // missing target is the same spelling refusal rather than a not-found.
         let missing = format!("works/{WORK_REF}/Stories/missing.md");
         let missing_error = execute_read_file(&read_request(&missing), &fixture.context)
             .await
@@ -4563,7 +4485,6 @@ mod tests {
             .expect("the exact spelling reads");
         assert_eq!(read, serde_json::json!({ "content": "chapter body" }));
 
-        // the invalid spelling is refused before the lookup.
         let exact_missing = format!("Works/{WORK_REF}/Stories/absent.md");
         let exact_missing_error =
             execute_read_file(&read_request(&exact_missing), &fixture.context)
@@ -4607,8 +4528,6 @@ mod tests {
     #[tokio::test]
     async fn fs_case_variant_spelling_refusal_outranks_a_symlinked_target() {
         let fixture = fixture(true).await;
-        // guard would call this an escape, so this pins the spelling-first order
-        // and the identical answer on both halves.
         let outside = tempfile::tempdir().expect("outside root");
         std::fs::create_dir_all(outside.path().join(WORK_REF)).expect("outside work dir");
         std::fs::write(

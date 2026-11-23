@@ -327,7 +327,6 @@ impl CoreService {
             validate_color(&color.to_string())?;
         }
 
-        // on the request, which we interpret as "do not change" via `note: None` below.
         let note_change = request.note.as_ref().map(|n| {
             let trimmed = n.trim();
             if trimmed.is_empty() {
