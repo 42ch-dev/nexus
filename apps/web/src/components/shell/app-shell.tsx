@@ -24,7 +24,6 @@ import { appsForEntrance, isAppLocked, type AppId } from '@/lib/app-registry';
 import { useActivation } from '@/lib/activation-store';
 import { useActiveCreatorId } from '@/lib/active-creator-context';
 import { useEntrance } from '@/lib/entrance-context';
-import { i18n } from '@/lib/i18n/config';
 import { useHotkey } from '@/lib/use-hotkey';
 import { useTimelineShortcut } from '@/lib/keyboard-shortcuts';
 import { useToast } from '@/lib/use-toast';
@@ -127,6 +126,7 @@ export function AppShell() {
  * unrequested. Unlocked apps render through `React.lazy(app.load)`.
  */
 export function AppModuleRoute({ appId }: { appId: AppId }) {
+  const { t } = useTranslation('shell');
   const { entrance } = useEntrance();
   const activeCreatorId = useActiveCreatorId();
   const { isUnlocked } = useActivation(activeCreatorId);
@@ -142,9 +142,9 @@ export function AppModuleRoute({ appId }: { appId: AppId }) {
 
   useEffect(() => {
     if (locked && app?.lockReason) {
-      toast({ title: i18n.t(app.lockReason, { ns: 'shell' }), variant: 'info' });
+      toast({ title: t(app.lockReason), variant: 'info' });
     }
-  }, [locked, app, toast]);
+  }, [locked, app, toast, t]);
 
   if (app === null || LazyComponent === null) {
     // Locked (or unknown) app: bounce to the first unlocked app of this

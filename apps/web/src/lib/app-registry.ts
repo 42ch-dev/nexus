@@ -7,7 +7,7 @@
  * carries the `shell` i18n key rendered by the rail.
  *
  * `lockedUntil` exists only for 作品 (`brief-saved` → activation store);
- * 会话/记忆 carry their § Copy lock reason as literal copy with NO
+ * 会话/记忆 carry a `rail.lockReason.*` `shell`-namespace i18n key with NO
  * `lockedUntil` member and NO unlock path this iteration (compass D17/D26).
  */
 import type { ComponentType } from 'react';
@@ -160,7 +160,8 @@ export function appsForEntrance(entrance: EntranceId): readonly AppDef[] {
 
 /**
  * Locked-state resolution. `brief-saved` apps consult the activation store;
- * apps with literal copy (会话/记忆) stay locked with no unlock path (D17).
+ * apps carrying a `RAIL_LOCK_REASON` i18n key stay locked with no unlock
+ * path (D17).
  */
 export function isAppLocked(app: AppDef, unlocked: (appId: AppId) => boolean): boolean {
   if (!app.lockReason) return false;
