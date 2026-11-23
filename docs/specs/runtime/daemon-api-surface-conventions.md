@@ -232,7 +232,7 @@ invariants for that PATCH content path are enforced by
 `crates/nexus-core/src/outline.rs::apply_chapter_patch`
 (through `persist_chapter_outline_content` →
 `nexus_core::content::atomic_write_text`: sibling temp + rename + file fsync +
-directory fsync, run while the caller holds a `RuntimeLockGuard`). The route is
+directory fsync, run while the caller holds a `WorkLock`). The route is
 served by `apps/nexus-service` (`content.ts`).
 
 When `set.content` is present on an `outline.patch_chapter` request, the handler
@@ -253,7 +253,7 @@ MUST:
    as the file rename so subsequent reads return the new revision. Failed DB
    update or failed rename must clean up the temp file where possible and must
    not report success.
-5. Hold the per-Work `RuntimeLockGuard` across the validate → DB persist →
+5. Hold the per-Work `WorkLock` across the validate → DB persist →
    frontmatter mutate → outline-path seed/write sequence, releasing it on every
    exit path (success and error). Body-ownership invariant: handlers MUST NOT
    mutate `body_path` or body markdown files (see §6.4).
