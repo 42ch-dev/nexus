@@ -1043,13 +1043,7 @@ fn state_from_node(
         converge: node.converge.as_ref().map(|converge| ConvergeConfig {
             strategy: converge_strategy_preset(converge.strategy),
         }),
-        timeout_ms: node
-            .timeout_ms
-            .map(|ms| {
-                u64::try_from(ms)
-                    .map_err(|_| refuse(format!("node `{}` has a negative timeout_ms", node.id)))
-            })
-            .transpose()?,
+        timeout_ms: node.timeout_ms,
         on_timeout: node.on_timeout.clone(),
     })
 }
@@ -1517,6 +1511,25 @@ roles:
             serde_json::to_value(&exported).expect("exported json"),
             serde_json::to_value(&manifest).expect("manifest json")
         );
+    }
+
+    #[test]
+    fn import_clamps_an_oversized_timeout_to_i64_max() {
+        let state = StateDefinition {
+            id: "join".to_string(),
+            description: None,
+            enter: Vec::new(),
+            exit_when: None,
+            next: None,
+            terminal: false,
+            context_update: None,
+            merge: None,
+            converge: None,
+            timeout_ms: Some(u64::MAX),
+            on_timeout: None,
+        };
+
+        assert_eq!(state_node(&state).timeout_ms, Some(i64::MAX as u64));
     }
 
     #[test]
