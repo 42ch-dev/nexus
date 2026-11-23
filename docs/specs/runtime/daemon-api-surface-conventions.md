@@ -245,8 +245,8 @@ MUST:
    §6.5 before creating directories or writing bytes.
 3. Write `content` to a sibling temp file, flush/sync, then atomically rename it
    over the final outline file (`atomic_write_outline`: temp + rename + file
-   fsync + directory fsync), mirroring the reconcile atomic write pattern in
-   `nexus_core::content::fsync_write_atomic`.
+   fsync + directory fsync), mirroring the existing outline atomic write in
+   `nexus_core::outline::atomic_write_outline` (`fsync_write_atomic`).
 4. Persist `work_chapters.outline_path` and `updated_at`, and bump
    `frontmatter.outline_revision`, in the same transactional finalization path
    as the file rename so subsequent reads return the new revision. Failed DB
