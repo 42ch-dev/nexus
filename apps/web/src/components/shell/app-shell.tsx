@@ -8,9 +8,11 @@
  * a locked app redirects to the entrance land route (with the § Copy reason as
  * toast) BEFORE the lazy factory is created, so its chunk is never requested.
  */
-import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
+import { Suspense, lazy, useEffect, useMemo } from 'react';
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
+
+import { i18n } from '@/lib/i18n/config';
 
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
@@ -126,9 +128,6 @@ export function AppShell() {
  * unrequested. Unlocked apps render through `React.lazy(app.load)`.
  */
 export function AppModuleRoute({ appId }: { appId: AppId }) {
-  const { t } = useTranslation('shell');
-  const tRef = useRef(t);
-  tRef.current = t;
   const { entrance } = useEntrance();
   const activeCreatorId = useActiveCreatorId();
   const { isUnlocked } = useActivation(activeCreatorId);
@@ -144,7 +143,7 @@ export function AppModuleRoute({ appId }: { appId: AppId }) {
 
   useEffect(() => {
     if (locked && app?.lockReason) {
-      toast({ title: tRef.current(app.lockReason), variant: 'info' });
+      toast({ title: i18n.t(app.lockReason, { ns: 'shell' }), variant: 'info' });
     }
   }, [locked, app, toast]);
 
