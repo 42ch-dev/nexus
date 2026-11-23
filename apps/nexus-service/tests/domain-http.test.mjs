@@ -280,6 +280,30 @@ describe('domain-http (P5-T1)', () => {
     assert.deepEqual(parentLineage.payload.items, []);
   });
 
+  test('Timeline events refuses a malformed or non-positive limit with a typed 400', async () => {
+    const timelineUrl = `${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/timeline/events`;
+    for (const limit of ['abc', '0', '-5', '1.5']) {
+      const refused = await jsonFetch(`${timelineUrl}?limit=${encodeURIComponent(limit)}`);
+      assert.equal(refused.status, 400, `limit=${limit}: ${refused.text}`);
+      assert.equal(refused.payload.error.code, 'invalid_input', refused.text);
+      assert.match(
+        refused.payload.error.message,
+        /^limit must be/,
+        `refusal must come from the route's own validator, not the decoder: ${refused.text}`,
+      );
+    }
+
+    const unsafeInteger = await jsonFetch(`${timelineUrl}?limit=9007199254740992`);
+    assert.equal(unsafeInteger.status, 400, unsafeInteger.text);
+    assert.equal(unsafeInteger.payload.error.code, 'invalid_input', unsafeInteger.text);
+
+    const page = await jsonFetch(`${timelineUrl}?limit=1`);
+    assert.equal(page.status, 200, page.text);
+    assert.ok(Array.isArray(page.payload.items), page.text);
+    const large = await jsonFetch(`${timelineUrl}?limit=99999999999`);
+    assert.equal(large.status, 200, large.text);
+  });
+
   test('scene/beat authoring reaches the core owner over HTTP and persists', async () => {
     const creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-creative-'));
     const workspaceDir = join(

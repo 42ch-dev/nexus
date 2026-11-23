@@ -25,6 +25,7 @@ import type { DomainRoute } from './routes.js';
 import { HttpError } from './errors.js';
 import {
   getWorldKbKeyBlockState,
+  parseOptionalInteger,
   patchWorldKbRelationship,
   promoteWorldKbCandidate,
   refuseUnknownQueryKeys,
@@ -200,7 +201,14 @@ export function listTimelineEvents(
       ...(branch_id !== null ? { branch_id } : {}),
       ...(status !== null ? { status: timelineEventStatus(status) } : {}),
       ...(event_type !== null ? { event_type } : {}),
-      ...(limit !== null ? { limit: Number(limit) } : {}),
+      ...(limit !== null
+        ? {
+            limit: parseOptionalInteger(searchParams, 'limit', {
+              min: 1,
+              max: Number.MAX_SAFE_INTEGER,
+            }),
+          }
+        : {}),
       ...(cursor !== null ? { cursor } : {}),
     }),
   );
