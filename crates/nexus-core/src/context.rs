@@ -318,24 +318,22 @@ async fn after_injection_lifecycle(
     }
 
     let (burn, chapter_anchor) = match (row.ttl_kind.as_str(), work_id) {
-        ("chapters", Some(work_id)) => {
-            match get_work(pool, &row.creator_id, work_id).await {
-                Ok(Some(work)) if is_novel_profile(work.work_profile.as_deref()) => {
-                    let chapter = i64::from(work.current_chapter);
-                    let burn = match get_chapter_anchor(pool, directive_id, work_id).await {
-                        Ok(Some(last)) => i64::max(0, chapter - last),
-                        Ok(None) => 0,
-                        Err(e) => {
-                            tracing::warn!(directive_id, work_id, error = %e,
+        ("chapters", Some(work_id)) => match get_work(pool, &row.creator_id, work_id).await {
+            Ok(Some(work)) if is_novel_profile(work.work_profile.as_deref()) => {
+                let chapter = i64::from(work.current_chapter);
+                let burn = match get_chapter_anchor(pool, directive_id, work_id).await {
+                    Ok(Some(last)) => i64::max(0, chapter - last),
+                    Ok(None) => 0,
+                    Err(e) => {
+                        tracing::warn!(directive_id, work_id, error = %e,
                                 "moment directive: chapter anchor read failed; burning 1");
-                            1
-                        }
-                    };
-                    (burn, Some((work_id, chapter)))
-                }
-                _ => (1, None),
+                        1
+                    }
+                };
+                (burn, Some((work_id, chapter)))
             }
-        }
+            _ => (1, None),
+        },
         _ => (1, None),
     };
 
