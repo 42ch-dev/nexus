@@ -200,13 +200,13 @@ describe('AppRail — progressive activation', () => {
     );
 
     const work = screen.getByTestId('rail-item-work');
-    expect(work).toHaveAttribute('title', 'Unlocks once you complete the Brief');
+    expect(work).toHaveAttribute('title', 'Works unlock once you complete the Brief');
     await user.click(work);
     expect(
-      await screen.findByText('Unlocks once you complete the Brief'),
+      await screen.findByText('Works unlock once you complete the Brief'),
     ).toBeInTheDocument();
     const session = screen.getByTestId('rail-item-session');
-    expect(session).toHaveAttribute('title', 'Unlocks once you create a Work');
+    expect(session).toHaveAttribute('title', 'Sessions unlock once you create a Work');
   });
 
   it('unlocked items navigate to their route', async () => {

@@ -343,9 +343,9 @@
     "caps": "Capabilities",
     "characters": "Characters",
     "lockReason": {
-      "work": "Unlocks once you complete the Brief",
-      "session": "Unlocks once you create a Work",
-      "memory": "Unlocks once the World is running"
+      "work": "Works unlock once you complete the Brief",
+      "session": "Sessions unlock once you create a Work",
+      "memory": "Memory unlocks once the World is running"
     }
   },
   "topnav": {

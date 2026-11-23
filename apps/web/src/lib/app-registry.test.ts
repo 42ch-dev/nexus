@@ -35,13 +35,13 @@ describe('appsForEntrance', () => {
   it('resolves every rail lock reason in the en and zh-CN catalogs', async () => {
     await i18n.changeLanguage('en');
     expect(i18n.t(RAIL_LOCK_REASON.work, { ns: 'shell' })).toBe(
-      'Unlocks once you complete the Brief',
+      'Works unlock once you complete the Brief',
     );
     expect(i18n.t(RAIL_LOCK_REASON.session, { ns: 'shell' })).toBe(
-      'Unlocks once you create a Work',
+      'Sessions unlock once you create a Work',
     );
     expect(i18n.t(RAIL_LOCK_REASON.memory, { ns: 'shell' })).toBe(
-      'Unlocks once the World is running',
+      'Memory unlocks once the World is running',
     );
     await i18n.changeLanguage('zh-CN');
     expect(i18n.t(RAIL_LOCK_REASON.work, { ns: 'shell' })).toBe('完成 Brief 后解锁「作品」');
