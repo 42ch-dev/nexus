@@ -108,9 +108,10 @@ my-strategy/
 The bundle directory name is part of the contract: the validator enforces
 `preset.id` == bundle directory name (`check_bundle_id_vs_directory`). Embedded
 presets follow the same rule: the essay bootstrap preset's id is `essay-init`
-(renamed from `essay`), so a user override must live at
-`~/.nexus42/presets/essay-init/`; a bundle at the old `essay/` path shadows
-nothing.
+(renamed from `essay`). The directory name controls discovery only:
+`import_strategy_candidate` refuses any id in `list_embedded_presets()` with
+`ReservedId`, so a user bundle cannot override an embedded preset, and a bundle
+under the old `essay/` path shadows nothing.
 
 ## preset.yaml — manifest format
 

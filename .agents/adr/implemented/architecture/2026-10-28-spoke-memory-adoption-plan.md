@@ -525,11 +525,10 @@ up as distributed safety. The protocol primitives (01) are used as follows:
   store already serves Memory.
 - **Delivered differently (superseded 2026-11-24).** The core-store extension
   above was not taken: the shipped dedup and receipt store live in
-  `crates/nexus-memory-provider` (`memory_receipts`; see
-  `crates/nexus-memory-provider/src/storage.rs:22-45`), and
-  `memory.receipts.get` is served by `crates/nexus-memory-provider/src/lib.rs`.
-  Read the preceding sentences as the predecessor design; the provider-side
-  shape is current.
+  `crates/nexus-memory-provider` — `MemoryStore::begin_admission` owns the
+  admission/dedup check and `LocalMemoryProvider::get_receipt` serves
+  `memory.receipts.get`. Read the preceding sentences as the predecessor
+  design; the provider-side shape is current.
 - **Retention**: dedup tombstones are retained `dedup_retention_seconds`
   (≥ `receipt_retention_seconds`; both advertised in `describe.limits`).
   Replay after receipt eviction but within the dedup window ⇒
@@ -596,7 +595,7 @@ real browsers/devices, or deployments.
 | Task | Owner | Deps | Acceptance |
 |---|---|---|---|
 | NXM-1: `LocalMemoryProvider: MemoryPort` in `crates/nexus-memory-provider` (extracted from `nexus-core` in v1.245; the impl is `impl MemoryPort for LocalMemoryProvider` in `crates/nexus-memory-provider/src/lib.rs`): provider-private storage/transaction layer over existing SQLite tables + bearer files under writer admission; **Nexus-owned** policy functions for classification/recall/staleness/transfer (algorithm-variable — the unpublished fixture engine is an optional offline reference, never a dependency). Includes the §5.1 additive control-metadata migration (revision columns, stable record/candidate identity, idempotency/fence/journal metadata) registered with the writer guard/outbox and bumping `DB_SCHEMA_VERSION` | fullstack-dev | NXM-0 | `PROPOSED: cargo test -p nexus-core local_memory_provider` (the round trip is still a `nexus-core` integration target, `crates/nexus-core/tests/local_memory_provider.rs`) and `cargo test -p nexus-memory-provider` (the crate's own units) — round-trips capture→review→promote→recall against a temp nexus home; writer-guard triggers still fire on out-of-protocol writes (assert `WRITER_FENCED`); migration idempotent and registered in `core_writer_registration` |
-| NXM-2: Memory-domain receipts — **superseded 2026-11-24**: shipped provider-side in `crates/nexus-memory-provider` (`memory_receipts` dedup + `memory.receipts.get`), not by extending the core receipt store; the core consumer/schema extension and `uncertain` gate lift described in §5.4 were not taken | fullstack-dev | NXM-1 | `crates/nexus-memory-provider/src/storage.rs:22-45` records the dedup/receipt rules; `memory.receipts.get` is served from `crates/nexus-memory-provider/src/lib.rs` |
+| NXM-2: Memory-domain receipts — **superseded 2026-11-24**: shipped provider-side in `crates/nexus-memory-provider` (`memory_receipts` dedup + `memory.receipts.get`), not by extending the core receipt store; the core consumer/schema extension and `uncertain` gate lift described in §5.4 were not taken | fullstack-dev | NXM-1 | `MemoryStore::begin_admission` (dedup) and `LocalMemoryProvider::get_receipt` (read) in `crates/nexus-memory-provider` |
 | NXM-3: SQL+file reconciliation pass (§5.2) | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_reconcile` — kill-injected fixtures for both crash windows converge or quarantine deterministically |
 | NXM-4: Profile admission with content-kind discipline (§4.5): required authored profile missing ⇒ `PROFILE_INCOMPLETE`; optional authored data absent ⇒ honest-empty; provider-capability mismatch ⇒ distinct provider-selection failure. SOUL.md mapped to `personality`; NO fake governance/transfer/reflection profile documents | fullstack-dev | NXM-1 | `PROPOSED: cargo test -p nexus-core memory_profile_admission` — all three outcomes distinguished |
 
