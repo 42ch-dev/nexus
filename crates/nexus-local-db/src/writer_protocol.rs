@@ -631,7 +631,7 @@ fn open_lock_file(path: &Path) -> Result<File, LocalDbError> {
         })
 }
 
-fn acquire_shared_lock(path: &Path) -> Result<File, LocalDbError> {
+async fn acquire_shared_lock(path: &Path) -> Result<File, LocalDbError> {
     let file = open_lock_file(path)?;
     let start = Instant::now();
     while file.try_lock_shared().is_err() {
@@ -640,7 +640,7 @@ fn acquire_shared_lock(path: &Path) -> Result<File, LocalDbError> {
                 resource: path.display().to_string(),
             });
         }
-        std::thread::sleep(Duration::from_millis(25));
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     Ok(file)
 }
@@ -1212,9 +1212,9 @@ async fn acquire_claimed_guard(
 
     let (migration_lock, engine_lock) = match mode {
         WriterMode::Migration => (acquire_exclusive_lock(&migration_lock_path).await?, None),
-        WriterMode::Direct => (acquire_shared_lock(&migration_lock_path)?, None),
+        WriterMode::Direct => (acquire_shared_lock(&migration_lock_path).await?, None),
         WriterMode::Engine => (
-            acquire_shared_lock(&migration_lock_path)?,
+            acquire_shared_lock(&migration_lock_path).await?,
             Some(try_exclusive_lock(&engine_lock_path)?),
         ),
     };
@@ -1632,7 +1632,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("state.db");
         run_guarded_migrations(&db_path).await.unwrap();
-        let shared = acquire_shared_lock(&migration_lock_path(&db_path)).unwrap();
+        let shared = acquire_shared_lock(&migration_lock_path(&db_path))
+            .await
+            .unwrap();
         let releaser = tokio::spawn(async move { drop(shared) });
 
         let (guard, _claim) =
@@ -1650,6 +1652,39 @@ mod tests {
         drop(guard);
         let _released = acquire_store_reset_fence(&db_path)
             .expect("dropping the migration owner releases the real lock");
+    }
+
+    /// A shared admission retries with an await backoff: while it waits for an
+    /// exclusive holder, a short task on the same current-thread runtime runs.
+    #[tokio::test(flavor = "current_thread")]
+    async fn shared_lock_wait_allows_runtime_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        run_guarded_migrations(&db_path).await.unwrap();
+        let lock_path = migration_lock_path(&db_path);
+
+        let exclusive = acquire_exclusive_lock(&lock_path).await.unwrap();
+        let releaser = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            drop(exclusive);
+        });
+        let progressed = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&progressed);
+        let short_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            flag.store(true, Ordering::SeqCst);
+        });
+
+        let shared = acquire_shared_lock(&lock_path)
+            .await
+            .expect("shared admission out-waits the exclusive holder");
+        assert!(
+            progressed.load(Ordering::SeqCst),
+            "a short task must run while shared admission waits"
+        );
+        releaser.await.unwrap();
+        short_task.await.unwrap();
+        drop(shared);
     }
 
     /// A creator whose open fails after another open already joined gives up
