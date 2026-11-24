@@ -427,6 +427,16 @@ mod tests {
             .expect("test token must be stored");
     }
 
+    /// Clear the isolated auth store through the single path the no-token test uses.
+    ///
+    /// A failed write must fail the test loudly; returning early here would make
+    /// the test body green-but-unrun (I-000608).
+    fn clear_token(store: &mut AuthStore) {
+        store
+            .clear_user_token()
+            .expect("test token must be cleared");
+    }
+
     #[test]
     fn extract_user_id_from_valid_jwt() {
         let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -801,9 +811,7 @@ mod tests {
         let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.clear_user_token().is_err() {
-            return;
-        }
+        clear_token(&mut store);
 
         let result = ensure_valid_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -843,18 +851,13 @@ mod tests {
         );
     }
 
-    /// Regression guard for I-000608: the tests above once returned early when
-    /// the token write failed, so a failure made them green without running
-    /// their body. This test drives the same `seed_token` helper under a forced
-    /// write failure, proving the guard panics instead of returning silently.
+    /// An isolated auth store whose `auth.json` cannot be written.
     ///
-    /// `auth.json` is occupied by a directory so `AuthStore::save` fails
-    /// portably. `isolated_home()` relocates `HOME` and `USERPROFILE`, and the
-    /// resolved store path is asserted to live inside the temp home so this can
-    /// never write into the real `~/.nexus42/auth.json`.
-    #[test]
-    #[should_panic(expected = "test token must be stored")]
-    fn store_user_token_failure_is_not_silent() {
+    /// `auth.json` is occupied by a directory, so `AuthStore::save` fails while
+    /// the returned guard keeps the temporary home installed. Callers must keep
+    /// that guard alive until after their write attempt.
+    #[cfg(unix)]
+    fn unwritable_auth_store() -> (crate::testutil::IsolatedHome, AuthStore) {
         let home = crate::testutil::isolated_home();
         let auth_path = crate::config::auth_store_path().expect("resolve auth store path");
         assert!(
@@ -863,6 +866,25 @@ mod tests {
             home.path()
         );
         std::fs::create_dir_all(&auth_path).expect("occupy auth.json with a directory");
+        (home, AuthStore::load().unwrap_or_default())
+    }
+
+    /// Regression guard for I-000608: the auth tests once returned early when a
+    /// store write failed, so a failure made them green without running their
+    /// bodies. These guards drive the same `seed_token` / `clear_token` helpers
+    /// the auth tests use, under a forced write failure.
+    ///
+    /// Unix-only: `dirs` 7 resolves `home_dir()` on Windows through the Known
+    /// Folder API (`FOLDERID_Profile`), which `isolated_home()` cannot redirect,
+    /// so this setup would write into the real user profile there.
+    #[test]
+    #[cfg(unix)]
+    #[should_panic(expected = "test token must be stored")]
+    fn store_user_token_failure_is_not_silent() {
+        let (home, mut store) = unwritable_auth_store();
+        // A local binding lives until the function exits, so the temporary home
+        // stays installed for the write attempt below.
+        let _keep_alive = home;
 
         let token = UserTokenState {
             access_token: "unwritable_tok".to_string(),
@@ -872,10 +894,15 @@ mod tests {
             refresh_token: None,
             refresh_expires_at: None,
         };
-        let mut store = AuthStore::load().unwrap_or_default();
         seed_token(&mut store, token);
-        // The guard must outlive the write attempt above: dropping it early
-        // would restore the real HOME/USERPROFILE mid-test.
-        drop(home);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[should_panic(expected = "test token must be cleared")]
+    fn clear_user_token_failure_is_not_silent() {
+        let (home, mut store) = unwritable_auth_store();
+        let _keep_alive = home;
+        clear_token(&mut store);
     }
 }

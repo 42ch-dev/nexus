@@ -13,13 +13,16 @@ use std::sync::Mutex;
 /// `--test-threads>1`.
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
-/// RAII guard that sets `HOME` (and `USERPROFILE` on Windows) to a temp directory
-/// for the duration of the test.
+/// RAII guard that sets `HOME` to a temp directory for the duration of the test.
 ///
 /// On macOS, `dirs::home_dir()` does NOT respect `$HOME` in all configurations,
 /// so this helper uses `std::env::set_var("HOME", ...)` which works for our
-/// internal `user_home_dir()` / `nexus_home_dir()` functions. `USERPROFILE` is
-/// moved in lockstep because Windows `dirs::home_dir()` resolves through it.
+/// internal `user_home_dir()` / `nexus_home_dir()` functions.
+///
+/// Windows is intentionally NOT isolated here: `dirs` 7 resolves `home_dir()`
+/// through the Known Folder API (`FOLDERID_Profile`), not `USERPROFILE`, so no
+/// environment variable can redirect it. Tests that need an isolated home on
+/// Windows must gate themselves out or use an explicit path instead.
 ///
 /// Uses a global mutex to serialize access — only one `IsolatedHome` is active
 /// at a time, preventing race conditions under `--test-threads>1`.
@@ -60,15 +63,10 @@ impl IsolatedHome {
     fn install(lock: Option<std::sync::MutexGuard<'static, ()>>) -> Self {
         let tmp = tempfile::TempDir::new().expect("tempdir for test");
         let original_home = std::env::var("HOME").ok();
-        let original_userprofile = std::env::var("USERPROFILE").ok();
         std::env::set_var("HOME", tmp.path());
-        // Windows `dirs::home_dir()` resolves through `USERPROFILE`, so moving
-        // only `HOME` would let tests touch the real `~/.nexus42` there.
-        std::env::set_var("USERPROFILE", tmp.path());
         Self {
             tmp,
             original_home,
-            original_userprofile,
             lock,
         }
     }
@@ -78,14 +76,13 @@ impl IsolatedHome {
 pub struct IsolatedHome {
     tmp: tempfile::TempDir,
     original_home: Option<String>,
-    original_userprofile: Option<String>,
     /// Held until drop to serialize HOME manipulation across test threads.
     /// `None` when the caller retains ownership of the lock itself.
     lock: Option<std::sync::MutexGuard<'static, ()>>,
 }
 
 impl IsolatedHome {
-    /// Temporary home directory currently installed as `HOME` / `USERPROFILE`.
+    /// Temporary home directory currently installed as `HOME`.
     ///
     /// Use it to assert that a resolved path stays inside the isolated home.
     #[must_use]
@@ -100,11 +97,6 @@ impl Drop for IsolatedHome {
             std::env::set_var("HOME", home);
         } else {
             std::env::remove_var("HOME");
-        }
-        if let Some(profile) = &self.original_userprofile {
-            std::env::set_var("USERPROFILE", profile);
-        } else {
-            std::env::remove_var("USERPROFILE");
         }
         // Release the process-wide HOME lock only after the environment is
         // restored, and read the field explicitly so it is not dead storage.
@@ -133,6 +125,11 @@ mod tests {
             "HOME should be a temp directory, not the real home"
         );
         assert!(home_path.is_dir());
+        assert_eq!(
+            home_path,
+            guard.path(),
+            "path() should return the installed temp home"
+        );
         drop(guard);
     }
 
@@ -142,24 +139,15 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let original = std::env::var("HOME").ok();
-        let original_profile = std::env::var("USERPROFILE").ok();
         {
             let _guard = IsolatedHome::with_caller_holding_lock();
             let during = std::env::var("HOME").expect("HOME should be set");
-            let during_profile = std::env::var("USERPROFILE").expect("USERPROFILE should be set");
             assert_ne!(during, original.clone().unwrap_or_default());
-            assert_ne!(during_profile, original_profile.clone().unwrap_or_default());
-            assert_eq!(during, during_profile, "both home variables move together");
         }
         assert_eq!(
             std::env::var("HOME").ok(),
             original,
             "HOME should be restored to its original value"
-        );
-        assert_eq!(
-            std::env::var("USERPROFILE").ok(),
-            original_profile,
-            "USERPROFILE should be restored to its original value"
         );
         drop(lock);
     }
