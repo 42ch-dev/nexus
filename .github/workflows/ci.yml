@@ -1055,7 +1055,7 @@ jobs:
       - name: Run memory-remote creator cohort
         run: cargo test -p nexus42 --features memory-remote --test creator_memory_remote
       - name: Run dev-graph memory-remote conformance cohort
-        # C7 (I-000322) marks ten nexus-memory-conformance test targets
+        # C7 (I-000322) marks twelve nexus-memory-conformance test targets
         # `required-features = ["dev-graph-memory-remote"]`, so the plain
         # `cargo test ${{ matrix.packages }}` core-group step skips them. The
         # feature exists only on that package: never append it to the

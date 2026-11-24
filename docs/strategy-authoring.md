@@ -106,7 +106,14 @@ my-strategy/
 ```
 
 The bundle directory name is part of the contract: the validator enforces
-`preset.id` == bundle directory name (`check_bundle_id_vs_directory`).
+`preset.id` == bundle directory name (`check_bundle_id_vs_directory`). Embedded
+presets follow the same rule: the essay bootstrap preset's id is `essay-init`
+(renamed from `essay`). Resolution checks `~/.nexus42/presets/<id>/` first
+(§ Fork flow), so an override must live at
+`~/.nexus42/presets/essay-init/`; a bundle under the old `essay/` path shadows
+nothing. Separately, `import_strategy_candidate` refuses to open a candidate
+row for a host-reserved embedded id (`ReservedId`), so the embedded preset
+cannot be replaced by importing a same-id bundle.
 
 ## preset.yaml — manifest format
 
@@ -115,7 +122,7 @@ Top-level keys (subset of `PresetManifest` in
 
 | Key | Meaning |
 |-----|---------|
-| `preset.id` | Identifier; `/^[a-z][a-z0-9._-]*$/` and **must equal the bundle directory name**. There is no separate `name` field — `id` is the identifier and `description` is the human label. |
+| `preset.id` | Identifier; `/^[a-z][a-z0-9._-]*$/` and **must equal the bundle directory name**. The workflow-IR document id (`WorkflowDocumentId`) uses the same grammar, so a manifest id accepted here is also a valid IR id. There is no separate `name` field — `id` is the identifier and `description` is the human label. |
 | `preset.version` | Schema version (`>= 1`; bump on breaking changes to this preset). |
 | `preset.kind` | `creator` (user-facing) or `system` (internal). External strategies use `creator`. |
 | `preset.description` | Human-readable description (<= 240 chars). |
