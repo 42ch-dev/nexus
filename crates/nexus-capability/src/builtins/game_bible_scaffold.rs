@@ -29,7 +29,7 @@ use super::novel_scaffold_sanitize::validate_work_ref;
 use super::work_commit::{
     claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
 };
-use crate::{Capability, CapabilityError, WorkspaceExecutor};
+use crate::{path_is_occupied, Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -172,8 +172,14 @@ impl ScaffoldTransaction {
     }
 
     fn create_dir(&mut self, dir: &Path) -> Result<bool, CapabilityError> {
-        if dir.exists() {
+        if dir.is_dir() {
             return Ok(false);
+        }
+        if path_is_occupied(dir) {
+            return Err(CapabilityError::Internal(format!(
+                "mkdir {}: occupied by a non-directory",
+                dir.display()
+            )));
         }
         std::fs::create_dir_all(dir)
             .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", dir.display())))?;
@@ -196,7 +202,7 @@ impl ScaffoldTransaction {
     ) -> Result<(), CapabilityError> {
         let path = workspace_root.join("Works").join(work_ref).join(rel_child);
 
-        let original = if path.exists() {
+        let original = if path_is_occupied(&path) {
             let data = std::fs::read(&path).map_err(|e| {
                 CapabilityError::Internal(format!("read original {}: {e}", path.display()))
             })?;
@@ -757,6 +763,85 @@ mod tests {
         assert!(
             !work_dir.join("Design/overview.md").exists(),
             "committed templates rolled back"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_keeps_a_preexisting_dangling_symlink_on_rollback() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let link = root.join("gb-symlink").join("README.md");
+        std::fs::create_dir_all(link.parent().expect("link has a parent")).expect("mkdir");
+        std::os::unix::fs::symlink(tmp.path().join("absent-gb-target.md"), &link).expect("symlink");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "Design/lore.md");
+        let cap = GameBibleProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(executor),
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_gb_symlink",
+                "work_ref": "gb-symlink",
+                "title": "GB Symlink",
+            }))
+            .await
+            .expect_err("a dangling link must refuse to be read as an original");
+        assert!(
+            matches!(err, CapabilityError::Internal(_)),
+            "expected the original read to fail, got: {err}"
+        );
+
+        assert!(
+            std::fs::symlink_metadata(&link).is_ok(),
+            "rollback unlinked a symlink this run never created"
+        );
+        assert!(
+            std::fs::symlink_metadata(tmp.path().join("absent-gb-target.md")).is_err(),
+            "the run wrote through the user's dangling link"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_refuses_a_dangling_symlink_at_a_directory_path() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let link = root.join("gb-dir-symlink").join("Logs").join("design");
+        std::fs::create_dir_all(link.parent().expect("link has a parent")).expect("mkdir");
+        std::os::unix::fs::symlink(tmp.path().join("absent-gb-dir-target"), &link)
+            .expect("symlink");
+        let cap = GameBibleProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(RecordingExecutor::at(tmp.path())),
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_gb_dir_symlink",
+                "work_ref": "gb-dir-symlink",
+                "title": "GB Dir Symlink",
+            }))
+            .await
+            .expect_err(
+                "an occupied non-directory must refuse the scaffold instead of reporting success",
+            );
+        assert!(
+            matches!(err, CapabilityError::Internal(_)),
+            "expected the occupied-directory refusal, got: {err}"
+        );
+        assert!(
+            std::fs::symlink_metadata(&link).is_ok(),
+            "rollback unlinked a symlink this run never created"
+        );
+        assert!(
+            std::fs::symlink_metadata(tmp.path().join("absent-gb-dir-target")).is_err(),
+            "the run created the dangling link's target"
         );
     }
 }
