@@ -147,6 +147,8 @@ pub struct RegistryClient {
     cache_dir: PathBuf,
     /// HTTP client for fetching from the CDN.
     http: reqwest::Client,
+    /// Registry JSON endpoint; production default is [`REGISTRY_URL`].
+    endpoint: String,
 }
 
 impl RegistryClient {
@@ -167,6 +169,7 @@ impl RegistryClient {
                 .timeout(Duration::from_secs(30))
                 .build()
                 .context("Failed to build HTTP client")?,
+            endpoint: REGISTRY_URL.to_string(),
         })
     }
 
@@ -182,7 +185,16 @@ impl RegistryClient {
                 .timeout(Duration::from_secs(30))
                 .build()
                 .context("Failed to build HTTP client")?,
+            endpoint: REGISTRY_URL.to_string(),
         })
+    }
+
+    /// Create a registry client with a custom cache directory and registry endpoint.
+    #[cfg(test)]
+    fn with_cache_dir_and_endpoint(cache_dir: PathBuf, endpoint: String) -> anyhow::Result<Self> {
+        let mut client = Self::with_cache_dir(cache_dir)?;
+        client.endpoint = endpoint;
+        Ok(client)
     }
 
     /// Return the cache directory path.
@@ -249,11 +261,11 @@ impl RegistryClient {
 
     /// Fetch the registry from the CDN over HTTP.
     async fn fetch_from_cdn(&self) -> anyhow::Result<Registry> {
-        info!("Fetching ACP Registry from {}", REGISTRY_URL);
+        info!("Fetching ACP Registry from {}", self.endpoint);
 
         let response = self
             .http
-            .get(REGISTRY_URL)
+            .get(&self.endpoint)
             .send()
             .await
             .context("Failed to fetch ACP Registry from CDN")?;
@@ -826,8 +838,25 @@ mod tests {
 
     #[tokio::test]
     async fn get_registry_returns_error_when_no_cache_and_no_network() {
-        let (client, _tmp) = make_test_client();
-        assert!(client.load_cached().is_none());
+        let tmp = TempDir::new().expect("Failed to create temp dir");
+        // Port 1 is never served; the connection is refused, so the fetch fails.
+        let client = RegistryClient::with_cache_dir_and_endpoint(
+            tmp.path().to_path_buf(),
+            "http://127.0.0.1:1/registry.json".to_string(),
+        )
+        .expect("Failed to create client");
+
+        assert!(client.load_cached().is_none(), "no cache was written");
+
+        let err = client
+            .get_registry()
+            .await
+            .expect_err("get_registry must fail when no cache and fetch fails");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Failed to fetch ACP Registry"),
+            "expected a fetch failure, got: {msg}"
+        );
     }
 
     #[test]
