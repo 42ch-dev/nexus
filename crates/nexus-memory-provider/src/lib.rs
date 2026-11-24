@@ -2132,7 +2132,10 @@ impl LocalMemoryProvider {
     /// client claim). Cleared by [`Self::finish_soul_invalidation`].
     ///
     /// # Errors
-    /// [`ProviderError::Internal`] when the workspace database cannot be read.
+    /// [`ProviderError::Internal`] when the workspace database cannot be read,
+    /// which is the only reachable variant: the store reads
+    /// `memory_provider_meta` directly, so `StoreError::Database` is the sole
+    /// failure `store_error` sees here.
     pub async fn soul_invalidation_binding(
         &self,
         record_id: &str,
@@ -2147,7 +2150,13 @@ impl LocalMemoryProvider {
     /// clear is a no-op.
     ///
     /// # Errors
-    /// [`ProviderError::Internal`] when the workspace database cannot be written.
+    /// [`ProviderError::Internal`] when the workspace database cannot be
+    /// written, and that is the only reachable variant: `clear_soul_invalidation`
+    /// issues one unconditional `DELETE` on `memory_provider_meta` with no
+    /// grant, frozen-space or subject check and no row to parse, so its only
+    /// failure is `StoreError::Database`, which `store_error` maps to
+    /// [`ProviderError::Internal`]. Clearing an absent row is a no-op, not a
+    /// `NotFound`.
     pub async fn finish_soul_invalidation(&self, record_id: &str) -> Result<(), ProviderError> {
         self.store
             .clear_soul_invalidation(&self.space_id, record_id)
