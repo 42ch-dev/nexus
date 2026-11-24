@@ -155,7 +155,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       [owner, disabled],
       [disabled, owner],
     ]) {
-      const { service, saves } = storeService(DEFAULT_CONFIG);
+      const { service, saves, restarts } = storeService(DEFAULT_CONFIG);
       const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers });
 
       assert.deepEqual(saves[0].providers, providers, 'the document is stored as submitted');
@@ -166,6 +166,16 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
         ['owner-acp'],
         'the single enabled id owns readiness regardless of position',
       );
+      assert.equal(restarts.length, 1);
+      assert.deepEqual(
+        restarts[0].providers
+          .filter((provider) => provider.enabled !== false)
+          .map(({ id }) => id),
+        ['owner-acp'],
+        'the restart is applied with the single enabled provider',
+      );
+      assert.equal(service.providerReady, true);
+      assert.equal(service.engineEpoch, 7);
     }
   });
 

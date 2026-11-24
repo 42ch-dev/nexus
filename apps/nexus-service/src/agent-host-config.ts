@@ -157,11 +157,11 @@ function parseAgentHostConfig(body: unknown): AgentHostConfig {
 }
 
 /**
- *
- * Checked on the document the native save actually writes — i.e. after the
- * replacement transform, which disables the entries it replaced. Validating
- * the submitted set instead would let a stored bad entry block forever the
- * save that disables it.
+ * Checked on the document exactly as submitted — the same document the native
+ * save writes. There is no replacement transform: a client that disables the
+ * provider it replaces is what makes a stored disabled entry saveable, and
+ * validating the stored set keeps a previously stored bad entry from blocking
+ * the save that repairs it.
  */
 function assertLaunchableProviders(config: AgentHostConfig): void {
   for (const [index, provider] of config.providers.entries()) {
@@ -189,7 +189,7 @@ function withReplacementSelected(config: AgentHostConfig): AgentHostConfig {
   if (enabled > 1) {
     throw invalidInput('a replacement save may enable at most one provider');
   }
-  // Zero or one enabled: keep the document as submitted; the owner is the single enabled id.
+  // Zero or exactly one enabled is accepted; zero yields provider_ready = false on the following restart.
   return config;
 }
 
