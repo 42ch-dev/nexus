@@ -644,9 +644,9 @@ mod tests {
             refresh_expires_at: Some("2026-05-28T12:00:00Z".to_string()),
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
 
         let result = refresh_access_token(&config).await;
         match result {
@@ -691,9 +691,9 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
 
         let result = refresh_access_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -718,9 +718,9 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
 
         let result = refresh_access_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -751,9 +751,9 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
 
         let result = ensure_valid_token(&config).await;
         match result {
@@ -782,9 +782,9 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
 
         let result = ensure_valid_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -828,9 +828,9 @@ mod tests {
             refresh_expires_at: Some("2027-01-01T00:00:00Z".to_string()),
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
 
         match logout(&config) {
             Ok(()) => {}
@@ -843,5 +843,32 @@ mod tests {
             store.user_token.is_none(),
             "Expected user_token to be None after logout"
         );
+    }
+
+    /// Regression guard for I-000608: the tests above once returned early when
+    /// the token write failed, so a failure made them green without running
+    /// their body. Occupying `auth.json` with a directory forces
+    /// `AuthStore::save` to fail portably, proving the `expect` panics instead
+    /// of returning silently.
+    #[test]
+    #[should_panic(expected = "test token must be stored")]
+    fn store_user_token_failure_is_not_silent() {
+        let _home = crate::testutil::isolated_home();
+        let nexus_dir = crate::config::nexus_home().expect("resolve nexus home");
+        std::fs::create_dir_all(nexus_dir.join("auth.json"))
+            .expect("occupy auth.json with a directory");
+
+        let token = UserTokenState {
+            access_token: "unwritable_tok".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: "2026-01-01T00:00:00Z".to_string(),
+            user_id: "usr_unwritable".to_string(),
+            refresh_token: None,
+            refresh_expires_at: None,
+        };
+        let mut store = AuthStore::load().unwrap_or_default();
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
     }
 }
