@@ -30,7 +30,7 @@ mod memory;
 mod memory_binding;
 mod memory_credentials;
 mod memory_pipeline;
-mod memory_provider_error;
+pub(crate) mod memory_provider_error;
 #[cfg(feature = "memory-remote")]
 mod memory_remote;
 mod memory_selection;
