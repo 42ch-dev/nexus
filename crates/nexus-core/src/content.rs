@@ -4,6 +4,8 @@
 
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use nexus_contracts::{
     ChapterBody, ChapterContentQuery, ChapterDetail, ChapterOutline, ChapterProtection,
@@ -196,7 +198,8 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 ///
 /// The target is only replaced after the prepare await returns: dropping
 /// this future while the temp write is still queued or in flight leaves the
-/// previous content intact. The commit itself — rename, final-file fsync,
+/// previous content intact and unlinks the staged temp (see
+/// [`TempFileGuard`]). The commit itself — rename, final-file fsync,
 /// parent-dir fsync — runs on a second blocking task only after the
 /// prepare await returns; once entered it is not interruptible, exactly
 /// like the old `tokio::fs::rename`. A panic mid-commit would surface as a
@@ -209,11 +212,27 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     );
     let temp_path = target.with_extension(&tmp_extension);
 
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let mut guard = TempFileGuard {
+        path: temp_path.clone(),
+        cancelled: Arc::clone(&cancelled),
+        armed: true,
+    };
+
     let write_temp = temp_path.clone();
     let write_content = content.to_string();
+    let prepare_cancelled = Arc::clone(&cancelled);
     let prepare_result = match tokio::task::spawn_blocking(move || {
         crate::atomic_write::prepare_temp(&write_temp, write_content.as_bytes())
-            .map_err(crate::atomic_write::AtomicWriteError::into_io)
+            .map_err(crate::atomic_write::AtomicWriteError::into_io)?;
+        if prepare_cancelled.load(Ordering::SeqCst) {
+            // The write future was dropped while this prepare was queued or
+            // in flight: its guard already unlinked the path, so drop the
+            // staged file this run recreated.
+            let _ = std::fs::remove_file(&write_temp);
+            return Err(std::io::Error::other("atomic write cancelled"));
+        }
+        Ok(())
     })
     .await
     {
@@ -222,7 +241,12 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     };
 
     let write_result = match prepare_result {
+        Ok(()) if cancelled.load(Ordering::SeqCst) => {
+            let _ = std::fs::remove_file(&temp_path);
+            Err(std::io::Error::other("atomic write cancelled"))
+        }
         Ok(()) => {
+            guard.disarm();
             let commit_target = target.clone();
             let commit_temp = temp_path.clone();
             match tokio::task::spawn_blocking(move || {
@@ -239,6 +263,34 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     };
 
     cleanup_temp_on_failure(write_result, &temp_path).await
+}
+
+/// Cancellation guard for `fsync_write_atomic`'s staged temp file.
+///
+/// Dropping the write future runs this `Drop`: it flips the shared cancel
+/// flag so a prepare closure still in flight unlinks the temp it recreates,
+/// then best-effort removes the path itself. [`disarm`](Self::disarm) runs
+/// immediately before the commit task is spawned — from then on the temp
+/// belongs to the rename and is only removed by the failure cleanup.
+struct TempFileGuard {
+    path: PathBuf,
+    cancelled: Arc<AtomicBool>,
+    armed: bool,
+}
+
+impl TempFileGuard {
+    const fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.cancelled.store(true, Ordering::SeqCst);
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
 }
 
 /// `fsync_write_atomic`'s single failure-exit: remove the caller-owned temp
@@ -1017,8 +1069,9 @@ mod tests {
     }
 
     /// Dropping `fsync_write_atomic` while its prepare stage is still queued
-    /// on the blocking pool leaves the target untouched — proven after the
-    /// cancelled task has fully exited, not just after its bytes landed.
+    /// on the blocking pool leaves the target untouched and no `md.tmp.*`
+    /// file behind — proven after the cancelled task has fully exited, not
+    /// just after its bytes landed.
     ///
     /// The runtime runs `max_blocking_threads(1)`, and the pool dispatches
     /// queued `spawn_blocking` tasks in submission order. The first slot is
@@ -1027,8 +1080,8 @@ mod tests {
     /// only then does the second (sentinel) blocking task resolve. The
     /// sentinel's resolution is therefore the ordering proof that the
     /// cancelled task has left the pool and any tail work it might have
-    /// performed is done — including a hypothetical rename snuck in after
-    /// the prepare, which is exactly the regression this catches.
+    /// performed is done — including a hypothetical rename or a temp file
+    /// resurrected after the guard's cleanup.
     #[test]
     fn cancelled_prepare_leaves_target_content_intact() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -1063,6 +1116,17 @@ mod tests {
                 std::fs::read_to_string(&target).expect("read target"),
                 "old bytes",
                 "cancelled write leaves the previous content in place"
+            );
+
+            let residual: Vec<String> = std::fs::read_dir(dir.path())
+                .expect("read temp dir")
+                .map(|entry| entry.expect("dir entry").file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .filter(|name| name.contains(".md.tmp."))
+                .collect();
+            assert!(
+                residual.is_empty(),
+                "cancelled write leaves no staged temp file: {residual:?}"
             );
         });
     }
