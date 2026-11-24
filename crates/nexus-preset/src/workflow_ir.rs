@@ -273,7 +273,8 @@ pub fn import_preset_bundle(
 ///
 /// # Errors
 ///
-/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id.
+/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id, or when a
+/// state's `next` is a `Conditional`/`Branches` form carrying no rules.
 pub fn import_preset_manifest(
     manifest: &PresetManifest,
 ) -> Result<WorkflowDocument, WorkflowIrError> {
@@ -293,7 +294,7 @@ fn document_from_manifest(
     let mut edge_ids = HashSet::new();
     for state in &manifest.states {
         nodes.push(state_node(state));
-        push_next_edges(state, &mut edges, &mut edge_ids);
+        push_next_edges(state, &mut edges, &mut edge_ids)?;
     }
     if let Some(graphs) = &manifest.inner_graphs {
         for (graph_name, graph) in graphs {
@@ -446,7 +447,7 @@ fn push_next_edges(
     state: &StateDefinition,
     edges: &mut Vec<WorkflowEdge>,
     used: &mut HashSet<String>,
-) {
+) -> Result<(), WorkflowIrError> {
     let from = state.id.as_str();
     match &state.next {
         None => {}
@@ -492,12 +493,13 @@ fn push_next_edges(
             }
         }
         Some(NextTarget::Conditional(conditional)) => {
-            push_conditional_edges(edges, used, from, &conditional.rules, &conditional.default);
+            push_conditional_edges(edges, used, from, &conditional.rules, &conditional.default)?;
         }
         Some(NextTarget::Branches(branches)) => {
-            push_conditional_edges(edges, used, from, &branches.branches, &branches.default);
+            push_conditional_edges(edges, used, from, &branches.branches, &branches.default)?;
         }
     }
+    Ok(())
 }
 
 fn push_conditional_edges(
@@ -506,7 +508,14 @@ fn push_conditional_edges(
     from: &str,
     rules: &[ConditionalRule],
     default: &str,
-) {
+) -> Result<(), WorkflowIrError> {
+    if rules.is_empty() {
+        // An edge-based IR cannot tell this form from a bare `next`, so importing it would
+        // silently rewrite the document on export.
+        return Err(refuse(format!(
+            "`{from}` has a conditional next with no rules; a bare `next` is the supported form"
+        )));
+    }
     for rule in rules {
         push_edge(
             edges,
@@ -527,6 +536,7 @@ fn push_conditional_edges(
         None,
         None,
     );
+    Ok(())
 }
 
 fn push_edge(
@@ -1572,6 +1582,45 @@ states:
             serde_json::to_value(&exported).expect("exported json"),
             serde_json::to_value(&manifest).expect("manifest json")
         );
+    }
+
+    #[test]
+    fn conditional_next_with_no_rules_is_refused() {
+        for next in [
+            "{ branches: [], default: done }",
+            "{ kind: conditional, rules: [], default: done }",
+        ] {
+            let yaml = format!(
+                r#"
+preset:
+  id: empty-branches
+  version: 1
+  kind: creator
+  description: "judged state whose conditional next carries no rules"
+  requires_capabilities: []
+  initial: review
+  terminal: done
+states:
+  - id: review
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/judge.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: {next}
+  - id: done
+    terminal: true
+"#
+            );
+            let manifest: PresetManifest = serde_yaml::from_str(&yaml).expect("manifest parses");
+
+            let error = import_preset_manifest(&manifest).expect_err("empty rules are refused");
+            assert!(
+                matches!(error, WorkflowIrError::NotProjectable { .. }),
+                "{next}: {error:?}"
+            );
+            assert!(error.to_string().contains("no rules"), "{next}: {error}");
+        }
     }
 
     #[test]
