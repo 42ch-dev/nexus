@@ -24,6 +24,7 @@ use crate::actor_fence::ActorFenceTable;
 use crate::changes::read_changes;
 use crate::error::{local_db_err, CoreError, CoreResult};
 use crate::memory_binding::MemoryProviderBinding;
+use crate::memory_provider_error::{provider_error_with_resource, PROVIDER_OPEN_RESOURCE};
 use crate::memory_selection::MemoryProviderSelection;
 use crate::principal::Principal;
 use crate::world_kb::{candidates, graph, patch};
@@ -368,10 +369,17 @@ impl CoreService {
                 let provider = match options.access {
                     CoreAccess::ReadOnly => {
                         LocalMemoryProvider::open_read_only(user_home, creator_id, workspace_slug)
-                            .await?
+                            .await
+                            .map_err(|error| {
+                                provider_error_with_resource(error, PROVIDER_OPEN_RESOURCE)
+                            })?
                     }
                     CoreAccess::DirectWriter | CoreAccess::EngineOwner => {
-                        LocalMemoryProvider::open(user_home, creator_id, workspace_slug).await?
+                        LocalMemoryProvider::open(user_home, creator_id, workspace_slug)
+                            .await
+                            .map_err(|error| {
+                                provider_error_with_resource(error, PROVIDER_OPEN_RESOURCE)
+                            })?
                     }
                 };
                 Ok(Arc::new(MemoryProviderBinding::pin_local(Arc::new(

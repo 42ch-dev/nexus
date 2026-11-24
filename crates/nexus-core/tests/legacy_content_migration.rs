@@ -1827,3 +1827,38 @@ async fn migration_accepts_a_binding_release_made_before_the_pass() {
     );
     pool.close().await;
 }
+
+/// I-000507: a refused pass names the migration it refused, not a resource the
+/// other provider entry points used to inherit from the shared conversion.
+#[tokio::test]
+async fn a_refused_pass_names_the_migration_resource() {
+    let env = seed_legacy_home().await;
+    let (core, principal) = open_core(&env).await;
+    let revoked = sqlx::query(
+        "UPDATE memory_grants SET revoked_at = '2026-01-01T00:00:00Z' WHERE space_id = ?",
+    )
+    .bind(nexus_memory_provider::DEFAULT_SPACE_ID)
+    .execute(core.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        revoked.rows_affected(),
+        1,
+        "the bootstrap admin grant exists"
+    );
+
+    let refused = core.migrate_legacy_content(&principal).await.unwrap_err();
+    match refused {
+        CoreError::ForbiddenReason { resource, reason } => {
+            assert_eq!(
+                resource, "memory: migrate-legacy",
+                "the refusing entry point"
+            );
+            assert!(
+                reason.contains("holds no grant"),
+                "the reason names the missing coverage: {reason}"
+            );
+        }
+        other => panic!("expected a forbidden reason, got {other:?}"),
+    }
+}
