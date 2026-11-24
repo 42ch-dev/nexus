@@ -839,6 +839,7 @@ fn structural_violations(document: &WorkflowDocument) -> Vec<Violation> {
 fn violation_path(violation: &Violation) -> String {
     match violation {
         Violation::DuplicateDocumentId(_) => "id".to_string(),
+        Violation::UnsupportedIrVersion { .. } => "ir_version".to_string(),
         Violation::DuplicateNodeId { node, .. } => format!("nodes.{node}"),
         Violation::DanglingEdge { edge, .. } => format!("edges.{edge}"),
         Violation::DanglingDependency { node, .. } => format!("nodes.{node}.depends_on"),

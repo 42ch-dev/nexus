@@ -423,6 +423,7 @@ fn legal_node_ids(document: &WorkflowDocument) -> String {
 /// The stable `snake_case` identifier of one structural violation.
 const fn structural_kind(violation: &Violation) -> &'static str {
     match violation {
+        Violation::UnsupportedIrVersion { .. } => "unsupported_ir_version",
         Violation::DuplicateDocumentId(_) => "duplicate_document_id",
         Violation::DuplicateNodeId { .. } => "duplicate_node_id",
         Violation::DanglingEdge { .. } => "dangling_edge",
@@ -446,6 +447,14 @@ const fn structural_kind(violation: &Violation) -> &'static str {
 #[allow(clippy::too_many_lines)] // one match arm per Violation variant: per-kind formatters, one table
 fn structural_correction(violation: &Violation, document: &WorkflowDocument) -> Correction {
     let (location, observed, correction) = match violation {
+        Violation::UnsupportedIrVersion { found, supported, .. } => (
+            format!("document {}", document.id.as_str()),
+            format!("ir_version {found} is newer than supported IR_VERSION {supported}"),
+            format!(
+                "set `ir_version` to {supported} or lower: this build validates documents written \
+                 against IR_VERSION {supported}"
+            ),
+        ),
         Violation::DuplicateDocumentId(id) => (
             format!("document {id}"),
             format!("document id `{id}` is declared more than once in the set"),

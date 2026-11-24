@@ -11,7 +11,7 @@
 
 use crate::{
     WorkflowDocument, WorkflowNestBinding, WorkflowNestChild, WorkflowNestChildKind, WorkflowNode,
-    WorkflowNodeEffectClass, WorkflowNodeKind,
+    WorkflowNodeEffectClass, WorkflowNodeKind, IR_VERSION,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -78,6 +78,13 @@ pub fn pattern_pin(child: &WorkflowNestChild) -> Option<(&str, &str)> {
 /// A structural violation. Every violation found is returned, never only the first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Violation {
+    /// A document's `ir_version` is newer than this build's `IR_VERSION`: the document is
+    /// refused rather than interpreted under rules it was not written against.
+    UnsupportedIrVersion {
+        document: String,
+        found: u64,
+        supported: u64,
+    },
     DuplicateDocumentId(String),
     DuplicateNodeId {
         document: String,
@@ -137,6 +144,14 @@ pub enum Violation {
 impl std::fmt::Display for Violation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UnsupportedIrVersion {
+                document,
+                found,
+                supported,
+            } => write!(
+                f,
+                "`{document}`: ir_version {found} is newer than supported IR_VERSION {supported}"
+            ),
             Self::DuplicateDocumentId(id) => {
                 write!(f, "document id `{id}` appears more than once in the set")
             }
@@ -224,6 +239,13 @@ pub fn validate(
         }
     }
     for document in documents {
+        if document.ir_version > IR_VERSION {
+            violations.push(Violation::UnsupportedIrVersion {
+                document: document.id.as_str().to_owned(),
+                found: document.ir_version,
+                supported: IR_VERSION,
+            });
+        }
         validate_document(document, &mut violations);
     }
     for pattern in patterns {
@@ -987,6 +1009,30 @@ mod tests {
             }]
         );
     }
+
+    #[test]
+    fn rejects_an_ir_version_newer_than_this_build() {
+        let mut doc = document("future", &json!([node("entry", "outer_state")]), &json!([]), &json!([]));
+        doc.ir_version = IR_VERSION + 1;
+
+        let violations = validate(&[&doc], &[]).unwrap_err();
+        assert_eq!(
+            violations,
+            vec![Violation::UnsupportedIrVersion {
+                document: "future".to_owned(),
+                found: IR_VERSION + 1,
+                supported: IR_VERSION,
+            }]
+        );
+    }
+
+    #[test]
+    fn accepts_the_supported_ir_version() {
+        let doc = document("current", &json!([node("entry", "outer_state")]), &json!([]), &json!([]));
+        assert_eq!(doc.ir_version, IR_VERSION);
+        assert_eq!(validate(&[&doc], &[]), Ok(()));
+    }
+
 
     /// A resolved pattern body, pinned at `1.0.0`.
     fn fragment<'a>(registry_id: &'a str, document: &'a WorkflowDocument) -> PatternBody<'a> {
