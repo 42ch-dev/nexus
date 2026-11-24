@@ -176,8 +176,10 @@ pub struct ToolContext {
     /// The Simulate plane's Work artifact port, when this context is one.
     ///
     /// `None` is production: every Work byte write commits through
-    /// [`FsWorkArtifactPort`]. `Some` records the intended writes instead, so a
-    /// dry run leaves the `Works/` tree byte-identical.
+    /// [`FsWorkArtifactPort`]. `Some` records the intended `Works/` writes
+    /// instead, so a dry run leaves the `Works/` tree byte-identical; it is
+    /// also the simulated-context marker that makes `execute_write_file`
+    /// refuse every non-`Works/` fs write rather than touching disk.
     pub(crate) recording_work_artifact: Option<Arc<RecordingWorkArtifactPort>>,
     /// The Simulate plane's knowledge port, when this context is one.
     ///
@@ -245,7 +247,10 @@ impl ToolContext {
     /// what makes that true for every Work write this context can reach.
     ///
     /// The knowledge stub is selected by the same call for the same reason: a
-    /// preview that reaches `nexus.kb_snapshot.write` must not insert rows.
+    /// preview that reaches `nexus.kb_snapshot.write` must not insert rows. The
+    /// same marker makes `fs/write_text_file` record only `Works/` artifact
+    /// writes and refuse every other fs write — there is no recorded seam for
+    /// plain paths, so a simulated context must not claim one.
     #[must_use]
     pub fn new_simulated(
         pool: sqlx::SqlitePool,
@@ -1115,7 +1120,8 @@ async fn execute_write_file(
 
     // ADR #485 §4.4: `Works/<work_ref>/…` is a Work artifact byte write — one
     // port, one lock, one durability path. Every other workspace path keeps
-    // the guarded write below.
+    // the guarded write below — except under a simulated context, which
+    // records only `Works/` artifact writes and refuses the rest.
     if let WorkPath::Artifact {
         work_ref,
         rel_child,
@@ -1130,10 +1136,13 @@ async fn execute_write_file(
             })
             .await?;
     } else if context.recording_work_artifact.is_some() {
-        // `recording_work_artifact` marks a simulated context: it must never touch disk.
+        // `recording_work_artifact` marks a simulated context: it never touches
+        // disk, and outside `Works/` there is no recorded seam to claim — the
+        // honest answer is a refusal naming the simulator restriction, not a
+        // permission-style denial (production would write this path).
         return Err(NexusApiError::Forbidden {
             resource: format!(
-                "fs/write_text_file: a simulated context cannot write '{path_str}' outside Works/"
+                "fs/write_text_file: simulated context — non-Works writes are not performed (production writes normally); requested '{path_str}'"
             ),
         });
     } else {
