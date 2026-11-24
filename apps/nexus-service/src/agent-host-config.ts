@@ -185,24 +185,12 @@ export async function getAgentHostConfig(service: ServiceCore): Promise<AgentHos
 }
 
 function withReplacementSelected(config: AgentHostConfig): AgentHostConfig {
-  const selected = config.providers.findLastIndex((provider) => provider.enabled !== false);
-  if (selected < 0) {
-    return config;
+  const enabled = config.providers.filter((provider) => provider.enabled !== false).length;
+  if (enabled > 1) {
+    throw invalidInput('a replacement save may enable at most one provider');
   }
-  const changes = config.providers.some(
-    (provider, index) => (provider.enabled !== false) !== (index === selected),
-  );
-  if (!changes) {
-    return config;
-  }
-  return {
-    ...config,
-    providers: config.providers.map((provider, index) =>
-      index === selected
-        ? { ...provider, enabled: true }
-        : { ...provider, enabled: false },
-    ),
-  };
+  // Zero or one enabled: keep the document as submitted; the owner is the single enabled id.
+  return config;
 }
 
 /** The owner facts the restart publishes; the same shape the boot start returns. */

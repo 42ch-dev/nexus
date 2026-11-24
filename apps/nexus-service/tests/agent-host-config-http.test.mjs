@@ -106,7 +106,7 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.equal(response.body.providers[0].id, 'claude-acp');
   });
 
-  test('a replacement save disables the replaced provider so readiness reports the new owner', async () => {
+  test('a replacement save with more than one enabled provider is refused and not saved', async () => {
     const oldProvider = {
       id: 'old-acp',
       protocol: 'acp',
@@ -119,41 +119,68 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       command: 'replacement-agent',
       enabled: true,
     };
-    const available = new Set([replacement.id]);
-    let stored = { ...DEFAULT_CONFIG, providers: [oldProvider] };
-    const service = {
-      workspaceInitialized: true,
-      providerReady: false,
-      engineEpoch: 0,
-      core: {
-        getAgentHostConfig: async () => stored,
-        saveAgentHostConfig: async (config) => {
-          stored = config;
-        },
-        restartExecutionOwner: async () => {
-          const selected = stored.providers.filter((provider) => provider.enabled !== false);
-          return {
-            engine_epoch: 11,
-            provider_ready:
-              selected.length > 0 && selected.every((provider) => available.has(provider.id)),
-          };
-        },
+    const stored = { ...DEFAULT_CONFIG, providers: [oldProvider] };
+    const { service, saves, restarts } = storeService(stored);
+
+    await assert.rejects(
+      () =>
+        handle('PUT', service, {
+          ...DEFAULT_CONFIG,
+          providers: [oldProvider, replacement],
+        }),
+      (error) => {
+        assert.equal(error.status, 400);
+        assert.equal(error.code, 'invalid_input');
+        assert.match(error.message, /at most one provider/);
+        return true;
       },
+    );
+
+    assert.equal(saves.length, 0, 'an ambiguous document never reaches the native save path');
+    assert.equal(restarts.length, 0, 'a refused save never restarts the engine owner');
+    const current = await handle('GET', service);
+    assert.deepEqual(current.body.providers, [oldProvider]);
+  });
+
+  test('reordering a single-enabled document cannot change the readiness owner', async () => {
+    const disabled = { id: 'old-acp', protocol: 'acp', command: 'old-agent', enabled: false };
+    const owner = {
+      id: 'owner-acp',
+      protocol: 'acp',
+      command: 'owner-agent',
+      enabled: true,
     };
 
-    const response = await handle('PUT', service, {
-      ...DEFAULT_CONFIG,
-      providers: [oldProvider, replacement],
-    });
+    for (const providers of [
+      [owner, disabled],
+      [disabled, owner],
+    ]) {
+      const { service, saves } = storeService(DEFAULT_CONFIG);
+      const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers });
 
-    assert.deepEqual(
-      response.body.providers,
-      [{ ...oldProvider, enabled: false }, replacement],
-      'the replaced entry is kept but disabled, the saved one is enabled',
-    );
-    assert.deepEqual(stored.providers.map((provider) => provider.id), ['old-acp', 'replacement-acp']);
-    assert.equal(service.providerReady, true, 'readiness follows the replacement');
-    assert.equal(service.engineEpoch, 11);
+      assert.deepEqual(saves[0].providers, providers, 'the document is stored as submitted');
+      assert.deepEqual(
+        response.body.providers
+          .filter((provider) => provider.enabled !== false)
+          .map(({ id }) => id),
+        ['owner-acp'],
+        'the single enabled id owns readiness regardless of position',
+      );
+    }
+  });
+
+  test('a document with zero enabled providers saves unchanged', async () => {
+    const providers = [
+      { id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: false },
+      { id: 'second-acp', protocol: 'acp', command: null, enabled: false },
+    ];
+    const { service, saves } = storeService(DEFAULT_CONFIG);
+
+    const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers });
+
+    assert.equal(saves.length, 1);
+    assert.deepEqual(saves[0].providers, providers);
+    assert.deepEqual(response.body.providers, providers);
   });
 
   test('a no-op save disables nothing', async () => {
@@ -204,7 +231,10 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     };
     const second = {
       ...DEFAULT_CONFIG,
-      providers: [...first.providers, { id: 'second-acp', protocol: 'acp', command: 'second-agent', enabled: true }],
+      providers: [
+        { id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: false },
+        { id: 'second-acp', protocol: 'acp', command: 'second-agent', enabled: true },
+      ],
     };
 
     const [a, b] = await Promise.all([
@@ -315,25 +345,21 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       enabled: true,
     };
 
-    for (const submitted of [
-      [broken, replacement],
-      [{ ...broken, enabled: false }, replacement],
-    ]) {
-      const { service, saves } = storeService({ ...DEFAULT_CONFIG, providers: [broken] });
+    const submitted = [{ ...broken, enabled: false }, replacement];
+    const { service, saves } = storeService({ ...DEFAULT_CONFIG, providers: [broken] });
 
-      const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers: submitted });
+    const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers: submitted });
 
-      const expected = [{ ...broken, enabled: false }, replacement];
-      assert.deepEqual(response.body.providers, expected, JSON.stringify(submitted));
-      assert.deepEqual(saves[0].providers, expected);
-      assert.deepEqual(
-        response.body.providers
-          .filter((provider) => provider.enabled !== false)
-          .map(({ id }) => id),
-        ['claude-acp'],
-        'exactly one enabled provider after the save',
-      );
-    }
+    const expected = [{ ...broken, enabled: false }, replacement];
+    assert.deepEqual(response.body.providers, expected, JSON.stringify(submitted));
+    assert.deepEqual(saves[0].providers, expected);
+    assert.deepEqual(
+      response.body.providers
+        .filter((provider) => provider.enabled !== false)
+        .map(({ id }) => id),
+      ['claude-acp'],
+      'exactly one enabled provider after the save',
+    );
   });
 
   test('validation key sets match the registered schema properties', async () => {
