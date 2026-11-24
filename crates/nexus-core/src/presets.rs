@@ -2353,6 +2353,44 @@ states:
     }
 
     #[test]
+    fn atomic_write_maps_write_stage_to_file_write_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("preset.yaml");
+        // A directory cannot be opened for writing on any platform, so the
+        // kernel's first `std::fs::write` fails at the Write stage.
+        let tmp_path = tmp.path().join("unwritable-tmp");
+        std::fs::create_dir(&tmp_path).unwrap();
+
+        let error = atomic_write_with_dir_fsync(&target, &tmp_path, b"content").unwrap_err();
+
+        assert!(
+            matches!(&error, PresetError::Internal { code, .. } if code == "FILE_WRITE_ERROR"),
+            "unexpected error: {error:?}"
+        );
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn atomic_write_maps_rename_stage_to_file_rename_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Renaming a file over an existing directory fails on every platform.
+        let target = tmp.path().join("target-is-a-dir");
+        std::fs::create_dir(&target).unwrap();
+        let tmp_path = tmp.path().join("preset.yaml.tmp.test");
+
+        let error = atomic_write_with_dir_fsync(&target, &tmp_path, b"content").unwrap_err();
+
+        assert!(
+            matches!(&error, PresetError::Internal { code, .. } if code == "FILE_RENAME_ERROR"),
+            "unexpected error: {error:?}"
+        );
+        assert!(
+            !tmp_path.exists(),
+            "rename failure must clean up the temp file"
+        );
+    }
+
+    #[test]
     fn conditional_transition_rejects_duplicate_but_keeps_distinct_condition() {
         let mut next = serde_yaml::Mapping::new();
         let request: StrategyPatchTransitionRequest = serde_json::from_value(serde_json::json!({
