@@ -199,10 +199,59 @@ fn print_job_detail(job: &nexus_local_db::KbExtractJob) {
 }
 
 /// Truncate a string for tabular display.
+///
+/// `max_len` counts characters, and the cut lands on a character boundary: an
+/// input of at most `max_len` characters is returned unchanged, otherwise the
+/// kept prefix is exactly `max_len - 1` characters plus `…`, so a multi-byte
+/// label never slices mid-character and never gains a spurious ellipsis. ASCII
+/// output is unchanged (`chars().count() == len()` for ASCII).
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max_len - 1])
+    if max_len == 0 {
+        return String::new();
+    }
+    if s.chars().count() <= max_len {
+        return s.to_string();
+    }
+    let cut = max_len - 1;
+    let end = s.char_indices().nth(cut).map_or(s.len(), |(idx, _)| idx);
+    format!("{}…", &s[..end])
+}
+
+#[cfg(test)]
+mod truncate_str_tests {
+    use super::truncate_str;
+
+    #[test]
+    fn ascii_short_input_is_unchanged() {
+        assert_eq!(truncate_str("abc", 5), "abc");
+    }
+
+    #[test]
+    fn ascii_truncation_replaces_last_unit_with_ellipsis() {
+        assert_eq!(truncate_str("abcdefghij", 5), "abcd…");
+    }
+
+    #[test]
+    fn multi_byte_label_cuts_on_char_boundary() {
+        // cut == max_len - 1 == 2 keeps 2 characters; a byte slice at 2 would
+        // split the first 3-byte char.
+        let label = "知识抽取失败原因很长";
+        let out = truncate_str(label, 3);
+        assert_eq!(out, "知识…");
+        assert!(out.ends_with('…'));
+        assert!(out.len() < label.len());
+    }
+
+    #[test]
+    fn multi_byte_label_within_char_budget_is_unchanged() {
+        // 8 characters but 24 bytes: the character budget fits, so no ellipsis.
+        let label = "知识抽取失败原因";
+        assert!(label.len() > 15);
+        assert_eq!(truncate_str(label, 15), label);
+    }
+
+    #[test]
+    fn zero_max_len_returns_empty() {
+        assert_eq!(truncate_str("abcdefghij", 0), "");
     }
 }
