@@ -997,14 +997,24 @@ jobs:
         # test target alone does not build example targets.
         run: cargo build -p nexus42 --features connect-host --example runtime_smoke_probe
       - name: Run the headless runtime smoke test
-        run: cargo test -p nexus42 --features connect-host --test nexus_runtime_smoke headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener -- --exact
+        run: |
+          out=$(cargo test -p nexus42 --features connect-host --test nexus_runtime_smoke headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener -- --exact 2>&1)
+          status=$?
+          printf '%s\n' "$out"
+          test "$status" -eq 0
+          printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
       - name: Run Connect library tests
         run: >-
           cargo test -p nexus42 --no-default-features --features connect-host --lib commands::connect::
       - name: Run Connect token CLI tests
         run: cargo test -p nexus42 --features connect-host --test connect_token_issue
       - name: Run Connect command surface contract
-        run: cargo test -p nexus42 --features connect-host --test command_surface_contract v1193_connect_help_describes_served_compute_surface -- --exact
+        run: |
+          out=$(cargo test -p nexus42 --features connect-host --test command_surface_contract v1193_connect_help_describes_served_compute_surface -- --exact 2>&1)
+          status=$?
+          printf '%s\n' "$out"
+          test "$status" -eq 0
+          printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
 
   # I-000340 (follow-up). The C-111 remote creator-memory cohort was a step on
   # the `cli` matrix row (I-000324), but it compiles a differently-feature-
@@ -1238,16 +1248,27 @@ jobs:
       # proofs had no CI owner. The step above runs neither target, and `simulation_services`
       # is `#![cfg(feature = "execution")]`, so every invocation here names the feature
       # explicitly rather than inheriting one. Measured 7s warm locally.
-      # shortcut: an `--exact` filter that matches no test exits 0, so renaming either
-      # recording proof would pass this step silently; add a `--list` assertion if the
-      # names ever move.
+      # Each `--exact` invocation asserts `1 passed` (I-000498): an `--exact` filter that
+      # matches no test exits 0, so a renamed proof would pass the step silently otherwise.
       - name: Run core simulation and recording Work planes
         timeout-minutes: 10
         run: |
           cargo test -p nexus-core --features execution --test simulation_services
-          cargo test -p nexus-core --features execution --test work_artifact_production_shape simulated_scaffold_records_without_touching_work_tree -- --exact
-          cargo test -p nexus-core --features execution --test work_artifact_production_shape a_failed_simulated_scaffold_leaves_the_work_tree_alone -- --exact
-          cargo test -p nexus-core --features execution --lib execution::capabilities::tests::simulated_fs_write_records_and_preserves_an_existing_chapter -- --exact
+          out=$(cargo test -p nexus-core --features execution --test work_artifact_production_shape simulated_scaffold_records_without_touching_work_tree -- --exact 2>&1)
+          status=$?
+          printf '%s\n' "$out"
+          test "$status" -eq 0
+          printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
+          out=$(cargo test -p nexus-core --features execution --test work_artifact_production_shape a_failed_simulated_scaffold_leaves_the_work_tree_alone -- --exact 2>&1)
+          status=$?
+          printf '%s\n' "$out"
+          test "$status" -eq 0
+          printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
+          out=$(cargo test -p nexus-core --features execution --lib owner::capabilities::tests::simulated_fs_write_records_and_preserves_an_existing_chapter -- --exact 2>&1)
+          status=$?
+          printf '%s\n' "$out"
+          test "$status" -eq 0
+          printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
 
   rust-core-host-state:
     name: Rust core host state owners
