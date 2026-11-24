@@ -787,6 +787,10 @@ fn projection_correction(error: &WorkflowIrError) -> String {
             "leave exactly one node of kind `terminal` and one entry in `terminal`; {count} nodes \
              are marked terminal"
         ),
+        WorkflowIrError::EmptyConditionalRules { state } => format!(
+            "give `{state}` a rule list or spell its advance as a bare `next`; a judged state's \
+             zero-rule branch has no preset projection that survives the export"
+        ),
     }
 }
 

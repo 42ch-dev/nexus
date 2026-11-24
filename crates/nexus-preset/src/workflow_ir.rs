@@ -76,6 +76,14 @@ pub enum WorkflowIrError {
         /// Number of states marked terminal.
         count: usize,
     },
+    /// A judged state's `next` is a `Conditional`/`Branches` form carrying no rules. A judged
+    /// node's single `default` edge is what an unconditional advance projects to, so the export
+    /// cannot tell this form from a bare `next` and would rewrite it.
+    #[error("`{state}` has a conditional next with no rules; a bare `next` is the supported form")]
+    EmptyConditionalRules {
+        /// State whose `next` carries no rules.
+        state: String,
+    },
 }
 
 fn refuse(reason: impl Into<String>) -> WorkflowIrError {
@@ -449,10 +457,11 @@ fn push_next_edges(
     used: &mut HashSet<String>,
 ) -> Result<(), WorkflowIrError> {
     let from = state.id.as_str();
+    let judged = is_judged(state);
     match &state.next {
         None => {}
         Some(NextTarget::Linear(to)) => {
-            let kind = if is_judged(state) {
+            let kind = if judged {
                 WorkflowEdgeKind::Default
             } else {
                 WorkflowEdgeKind::Linear
@@ -493,10 +502,24 @@ fn push_next_edges(
             }
         }
         Some(NextTarget::Conditional(conditional)) => {
-            push_conditional_edges(edges, used, from, &conditional.rules, &conditional.default)?;
+            push_conditional_edges(
+                edges,
+                used,
+                from,
+                judged,
+                &conditional.rules,
+                &conditional.default,
+            )?;
         }
         Some(NextTarget::Branches(branches)) => {
-            push_conditional_edges(edges, used, from, &branches.branches, &branches.default)?;
+            push_conditional_edges(
+                edges,
+                used,
+                from,
+                judged,
+                &branches.branches,
+                &branches.default,
+            )?;
         }
     }
     Ok(())
@@ -506,15 +529,17 @@ fn push_conditional_edges(
     edges: &mut Vec<WorkflowEdge>,
     used: &mut HashSet<String>,
     from: &str,
+    judged: bool,
     rules: &[ConditionalRule],
     default: &str,
 ) -> Result<(), WorkflowIrError> {
-    if rules.is_empty() {
-        // An edge-based IR cannot tell this form from a bare `next`, so importing it would
-        // silently rewrite the document on export.
-        return Err(refuse(format!(
-            "`{from}` has a conditional next with no rules; a bare `next` is the supported form"
-        )));
+    if judged && rules.is_empty() {
+        // A judged node's unconditional advance projects to one `Default` edge, which the export
+        // folds back to a bare `next`; an empty rule list would therefore be silently rewritten.
+        // A non-judged node keeps its `{branches: [], default}` spelling through that same export.
+        return Err(WorkflowIrError::EmptyConditionalRules {
+            state: from.to_string(),
+        });
     }
     for rule in rules {
         push_edge(
@@ -1386,6 +1411,49 @@ fn initial_action_preset(action: &WorkflowInitialAction) -> Result<InitialAction
 mod tests {
     use super::*;
 
+    /// A manifest whose judged `review` state carries `next` spelled by the caller.
+    fn judged_manifest(next: &str) -> String {
+        format!(
+            r#"
+preset:
+  id: judged-branches
+  version: 1
+  kind: creator
+  description: "judged state whose conditional next carries no rules"
+  requires_capabilities: []
+  initial: review
+  terminal: done
+states:
+  - id: review
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/judge.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: {next}
+  - id: done
+    terminal: true
+"#
+        )
+    }
+
+    /// A non-judged state whose `next` is the zero-rule branch form.
+    const MANIFEST_WITH_EMPTY_BRANCHES: &str = r#"
+preset:
+  id: plain-branches
+  version: 1
+  kind: creator
+  description: "non-judged state whose branch list is empty"
+  requires_capabilities: []
+  initial: review
+  terminal: done
+states:
+  - id: review
+    next: {branches: [], default: done}
+  - id: done
+    terminal: true
+"#;
+
     const MANIFEST: &str = r#"
 preset:
   id: round-trip
@@ -1585,42 +1653,49 @@ states:
     }
 
     #[test]
-    fn conditional_next_with_no_rules_is_refused() {
+    fn conditional_next_with_no_rules_is_refused_on_a_judged_state() {
         for next in [
             "{ branches: [], default: done }",
             "{ kind: conditional, rules: [], default: done }",
         ] {
-            let yaml = format!(
-                r#"
-preset:
-  id: empty-branches
-  version: 1
-  kind: creator
-  description: "judged state whose conditional next carries no rules"
-  requires_capabilities: []
-  initial: review
-  terminal: done
-states:
-  - id: review
-    exit_when:
-      kind: llm_judge
-      template_file: prompts/judge.md
-      judge_capability: judge.llm
-      min_interval: "PT1H"
-    next: {next}
-  - id: done
-    terminal: true
-"#
-            );
-            let manifest: PresetManifest = serde_yaml::from_str(&yaml).expect("manifest parses");
+            let manifest: PresetManifest =
+                serde_yaml::from_str(&judged_manifest(next)).expect("manifest parses");
 
             let error = import_preset_manifest(&manifest).expect_err("empty rules are refused");
             assert!(
-                matches!(error, WorkflowIrError::NotProjectable { .. }),
+                matches!(
+                    &error,
+                    WorkflowIrError::EmptyConditionalRules { state } if state == "review"
+                ),
                 "{next}: {error:?}"
             );
             assert!(error.to_string().contains("no rules"), "{next}: {error}");
         }
+    }
+
+    /// A non-judged state has no judge to route, so its zero-rule branch is a plain default edge —
+    /// and `next_from_edges` exports that shape back as `branches: []`, not as a bare `next`.
+    #[test]
+    fn empty_branches_on_a_non_judged_state_round_trip() {
+        let manifest: PresetManifest =
+            serde_yaml::from_str(MANIFEST_WITH_EMPTY_BRANCHES).expect("manifest parses");
+        let document = import_preset_manifest(&manifest).expect("import");
+        assert_eq!(document.edges.len(), 1);
+        assert_eq!(document.edges[0].kind, WorkflowEdgeKind::Default);
+        assert_eq!(document.edges[0].to, "done");
+
+        let exported = export_preset(&document).expect("export");
+        assert_eq!(
+            serde_json::to_value(&exported).expect("exported json"),
+            serde_json::to_value(&manifest).expect("manifest json"),
+            "a non-judged zero-rule branch keeps its `branches: []` spelling"
+        );
+
+        let reimported =
+            import_preset_manifest(&exported).expect("the exported manifest imports again");
+        assert_eq!(reimported.edges.len(), 1);
+        assert_eq!(reimported.edges[0].kind, WorkflowEdgeKind::Default);
+        assert_eq!(reimported.edges[0].to, "done");
     }
 
     #[test]

@@ -173,8 +173,10 @@ pub fn validate_workflow_ir(
 ///
 /// # Returns
 ///
-/// A `ValidationResult` containing all diagnostics (errors + warnings). A manifest whose
-/// `preset.id` is not a valid IR id cannot be projected and reports that as an `IdMismatch`.
+/// A `ValidationResult` containing all diagnostics (errors + warnings). A manifest that cannot be
+/// projected reports the failing carrier: an invalid `preset.id` as an `IdMismatch` at
+/// `preset.id`, and a judged state's zero-rule `next` as a `Structural` error at
+/// `states[<index>].next`.
 #[must_use]
 pub fn validate_preset_semantic(
     manifest: &PresetManifest,
@@ -182,7 +184,7 @@ pub fn validate_preset_semantic(
 ) -> ValidationResult {
     match crate::workflow_ir::import_preset_manifest(manifest) {
         Ok(document) => validate_workflow_ir(&document, caps),
-        Err(error) => projection_refusal(&error),
+        Err(error) => projection_refusal(manifest, &error),
     }
 }
 
@@ -218,7 +220,7 @@ pub fn validate_assets_in_bundle(
 ) -> ValidationResult {
     match crate::workflow_ir::import_preset_manifest(manifest) {
         Ok(document) => validate_workflow_ir_assets(&document, bundle_root),
-        Err(error) => projection_refusal(&error),
+        Err(error) => projection_refusal(manifest, &error),
     }
 }
 
@@ -238,18 +240,38 @@ pub fn validate_workflow_ir_path_safety(document: &WorkflowDocument) -> Validati
 pub fn validate_path_safety(manifest: &PresetManifest) -> ValidationResult {
     match crate::workflow_ir::import_preset_manifest(manifest) {
         Ok(document) => validate_workflow_ir_path_safety(&document),
-        Err(error) => projection_refusal(&error),
+        Err(error) => projection_refusal(manifest, &error),
     }
 }
 
-/// The only projection failure a validation entry can hit is an id that is not expressible in IR.
-fn projection_refusal(error: &crate::workflow_ir::WorkflowIrError) -> ValidationResult {
+/// Map a projection refusal onto the manifest field that caused it.
+///
+/// A projection error is not always the document id: a state's `next` can be the carrier that
+/// cannot be represented, so the diagnostic names that state rather than `preset.id`.
+fn projection_refusal(
+    manifest: &PresetManifest,
+    error: &crate::workflow_ir::WorkflowIrError,
+) -> ValidationResult {
+    let (path, category) = match error {
+        crate::workflow_ir::WorkflowIrError::EmptyConditionalRules { state } => {
+            let path = manifest
+                .states
+                .iter()
+                .position(|candidate| candidate.id == *state)
+                .map_or_else(
+                    || format!("states[{state}].next"),
+                    |index| format!("states[{index}].next"),
+                );
+            (path, DiagnosticCategory::Structural)
+        }
+        _ => ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
+    };
     ValidationResult {
         diagnostics: vec![ValidationDiagnostic {
-            path: "preset.id".to_string(),
+            path,
             message: error.to_string(),
             severity: DiagnosticSeverity::Error,
-            category: DiagnosticCategory::IdMismatch,
+            category,
         }],
     }
 }
@@ -1247,6 +1269,42 @@ states:
             !result.has_errors(),
             "expected no errors: {:?}",
             result.diagnostics
+        );
+    }
+
+    #[test]
+    fn judged_empty_branch_refusal_reports_the_state_next() {
+        let yaml = r"
+preset:
+  id: empty-rules
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: review
+  terminal: done
+states:
+  - id: review
+    exit_when: { kind: llm_judge }
+    next: { branches: [], default: done }
+  - id: done
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let result = validate_preset_semantic(&manifest, &BuiltinCapabilityCatalog);
+
+        assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.path, "states[0].next");
+        assert_eq!(diagnostic.category, DiagnosticCategory::Structural);
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        assert!(
+            diagnostic
+                .message
+                .contains("has a conditional next with no rules"),
+            "{}",
+            diagnostic.message
         );
     }
 
