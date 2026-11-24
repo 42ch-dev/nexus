@@ -998,10 +998,11 @@ jobs:
         run: cargo build -p nexus42 --features connect-host --example runtime_smoke_probe
       - name: Run the headless runtime smoke test
         run: |
-          out=$(cargo test -p nexus42 --features connect-host --test nexus_runtime_smoke headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener -- --exact 2>&1)
-          status=$?
+          if ! out=$(cargo test -p nexus42 --features connect-host --test nexus_runtime_smoke headless_runtime_prints_readiness_serves_connect_and_has_no_http_listener -- --exact 2>&1); then
+            printf '%s\n' "$out"
+            exit 1
+          fi
           printf '%s\n' "$out"
-          test "$status" -eq 0
           printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
       - name: Run Connect library tests
         run: >-
@@ -1010,10 +1011,11 @@ jobs:
         run: cargo test -p nexus42 --features connect-host --test connect_token_issue
       - name: Run Connect command surface contract
         run: |
-          out=$(cargo test -p nexus42 --features connect-host --test command_surface_contract v1193_connect_help_describes_served_compute_surface -- --exact 2>&1)
-          status=$?
+          if ! out=$(cargo test -p nexus42 --features connect-host --test command_surface_contract v1193_connect_help_describes_served_compute_surface -- --exact 2>&1); then
+            printf '%s\n' "$out"
+            exit 1
+          fi
           printf '%s\n' "$out"
-          test "$status" -eq 0
           printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
 
   # I-000340 (follow-up). The C-111 remote creator-memory cohort was a step on
@@ -1254,20 +1256,23 @@ jobs:
         timeout-minutes: 10
         run: |
           cargo test -p nexus-core --features execution --test simulation_services
-          out=$(cargo test -p nexus-core --features execution --test work_artifact_production_shape simulated_scaffold_records_without_touching_work_tree -- --exact 2>&1)
-          status=$?
+          if ! out=$(cargo test -p nexus-core --features execution --test work_artifact_production_shape simulated_scaffold_records_without_touching_work_tree -- --exact 2>&1); then
+            printf '%s\n' "$out"
+            exit 1
+          fi
           printf '%s\n' "$out"
-          test "$status" -eq 0
           printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
-          out=$(cargo test -p nexus-core --features execution --test work_artifact_production_shape a_failed_simulated_scaffold_leaves_the_work_tree_alone -- --exact 2>&1)
-          status=$?
+          if ! out=$(cargo test -p nexus-core --features execution --test work_artifact_production_shape a_failed_simulated_scaffold_leaves_the_work_tree_alone -- --exact 2>&1); then
+            printf '%s\n' "$out"
+            exit 1
+          fi
           printf '%s\n' "$out"
-          test "$status" -eq 0
           printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
-          out=$(cargo test -p nexus-core --features execution --lib owner::capabilities::tests::simulated_fs_write_records_and_preserves_an_existing_chapter -- --exact 2>&1)
-          status=$?
+          if ! out=$(cargo test -p nexus-core --features execution --lib owner::capabilities::tests::simulated_fs_write_records_and_preserves_an_existing_chapter -- --exact 2>&1); then
+            printf '%s\n' "$out"
+            exit 1
+          fi
           printf '%s\n' "$out"
-          test "$status" -eq 0
           printf '%s\n' "$out" | grep -Eq 'test result: ok\. 1 passed'
 
   rust-core-host-state:
