@@ -239,6 +239,14 @@ export function ApproveDisclosure({
                     ))}
                   </ul>
                 ) : null}
+                {trajectory.stubbed_judges.length > 0 ? (
+                  <p
+                    data-testid="approve-predicted-waits-bound"
+                    className="mt-1 text-label-12 text-gray-700"
+                  >
+                    {t('strategy.approve.predictedWaitsDefaultPathOnly')}
+                  </p>
+                ) : null}
               </dd>
             </div>
           </dl>

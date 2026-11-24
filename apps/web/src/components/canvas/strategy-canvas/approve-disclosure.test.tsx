@@ -70,12 +70,27 @@ describe('ApproveDisclosure — five disclosure elements', () => {
     expect(summary).toHaveTextContent(/a fence, not a forecast/i);
   });
 
-  it('4. labels predicted waits "predicted (static)"', () => {
-    renderDisclosure();
+  it('4. labels predicted waits and bounds the list when a judge is stubbed', () => {
+    renderDisclosure({
+      trajectory: simulationTrajectory({ stubbed_judges: ['routing'] }),
+    });
 
     const waits = screen.getByTestId('approve-predicted-waits');
     expect(waits).toHaveTextContent('Predicted (static) waits: 1');
     expect(waits).toHaveTextContent('pause');
+    expect(screen.getByTestId('approve-predicted-waits-bound')).toHaveTextContent(
+      'covers only the default path',
+    );
+  });
+
+  it('shows no bound note when no judge is stubbed', () => {
+    renderDisclosure({
+      trajectory: simulationTrajectory({ stubbed_judges: [] }),
+    });
+
+    const waits = screen.getByTestId('approve-predicted-waits');
+    expect(waits).toHaveTextContent('Predicted (static) waits: 1');
+    expect(screen.queryByTestId('approve-predicted-waits-bound')).not.toBeInTheDocument();
   });
 
   it('5. states that a passed simulation does not preview output', () => {
