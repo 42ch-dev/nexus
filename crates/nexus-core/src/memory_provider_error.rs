@@ -28,22 +28,22 @@ use crate::error::CoreError;
 const IDEMPOTENCY_CONFLICT_CODE: &str = "idempotency_conflict";
 
 /// The resource the provider open names when it refuses.
-pub(crate) const PROVIDER_OPEN_RESOURCE: &str = "memory: provider-open";
+pub const PROVIDER_OPEN_RESOURCE: &str = "memory: provider-open";
 
 /// The resource the review-disposition section names when it refuses.
-pub(crate) const REVIEW_DISPOSITION_RESOURCE: &str = "memory: review-disposition";
+pub const REVIEW_DISPOSITION_RESOURCE: &str = "memory: review-disposition";
 
 /// The resource the SOUL-invalidation recovery row names when it refuses.
-pub(crate) const SOUL_RECOVERY_RESOURCE: &str = "memory: soul-recovery";
+pub const SOUL_RECOVERY_RESOURCE: &str = "memory: soul-recovery";
 
 /// The resource the legacy migration pass names when it refuses.
-pub(crate) const LEGACY_MIGRATION_RESOURCE: &str = "memory: migrate-legacy";
+pub const LEGACY_MIGRATION_RESOURCE: &str = "memory: migrate-legacy";
 
 /// Project one provider refusal naming the core entry point that raised it.
 ///
 /// `NotAuthorized` carries no resource in the provider's taxonomy, so the entry
 /// point supplies its own; every other variant keeps the shared projection.
-pub(crate) fn provider_error_with_resource(error: ProviderError, resource: &str) -> CoreError {
+pub fn provider_error_with_resource(error: ProviderError, resource: &str) -> CoreError {
     match error {
         ProviderError::NotAuthorized(reason) => CoreError::ForbiddenReason {
             resource: resource.to_string(),
