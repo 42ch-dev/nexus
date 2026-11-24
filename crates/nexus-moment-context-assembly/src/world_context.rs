@@ -659,9 +659,6 @@ mod tests {
         assert_eq!(block.characters_in_chapter.len(), 2);
     }
 
-    #[tokio::test]
-    async fn legacy_worldless_caller_skips_block() {}
-
     #[test]
     fn missing_world_id_returns_empty_block() {
         let params = make_params("wld_ghost", &[]);
