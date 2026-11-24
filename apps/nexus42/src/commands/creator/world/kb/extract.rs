@@ -213,7 +213,11 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         return s.to_string();
     }
     let cut = max_len - 1;
-    let end = s.char_indices().nth(cut).map_or(s.len(), |(idx, _)| idx);
+    let end = s
+        .char_indices()
+        .nth(cut)
+        .map(|(idx, _)| idx)
+        .expect("chars().count() > max_len guarantees a cut boundary");
     format!("{}…", &s[..end])
 }
 
