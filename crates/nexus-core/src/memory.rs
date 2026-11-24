@@ -63,6 +63,10 @@ use nexus_creator_memory::bearer::MemoryBearerRef;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::memory_provider_error::{
+    provider_error_with_resource, LEGACY_MIGRATION_RESOURCE, REVIEW_DISPOSITION_RESOURCE,
+    SOUL_RECOVERY_RESOURCE,
+};
 use crate::principal::Principal;
 use crate::service::CoreService;
 use nexus_memory_provider::legacy;
@@ -741,7 +745,11 @@ impl MemoryAdapter {
             return Ok(None);
         }
         let local = self.binding.local()?;
-        Ok(Some(local.review_disposition(&self.subject_id).await?))
+        let section = local
+            .review_disposition(&self.subject_id)
+            .await
+            .map_err(|error| provider_error_with_resource(error, REVIEW_DISPOSITION_RESOURCE))?;
+        Ok(Some(section))
     }
 
     /// The provider subject this adapter speaks for: the bearer a write under
@@ -1836,7 +1844,7 @@ impl MemoryAdapter {
             .local()?
             .soul_invalidation_binding(record_id)
             .await
-            .map_err(CoreError::from)
+            .map_err(|error| provider_error_with_resource(error, SOUL_RECOVERY_RESOURCE))
     }
 
     /// Clear that recovery row once the invalidation ran; a remote binding has
@@ -1849,7 +1857,7 @@ impl MemoryAdapter {
             .local()?
             .finish_soul_invalidation(record_id)
             .await
-            .map_err(CoreError::from)
+            .map_err(|error| provider_error_with_resource(error, SOUL_RECOVERY_RESOURCE))
     }
 }
 
@@ -5378,7 +5386,7 @@ impl CoreService {
         provider
             .migrate_legacy(&spoke_principal)
             .await
-            .map_err(CoreError::from)
+            .map_err(|error| provider_error_with_resource(error, LEGACY_MIGRATION_RESOURCE))
     }
 }
 
