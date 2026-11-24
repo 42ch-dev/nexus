@@ -13,11 +13,13 @@ use std::sync::Mutex;
 /// `--test-threads>1`.
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
-/// RAII guard that sets `HOME` to a temp directory for the duration of the test.
+/// RAII guard that sets `HOME` (and `USERPROFILE` on Windows) to a temp directory
+/// for the duration of the test.
 ///
 /// On macOS, `dirs::home_dir()` does NOT respect `$HOME` in all configurations,
 /// so this helper uses `std::env::set_var("HOME", ...)` which works for our
-/// internal `user_home_dir()` / `nexus_home_dir()` functions.
+/// internal `user_home_dir()` / `nexus_home_dir()` functions. `USERPROFILE` is
+/// moved in lockstep because Windows `dirs::home_dir()` resolves through it.
 ///
 /// Uses a global mutex to serialize access — only one `IsolatedHome` is active
 /// at a time, preventing race conditions under `--test-threads>1`.
@@ -58,10 +60,15 @@ impl IsolatedHome {
     fn install(lock: Option<std::sync::MutexGuard<'static, ()>>) -> Self {
         let tmp = tempfile::TempDir::new().expect("tempdir for test");
         let original_home = std::env::var("HOME").ok();
+        let original_userprofile = std::env::var("USERPROFILE").ok();
         std::env::set_var("HOME", tmp.path());
+        // Windows `dirs::home_dir()` resolves through `USERPROFILE`, so moving
+        // only `HOME` would let tests touch the real `~/.nexus42` there.
+        std::env::set_var("USERPROFILE", tmp.path());
         Self {
             _tmp: tmp,
             original_home,
+            original_userprofile,
             _lock: lock,
         }
     }
@@ -71,9 +78,20 @@ impl IsolatedHome {
 pub struct IsolatedHome {
     _tmp: tempfile::TempDir,
     original_home: Option<String>,
+    original_userprofile: Option<String>,
     /// Held until drop to serialize HOME manipulation across test threads.
     /// `None` when the caller retains ownership of the lock itself.
     _lock: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+impl IsolatedHome {
+    /// Temporary home directory currently installed as `HOME` / `USERPROFILE`.
+    ///
+    /// Use it to assert that a resolved path stays inside the isolated home.
+    #[must_use]
+    pub fn path(&self) -> &std::path::Path {
+        self._tmp.path()
+    }
 }
 
 impl Drop for IsolatedHome {
@@ -82,6 +100,11 @@ impl Drop for IsolatedHome {
             std::env::set_var("HOME", home);
         } else {
             std::env::remove_var("HOME");
+        }
+        if let Some(profile) = &self.original_userprofile {
+            std::env::set_var("USERPROFILE", profile);
+        } else {
+            std::env::remove_var("USERPROFILE");
         }
     }
 }
@@ -116,15 +139,24 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let original = std::env::var("HOME").ok();
+        let original_profile = std::env::var("USERPROFILE").ok();
         {
             let _guard = IsolatedHome::with_caller_holding_lock();
             let during = std::env::var("HOME").expect("HOME should be set");
+            let during_profile = std::env::var("USERPROFILE").expect("USERPROFILE should be set");
             assert_ne!(during, original.clone().unwrap_or_default());
+            assert_ne!(during_profile, original_profile.clone().unwrap_or_default());
+            assert_eq!(during, during_profile, "both home variables move together");
         }
         assert_eq!(
             std::env::var("HOME").ok(),
             original,
             "HOME should be restored to its original value"
+        );
+        assert_eq!(
+            std::env::var("USERPROFILE").ok(),
+            original_profile,
+            "USERPROFILE should be restored to its original value"
         );
         drop(lock);
     }

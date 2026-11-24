@@ -417,6 +417,16 @@ mod tests {
     use super::*;
     use base64::Engine;
 
+    /// Seed the isolated auth store through the single path every auth test uses.
+    ///
+    /// A failed write must fail the test loudly; returning early here would make
+    /// the test body green-but-unrun (I-000608).
+    fn seed_token(store: &mut AuthStore, token: UserTokenState) {
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
+    }
+
     #[test]
     fn extract_user_id_from_valid_jwt() {
         let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -644,9 +654,7 @@ mod tests {
             refresh_expires_at: Some("2026-05-28T12:00:00Z".to_string()),
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        store
-            .store_user_token(token)
-            .expect("test token must be stored");
+        seed_token(&mut store, token);
 
         let result = refresh_access_token(&config).await;
         match result {
@@ -691,9 +699,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        store
-            .store_user_token(token)
-            .expect("test token must be stored");
+        seed_token(&mut store, token);
 
         let result = refresh_access_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -718,9 +724,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        store
-            .store_user_token(token)
-            .expect("test token must be stored");
+        seed_token(&mut store, token);
 
         let result = refresh_access_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -751,9 +755,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        store
-            .store_user_token(token)
-            .expect("test token must be stored");
+        seed_token(&mut store, token);
 
         let result = ensure_valid_token(&config).await;
         match result {
@@ -782,9 +784,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        store
-            .store_user_token(token)
-            .expect("test token must be stored");
+        seed_token(&mut store, token);
 
         let result = ensure_valid_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -828,9 +828,7 @@ mod tests {
             refresh_expires_at: Some("2027-01-01T00:00:00Z".to_string()),
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        store
-            .store_user_token(token)
-            .expect("test token must be stored");
+        seed_token(&mut store, token);
 
         match logout(&config) {
             Ok(()) => {}
@@ -847,16 +845,24 @@ mod tests {
 
     /// Regression guard for I-000608: the tests above once returned early when
     /// the token write failed, so a failure made them green without running
-    /// their body. Occupying `auth.json` with a directory forces
-    /// `AuthStore::save` to fail portably, proving the `expect` panics instead
-    /// of returning silently.
+    /// their body. This test drives the same `seed_token` helper under a forced
+    /// write failure, proving the guard panics instead of returning silently.
+    ///
+    /// `auth.json` is occupied by a directory so `AuthStore::save` fails
+    /// portably. `isolated_home()` relocates `HOME` and `USERPROFILE`, and the
+    /// resolved store path is asserted to live inside the temp home so this can
+    /// never write into the real `~/.nexus42/auth.json`.
     #[test]
     #[should_panic(expected = "test token must be stored")]
     fn store_user_token_failure_is_not_silent() {
-        let _home = crate::testutil::isolated_home();
-        let nexus_dir = crate::config::nexus_home().expect("resolve nexus home");
-        std::fs::create_dir_all(nexus_dir.join("auth.json"))
-            .expect("occupy auth.json with a directory");
+        let home = crate::testutil::isolated_home();
+        let auth_path = crate::config::auth_store_path().expect("resolve auth store path");
+        assert!(
+            auth_path.starts_with(home.path()),
+            "auth store {auth_path:?} must live under the isolated home {:?}",
+            home.path()
+        );
+        std::fs::create_dir_all(&auth_path).expect("occupy auth.json with a directory");
 
         let token = UserTokenState {
             access_token: "unwritable_tok".to_string(),
@@ -867,8 +873,6 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        store
-            .store_user_token(token)
-            .expect("test token must be stored");
+        seed_token(&mut store, token);
     }
 }
