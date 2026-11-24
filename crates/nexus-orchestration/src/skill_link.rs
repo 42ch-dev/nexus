@@ -249,86 +249,38 @@ mod tests {
         let workspace = temp.path().join("workspace");
         let home_skills = temp.path().join("home").join("skills");
 
-        // Create two skill directories
+        // Set up a link pointing at a different skill than the requested target.
         let wrong_dir = home_skills.join("wrong-skill");
         fs::create_dir_all(&wrong_dir).expect("create wrong dir");
         fs::write(wrong_dir.join("SKILL.md"), "wrong content").expect("write");
 
-        let correct_dir = home_skills.join("correct-skill");
-        fs::create_dir_all(&correct_dir).expect("create correct dir");
-        fs::write(correct_dir.join("SKILL.md"), "correct content").expect("write");
-
-        // First, create a symlink to the wrong target
-        let project_skills = workspace.join(".agents").join("skills");
-        fs::create_dir_all(&project_skills).expect("create project skills dir");
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&wrong_dir, project_skills.join("target-skill"))
-                .expect("create wrong symlink");
-        }
-        #[cfg(windows)]
-        {
-            std::os::windows::fs::symlink_dir(&wrong_dir, project_skills.join("target-skill"))
-                .expect("create wrong symlink");
-        }
-
-        // Verify it points to wrong target
-        let link_path = project_skills.join("target-skill");
-        let wrong_content =
-            fs::read_to_string(link_path.join("SKILL.md")).expect("read wrong link");
-        assert_eq!(wrong_content, "wrong content");
-
-        // Now call ensure_skill_link with the correct target
-        let result = ensure_skill_link(
-            &workspace,
-            home_skills.join("correct-skill").parent().unwrap(),
-            "target-skill",
-        )
-        .expect("should succeed");
-
-        // On Unix this should recreate; the target dir is home_skills/correct-skill
-        // but we passed home_skills as the base, so it looks for home_skills/target-skill
-        // which doesn't exist — so it returns Ok(false). Let me fix this test.
-        // Actually, let's just test with a simpler approach: create a symlink manually
-        // pointing to wrong-skill, then call ensure with home_skills pointing to a dir
-        // that has target-skill as a subdir.
-
-        // Better approach: use the same home_skills_dir but ensure "target-skill" exists
-        // there and the initial symlink points to something else.
-        let _ = result; // We'll redo the test properly below.
-
-        // Clean up and redo
-        if link_path.is_symlink() || link_path.exists() {
-            let _ = fs::remove_file(&link_path);
-        }
-
-        // Create "target-skill" in home_skills
         let target_dir = home_skills.join("target-skill");
         fs::create_dir_all(&target_dir).expect("create target dir");
         fs::write(target_dir.join("SKILL.md"), "target content").expect("write");
 
-        // Create symlink pointing to wrong location
+        let project_skills = workspace.join(".agents").join("skills");
+        fs::create_dir_all(&project_skills).expect("create project skills dir");
+        let link_path = project_skills.join("target-skill");
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&wrong_dir, &link_path).expect("wrong symlink");
+            std::os::unix::fs::symlink(&wrong_dir, &link_path).expect("create wrong symlink");
         }
         #[cfg(windows)]
         {
-            std::os::windows::fs::symlink_dir(&wrong_dir, &link_path).expect("wrong symlink");
+            std::os::windows::fs::symlink_dir(&wrong_dir, &link_path)
+                .expect("create wrong symlink");
         }
 
-        // Verify wrong content
         assert_eq!(
-            fs::read_to_string(link_path.join("SKILL.md")).expect("read"),
+            fs::read_to_string(link_path.join("SKILL.md")).expect("read wrong link"),
             "wrong content"
         );
 
-        // Call ensure — should detect mismatch and recreate
+        // Should detect the mismatch and recreate the link.
         let result =
             ensure_skill_link(&workspace, &home_skills, "target-skill").expect("should succeed");
         assert!(result, "should report link was recreated");
 
-        // Verify symlink now points to correct target
         assert_eq!(
             fs::read_to_string(link_path.join("SKILL.md")).expect("read"),
             "target content"
