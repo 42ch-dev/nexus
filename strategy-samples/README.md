@@ -862,12 +862,20 @@ that comparison can see.
 | an empty value written out: `run_intents: []`, `enter: []`, `terminal: false` | key omitted | same manifest; the field's `skip_serializing_if` drops it |
 | a defaulted field left out: `preset.requires_capabilities`, `cli_args[].required`, a `previous_preset` gate's `scope`, `context_update.op.body` | the default written out: `requires_capabilities: []`, `required: false`, `scope: work`, `body: ''` | same manifest; those fields carry `#[serde(default)]` and no `skip_serializing_if` |
 | legacy `next: {kind: conditional, rules: [...]}` | `next: {branches: [...], default: ...}` | same rules, current spelling (documented `shortcut:` in `workflow_ir.rs`) |
-| judged state (`exit_when: llm_judge`) with `next: {branches: [], default: B}` | `next: B` | same meaning — a zero-rule branch always falls through to `default` — but the bytes move (I-000476); the IR cannot tell a zero-rule branch from a bare `next` on a judged node |
 
 So a manifest that spells a row of the second table does not round-trip: write
 the canonical spelling instead. Neither bundled sample uses one, and
 `examples/first-workflow`'s `walked` state is not affected — a **non**-judged
 zero-rule branch keeps its `next: {branches: [], default: B}` shape untouched.
+
+One shape is neither importable nor a rewrite (I-000476): a judged state
+(`exit_when: llm_judge`) whose `next` is `{branches: [], default: B}`, or the
+legacy `{kind: conditional, rules: []}` spelling of it. A judged node's
+unconditional advance projects to one `default` edge, which the export folds
+back to a bare `next`, so an empty rule list cannot survive the round trip; the
+import refuses the form with `WorkflowIrError::EmptyConditionalRules` (a
+validation entry reports it at the state's `next` path) instead of silently
+rewriting it. Write `next: B`.
 
 Two facts are worth knowing when authoring either spelling:
 
@@ -875,7 +883,7 @@ Two facts are worth knowing when authoring either spelling:
   becomes the node's **`default`** edge in the IR — the only edge a static walk
   may follow out of a judged node — and re-exports as the same `next: B`. Both
   bundled samples rely on this.
-- Only the judged zero-rule branch collapses; the non-judged one is preserved.
+- A judged zero-rule branch is refused; the non-judged one is preserved.
 
 A difference that is on neither list means the exporter is wrong for that
 manifest: report it instead of editing YAML to match. A difference that is

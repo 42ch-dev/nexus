@@ -21,9 +21,8 @@
 //!    documents what such a comparison cannot see; [`VALUE_REWRITES`] documents
 //!    the spellings that would make it fail.
 //! 4. Those rewrites still happen exactly where the lists say, so a reader never
-//!    has to trust a comment. The I-000476 case is asserted by the target that
-//!    survives the fix, not by the collapsed spelling, so correcting the exporter
-//!    keeps it green while a retargeted edge still fails.
+//!    has to trust a comment. The I-000476 shapes are refused on import with a typed
+//!    `WorkflowIrError` instead of being rewritten, so a retargeted edge still fails.
 //! 5. Each sample's hand-edited `workflow.json` loads back into a document whose `assets[]`
 //!    declares exactly the templates its carriers reference — one entry per `path`, each `id`
 //!    naming the file that path hashes — and that exports the committed `preset.yaml` byte for
@@ -36,7 +35,7 @@
 use nexus_capability::CapabilityRegistry;
 use nexus_contracts::generated::daemon_api::orchestration::WorkflowDocument;
 use nexus_preset::manifest::{EnterAction, ExitWhen, NextTarget, PresetManifest};
-use nexus_preset::workflow_ir::import_preset_manifest;
+use nexus_preset::workflow_ir::{import_preset_manifest, WorkflowIrError};
 use nexus_preset::{
     collect_ir_asset_references, export_preset, expr, import_preset_bundle, load_preset,
     validate_assets_in_bundle, validate_path_safety, validate_preset_semantic, FsAssetSource,
@@ -278,13 +277,17 @@ const VALUE_REWRITES: &[Normalisation] = &[
         semantic: false,
         source: "documented `shortcut:` in `nexus-preset/src/workflow_ir.rs`",
     },
-    Normalisation {
-        input: "judged state (`exit_when: llm_judge`) with `next: {branches: [], default: B}`",
-        output: "`next: B`",
-        semantic: false,
-        source: "I-000476: the IR cannot distinguish a zero-rule branch from a bare `next` on a \
-                 judged node, so the export collapses it",
-    },
+];
+
+/// Judged-state shapes the importer refuses outright (I-000476).
+///
+/// These are not rewrites: a judged node's unconditional advance projects to one `default` edge,
+/// which the export folds back to a bare `next`, so an empty rule list cannot survive the round
+/// trip. The import refuses the form instead of rewriting it. A **non-judged** zero-rule branch
+/// keeps its `{branches: [], default}` spelling and round-trips (asserted below).
+const REFUSED_SHAPES: &[&str] = &[
+    "    exit_when: {kind: llm_judge}\n    next: {branches: [], default: b}\n",
+    "    exit_when: {kind: llm_judge}\n    next: {kind: conditional, rules: [], default: b}\n",
 ];
 
 /// Join one YAML path segment onto `path`.
@@ -659,6 +662,13 @@ fn probe_export(a_state: &str) -> Value {
     probe_export_manifest(&probe_manifest(a_state))
 }
 
+/// Import a probe manifest whose `a` state is spelled by `a_state`, expecting a refusal.
+fn probe_import_refusal(a_state: &str) -> WorkflowIrError {
+    let manifest: PresetManifest =
+        serde_yaml::from_str(&probe_manifest(a_state)).expect("probe parses");
+    import_preset_manifest(&manifest).expect_err("probe import is refused")
+}
+
 /// Every defaulted field [`VALUE_REWRITES`] names is written out by the export, on each carrier it
 /// sits on: a hand-written manifest that leaves the field out still exports the canonical value.
 #[test]
@@ -705,21 +715,25 @@ fn every_documented_normalisation_is_cosmetic() {
     }
 }
 
-/// The shape rewrites on the list still happen exactly where the list says — including the one
-/// that does rewrite the bytes (I-000476) and the spellings the three bundles use.
+/// The shape rewrites on the list still happen exactly where the list says — the refused judged
+/// shapes are refused with a typed error (I-000476), and the spellings the three bundles use are
+/// untouched.
 #[test]
 fn documented_shape_rewrites_and_stable_shapes_hold() {
     let bare = probe_export("    exit_when: {kind: llm_judge}\n    next: b\n");
     assert_eq!(bare["states"][0]["next"], Value::String("b".to_string()));
 
-    let collapsed =
-        probe_export("    exit_when: {kind: llm_judge}\n    next: {branches: [], default: b}\n");
-    let next = &collapsed["states"][0]["next"];
-    assert_eq!(
-        next.as_str().or_else(|| next["default"].as_str()),
-        Some("b"),
-        "a judged state's zero-rule branch must still target `b`, whatever spelling it exports"
-    );
+    for shape in REFUSED_SHAPES {
+        let refusal = probe_import_refusal(shape);
+        assert!(
+            matches!(&refusal, WorkflowIrError::EmptyConditionalRules { state } if state == "a"),
+            "{shape}: {refusal:?}"
+        );
+        assert!(
+            refusal.to_string().contains("no rules"),
+            "{shape}: the refusal names the empty rule list: {refusal}"
+        );
+    }
 
     let kept = probe_export("    next: {branches: [], default: b}\n");
     assert_eq!(
