@@ -30,7 +30,7 @@ use super::novel_scaffold_sanitize::validate_work_ref;
 use super::work_commit::{
     claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
 };
-use crate::{Capability, CapabilityError, WorkspaceExecutor};
+use crate::{path_is_occupied, Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -96,7 +96,7 @@ impl ScaffoldTransaction {
 
     /// Create a directory if it doesn't exist. Returns `true` if freshly created.
     fn create_dir(&mut self, dir: &Path) -> Result<bool, CapabilityError> {
-        if dir.exists() {
+        if path_is_occupied(dir) {
             return Ok(false);
         }
         std::fs::create_dir_all(dir)
@@ -120,7 +120,7 @@ impl ScaffoldTransaction {
     ) -> Result<(), CapabilityError> {
         let path = workspace_root.join("Works").join(work_ref).join(rel_child);
 
-        let original = if path.exists() {
+        let original = if path_is_occupied(&path) {
             let data = std::fs::read(&path).map_err(|e| {
                 CapabilityError::Internal(format!("read original {}: {e}", path.display()))
             })?;
@@ -696,6 +696,46 @@ mod tests {
         assert!(
             !work_dir.join("Outlines/outline.md").exists(),
             "rollback must remove every file this run created"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_keeps_a_preexisting_dangling_symlink_on_rollback() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let link = root.join("essay-symlink").join("README.md");
+        std::fs::create_dir_all(link.parent().expect("link has a parent")).expect("mkdir");
+        std::os::unix::fs::symlink(tmp.path().join("absent-essay-target.md"), &link)
+            .expect("symlink");
+        let executor = RecordingExecutor::refusing_at(tmp.path(), "Drafts/draft.md");
+        let cap = EssayProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(executor),
+        };
+
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_essay_symlink",
+                "work_ref": "essay-symlink",
+                "title": "Essay Symlink",
+            }))
+            .await
+            .expect_err("a dangling link must refuse to be read as an original");
+        assert!(
+            matches!(err, CapabilityError::Internal(_)),
+            "expected the original read to fail, got: {err}"
+        );
+
+        assert!(
+            std::fs::symlink_metadata(&link).is_ok(),
+            "rollback unlinked a symlink this run never created"
+        );
+        assert!(
+            std::fs::symlink_metadata(tmp.path().join("absent-essay-target.md")).is_err(),
+            "the run wrote through the user's dangling link"
         );
     }
 }
