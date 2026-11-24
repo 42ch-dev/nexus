@@ -66,22 +66,22 @@ impl IsolatedHome {
         // only `HOME` would let tests touch the real `~/.nexus42` there.
         std::env::set_var("USERPROFILE", tmp.path());
         Self {
-            _tmp: tmp,
+            tmp,
             original_home,
             original_userprofile,
-            _lock: lock,
+            lock,
         }
     }
 }
 
 /// RAII guard that restores `HOME` when dropped.
 pub struct IsolatedHome {
-    _tmp: tempfile::TempDir,
+    tmp: tempfile::TempDir,
     original_home: Option<String>,
     original_userprofile: Option<String>,
     /// Held until drop to serialize HOME manipulation across test threads.
     /// `None` when the caller retains ownership of the lock itself.
-    _lock: Option<std::sync::MutexGuard<'static, ()>>,
+    lock: Option<std::sync::MutexGuard<'static, ()>>,
 }
 
 impl IsolatedHome {
@@ -90,7 +90,7 @@ impl IsolatedHome {
     /// Use it to assert that a resolved path stays inside the isolated home.
     #[must_use]
     pub fn path(&self) -> &std::path::Path {
-        self._tmp.path()
+        self.tmp.path()
     }
 }
 
@@ -106,6 +106,9 @@ impl Drop for IsolatedHome {
         } else {
             std::env::remove_var("USERPROFILE");
         }
+        // Release the process-wide HOME lock only after the environment is
+        // restored, and read the field explicitly so it is not dead storage.
+        drop(self.lock.take());
     }
 }
 

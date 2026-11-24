@@ -874,5 +874,8 @@ mod tests {
         };
         let mut store = AuthStore::load().unwrap_or_default();
         seed_token(&mut store, token);
+        // The guard must outlive the write attempt above: dropping it early
+        // would restore the real HOME/USERPROFILE mid-test.
+        drop(home);
     }
 }
