@@ -199,10 +199,51 @@ fn print_job_detail(job: &nexus_local_db::KbExtractJob) {
 }
 
 /// Truncate a string for tabular display.
+///
+/// The cut lands on a character boundary: the kept prefix is the first
+/// `max_len - 1` characters, so a multi-byte label never slices mid-character.
+/// ASCII output is unchanged (one byte per character).
 fn truncate_str(s: &str, max_len: usize) -> String {
+    if max_len == 0 {
+        return String::new();
+    }
     if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max_len - 1])
+        return s.to_string();
+    }
+    let cut = max_len - 1;
+    let end = match s.char_indices().nth(cut) {
+        Some((idx, _)) => idx,
+        None => s.len(),
+    };
+    format!("{}…", &s[..end])
+}
+
+#[cfg(test)]
+mod truncate_str_tests {
+    use super::truncate_str;
+
+    #[test]
+    fn ascii_short_input_is_unchanged() {
+        assert_eq!(truncate_str("abc", 5), "abc");
+    }
+
+    #[test]
+    fn ascii_truncation_replaces_last_unit_with_ellipsis() {
+        assert_eq!(truncate_str("abcdefghij", 5), "abcd…");
+    }
+
+    #[test]
+    fn multi_byte_label_cuts_on_char_boundary() {
+        // Byte offset `max_len - 1 == 2` lands inside the first 3-byte char.
+        let label = "知识抽取失败原因很长";
+        let out = truncate_str(label, 3);
+        assert_eq!(out, "知识…");
+        assert!(out.ends_with('…'));
+        assert!(out.len() < label.len());
+    }
+
+    #[test]
+    fn zero_max_len_returns_empty() {
+        assert_eq!(truncate_str("abcdefghij", 0), "");
     }
 }
