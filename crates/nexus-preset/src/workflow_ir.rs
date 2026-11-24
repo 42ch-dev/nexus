@@ -213,9 +213,12 @@ impl AssetSource for EmbeddedAssetSource<'_> {
 /// # Errors
 ///
 /// Returns [`WorkflowIrError::AssetRead`] when a referenced asset is missing, unreadable, or
-/// refused by `source` (a [`FsAssetSource`] escape, for one), and
+/// refused by `source` (a [`FsAssetSource`] escape, for one),
 /// [`WorkflowIrError::NotProjectable`] when a referenced path is unsafe (absolute, `..`
-/// traversal) or the manifest header cannot form a document.
+/// traversal) or the manifest header cannot form a document, and
+/// [`WorkflowIrError::EmptyConditionalRules`] when a judged state's `next` is a
+/// `Conditional`/`Branches` form carrying no rules. A non-judged state's
+/// `{branches: [], default: <id>}` next is accepted and re-exports in that same form.
 pub fn import_preset_bundle(
     manifest: &PresetManifest,
     source: &dyn AssetSource,
@@ -281,8 +284,10 @@ pub fn import_preset_bundle(
 ///
 /// # Errors
 ///
-/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id, or when a
-/// state's `next` is a `Conditional`/`Branches` form carrying no rules.
+/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id, and
+/// [`WorkflowIrError::EmptyConditionalRules`] when a judged state's `next` is a
+/// `Conditional`/`Branches` form carrying no rules. A non-judged state's
+/// `{branches: [], default: <id>}` next is accepted and re-exports in that same form.
 pub fn import_preset_manifest(
     manifest: &PresetManifest,
 ) -> Result<WorkflowDocument, WorkflowIrError> {
