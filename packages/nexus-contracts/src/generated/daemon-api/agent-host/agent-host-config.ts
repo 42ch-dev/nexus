@@ -5,7 +5,7 @@
  */
 
 /**
- * The agent-host provider document at `<home>/.nexus42/agent-host/config.toml`. GET /v1/daemon/agent-host/config returns it (native defaults when the file is absent); PUT replaces it with the same document. Provider entries are kept when disabled so a known-good provider can be re-enabled.
+ * The agent-host provider document at `<home>/.nexus42/agent-host/config.toml`. GET /v1/daemon/agent-host/config returns it (native defaults when the file is absent); PUT replaces it with the same document. Provider entries are kept when disabled so a known-good provider can be re-enabled. At most one provider entry may be enabled; a PUT carrying more than one enabled entry is rejected with `invalid_input`.
  */
 export interface AgentHostConfig {
   /**
@@ -35,7 +35,7 @@ export interface AgentHostConfig {
     allow_model_fallback?: boolean;
   };
   /**
-   * Configured providers. An enabled entry requires a supported protocol and a non-empty command (the launcher's own admission rule).
+   * Configured providers. An enabled entry requires a supported protocol and a non-empty command (the launcher's own admission rule). At most one entry may have `enabled: true`; a save with more enabled entries is rejected with `invalid_input`.
    */
   providers: {
     /**
