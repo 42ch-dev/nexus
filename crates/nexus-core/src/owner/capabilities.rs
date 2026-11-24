@@ -1129,6 +1129,13 @@ async fn execute_write_file(
                 content: &content,
             })
             .await?;
+    } else if context.recording_work_artifact.is_some() {
+        // `recording_work_artifact` marks a simulated context: it must never touch disk.
+        return Err(NexusApiError::Forbidden {
+            resource: format!(
+                "fs/write_text_file: a simulated context cannot write '{path_str}' outside Works/"
+            ),
+        });
     } else {
         let write_result = tokio::task::spawn_blocking(move || {
             if let Some(parent) = resolved.parent() {
@@ -3695,6 +3702,44 @@ mod tests {
             fixture.context.recorded_work_artifact_mutations().is_none(),
             "a production context reports no log rather than an empty one"
         );
+    }
+
+    /// I-000514: a simulated context refuses any non-`Works/` fs write and
+    /// never creates or modifies the target. Removing the refusal branch lets
+    /// the guarded `std::fs::write` land the file, so this test is the negative
+    /// control for that guard.
+    #[tokio::test]
+    async fn simulated_fs_write_refuses_non_work_paths() {
+        let fixture = fixture(true).await;
+        let context = ToolContext::new_simulated(
+            fixture.pool.clone(),
+            fixture.context.nexus_home.clone(),
+            fixture.context.workspace_path(),
+            ToolRuntimeFacts::default(),
+            None,
+            None,
+        );
+
+        let path = "notes/outline.md".to_string();
+        let error = execute_write_file(&write_request(&path, "spilled bytes\n"), &context)
+            .await
+            .expect_err("a simulated context must refuse a non-Works write");
+        match error {
+            NexusApiError::Forbidden { resource } => assert!(
+                resource.contains(&path),
+                "the refusal names the requested path: {resource}"
+            ),
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+
+        assert!(
+            !fixture.workspace.path().join(&path).exists(),
+            "the target must never be created"
+        );
+        let mutations = context
+            .recorded_work_artifact_mutations()
+            .expect("a simulated context returns its log");
+        assert!(mutations.is_empty(), "no Work mutations were recorded");
     }
 
     fn kb_write_request(blocks: &serde_json::Value) -> ToolsApi {
