@@ -279,7 +279,7 @@ struct TempFileGuard {
 }
 
 impl TempFileGuard {
-    fn disarm(&mut self) {
+    const fn disarm(&mut self) {
         self.armed = false;
     }
 }
