@@ -1309,6 +1309,17 @@ async fn dropped_guard_holders_release_the_migration_lock() {
     engine.release_retained_admission();
     drop(engine);
 
+    // A disposed sqlite connection hands its shared lock back from a sqlx
+    // worker thread after the pool handle is gone, so the release is not
+    // observable at the call. Taking the exclusive fence here is the exact
+    // acquisition the child asserts, and it can only succeed once every shared
+    // holder this process disposed is really gone; on expiry the child still
+    // reports the contract failure.
+    let settle = Instant::now();
+    while acquire_store_reset_fence(&db).is_err() && settle.elapsed() < ACQUISITION_BOUND {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
     let out = dir.path().join("fence_out");
     let err = dir.path().join("fence_err");
     let mut child = spawn_child(
