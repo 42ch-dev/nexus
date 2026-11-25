@@ -35,12 +35,16 @@ use std::time::SystemTime;
 
 mod build_walk;
 
+#[path = "wasm_target_probe.rs"]
+mod wasm_target_probe;
+
 /// Module ids that must be embedded. Each id must match a source crate under
 /// `../../modules/<id>/`.
 const MODULE_IDS: &[&str] = &["basic-combat"];
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
+    println!("cargo:rerun-if-env-changed=RUSTC");
 
     let manifest_dir = PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by Cargo"),
@@ -68,15 +72,13 @@ fn main() {
 
 /// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
 ///
-/// Uses `rustc --print sysroot --target wasm32-unknown-unknown` which exits 0
-/// only when the target is available. This is a fast metadata query — it does
-/// not compile anything.
+/// Decided from `sysroot/lib/rustlib/wasm32-unknown-unknown`:
+/// `rustc --print sysroot --target wasm32-unknown-unknown` exits 0 even when
+/// the target is absent, so its exit status says nothing.
 #[must_use]
 fn has_wasm_target() -> bool {
-    std::process::Command::new("rustc")
-        .args(["--print", "sysroot", "--target", "wasm32-unknown-unknown"])
-        .output()
-        .is_ok_and(|o| o.status.success())
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    wasm_target_probe::wasm_target_installed(&rustc)
 }
 
 /// Compile one module's `.wasm` from source, stage its manifest, and inject

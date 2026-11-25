@@ -11,8 +11,12 @@
 //! is set; the two embedded-module integration tests in
 //! `computable_port.rs` are gated behind `#[cfg(not(...))]` accordingly.
 
+#[path = "../nexus-wasm-host/wasm_target_probe.rs"]
+mod wasm_target_probe;
+
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(nexus_spoke_adapter_no_wasm_target)");
+    println!("cargo:rerun-if-env-changed=RUSTC");
 
     if !has_wasm_target() {
         println!(
@@ -26,13 +30,11 @@ fn main() {
 
 /// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
 ///
-/// Uses `rustc --print sysroot --target wasm32-unknown-unknown` which exits 0
-/// only when the target is available. This is a fast metadata query — it does
-/// not compile anything.
+/// Decided from `sysroot/lib/rustlib/wasm32-unknown-unknown`:
+/// `rustc --print sysroot --target wasm32-unknown-unknown` exits 0 even when
+/// the target is absent, so its exit status says nothing.
 #[must_use]
 fn has_wasm_target() -> bool {
-    std::process::Command::new("rustc")
-        .args(["--print", "sysroot", "--target", "wasm32-unknown-unknown"])
-        .output()
-        .is_ok_and(|o| o.status.success())
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    wasm_target_probe::wasm_target_installed(&rustc)
 }
