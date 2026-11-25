@@ -29,20 +29,34 @@ pub fn stderr(out: &Output) -> String {
 /// Decode a `--json` leaf's stdout as the one JSON document its contract
 /// promises.
 ///
-/// An empty stdout is a contract violation, not a parse problem: `serde_json`
-/// reports it as `EOF while parsing a value at line 1 column 0`, which reads
-/// like a crash instead of "the command printed nothing". Name the empty case
-/// here (with exit status and stderr) so the failure says what broke, and keep
-/// the same for a truncated/non-JSON body.
+/// Both decoded shapes are contract violations, not parse problems, and each
+/// is named with the exit status and stderr:
+///
+/// - Empty stdout is what `serde_json` reports as `EOF while parsing a value
+///   at line 1 column 0`, which reads like a crash instead of "the command
+///   printed nothing".
+/// - Non-UTF-8 stdout is decoded strictly: [`stdout`] is lossy for the text
+///   assertions, so `--json` must not let replacement characters satisfy the
+///   parse.
+///
+/// A truncated/non-JSON body keeps the same treatment.
 pub fn json_stdout(out: &Output) -> serde_json::Value {
-    let text = stdout(out);
     let code = out.status.code();
+    let text = std::str::from_utf8(&out.stdout).unwrap_or_else(|error| {
+        panic!(
+            "--json leaf printed non-UTF-8 stdout ({error}; {} bytes) (exit code {code:?}); \
+             stdout preview: {:?}; stderr: {}",
+            out.stdout.len(),
+            String::from_utf8_lossy(&out.stdout),
+            stderr(out)
+        )
+    });
     assert!(
         !text.trim().is_empty(),
         "--json leaf printed empty stdout (exit code {code:?}); stderr: {}",
         stderr(out)
     );
-    serde_json::from_str(&text).unwrap_or_else(|error| {
+    serde_json::from_str(text).unwrap_or_else(|error| {
         panic!(
             "--json leaf printed invalid JSON ({error}) (exit code {code:?}); \
              stdout: {text:?}; stderr: {}",
