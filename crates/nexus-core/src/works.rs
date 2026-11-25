@@ -1711,8 +1711,8 @@ async fn reconcile_chapters(
         .into());
     }
 
-    let workspace_path_str = service.work_workspace_path(principal)?.unwrap_or_default();
-    let workspace_root = std::path::Path::new(&workspace_path_str);
+    let workspace_path = service.workspace_root(principal)?;
+    let workspace_root = workspace_path.as_path();
     let now = chrono::Utc::now().to_rfc3339();
 
     let recheck = || service.verify_principal(principal);
