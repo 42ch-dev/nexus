@@ -79,7 +79,11 @@ describe('native config publication (real binding)', () => {
     assert.equal(wireCode(error), 'invalid_input');
   });
 
-  test('a write-denied target refuses as forbidden and keeps its bytes', async () => {
+  test('a write-denied target refuses as forbidden and keeps its bytes', async (t) => {
+    if (process.getuid?.() === 0) {
+      t.skip('EACCES cannot be simulated for the superuser');
+      return;
+    }
     const home = makeHome();
     try {
       const target = makeTarget(home, 'name = "locked"\n');

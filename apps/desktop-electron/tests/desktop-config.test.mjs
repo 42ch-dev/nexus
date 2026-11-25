@@ -508,6 +508,10 @@ test('a release never unlinks a lock that only ends with our token', async (t) =
 
 
 test('a write-denied document is refused and keeps its bytes', async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip('EACCES cannot be simulated for the superuser');
+    return;
+  }
   const { home, config } = setup(t);
   const daemon = 'active_creator_id = "ctr_locked"\n';
   const agent = 'future_key = "keep"\n';
