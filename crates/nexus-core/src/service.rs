@@ -1034,6 +1034,40 @@ mod tests {
         toml::to_string(&table).expect("config document")
     }
 
+    /// The lock-point observation: the same exclusive create
+    /// `config_lock::acquire` makes, so an `AlreadyExists` proves a writer holds
+    /// the daemon-home lock *now* rather than that the reader was about to look.
+    /// The home is a fresh temporary directory, so that writer is this test's.
+    ///
+    /// # Errors
+    ///
+    /// The I/O error that kept the exclusive create from running, and
+    /// [`std::io::ErrorKind::Other`] when the lock was free — the observation
+    /// that never happened.
+    fn probe_held_config_lock(nexus_home: &Path) -> std::io::Result<()> {
+        let path = nexus_home.join("config.toml.lock");
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(error) => Err(error),
+            // The lock was free: drop the would-be lock this probe created so a
+            // later acquisition in the same home does not wait out its stale
+            // threshold, and report the observation that did not happen.
+            Ok(_) => {
+                let _ = std::fs::remove_file(&path);
+                Err(std::io::Error::other(
+                    "the config lock was free: the reader never hit the writer's held lock",
+                ))
+            }
+        }
+    }
+
     /// The snapshot reads the whole stored document, so a disk-selected remote
     /// provider is not replaced by the implicit local default.
     #[test]
@@ -1075,8 +1109,21 @@ mod tests {
     /// window is real and observable: the document on disk is empty while the
     /// lock is held, and a reader that skipped the lock would read exactly
     /// that empty body as the implicit local default.
+    ///
+    /// The window is proven, not guessed: the reader takes the same exclusive
+    /// create the snapshot's acquisition takes, signals only once that attempt
+    /// reports the lock held, and the writer closes the window only after a
+    /// bounded wait shows that reader is still unfinished. A reader that never
+    /// hit the held lock, or that finished or died inside the wait, fails the
+    /// test by name instead of passing on a reader released after the rewrite.
     #[test]
     fn the_snapshot_never_reads_a_writer_in_progress_rewrite_as_local() {
+        /// Only a stuck thread trips this one.
+        const SIGNAL_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+        /// A reader that reached the lock while it is held stays unfinished at
+        /// least this long.
+        const BLOCKED_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
+
         let home = tempfile::tempdir().expect("home");
         let home_path = home.path().to_path_buf();
         let path = home_path.join("config.toml");
@@ -1084,7 +1131,8 @@ mod tests {
         std::fs::write(&path, &document).expect("seed config");
 
         let (truncated, truncated_rx) = std::sync::mpsc::channel();
-        let (release, release_rx) = std::sync::mpsc::channel();
+        let (reader_at_lock, reader_at_lock_rx) = std::sync::mpsc::channel();
+        let (reader_finished, reader_finished_rx) = std::sync::mpsc::channel();
         let writer_document = document;
         let writer_path = path.clone();
         let writer_home = home_path.clone();
@@ -1092,12 +1140,24 @@ mod tests {
             let lock = nexus_home_layout::config_lock::acquire(&writer_home).expect("writer lock");
             std::fs::write(&writer_path, "").expect("truncate under the lock");
             truncated.send(()).expect("signal the truncated window");
-            release_rx.recv().expect("hold the window for the reader");
+            reader_at_lock_rx
+                .recv_timeout(SIGNAL_WINDOW)
+                .expect("the reader reaches the lock point inside the truncated window");
+            assert!(
+                matches!(
+                    reader_finished_rx.recv_timeout(BLOCKED_WINDOW),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ),
+                "the truncated window was not observed: the reader finished or died before the \
+                 rewrite was released"
+            );
             std::fs::write(&writer_path, writer_document).expect("rewrite the whole document");
             drop(lock);
         });
 
-        truncated_rx.recv().expect("the truncated window is live");
+        truncated_rx
+            .recv_timeout(SIGNAL_WINDOW)
+            .expect("the truncated window is live");
         assert_eq!(
             std::fs::read_to_string(&path).expect("window document"),
             "",
@@ -1105,9 +1165,16 @@ mod tests {
         );
 
         let reader_path = home_path;
-        let reader = std::thread::spawn(move || selection_snapshot(&reader_path));
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        release.send(()).expect("close the window");
+        let reader = std::thread::spawn(move || {
+            probe_held_config_lock(&reader_path)
+                .expect("the reader hits the writer's held config lock before it reads");
+            reader_at_lock.send(()).expect("signal the lock point");
+            let snapshot = selection_snapshot(&reader_path);
+            // The writer listens only while the window is open, so a signal
+            // sent after it released has no receiver left.
+            let _ = reader_finished.send(());
+            snapshot
+        });
         writer.join().expect("writer thread");
 
         assert_eq!(
