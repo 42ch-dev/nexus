@@ -33,50 +33,50 @@ const CORE_ERROR_CODES: Record<CoreError['code'], true> = {
 };
 
 function isCoreErrorCode(code: string): code is CoreError['code'] {
-  return code in CORE_ERROR_CODES;
+  // Own-property check: inherited names (toString, constructor, __proto__, …)
+  // must not pass the whitelist.
+  return Object.hasOwn(CORE_ERROR_CODES, code);
 }
 
-/** A client-supplied status is only honored when it is a valid HTTP status. */
+/** An error reply only carries a client-error or server-error status. */
 function isValidHttpStatus(status: unknown): status is number {
-  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599;
+}
+
+/**
+ * Validate a provider-controlled envelope. Requires an allowlisted code and a
+ * string message; an invalid http_status (outside 400-599, non-integer, or
+ * non-numeric) is stripped so the mapper falls back to the code's mapped
+ * status instead of emitting a bogus or success status.
+ */
+function validateEnvelope(candidate: unknown): CoreError | null {
+  if (candidate === null || typeof candidate !== 'object') return null;
+  const envelope = candidate as CoreError;
+  if (
+    typeof envelope.code !== 'string' ||
+    !isCoreErrorCode(envelope.code) ||
+    typeof envelope.message !== 'string'
+  ) {
+    return null;
+  }
+  if (envelope.http_status === undefined || isValidHttpStatus(envelope.http_status)) {
+    return envelope;
+  }
+  const { http_status: _ignored, ...rest } = envelope;
+  return rest;
 }
 
 /** Parse a native rejection reason into the generated wire `CoreError` envelope. */
 export function parseNativeCoreError(error: unknown): CoreError | null {
   // Typed rejections arrive as the envelope object itself, not a JSON string.
-  // The object is provider-controlled, so validate the envelope fields rather
-  // than trusting an allowlisted `code` alone.
-  if (error !== null && typeof error === 'object') {
-    const candidate = error as CoreError;
-    if (
-      typeof candidate.code === 'string' &&
-      isCoreErrorCode(candidate.code) &&
-      typeof candidate.message === 'string'
-    ) {
-      if (candidate.http_status === undefined || isValidHttpStatus(candidate.http_status)) {
-        return candidate;
-      }
-      // An out-of-range/non-integer http_status would be rejected by Node when
-      // assigned to res.statusCode; ignore it so the mapper falls back to the
-      // code's mapped status instead of re-masking the error as 500.
-      const { http_status: _ignored, ...envelope } = candidate;
-      return envelope;
-    }
-  }
+  const fromObject = validateEnvelope(error);
+  if (fromObject) return fromObject;
   const message = error instanceof Error ? error.message : String(error);
   try {
-    const parsed = JSON.parse(message) as CoreError;
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.code === 'string' &&
-      isCoreErrorCode(parsed.code)
-    ) {
-      return parsed;
-    }
+    return validateEnvelope(JSON.parse(message));
   } catch {
+    return null;
   }
-  return null;
 }
 
 export function isNativeCoreErrorCode(error: unknown, code: CoreError['code']): boolean {

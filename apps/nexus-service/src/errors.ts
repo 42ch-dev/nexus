@@ -78,7 +78,7 @@ function applyConflictCode(details: Record<string, unknown> | undefined): string
 }
 
 export function statusForCode(code: string): number {
-  if (code in STATUS_BY_CODE) {
+  if (Object.hasOwn(STATUS_BY_CODE, code)) {
     return STATUS_BY_CODE[code as CoreError['code']];
   }
   if (code === 'route_not_migrated') return 501;
