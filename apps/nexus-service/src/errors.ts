@@ -74,11 +74,11 @@ const APPLY_CONFLICT_REASONS: Readonly<Record<string, true>> = {
 function applyConflictCode(details: Record<string, unknown> | undefined): string | undefined {
   if (details?.code !== 'apply_refused') return undefined;
   const reason = String(details.reason);
-  return APPLY_CONFLICT_REASONS[reason] ? reason : undefined;
+  return Object.hasOwn(APPLY_CONFLICT_REASONS, reason) ? reason : undefined;
 }
 
 export function statusForCode(code: string): number {
-  if (code in STATUS_BY_CODE) {
+  if (Object.hasOwn(STATUS_BY_CODE, code)) {
     return STATUS_BY_CODE[code as CoreError['code']];
   }
   if (code === 'route_not_migrated') return 501;
