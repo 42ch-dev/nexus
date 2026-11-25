@@ -38,7 +38,9 @@ if (!entryRecurses && subdir.length > 0) {
   );
 }
 
-console.log(`discovered ${files.length} .test.mjs files (${topLevel.length} top-level, ${subdir.length} in subdirectories)`);
-for (const e of errors) console.error(`FAIL: ${e}`);
+process.stdout.write(
+  `discovered ${files.length} .test.mjs files (${topLevel.length} top-level, ${subdir.length} in subdirectories)\n`,
+);
+for (const e of errors) process.stderr.write(`FAIL: ${e}\n`);
 if (errors.length > 0) process.exit(1);
-console.log("test discovery check passed");
+process.stdout.write("test discovery check passed\n");
