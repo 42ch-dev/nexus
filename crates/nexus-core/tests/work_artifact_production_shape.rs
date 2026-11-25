@@ -677,8 +677,8 @@ impl WorkspaceExecutor for RecordingThenRefusal {
 
 /// A dangling `README.md` at the Work root belongs to the user. A dry run must
 /// read that entry as occupied — the scaffold checks `symlink_metadata`, not
-/// `Path::exists` — so it must neither write through the link (which would
-/// materialize `never-written.md`) nor unlink it when the run fails later.
+/// `Path::exists` — so it records no write for it and does not unlink it when
+/// the run fails later.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
@@ -730,9 +730,24 @@ async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
         Path::new("never-written.md"),
         "the link target is untouched"
     );
+    // The recording executor lands no bytes, so a materialized `never-written.md`
+    // could never appear. What a regressed occupancy check would do instead is
+    // treat the dangling link as a free name and record a write for it, which
+    // the recorder observes.
+    let recorded: Vec<String> = fx
+        .executor
+        .recorded_work_artifact_mutations()
+        .expect("a simulated executor records its Work writes")
+        .iter()
+        .map(|mutation| mutation.rel_child.clone())
+        .collect();
     assert!(
-        !work_dir.join("never-written.md").exists(),
-        "the run wrote through the user's dangling link"
+        !recorded.is_empty(),
+        "the recorder must have observed the writes after the skipped entry: {recorded:?}"
+    );
+    assert!(
+        recorded.iter().all(|rel_child| rel_child != "README.md"),
+        "a dangling entry must be read as occupied, never recorded as a write: {recorded:?}"
     );
     let mut entries: Vec<String> = std::fs::read_dir(&work_dir)
         .expect("work dir readable")
