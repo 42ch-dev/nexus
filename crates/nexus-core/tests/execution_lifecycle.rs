@@ -1208,12 +1208,14 @@ async fn a_restart_after_a_re_apply_refuses_instead_of_rebuilding_the_newer_docu
     let session = read_restart_session(&pool, &session_id)
         .await
         .expect("the run row exists");
+    // This equality is the whole position leg: it pins the run to the shared entry
+    // node, the only node both documents declare, so neither the superseding
+    // document's node nor the descriptor's can have run.
     assert_eq!(
         session.current_task_id, SHARED_ENTRY_NODE,
         "a refused reconstruction must not advance the run; got {:?}",
         session.current_task_id
     );
-    assert_ne!(session.current_task_id, SUPERSEDING_ONLY_NODE);
 
     handle.close().await.unwrap();
     owner.close().await.unwrap();
