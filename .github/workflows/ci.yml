@@ -684,36 +684,72 @@ jobs:
           tmpdir="$(mktemp -d)"
           fixture="$tmpdir/synthetic.rs"
           printf 'fn sneaky() {\n    std::fs::write("Works/wrk_x/ch1.md", b"x").unwrap();\n}\n' > "$fixture"
-          if bash tooling/check-work-artifact-writes.sh "$fixture"; then
+          out="$tmpdir/synthetic.out"
+          if bash tooling/check-work-artifact-writes.sh "$fixture" >"$out" 2>&1; then
             echo "::error::work artifact write guard accepted a synthetic direct Work write"
             exit 1
           fi
+          cat "$out"
+          case "$(cat "$out")" in
+            *"work artifact direct write"*) ;;
+            *) echo "::error::synthetic fixture rejected without the direct-write diagnostic"; exit 1 ;;
+          esac
+          case "$(cat "$out")" in
+            *"guard crashed"*) echo "::error::work artifact write guard crashed on the synthetic fixture"; exit 1 ;;
+          esac
           # A mixed function (port commit then a direct write) must also fail:
           # the non-Work fallback is an exact (path, symbol) pair, not a
           # function-wide property.
           mixed="$tmpdir/mixed.rs"
           printf 'fn mixed(executor: &dyn WorkspaceExecutor) {\n    let _ = WorkPath::Artifact; let _ = FsWorkArtifactPort;\n    std::fs::write("Works/wrk_x/ch2.md", b"x").unwrap();\n}\n' > "$mixed"
-          if bash tooling/check-work-artifact-writes.sh "$mixed"; then
+          out="$tmpdir/mixed.out"
+          if bash tooling/check-work-artifact-writes.sh "$mixed" >"$out" 2>&1; then
             echo "::error::work artifact write guard waived a mixed-function direct Work write"
             exit 1
           fi
+          cat "$out"
+          case "$(cat "$out")" in
+            *"work artifact direct write"*) ;;
+            *) echo "::error::mixed fixture rejected without the direct-write diagnostic"; exit 1 ;;
+          esac
+          case "$(cat "$out")" in
+            *"guard crashed"*) echo "::error::work artifact write guard crashed on the mixed fixture"; exit 1 ;;
+          esac
           # An exempt symbol that gains a second direct write must fail the
           # expected-count check (exemption keys carry an exact hit count).
           count_dir="$tmpdir/count"
           mkdir -p "$count_dir/crates/nexus-capability/src/builtins"
           printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original);\n        std::fs::write(path, other);\n    }\n}\n' > "$count_dir/crates/nexus-capability/src/builtins/essay_scaffold.rs"
-          if bash tooling/check-work-artifact-writes.sh "$count_dir"; then
+          out="$tmpdir/count.out"
+          if bash tooling/check-work-artifact-writes.sh "$count_dir" >"$out" 2>&1; then
             echo "::error::work artifact write guard ignored a second direct write in an exempt symbol"
             exit 1
           fi
+          cat "$out"
+          case "$(cat "$out")" in
+            *"observed 2 direct write(s), expected 1"*) ;;
+            *) echo "::error::count fixture rejected without the observed/expected count diagnostic"; exit 1 ;;
+          esac
+          case "$(cat "$out")" in
+            *"guard crashed"*) echo "::error::work artifact write guard crashed on the count fixture"; exit 1 ;;
+          esac
           # Two direct writes on one line must count as two occurrences.
           same_line="$tmpdir/same-line"
           mkdir -p "$same_line/crates/nexus-capability/src/builtins"
           printf 'struct ScaffoldTransaction;\nimpl Drop for ScaffoldTransaction {\n    fn drop(&mut self) {\n        std::fs::write(path, original); std::fs::write(path, other);\n    }\n}\n' > "$same_line/crates/nexus-capability/src/builtins/essay_scaffold.rs"
-          if bash tooling/check-work-artifact-writes.sh "$same_line"; then
+          out="$tmpdir/same-line.out"
+          if bash tooling/check-work-artifact-writes.sh "$same_line" >"$out" 2>&1; then
             echo "::error::work artifact write guard counted one line as one write"
             exit 1
           fi
+          cat "$out"
+          case "$(cat "$out")" in
+            *"observed 2 direct write(s), expected 1"*) ;;
+            *) echo "::error::same-line fixture rejected without the observed/expected count diagnostic"; exit 1 ;;
+          esac
+          case "$(cat "$out")" in
+            *"guard crashed"*) echo "::error::work artifact write guard crashed on the same-line fixture"; exit 1 ;;
+          esac
       - name: Work artifact write guard
         run: bash tooling/check-work-artifact-writes.sh
 
