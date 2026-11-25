@@ -267,7 +267,11 @@ describe('config publication policy (native publisher)', () => {
     ({ writeAgentProfile } = await import(join(serviceRoot, 'dist', 'agent-profile.js')));
   });
 
-  test('a write-denied config is refused as 403 forbidden and keeps its bytes', async () => {
+  test('a write-denied config is refused as 403 forbidden and keeps its bytes', async (t) => {
+    if (process.getuid?.() === 0) {
+      t.skip('EACCES cannot be simulated for the superuser');
+      return;
+    }
     const home = seededHome();
     const original = readFileSync(configPathFor(home), 'utf8');
     chmodSync(configPathFor(home), 0o444);
