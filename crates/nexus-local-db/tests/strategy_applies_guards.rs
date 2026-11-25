@@ -337,11 +337,49 @@ async fn the_current_apply_lookup_is_two_index_searches_not_two_scans() {
 /// after `INDEX` is compared whole — a longer name that merely starts with the expected one is a
 /// different index, not a match.
 fn search_names_index(detail: &str, index: &str) -> bool {
-    detail.starts_with("SEARCH")
-        && detail
-            .split_once(" INDEX ")
-            .and_then(|(_, rest)| rest.split_whitespace().next())
-            == Some(index)
+    detail.starts_with("SEARCH") && searched_index(detail).as_deref() == Some(index)
+}
+
+/// The index a plan row seeks through, with its quoting removed, or `None` when the row names no
+/// index. The row is read as quoted-aware words so that SQLite's `"..."`, `[...]` and backtick
+/// spellings yield the identifier itself, and so that a quoted alias containing `USING INDEX
+/// <text>` stays one word instead of being read as the lookup.
+fn searched_index(detail: &str) -> Option<String> {
+    let words = plan_words(detail);
+    let using = words.iter().position(|word| word == "USING")?;
+    match (words.get(using + 1)?.as_str(), words.get(using + 2)) {
+        ("INDEX", Some(name)) => Some(name.clone()),
+        ("COVERING", Some(index)) if index == "INDEX" => words.get(using + 3).cloned(),
+        _ => None,
+    }
+}
+
+/// Splits a plan row into words, treating a quoted or bracketed run as one word without its
+/// delimiters. An unterminated run stays one word, which no expected name matches.
+fn plan_words(detail: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut closer: Option<char> = None;
+    for character in detail.chars() {
+        match closer {
+            Some(close) if character == close => closer = None,
+            Some(_) => word.push(character),
+            None if character.is_whitespace() => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            None => match character {
+                '"' | '\'' | '`' => closer = Some(character),
+                '[' => closer = Some(']'),
+                _ => word.push(character),
+            },
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
 }
 
 /// A plan row that walks `strategy_applies` in full — a `SCAN` of the table or of either alias,
@@ -401,5 +439,40 @@ fn a_search_must_name_the_expected_index_exactly() {
     assert!(!search_names_index(
         "SCAN cur USING INDEX idx_strategy_applies_strategy_current",
         "idx_strategy_applies_strategy_current"
+    ));
+}
+
+/// SQLite may spell an identifier `"..."`, `[...]` or `` `...` ``: the quoting is stripped before
+/// the comparison, and a quoted alias that itself contains `USING INDEX <text>` is still only an
+/// alias, not the lookup.
+#[test]
+fn quoted_plan_identifiers_are_read_whole() {
+    assert!(search_names_index(
+        "SEARCH cur USING INDEX \"idx_strategy_applies_strategy_current\" (strategy_id=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(search_names_index(
+        "SEARCH cur USING INDEX [idx_strategy_applies_strategy_current] (strategy_id=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(search_names_index(
+        "SEARCH later USING COVERING INDEX `idx_strategy_applies_supersedes` (supersedes_apply_id=?)",
+        "idx_strategy_applies_supersedes"
+    ));
+    assert!(!search_names_index(
+        "SEARCH \"cur USING INDEX idx_strategy_applies_strategy_current\" USING INDEX idx_other",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(!search_names_index(
+        "SEARCH \"idx_strategy_applies_strategy_current\"",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(search_names_index(
+        "SEARCH cur USING INDEX \"idx strategy current\" (strategy_id=?)",
+        "idx strategy current"
+    ));
+    assert!(!search_names_index(
+        "SEARCH cur USING INDEX \"idx strategy current\" (strategy_id=?)",
+        "idx"
     ));
 }
