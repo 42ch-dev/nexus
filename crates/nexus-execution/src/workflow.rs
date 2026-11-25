@@ -3370,10 +3370,12 @@ impl ScheduleRunStarter for CoordinatorScheduleRunStarter {
 /// N-4b: the COMPLETE prompt-role set is derived from the resolved outer
 /// and inner graphs and every effective binding (including `default`) is
 /// REQUIRED before enqueue. A prompt path is any `llm_judge` exit (the
-/// judge capability resolves the `default` role) or any `acp_prompt` inner
-/// node (its `agent` field, or `default` when absent). A preset with NO
-/// prompt path may accept an empty binding map — proven by graph
-/// inspection, never by deferring to the prompt executor.
+/// judge capability resolves the `default` role), any `acp_prompt` inner
+/// node (its `agent` field, or `default` when absent), or any capability
+/// enter action whose name is a prompt-executing builtin (`acp.prompt`)
+/// — it prompts through the `default` role. A preset with NO prompt path
+/// may accept an empty binding map — proven by graph inspection, never
+/// by deferring to the prompt executor.
 async fn validate_agent_bindings(
     manifest: &nexus_preset::manifest::PresetManifest,
     bindings: &std::collections::HashMap<String, nexus_session_storage::run_state::AgentBinding>,
@@ -10146,5 +10148,144 @@ mod tests {
             Some((session_id.0.clone(), durable.status.as_db_str().to_string())),
             "the final published status must match the durable DB status"
         );
+    }
+
+    /// Build the `acp.prompt` capability-enter manifest: one `prompt` state
+    /// whose enter action is the inline `acp.prompt` capability, exiting via
+    /// `exit_when` into the terminal `done` state. `writer` is the only
+    /// declared role, so `default` is bound only when the scenario requires it.
+    fn acp_prompt_manifest(
+        exit_when: nexus_contracts::local::orchestration::preset::ExitWhen,
+    ) -> nexus_contracts::local::orchestration::preset::PresetManifest {
+        use nexus_contracts::local::orchestration::preset::{
+            EnterAction, NextTarget, PresetHeader, PresetKind, PresetManifest,
+            PresetRoleDefinition, StateDefinition,
+        };
+
+        PresetManifest {
+            preset: PresetHeader {
+                id: "cap-prompt".into(),
+                version: 1,
+                kind: PresetKind::Creator,
+                description: "test".into(),
+                requires_capabilities: vec![],
+                run_intents: vec![],
+                initial: "prompt".into(),
+                terminal: "done".into(),
+                world_binding: None,
+                author: None,
+                homepage: None,
+                license: None,
+                initial_action: None,
+                gates: vec![],
+                cli_args: vec![],
+            },
+            states: vec![
+                StateDefinition {
+                    id: "prompt".into(),
+                    description: None,
+                    enter: vec![EnterAction::Capability {
+                        name: "acp.prompt".into(),
+                        args: None,
+                    }],
+                    exit_when: Some(exit_when),
+                    next: Some(NextTarget::Linear("done".into())),
+                    terminal: false,
+                    context_update: None,
+                    merge: None,
+                    converge: None,
+                    timeout_ms: None,
+                    on_timeout: None,
+                },
+                StateDefinition {
+                    id: "done".into(),
+                    description: None,
+                    enter: vec![],
+                    exit_when: None,
+                    next: None,
+                    terminal: true,
+                    context_update: None,
+                    merge: None,
+                    converge: None,
+                    timeout_ms: None,
+                    on_timeout: None,
+                },
+            ],
+            inner_graphs: None,
+            signals: vec![],
+            roles: vec![PresetRoleDefinition {
+                id: "writer".into(),
+                description: "writer".into(),
+                system_prompt_file: "writer.md".into(),
+                recommended_skills: vec![],
+            }],
+        }
+    }
+
+    /// Assert admission refuses the manifest when only `writer` is bound
+    /// (naming `default`), then admits once `default` is bound.
+    async fn assert_default_binding_required(
+        manifest: &nexus_contracts::local::orchestration::preset::PresetManifest,
+    ) {
+        use nexus_session_storage::run_state::AgentBinding;
+
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert(
+            "writer".to_string(),
+            AgentBinding {
+                provider_id: "claude".into(),
+                model: None,
+            },
+        );
+        let err = validate_agent_bindings(manifest, &bindings, None)
+            .await
+            .expect_err("acp.prompt without `default` must be refused at admission");
+        assert!(
+            matches!(err, RunControlError::Admission(_)),
+            "expected admission error, got {err:?}"
+        );
+        let RunControlError::Admission(message) = err else {
+            unreachable!();
+        };
+        assert!(
+            message.contains("missing agent binding for required role 'default'"),
+            "unexpected admission message: {message}"
+        );
+
+        bindings.insert(
+            "default".to_string(),
+            AgentBinding {
+                provider_id: "claude".into(),
+                model: None,
+            },
+        );
+        validate_agent_bindings(manifest, &bindings, None)
+            .await
+            .expect("binding `default` admits the preset");
+    }
+
+    /// An inline `acp.prompt` capability enter action is a prompt path: the
+    /// capability prompts through `default`, so admission must require the
+    /// `default` role binding even when only declared roles are bound.
+    #[tokio::test]
+    async fn capability_prompt_enter_action_requires_default_binding() {
+        use nexus_contracts::local::orchestration::preset::ExitWhen;
+
+        assert_default_binding_required(&acp_prompt_manifest(ExitWhen::Manual)).await;
+    }
+
+    /// Same prompt path behind an `llm_judge` exit: the capability enter
+    /// action still resolves `default`, so a missing binding is refused and
+    /// a bound `default` passes.
+    #[tokio::test]
+    async fn capability_prompt_enter_action_with_llm_judge_exit_requires_default_binding() {
+        use nexus_contracts::local::orchestration::preset::ExitWhen;
+
+        assert_default_binding_required(&acp_prompt_manifest(ExitWhen::LlmJudge {
+            template_file: None,
+            judge_capability: None,
+            min_interval: None,
+        }))
+        .await;
     }
 }

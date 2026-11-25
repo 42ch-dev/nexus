@@ -126,6 +126,16 @@ pub fn builtin_input_schema(name: &str) -> Option<&'static str> {
         .map(|idx| BUILTIN_CAPABILITIES[idx].1)
 }
 
+/// Builtins that execute a prompt at run time.
+///
+/// `acp.prompt` builds its `PromptRequest` with `agent_ref: None`, which
+/// resolves the `default` role, so `required_prompt_roles` counts an
+/// `enter`/`capability` action naming one of these as a prompt path.
+/// Observed but out of scope: `judge.llm`, `context.summarize`, and
+/// `nexus.llm.extract` are not entered as plain capability actions today —
+/// add them here only when they are.
+pub const PROMPT_EXECUTING_CAPABILITIES: &[&str] = &["acp.prompt"];
+
 /// Input schema for `acp.prompt`.
 pub const ACP_PROMPT_INPUT_SCHEMA: &str = r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -342,5 +352,19 @@ mod tests {
     #[test]
     fn declaration_has_thirty_two_canonical_names() {
         assert_eq!(builtin_names().count(), 32);
+    }
+
+    /// `PROMPT_EXECUTING_CAPABILITIES` is a second handwritten name list
+    /// beside `BUILTIN_CAPABILITIES`; the coupling test is the tripwire
+    /// that makes a rename/removal of a listed builtin fail loudly instead
+    /// of silently admitting a prompt path without its required role.
+    #[test]
+    fn prompt_executing_names_are_declared_builtins() {
+        for name in PROMPT_EXECUTING_CAPABILITIES {
+            assert!(
+                builtin_names().any(|declared| declared == *name),
+                "prompt-executing name '{name}' is not declared in BUILTIN_CAPABILITIES"
+            );
+        }
     }
 }
