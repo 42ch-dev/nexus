@@ -10288,4 +10288,245 @@ mod tests {
         }))
         .await;
     }
+
+    /// The embedded strategy both applied-identity tests admit.
+    const APPLIED_IDENTITY_PRESET: &str = "memory-augmented";
+
+    /// Admission double for the applied-identity refusal family: a strategy
+    /// whose frozen applied document no longer hashes to the identity the
+    /// apply recorded.
+    ///
+    /// The refusal SHAPE is reproduced here — the frozen document is re-hashed
+    /// and compared against the recorded content hash — but this is a
+    /// store-semantics double, not the store: it does not run the adapter's
+    /// per-admission re-verification route
+    /// (`crates/nexus-core/src/owner/applied_documents.rs`). The refusal
+    /// message is copied from the adapter's `Display` impl
+    /// (`crates/nexus-core/src/apply.rs`); only the coded family and its
+    /// mapping are asserted in this crate.
+    struct NonReplayableAppliedIdentity {
+        document:
+            nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument,
+        identity: nexus_session_storage::run_state::AppliedRunIdentity,
+    }
+
+    impl NonReplayableAppliedIdentity {
+        /// Freeze `preset_id`'s embedded document under the identity recorded
+        /// over its bytes, then edit the document — the applied bytes move
+        /// after the apply, which is what the store's `document_json` rewrite
+        /// looks like to admission.
+        fn new(preset_id: &str) -> Self {
+            let catalog = nexus_preset::capability_catalog::BuiltinCapabilityCatalog;
+            let loaded =
+                nexus_preset::load_embedded_preset(preset_id, &catalog).expect("preset loads");
+            let mut document = nexus_preset::embedded_workflow_document(&loaded)
+                .expect("embedded preset projects to IR");
+            let (apply_id, content_hash) =
+                nexus_preset::embedded_applied_identity(preset_id, &document)
+                    .expect("the frozen document hashes");
+            document.version += 1;
+            let recomputed = nexus_preset::embedded_applied_identity(preset_id, &document)
+                .expect("the edited document hashes")
+                .1;
+            assert_ne!(
+                content_hash, recomputed,
+                "the fixture edit must move the canonical hash"
+            );
+            Self {
+                document,
+                identity: nexus_session_storage::run_state::AppliedRunIdentity {
+                    apply_id,
+                    content_hash,
+                },
+            }
+        }
+    }
+
+    /// Store-semantics double: `admit` SYNTHESIZES the applied-identity
+    /// refusal from its own re-hash, so the "current apply no longer replays"
+    /// state is reachable here without a Creator store. What the tests below
+    /// guard is the coordinator's mapping
+    /// (`AppliedAdmissionError::AppliedIdentity` → `RunControlError::AppliedIdentityInvalid`)
+    /// at both admission seams and the pending/no-claim outcome — never the
+    /// adapter's own resolution semantics, which this double replaces.
+    #[async_trait]
+    impl AppliedAdmissionPort for NonReplayableAppliedIdentity {
+        async fn admit(
+            &self,
+            preset_id: &str,
+            _loaded: &nexus_preset::LoadedPreset,
+        ) -> Result<crate::admission::AppliedAdmission, AppliedAdmissionError> {
+            let recomputed = nexus_preset::embedded_applied_identity(preset_id, &self.document)
+                .expect("the frozen document still hashes")
+                .1;
+            if recomputed == self.identity.content_hash {
+                return Ok(crate::admission::AppliedAdmission {
+                    intake_mode: None,
+                    applied: None,
+                });
+            }
+            Err(AppliedAdmissionError::AppliedIdentity {
+                code: "applied_document_changed".to_string(),
+                message: format!(
+                    "applied identity of strategy `{preset_id}` (apply `{}`) records content \
+                     hash `{}`, but its frozen document now hashes to `{recomputed}`: the \
+                     applied bytes changed after apply",
+                    self.identity.apply_id, self.identity.content_hash
+                ),
+            })
+        }
+    }
+
+    /// `start_session` admits through the applied-identity port, so a frozen
+    /// document that no longer replays must surface the coded
+    /// `AppliedIdentityInvalid` — not an admission fault — before any run
+    /// exists.
+    #[tokio::test]
+    async fn start_session_refuses_non_replayable_applied_identity() {
+        let (tmp, nexus_home, db_path) = fixture().await;
+        let _ = &tmp;
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(guarded.clone_pool());
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                sqlite.clone(),
+                caps.clone(),
+            ),
+        );
+        let coordinator = WorkflowRunCoordinator::new(
+            engine,
+            storage,
+            pool.clone(),
+            // Inference fills the coordinator's cancel-map type from the
+            // constructor signature; a test starts with no in-flight cancels.
+            std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            Arc::new(NonReplayableAppliedIdentity::new(APPLIED_IDENTITY_PRESET)),
+        );
+
+        let error = coordinator
+            .start_session(
+                APPLIED_IDENTITY_PRESET,
+                CREATOR,
+                None,
+                std::collections::HashMap::new(),
+                &nexus_home,
+                &caps,
+                None,
+                None,
+            )
+            .await
+            .expect_err("a non-replayable applied document must refuse admission");
+
+        match error {
+            RunControlError::AppliedIdentityInvalid { code, message } => {
+                assert_eq!(code, "applied_document_changed");
+                assert!(message.contains(APPLIED_IDENTITY_PRESET), "{message}");
+            }
+            other => panic!("expected AppliedIdentityInvalid, got {other:?}"),
+        }
+    }
+
+    /// The schedule-admission twin: the same malformed applied identity
+    /// refuses `admit_schedule` with the same coded `AppliedIdentityInvalid`,
+    /// and the durable row is left pending and unclaimed.
+    #[tokio::test]
+    async fn schedule_admission_refuses_the_same_non_replayable_applied_identity() {
+        let (tmp, nexus_home, db_path) = fixture().await;
+        let _ = &tmp;
+        let guarded = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .expect("open pool");
+        let pool = Arc::new(guarded.clone_pool());
+        let sqlite = Arc::new(SqliteSessionStorage::new(pool.clone()));
+        let storage: Arc<dyn SessionStorage> = sqlite.clone();
+        let caps = nexus_capability::CapabilityRegistryHolder::with_registry(Arc::new(
+            nexus_capability::CapabilityRegistry::with_builtins(),
+        ));
+        let engine = Arc::new(
+            nexus_orchestration::GraphFlowEngine::new_with_storage_and_workflow_store(
+                storage.clone(),
+                sqlite.clone(),
+                caps.clone(),
+            ),
+        );
+        let coordinator = WorkflowRunCoordinator::new(
+            engine,
+            storage,
+            pool.clone(),
+            std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            Arc::new(NonReplayableAppliedIdentity::new(APPLIED_IDENTITY_PRESET)),
+        );
+
+        // SAFETY: test-only minimal drive-enabled schedule fixture.
+        sqlx::query(
+            "INSERT INTO creator_schedules
+             (schedule_id, creator_id, preset_id, preset_version, status,
+              concurrency_kind, current_core_context_version,
+              created_at, updated_at, execution_policy, current_session_id)
+             VALUES ('applied-identity-schedule', 'test_creator', ?, 1, 'pending',
+                     'serial', 0, 0, 0, 'driven_v1', NULL)",
+        )
+        .bind(APPLIED_IDENTITY_PRESET)
+        .execute(pool.as_ref())
+        .await
+        .expect("schedule fixture");
+        // SAFETY: test-only core-context seed; admission reads the frozen
+        // version before it resolves the applied identity.
+        sqlx::query(
+            "INSERT OR IGNORE INTO core_context_versions
+               (schedule_id, version, payload_kind, content,
+                derivation_kind, derivation_detail,
+                created_at, created_by_kind, created_by_user_id)
+             VALUES ('applied-identity-schedule', 0, 'text', ?, 'seed', ?, 0, 'system', NULL)",
+        )
+        .bind(br#"{"kind":"text","body":""}"#.to_vec())
+        .bind(br#"{"kind":"seed","raw":""}"#.to_vec())
+        .execute(pool.as_ref())
+        .await
+        .expect("core-context fixture");
+
+        let error = coordinator
+            .admit_schedule(
+                "applied-identity-schedule",
+                pool.as_ref(),
+                &nexus_home,
+                &caps,
+                None,
+                None,
+            )
+            .await
+            .expect_err("a non-replayable applied document must refuse schedule admission");
+
+        match error {
+            RunControlError::AppliedIdentityInvalid { code, message } => {
+                assert_eq!(code, "applied_document_changed");
+                assert!(message.contains(APPLIED_IDENTITY_PRESET), "{message}");
+            }
+            other => panic!("expected AppliedIdentityInvalid, got {other:?}"),
+        }
+
+        let (status, current_session_id): (String, Option<String>) = sqlx::query_as(
+            "SELECT status, current_session_id FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind("applied-identity-schedule")
+        .fetch_one(pool.as_ref())
+        .await
+        .expect("schedule row");
+        assert_eq!(
+            status, "pending",
+            "the refused admission must not claim the row"
+        );
+        assert_eq!(
+            current_session_id, None,
+            "the refused admission must own no run"
+        );
+    }
 }
