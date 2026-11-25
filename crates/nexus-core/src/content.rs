@@ -74,6 +74,19 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
         })
 }
 
+/// Machine-readable `io::ErrorKind` suffix appended to the legacy
+/// `chapter_path_unresolvable` field code, so the read boundary can tell a
+/// real absence (`not_found`) from a permission refusal or any other
+/// canonicalize failure. The encoding stays internal to this module and the
+/// read boundary; every other caller keeps the exact legacy field.
+fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::NotFound => "not_found",
+        std::io::ErrorKind::PermissionDenied => "permission_denied",
+        _ => "other",
+    }
+}
+
 /// # Errors
 ///
 /// Returns `CoreError` when the principal is rejected, the work/chapter is
@@ -130,7 +143,7 @@ pub fn resolve_guarded_path(
 
     if must_exist {
         let canonical_target = joined.canonicalize().map_err(|e| CoreError::InvalidInput {
-            field: "chapter_path_unresolvable".to_string(),
+            field: format!("chapter_path_unresolvable:{}", io_kind_code(e.kind())),
             reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
         })?;
         if !canonical_target.starts_with(&canonical_root) {

@@ -1041,6 +1041,24 @@ async fn execute_read_file(
                     resource: format!("file: path '{path_str}' does not exist"),
                 }
             }
+            NexusApiError::InvalidInput { ref field, .. }
+                if field.starts_with("chapter_path_unresolvable:") =>
+            {
+                match field.strip_prefix("chapter_path_unresolvable:") {
+                    Some("not_found") => NexusApiError::NotFound {
+                        resource: format!("file: path '{path_str}' does not exist"),
+                    },
+                    Some("permission_denied") => NexusApiError::Forbidden {
+                        resource: format!("file: path '{path_str}' cannot be read (permission denied)"),
+                    },
+                    _ => NexusApiError::Internal {
+                        category: format!(
+                            "FILE_RESOLVE_FAILED: {}",
+                            format_args!("cannot resolve file path '{path_str}'")
+                        ),
+                    },
+                }
+            }
             NexusApiError::InvalidInput { .. } => NexusApiError::Forbidden {
                 resource: format!("file: path '{path_str}' is outside the workspace root"),
             },
@@ -4660,4 +4678,74 @@ mod tests {
             "plain body"
         );
     }
+
+    #[tokio::test]
+    async fn execute_read_file_reports_a_missing_path_as_not_found() {
+        let fixture = fixture(true).await;
+
+        let error = execute_read_file(&read_request("notes/absent.md"), &fixture.context)
+            .await
+            .expect_err("a missing path is not found");
+
+        assert!(
+            matches!(error, NexusApiError::NotFound { .. }),
+            "real absence stays NotFound: {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_read_file_reports_a_permission_denial_as_forbidden_not_not_found() {
+        let fixture = fixture(true).await;
+        let locked = fixture.workspace.path().join("locked");
+        std::fs::create_dir_all(&locked).expect("locked dir");
+        std::fs::write(locked.join("secret.md"), "secret body").expect("seed secret");
+        let mut permissions = std::fs::metadata(&locked)
+            .expect("locked metadata")
+            .permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o000);
+        }
+        std::fs::set_permissions(&locked, permissions).expect("chmod 000");
+
+        let error = execute_read_file(&read_request("locked/secret.md"), &fixture.context)
+            .await
+            .expect_err("an unreadable path refuses");
+
+        let mut restore = std::fs::metadata(&locked)
+            .expect("locked metadata")
+            .permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            restore.set_mode(0o700);
+        }
+        std::fs::set_permissions(&locked, restore).expect("restore perms");
+
+        assert!(
+            matches!(error, NexusApiError::Forbidden { .. }),
+            "a permission denial is truthful, not a false absence: {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_read_file_reports_other_resolve_failures_as_internal_not_not_found() {
+        let fixture = fixture(true).await;
+        std::fs::write(fixture.workspace.path().join("plain.md"), "plain body")
+            .expect("seed plain file");
+
+        // canonicalize fails with NotADirectory: the parent component is a
+        // file, which is a resolve failure that is neither absence nor a
+        // permission refusal.
+        let error = execute_read_file(&read_request("plain.md/child.md"), &fixture.context)
+            .await
+            .expect_err("a file-as-parent path refuses");
+
+        assert!(
+            matches!(error, NexusApiError::Internal { .. }),
+            "other resolve failures are truthful, not a false absence: {error:?}"
+        );
+    }
+
 }
