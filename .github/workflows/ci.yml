@@ -495,6 +495,8 @@ jobs:
         run: cargo build --locked -p nexus42 --bin nexus42
       - name: Test nexus-service boot and bind gate
         run: pnpm --filter @42ch/nexus-service run test
+      - name: Check nexus-service test discovery and naming contract
+        run: node apps/nexus-service/tooling/check-service-test-discovery.mjs
       - name: Test native config publication
         # `readonly-config.test.mjs` is deliberately NOT wired here: it seeds its
         # homes through `cargo run -q -p nexus-core-node --bin
