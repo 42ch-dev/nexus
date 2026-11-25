@@ -83,9 +83,13 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
 /// other surface can export it. Kinds meaning a malformed request get their
 /// own code (`not_a_directory`); `FilenameTooLong` has no stable
 /// `io::ErrorKind` variant on this toolchain, so it stays folded into
-/// `other` until the MSRV exposes it. [`ROOT_UNRESOLVABLE_CODE`] is not an
-/// `io::ErrorKind`: it marks the workspace root itself failing to resolve, a
-/// distinct class the read boundary must not render as a file-level verdict.
+/// `other` until the MSRV exposes it.
+///
+/// [`ROOT_UNRESOLVABLE_CODE`] is not an `io::ErrorKind`: it marks the
+/// workspace root itself failing to resolve, emitted in the `must_exist` arm
+/// before the ancestor probe, in the same suffix position as the io kinds —
+/// a distinct class the read boundary maps to a root-level `Internal`, never
+/// a file-level NotFound/Forbidden.
 pub const ROOT_UNRESOLVABLE_CODE: &str = "root_unresolvable";
 
 const fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
@@ -143,12 +147,16 @@ pub fn strip_chapter_path_kind(error: CoreError) -> CoreError {
 /// `CHAPTER_PATH_*` code (`chapter_path_empty`, `chapter_path_unresolvable`,
 /// `chapter_path_forbidden`) when the path is empty, cannot be resolved, or
 /// escapes the workspace root. For a `must_exist` canonicalize failure the
-/// unresolvable code carries a machine-readable `io::ErrorKind` suffix —
-/// `chapter_path_unresolvable:not_found` / `:permission_denied` / `:other` —
-/// so the read boundary can tell a real absence from a permission refusal or
-/// any other resolve failure; `execute_read_file` additionally tolerates the
-/// exact legacy (unsuffixed) field. Callers may substitute domain-specific
-/// codes.
+/// unresolvable code carries a machine-readable suffix —
+/// `chapter_path_unresolvable:not_found` / `:permission_denied` /
+/// `:not_a_directory` / `:other` for `io::ErrorKind`-derived target
+/// failures, or the non-io `chapter_path_unresolvable:root_unresolvable`
+/// ([`ROOT_UNRESOLVABLE_CODE`]) when the workspace root itself fails to
+/// canonicalize, emitted before the ancestor probe and never rendered as a
+/// file-level verdict — so the read boundary can tell a real absence from a
+/// permission refusal, a malformed request, or a root-unavailable failure;
+/// `execute_read_file` additionally tolerates the exact legacy (unsuffixed)
+/// field. Callers may substitute domain-specific codes.
 ///
 /// This is the single W-002 authority: the daemon `api/path_guard.rs` and the
 /// host-tool write paths delegate here and map the error at their own

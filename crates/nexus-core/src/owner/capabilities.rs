@@ -1003,7 +1003,8 @@ fn work_artifact_parts(path_str: &str) -> Result<(&str, &Path), NexusApiError> {
 /// absence) → `NotFound`; `permission_denied` → `Forbidden`; kinds meaning a
 /// malformed request (`not_a_directory`) → `InvalidInput` (a 400-class
 /// request error); `root_unresolvable` (the workspace root itself failed to
-/// resolve) → `Internal`, never a file-level absence/escape verdict;
+/// canonicalize, emitted before the ancestor probe) → a root-level
+/// `Internal`, never a file-level absence/escape verdict;
 /// everything else → the quiet `Internal` fallback. The exact legacy
 /// unsuffixed field keeps its historical `NotFound` mapping, and
 /// `chapter_path_forbidden` stays the non-revealing outside-workspace shape.
