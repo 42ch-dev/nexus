@@ -19,8 +19,6 @@ function ctxRef(overrides: Partial<StrategyCanvasAdapterContext> = {}) {
       form: { label: '', description: '', nextTarget: '', promptBody: '' },
       onChange: () => {},
       setActiveSection: () => {},
-      selectedState: undefined,
-      promptTemplateRef: undefined,
       selectedNode: null,
       parsed: undefined,
       danglingTargets: [],

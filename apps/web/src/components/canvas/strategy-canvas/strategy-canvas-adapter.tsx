@@ -8,14 +8,14 @@ import { StrategyAltView } from '../strategy-alt-view';
 import { strategyNodeTypes } from '../strategy-nodes';
 import { buildStrategyGraphFromIr } from '@/lib/canvas/strategy-graph-ir';
 import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
-import type { ParsedPreset, PresetState } from '@/lib/canvas/preset-yaml';
+import type { ParsedPreset } from '@/lib/canvas/preset-yaml';
 
 import { EdgeInspector } from './inspectors/edge-inspector';
 import { PromptInspector } from './inspectors/prompt-inspector';
 import { SlotInspector } from './inspectors/slot-inspector';
 import { StateInspector } from './inspectors/state-inspector';
 import { applyTrajectoryOverlay } from './simulation-overlay';
-import { type EditForm, type Section } from './state-machine';
+import { type EditForm, type Section, templateRefOf } from './state-machine';
 
 /** Live session overlay data attached to the graph payload. */
 export interface ActiveSession {
@@ -50,8 +50,6 @@ export interface StrategyCanvasAdapterContext {
   form: EditForm;
   onChange: <K extends keyof EditForm>(field: K, value: EditForm[K]) => void;
   setActiveSection: (section: Section) => void;
-  selectedState: PresetState | undefined;
-  promptTemplateRef: string | undefined;
   selectedNode: Node<StrategyNodeData> | null;
   parsed: ParsedPreset | undefined;
   danglingTargets: string[];
@@ -137,10 +135,16 @@ export function createStrategyCanvasAdapter(
       };
     },
 
-    renderInspector(_node) {
+    renderInspector(node) {
       const ctx = ctxRef.current;
-      const selectedNode = ctx.selectedNode;
-      if (ctx.compose && selectedNode?.type === 'strategy-pattern-slot') {
+      // Selection must come from the memo-keyed argument, never the ref: the
+      // orchestrator assigns `ctxRef.current` only after `useCanvasSurface`
+      // runs, so anything selection-derived read from the ctx would be the
+      // previous render's selection. `selectedState` and `promptTemplateRef`
+      // are therefore resolved below from the passed node's `data.stateId`
+      // (via `ctx.parsed` and `templateRefOf`), not stored on the ctx.
+      const selectedNode = node as Node<StrategyNodeData>;
+      if (ctx.compose && selectedNode.type === 'strategy-pattern-slot') {
         return (
           <SlotInspector
             node={selectedNode.data as StrategyNodeData}
@@ -152,8 +156,10 @@ export function createStrategyCanvasAdapter(
           />
         );
       }
-      const selectedState = ctx.selectedState;
+      const stateId = (selectedNode.data as StrategyNodeData).stateId;
+      const selectedState = ctx.parsed?.manifest.states.find((s) => s.id === stateId);
       if (!selectedState) return null;
+      const promptTemplateRef = templateRefOf(selectedState);
 
       return (
         <>
@@ -161,12 +167,12 @@ export function createStrategyCanvasAdapter(
           <div onFocusCapture={() => ctx.setActiveSection('transition')}>
             <EdgeInspector selectedState={selectedState} form={ctx.form} onChange={ctx.onChange} />
           </div>
-          {ctx.promptTemplateRef ? (
+          {promptTemplateRef ? (
             <div onFocusCapture={() => ctx.setActiveSection('prompt')}>
               <PromptInspector
                 form={ctx.form}
                 onChange={ctx.onChange}
-                promptTemplateRef={ctx.promptTemplateRef}
+                promptTemplateRef={promptTemplateRef}
               />
             </div>
           ) : null}
