@@ -332,11 +332,16 @@ async fn the_current_apply_lookup_is_two_index_searches_not_two_scans() {
     );
 }
 
-/// A plan row that seeks through `index` rather than walking anything: SQLite spells its leaf
-/// lookups `SEARCH <alias> USING INDEX <name>`, so the prefix is the shape and the index name is
-/// the target. Wording beyond that prefix is not matched.
+/// Whether a plan row is a `SEARCH` through exactly `index`: SQLite spells its leaf lookups
+/// `SEARCH <alias> USING [COVERING] INDEX <name>`, so the prefix is the shape and the identifier
+/// after `INDEX` is compared whole — a longer name that merely starts with the expected one is a
+/// different index, not a match.
 fn search_names_index(detail: &str, index: &str) -> bool {
-    detail.starts_with("SEARCH") && detail.contains(index)
+    detail.starts_with("SEARCH")
+        && detail
+            .split_once(" INDEX ")
+            .and_then(|(_, rest)| rest.split_whitespace().next())
+            == Some(index)
 }
 
 /// A plan row that walks `strategy_applies` in full — a `SCAN` of the table or of either alias,
@@ -366,5 +371,35 @@ fn a_full_index_walk_is_a_scan() {
     ));
     assert!(!scans_strategy_applies(
         "SCAN constants USING INDEX idx_unrelated"
+    ));
+}
+
+/// The index is identified whole: a plan that seeks a superset-named index is a different index,
+/// so it must not satisfy the check for the expected one.
+#[test]
+fn a_search_must_name_the_expected_index_exactly() {
+    assert!(search_names_index(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current (strategy_id=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(search_names_index(
+        "SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes (supersedes_apply_id=?)",
+        "idx_strategy_applies_supersedes"
+    ));
+    assert!(!search_names_index(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current_v2 (strategy_id=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(!search_names_index(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current",
+        "idx_strategy_applies_strategy_current_v2"
+    ));
+    assert!(!search_names_index(
+        "SEARCH cur USING INTEGER PRIMARY KEY (rowid=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(!search_names_index(
+        "SCAN cur USING INDEX idx_strategy_applies_strategy_current",
+        "idx_strategy_applies_strategy_current"
     ));
 }
