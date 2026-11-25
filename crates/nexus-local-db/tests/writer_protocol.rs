@@ -1309,6 +1309,18 @@ async fn dropped_guard_holders_release_the_migration_lock() {
     engine.release_retained_admission();
     drop(engine);
 
+    // A disposed sqlite connection hands its shared lock back from a sqlx
+    // worker thread after the pool handle is gone, so the release is not
+    // observable at the call. A successful exclusive fence here proves the OS
+    // admission is gone (a shared lock on any other descriptor of the same
+    // process refuses it), and it is the exact acquisition the child asserts;
+    // the loop yields to the runtime between attempts, and on expiry falls
+    // through so the child remains the final judge of the contract.
+    let settle = Instant::now();
+    while acquire_store_reset_fence(&db).is_err() && settle.elapsed() < ACQUISITION_BOUND {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
     let out = dir.path().join("fence_out");
     let err = dir.path().join("fence_err");
     let mut child = spawn_child(
