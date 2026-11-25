@@ -998,6 +998,53 @@ fn work_artifact_parts(path_str: &str) -> Result<(&str, &Path), NexusApiError> {
     }
 }
 
+/// Map the `fs/read_text_file` path-guard error to its wire variant. The
+/// classification contract this boundary promises: `not_found` (real
+/// absence) → `NotFound`; `permission_denied` → `Forbidden`; kinds meaning a
+/// malformed request (`not_a_directory`) → `InvalidInput` (a 400-class
+/// request error); everything else → the quiet `Internal` fallback. The
+/// exact legacy unsuffixed field keeps its historical `NotFound` mapping,
+/// and `chapter_path_forbidden` stays the non-revealing outside-workspace
+/// shape. Pulled out of `execute_read_file` so the contract is assertable
+/// without filesystem tricks on any runner.
+fn read_guard_error(e: NexusApiError, path_str: &str) -> NexusApiError {
+    match e {
+        NexusApiError::InvalidInput { ref field, .. } if field == "chapter_path_unresolvable" => {
+            NexusApiError::NotFound {
+                resource: format!("file: path '{path_str}' does not exist"),
+            }
+        }
+        NexusApiError::InvalidInput { ref field, .. }
+            if field.starts_with("chapter_path_unresolvable:") =>
+        {
+            match field.strip_prefix("chapter_path_unresolvable:") {
+                Some("not_found") => NexusApiError::NotFound {
+                    resource: format!("file: path '{path_str}' does not exist"),
+                },
+                Some("permission_denied") => NexusApiError::Forbidden {
+                    resource: format!("file: path '{path_str}' cannot be read (permission denied)"),
+                },
+                Some("not_a_directory") => NexusApiError::InvalidInput {
+                    field: "path".into(),
+                    reason: format!(
+                        "path '{path_str}' cannot resolve: a component is not a directory"
+                    ),
+                },
+                _ => NexusApiError::Internal {
+                    category: format!(
+                        "FILE_RESOLVE_FAILED: {}",
+                        format_args!("cannot resolve file path '{path_str}'")
+                    ),
+                },
+            }
+        }
+        NexusApiError::InvalidInput { .. } => NexusApiError::Forbidden {
+            resource: format!("file: path '{path_str}' is outside the workspace root"),
+        },
+        other => other,
+    }
+}
+
 /// Execute `fs/read_text_file` tool.
 ///
 /// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
@@ -1033,39 +1080,7 @@ async fn execute_read_file(
     let workspace_path = Path::new(&workspace_path_str).to_path_buf();
     let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
         .await
-        .map_err(|e| match e {
-            NexusApiError::InvalidInput { ref field, .. }
-                if field == "chapter_path_unresolvable" =>
-            {
-                NexusApiError::NotFound {
-                    resource: format!("file: path '{path_str}' does not exist"),
-                }
-            }
-            NexusApiError::InvalidInput { ref field, .. }
-                if field.starts_with("chapter_path_unresolvable:") =>
-            {
-                match field.strip_prefix("chapter_path_unresolvable:") {
-                    Some("not_found") => NexusApiError::NotFound {
-                        resource: format!("file: path '{path_str}' does not exist"),
-                    },
-                    Some("permission_denied") => NexusApiError::Forbidden {
-                        resource: format!(
-                            "file: path '{path_str}' cannot be read (permission denied)"
-                        ),
-                    },
-                    _ => NexusApiError::Internal {
-                        category: format!(
-                            "FILE_RESOLVE_FAILED: {}",
-                            format_args!("cannot resolve file path '{path_str}'")
-                        ),
-                    },
-                }
-            }
-            NexusApiError::InvalidInput { .. } => NexusApiError::Forbidden {
-                resource: format!("file: path '{path_str}' is outside the workspace root"),
-            },
-            other => other,
-        })?;
+        .map_err(|e| read_guard_error(e, &path_str))?;
 
     let content = tokio::task::spawn_blocking({
         let resolved = resolved.clone();
@@ -4823,21 +4838,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_read_file_reports_other_resolve_failures_as_internal_not_not_found() {
+    async fn execute_read_file_reports_not_a_directory_as_invalid_input_not_not_found() {
         let fixture = fixture(true).await;
         std::fs::write(fixture.workspace.path().join("plain.md"), "plain body")
             .expect("seed plain file");
 
         // canonicalize fails with NotADirectory: the parent component is a
-        // file, which is a resolve failure that is neither absence nor a
-        // permission refusal.
+        // file — a malformed request, so the boundary renders a 400-class
+        // InvalidInput, never a false absence.
         let error = execute_read_file(&read_request("plain.md/child.md"), &fixture.context)
             .await
             .expect_err("a file-as-parent path refuses");
 
         assert!(
-            matches!(error, NexusApiError::Internal { .. }),
-            "other resolve failures are truthful, not a false absence: {error:?}"
+            matches!(error, NexusApiError::InvalidInput { .. }),
+            "a malformed path is a request error, not a false absence: {error:?}"
+        );
+    }
+
+    #[test]
+    fn read_guard_error_classification_is_assertable_on_any_runner() {
+        let unresolvable = |kind: &str| NexusApiError::InvalidInput {
+            field: format!("chapter_path_unresolvable:{kind}"),
+            reason: "synthetic".into(),
+        };
+
+        // The chmod-independent seam: the suffix→variant contract is asserted
+        // directly, so a privileged CI worker still fails on a regression.
+        assert!(
+            matches!(
+                read_guard_error(unresolvable("permission_denied"), "x"),
+                NexusApiError::Forbidden { .. }
+            ),
+            "permission_denied classifies as Forbidden"
+        );
+        assert!(
+            matches!(
+                read_guard_error(unresolvable("not_found"), "x"),
+                NexusApiError::NotFound { .. }
+            ),
+            "not_found classifies as NotFound"
+        );
+        assert!(
+            matches!(
+                read_guard_error(unresolvable("not_a_directory"), "x"),
+                NexusApiError::InvalidInput { .. }
+            ),
+            "not_a_directory classifies as InvalidInput"
+        );
+        assert!(
+            matches!(
+                read_guard_error(unresolvable("other"), "x"),
+                NexusApiError::Internal { .. }
+            ),
+            "other kinds fall back to the quiet Internal shape"
+        );
+        let legacy = NexusApiError::InvalidInput {
+            field: "chapter_path_unresolvable".into(),
+            reason: "legacy".into(),
+        };
+        assert!(
+            matches!(
+                read_guard_error(legacy, "x"),
+                NexusApiError::NotFound { .. }
+            ),
+            "the exact legacy field keeps its historical NotFound mapping"
         );
     }
 
