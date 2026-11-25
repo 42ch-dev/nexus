@@ -6,6 +6,7 @@ const CORE_ERROR_CODES = new Set<string>([
   'invalid_input',
   'forbidden',
   'not_found',
+  'not_supported',
   'world_kb_conflict',
   'world_kb_validation',
   'outline_conflict',
@@ -19,11 +20,27 @@ const CORE_ERROR_CODES = new Set<string>([
   'busy',
   'closing',
   'interrupted',
+  'policy_blocked',
+  'service_unavailable',
+  'compute_fuel_exhausted',
+  'compute_wall_time_exceeded',
+  'compute_memory_cap_exceeded',
+  'compute_module_trapped',
+  'compute_module_error',
   'internal',
 ]);
 
 /** Parse a native rejection reason into the generated wire `CoreError` envelope. */
 export function parseNativeCoreError(error: unknown): CoreError | null {
+  // Typed rejections arrive as the envelope object itself, not a JSON string.
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    typeof (error as CoreError).code === 'string' &&
+    CORE_ERROR_CODES.has((error as CoreError).code)
+  ) {
+    return error as CoreError;
+  }
   const message = error instanceof Error ? error.message : String(error);
   try {
     const parsed = JSON.parse(message) as CoreError;
