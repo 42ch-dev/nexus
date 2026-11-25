@@ -505,3 +505,60 @@ fn plan_index_names_are_read_whole() {
         "a row that names no index has no candidate"
     );
 }
+
+/// I-000471: the disposition migration's list is the only place that says which UPDATE/DELETE
+/// triggers are dead and which must stay, so pin both lists. `outbox_*_update` / `outbox_*_delete`
+/// are AFTER triggers that no committed statement can reach; the guard trio and the approval pin
+/// must stay even though the abort shadows them, because the crate's coverage assertion names the
+/// trio and a cleanup aimed at "dead" triggers would otherwise remove it.
+///
+/// A name that no longer matches a trigger in `20261114000001` reds here too: a disposition that
+/// points at nothing is worse than none.
+#[test]
+fn the_disposition_migration_names_the_dead_pair_and_the_retained_triggers() {
+    const DISPOSITION: &str =
+        include_str!("../migrations/20261116000002_strategy_applies_trigger_disposition.sql");
+    const INSTALLER: &str = include_str!("../migrations/20261114000001_strategy_applies.sql");
+
+    const RETIRED: [&str; 2] = [
+        "outbox_strategy_applies_update",
+        "outbox_strategy_applies_delete",
+    ];
+    const RETAINED: [&str; 6] = [
+        "guard_strategy_applies_insert",
+        "guard_strategy_applies_update",
+        "guard_strategy_applies_delete",
+        "pinned_approval_strategy_applies_insert",
+        "pinned_approval_strategy_applies_update",
+        "outbox_strategy_applies_insert",
+    ];
+
+    let retired_start = DISPOSITION
+        .find("Retired (cannot fire)")
+        .expect("the disposition names the triggers it retires");
+    let retained_start = DISPOSITION
+        .find("Retained (must stay)")
+        .expect("the disposition names the triggers it retains");
+    assert!(
+        retired_start < retained_start,
+        "the retired list must precede the retained list"
+    );
+    let retired = &DISPOSITION[retired_start..retained_start];
+    // Comment only: the retained list runs to the end of the file.
+    let retained = &DISPOSITION[retained_start..];
+
+    for name in RETIRED {
+        assert!(retired.contains(name), "retired list must name {name}");
+        assert!(!retained.contains(name), "{name} is dead, not retained");
+    }
+    for name in RETAINED {
+        assert!(retained.contains(name), "retained list must name {name}");
+        assert!(!retired.contains(name), "{name} must stay, not be retired");
+    }
+    for name in RETIRED.into_iter().chain(RETAINED) {
+        assert!(
+            INSTALLER.contains(&format!("CREATE TRIGGER IF NOT EXISTS {name}\n")),
+            "20261114000001 installs no trigger named {name}"
+        );
+    }
+}
