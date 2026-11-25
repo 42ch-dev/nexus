@@ -1049,7 +1049,9 @@ async fn execute_read_file(
                         resource: format!("file: path '{path_str}' does not exist"),
                     },
                     Some("permission_denied") => NexusApiError::Forbidden {
-                        resource: format!("file: path '{path_str}' cannot be read (permission denied)"),
+                        resource: format!(
+                            "file: path '{path_str}' cannot be read (permission denied)"
+                        ),
                     },
                     _ => NexusApiError::Internal {
                         category: format!(
@@ -4693,35 +4695,27 @@ mod tests {
         );
     }
 
+    // Unix-only: chmod-000 is the construction that makes canonicalize fail
+    // with PermissionDenied; Windows access control has no portable
+    // equivalent here, so the test skips rather than fails there.
+    #[cfg(unix)]
     #[tokio::test]
     async fn execute_read_file_reports_a_permission_denial_as_forbidden_not_not_found() {
+        use std::os::unix::fs::PermissionsExt;
+
         let fixture = fixture(true).await;
         let locked = fixture.workspace.path().join("locked");
         std::fs::create_dir_all(&locked).expect("locked dir");
         std::fs::write(locked.join("secret.md"), "secret body").expect("seed secret");
-        let mut permissions = std::fs::metadata(&locked)
-            .expect("locked metadata")
-            .permissions();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            permissions.set_mode(0o000);
-        }
-        std::fs::set_permissions(&locked, permissions).expect("chmod 000");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .expect("chmod 000");
 
         let error = execute_read_file(&read_request("locked/secret.md"), &fixture.context)
             .await
             .expect_err("an unreadable path refuses");
 
-        let mut restore = std::fs::metadata(&locked)
-            .expect("locked metadata")
-            .permissions();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            restore.set_mode(0o700);
-        }
-        std::fs::set_permissions(&locked, restore).expect("restore perms");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
+            .expect("restore perms");
 
         assert!(
             matches!(error, NexusApiError::Forbidden { .. }),
@@ -4747,5 +4741,4 @@ mod tests {
             "other resolve failures are truthful, not a false absence: {error:?}"
         );
     }
-
 }

@@ -79,7 +79,7 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
 /// real absence (`not_found`) from a permission refusal or any other
 /// canonicalize failure. The encoding stays internal to this module and the
 /// read boundary; every other caller keeps the exact legacy field.
-fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
+const fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
     match kind {
         std::io::ErrorKind::NotFound => "not_found",
         std::io::ErrorKind::PermissionDenied => "permission_denied",
@@ -114,7 +114,13 @@ fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
 /// Returns [`CoreError::InvalidInput`] whose `field` carries the legacy
 /// `CHAPTER_PATH_*` code (`chapter_path_empty`, `chapter_path_unresolvable`,
 /// `chapter_path_forbidden`) when the path is empty, cannot be resolved, or
-/// escapes the workspace root. Callers may substitute domain-specific codes.
+/// escapes the workspace root. For a `must_exist` canonicalize failure the
+/// unresolvable code carries a machine-readable `io::ErrorKind` suffix —
+/// `chapter_path_unresolvable:not_found` / `:permission_denied` / `:other` —
+/// so the read boundary can tell a real absence from a permission refusal or
+/// any other resolve failure; `execute_read_file` additionally tolerates the
+/// exact legacy (unsuffixed) field. Callers may substitute domain-specific
+/// codes.
 ///
 /// This is the single W-002 authority: the daemon `api/path_guard.rs` and the
 /// host-tool write paths delegate here and map the error at their own
