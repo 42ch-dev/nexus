@@ -1,13 +1,16 @@
 //
 // Every case below runs the REAL script against a REAL disposable Cargo
 // workspace: no stubbed `cargo`, no canned tree output, no source-shape
-// assertions. The fixtures use path-only dependencies, so the suite resolves
-// offline and never touches the shared checkout's manifests or Cargo.lock.
+// assertions — except the census temp-file case, which must read the script's
+// `mktemp` call sites because a bare `mktemp` on BSD ignores TMPDIR, hides the
+// census file from the guard dir and makes the cleanup case vacuous.
+// The fixtures use path-only dependencies, so the suite resolves offline and
+// never touches the shared checkout's manifests or Cargo.lock.
 
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -769,6 +772,49 @@ test('a failing census leaves no temp files behind', () => {
   assert.match(run.stdout, /graph probe for nexus-compute-policy .* failed \(exit \d+\)/);
   assert.match(run.stdout, /--locked/);
   assert.deepEqual(readdirSync(guardTmp), [], `temp files leaked: ${readdirSync(guardTmp)}`);
+});
+
+// The case above only proves the trap deletes what mktemp created INSIDE
+// guardTmp. A bare `mktemp` on BSD ignores TMPDIR, so the census file would
+// live somewhere else, guardTmp would still be empty and the cleanup proof
+// above would be vacuous. Every census call site must therefore hand mktemp an
+// explicit `${TMPDIR}`-based template; the variable name, the length of the
+// random run and trailing redirections stay free to change.
+
+// First shell word after `mktemp` on the same physical line, or undefined when
+// that word is not an argument at all. A quoted body is taken verbatim. A bare
+// word that STARTS with a redirect (`2>"…"`, `> x`, `< x`) carries no
+// template; a bare word that merely ends at one (`…XXXXXX</dev/null`) does —
+// the shell ends an unquoted word at the first `<` or `>`. A comment or
+// separator (`#`, `;`, `|`, `&`) still means no template. Text on later
+// physical lines is never read, so a decoy parked inside a multi-line command
+// substitution cannot supply one.
+function mktempTemplate(line) {
+  const marker = line.match(/\bmktemp\b/);
+  if (!marker) return undefined;
+  const rest = line.slice(marker.index + 'mktemp'.length);
+  const quoted = /^\s*"([^"]*)"/.exec(rest) ?? /^\s*'([^']*)'/.exec(rest);
+  if (quoted) return quoted[1];
+  const word = (/^\s*([^\s)]*)/.exec(rest) ?? [])[1];
+  if (!word || /^[0-9]*(?:>|<|&>)/.test(word) || /[#;|&]/.test(word)) return undefined;
+  return word.split(/[<>]/)[0] || undefined;
+}
+
+test('every census mktemp call templates the temp file into TMPDIR', () => {
+  const lines = readFileSync(GUARD, 'utf8')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'));
+
+  let calls = 0;
+  for (const line of lines) {
+    if (!/\bmktemp\b/.test(line)) continue;
+    calls += 1;
+    const template = mktempTemplate(line);
+    assert.ok(template, `mktemp needs an explicit template, not a redirection or comment: ${line.trim()}`);
+    assert.match(template, /\$\{TMPDIR/, `census temp file must honour TMPDIR: ${line.trim()}`);
+    assert.match(template, /nexus-graph-pins-census\./, `census temp file must use the census prefix: ${line.trim()}`);
+  }
+  assert.ok(calls > 0, 'the guard script calls mktemp nowhere; the census cleanup case cannot be proven');
 });
 
 const CONNECT_FORBIDDEN = [
