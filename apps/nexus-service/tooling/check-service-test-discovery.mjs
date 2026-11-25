@@ -3,9 +3,11 @@
 // must actually be a suite. The suite discriminator is import-aware: it parses
 // the file's `node:test` imports and looks for anchored, modifier-aware calls
 // of the bound names — `test(`, `it(`, `describe(`, with `.skip`/`.only`/
-// `.todo`/`.concurrent` modifiers. So regex literals like /re/.test(value),
-// `obj.test()` methods, and `// test(` comment mentions do not count, while
-// `it(`-based and `test.skip(` suites do.
+// `.todo`/`.concurrent` modifiers — over comment-stripped source. So regex
+// literals like /re/.test(value), `obj.test()` methods, and `// test(` comment
+// mentions do not count, while `it(`-based and `test.skip(` suites do. (The
+// stripper is quote-aware; a quote inside a regex literal can confuse it, which
+// is acceptable for a detection heuristic.)
 // The entry gate requires the package.json test script to invoke
 // tooling/run-service-tests.mjs (the recursive runner): a flat glob
 // (`tests/*.test.mjs`) or a narrowed entry (`node --test tests/http/`) skips
@@ -42,13 +44,56 @@ function boundTestNames(src) {
   return { names, namespaces };
 }
 
+// Quote-aware removal of // and /* */ comments. Over-stripping would hide a
+// real test call, so quotes (incl. escapes) are honored; regex literals are
+// not distinguished from division and may flip quote state (documented above).
+function stripComments(src) {
+  let out = "";
+  let i = 0;
+  let quote = null;
+  while (i < src.length) {
+    const c = src[i];
+    if (quote) {
+      out += c;
+      if (c === "\\") {
+        out += src[i + 1] ?? "";
+        i += 2;
+        continue;
+      }
+      if (c === quote) quote = null;
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      out += c;
+      i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      i += 2;
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
 function isSuite(src) {
-  const { names, namespaces } = boundTestNames(src);
+  const clean = stripComments(src);
+  const { names, namespaces } = boundTestNames(clean);
   for (const n of names) {
-    if (new RegExp(`(^|[^\\w.])${n}${MODIFIERS}\\s*\\(`, "m").test(src)) return true;
+    if (new RegExp(`(^|[^\\w.])${n}${MODIFIERS}\\s*\\(`, "m").test(clean)) return true;
   }
   for (const ns of namespaces) {
-    if (new RegExp(`(^|[^\\w.])${ns}\\.(describe|it|test)${MODIFIERS}\\s*\\(`, "m").test(src)) {
+    if (new RegExp(`(^|[^\\w.])${ns}\\.(describe|it|test)${MODIFIERS}\\s*\\(`, "m").test(clean)) {
       return true;
     }
   }
@@ -67,7 +112,22 @@ function selfTest() {
     ["regex .test( helper", "export const ok = /safe integer/.test('safe integer 9');", false],
     ["plain helper", "export const helper = true;\n// test( mentioned in a comment", false],
     ["method call named test", "const obj = { test() {} };\nobj.test();", false],
-    ["helper importing node:test without calling", "import {test} from 'node:test';\nexport const t = test;", false],
+    ["imported-but-uncalled binding", "import {test} from 'node:test';\nexport const t = test;", false],
+    [
+      "obj.test() with node:test import present",
+      "import {test} from 'node:test';\nconst obj = { test: function () {} };\nobj.test();\nexport const bound = test;",
+      false,
+    ],
+    [
+      "comment mention with node:test import present",
+      "import {test} from 'node:test';\n// test('documented later')\nexport const helper = true;",
+      false,
+    ],
+    [
+      "it( suite with mixed decoys",
+      "import {it} from 'node:test';\nconst obj = { test() {} };\nobj.test();\n// test('comment')\nit('works', () => {});",
+      true,
+    ],
   ];
   let failed = 0;
   for (const [name, src, expected] of cases) {

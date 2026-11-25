@@ -497,6 +497,7 @@ jobs:
         run: pnpm --filter @42ch/nexus-service run test
       - name: Check nexus-service test discovery and naming contract
         run: |
+          node apps/nexus-service/tooling/run-service-tests.mjs --self-test
           node apps/nexus-service/tooling/check-service-test-discovery.mjs --self-test
           node apps/nexus-service/tooling/check-service-test-discovery.mjs
       - name: Test native config publication
