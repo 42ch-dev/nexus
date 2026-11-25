@@ -341,18 +341,31 @@ fn search_names_index(detail: &str, index: &str) -> bool {
 }
 
 /// The index a plan row seeks through, or `None` when the row names no index. Real plans write the
-/// name unquoted and end it at the parameter list, so the candidate is the text after
-/// `USING [COVERING] INDEX` up to ` (`, or to the end of the line. A surrounding quote pair is
+/// name unquoted and echo a constraint list after it, so the candidate is the text after
+/// `USING [COVERING] INDEX` with a trailing constraint list removed. A surrounding quote pair is
 /// accepted and removed; an unterminated quote is refused, not compared.
 fn searched_index(detail: &str) -> Option<&str> {
     let (_, after_using) = detail.split_once("USING ")?;
     let after_using = after_using.strip_prefix("COVERING ").unwrap_or(after_using);
     let candidate = after_using.strip_prefix("INDEX ")?;
-    let candidate = candidate
-        .split_once(" (")
-        .map_or(candidate, |(name, _)| name)
-        .trim();
-    unquote_identifier(candidate)
+    unquote_identifier(without_constraint_list(candidate))
+}
+
+/// Drops the plan's echoed constraint list, if and only if the text ends with one: the boundary is
+/// the LAST ` (`, and only a suffix shaped `(...=...)` is a constraint. Anything else — including an
+/// index name that itself contains ` (` — stays one candidate, which then cannot equal a bare
+/// expected name by accident.
+fn without_constraint_list(candidate: &str) -> &str {
+    let text = candidate.trim();
+    let Some(open) = text.rfind(" (") else {
+        return text;
+    };
+    let suffix = &text[open + 1..];
+    if suffix.starts_with('(') && suffix.ends_with(')') && suffix.contains('=') {
+        text[..open].trim_end()
+    } else {
+        text
+    }
 }
 
 /// Removes one pair of surrounding quotes, or refuses the candidate: an opening quote without its
@@ -457,6 +470,25 @@ fn plan_index_names_are_read_whole() {
         searched_index("SEARCH cur USING INDEX \"idx strategy current\""),
         Some("idx strategy current"),
         "the end of the line is the other boundary"
+    );
+    assert_eq!(
+        searched_index("SEARCH cur USING INDEX idx_strategy_applies_strategy_current (extra)"),
+        Some("idx_strategy_applies_strategy_current (extra)"),
+        "a parenthesised tail without `=` is part of the name, not a constraint list"
+    );
+    assert!(
+        !search_names_index(
+            "SEARCH cur USING INDEX idx_strategy_applies_strategy_current (extra)",
+            "idx_strategy_applies_strategy_current"
+        ),
+        "a name followed by a non-constraint tail is a different name"
+    );
+    assert!(
+        search_names_index(
+            "SEARCH cur USING INDEX idx_strategy_applies_strategy_current (strategy_id=?)",
+            "idx_strategy_applies_strategy_current"
+        ),
+        "an echoed constraint list is a boundary, not part of the name"
     );
     assert_eq!(
         searched_index("SEARCH cur USING INDEX \"idx_strategy_applies_strategy_current"),
