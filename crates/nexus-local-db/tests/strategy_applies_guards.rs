@@ -315,26 +315,56 @@ async fn the_current_apply_lookup_is_two_index_searches_not_two_scans() {
     .unwrap();
 
     let plan = query_plan(&pool, CURRENT_ROW_LOOKUP_PLAN).await;
+    let rows: Vec<&str> = plan.lines().collect();
     assert!(
-        plan.contains("idx_strategy_applies_strategy_current"),
-        "the strategy filter and the total order are one index range: {plan}"
+        rows.iter()
+            .any(|row| search_names_index(row, "idx_strategy_applies_strategy_current")),
+        "the strategy filter and the total order are one SEARCH of their index: {plan}"
     );
     assert!(
-        plan.contains("idx_strategy_applies_supersedes"),
-        "the anti-join's inner side is a supersede-link index lookup: {plan}"
+        rows.iter()
+            .any(|row| search_names_index(row, "idx_strategy_applies_supersedes")),
+        "the anti-join's inner side is a SEARCH of the supersede-link index: {plan}"
     );
     assert!(
-        !plan.lines().any(full_scan_of_strategy_applies),
-        "neither side of the lookup may fall back to a full table scan: {plan}"
+        !rows.iter().any(|row| scans_strategy_applies(row)),
+        "neither side of the lookup may walk strategy_applies, by table or by index: {plan}"
     );
 }
 
-/// A plan row that walks `strategy_applies` in full: `SCAN` of one alias (or the table) with no
-/// index named. SQLite's wording is free to change, so only the scan shape is matched.
-fn full_scan_of_strategy_applies(detail: &str) -> bool {
+/// A plan row that seeks through `index` rather than walking anything: SQLite spells its leaf
+/// lookups `SEARCH <alias> USING INDEX <name>`, so the prefix is the shape and the index name is
+/// the target. Wording beyond that prefix is not matched.
+fn search_names_index(detail: &str, index: &str) -> bool {
+    detail.starts_with("SEARCH") && detail.contains(index)
+}
+
+/// A plan row that walks `strategy_applies` in full — a `SCAN` of the table or of either alias,
+/// whether or not an index is named. `SCAN cur USING INDEX ...` is a full index walk, as much a
+/// degradation as `SCAN cur`.
+fn scans_strategy_applies(detail: &str) -> bool {
     detail.starts_with("SCAN")
-        && !detail.contains("USING")
-        && ["strategy_applies", " cur", " later"]
-            .iter()
-            .any(|name| detail.contains(name))
+        && detail
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|token| matches!(token, "strategy_applies" | "cur" | "later"))
+}
+
+/// A full walk through an index is still a walk: only `SCAN` rows are refused, so the guard must
+/// reject them however SQLite names the index, and must not mistake an unrelated scan for one.
+#[test]
+fn a_full_index_walk_is_a_scan() {
+    assert!(scans_strategy_applies(
+        "SCAN cur USING INDEX idx_strategy_applies_strategy_current"
+    ));
+    assert!(scans_strategy_applies("SCAN later"));
+    assert!(scans_strategy_applies("SCAN TABLE strategy_applies"));
+    assert!(!scans_strategy_applies(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current"
+    ));
+    assert!(!scans_strategy_applies(
+        "SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes"
+    ));
+    assert!(!scans_strategy_applies(
+        "SCAN constants USING INDEX idx_unrelated"
+    ));
 }
