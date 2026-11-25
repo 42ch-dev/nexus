@@ -2415,6 +2415,20 @@ async fn execute_manuscript_list(
     }))
 }
 
+/// Map the manuscript body guard error at the N-API boundary. The shared
+/// strip runs first so an internal `chapter_path_unresolvable:<kind>` can
+/// never reach `details.field` on the wire: the exact legacy field is all
+/// this surface exports.
+fn manuscript_guard_error(e: NexusApiError) -> NexusApiError {
+    match crate::content::strip_chapter_path_kind(e) {
+        NexusApiError::Coded { message, .. } => NexusApiError::InvalidInput {
+            field: "body_path".into(),
+            reason: message,
+        },
+        other => other,
+    }
+}
+
 /// T2: `nexus.manuscript.read_range` — read a bounded content range from a chapter body.
 #[allow(clippy::similar_names)] // the paired names are the domain vocabulary here
 async fn execute_manuscript_read_range(
@@ -2489,13 +2503,7 @@ async fn execute_manuscript_read_range(
         must_exist,
     )
     .await
-    .map_err(|e| match e {
-        NexusApiError::Coded { message, .. } => NexusApiError::InvalidInput {
-            field: "body_path".into(),
-            reason: message,
-        },
-        other => other,
-    })?;
+    .map_err(manuscript_guard_error)?;
 
     let content =
         tokio::fs::read_to_string(&abs_body)
@@ -4831,5 +4839,90 @@ mod tests {
             matches!(error, NexusApiError::Internal { .. }),
             "other resolve failures are truthful, not a false absence: {error:?}"
         );
+    }
+
+    #[test]
+    fn manuscript_guard_error_strips_the_kind_suffix_to_the_legacy_field() {
+        for kind in ["not_found", "permission_denied", "other"] {
+            let error = manuscript_guard_error(NexusApiError::InvalidInput {
+                field: format!("chapter_path_unresolvable:{kind}"),
+                reason: "cannot resolve chapter path: io error".into(),
+            });
+            match error {
+                NexusApiError::InvalidInput { field, reason } => {
+                    assert_eq!(
+                        field, "chapter_path_unresolvable",
+                        "{kind}: the suffix never reaches the wire"
+                    );
+                    assert!(
+                        reason.contains("cannot resolve chapter path"),
+                        "{kind}: the human reason survives: {reason}"
+                    );
+                }
+                other => panic!("{kind}: expected InvalidInput, got {other:?}"),
+            }
+        }
+
+        // The exact legacy field passes through untouched, and so do
+        // unrelated errors.
+        let legacy = manuscript_guard_error(NexusApiError::InvalidInput {
+            field: "chapter_path_unresolvable".into(),
+            reason: "legacy".into(),
+        });
+        assert!(
+            matches!(legacy, NexusApiError::InvalidInput { ref field, .. } if field == "chapter_path_unresolvable"),
+            "exact legacy field is unchanged: {legacy:?}"
+        );
+        let forbidden = manuscript_guard_error(NexusApiError::InvalidInput {
+            field: "chapter_path_forbidden".into(),
+            reason: "escapes workspace root".into(),
+        });
+        assert!(
+            matches!(forbidden, NexusApiError::InvalidInput { ref field, .. } if field == "chapter_path_forbidden"),
+            "forbidden is unchanged: {forbidden:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_manuscript_read_range_missing_body_stays_non_not_found() {
+        let fixture = fixture(true).await;
+        nexus_local_db::work_chapters::seed_chapters(
+            &fixture.pool,
+            WORK_ID,
+            WORK_REF,
+            1,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("seed chapters");
+        // The seeded row names a body_path whose file was never written:
+        // the read must surface a truthful failure, never a chapter absence.
+        let request = ToolsApi {
+            caller_kind: None,
+            parameters: serde_json::json!({
+                "work_id": WORK_ID,
+                "chapter": 1,
+                "start_line": 1,
+                "end_line": 5,
+            }),
+            request_id: None,
+            session_id: None,
+            tool_name: "nexus.manuscript.read_range".to_string(),
+        };
+
+        let error = execute_manuscript_read_range(&request, &fixture.context, CREATOR)
+            .await
+            .expect_err("a missing body file refuses");
+
+        assert!(
+            !matches!(error, NexusApiError::NotFound { .. }),
+            "a missing body is never reported as a missing chapter: {error:?}"
+        );
+        if let NexusApiError::InvalidInput { ref field, .. } = error {
+            assert!(
+                !field.starts_with("chapter_path_unresolvable:"),
+                "the internal kind suffix never reaches the wire: {field}"
+            );
+        }
     }
 }

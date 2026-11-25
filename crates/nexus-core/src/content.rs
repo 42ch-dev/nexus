@@ -87,6 +87,24 @@ const fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
     }
 }
 
+/// Strip the internal `io::ErrorKind` suffix from a
+/// `chapter_path_unresolvable:<kind>` field so non-`fs/read_text_file`
+/// surfaces keep exporting the exact legacy `chapter_path_unresolvable` field
+/// — the suffix must never reach a wire `details.field`. Every other error
+/// passes through unchanged.
+pub fn strip_chapter_path_kind(error: CoreError) -> CoreError {
+    match error {
+        CoreError::InvalidInput {
+            ref field,
+            ref reason,
+        } if field.starts_with("chapter_path_unresolvable:") => CoreError::InvalidInput {
+            field: "chapter_path_unresolvable".to_string(),
+            reason: reason.clone(),
+        },
+        other => other,
+    }
+}
+
 /// # Errors
 ///
 /// Returns `CoreError` when the principal is rejected, the work/chapter is
@@ -580,26 +598,18 @@ async fn read_guarded_file(
 ) -> Result<String, ContentFault> {
     const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
 
+    // The `:kind` suffix is internal to the fs/read_text_file boundary;
+    // normalize before matching so this surface keeps exporting the exact
+    // legacy field and the wire shape (`details.field`) stays unchanged.
     let path = resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), true)
         .await
+        .map_err(strip_chapter_path_kind)
         .map_err(|e| match e {
             CoreError::InvalidInput { ref field, .. } if field == "chapter_path_forbidden" => {
                 ContentFault::BadRequest {
                     code: forbidden_code.to_string(),
                     message: format!("chapter path '{rel_path}' escapes workspace root"),
                 }
-            }
-            // The `:kind` suffix is internal to the fs/read_text_file
-            // boundary; every other surface keeps the exact legacy field so
-            // the wire shape (`details.field`) stays unchanged.
-            CoreError::InvalidInput {
-                ref field,
-                ref reason,
-            } if field.starts_with("chapter_path_unresolvable:") => {
-                ContentFault::Core(CoreError::InvalidInput {
-                    field: "chapter_path_unresolvable".to_string(),
-                    reason: reason.clone(),
-                })
             }
             other => ContentFault::Core(other),
         })?;
