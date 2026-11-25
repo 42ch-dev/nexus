@@ -10296,11 +10296,14 @@ mod tests {
     /// whose frozen applied document no longer hashes to the identity the
     /// apply recorded.
     ///
-    /// The real adapter re-verifies the recorded hash against the frozen bytes
-    /// on every admission; this double runs the same comparison over the same
-    /// canonical hash, so the tests below admit against a genuinely
-    /// non-replayable apply instead of a hand-written error. The adapter's
-    /// prose is asserted against the real adapter in `nexus-core`.
+    /// The refusal SHAPE is reproduced here — the frozen document is re-hashed
+    /// and compared against the recorded content hash — but this is a
+    /// store-semantics double, not the store: it does not run the adapter's
+    /// per-admission re-verification route
+    /// (`crates/nexus-core/src/owner/applied_documents.rs`). The refusal
+    /// message is copied from the adapter's `Display` impl
+    /// (`crates/nexus-core/src/apply.rs`); only the coded family and its
+    /// mapping are asserted in this crate.
     struct NonReplayableAppliedIdentity {
         document:
             nexus_contracts::generated::daemon_api::orchestration::workflow_document::WorkflowDocument,
@@ -10339,6 +10342,13 @@ mod tests {
         }
     }
 
+    /// Store-semantics double: `admit` SYNTHESIZES the applied-identity
+    /// refusal from its own re-hash, so the "current apply no longer replays"
+    /// state is reachable here without a Creator store. What the tests below
+    /// guard is the coordinator's mapping
+    /// (`AppliedAdmissionError::AppliedIdentity` → `RunControlError::AppliedIdentityInvalid`)
+    /// at both admission seams and the pending/no-claim outcome — never the
+    /// adapter's own resolution semantics, which this double replaces.
     #[async_trait]
     impl AppliedAdmissionPort for NonReplayableAppliedIdentity {
         async fn admit(
