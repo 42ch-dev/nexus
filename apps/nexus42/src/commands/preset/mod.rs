@@ -57,13 +57,11 @@ use nexus_contracts::generated::daemon_api::orchestration::workflow_document::{
 };
 use nexus_contracts::generated::daemon_api::preset_management::list_presets_response::ListPresetsResponse;
 use nexus_contracts::ScaffoldPresetRequest;
-use nexus_workflow_ir::Violation;
+// Newest Workflow IR document version this build can validate, taken from the
+// IR crate so the CLI can never report a version the rest of the build does not write.
+use nexus_workflow_ir::{Violation, IR_VERSION as SUPPORTED_IR_VERSION};
 
 pub mod patch;
-
-/// Newest Workflow IR document version this build can validate — the v0 draft
-/// `nexus_preset::workflow_ir` emits. A schema bump has to move both.
-const SUPPORTED_IR_VERSION: u64 = 0;
 
 #[derive(Debug, Subcommand)]
 pub enum PresetCommand {
@@ -1750,7 +1748,7 @@ states:
             .unwrap(),
         )
         .unwrap();
-        ir["ir_version"] = serde_json::json!(1);
+        ir["ir_version"] = serde_json::json!(nexus_workflow_ir::IR_VERSION + 1);
 
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("future.workflow.ir.json");
@@ -1763,8 +1761,11 @@ states:
             resp["errors"][0]
                 .as_str()
                 .unwrap_or_default()
-                .contains("newer than supported 0"),
-            "expected the exporter's ir_version refusal, got: {resp}"
+                .contains(&format!(
+                    "newer than supported {}",
+                    nexus_workflow_ir::IR_VERSION
+                )),
+            "the CLI must report the IR crate's IR_VERSION, got: {resp}"
         );
         assert!(
             validate_preset(path, true).is_err(),
