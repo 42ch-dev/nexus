@@ -74,6 +74,51 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
         })
 }
 
+/// Machine-readable `io::ErrorKind` suffix appended to the legacy
+/// `chapter_path_unresolvable` field code. Only the `must_exist` arm of
+/// [`resolve_guarded_path`] emits the suffixed form; the write branch never
+/// produces it. `fs/read_text_file` (`execute_read_file`) consumes the suffix
+/// directly, while [`strip_chapter_path_kind`] normalizes it back to the
+/// exact legacy field at `read_guarded_file` and the manuscript guard, so no
+/// other surface can export it. Kinds meaning a malformed request get their
+/// own code (`not_a_directory`); `FilenameTooLong` has no stable
+/// `io::ErrorKind` variant on this toolchain, so it stays folded into
+/// `other` until the MSRV exposes it.
+///
+/// [`ROOT_UNRESOLVABLE_CODE`] is not an `io::ErrorKind`: it marks the
+/// workspace root itself failing to resolve, emitted in the `must_exist` arm
+/// before the ancestor probe, in the same suffix position as the io kinds —
+/// a distinct class the read boundary maps to a root-level `Internal`, never
+/// a file-level NotFound/Forbidden.
+pub const ROOT_UNRESOLVABLE_CODE: &str = "root_unresolvable";
+
+const fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::NotFound => "not_found",
+        std::io::ErrorKind::PermissionDenied => "permission_denied",
+        std::io::ErrorKind::NotADirectory => "not_a_directory",
+        _ => "other",
+    }
+}
+
+/// Strip the internal `io::ErrorKind` suffix from a
+/// `chapter_path_unresolvable:<kind>` field so non-`fs/read_text_file`
+/// surfaces keep exporting the exact legacy `chapter_path_unresolvable` field
+/// — the suffix must never reach a wire `details.field`. Every other error
+/// passes through unchanged.
+pub fn strip_chapter_path_kind(error: CoreError) -> CoreError {
+    match error {
+        CoreError::InvalidInput {
+            ref field,
+            ref reason,
+        } if field.starts_with("chapter_path_unresolvable:") => CoreError::InvalidInput {
+            field: "chapter_path_unresolvable".to_string(),
+            reason: reason.clone(),
+        },
+        other => other,
+    }
+}
+
 /// # Errors
 ///
 /// Returns `CoreError` when the principal is rejected, the work/chapter is
@@ -101,7 +146,17 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
 /// Returns [`CoreError::InvalidInput`] whose `field` carries the legacy
 /// `CHAPTER_PATH_*` code (`chapter_path_empty`, `chapter_path_unresolvable`,
 /// `chapter_path_forbidden`) when the path is empty, cannot be resolved, or
-/// escapes the workspace root. Callers may substitute domain-specific codes.
+/// escapes the workspace root. For a `must_exist` canonicalize failure the
+/// unresolvable code carries a machine-readable suffix —
+/// `chapter_path_unresolvable:not_found` / `:permission_denied` /
+/// `:not_a_directory` / `:other` for `io::ErrorKind`-derived target
+/// failures, or the non-io `chapter_path_unresolvable:root_unresolvable`
+/// ([`ROOT_UNRESOLVABLE_CODE`]) when the workspace root itself fails to
+/// canonicalize, emitted before the ancestor probe and never rendered as a
+/// file-level verdict — so the read boundary can tell a real absence from a
+/// permission refusal, a malformed request, or a root-unavailable failure;
+/// `execute_read_file` additionally tolerates the exact legacy (unsuffixed)
+/// field. Callers may substitute domain-specific codes.
 ///
 /// This is the single W-002 authority: the daemon `api/path_guard.rs` and the
 /// host-tool write paths delegate here and map the error at their own
@@ -122,17 +177,52 @@ pub fn resolve_guarded_path(
         });
     }
 
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    // A workspace root that cannot be canonicalized makes every containment
+    // verdict meaningless: the must_exist arm reports it as a root-resolution
+    // failure (a truthful unresolvable shape), never as a path escape. The
+    // write branch keeps its historical fallback to the spelled root.
+    let canonical_root_result = workspace_root.canonicalize();
+    if must_exist {
+        if let Err(e) = &canonical_root_result {
+            return Err(CoreError::InvalidInput {
+                field: format!("chapter_path_unresolvable:{ROOT_UNRESOLVABLE_CODE}"),
+                reason: format!("cannot resolve workspace root: {e}"),
+            });
+        }
+    }
+    let canonical_root = canonical_root_result.unwrap_or_else(|_| workspace_root.to_path_buf());
 
     let joined = canonical_root.join(rel_path);
 
     if must_exist {
-        let canonical_target = joined.canonicalize().map_err(|e| CoreError::InvalidInput {
-            field: "chapter_path_unresolvable".to_string(),
-            reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
-        })?;
+        let canonical_target = match joined.canonicalize() {
+            Ok(canonical) => canonical,
+            Err(e) => {
+                // Containment before classification: when the target cannot be
+                // resolved, a symlinked ancestor may point outside the root.
+                // Decide containment from the nearest existing ancestor and,
+                // if it escapes, report the non-revealing forbidden shape for
+                // every kind so absence and permission stay indistinguishable
+                // outside the workspace.
+                let mut probe = joined.as_path();
+                loop {
+                    if let Ok(ancestor) = probe.canonicalize() {
+                        if !ancestor.starts_with(&canonical_root) {
+                            return Err(forbidden(rel_path));
+                        }
+                        break;
+                    }
+                    match probe.parent() {
+                        Some(parent) => probe = parent,
+                        None => return Err(forbidden(rel_path)),
+                    }
+                }
+                return Err(CoreError::InvalidInput {
+                    field: format!("chapter_path_unresolvable:{}", io_kind_code(e.kind())),
+                    reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
+                });
+            }
+        };
         if !canonical_target.starts_with(&canonical_root) {
             return Err(forbidden(rel_path));
         }
@@ -537,16 +627,20 @@ async fn read_guarded_file(
 ) -> Result<String, ContentFault> {
     const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
 
+    // The `:kind` suffix is internal to the fs/read_text_file boundary;
+    // normalize before matching so this surface keeps exporting the exact
+    // legacy field and the wire shape (`details.field`) stays unchanged.
     let path = resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), true)
         .await
-        .map_err(|e| match &e {
-            CoreError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
+        .map_err(strip_chapter_path_kind)
+        .map_err(|e| match e {
+            CoreError::InvalidInput { ref field, .. } if field == "chapter_path_forbidden" => {
                 ContentFault::BadRequest {
                     code: forbidden_code.to_string(),
                     message: format!("chapter path '{rel_path}' escapes workspace root"),
                 }
             }
-            _ => ContentFault::Core(e),
+            other => ContentFault::Core(other),
         })?;
 
     let metadata = tokio::fs::metadata(&path).await.map_err(|e| {
@@ -1155,5 +1249,63 @@ mod tests {
             residual.is_empty(),
             "failed commit leaves no staged temp file: {residual:?}"
         );
+    }
+
+    #[test]
+    fn io_kind_code_names_the_request_shaping_kinds() {
+        assert_eq!(io_kind_code(std::io::ErrorKind::NotFound), "not_found");
+        assert_eq!(
+            io_kind_code(std::io::ErrorKind::PermissionDenied),
+            "permission_denied"
+        );
+        assert_eq!(
+            io_kind_code(std::io::ErrorKind::NotADirectory),
+            "not_a_directory"
+        );
+        assert_eq!(io_kind_code(std::io::ErrorKind::Other), "other");
+        assert_eq!(io_kind_code(std::io::ErrorKind::InvalidInput), "other");
+    }
+
+    #[test]
+    fn must_exist_reports_an_unresolvable_workspace_root_as_unresolvable_not_escape() {
+        let missing_root = tempfile::tempdir().expect("temp dir").path().join("gone");
+
+        let error = resolve_guarded_path(&missing_root, "chapter.md", true)
+            .expect_err("an unresolvable workspace root refuses");
+
+        match error {
+            CoreError::InvalidInput { field, reason } => {
+                assert_eq!(
+                    field,
+                    format!("chapter_path_unresolvable:{ROOT_UNRESOLVABLE_CODE}"),
+                    "root resolution failure carries its own machine code: {field}"
+                );
+                assert!(
+                    reason.contains("workspace root"),
+                    "the reason names the root, not the chapter: {reason}"
+                );
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn write_branch_keeps_its_spelled_root_fallback_for_an_unresolvable_root() {
+        // The write branch contract is unchanged by the must_exist root fix:
+        // it still resolves against the spelled root, so a root that does not
+        // resolve walks to the filesystem root and reports the historical
+        // no-parent forbidden shape — not the new unresolvable encoding.
+        let missing_root = tempfile::tempdir().expect("temp dir").path().join("gone");
+
+        let error = resolve_guarded_path(&missing_root, "chapter.md", false)
+            .expect_err("write branch keeps its historical fallback outcome");
+
+        match error {
+            CoreError::InvalidInput { field, .. } => assert_eq!(
+                field, "chapter_path_forbidden",
+                "write branch outcome is unchanged: {field}"
+            ),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
     }
 }
