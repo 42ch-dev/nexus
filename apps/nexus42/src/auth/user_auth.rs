@@ -905,4 +905,35 @@ mod tests {
         let _keep_alive = home;
         clear_token(&mut store);
     }
+
+    /// Recurrence detector for the silent-early-return pattern (I-000608).
+    ///
+    /// Runs the real `refresh_access_token_success` test in a child process with
+    /// `NEXUS_TEST_FORCE_STORE_FAILURE` set. With the `expect` guard in place the
+    /// child fails; if anyone restores a silent early return on the store write,
+    /// the child passes and this test goes red — the guard stays falsifiable.
+    #[test]
+    fn forced_store_failure_fails_a_real_auth_test() {
+        let home = crate::testutil::isolated_home();
+        let exe = std::env::current_exe().expect("path to the test binary");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "auth::user_auth::tests::refresh_access_token_success",
+            ])
+            .env("NEXUS_TEST_FORCE_STORE_FAILURE", "1")
+            .env("HOME", home.path())
+            .output()
+            .expect("run the child test binary");
+        // The temporary home must exist for the whole child run, so drop it
+        // explicitly once the child has exited.
+        drop(home);
+
+        assert!(
+            !output.status.success(),
+            "a real auth test must fail when the store write fails, but the child exited \
+             successfully (silent early return restored?):\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
