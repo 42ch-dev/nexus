@@ -19,6 +19,11 @@ static HOME_LOCK: Mutex<()> = Mutex::new(());
 /// so this helper uses `std::env::set_var("HOME", ...)` which works for our
 /// internal `user_home_dir()` / `nexus_home_dir()` functions.
 ///
+/// Windows is intentionally NOT isolated here: `dirs` 7 resolves `home_dir()`
+/// through the Known Folder API (`FOLDERID_Profile`), not `USERPROFILE`, so no
+/// environment variable can redirect it. Tests that need an isolated home on
+/// Windows must gate themselves out or use an explicit path instead.
+///
 /// Uses a global mutex to serialize access — only one `IsolatedHome` is active
 /// at a time, preventing race conditions under `--test-threads>1`.
 ///
@@ -60,20 +65,30 @@ impl IsolatedHome {
         let original_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", tmp.path());
         Self {
-            _tmp: tmp,
+            tmp,
             original_home,
-            _lock: lock,
+            lock,
         }
     }
 }
 
 /// RAII guard that restores `HOME` when dropped.
 pub struct IsolatedHome {
-    _tmp: tempfile::TempDir,
+    tmp: tempfile::TempDir,
     original_home: Option<String>,
     /// Held until drop to serialize HOME manipulation across test threads.
     /// `None` when the caller retains ownership of the lock itself.
-    _lock: Option<std::sync::MutexGuard<'static, ()>>,
+    lock: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+impl IsolatedHome {
+    /// Temporary home directory currently installed as `HOME`.
+    ///
+    /// Use it to assert that a resolved path stays inside the isolated home.
+    #[must_use]
+    pub fn path(&self) -> &std::path::Path {
+        self.tmp.path()
+    }
 }
 
 impl Drop for IsolatedHome {
@@ -83,6 +98,9 @@ impl Drop for IsolatedHome {
         } else {
             std::env::remove_var("HOME");
         }
+        // Release the process-wide HOME lock only after the environment is
+        // restored, and read the field explicitly so it is not dead storage.
+        drop(self.lock.take());
     }
 }
 
@@ -107,6 +125,11 @@ mod tests {
             "HOME should be a temp directory, not the real home"
         );
         assert!(home_path.is_dir());
+        assert_eq!(
+            home_path,
+            guard.path(),
+            "path() should return the installed temp home"
+        );
         drop(guard);
     }
 

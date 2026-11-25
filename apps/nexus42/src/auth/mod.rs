@@ -69,6 +69,16 @@ pub struct CreatorAuthState {
     pub creator_api_key: Option<String>,
 }
 
+/// Whether a test-only failure-injection switch is set.
+///
+/// Compiled out of production builds. The auth tests use it to force store
+/// writes to fail in a child test process, which makes the "guarded pattern
+/// returned silently" regression detectable.
+#[cfg(test)]
+fn forced_failure(var: &str) -> bool {
+    std::env::var_os(var).is_some()
+}
+
 impl AuthStore {
     /// Load auth store from disk
     ///
@@ -194,6 +204,12 @@ impl AuthStore {
     ///
     /// Returns I/O errors if the auth store cannot be saved to disk.
     pub fn store_user_token(&mut self, token: UserTokenState) -> Result<()> {
+        #[cfg(test)]
+        if forced_failure("NEXUS_TEST_FORCE_STORE_FAILURE") {
+            return Err(crate::errors::CliError::Other(
+                "forced store failure (NEXUS_TEST_FORCE_STORE_FAILURE)".to_string(),
+            ));
+        }
         self.user_token = Some(token);
         self.save()
     }

@@ -417,6 +417,26 @@ mod tests {
     use super::*;
     use base64::Engine;
 
+    /// Seed the isolated auth store through the single path every auth test uses.
+    ///
+    /// A failed write must fail the test loudly; returning early here would make
+    /// the test body green-but-unrun (I-000608).
+    fn seed_token(store: &mut AuthStore, token: UserTokenState) {
+        store
+            .store_user_token(token)
+            .expect("test token must be stored");
+    }
+
+    /// Clear the isolated auth store through the single path the no-token test uses.
+    ///
+    /// A failed write must fail the test loudly; returning early here would make
+    /// the test body green-but-unrun (I-000608).
+    fn clear_token(store: &mut AuthStore) {
+        store
+            .clear_user_token()
+            .expect("test token must be cleared");
+    }
+
     #[test]
     fn extract_user_id_from_valid_jwt() {
         let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -644,9 +664,7 @@ mod tests {
             refresh_expires_at: Some("2026-05-28T12:00:00Z".to_string()),
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        seed_token(&mut store, token);
 
         let result = refresh_access_token(&config).await;
         match result {
@@ -691,9 +709,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        seed_token(&mut store, token);
 
         let result = refresh_access_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -718,9 +734,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        seed_token(&mut store, token);
 
         let result = refresh_access_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -751,9 +765,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        seed_token(&mut store, token);
 
         let result = ensure_valid_token(&config).await;
         match result {
@@ -782,9 +794,7 @@ mod tests {
             refresh_expires_at: None,
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        seed_token(&mut store, token);
 
         let result = ensure_valid_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -801,9 +811,7 @@ mod tests {
         let _home = crate::testutil::isolated_home();
         let config = CliConfig::default();
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.clear_user_token().is_err() {
-            return;
-        }
+        clear_token(&mut store);
 
         let result = ensure_valid_token(&config).await;
         if let Err(CliError::Other(msg)) = result {
@@ -828,9 +836,7 @@ mod tests {
             refresh_expires_at: Some("2027-01-01T00:00:00Z".to_string()),
         };
         let mut store = AuthStore::load().unwrap_or_default();
-        if store.store_user_token(token).is_err() {
-            return;
-        }
+        seed_token(&mut store, token);
 
         match logout(&config) {
             Ok(()) => {}
@@ -842,6 +848,98 @@ mod tests {
         assert!(
             store.user_token.is_none(),
             "Expected user_token to be None after logout"
+        );
+    }
+
+    /// An isolated auth store whose `auth.json` cannot be written.
+    ///
+    /// `auth.json` is occupied by a directory, so `AuthStore::save` fails while
+    /// the returned guard keeps the temporary home installed. Callers must keep
+    /// that guard alive until after their write attempt.
+    #[cfg(unix)]
+    fn unwritable_auth_store() -> (crate::testutil::IsolatedHome, AuthStore) {
+        let home = crate::testutil::isolated_home();
+        let auth_path = crate::config::auth_store_path().expect("resolve auth store path");
+        assert!(
+            auth_path.starts_with(home.path()),
+            "auth store {auth_path:?} must live under the isolated home {:?}",
+            home.path()
+        );
+        std::fs::create_dir_all(&auth_path).expect("occupy auth.json with a directory");
+        (home, AuthStore::load().unwrap_or_default())
+    }
+
+    /// Regression guard for I-000608: the auth tests once returned early when a
+    /// store write failed, so a failure made them green without running their
+    /// bodies. These guards drive the same `seed_token` / `clear_token` helpers
+    /// the auth tests use, under a forced write failure.
+    ///
+    /// Unix-only: `dirs` 7 resolves `home_dir()` on Windows through the Known
+    /// Folder API (`FOLDERID_Profile`), which `isolated_home()` cannot redirect,
+    /// so this setup would write into the real user profile there.
+    #[test]
+    #[cfg(unix)]
+    #[should_panic(expected = "test token must be stored")]
+    fn store_user_token_failure_is_not_silent() {
+        let (home, mut store) = unwritable_auth_store();
+        // A local binding lives until the function exits, so the temporary home
+        // stays installed for the write attempt below.
+        let _keep_alive = home;
+
+        let token = UserTokenState {
+            access_token: "unwritable_tok".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at: "2026-01-01T00:00:00Z".to_string(),
+            user_id: "usr_unwritable".to_string(),
+            refresh_token: None,
+            refresh_expires_at: None,
+        };
+        seed_token(&mut store, token);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[should_panic(expected = "test token must be cleared")]
+    fn clear_user_token_failure_is_not_silent() {
+        let (home, mut store) = unwritable_auth_store();
+        let _keep_alive = home;
+        clear_token(&mut store);
+    }
+
+    /// Recurrence detector for the silent-early-return pattern (I-000608).
+    ///
+    /// Runs the real `refresh_access_token_success` test in a child process with
+    /// `NEXUS_TEST_FORCE_STORE_FAILURE` set. With the `expect` guard in place the
+    /// child fails; if anyone restores a silent early return on the store write,
+    /// the child passes and this test goes red.
+    ///
+    /// Boundary: this detects a restored silent return because the child then
+    /// passes unexpectedly. It also trips if the injection switch itself is
+    /// removed or stops injecting (the child then runs the real test normally
+    /// and passes); the two regressions are indistinguishable here, but neither
+    /// can pass silently.
+    #[test]
+    fn forced_store_failure_fails_a_real_auth_test() {
+        let home = crate::testutil::isolated_home();
+        let exe = std::env::current_exe().expect("path to the test binary");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "auth::user_auth::tests::refresh_access_token_success",
+            ])
+            .env("NEXUS_TEST_FORCE_STORE_FAILURE", "1")
+            .env("HOME", home.path())
+            .output()
+            .expect("run the child test binary");
+        // The temporary home must exist for the whole child run, so drop it
+        // explicitly once the child has exited.
+        drop(home);
+
+        assert!(
+            !output.status.success(),
+            "a real auth test must fail when the store write fails, but the child exited \
+             successfully (silent early return restored?):\n{}",
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 }
