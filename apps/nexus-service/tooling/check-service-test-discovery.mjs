@@ -3,7 +3,7 @@
 // must actually be a suite (contain at least one `test(` or `describe(` call).
 // A suite is "unreachable" when the package.json test entry does not recurse
 // (`tests/*.test.mjs`) while a `.test.mjs` lives in a tests/<subdir>/.
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +30,9 @@ for (const f of files) {
 
 const testScript = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")).scripts.test;
 const entryRecurses = !testScript.includes("tests/*.test.mjs");
+if (testScript.includes("tooling/run-service-tests.mjs") && !existsSync(join(pkgDir, "tooling", "run-service-tests.mjs"))) {
+  errors.push("test script invokes tooling/run-service-tests.mjs but the runner file is missing");
+}
 if (!entryRecurses && subdir.length > 0) {
   errors.push(
     `test entry is not recursive (${testScript}) but subdirectory suites exist: ${subdir
