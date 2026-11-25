@@ -126,6 +126,15 @@ pub fn builtin_input_schema(name: &str) -> Option<&'static str> {
         .map(|idx| BUILTIN_CAPABILITIES[idx].1)
 }
 
+/// Builtins that execute a prompt at run time and therefore resolve a
+/// prompt role (`acp.prompt` builds its `PromptRequest` with
+/// `agent_ref: None`, which resolves the `default` role).
+/// `required_prompt_roles` counts an `enter`/`capability` action naming one
+/// of these as a prompt path. Observed but out of scope: `judge.llm`,
+/// `context.summarize`, and `nexus.llm.extract` are not entered as plain
+/// capability actions today — add them here only when they are.
+pub const PROMPT_EXECUTING_CAPABILITIES: &[&str] = &["acp.prompt"];
+
 /// Input schema for `acp.prompt`.
 pub const ACP_PROMPT_INPUT_SCHEMA: &str = r#"{
             "$schema": "https://json-schema.org/draft/2020-12/schema",

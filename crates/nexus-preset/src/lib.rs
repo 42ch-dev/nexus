@@ -181,9 +181,12 @@ pub fn embedded_applied_identity(
 /// (N-4b/N-9).
 ///
 /// Every `llm_judge` exit resolves the `default` role (the judge capability
-/// `judge.llm` binds `default` at prompt time), and every `acp_prompt` inner
-/// node resolves its `agent` field (or `default` when absent). A preset with
-/// NO prompt path yields an empty set — an empty binding map is then valid.
+/// `judge.llm` binds `default` at prompt time), every `acp_prompt` inner
+/// node resolves its `agent` field (or `default` when absent), and every
+/// capability enter action whose name is in
+/// [`capability_catalog::PROMPT_EXECUTING_CAPABILITIES`] resolves the
+/// `default` role. A preset with NO prompt path yields an empty set — an
+/// empty binding map is then valid.
 ///
 /// The input is the manifest, not a `LoadedPreset`: a run admitted from an
 /// applied `WorkflowDocument` has no descriptor, and admission and graph
@@ -206,21 +209,31 @@ pub fn required_prompt_roles(
             }
         }
         for action in &state.enter {
-            if let EnterAction::InnerGraph { name } = action {
-                if let Some(ig) = manifest.inner_graphs.as_ref().and_then(|igs| igs.get(name)) {
-                    for node in &ig.nodes {
-                        if matches!(node.kind, GraphNodeKind::AcpPrompt) {
-                            match &node.agent {
-                                Some(agent) => {
-                                    required.insert(agent.clone());
-                                }
-                                None => {
-                                    required.insert("default".to_string());
+            match action {
+                EnterAction::InnerGraph { name } => {
+                    if let Some(ig) = manifest.inner_graphs.as_ref().and_then(|igs| igs.get(name)) {
+                        for node in &ig.nodes {
+                            if matches!(node.kind, GraphNodeKind::AcpPrompt) {
+                                match &node.agent {
+                                    Some(agent) => {
+                                        required.insert(agent.clone());
+                                    }
+                                    None => {
+                                        required.insert("default".to_string());
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                EnterAction::Capability { name, .. } => {
+                    if crate::capability_catalog::PROMPT_EXECUTING_CAPABILITIES
+                        .contains(&name.as_str())
+                    {
+                        required.insert("default".to_string());
+                    }
+                }
+                EnterAction::HostTool { .. } => {}
             }
         }
     }
