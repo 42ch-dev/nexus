@@ -630,15 +630,15 @@ async fn simulated_scaffold_records_without_touching_work_tree() {
     );
 }
 
-/// The recording executor of a dry run that loses the engine database after
-/// its last Work write, so the seed/patch step behind those writes fails.
-struct RecordingThenDbLoss {
+/// A recording executor whose port refuses the last Work write, so a dry run
+/// fails after it recorded the earlier ones. A dry run now runs no database
+/// step, so the failure has to come from the port itself.
+struct RecordingThenRefusal {
     inner: Arc<WorkspaceCommitExecutor>,
-    pool: Arc<SqlitePool>,
 }
 
 #[async_trait]
-impl WorkspaceExecutor for RecordingThenDbLoss {
+impl WorkspaceExecutor for RecordingThenRefusal {
     fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
         self.inner.workspace_root()
     }
@@ -665,19 +665,19 @@ impl WorkspaceExecutor for RecordingThenDbLoss {
         &self,
         input: WorkArtifactCommitInput,
     ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
-        let last = input.rel_child == "AGENTS.md";
-        let recorded = self.inner.commit_work_artifact(input).await?;
-        if last {
-            self.pool.close().await;
+        if input.rel_child == "AGENTS.md" {
+            return Err(CapabilityError::Forbidden(format!(
+                "work '{}' has no works row in the active workspace",
+                input.work_ref
+            )));
         }
-        Ok(recorded)
+        self.inner.commit_work_artifact(input).await
     }
 }
 
-/// A dry run that fails after it registered Work paths must not roll them
-/// back: `Path::exists` is false for a dangling symlink, so the scaffold reads
-/// the name as free and registers it — but the entry belongs to the user, and
-/// unlinking it would make an error path of a simulation mutate the tree.
+/// A dry run that fails after it recorded Work paths must not touch the tree
+/// it was given: the dangling `README.md` belongs to the user, and unlinking
+/// it would make an error path of a simulation mutate the tree.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
@@ -695,9 +695,8 @@ async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
     std::os::unix::fs::symlink("never-written.md", &readme).expect("dangling symlink");
     assert!(!readme.exists(), "the seeded link must dangle");
 
-    let executor: Arc<dyn WorkspaceExecutor> = Arc::new(RecordingThenDbLoss {
+    let executor: Arc<dyn WorkspaceExecutor> = Arc::new(RecordingThenRefusal {
         inner: Arc::clone(&fx.executor),
-        pool: Arc::clone(&fx.pool),
     });
     let novel =
         NovelProjectScaffold::with_pool((*fx.pool).clone()).with_workspace_executor(Some(executor));
@@ -713,10 +712,10 @@ async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
             "total_planned_chapters": 1,
         }))
         .await
-        .expect_err("the database step behind the recorded writes must fail");
+        .expect_err("the port refusal behind the recorded writes must fail the dry run");
     assert!(
-        matches!(err, CapabilityError::Internal(_)),
-        "expected the database failure to propagate, got: {err}"
+        matches!(err, CapabilityError::Forbidden(_)),
+        "expected the port refusal to propagate, got: {err}"
     );
 
     let link = std::fs::symlink_metadata(&readme)
