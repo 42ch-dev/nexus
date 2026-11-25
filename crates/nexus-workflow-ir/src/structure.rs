@@ -218,9 +218,10 @@ impl std::error::Error for Violation {}
 /// Validate a document set against the Q2 structural rules.
 ///
 /// `patterns` carries the pattern bodies the caller resolved; a pin with no entry there is a leaf,
-/// so this never requires a registry. A resolved fragment body gets [`validate_fragment`]'s four
-/// node-graph checks and nothing more: its nests join the nest walk below for cycles and depth, and
-/// [`validate_nests`] runs on documents only.
+/// so this never requires a registry. A resolved fragment body is first held to the same
+/// `ir_version` gate as a document, then gets [`validate_fragment`]'s four node-graph checks and
+/// nothing more: its nests join the nest walk below for cycles and depth, and [`validate_nests`]
+/// runs on documents only.
 ///
 /// # Errors
 ///
