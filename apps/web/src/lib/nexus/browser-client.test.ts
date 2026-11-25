@@ -1927,7 +1927,9 @@ describe('BrowserClient strategy apply (v241 P3.5 T1)', () => {
           {
             success: false,
             error: {
-              code: 'invalid_input',
+              // The service publishes the conflict's own name as `code` (errors.ts
+              // applyConflictCode); only `details` keeps the core envelope verbatim.
+              code: 'already_applied',
               message: 'approval apr_1 is already the current apply',
               details: {
                 code: 'apply_refused',
@@ -1949,8 +1951,47 @@ describe('BrowserClient strategy apply (v241 P3.5 T1)', () => {
 
     expect(error).toBeInstanceOf(NexusClientError);
     expect((error as NexusClientError).status).toBe(409);
+    expect((error as NexusClientError).code).toBe('already_applied');
     expect(((error as NexusClientError).details as { reason?: string }).reason).toBe(
       'already_applied',
+    );
+  });
+
+  it('mirrors the service conflict envelope on a 409 approval_hash_changed', async () => {
+    // errors.ts applyConflictCode: both `already_applied` and `approval_hash_changed`
+    // map to 409 with the reason as the envelope `code`; details pass through verbatim.
+    useHandlers(
+      http.post(applyPath, () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'approval_hash_changed',
+              message: 'approval apr_1 frozen bytes no longer match',
+              details: {
+                code: 'apply_refused',
+                reason: 'approval_hash_changed',
+                message: 'approval apr_1 frozen bytes no longer match',
+                approval_id: 'apr_1',
+                stored_content_hash: 'hash-1',
+                recomputed_content_hash: 'hash-2',
+              },
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const error = await new BrowserClient()
+      .applyStrategy(strategyId, { approval_content_hash: 'hash-1' })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(NexusClientError);
+    expect((error as NexusClientError).status).toBe(409);
+    expect((error as NexusClientError).code).toBe('approval_hash_changed');
+    expect(((error as NexusClientError).details as { reason?: string }).reason).toBe(
+      'approval_hash_changed',
     );
   });
 });
