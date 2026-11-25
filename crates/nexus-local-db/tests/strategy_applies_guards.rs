@@ -274,6 +274,7 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
 /// the plan prefix): the strategy's successor-less rows in the total order the reads pick a winner
 /// by. `sqlx` requires the statement to be a literal, hence one constant rather than a format
 /// argument.
+// SAFETY: test-only EXPLAIN QUERY PLAN inspection; static SQL mirror.
 const CURRENT_ROW_LOOKUP_PLAN: &str = "EXPLAIN QUERY PLAN \
      SELECT cur.apply_id, cur.approval_id, cur.content_hash, cur.applied_at, \
             cur.supersedes_apply_id \
@@ -314,12 +315,193 @@ async fn the_current_apply_lookup_is_two_index_searches_not_two_scans() {
     .unwrap();
 
     let plan = query_plan(&pool, CURRENT_ROW_LOOKUP_PLAN).await;
+    let rows: Vec<&str> = plan.lines().collect();
     assert!(
-        plan.contains("SEARCH cur USING INDEX idx_strategy_applies_strategy_current"),
-        "the strategy filter and the total order are one index range: {plan}"
+        rows.iter()
+            .any(|row| search_names_index(row, "idx_strategy_applies_strategy_current")),
+        "the strategy filter and the total order are one SEARCH of their index: {plan}"
     );
     assert!(
-        plan.contains("SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes"),
-        "the anti-join's inner side is a supersede-link index lookup: {plan}"
+        rows.iter()
+            .any(|row| search_names_index(row, "idx_strategy_applies_supersedes")),
+        "the anti-join's inner side is a SEARCH of the supersede-link index: {plan}"
+    );
+    assert!(
+        !rows.iter().any(|row| scans_strategy_applies(row)),
+        "neither side of the lookup may walk strategy_applies, by table or by index: {plan}"
+    );
+    assert!(
+        !plan.contains("TEMP B-TREE"),
+        "the total order must come from the index range, not a sort: {plan}"
+    );
+}
+
+/// Whether a plan row is a `SEARCH` through exactly `index`: SQLite spells its leaf lookups
+/// `SEARCH <alias> USING [COVERING] INDEX <name>`, so the prefix is the shape and the name after
+/// `INDEX` is compared whole — a longer name that merely starts with the expected one is a
+/// different index, not a match.
+fn search_names_index(detail: &str, index: &str) -> bool {
+    detail.starts_with("SEARCH") && searched_index(detail) == Some(index)
+}
+
+/// The index a plan row seeks through, or `None` when the row names no index. Real plans write the
+/// name unquoted and echo a constraint list after it, so the candidate is the text after
+/// `USING [COVERING] INDEX` with a trailing constraint list removed. A surrounding quote pair is
+/// accepted and removed; an unterminated quote is refused, not compared.
+fn searched_index(detail: &str) -> Option<&str> {
+    let (_, after_using) = detail.split_once("USING ")?;
+    let after_using = after_using.strip_prefix("COVERING ").unwrap_or(after_using);
+    let candidate = after_using.strip_prefix("INDEX ")?;
+    unquote_identifier(without_constraint_list(candidate))
+}
+
+/// Drops the plan's echoed constraint list, if and only if the text ends with one: the boundary is
+/// the LAST ` (`, and only a suffix shaped `(...=...)` is a constraint. Anything else — including an
+/// index name that itself contains ` (` — stays one candidate, which then cannot equal a bare
+/// expected name by accident.
+fn without_constraint_list(candidate: &str) -> &str {
+    let text = candidate.trim();
+    let Some(open) = text.rfind(" (") else {
+        return text;
+    };
+    let suffix = &text[open + 1..];
+    if suffix.starts_with('(') && suffix.ends_with(')') && suffix.contains('=') {
+        text[..open].trim_end()
+    } else {
+        text
+    }
+}
+
+/// Removes one pair of surrounding quotes, or refuses the candidate: an opening quote without its
+/// close is not an identifier a comparison may use.
+fn unquote_identifier(candidate: &str) -> Option<&str> {
+    let opening = candidate.chars().next()?;
+    let closing = match opening {
+        '"' | '\'' | '`' => opening,
+        '[' => ']',
+        _ => return Some(candidate),
+    };
+    let inner = &candidate[opening.len_utf8()..];
+    let end = inner.find(closing)?;
+    inner[end + closing.len_utf8()..]
+        .is_empty()
+        .then_some(&inner[..end])
+}
+
+/// A plan row that walks `strategy_applies` in full — a `SCAN` of the table or of either alias,
+/// whether or not an index is named. `SCAN cur USING INDEX ...` is a full index walk, as much a
+/// degradation as `SCAN cur`.
+fn scans_strategy_applies(detail: &str) -> bool {
+    detail.starts_with("SCAN")
+        && detail
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|token| matches!(token, "strategy_applies" | "cur" | "later"))
+}
+
+/// A full walk through an index is still a walk: only `SCAN` rows are refused, so the guard must
+/// reject them however SQLite names the index, and must not mistake an unrelated scan for one.
+#[test]
+fn a_full_index_walk_is_a_scan() {
+    assert!(scans_strategy_applies(
+        "SCAN cur USING INDEX idx_strategy_applies_strategy_current"
+    ));
+    assert!(scans_strategy_applies("SCAN later"));
+    assert!(scans_strategy_applies("SCAN TABLE strategy_applies"));
+    assert!(!scans_strategy_applies(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current"
+    ));
+    assert!(!scans_strategy_applies(
+        "SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes"
+    ));
+    assert!(!scans_strategy_applies(
+        "SCAN constants USING INDEX idx_unrelated"
+    ));
+}
+
+/// The index is identified whole: a plan that seeks a superset-named index is a different index,
+/// so it must not satisfy the check for the expected one.
+#[test]
+fn a_search_must_name_the_expected_index_exactly() {
+    assert!(search_names_index(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current (strategy_id=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(search_names_index(
+        "SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes (supersedes_apply_id=?)",
+        "idx_strategy_applies_supersedes"
+    ));
+    assert!(!search_names_index(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current_v2 (strategy_id=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(!search_names_index(
+        "SEARCH cur USING INDEX idx_strategy_applies_strategy_current",
+        "idx_strategy_applies_strategy_current_v2"
+    ));
+    assert!(!search_names_index(
+        "SEARCH cur USING INTEGER PRIMARY KEY (rowid=?)",
+        "idx_strategy_applies_strategy_current"
+    ));
+    assert!(!search_names_index(
+        "SCAN cur USING INDEX idx_strategy_applies_strategy_current",
+        "idx_strategy_applies_strategy_current"
+    ));
+}
+
+/// The candidate is read as the plan writes it: unquoted, ending at the parameter list, and
+/// compared whole — a name with a space is one name, never truncated at the space. A quote pair
+/// around it is removed; an unterminated quote is refused instead of compared.
+#[test]
+fn plan_index_names_are_read_whole() {
+    assert_eq!(
+        searched_index(
+            "SEARCH cur USING INDEX idx_strategy_applies_strategy_current (strategy_id=?)"
+        ),
+        Some("idx_strategy_applies_strategy_current")
+    );
+    assert_eq!(
+        searched_index(
+            "SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes (supersedes_apply_id=?)"
+        ),
+        Some("idx_strategy_applies_supersedes")
+    );
+    assert_eq!(
+        searched_index("SEARCH cur USING INDEX \"idx strategy current\" (strategy_id=?)"),
+        Some("idx strategy current"),
+        "the whole spaced name is the candidate, not its first word"
+    );
+    assert_eq!(
+        searched_index("SEARCH cur USING INDEX \"idx strategy current\""),
+        Some("idx strategy current"),
+        "the end of the line is the other boundary"
+    );
+    assert_eq!(
+        searched_index("SEARCH cur USING INDEX idx_strategy_applies_strategy_current (extra)"),
+        Some("idx_strategy_applies_strategy_current (extra)"),
+        "a parenthesised tail without `=` is part of the name, not a constraint list"
+    );
+    assert!(
+        !search_names_index(
+            "SEARCH cur USING INDEX idx_strategy_applies_strategy_current (extra)",
+            "idx_strategy_applies_strategy_current"
+        ),
+        "a name followed by a non-constraint tail is a different name"
+    );
+    assert!(
+        search_names_index(
+            "SEARCH cur USING INDEX idx_strategy_applies_strategy_current (strategy_id=?)",
+            "idx_strategy_applies_strategy_current"
+        ),
+        "an echoed constraint list is a boundary, not part of the name"
+    );
+    assert_eq!(
+        searched_index("SEARCH cur USING INDEX \"idx_strategy_applies_strategy_current"),
+        None,
+        "an unterminated quote is refused"
+    );
+    assert_eq!(
+        searched_index("SEARCH cur USING INTEGER PRIMARY KEY (rowid=?)"),
+        None,
+        "a row that names no index has no candidate"
     );
 }
