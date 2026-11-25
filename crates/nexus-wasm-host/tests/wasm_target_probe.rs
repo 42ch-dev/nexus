@@ -13,13 +13,32 @@ use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread::sleep;
+use std::time::Duration;
+
+/// `ETXTBSY`: a filesystem that has only just seen the wrapper written can
+/// still report it as busy when exec'd (seen on CI runners).
+const ETXTBSY: i32 = 26;
+
+static SCRIPT_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Writes an executable shell script with `body` and returns its path.
-fn shell_script(dir: &Path, name: &str, body: &str) -> PathBuf {
-    let path = dir.join(name);
+///
+/// Every call gets a fresh file name and the bytes are synced to the file
+/// before the handle is closed, so no write fd outlives the exec.
+fn shell_script(dir: &Path, stem: &str, body: &str) -> PathBuf {
+    let path = dir.join(format!(
+        "{stem}-{}-{}.sh",
+        std::process::id(),
+        SCRIPT_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     let mut file = fs::File::create(&path).expect("create shell script");
     writeln!(file, "#!/bin/sh").expect("write shebang");
     write!(file, "{body}").expect("write script body");
+    file.flush().expect("flush shell script");
+    file.sync_all().expect("sync shell script");
     drop(file);
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod shell script");
     path
@@ -29,9 +48,33 @@ fn shell_script(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn fake_rustc(dir: &Path, sysroot: &Path) -> PathBuf {
     shell_script(
         dir,
-        "fake-rustc.sh",
+        "fake-rustc",
         &format!("printf '%s\\n' '{}'\n", sysroot.display()),
     )
+}
+
+/// Runs the probe against `rustc` once the wrapper is definitely exec-able.
+///
+/// A transient `ETXTBSY` must never stand in for the probe's own verdict, so
+/// the exec race is drained here before the assertion looks at the outcome.
+fn probe(rustc: &Path) -> bool {
+    wait_until_executable(rustc);
+    wasm_target_probe::wasm_target_installed(rustc.to_str().expect("utf-8 path"))
+}
+
+/// Retries a bare exec of `path` until the kernel stops reporting `ETXTBSY`.
+fn wait_until_executable(path: &Path) {
+    for attempt in 0..100 {
+        match Command::new(path).arg("--print").output() {
+            Err(err) if err.raw_os_error() == Some(ETXTBSY) => {
+                assert!(attempt < 99, "wrapper never became executable: {err}");
+                sleep(Duration::from_millis(10));
+            }
+            // Exec got past the race; the wrapper's own output is what the
+            // probe is meant to judge.
+            _ => return,
+        }
+    }
 }
 
 #[test]
@@ -42,7 +85,7 @@ fn fake_sysroot_without_target_is_not_installed() {
     let rustc = fake_rustc(tmp.path(), &sysroot);
 
     assert!(
-        !wasm_target_probe::wasm_target_installed(rustc.to_str().expect("utf-8 path")),
+        !probe(&rustc),
         "probe reported the target installed for a sysroot without lib/rustlib/wasm32-unknown-unknown"
     );
 }
@@ -56,7 +99,7 @@ fn fake_sysroot_with_target_is_installed() {
     let rustc = fake_rustc(tmp.path(), &sysroot);
 
     assert!(
-        wasm_target_probe::wasm_target_installed(rustc.to_str().expect("utf-8 path")),
+        probe(&rustc),
         "probe failed to see a sysroot containing lib/rustlib/wasm32-unknown-unknown"
     );
 }
@@ -70,7 +113,7 @@ fn non_directory_target_entry_panics() {
     fs::write(sysroot.join("lib/rustlib/wasm32-unknown-unknown"), b"").expect("create stray file");
     let rustc = fake_rustc(tmp.path(), &sysroot);
 
-    let _ = wasm_target_probe::wasm_target_installed(rustc.to_str().expect("utf-8 path"));
+    let _ = probe(&rustc);
 }
 
 #[test]
@@ -83,9 +126,9 @@ fn missing_rustc_panics() {
 #[should_panic(expected = "failed with")]
 fn failing_rustc_panics() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let rustc = shell_script(tmp.path(), "failing-rustc.sh", "echo boom >&2\nexit 2\n");
+    let rustc = shell_script(tmp.path(), "failing-rustc", "echo boom >&2\nexit 2\n");
 
-    let _ = wasm_target_probe::wasm_target_installed(rustc.to_str().expect("utf-8 path"));
+    let _ = probe(&rustc);
 }
 
 #[test]
@@ -96,5 +139,5 @@ fn unusable_sysroot_output_panics() {
     fs::write(&not_a_directory, b"").expect("create regular file");
     let rustc = fake_rustc(tmp.path(), &not_a_directory);
 
-    let _ = wasm_target_probe::wasm_target_installed(rustc.to_str().expect("utf-8 path"));
+    let _ = probe(&rustc);
 }
