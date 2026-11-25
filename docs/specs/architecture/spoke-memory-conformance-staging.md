@@ -63,6 +63,10 @@ A mutation's current authorization, replay resolution, effect, content-free rece
 
 Only replay with the same provider-scoped idempotency key and identical payload, or `memory.receipts.get`, resolves an uncertain outcome. A changed payload under the same key produces `IDEMPOTENCY_CONFLICT`. Post-commit response loss is `OUTCOME_UNCERTAIN`; it is not reported as a clean no-effect error. Current authorization is rechecked before replay and before receipt reads.
 
+#### 2.5.1 Retention floor and the accepted residual window
+
+Expired receipts and deduplication rows are swept durably; the sweep's clock floor is persisted in provider-owned metadata and restored on open, so a restart alone cannot resurrect an expired receipt. One residual window remains by contract: a receipt observed after the last committed sweep or write and before process exit can be re-served if the process restarts **and** the wall clock moves backwards past the floor. Both conditions must hold — a running process, a forward-moving clock, or a restart without a clock rollback cannot surface it. `memory.receipts.get` stays read-only (MEM-R011): observing expiry never writes, so a read can never advance the floor. This window is an accepted, documented limit (owner decision 2026-11-25, I-000140); closing it would require read-path persistence and a MEM-R011 contract change, which is not authorized.
+
 #### 2.6 Fault and clock control
 
 `FixtureFaults` supplies bounded `BeforeCommit`, `AfterCommitBeforeResponse`, `AdmissionPause`, and `ResponseDrop` points plus a controllable clock. Fault state is test control, never durable provider authority. Crash/restart scenarios use bounded joins and timeouts. Assertions use protocol-visible behavior except for the explicitly local-physical L-family scenarios.
