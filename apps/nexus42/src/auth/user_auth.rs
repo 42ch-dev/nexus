@@ -911,7 +911,13 @@ mod tests {
     /// Runs the real `refresh_access_token_success` test in a child process with
     /// `NEXUS_TEST_FORCE_STORE_FAILURE` set. With the `expect` guard in place the
     /// child fails; if anyone restores a silent early return on the store write,
-    /// the child passes and this test goes red — the guard stays falsifiable.
+    /// the child passes and this test goes red.
+    ///
+    /// Boundary: this detects a restored silent return because the child then
+    /// passes unexpectedly. It also trips if the injection switch itself is
+    /// removed or stops injecting (the child then runs the real test normally
+    /// and passes); the two regressions are indistinguishable here, but neither
+    /// can pass silently.
     #[test]
     fn forced_store_failure_fails_a_real_auth_test() {
         let home = crate::testutil::isolated_home();

@@ -220,12 +220,6 @@ impl AuthStore {
     ///
     /// Returns I/O errors if the auth store cannot be saved to disk.
     pub fn clear_user_token(&mut self) -> Result<()> {
-        #[cfg(test)]
-        if forced_failure("NEXUS_TEST_FORCE_CLEAR_FAILURE") {
-            return Err(crate::errors::CliError::Other(
-                "forced clear failure (NEXUS_TEST_FORCE_CLEAR_FAILURE)".to_string(),
-            ));
-        }
         self.user_token = None;
         self.save()
     }
