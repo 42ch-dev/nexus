@@ -18,7 +18,7 @@ mod direct;
 #[path = "common/direct_actor.rs"]
 mod direct_actor;
 
-use cli_support::{stderr, stdout};
+use cli_support::{json_stdout, stderr, stdout};
 use direct::DirectFixture;
 use direct_actor::fixture_creator_id;
 use nexus_home_layout::workspace_state_db_path;
@@ -369,8 +369,7 @@ async fn migrate_legacy_migrates_then_verifies() {
 
     let out = env.cli(&["creator", "memory", "migrate-legacy", "--json"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
-    let report: serde_json::Value =
-        serde_json::from_str(&stdout(&out)).expect("migration report JSON");
+    let report = json_stdout(&out);
     assert_eq!(report["status"], "migrated", "{report}");
     assert_eq!(
         report["records"], 2,
@@ -391,8 +390,7 @@ async fn migrate_legacy_migrates_then_verifies() {
 
     let again = env.cli(&["creator", "memory", "migrate-legacy", "--json"]);
     assert!(again.status.success(), "stderr: {}", stderr(&again));
-    let report: serde_json::Value =
-        serde_json::from_str(&stdout(&again)).expect("migration report JSON");
+    let report = json_stdout(&again);
     assert_eq!(report["status"], "already_complete", "{report}");
     assert_eq!(
         report["records"], 2,

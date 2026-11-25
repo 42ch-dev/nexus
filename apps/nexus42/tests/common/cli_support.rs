@@ -26,6 +26,31 @@ pub fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+/// Decode a `--json` leaf's stdout as the one JSON document its contract
+/// promises.
+///
+/// An empty stdout is a contract violation, not a parse problem: `serde_json`
+/// reports it as `EOF while parsing a value at line 1 column 0`, which reads
+/// like a crash instead of "the command printed nothing". Name the empty case
+/// here (with exit status and stderr) so the failure says what broke, and keep
+/// the same for a truncated/non-JSON body.
+pub fn json_stdout(out: &Output) -> serde_json::Value {
+    let text = stdout(out);
+    let code = out.status.code();
+    assert!(
+        !text.trim().is_empty(),
+        "--json leaf printed empty stdout (exit code {code:?}); stderr: {}",
+        stderr(out)
+    );
+    serde_json::from_str(&text).unwrap_or_else(|error| {
+        panic!(
+            "--json leaf printed invalid JSON ({error}) (exit code {code:?}); \
+             stdout: {text:?}; stderr: {}",
+            stderr(out)
+        )
+    })
+}
+
 /// Build a fresh migrated pool holding one owner-scoped world and one
 /// `Character` KB entry.
 ///
