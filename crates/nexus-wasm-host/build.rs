@@ -46,12 +46,25 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(nexus_no_wasm_target)");
     println!("cargo:rerun-if-env-changed=RUSTC");
 
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    // `rustup target add` rewrites this directory; without the watch, an
+    // "absent" decision cached in an earlier build survives the install and
+    // the gated tests stay skipped.
+    println!(
+        "cargo:rerun-if-changed={}",
+        wasm_target_probe::sysroot_of(&rustc)
+            .join("lib/rustlib")
+            .display()
+    );
+
     let manifest_dir = PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by Cargo"),
     );
     let embedded_root = manifest_dir.join("embedded-modules");
 
-    if !has_wasm_target() {
+    // Presence is decided from `sysroot/lib/rustlib/wasm32-unknown-unknown`:
+    // `rustc --print sysroot --target <t>` exits 0 even without the target.
+    if !wasm_target_probe::wasm_target_installed(&rustc) {
         println!(
             "cargo:warning=nexus-wasm-host: wasm32-unknown-unknown target not found; \
              skipping embedded WASM compilation. Embedded modules will be empty at \
@@ -68,17 +81,6 @@ fn main() {
     for &id in MODULE_IDS {
         build_module(id, &modules_root, &embedded_root);
     }
-}
-
-/// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
-///
-/// Decided from `sysroot/lib/rustlib/wasm32-unknown-unknown`:
-/// `rustc --print sysroot --target wasm32-unknown-unknown` exits 0 even when
-/// the target is absent, so its exit status says nothing.
-#[must_use]
-fn has_wasm_target() -> bool {
-    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
-    wasm_target_probe::wasm_target_installed(&rustc)
 }
 
 /// Compile one module's `.wasm` from source, stage its manifest, and inject

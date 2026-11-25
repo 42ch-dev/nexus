@@ -18,7 +18,20 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(nexus_spoke_adapter_no_wasm_target)");
     println!("cargo:rerun-if-env-changed=RUSTC");
 
-    if !has_wasm_target() {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    // `rustup target add` rewrites this directory; without the watch, an
+    // "absent" decision cached in an earlier build survives the install and
+    // the gated tests stay skipped.
+    println!(
+        "cargo:rerun-if-changed={}",
+        wasm_target_probe::sysroot_of(&rustc)
+            .join("lib/rustlib")
+            .display()
+    );
+
+    // Presence is decided from `sysroot/lib/rustlib/wasm32-unknown-unknown`:
+    // `rustc --print sysroot --target <t>` exits 0 even without the target.
+    if !wasm_target_probe::wasm_target_installed(&rustc) {
         println!(
             "cargo:warning=nexus-spoke-adapter: wasm32-unknown-unknown target not found; \
              skipping embedded-module integration tests. Install the target with: \
@@ -26,15 +39,4 @@ fn main() {
         );
         println!("cargo:rustc-cfg=nexus_spoke_adapter_no_wasm_target");
     }
-}
-
-/// Returns `true` when the `wasm32-unknown-unknown` sysroot is installed.
-///
-/// Decided from `sysroot/lib/rustlib/wasm32-unknown-unknown`:
-/// `rustc --print sysroot --target wasm32-unknown-unknown` exits 0 even when
-/// the target is absent, so its exit status says nothing.
-#[must_use]
-fn has_wasm_target() -> bool {
-    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
-    wasm_target_probe::wasm_target_installed(&rustc)
 }

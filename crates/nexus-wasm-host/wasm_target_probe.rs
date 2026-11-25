@@ -42,8 +42,12 @@ pub fn wasm_target_installed(rustc: &str) -> bool {
 
 /// The sysroot of the compiler Cargo is actually driving (`RUSTC`, not `PATH`).
 ///
+/// Build scripts use it to emit `cargo:rerun-if-changed` for
+/// `lib/rustlib` so installing the target later (`rustup target add`) does not
+/// leave a cached "target absent" decision in place.
+///
 /// An unanswerable query panics rather than reporting absence.
-fn sysroot_of(rustc: &str) -> PathBuf {
+pub fn sysroot_of(rustc: &str) -> PathBuf {
     let output = Command::new(rustc)
         .args(["--print", "sysroot"])
         .output()
