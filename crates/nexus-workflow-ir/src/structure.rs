@@ -250,6 +250,13 @@ pub fn validate(
     }
     for pattern in patterns {
         if let PatternBodyKind::Fragment(fragment) = pattern.body {
+            if fragment.ir_version > IR_VERSION {
+                violations.push(Violation::UnsupportedIrVersion {
+                    document: fragment.id.as_str().to_owned(),
+                    found: fragment.ir_version,
+                    supported: IR_VERSION,
+                });
+            }
             validate_fragment(fragment, &mut violations);
         }
     }
@@ -1012,7 +1019,12 @@ mod tests {
 
     #[test]
     fn rejects_an_ir_version_newer_than_this_build() {
-        let mut doc = document("future", &json!([node("entry", "outer_state")]), &json!([]), &json!([]));
+        let mut doc = document(
+            "future",
+            &json!([node("entry", "outer_state")]),
+            &json!([]),
+            &json!([]),
+        );
         doc.ir_version = IR_VERSION + 1;
 
         let violations = validate(&[&doc], &[]).unwrap_err();
@@ -1028,11 +1040,48 @@ mod tests {
 
     #[test]
     fn accepts_the_supported_ir_version() {
-        let doc = document("current", &json!([node("entry", "outer_state")]), &json!([]), &json!([]));
+        let doc = document(
+            "current",
+            &json!([node("entry", "outer_state")]),
+            &json!([]),
+            &json!([]),
+        );
         assert_eq!(doc.ir_version, IR_VERSION);
         assert_eq!(validate(&[&doc], &[]), Ok(()));
     }
+    #[test]
+    fn rejects_a_fragment_with_an_ir_version_newer_than_this_build() {
+        let mut frag = document(
+            "frag",
+            &json!([node("entry", "inner_step")]),
+            &json!([]),
+            &json!([]),
+        );
+        frag.ir_version = IR_VERSION + 1;
+        let bodies = [fragment("frag.pat", &frag)];
 
+        let violations = validate(&[], &bodies).unwrap_err();
+        assert_eq!(
+            violations,
+            vec![Violation::UnsupportedIrVersion {
+                document: "frag".to_owned(),
+                found: IR_VERSION + 1,
+                supported: IR_VERSION,
+            }]
+        );
+    }
+
+    #[test]
+    fn accepts_a_fragment_at_the_supported_ir_version() {
+        let frag = document(
+            "frag",
+            &json!([node("entry", "inner_step")]),
+            &json!([]),
+            &json!([]),
+        );
+        let bodies = [fragment("frag.pat", &frag)];
+        assert_eq!(validate(&[], &bodies), Ok(()));
+    }
 
     /// A resolved pattern body, pinned at `1.0.0`.
     fn fragment<'a>(registry_id: &'a str, document: &'a WorkflowDocument) -> PatternBody<'a> {
