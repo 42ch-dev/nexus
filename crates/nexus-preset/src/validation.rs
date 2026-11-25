@@ -293,14 +293,32 @@ fn has_outgoing_edge(document: &WorkflowDocument, node_id: &str) -> bool {
     document.edges.iter().any(|edge| edge.from == node_id)
 }
 
+/// Labeled next edges leaving the outer state `from`.
+///
+/// `Linear` + `label` is the only shape the projection reads as a labeled
+/// `next` edge ([`crate::workflow_ir`] `push_next_edges`); a label on any other
+/// edge kind is dropped by projection, so it is not labeled routing at all.
 fn labeled_edges<'a>(
     document: &'a WorkflowDocument,
     from: &'a str,
 ) -> impl Iterator<Item = &'a WorkflowEdge> {
-    document
-        .edges
-        .iter()
-        .filter(move |edge| edge.from == from && edge.label.is_some())
+    document.edges.iter().filter(move |edge| {
+        edge.from == from && edge.label.is_some() && matches!(edge.kind, WorkflowEdgeKind::Linear)
+    })
+}
+
+/// Whether `edge` feeds the runtime merge-arrival count of its target.
+///
+/// `StateCompositeTask::resolve_labeled_target` writes `_merge_<target>` only
+/// while routing an outer state's labeled / go-nogo `next` edges, so those are
+/// the only arrivals a merge gate can ever see. A hand-authored IR can put a
+/// label on a `conditional` / `default` / `depends_on` edge, or on an
+/// inner-graph node's edge; projection refuses or drops those, so counting them
+/// here fabricates a quorum mismatch.
+fn is_merge_arrival_edge(edge: &WorkflowEdge, outer_ids: &HashSet<&str>) -> bool {
+    outer_ids.contains(edge.from.as_str())
+        && (matches!(edge.kind, WorkflowEdgeKind::Go | WorkflowEdgeKind::Nogo)
+            || (matches!(edge.kind, WorkflowEdgeKind::Linear) && edge.label.is_some()))
 }
 
 // A2: Logical completeness checks
@@ -541,13 +559,16 @@ fn check_labeled_edge_duplicates(document: &WorkflowDocument, result: &mut Valid
 /// - M must equal the count of incoming labeled edges.
 /// - Merge nodes must have at least one outgoing edge.
 fn check_merge_node_integrity(document: &WorkflowDocument, result: &mut ValidationResult) {
+    let outer_ids: HashSet<&str> = outer_states(document)
+        .map(|(_, node)| node.id.as_str())
+        .collect();
     let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
-    for edge in &document.edges {
-        if edge.label.is_some()
-            || matches!(edge.kind, WorkflowEdgeKind::Go | WorkflowEdgeKind::Nogo)
-        {
-            *incoming_labeled.entry(edge.to.as_str()).or_insert(0) += 1;
-        }
+    for edge in document
+        .edges
+        .iter()
+        .filter(|edge| is_merge_arrival_edge(edge, &outer_ids))
+    {
+        *incoming_labeled.entry(edge.to.as_str()).or_insert(0) += 1;
     }
 
     for (i, state) in outer_states(document) {
@@ -2510,6 +2531,121 @@ states:
                 .iter()
                 .any(|(_, message, _, _)| { message.contains("does not match actual incoming") }),
             "quorum m mismatch absent: {merge:?}"
+        );
+    }
+
+    /// I-000397: a merge arrival is an outer state's labeled / go-nogo next
+    /// edge. A label on a `conditional` / `depends_on` edge, or on an
+    /// inner-graph node's edge, never reaches `_merge_<target>` at runtime, so
+    /// counting it would fabricate a quorum mismatch and a duplicate label.
+    #[test]
+    fn merge_arrival_counts_only_outer_state_labeled_and_gonogo_edges() {
+        let yaml = r"
+preset:
+  id: merge-arrival-family
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: approve
+        target: merged
+  - id: b
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      go: merged
+      nogo: done
+  - id: c
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+  - id: d
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+  - id: merged
+    merge:
+      kind: quorum
+      n: 2
+      m: 2
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let mut document = crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+        let caps = BuiltinCapabilityCatalog;
+
+        // Positive direction: exactly the labeled edge from `a` and the go
+        // edge from `b` count, so quorum n=2/m=2 holds and nothing is reported.
+        let clean = validate_workflow_ir(&document, &caps);
+        assert!(
+            clean.diagnostics.is_empty(),
+            "labeled + go arrivals should satisfy the quorum: {:?}",
+            clean.diagnostics
+        );
+
+        // `d` is an inner-graph node: its edges are not outer-state routing.
+        for node in &mut document.nodes {
+            if node.id == "d" {
+                node.kind = WorkflowNodeKind::InnerStep;
+            }
+        }
+        // Three more edges carry the same label into `merged`. A count of
+        // 2 can only survive if all three are excluded (each edge adds at
+        // most 1), so one assertion covers both directions.
+        document.edges.extend([
+            WorkflowEdge {
+                from: "d".to_string(),
+                id: "d->merged".to_string(),
+                kind: WorkflowEdgeKind::Linear,
+                label: Some("approve".to_string()),
+                to: "merged".to_string(),
+                when: None,
+            },
+            WorkflowEdge {
+                from: "c".to_string(),
+                id: "c->merged-conditional".to_string(),
+                kind: WorkflowEdgeKind::Conditional,
+                label: Some("approve".to_string()),
+                to: "merged".to_string(),
+                when: Some("_context._judge_result == true".to_string()),
+            },
+            WorkflowEdge {
+                from: "c".to_string(),
+                id: "c->merged-depends-on".to_string(),
+                kind: WorkflowEdgeKind::DependsOn,
+                label: Some("approve".to_string()),
+                to: "merged".to_string(),
+                when: None,
+            },
+        ]);
+
+        let result = validate_workflow_ir(&document, &caps);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| d.category != DiagnosticCategory::MergeIntegrity),
+            "unrelated labeled edges counted as merge arrivals: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|d| d.category != DiagnosticCategory::DuplicateLabel),
+            "unrelated labeled edges entered the duplicate-label check: {:?}",
+            result.diagnostics
         );
     }
 
