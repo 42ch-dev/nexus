@@ -274,6 +274,7 @@ async fn a_committed_apply_is_immutable_and_may_only_supersede_its_own_strategy(
 /// the plan prefix): the strategy's successor-less rows in the total order the reads pick a winner
 /// by. `sqlx` requires the statement to be a literal, hence one constant rather than a format
 /// argument.
+// SAFETY: test-only EXPLAIN QUERY PLAN inspection; static SQL mirror.
 const CURRENT_ROW_LOOKUP_PLAN: &str = "EXPLAIN QUERY PLAN \
      SELECT cur.apply_id, cur.approval_id, cur.content_hash, cur.applied_at, \
             cur.supersedes_apply_id \
@@ -315,11 +316,25 @@ async fn the_current_apply_lookup_is_two_index_searches_not_two_scans() {
 
     let plan = query_plan(&pool, CURRENT_ROW_LOOKUP_PLAN).await;
     assert!(
-        plan.contains("SEARCH cur USING INDEX idx_strategy_applies_strategy_current"),
+        plan.contains("idx_strategy_applies_strategy_current"),
         "the strategy filter and the total order are one index range: {plan}"
     );
     assert!(
-        plan.contains("SEARCH later USING COVERING INDEX idx_strategy_applies_supersedes"),
+        plan.contains("idx_strategy_applies_supersedes"),
         "the anti-join's inner side is a supersede-link index lookup: {plan}"
     );
+    assert!(
+        !plan.lines().any(full_scan_of_strategy_applies),
+        "neither side of the lookup may fall back to a full table scan: {plan}"
+    );
+}
+
+/// A plan row that walks `strategy_applies` in full: `SCAN` of one alias (or the table) with no
+/// index named. SQLite's wording is free to change, so only the scan shape is matched.
+fn full_scan_of_strategy_applies(detail: &str) -> bool {
+    detail.starts_with("SCAN")
+        && !detail.contains("USING")
+        && ["strategy_applies", " cur", " later"]
+            .iter()
+            .any(|name| detail.contains(name))
 }
