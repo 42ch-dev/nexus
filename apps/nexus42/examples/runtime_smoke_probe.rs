@@ -7,7 +7,7 @@
 //!
 //! ```text
 //! PROBE_PEER_ID=<peer-id>            # --print-peer-only (allowlist seed)
-//! DIAL_OK session=<id> remote=<id>   # signed-hello handshake completed
+//! DIAL_OK session_tag=<16hex> remote=<id>  # signed-hello handshake completed
 //! SERVED_OPS=upsert,promote,relate,check,assemble,compute   # manifest extensions.nexus.served_ops
 //! UNSERVED_REFUSAL_CODE=<code>       # a truly unserved op's wire refusal
 //! UNSERVED_REFUSAL_MESSAGE=<reason>
@@ -48,6 +48,16 @@ const DIALER_SEED: u8 = 7;
 
 fn fixed_keypair(seed: u8) -> Keypair {
     Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
+}
+
+/// The session identity every probe line carries: a `<16hex>` `DefaultHasher`
+/// tag, never the raw id. `DIAL_OK` and `COMPUTE_OK` both use this shape so the
+/// smoke test reads either line with one parser.
+fn session_tag(session_id: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 /// Minimal peer manifest (the probe is a reference peer — mirrors the
@@ -152,8 +162,8 @@ async fn main() {
         }
     };
     println!(
-        "DIAL_OK session={} remote={}",
-        session.session_id(),
+        "DIAL_OK session_tag={} remote={}",
+        session_tag(session.session_id()),
         session.remote_peer_id()
     );
 
@@ -294,12 +304,9 @@ async fn run_retained_ops(
                 computed.payload
             )
         })?;
-    let session_tag = {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        session_id.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
-    println!("COMPUTE_OK session_tag={session_tag} entry=kb_atk current_hp={current_hp}");
+    println!(
+        "COMPUTE_OK session_tag={} entry=kb_atk current_hp={current_hp}",
+        session_tag(session_id)
+    );
     Ok(())
 }
