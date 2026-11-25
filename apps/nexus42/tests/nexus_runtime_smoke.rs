@@ -429,6 +429,38 @@ fn session_tag(session: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+/// The session identity a named probe line reports, or an error naming the
+/// divergence: exactly one line whose first token is `prefix` and which carries
+/// a `<16 lowercase hex>` `session_tag=` token and no raw `session=` token.
+///
+/// `DIAL_OK` and `COMPUTE_OK` both use that one shape, so the same parse covers
+/// either line and a probe that reverts one of them to a raw id fails here.
+fn probe_session_tag<'a>(stdout: &'a str, prefix: &str) -> Result<&'a str, String> {
+    let mut lines = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.split_whitespace().next() == Some(prefix));
+    let line = lines
+        .next()
+        .ok_or_else(|| format!("missing {prefix} line"))?;
+    if lines.next().is_some() {
+        return Err(format!("duplicate {prefix} lines"));
+    }
+    let mut tokens = line.split_whitespace().skip(1);
+    if tokens.clone().any(|token| token.starts_with("session=")) {
+        return Err(format!("{prefix} prints a raw session= id: {line:?}"));
+    }
+    let tag = tokens
+        .find_map(|token| token.strip_prefix("session_tag="))
+        .ok_or_else(|| format!("{prefix} line has no session_tag= token: {line:?}"))?;
+    if tag.len() != 16 || !tag.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        return Err(format!(
+            "{prefix} session_tag is not 16 lowercase hex: {tag:?}"
+        ));
+    }
+    Ok(tag)
+}
+
 /// Parse the probe's `COMPUTE_OK session_tag=<tag> entry=kb_atk current_hp=<n>`
 /// line and return the reported HP. Requires exactly ONE matching line and a
 /// complete integer token: a neighbouring value (`150`, `1500`) therefore
@@ -490,6 +522,40 @@ fn compute_result_control_rejects_a_neighbouring_value() {
     assert!(
         assert_compute_result(&format!("{}\n{}", line("15"), line("15")), "ses_smoke").is_err(),
         "duplicate compute lines must be rejected"
+    );
+}
+
+/// The session-tag parse's negative control: a raw id, an uppercased or short
+/// tag, a missing tag and a duplicated line must never satisfy it.
+#[test]
+fn session_tag_parse_control_rejects_a_raw_or_malformed_session() {
+    let dial = |session: &str| format!("DIAL_OK {session} remote=12D3KooWpeer");
+
+    assert_eq!(
+        probe_session_tag(&dial("session_tag=0123456789abcdef"), "DIAL_OK"),
+        Ok("0123456789abcdef")
+    );
+    for bad in [
+        "session=ses_smoke",
+        "session_tag=0123456789ABCDEF",
+        "session_tag=0123456789abcde",
+        "session_tag=0123456789abcdeg",
+        "session_tag=0123456789abcdef session=ses_smoke",
+        "remote=12D3KooWpeer",
+    ] {
+        assert!(
+            probe_session_tag(&dial(bad), "DIAL_OK").is_err(),
+            "{bad:?} must fail the session-tag parse"
+        );
+    }
+    let two = format!(
+        "{}\n{}",
+        dial("session_tag=0123456789abcdef"),
+        dial("session_tag=0123456789abcdef")
+    );
+    assert!(
+        probe_session_tag(&two, "DIAL_OK").is_err(),
+        "duplicate DIAL_OK lines must be rejected"
     );
 }
 
@@ -1160,12 +1226,19 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         stdout.lines().any(|line| line.trim() == SERVED_OPS_LINE),
         "probe output missing the exact {SERVED_OPS_LINE:?} line:\n{stdout}\nstderr:\n{stderr}"
     );
-    for expected in ["DIAL_OK", "SESSION_OK", "UPSERT_OK", "SESSION_ALIVE_OK"] {
+    for expected in ["SESSION_OK", "UPSERT_OK", "SESSION_ALIVE_OK"] {
         assert!(
             stdout.contains(expected),
             "probe output missing {expected:?}:\n{stdout}\nstderr:\n{stderr}"
         );
     }
+    let dial_tag = probe_session_tag(&stdout, "DIAL_OK")
+        .unwrap_or_else(|e| panic!("{e}\nstdout:\n{stdout}\nstderr:\n{stderr}"));
+    assert_ne!(
+        dial_tag,
+        session_tag(COMPUTE_SESSION),
+        "DIAL_OK must report the connect peer session, not the staged compute session:\n{stdout}"
+    );
     assert_eq!(
         probe_value(&stdout, "UNSERVED_REFUSAL_CODE").unwrap_or_default(),
         "op_unsupported"
@@ -1185,11 +1258,20 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         "the refusal must be the out-of-scope denial, not request validation:\n{stdout}\nstderr:\n{stderr}"
     );
     #[cfg(not(nexus42_no_wasm_target))]
-    assert_eq!(
-        assert_compute_result(&stdout, COMPUTE_SESSION),
-        Ok(()),
-        "the deterministic compute result must be exactly 15 HP:\n{stdout}\nstderr:\n{stderr}"
-    );
+    {
+        let compute_tag = probe_session_tag(&stdout, "COMPUTE_OK")
+            .unwrap_or_else(|e| panic!("{e}\nstdout:\n{stdout}\nstderr:\n{stderr}"));
+        assert_eq!(
+            compute_tag,
+            session_tag(COMPUTE_SESSION),
+            "COMPUTE_OK must tag the staged compute session:\n{stdout}"
+        );
+        assert_eq!(
+            assert_compute_result(&stdout, COMPUTE_SESSION),
+            Ok(()),
+            "the deterministic compute result must be exactly 15 HP:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
     #[cfg(nexus42_no_wasm_target)]
     assert!(
         !stdout.contains("COMPUTE_OK"),
