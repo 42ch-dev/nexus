@@ -153,16 +153,20 @@ struct ScaffoldTransaction {
     overwritten_files: Vec<(PathBuf, Vec<u8>)>,
     created_dirs: Vec<PathBuf>,
     temp_files: Vec<PathBuf>,
+    /// Whether the executor records its writes instead of landing them. Such a
+    /// run never owns a path on disk, so its rollback is inert.
+    recording: bool,
     committed: bool,
 }
 
 impl ScaffoldTransaction {
-    const fn new() -> Self {
+    const fn new(recording: bool) -> Self {
         Self {
             created_files: Vec::new(),
             overwritten_files: Vec::new(),
             created_dirs: Vec::new(),
             temp_files: Vec::new(),
+            recording,
             committed: false,
         }
     }
@@ -171,7 +175,15 @@ impl ScaffoldTransaction {
         self.committed = true;
     }
 
+    /// Create a directory if it doesn't exist. Returns `true` if freshly created.
+    ///
+    /// A no-op under a recording executor: the bytes those directories would
+    /// hold never land, so leaving them behind would change the tree a dry run
+    /// promises to leave alone.
     fn create_dir(&mut self, dir: &Path) -> Result<bool, CapabilityError> {
+        if self.recording {
+            return Ok(false);
+        }
         if dir.is_dir() {
             return Ok(false);
         }
@@ -230,7 +242,7 @@ impl ScaffoldTransaction {
 
 impl Drop for ScaffoldTransaction {
     fn drop(&mut self) {
-        if self.committed {
+        if self.committed || self.recording {
             return;
         }
         for tmp in &self.temp_files {
@@ -374,7 +386,7 @@ impl Capability for GameBibleProjectScaffold {
         .await?;
 
         let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
-            let mut tx = ScaffoldTransaction::new();
+            let mut tx = ScaffoldTransaction::new(executor.records_work_artifacts());
 
             for dir in [
                 &work_dir,
@@ -470,6 +482,7 @@ impl Capability for GameBibleProjectScaffold {
 mod tests {
     use super::super::work_commit::test_support::RecordingExecutor;
     use super::*;
+    use std::collections::BTreeMap;
 
     /// Capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> GameBibleProjectScaffold {
@@ -479,6 +492,67 @@ mod tests {
             pool: None,
             works_root,
             executor: Some(executor),
+        }
+    }
+
+    /// Every entry below `root` and the bytes it holds (`None` for a directory).
+    fn tree_snapshot(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+        let mut snapshot = BTreeMap::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    snapshot.insert(path.clone(), None);
+                    pending.push(path);
+                } else {
+                    snapshot.insert(path.clone(), std::fs::read(&path).ok());
+                }
+            }
+        }
+        snapshot
+    }
+
+    /// A dry-run executor: reports recording and lands no bytes.
+    struct DryRunExecutor {
+        workspace_root: PathBuf,
+    }
+
+    #[async_trait]
+    impl WorkspaceExecutor for DryRunExecutor {
+        async fn open(
+            &self,
+            _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError>
+        {
+            Err(CapabilityError::WorkerUnavailable)
+        }
+
+        async fn commit(
+            &self,
+            _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError>
+        {
+            Err(CapabilityError::WorkerUnavailable)
+        }
+
+        fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
+            Ok(self.workspace_root.clone())
+        }
+
+        fn records_work_artifacts(&self) -> bool {
+            true
+        }
+
+        async fn commit_work_artifact(
+            &self,
+            _input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+        {
+            Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
         }
     }
 
@@ -536,7 +610,7 @@ mod tests {
         let sub_dir = work_dir.join("subdir");
         std::fs::create_dir_all(&sub_dir).expect("mkdir subdir");
 
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         tx.created_files.push(file_path.clone());
         tx.created_dirs.push(sub_dir.clone());
 
@@ -567,7 +641,7 @@ mod tests {
         let file_path = work_dir.join("keep.txt");
         std::fs::write(&file_path, "keep").expect("write");
 
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         tx.created_files.push(file_path.clone());
         tx.created_dirs.push(work_dir);
         tx.commit();
@@ -590,7 +664,7 @@ mod tests {
         std::fs::write(&readme_path, user_content).expect("write user README");
 
         let executor = RecordingExecutor::new();
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         tx.create_dir(&work_dir).unwrap();
         let scaffold_content = "# Overwritten\n\nScaffold template.\n";
         tx.write_file(
@@ -653,7 +727,7 @@ mod tests {
         let tmp_path = final_path.with_extension("tmp");
         std::fs::write(&tmp_path, "partial content").expect("write temp");
 
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         tx.temp_files.push(tmp_path.clone());
 
         drop(tx);
@@ -699,6 +773,38 @@ mod tests {
             .any(|c| c.rel_child == "Design/overview.md"
                 && c.content.contains("section_status: draft")));
         assert_eq!(out["files_created"].as_array().unwrap().len(), 13);
+    }
+
+    #[tokio::test]
+    async fn recording_run_leaves_the_works_tree_identical() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = GameBibleProjectScaffold {
+            pool: None,
+            works_root: root,
+            executor: Some(Arc::new(DryRunExecutor {
+                workspace_root: tmp.path().to_path_buf(),
+            })),
+        };
+
+        let before = tree_snapshot(tmp.path());
+        let out = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_gb_recording",
+                "work_ref": "recording-gb",
+                "title": "Recording Game Bible",
+            }))
+            .await
+            .expect("a recording run must succeed");
+
+        assert_eq!(
+            before,
+            tree_snapshot(tmp.path()),
+            "a recording run must leave the whole Works tree untouched"
+        );
+        assert_eq!(out["dirs_created"], serde_json::json!([]));
     }
 
     #[tokio::test]
