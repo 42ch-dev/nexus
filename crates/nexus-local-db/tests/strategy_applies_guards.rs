@@ -330,6 +330,10 @@ async fn the_current_apply_lookup_is_two_index_searches_not_two_scans() {
         !rows.iter().any(|row| scans_strategy_applies(row)),
         "neither side of the lookup may walk strategy_applies, by table or by index: {plan}"
     );
+    assert!(
+        !plan.contains("TEMP B-TREE"),
+        "the total order must come from the index range, not a sort: {plan}"
+    );
 }
 
 /// Whether a plan row is a `SEARCH` through exactly `index`: SQLite spells its leaf lookups
