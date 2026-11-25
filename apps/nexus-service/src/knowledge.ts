@@ -480,7 +480,7 @@ function readingQuery(searchParams: URLSearchParams): ReadingProgressQuery {
   }
   return {
     work_id,
-    chapter: requireInteger(chapter, 'chapter'),
+    chapter: requirePositiveInteger(chapter, 'chapter'),
     ...(volume === null ? {} : { volume: requirePositiveInteger(volume, 'volume') }),
   };
 }
