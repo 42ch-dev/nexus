@@ -62,8 +62,11 @@ function validateEnvelope(candidate: unknown): CoreError | null {
   if (envelope.http_status === undefined || isValidHttpStatus(envelope.http_status)) {
     return envelope;
   }
-  const { http_status: _ignored, ...rest } = envelope;
-  return rest;
+  // Rebuild explicitly: object rest copies only own enumerable properties, so
+  // an Error-shaped rejection would lose its non-enumerable `message`.
+  const sanitized: CoreError = { code: envelope.code, message: envelope.message };
+  if (envelope.details !== undefined) sanitized.details = envelope.details;
+  return sanitized;
 }
 
 /** Parse a native rejection reason into the generated wire `CoreError` envelope. */

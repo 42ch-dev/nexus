@@ -215,6 +215,49 @@ describe('agent-host session operations (CAP-007 / I-000131)', () => {
     );
   });
 
+  test('an Error-shaped rejection with an invalid http_status keeps its message (I-000428)', async () => {
+    const rejection = new Error('provider does not serve set_model');
+    rejection.code = 'not_supported';
+    rejection.http_status = 1000;
+    const service = serviceFor({
+      providerCall: async () => ({ ok: false, error: rejection }),
+    });
+
+    await assert.rejects(
+      () => execute(service, { kind: 'set_model', model: 'claude-opus' }),
+      (error) => {
+        assert.equal(error.status, 501);
+        assert.equal(error.code, 'not_supported');
+        assert.equal(error.message, 'provider does not serve set_model');
+        return true;
+      },
+    );
+  });
+
+  test('a prototype-name details.reason does not become a conflict code (I-000428)', async () => {
+    const service = serviceFor({
+      providerCall: async () => ({
+        ok: false,
+        error: {
+          code: 'invalid_input',
+          message: 'apply refused',
+          http_status: 400,
+          details: { code: 'apply_refused', reason: 'toString' },
+        },
+      }),
+    });
+
+    await assert.rejects(
+      () => execute(service, { kind: 'set_model', model: 'claude-opus' }),
+      (error) => {
+        assert.notEqual(error.status, 409);
+        assert.equal(error.status, 400);
+        assert.equal(error.code, 'invalid_input');
+        return true;
+      },
+    );
+  });
+
   test('a typed internal reply error stays 500 internal with the public message', async () => {
     const service = serviceFor({
       providerCall: async () => ({

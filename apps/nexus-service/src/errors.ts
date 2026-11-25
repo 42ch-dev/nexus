@@ -74,7 +74,7 @@ const APPLY_CONFLICT_REASONS: Readonly<Record<string, true>> = {
 function applyConflictCode(details: Record<string, unknown> | undefined): string | undefined {
   if (details?.code !== 'apply_refused') return undefined;
   const reason = String(details.reason);
-  return APPLY_CONFLICT_REASONS[reason] ? reason : undefined;
+  return Object.hasOwn(APPLY_CONFLICT_REASONS, reason) ? reason : undefined;
 }
 
 export function statusForCode(code: string): number {
