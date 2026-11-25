@@ -118,7 +118,15 @@ function expectInspectorOffersNoSave(compose: boolean) {
     },
   } as MutableRefObject<StrategyCanvasAdapterContext>;
 
-  const { container } = render(<>{createStrategyCanvasAdapter(ctxRef).renderInspector?.(null as never)}</>);
+  const { container } = render(
+    <>
+      {createStrategyCanvasAdapter(ctxRef).renderInspector?.({
+        id: 'draft',
+        position: { x: 0, y: 0 },
+        data: { stateId: 'draft' },
+      } as never)}
+    </>,
+  );
   const inspector = within(container);
   expect(inspector.getByLabelText('State inspector')).toBeInTheDocument();
   expect(inspector.getByLabelText('Transition inspector')).toBeInTheDocument();

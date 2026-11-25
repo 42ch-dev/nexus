@@ -15,7 +15,7 @@ import { PromptInspector } from './inspectors/prompt-inspector';
 import { SlotInspector } from './inspectors/slot-inspector';
 import { StateInspector } from './inspectors/state-inspector';
 import { applyTrajectoryOverlay } from './simulation-overlay';
-import { type EditForm, type Section } from './state-machine';
+import { type EditForm, type Section, templateRefOf } from './state-machine';
 
 /** Live session overlay data attached to the graph payload. */
 export interface ActiveSession {
@@ -137,10 +137,14 @@ export function createStrategyCanvasAdapter(
       };
     },
 
-    renderInspector(_node) {
+    renderInspector(node) {
       const ctx = ctxRef.current;
-      const selectedNode = ctx.selectedNode;
-      if (ctx.compose && selectedNode?.type === 'strategy-pattern-slot') {
+      // Selection must come from the memo-keyed argument, never the ref: the
+      // orchestrator assigns `ctxRef.current` only after `useCanvasSurface`
+      // runs, so on the selection-change render `ctx.selectedNode` /
+      // `ctx.selectedState` still hold the previous render's selection.
+      const selectedNode = node as Node<StrategyNodeData>;
+      if (ctx.compose && selectedNode.type === 'strategy-pattern-slot') {
         return (
           <SlotInspector
             node={selectedNode.data as StrategyNodeData}
@@ -152,8 +156,10 @@ export function createStrategyCanvasAdapter(
           />
         );
       }
-      const selectedState = ctx.selectedState;
+      const stateId = (selectedNode.data as StrategyNodeData).stateId;
+      const selectedState = ctx.parsed?.manifest.states.find((s) => s.id === stateId);
       if (!selectedState) return null;
+      const promptTemplateRef = templateRefOf(selectedState);
 
       return (
         <>
@@ -161,12 +167,12 @@ export function createStrategyCanvasAdapter(
           <div onFocusCapture={() => ctx.setActiveSection('transition')}>
             <EdgeInspector selectedState={selectedState} form={ctx.form} onChange={ctx.onChange} />
           </div>
-          {ctx.promptTemplateRef ? (
+          {promptTemplateRef ? (
             <div onFocusCapture={() => ctx.setActiveSection('prompt')}>
               <PromptInspector
                 form={ctx.form}
                 onChange={ctx.onChange}
-                promptTemplateRef={ctx.promptTemplateRef}
+                promptTemplateRef={promptTemplateRef}
               />
             </div>
           ) : null}
