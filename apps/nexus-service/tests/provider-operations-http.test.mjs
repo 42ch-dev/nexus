@@ -156,6 +156,26 @@ describe('agent-host session operations (CAP-007 / I-000131)', () => {
     );
   });
 
+  test('a typed reply error with an invalid http_status falls back to the mapped status (I-000428)', async () => {
+    const service = serviceFor({
+      providerCall: async () => ({
+        ok: false,
+        error: { code: 'not_supported', message: 'provider does not serve set_model', http_status: 1000 },
+      }),
+    });
+
+    await assert.rejects(
+      () => execute(service, { kind: 'set_model', model: 'claude-opus' }),
+      (error) => {
+        assert.notEqual(error.status, 500);
+        assert.equal(error.status, 501);
+        assert.equal(error.code, 'not_supported');
+        assert.equal(error.message, 'provider does not serve set_model');
+        return true;
+      },
+    );
+  });
+
   test('a typed internal reply error stays 500 internal with the public message', async () => {
     const service = serviceFor({
       providerCall: async () => ({
