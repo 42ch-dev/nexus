@@ -506,6 +506,76 @@ fn plan_index_names_are_read_whole() {
     );
 }
 
+/// I-000471: what makes the outbox UPDATE/DELETE pair dead is database state, not prose. The pair
+/// is installed as AFTER triggers — only a committed statement runs them — and the immutability
+/// pair before them aborts without a predicate, so no UPDATE or DELETE can ever commit. Assert both
+/// facts against the migrated schema; the disposition narrative below is the documentation pin, not
+/// the proof.
+#[tokio::test]
+async fn the_unconditional_immutability_pair_makes_the_outbox_pair_unreachable() {
+    let (pool, _dir) = pool().await;
+
+    let triggers: Vec<(String, String)> = sqlx::query_as(
+        "SELECT name, sql FROM sqlite_master \
+         WHERE type = 'trigger' AND tbl_name = 'strategy_applies' ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("trigger list");
+
+    // Dead by construction: the pair observes the statement only after it succeeds.
+    for (name, event) in [
+        (
+            "outbox_strategy_applies_update",
+            "AFTER UPDATE ON strategy_applies",
+        ),
+        (
+            "outbox_strategy_applies_delete",
+            "AFTER DELETE ON strategy_applies",
+        ),
+    ] {
+        let sql = trigger_sql(&triggers, name);
+        assert!(
+            sql.contains(event),
+            "{name} must be the {event} trigger, is: {sql}"
+        );
+    }
+
+    // ...and unreachable because these abort with no predicate: there is no committed statement
+    // left for an AFTER trigger to observe.
+    for (name, event) in [
+        (
+            "immutable_strategy_applies_update",
+            "BEFORE UPDATE ON strategy_applies",
+        ),
+        (
+            "immutable_strategy_applies_delete",
+            "BEFORE DELETE ON strategy_applies",
+        ),
+    ] {
+        let sql = trigger_sql(&triggers, name);
+        assert!(
+            sql.contains(event),
+            "{name} must be the {event} trigger, is: {sql}"
+        );
+        assert!(sql.contains("RAISE(ABORT"), "{name} must abort, is: {sql}");
+        assert!(
+            !sql.contains(" WHERE ") && !sql.contains(" WHEN "),
+            "{name} must abort unconditionally, so an AFTER trigger can never see the write: {sql}"
+        );
+    }
+}
+
+/// The `CREATE TRIGGER` text `sqlite_master` stores for `name`, whitespace-collapsed so a statement
+/// is matched as written rather than by its layout.
+fn trigger_sql(triggers: &[(String, String)], name: &str) -> String {
+    let (_, sql) = triggers
+        .iter()
+        .find(|(trigger, _)| trigger == name)
+        .unwrap_or_else(|| panic!("no trigger named {name}"));
+    sql.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// I-000471: the disposition migration's list is the only place that says which UPDATE/DELETE
 /// triggers are dead and which must stay, so pin both lists. `outbox_*_update` / `outbox_*_delete`
 /// are AFTER triggers that no committed statement can reach; the guard trio and the approval pin
