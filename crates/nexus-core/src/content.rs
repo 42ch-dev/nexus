@@ -148,10 +148,34 @@ pub fn resolve_guarded_path(
     let joined = canonical_root.join(rel_path);
 
     if must_exist {
-        let canonical_target = joined.canonicalize().map_err(|e| CoreError::InvalidInput {
-            field: format!("chapter_path_unresolvable:{}", io_kind_code(e.kind())),
-            reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
-        })?;
+        let canonical_target = match joined.canonicalize() {
+            Ok(canonical) => canonical,
+            Err(e) => {
+                // Containment before classification: when the target cannot be
+                // resolved, a symlinked ancestor may point outside the root.
+                // Decide containment from the nearest existing ancestor and,
+                // if it escapes, report the non-revealing forbidden shape for
+                // every kind so absence and permission stay indistinguishable
+                // outside the workspace.
+                let mut probe = joined.as_path();
+                loop {
+                    if let Ok(ancestor) = probe.canonicalize() {
+                        if !ancestor.starts_with(&canonical_root) {
+                            return Err(forbidden(rel_path));
+                        }
+                        break;
+                    }
+                    match probe.parent() {
+                        Some(parent) => probe = parent,
+                        None => return Err(forbidden(rel_path)),
+                    }
+                }
+                return Err(CoreError::InvalidInput {
+                    field: format!("chapter_path_unresolvable:{}", io_kind_code(e.kind())),
+                    reason: format!("cannot resolve chapter path '{rel_path}': {e}"),
+                });
+            }
+        };
         if !canonical_target.starts_with(&canonical_root) {
             return Err(forbidden(rel_path));
         }
@@ -558,14 +582,26 @@ async fn read_guarded_file(
 
     let path = resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), true)
         .await
-        .map_err(|e| match &e {
-            CoreError::InvalidInput { field, .. } if field == "chapter_path_forbidden" => {
+        .map_err(|e| match e {
+            CoreError::InvalidInput { ref field, .. } if field == "chapter_path_forbidden" => {
                 ContentFault::BadRequest {
                     code: forbidden_code.to_string(),
                     message: format!("chapter path '{rel_path}' escapes workspace root"),
                 }
             }
-            _ => ContentFault::Core(e),
+            // The `:kind` suffix is internal to the fs/read_text_file
+            // boundary; every other surface keeps the exact legacy field so
+            // the wire shape (`details.field`) stays unchanged.
+            CoreError::InvalidInput {
+                ref field,
+                ref reason,
+            } if field.starts_with("chapter_path_unresolvable:") => {
+                ContentFault::Core(CoreError::InvalidInput {
+                    field: "chapter_path_unresolvable".to_string(),
+                    reason: reason.clone(),
+                })
+            }
+            other => ContentFault::Core(other),
         })?;
 
     let metadata = tokio::fs::metadata(&path).await.map_err(|e| {

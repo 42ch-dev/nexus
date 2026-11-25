@@ -4710,17 +4710,108 @@ mod tests {
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
             .expect("chmod 000");
 
-        let error = execute_read_file(&read_request("locked/secret.md"), &fixture.context)
-            .await
-            .expect_err("an unreadable path refuses");
+        // Probe before asserting: on a root / privileged-container runner a
+        // read below a chmod-000 directory succeeds, so there is no denial to
+        // classify — skip rather than fail the suite there.
+        let probe = std::fs::read(locked.join("secret.md"));
+        let denied = matches!(
+            probe.as_ref().map_err(std::io::Error::kind),
+            Err(std::io::ErrorKind::PermissionDenied)
+        );
+
+        let outcome = if denied {
+            Some(
+                execute_read_file(&read_request("locked/secret.md"), &fixture.context)
+                    .await
+                    .expect_err("an unreadable path refuses"),
+            )
+        } else {
+            eprintln!(
+                "skipping permission-denial assertion: chmod 000 does not deny reads \
+                 on this runner (root or privileged container)"
+            );
+            None
+        };
 
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))
             .expect("restore perms");
 
-        assert!(
-            matches!(error, NexusApiError::Forbidden { .. }),
-            "a permission denial is truthful, not a false absence: {error:?}"
+        if let Some(error) = outcome {
+            assert!(
+                matches!(error, NexusApiError::Forbidden { .. }),
+                "a permission denial is truthful, not a false absence: {error:?}"
+            );
+        }
+    }
+
+    // Unix-only: needs a symlink to place an ancestor outside the root.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn execute_read_file_outside_workspace_unresolvable_path_is_non_revealing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = fixture(true).await;
+        let outside = tempfile::tempdir().expect("outside root");
+        std::fs::write(outside.path().join("hidden.md"), "outside body").expect("seed outside");
+        std::os::unix::fs::symlink(outside.path(), fixture.workspace.path().join("escape"))
+            .expect("escape symlink");
+
+        // Both a missing target and (via chmod) a permission-denied lookup
+        // below the escaping ancestor must collapse to the same non-revealing
+        // Forbidden shape — no existence metadata leaks outside the root.
+        std::fs::set_permissions(outside.path(), std::fs::Permissions::from_mode(0o000))
+            .expect("chmod 000 outside");
+        let denied_probe = matches!(
+            std::fs::read(outside.path().join("hidden.md"))
+                .as_ref()
+                .map_err(std::io::Error::kind),
+            Err(std::io::ErrorKind::PermissionDenied)
         );
+        std::fs::set_permissions(outside.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("restore outside perms");
+
+        let missing_error = execute_read_file(&read_request("escape/absent.md"), &fixture.context)
+            .await
+            .expect_err("a missing path below the escape refuses");
+        assert!(
+            matches!(missing_error, NexusApiError::Forbidden { .. }),
+            "outside absence is non-revealing, never NotFound: {missing_error:?}"
+        );
+
+        if denied_probe {
+            std::fs::set_permissions(outside.path(), std::fs::Permissions::from_mode(0o000))
+                .expect("chmod 000 outside");
+            let denied_error =
+                execute_read_file(&read_request("escape/hidden.md"), &fixture.context)
+                    .await
+                    .expect_err("an unreadable path below the escape refuses");
+            std::fs::set_permissions(outside.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("restore outside perms");
+            match (&missing_error, &denied_error) {
+                (
+                    NexusApiError::Forbidden { resource: missing },
+                    NexusApiError::Forbidden { resource: denied },
+                ) => {
+                    for resource in [missing, denied] {
+                        assert!(
+                            !resource.contains("does not exist")
+                                && !resource.contains("permission denied"),
+                            "no existence metadata leaks: {resource}"
+                        );
+                    }
+                    assert!(
+                        denied.replace("hidden.md", "absent.md") == *missing,
+                        "absence and permission are indistinguishable: {missing} vs {denied}"
+                    );
+                }
+                _ => panic!("both outcomes must be Forbidden"),
+            }
+        } else {
+            eprintln!(
+                "skipping outside-permission probe: chmod 000 does not deny reads \
+                 on this runner (root or privileged container)"
+            );
+        }
     }
 
     #[tokio::test]
