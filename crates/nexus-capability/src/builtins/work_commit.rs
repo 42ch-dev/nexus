@@ -172,6 +172,26 @@ pub async fn claim_work_ref(
     work_id: &str,
     requested: Option<&str>,
 ) -> Result<WorkRefClaim, CapabilityError> {
+    claim_work_ref_with_recording(pool, creator_id, work_id, requested, false).await
+}
+
+/// [`claim_work_ref`] with an explicit recording flag.
+///
+/// A recording (dry) run owns no row, so it performs the same ownership reads
+/// and writes none of them: a missing or foreign works row still refuses (the
+/// dry run meets the same gate the real run does), while the effective
+/// `work_ref` is taken as-is instead of being persisted, and no rollback state
+/// is armed because there is nothing to restore.
+///
+/// # Errors
+/// Same as [`claim_work_ref`].
+pub async fn claim_work_ref_with_recording(
+    pool: Option<&SqlitePool>,
+    creator_id: &str,
+    work_id: &str,
+    requested: Option<&str>,
+    recording: bool,
+) -> Result<WorkRefClaim, CapabilityError> {
     let Some(pool) = pool else {
         let Some(work_ref) = requested else {
             return Err(CapabilityError::InputInvalid(
@@ -208,6 +228,13 @@ pub async fn claim_work_ref(
             effective: stored,
         });
     };
+    if recording {
+        return Ok(WorkRefClaim {
+            pool: None,
+            prior: None,
+            effective: work_ref.to_string(),
+        });
+    }
     if prior.as_deref() == Some(work_ref) {
         return Ok(WorkRefClaim {
             pool: Some(pool.clone()),
@@ -251,6 +278,29 @@ pub async fn publish_work_identity(
     work_profile: &str,
     work_ref: &str,
 ) -> Result<(), CapabilityError> {
+    publish_work_identity_with_recording(pool, creator_id, work_id, work_profile, work_ref, false)
+        .await
+}
+
+/// [`publish_work_identity`] with an explicit recording flag.
+///
+/// A recording (dry) run lands no bytes, so it publishes no identity either:
+/// the works row keeps whatever profile and ref it already had. The row's
+/// ownership was already checked by the run's claim.
+///
+/// # Errors
+/// Same as [`publish_work_identity`]; a recording run never fails here.
+pub async fn publish_work_identity_with_recording(
+    pool: Option<&SqlitePool>,
+    creator_id: &str,
+    work_id: &str,
+    work_profile: &str,
+    work_ref: &str,
+    recording: bool,
+) -> Result<(), CapabilityError> {
+    if recording {
+        return Ok(());
+    }
     let Some(pool) = pool else {
         return Ok(());
     };
@@ -438,25 +488,17 @@ pub mod test_support {
             Ok(WorkArtifactCommitOutput { committed: true })
         }
     }
-}
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::test_support::RecordingExecutor;
-    use super::*;
-    use crate::builtins::{EssayProjectScaffold, NovelProjectScaffold};
-    use crate::Capability;
-    use nexus_local_db::works::{self, WorkRecord};
-    use serde_json::json;
-
-    const CREATOR: &str = "ctr_claim";
-    const WORK_ID: &str = "wrk_claim";
-
-    fn work_record(work_ref: Option<&str>, work_profile: Option<&str>) -> WorkRecord {
-        WorkRecord {
-            work_id: WORK_ID.to_string(),
-            creator_id: CREATOR.to_string(),
+    /// One works row, written through the real engine pool.
+    pub fn work_record(
+        work_id: &str,
+        creator_id: &str,
+        work_ref: Option<&str>,
+        work_profile: Option<&str>,
+    ) -> nexus_local_db::works::WorkRecord {
+        nexus_local_db::works::WorkRecord {
+            work_id: work_id.to_string(),
+            creator_id: creator_id.to_string(),
             workspace_slug: "default".to_string(),
             status: "draft".to_string(),
             title: "Claimed Work".to_string(),
@@ -489,29 +531,76 @@ mod tests {
         }
     }
 
+    /// An engine pool under `dir` holding one works row for
+    /// `work_id`/`creator_id` (`state.db` sits beside any `Works/` tree).
+    ///
+    /// # Panics
+    /// When the engine pool cannot open or the works row cannot be written.
+    pub async fn pool_with_work(
+        dir: &Path,
+        work_id: &str,
+        creator_id: &str,
+        work_ref: Option<&str>,
+        work_profile: Option<&str>,
+    ) -> sqlx::SqlitePool {
+        let guarded = nexus_local_db::init_engine_pool(&dir.join("state.db"))
+            .await
+            .expect("engine pool");
+        let pool = guarded.clone_pool();
+        nexus_local_db::works::create_work(
+            &pool,
+            &work_record(work_id, creator_id, work_ref, work_profile),
+        )
+        .await
+        .expect("works row");
+        pool
+    }
+
+    /// The `(work_ref, work_profile)` pair stored for `work_id`.
+    ///
+    /// # Panics
+    /// When the row cannot be read.
+    pub async fn stored_identity(
+        pool: &sqlx::SqlitePool,
+        work_id: &str,
+    ) -> (Option<String>, Option<String>) {
+        sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT work_ref, work_profile FROM works WHERE work_id = ?",
+        )
+        .bind(work_id)
+        .fetch_one(pool)
+        .await
+        .expect("read works row")
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::test_support::RecordingExecutor;
+    use super::*;
+    use crate::builtins::{EssayProjectScaffold, NovelProjectScaffold};
+    use crate::Capability;
+    use nexus_local_db::works::WorkRecord;
+    use serde_json::json;
+
+    const CREATOR: &str = "ctr_claim";
+    const WORK_ID: &str = "wrk_claim";
+
+    fn work_record(work_ref: Option<&str>, work_profile: Option<&str>) -> WorkRecord {
+        super::test_support::work_record(WORK_ID, CREATOR, work_ref, work_profile)
+    }
+
     async fn pool_with_work(
         dir: &Path,
         work_ref: Option<&str>,
         work_profile: Option<&str>,
     ) -> SqlitePool {
-        let guarded = nexus_local_db::init_engine_pool(&dir.join("state.db"))
-            .await
-            .expect("engine pool");
-        let pool = guarded.clone_pool();
-        works::create_work(&pool, &work_record(work_ref, work_profile))
-            .await
-            .expect("works row");
-        pool
+        super::test_support::pool_with_work(dir, WORK_ID, CREATOR, work_ref, work_profile).await
     }
 
     async fn stored_identity(pool: &SqlitePool) -> (Option<String>, Option<String>) {
-        sqlx::query_as::<_, (Option<String>, Option<String>)>(
-            "SELECT work_ref, work_profile FROM works WHERE work_id = ?",
-        )
-        .bind(WORK_ID)
-        .fetch_one(pool)
-        .await
-        .expect("read works row")
+        super::test_support::stored_identity(pool, WORK_ID).await
     }
 
     /// One pooled connection, no acquire timeout: holding it keeps any
@@ -528,7 +617,7 @@ mod tests {
         .await
         .expect("engine pool");
         let pool = guarded.clone_pool();
-        works::create_work(&pool, &work_record(work_ref, None))
+        nexus_local_db::works::create_work(&pool, &work_record(work_ref, None))
             .await
             .expect("works row");
         pool

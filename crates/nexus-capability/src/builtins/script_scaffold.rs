@@ -28,7 +28,8 @@
 
 use super::novel_scaffold_sanitize::validate_work_ref;
 use super::work_commit::{
-    claim_work_ref, commit_work_bytes, publish_work_identity, require_executor, resolve_works_dirs,
+    claim_work_ref_with_recording, commit_work_bytes, publish_work_identity_with_recording,
+    require_executor, resolve_works_dirs,
 };
 use crate::{path_is_occupied, Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
@@ -103,16 +104,20 @@ struct ScaffoldTransaction {
     created_dirs: Vec<PathBuf>,
     /// Temp files that may need cleanup on rollback (write started but rename didn't complete).
     temp_files: Vec<PathBuf>,
+    /// Whether the executor records its writes instead of landing them. Such a
+    /// run never owns a path on disk, so its rollback is inert.
+    recording: bool,
     committed: bool,
 }
 
 impl ScaffoldTransaction {
-    const fn new() -> Self {
+    const fn new(recording: bool) -> Self {
         Self {
             created_files: Vec::new(),
             overwritten_files: Vec::new(),
             created_dirs: Vec::new(),
             temp_files: Vec::new(),
+            recording,
             committed: false,
         }
     }
@@ -122,6 +127,11 @@ impl ScaffoldTransaction {
     }
 
     /// Create a directory if it doesn't exist. Returns `true` if freshly created.
+    ///
+    /// Under a recording executor the checks still run — an occupied path
+    /// refuses exactly as it does in a real run — but nothing is created: the
+    /// bytes those directories would hold never land, so leaving them behind
+    /// would change the tree a dry run promises to leave alone.
     fn create_dir(&mut self, dir: &Path) -> Result<bool, CapabilityError> {
         if dir.is_dir() {
             return Ok(false);
@@ -131,6 +141,9 @@ impl ScaffoldTransaction {
                 "mkdir {}: occupied by a non-directory",
                 dir.display()
             )));
+        }
+        if self.recording {
+            return Ok(false);
         }
         std::fs::create_dir_all(dir)
             .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", dir.display())))?;
@@ -165,9 +178,13 @@ impl ScaffoldTransaction {
         commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
 
         let is_create = original.is_none();
-        match original {
-            Some(data) => self.overwritten_files.push((path.clone(), data)),
-            None => self.created_files.push(path.clone()),
+        // A recording run lands nothing, so it owns nothing: reporting these
+        // paths as created would name files that do not exist.
+        if !self.recording {
+            match original {
+                Some(data) => self.overwritten_files.push((path.clone(), data)),
+                None => self.created_files.push(path.clone()),
+            }
         }
 
         info!(
@@ -181,7 +198,7 @@ impl ScaffoldTransaction {
 
 impl Drop for ScaffoldTransaction {
     fn drop(&mut self) {
-        if self.committed {
+        if self.committed || self.recording {
             return;
         }
         for tmp in &self.temp_files {
@@ -312,6 +329,7 @@ impl Capability for ScriptProjectScaffold {
         );
 
         let executor = require_executor(self.executor.as_ref())?;
+        let recording = executor.records_work_artifacts();
         let (workspace_root, resolved_works) = resolve_works_dirs(executor, &self.works_root)?;
         let work_dir = resolved_works.join(&work_ref);
         let scripts_dir = work_dir.join("Scripts");
@@ -321,16 +339,17 @@ impl Capability for ScriptProjectScaffold {
         let logs_write_dir = logs_dir.join("write");
         let logs_review_dir = logs_dir.join("review");
 
-        let mut claim = claim_work_ref(
+        let mut claim = claim_work_ref_with_recording(
             self.pool.as_ref(),
             &inp.creator_id,
             &inp.work_id,
             Some(&work_ref),
+            recording,
         )
         .await?;
 
         let result: Result<(Vec<String>, Vec<String>), CapabilityError> = async {
-            let mut tx = ScaffoldTransaction::new();
+            let mut tx = ScaffoldTransaction::new(recording);
 
             for dir in [
                 &work_dir,
@@ -388,12 +407,13 @@ impl Capability for ScriptProjectScaffold {
             )
             .await?;
 
-            publish_work_identity(
+            publish_work_identity_with_recording(
                 self.pool.as_ref(),
                 &inp.creator_id,
                 &inp.work_id,
                 "script",
                 &work_ref,
+                recording,
             )
             .await?;
 
@@ -448,8 +468,11 @@ impl Capability for ScriptProjectScaffold {
 
 #[cfg(test)]
 mod tests {
-    use super::super::work_commit::test_support::RecordingExecutor;
+    use super::super::work_commit::test_support::{
+        pool_with_work, stored_identity, RecordingExecutor,
+    };
     use super::*;
+    use std::collections::BTreeMap;
 
     /// Capability over a temp `Works/` root with a recording executor.
     fn cap_with_root(works_root: PathBuf) -> ScriptProjectScaffold {
@@ -459,6 +482,91 @@ mod tests {
             pool: None,
             works_root,
             executor: Some(executor),
+        }
+    }
+
+    /// Every entry below `root` and the bytes it holds (`None` for a directory).
+    fn tree_snapshot(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+        let mut snapshot = BTreeMap::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    snapshot.insert(path.clone(), None);
+                    pending.push(path);
+                } else {
+                    snapshot.insert(path.clone(), std::fs::read(&path).ok());
+                }
+            }
+        }
+        snapshot
+    }
+
+    /// A dry-run executor: reports recording and lands no bytes. `fail_on`
+    /// reproduces the port refusing one later artifact.
+    struct DryRunExecutor {
+        workspace_root: PathBuf,
+        fail_on: Option<&'static str>,
+    }
+
+    impl DryRunExecutor {
+        fn at(workspace_root: PathBuf) -> Self {
+            Self {
+                workspace_root,
+                fail_on: None,
+            }
+        }
+
+        fn refusing_at(workspace_root: PathBuf, rel_child: &'static str) -> Self {
+            Self {
+                workspace_root,
+                fail_on: Some(rel_child),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceExecutor for DryRunExecutor {
+        async fn open(
+            &self,
+            _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError>
+        {
+            Err(CapabilityError::WorkerUnavailable)
+        }
+
+        async fn commit(
+            &self,
+            _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError>
+        {
+            Err(CapabilityError::WorkerUnavailable)
+        }
+
+        fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
+            Ok(self.workspace_root.clone())
+        }
+
+        fn records_work_artifacts(&self) -> bool {
+            true
+        }
+
+        async fn commit_work_artifact(
+            &self,
+            input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+        {
+            if self.fail_on == Some(input.rel_child.as_str()) {
+                return Err(CapabilityError::Forbidden(format!(
+                    "work '{}' has no works row in the active workspace",
+                    input.work_ref
+                )));
+            }
+            Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
         }
     }
 
@@ -513,7 +621,7 @@ mod tests {
         let sub_dir = work_dir.join("subdir");
         std::fs::create_dir_all(&sub_dir).expect("mkdir subdir");
 
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         tx.created_files.push(file_path.clone());
         tx.created_dirs.push(sub_dir.clone());
 
@@ -544,7 +652,7 @@ mod tests {
         let file_path = work_dir.join("keep.txt");
         std::fs::write(&file_path, "keep").expect("write");
 
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         tx.created_files.push(file_path.clone());
         tx.created_dirs.push(work_dir);
         tx.commit();
@@ -568,7 +676,7 @@ mod tests {
         std::fs::write(&readme_path, user_content).expect("write user README");
 
         let executor = RecordingExecutor::new();
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         tx.create_dir(&work_dir).unwrap();
 
         let scaffold_content = "# Overwritten\n\nScaffold template content.\n";
@@ -633,7 +741,7 @@ mod tests {
 
         let final_path = work_dir.join("template.md");
 
-        let mut tx = ScaffoldTransaction::new();
+        let mut tx = ScaffoldTransaction::new(false);
         let tmp_path = final_path.with_extension("tmp");
         std::fs::write(&tmp_path, "partial content").expect("write temp");
         tx.temp_files.push(tmp_path.clone());
@@ -700,6 +808,192 @@ mod tests {
         assert!(scaffold_path.join("Scripts/script.md").is_file());
         assert!(scaffold_path.join("Beats/beat-sheet.md").is_file());
         assert!(scaffold_path.join("Characters/characters.md").is_file());
+    }
+
+    #[tokio::test]
+    async fn recording_run_leaves_the_works_tree_identical() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = ScriptProjectScaffold {
+            pool: None,
+            works_root: root,
+            executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
+        };
+
+        std::fs::write(tmp.path().join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
+        let before = tree_snapshot(tmp.path());
+        assert!(!before.is_empty(), "the snapshot must see the seeded entry");
+        let out = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_script_recording",
+                "work_ref": "recording-script",
+                "title": "Recording Script",
+            }))
+            .await
+            .expect("a recording run must succeed");
+
+        assert_eq!(
+            before,
+            tree_snapshot(tmp.path()),
+            "a recording run must leave the whole Works tree untouched"
+        );
+        assert_eq!(out["dirs_created"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn recording_run_leaves_the_works_row_untouched() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let pool = pool_with_work(
+            tmp.path(),
+            "wrk_script_dry",
+            "creator_test",
+            Some("kept-ref"),
+            Some("novel"),
+        )
+        .await;
+        let cap = ScriptProjectScaffold {
+            pool: Some(pool.clone()),
+            works_root: root.clone(),
+            executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
+        };
+
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
+        let before_tree = tree_snapshot(&root);
+        assert!(
+            !before_tree.is_empty(),
+            "the snapshot must see the seeded entry"
+        );
+        let out = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_script_dry",
+                "work_ref": "recording-script",
+                "title": "Recording Script",
+            }))
+            .await
+            .expect("a recording run must succeed against a real works row");
+
+        assert_eq!(
+            stored_identity(&pool, "wrk_script_dry").await,
+            (Some("kept-ref".to_string()), Some("novel".to_string())),
+            "a recording run must neither claim nor publish the works row"
+        );
+        assert!(
+            !root.join("recording-script").exists(),
+            "a recording run must not create Works/<work_ref>"
+        );
+        assert_eq!(
+            before_tree,
+            tree_snapshot(&root),
+            "a recording run must leave the seeded Works tree as it found it"
+        );
+        assert_eq!(
+            out["files_created"],
+            serde_json::json!([]),
+            "a recording run creates no files to report"
+        );
+        assert_eq!(out["dirs_created"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn failed_recording_run_leaves_no_works_row_or_tree_side_effect() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let pool = pool_with_work(
+            tmp.path(),
+            "wrk_script_dry_fail",
+            "creator_test",
+            None,
+            None,
+        )
+        .await;
+        let cap = ScriptProjectScaffold {
+            pool: Some(pool.clone()),
+            works_root: root.clone(),
+            executor: Some(Arc::new(DryRunExecutor::refusing_at(
+                tmp.path().to_path_buf(),
+                "Characters/characters.md",
+            ))),
+        };
+
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
+        let before_tree = tree_snapshot(&root);
+        let before_row = stored_identity(&pool, "wrk_script_dry_fail").await;
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_script_dry_fail",
+                "work_ref": "recording-script-fail",
+                "title": "Recording Script Fail",
+            }))
+            .await
+            .expect_err("a refused later artifact must fail the dry run");
+
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the port refusal to propagate, got: {err}"
+        );
+        assert_eq!(
+            before_row,
+            stored_identity(&pool, "wrk_script_dry_fail").await,
+            "a failed dry run must not write the works row"
+        );
+        assert!(
+            !root.join("recording-script-fail").exists(),
+            "a failed dry run must not create Works/<work_ref>"
+        );
+        assert_eq!(
+            before_tree,
+            tree_snapshot(&root),
+            "a failed dry run must leave the seeded Works tree untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn recording_run_still_refuses_an_occupied_directory_path() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let link = root
+            .join("recording-script-occupied")
+            .join("Logs")
+            .join("write");
+        std::fs::create_dir_all(link.parent().expect("link has a parent")).expect("mkdir");
+        std::os::unix::fs::symlink(tmp.path().join("absent-script-dry-target"), &link)
+            .expect("symlink");
+        let cap = ScriptProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
+        };
+
+        let before_tree = tree_snapshot(&root);
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_script_dry_occupied",
+                "work_ref": "recording-script-occupied",
+                "title": "Recording Script Occupied",
+            }))
+            .await
+            .expect_err("a recording run must still refuse an occupied directory path");
+
+        assert!(
+            matches!(err, CapabilityError::Internal(_)),
+            "expected the occupied-directory refusal, got: {err}"
+        );
+        assert_eq!(
+            before_tree,
+            tree_snapshot(&root),
+            "the refusal must leave the tree untouched"
+        );
     }
 
     #[tokio::test]

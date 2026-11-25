@@ -5,7 +5,9 @@
 //! and updates the `works` table — all atomically per V1.36 §5.4.
 
 use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
-use super::work_commit::{claim_work_ref, commit_work_bytes, require_executor, resolve_works_dirs};
+use super::work_commit::{
+    claim_work_ref_with_recording, commit_work_bytes, require_executor, resolve_works_dirs,
+};
 use crate::path_is_occupied;
 use crate::{Capability, CapabilityError, WorkspaceExecutor};
 use async_trait::async_trait;
@@ -368,6 +370,7 @@ impl Capability for NovelProjectScaffold {
         }
 
         let executor = require_executor(self.executor.as_ref())?;
+        let recording = executor.records_work_artifacts();
         let (workspace_root, works_dir) = resolve_works_dirs(executor, &self.works_root)?;
 
         let requested_ref = inp
@@ -375,11 +378,12 @@ impl Capability for NovelProjectScaffold {
             .as_ref()
             .is_none_or(|fields| fields.iter().any(|field| field == "work_ref"))
             .then_some(inp.work_ref.as_str());
-        let mut claim = claim_work_ref(
+        let mut claim = claim_work_ref_with_recording(
             self.pool.as_ref(),
             &inp.creator_id,
             &inp.work_id,
             requested_ref,
+            recording,
         )
         .await?;
         inp.work_ref = claim.effective().to_string();
@@ -387,7 +391,7 @@ impl Capability for NovelProjectScaffold {
 
         let result = async {
 
-        let mut txn = ScaffoldTransaction::new(executor.records_work_artifacts());
+        let mut txn = ScaffoldTransaction::new(recording);
 
         txn.create_dir(&root)?;
 
@@ -421,6 +425,7 @@ impl Capability for NovelProjectScaffold {
                 Path::new("README.md"),
                 &rendered,
                 &mut txn.files_created,
+                recording,
             )
             .await?;
         }
@@ -456,6 +461,7 @@ impl Capability for NovelProjectScaffold {
                 Path::new("Outlines/volume-outline.md"),
                 &content,
                 &mut txn.files_created,
+                recording,
             )
             .await?;
         } else if let Some(tmpl) = load_template("volume-outline.md") {
@@ -475,6 +481,7 @@ impl Capability for NovelProjectScaffold {
                 Path::new("Outlines/volume-outline.md"),
                 &rendered,
                 &mut txn.files_created,
+                recording,
             )
             .await?;
         }
@@ -488,6 +495,7 @@ impl Capability for NovelProjectScaffold {
                 Path::new("Outlines/foreshadowing.md"),
                 &rendered,
                 &mut txn.files_created,
+                recording,
             )
             .await?;
         }
@@ -501,6 +509,7 @@ impl Capability for NovelProjectScaffold {
                 Path::new("Outlines/event-index.md"),
                 &rendered,
                 &mut txn.files_created,
+                recording,
             )
             .await?;
         }
@@ -535,10 +544,16 @@ impl Capability for NovelProjectScaffold {
             Path::new("AGENTS.md"),
             &agents_md_rendered,
             &mut txn.files_created,
+            recording,
         )
         .await?;
 
-        let chapters_seeded = if let Some(pool) = &self.pool {
+        // A dry run registers no World and patches no works row, so it seeds
+        // no chapter rows either: report zero rather than claim work it never
+        // did.
+        let chapters_seeded = if recording {
+            0
+        } else if let Some(pool) = &self.pool {
             let now = chrono::Utc::now().to_rfc3339();
             let mut tx = pool
                 .begin()
@@ -722,6 +737,9 @@ impl Capability for NovelProjectScaffold {
 
 /// On rollback, only files this call actually wrote (return value `true`)
 /// will be removed; pre-existing files are preserved.
+///
+/// A recording (dry) run writes nothing, so it reports `false` exactly like an
+/// occupied path: this call owns no file to remove.
 async fn write_file_idem(
     executor: &dyn WorkspaceExecutor,
     workspace_root: &Path,
@@ -729,6 +747,7 @@ async fn write_file_idem(
     rel_child: &Path,
     content: &str,
     files_created: &mut Vec<PathBuf>,
+    recording: bool,
 ) -> Result<bool, CapabilityError> {
     let path = workspace_root.join("Works").join(work_ref).join(rel_child);
     if path_is_occupied(&path) {
@@ -736,6 +755,11 @@ async fn write_file_idem(
         return Ok(false);
     }
     commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
+    // A recording run lands nothing, so it owns nothing: reporting this path as
+    // created would name a file that does not exist.
+    if recording {
+        return Ok(false);
+    }
     files_created.push(path);
     Ok(true)
 }
@@ -766,22 +790,32 @@ impl ScaffoldTransaction {
     }
 
     /// Create a directory and all parents. No-op if it already exists, and a
-    /// no-op entirely under a recording executor: the bytes those directories
-    /// would hold never land, so leaving them behind would change the tree a
-    /// dry run promises to leave alone.
+    /// no-op under a recording executor once the read-only checks pass: the
+    /// bytes those directories would hold never land, so leaving them behind
+    /// would change the tree a dry run promises to leave alone.
+    ///
+    /// The checks run in both modes, so an occupied non-directory path refuses
+    /// instead of letting either mode create something over it or report
+    /// success.
     ///
     /// A freshly created directory is owned by this transaction and removed on
     /// rollback; a pre-existing one is never removed.
     fn create_dir(&mut self, path: &Path) -> Result<(), CapabilityError> {
+        if path.is_dir() {
+            return Ok(());
+        }
+        if path_is_occupied(path) {
+            return Err(CapabilityError::Internal(format!(
+                "mkdir {}: occupied by a non-directory",
+                path.display()
+            )));
+        }
         if self.recording {
             return Ok(());
         }
-        let pre_existed = path_is_occupied(path);
         std::fs::create_dir_all(path)
             .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", path.display())))?;
-        if !pre_existed {
-            self.dirs_created.push(path.to_path_buf());
-        }
+        self.dirs_created.push(path.to_path_buf());
         Ok(())
     }
 
@@ -825,8 +859,11 @@ impl Drop for ScaffoldTransaction {
 
 #[cfg(test)]
 mod tests {
-    use super::super::work_commit::test_support::RecordingExecutor;
+    use super::super::work_commit::test_support::{
+        pool_with_work, stored_identity, RecordingExecutor,
+    };
     use super::*;
+    use std::collections::BTreeMap;
     use tempfile::TempDir;
 
     /// Capability over a temp `Works/` root with a recording executor.
@@ -838,6 +875,100 @@ mod tests {
             works_root,
             executor: Some(executor),
         }
+    }
+
+    /// Every entry below `root` and the bytes it holds (`None` for a directory).
+    fn tree_snapshot(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+        let mut snapshot = BTreeMap::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    snapshot.insert(path.clone(), None);
+                    pending.push(path);
+                } else {
+                    snapshot.insert(path.clone(), std::fs::read(&path).ok());
+                }
+            }
+        }
+        snapshot
+    }
+
+    /// A dry-run executor: reports recording and lands no bytes. `fail_on`
+    /// reproduces the port refusing one later artifact.
+    struct DryRunExecutor {
+        workspace_root: PathBuf,
+        fail_on: Option<&'static str>,
+    }
+
+    impl DryRunExecutor {
+        fn at(workspace_root: PathBuf) -> Self {
+            Self {
+                workspace_root,
+                fail_on: None,
+            }
+        }
+
+        fn refusing_at(workspace_root: PathBuf, rel_child: &'static str) -> Self {
+            Self {
+                workspace_root,
+                fail_on: Some(rel_child),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl WorkspaceExecutor for DryRunExecutor {
+        async fn open(
+            &self,
+            _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError>
+        {
+            Err(CapabilityError::WorkerUnavailable)
+        }
+
+        async fn commit(
+            &self,
+            _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError>
+        {
+            Err(CapabilityError::WorkerUnavailable)
+        }
+
+        fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
+            Ok(self.workspace_root.clone())
+        }
+
+        fn records_work_artifacts(&self) -> bool {
+            true
+        }
+
+        async fn commit_work_artifact(
+            &self,
+            input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
+        ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
+        {
+            if self.fail_on == Some(input.rel_child.as_str()) {
+                return Err(CapabilityError::Forbidden(format!(
+                    "work '{}' has no works row in the active workspace",
+                    input.work_ref
+                )));
+            }
+            Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
+        }
+    }
+
+    /// How many Worlds `creator_id` owns.
+    async fn world_count(pool: &sqlx::SqlitePool, creator_id: &str) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM narrative_worlds WHERE owner_creator_id = ?")
+            .bind(creator_id)
+            .fetch_one(pool)
+            .await
+            .expect("count worlds")
     }
 
     #[test]
@@ -1123,6 +1254,253 @@ mod tests {
         assert!(
             std::fs::symlink_metadata(tmp.path().join("absent-target.md")).is_err(),
             "the run wrote through the user's dangling link"
+        );
+    }
+
+    #[tokio::test]
+    async fn recording_run_leaves_the_works_tree_identical() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root,
+            executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
+        };
+
+        std::fs::write(tmp.path().join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
+        let before = tree_snapshot(tmp.path());
+        assert!(!before.is_empty(), "the snapshot must see the seeded entry");
+        let out = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_recording",
+                "work_ref": "recording-novel",
+                "title": "Recording Novel",
+                "world_id": "wld_recording_novel",
+                "total_planned_chapters": 2,
+            }))
+            .await
+            .expect("a recording run must succeed");
+
+        assert_eq!(
+            before,
+            tree_snapshot(tmp.path()),
+            "a recording run must leave the whole Works tree untouched"
+        );
+        assert_eq!(out["files_created"], serde_json::json!([]));
+        assert_eq!(out["dirs_created"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn write_file_idem_reports_only_files_it_wrote() {
+        let tmp = TempDir::new().expect("tmpdir");
+
+        let dry = DryRunExecutor::at(tmp.path().to_path_buf());
+        let mut recorded_files = Vec::new();
+        let wrote = write_file_idem(
+            &dry,
+            tmp.path(),
+            "dry-ref",
+            Path::new("README.md"),
+            "body",
+            &mut recorded_files,
+            true,
+        )
+        .await
+        .expect("a recording write is not an error");
+        assert!(!wrote, "a recording run created no file to own");
+        assert!(
+            recorded_files.is_empty(),
+            "a recording run reports no created file"
+        );
+
+        let real = RecordingExecutor::at(tmp.path());
+        let mut written_files = Vec::new();
+        let wrote = write_file_idem(
+            &*real,
+            tmp.path(),
+            "real-ref",
+            Path::new("README.md"),
+            "body",
+            &mut written_files,
+            false,
+        )
+        .await
+        .expect("a real write lands through the port");
+        assert!(wrote, "a real write owns the file it created");
+        assert_eq!(
+            written_files.len(),
+            1,
+            "a real write reports the file it created"
+        );
+    }
+
+    #[tokio::test]
+    async fn recording_run_leaves_the_works_row_and_worlds_untouched() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let pool = pool_with_work(
+            tmp.path(),
+            "wrk_novel_dry",
+            "creator_test",
+            Some("kept-ref"),
+            Some("novel"),
+        )
+        .await;
+        nexus_local_db::creators::ensure_creator_row(&pool, "creator_test", "Creator Test")
+            .await
+            .expect("creator row");
+        let cap = NovelProjectScaffold {
+            pool: Some(pool.clone()),
+            works_root: root.clone(),
+            executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
+        };
+
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
+        let before_tree = tree_snapshot(&root);
+        assert!(
+            !before_tree.is_empty(),
+            "the snapshot must see the seeded entry"
+        );
+        let out = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_dry",
+                "work_ref": "recording-novel",
+                "title": "Recording Novel",
+                "create_world": true,
+                "world_title": "Recording World",
+                "total_planned_chapters": 2,
+            }))
+            .await
+            .expect("a recording run must succeed against a real works row");
+
+        assert_eq!(
+            stored_identity(&pool, "wrk_novel_dry").await,
+            (Some("kept-ref".to_string()), Some("novel".to_string())),
+            "a recording run must neither claim nor patch the works row"
+        );
+        assert_eq!(
+            world_count(&pool, "creator_test").await,
+            0,
+            "a recording run must not register a World"
+        );
+        assert!(
+            !root.join("recording-novel").exists(),
+            "a recording run must not create Works/<work_ref>"
+        );
+        assert_eq!(
+            before_tree,
+            tree_snapshot(&root),
+            "a recording run must leave the seeded Works tree as it found it"
+        );
+        assert_eq!(
+            out["files_created"],
+            serde_json::json!([]),
+            "a recording run creates no files to report"
+        );
+        assert_eq!(out["chapters_seeded"], 0);
+    }
+
+    #[tokio::test]
+    async fn failed_recording_run_leaves_no_row_world_or_tree_side_effect() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let pool =
+            pool_with_work(tmp.path(), "wrk_novel_dry_fail", "creator_test", None, None).await;
+        nexus_local_db::creators::ensure_creator_row(&pool, "creator_test", "Creator Test")
+            .await
+            .expect("creator row");
+        let cap = NovelProjectScaffold {
+            pool: Some(pool.clone()),
+            works_root: root.clone(),
+            executor: Some(Arc::new(DryRunExecutor::refusing_at(
+                tmp.path().to_path_buf(),
+                "AGENTS.md",
+            ))),
+        };
+
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
+        let before_tree = tree_snapshot(&root);
+        let before_row = stored_identity(&pool, "wrk_novel_dry_fail").await;
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_dry_fail",
+                "work_ref": "recording-novel-fail",
+                "title": "Recording Novel Fail",
+                "create_world": true,
+                "world_title": "Recording World Fail",
+                "total_planned_chapters": 2,
+            }))
+            .await
+            .expect_err("a refused later artifact must fail the dry run");
+
+        assert!(
+            matches!(err, CapabilityError::Forbidden(_)),
+            "expected the port refusal to propagate, got: {err}"
+        );
+        assert_eq!(
+            before_row,
+            stored_identity(&pool, "wrk_novel_dry_fail").await,
+            "a failed dry run must not write the works row"
+        );
+        assert_eq!(
+            world_count(&pool, "creator_test").await,
+            0,
+            "a failed dry run must not register a World"
+        );
+        assert!(
+            !root.join("recording-novel-fail").exists(),
+            "a failed dry run must not create Works/<work_ref>"
+        );
+        assert_eq!(
+            before_tree,
+            tree_snapshot(&root),
+            "a failed dry run must leave the seeded Works tree untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn recording_run_still_refuses_an_occupied_directory_path() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let occupant = root
+            .join("recording-novel-occupied")
+            .join("Outlines")
+            .join("chapters");
+        std::fs::create_dir_all(occupant.parent().expect("occupant has a parent"))
+            .expect("mkdir parent");
+        std::fs::write(&occupant, "not a directory").expect("write occupant");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
+        };
+
+        let before_tree = tree_snapshot(&root);
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_dry_occupied",
+                "work_ref": "recording-novel-occupied",
+                "title": "Recording Novel Occupied",
+                "world_id": "wld_recording_novel_occupied",
+                "total_planned_chapters": 1,
+            }))
+            .await
+            .expect_err("a recording run must still refuse an occupied directory path");
+
+        assert!(
+            matches!(err, CapabilityError::Internal(_)),
+            "expected the occupied-directory refusal, got: {err}"
+        );
+        assert_eq!(
+            before_tree,
+            tree_snapshot(&root),
+            "the refusal must leave the tree untouched"
         );
     }
 }
