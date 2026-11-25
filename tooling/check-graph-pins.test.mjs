@@ -782,19 +782,22 @@ test('a failing census leaves no temp files behind', () => {
 // random run and trailing redirections stay free to change.
 
 // First shell word after `mktemp` on the same physical line, or undefined when
-// that word is not an argument at all. A quoted body is taken verbatim. A bare
-// word that STARTS with a redirect (`2>"…"`, `> x`, `< x`) carries no
-// template; a bare word that merely ends at one (`…XXXXXX</dev/null`) does —
-// the shell ends an unquoted word at the first `<` or `>`. A comment or
-// separator (`#`, `;`, `|`, `&`) still means no template. Text on later
-// physical lines is never read, so a decoy parked inside a multi-line command
-// substitution cannot supply one.
+// that word is not a template at all. A double-quoted body is taken verbatim;
+// a single-quoted one is rejected outright because quotes without `$`
+// expansion leave `${TMPDIR}` literal, so mktemp would never receive the
+// requested directory. A bare word that STARTS with a redirect (`2>"…"`,
+// `> x`, `< x`) carries no template; a bare word that merely ends at one
+// (`…XXXXXX</dev/null`) does — the shell ends an unquoted word at the first
+// `<` or `>`. A comment or separator (`#`, `;`, `|`, `&`) still means no
+// template. Text on later physical lines is never read, so a decoy parked
+// inside a multi-line command substitution cannot supply one.
 function mktempTemplate(line) {
   const marker = line.match(/\bmktemp\b/);
   if (!marker) return undefined;
   const rest = line.slice(marker.index + 'mktemp'.length);
-  const quoted = /^\s*"([^"]*)"/.exec(rest) ?? /^\s*'([^']*)'/.exec(rest);
-  if (quoted) return quoted[1];
+  const doubleQuoted = /^\s*"([^"]*)"/.exec(rest);
+  if (doubleQuoted) return doubleQuoted[1];
+  if (/^\s*'/.test(rest)) return undefined;
   const word = (/^\s*([^\s)]*)/.exec(rest) ?? [])[1];
   if (!word || /^[0-9]*(?:>|<|&>)/.test(word) || /[#;|&]/.test(word)) return undefined;
   return word.split(/[<>]/)[0] || undefined;
@@ -810,8 +813,8 @@ test('every census mktemp call templates the temp file into TMPDIR', () => {
     if (!/\bmktemp\b/.test(line)) continue;
     calls += 1;
     const template = mktempTemplate(line);
-    assert.ok(template, `mktemp needs an explicit template, not a redirection or comment: ${line.trim()}`);
-    assert.match(template, /\$\{TMPDIR/, `census temp file must honour TMPDIR: ${line.trim()}`);
+    assert.ok(template, `mktemp needs an explicit double-quoted or bare template: ${line.trim()}`);
+    assert.match(template, /\$\{TMPDIR(?:\}|:-)/, `census temp file must expand TMPDIR: ${line.trim()}`);
     assert.match(template, /nexus-graph-pins-census\./, `census temp file must use the census prefix: ${line.trim()}`);
   }
   assert.ok(calls > 0, 'the guard script calls mktemp nowhere; the census cleanup case cannot be proven');
