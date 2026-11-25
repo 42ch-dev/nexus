@@ -749,7 +749,9 @@ mod tests {
             executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
         };
 
+        std::fs::write(tmp.path().join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
         let before = tree_snapshot(tmp.path());
+        assert!(!before.is_empty(), "the snapshot must see the seeded entry");
         let out = cap
             .run(serde_json::json!({
                 "creator_id": "creator_test",
@@ -787,7 +789,13 @@ mod tests {
             executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
         };
 
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
         let before_tree = tree_snapshot(&root);
+        assert!(
+            !before_tree.is_empty(),
+            "the snapshot must see the seeded entry"
+        );
         let out = cap
             .run(serde_json::json!({
                 "creator_id": "creator_test",
@@ -803,10 +811,14 @@ mod tests {
             (Some("kept-ref".to_string()), Some("novel".to_string())),
             "a recording run must neither claim nor publish the works row"
         );
+        assert!(
+            !root.join("recording-essay").exists(),
+            "a recording run must not create Works/<work_ref>"
+        );
         assert_eq!(
             before_tree,
             tree_snapshot(&root),
-            "a recording run must not create the Works tree"
+            "a recording run must leave the seeded Works tree as it found it"
         );
         assert_eq!(
             out["files_created"],
@@ -832,6 +844,8 @@ mod tests {
             ))),
         };
 
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
         let before_tree = tree_snapshot(&root);
         let before_row = stored_identity(&pool, "wrk_essay_dry_fail").await;
         let err = cap
@@ -853,10 +867,14 @@ mod tests {
             stored_identity(&pool, "wrk_essay_dry_fail").await,
             "a failed dry run must not write the works row"
         );
+        assert!(
+            !root.join("recording-essay-fail").exists(),
+            "a failed dry run must not create Works/<work_ref>"
+        );
         assert_eq!(
             before_tree,
             tree_snapshot(&root),
-            "a failed dry run must leave the Works tree untouched"
+            "a failed dry run must leave the seeded Works tree untouched"
         );
     }
 

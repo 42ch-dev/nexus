@@ -737,6 +737,9 @@ impl Capability for NovelProjectScaffold {
 
 /// On rollback, only files this call actually wrote (return value `true`)
 /// will be removed; pre-existing files are preserved.
+///
+/// A recording (dry) run writes nothing, so it reports `false` exactly like an
+/// occupied path: this call owns no file to remove.
 async fn write_file_idem(
     executor: &dyn WorkspaceExecutor,
     workspace_root: &Path,
@@ -752,11 +755,12 @@ async fn write_file_idem(
         return Ok(false);
     }
     commit_work_bytes(executor, workspace_root, work_ref, rel_child, content).await?;
-    // A recording run lands nothing, so it owns nothing: reporting this path
-    // as created would name a file that does not exist.
-    if !recording {
-        files_created.push(path);
+    // A recording run lands nothing, so it owns nothing: reporting this path as
+    // created would name a file that does not exist.
+    if recording {
+        return Ok(false);
     }
+    files_created.push(path);
     Ok(true)
 }
 
@@ -786,35 +790,32 @@ impl ScaffoldTransaction {
     }
 
     /// Create a directory and all parents. No-op if it already exists, and a
-    /// no-op entirely under a recording executor: the bytes those directories
-    /// would hold never land, so leaving them behind would change the tree a
-    /// dry run promises to leave alone.
+    /// no-op under a recording executor once the read-only checks pass: the
+    /// bytes those directories would hold never land, so leaving them behind
+    /// would change the tree a dry run promises to leave alone.
     ///
-    /// The read-only checks still run while recording — an occupied
-    /// non-directory path refuses instead of letting the dry run report
-    /// success — and only `create_dir_all` and its bookkeeping are skipped.
+    /// The checks run in both modes, so an occupied non-directory path refuses
+    /// instead of letting either mode create something over it or report
+    /// success.
     ///
     /// A freshly created directory is owned by this transaction and removed on
     /// rollback; a pre-existing one is never removed.
     fn create_dir(&mut self, path: &Path) -> Result<(), CapabilityError> {
-        if self.recording {
-            if path.is_dir() {
-                return Ok(());
-            }
-            if path_is_occupied(path) {
-                return Err(CapabilityError::Internal(format!(
-                    "mkdir {}: occupied by a non-directory",
-                    path.display()
-                )));
-            }
+        if path.is_dir() {
             return Ok(());
         }
-        let pre_existed = path_is_occupied(path);
+        if path_is_occupied(path) {
+            return Err(CapabilityError::Internal(format!(
+                "mkdir {}: occupied by a non-directory",
+                path.display()
+            )));
+        }
+        if self.recording {
+            return Ok(());
+        }
         std::fs::create_dir_all(path)
             .map_err(|e| CapabilityError::Internal(format!("mkdir {}: {e}", path.display())))?;
-        if !pre_existed {
-            self.dirs_created.push(path.to_path_buf());
-        }
+        self.dirs_created.push(path.to_path_buf());
         Ok(())
     }
 
@@ -1266,7 +1267,9 @@ mod tests {
             executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
         };
 
+        std::fs::write(tmp.path().join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
         let before = tree_snapshot(tmp.path());
+        assert!(!before.is_empty(), "the snapshot must see the seeded entry");
         let out = cap
             .run(serde_json::json!({
                 "creator_id": "creator_test",
@@ -1286,6 +1289,50 @@ mod tests {
         );
         assert_eq!(out["files_created"], serde_json::json!([]));
         assert_eq!(out["dirs_created"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn write_file_idem_reports_only_files_it_wrote() {
+        let tmp = TempDir::new().expect("tmpdir");
+
+        let dry = DryRunExecutor::at(tmp.path().to_path_buf());
+        let mut recorded_files = Vec::new();
+        let wrote = write_file_idem(
+            &dry,
+            tmp.path(),
+            "dry-ref",
+            Path::new("README.md"),
+            "body",
+            &mut recorded_files,
+            true,
+        )
+        .await
+        .expect("a recording write is not an error");
+        assert!(!wrote, "a recording run created no file to own");
+        assert!(
+            recorded_files.is_empty(),
+            "a recording run reports no created file"
+        );
+
+        let real = RecordingExecutor::at(tmp.path());
+        let mut written_files = Vec::new();
+        let wrote = write_file_idem(
+            &*real,
+            tmp.path(),
+            "real-ref",
+            Path::new("README.md"),
+            "body",
+            &mut written_files,
+            false,
+        )
+        .await
+        .expect("a real write lands through the port");
+        assert!(wrote, "a real write owns the file it created");
+        assert_eq!(
+            written_files.len(),
+            1,
+            "a real write reports the file it created"
+        );
     }
 
     #[tokio::test]
@@ -1309,7 +1356,13 @@ mod tests {
             executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
         };
 
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
         let before_tree = tree_snapshot(&root);
+        assert!(
+            !before_tree.is_empty(),
+            "the snapshot must see the seeded entry"
+        );
         let out = cap
             .run(serde_json::json!({
                 "creator_id": "creator_test",
@@ -1333,10 +1386,14 @@ mod tests {
             0,
             "a recording run must not register a World"
         );
+        assert!(
+            !root.join("recording-novel").exists(),
+            "a recording run must not create Works/<work_ref>"
+        );
         assert_eq!(
             before_tree,
             tree_snapshot(&root),
-            "a recording run must not create the Works tree"
+            "a recording run must leave the seeded Works tree as it found it"
         );
         assert_eq!(
             out["files_created"],
@@ -1364,6 +1421,8 @@ mod tests {
             ))),
         };
 
+        std::fs::create_dir_all(&root).expect("works root");
+        std::fs::write(root.join("sentinel.txt"), "pre-existing\n").expect("sentinel entry");
         let before_tree = tree_snapshot(&root);
         let before_row = stored_identity(&pool, "wrk_novel_dry_fail").await;
         let err = cap
@@ -1393,10 +1452,14 @@ mod tests {
             0,
             "a failed dry run must not register a World"
         );
+        assert!(
+            !root.join("recording-novel-fail").exists(),
+            "a failed dry run must not create Works/<work_ref>"
+        );
         assert_eq!(
             before_tree,
             tree_snapshot(&root),
-            "a failed dry run must leave the Works tree untouched"
+            "a failed dry run must leave the seeded Works tree untouched"
         );
     }
 

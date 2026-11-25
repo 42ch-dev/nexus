@@ -675,9 +675,10 @@ impl WorkspaceExecutor for RecordingThenRefusal {
     }
 }
 
-/// A dry run that fails after it recorded Work paths must not touch the tree
-/// it was given: the dangling `README.md` belongs to the user, and unlinking
-/// it would make an error path of a simulation mutate the tree.
+/// A dangling `README.md` at the Work root belongs to the user. A dry run must
+/// read that entry as occupied — the scaffold checks `symlink_metadata`, not
+/// `Path::exists` — so it must neither write through the link (which would
+/// materialize `never-written.md`) nor unlink it when the run fails later.
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
 async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
@@ -728,6 +729,10 @@ async fn a_failed_simulated_scaffold_leaves_the_work_tree_alone() {
         std::fs::read_link(&readme).expect("link target"),
         Path::new("never-written.md"),
         "the link target is untouched"
+    );
+    assert!(
+        !work_dir.join("never-written.md").exists(),
+        "the run wrote through the user's dangling link"
     );
     let mut entries: Vec<String> = std::fs::read_dir(&work_dir)
         .expect("work dir readable")
