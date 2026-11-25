@@ -139,8 +139,10 @@ export function createStrategyCanvasAdapter(
       const ctx = ctxRef.current;
       // Selection must come from the memo-keyed argument, never the ref: the
       // orchestrator assigns `ctxRef.current` only after `useCanvasSurface`
-      // runs, so on the selection-change render `ctx.selectedNode` /
-      // `ctx.selectedState` still hold the previous render's selection.
+      // runs, so anything selection-derived read from the ctx would be the
+      // previous render's selection. `selectedState` and `promptTemplateRef`
+      // are therefore resolved below from the passed node's `data.stateId`
+      // (via `ctx.parsed` and `templateRefOf`), not stored on the ctx.
       const selectedNode = node as Node<StrategyNodeData>;
       if (ctx.compose && selectedNode.type === 'strategy-pattern-slot') {
         return (
