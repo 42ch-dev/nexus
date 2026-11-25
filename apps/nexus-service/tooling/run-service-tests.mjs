@@ -40,7 +40,7 @@ function selfTest() {
   for (const [name, result, expected] of cases) {
     const actual = mapChildExit(result);
     if (actual !== expected) {
-      process.stderr.write(`SELF-TEST FAIL: ${name}: expected ${expected}, got ${actual}\n`);
+      process.stderr.write(`SELF-TEST FAIL: ${String(name)}: expected ${String(expected)}, got ${String(actual)}\n`);
       failed += 1;
     }
   }
