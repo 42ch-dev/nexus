@@ -78,10 +78,13 @@ pub fn pattern_pin(child: &WorkflowNestChild) -> Option<(&str, &str)> {
 /// A structural violation. Every violation found is returned, never only the first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Violation {
-    /// A document's `ir_version` is newer than this build's `IR_VERSION`: the document is
-    /// refused rather than interpreted under rules it was not written against.
+    /// A document's or resolved fragment's `ir_version` is newer than this build's `IR_VERSION`:
+    /// the body is refused rather than interpreted under rules it was not written against.
+    /// `fragment` marks a version carried by a pinned pattern package, so consumers do not
+    /// attribute the fix to the document under validation.
     UnsupportedIrVersion {
         document: String,
+        fragment: bool,
         found: u64,
         supported: u64,
     },
@@ -146,12 +149,24 @@ impl std::fmt::Display for Violation {
         match self {
             Self::UnsupportedIrVersion {
                 document,
+                fragment,
                 found,
                 supported,
-            } => write!(
-                f,
-                "`{document}`: ir_version {found} is newer than supported IR_VERSION {supported}"
-            ),
+            } => {
+                if *fragment {
+                    write!(
+                        f,
+                        "pattern fragment `{document}`: ir_version {found} is newer than \
+                         supported IR_VERSION {supported}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "`{document}`: ir_version {found} is newer than supported IR_VERSION \
+                         {supported}"
+                    )
+                }
+            }
             Self::DuplicateDocumentId(id) => {
                 write!(f, "document id `{id}` appears more than once in the set")
             }
@@ -243,6 +258,7 @@ pub fn validate(
         if document.ir_version > IR_VERSION {
             violations.push(Violation::UnsupportedIrVersion {
                 document: document.id.as_str().to_owned(),
+                fragment: false,
                 found: document.ir_version,
                 supported: IR_VERSION,
             });
@@ -254,6 +270,7 @@ pub fn validate(
             if fragment.ir_version > IR_VERSION {
                 violations.push(Violation::UnsupportedIrVersion {
                     document: fragment.id.as_str().to_owned(),
+                    fragment: true,
                     found: fragment.ir_version,
                     supported: IR_VERSION,
                 });
@@ -1033,6 +1050,7 @@ mod tests {
             violations,
             vec![Violation::UnsupportedIrVersion {
                 document: "future".to_owned(),
+                fragment: false,
                 found: IR_VERSION + 1,
                 supported: IR_VERSION,
             }]
@@ -1050,6 +1068,7 @@ mod tests {
         assert_eq!(doc.ir_version, IR_VERSION);
         assert_eq!(validate(&[&doc], &[]), Ok(()));
     }
+
     #[test]
     fn rejects_a_fragment_with_an_ir_version_newer_than_this_build() {
         let mut frag = document(
@@ -1066,6 +1085,7 @@ mod tests {
             violations,
             vec![Violation::UnsupportedIrVersion {
                 document: "frag".to_owned(),
+                fragment: true,
                 found: IR_VERSION + 1,
                 supported: IR_VERSION,
             }]

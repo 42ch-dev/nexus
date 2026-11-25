@@ -448,10 +448,11 @@ const fn structural_kind(violation: &Violation) -> &'static str {
 fn structural_correction(violation: &Violation, document: &WorkflowDocument) -> Correction {
     let (location, observed, correction) = match violation {
         Violation::UnsupportedIrVersion {
-            document: offender,
             found,
             supported,
-        } if offender.as_str() == document.id.as_str() => (
+            fragment: false,
+            ..
+        } => (
             format!("document {}", document.id.as_str()),
             format!("ir_version {found} is newer than supported IR_VERSION {supported}"),
             format!(
@@ -460,17 +461,18 @@ fn structural_correction(violation: &Violation, document: &WorkflowDocument) -> 
             ),
         ),
         Violation::UnsupportedIrVersion {
-            document: fragment,
+            document: id,
             found,
             supported,
+            fragment: true,
         } => (
-            format!("fragment {fragment}"),
+            format!("fragment {id}"),
             format!(
-                "pattern fragment `{fragment}` declares ir_version {found}, newer than supported \
+                "pattern fragment `{id}` declares ir_version {found}, newer than supported \
                  IR_VERSION {supported}"
             ),
             format!(
-                "the version of `{fragment}` comes from the pinned pattern package, not this \
+                "the version of `{id}` comes from the pinned pattern package, not this \
                  document: regenerate the package against IR_VERSION {supported} or repin a \
                  package built for it"
             ),
@@ -878,6 +880,7 @@ mod tests {
             (
                 Violation::UnsupportedIrVersion {
                     document: "generated".into(),
+                    fragment: false,
                     found: 9,
                     supported: 0,
                 },
@@ -1002,11 +1005,13 @@ mod tests {
             );
         }
     }
+
     #[test]
     fn a_fragment_ir_version_correction_points_at_the_pattern_package() {
         let correction = structural_correction(
             &Violation::UnsupportedIrVersion {
                 document: "story.arc@1.0.0".into(),
+                fragment: true,
                 found: 9,
                 supported: 0,
             },
@@ -1025,6 +1030,32 @@ mod tests {
         assert!(
             !correction.correction.contains("set `ir_version`"),
             "the candidate document cannot fix a pinned fragment's version: {}",
+            correction.correction
+        );
+    }
+
+    /// A fragment whose id collides with the candidate document keeps its package correction:
+    /// the variant says what it is, so the correction never infers it from ids.
+    #[test]
+    fn a_fragment_sharing_the_document_id_still_gets_the_package_correction() {
+        let document = legal_document();
+        let correction = structural_correction(
+            &Violation::UnsupportedIrVersion {
+                document: document.id.as_str().to_owned(),
+                fragment: true,
+                found: 9,
+                supported: 0,
+            },
+            &document,
+        );
+        assert_eq!(
+            correction.location,
+            format!("fragment {}", document.id.as_str())
+        );
+        assert!(correction.correction.contains("pinned pattern package"));
+        assert!(
+            !correction.correction.contains("set `ir_version`"),
+            "an id collision must not turn a fragment into a document fix: {}",
             correction.correction
         );
     }
