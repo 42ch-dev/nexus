@@ -83,7 +83,11 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
 /// other surface can export it. Kinds meaning a malformed request get their
 /// own code (`not_a_directory`); `FilenameTooLong` has no stable
 /// `io::ErrorKind` variant on this toolchain, so it stays folded into
-/// `other` until the MSRV exposes it.
+/// `other` until the MSRV exposes it. [`ROOT_UNRESOLVABLE_CODE`] is not an
+/// `io::ErrorKind`: it marks the workspace root itself failing to resolve, a
+/// distinct class the read boundary must not render as a file-level verdict.
+pub const ROOT_UNRESOLVABLE_CODE: &str = "root_unresolvable";
+
 const fn io_kind_code(kind: std::io::ErrorKind) -> &'static str {
     match kind {
         std::io::ErrorKind::NotFound => "not_found",
@@ -173,7 +177,7 @@ pub fn resolve_guarded_path(
     if must_exist {
         if let Err(e) = &canonical_root_result {
             return Err(CoreError::InvalidInput {
-                field: format!("chapter_path_unresolvable:{}", io_kind_code(e.kind())),
+                field: format!("chapter_path_unresolvable:{ROOT_UNRESOLVABLE_CODE}"),
                 reason: format!("cannot resolve workspace root: {e}"),
             });
         }
@@ -1263,9 +1267,10 @@ mod tests {
 
         match error {
             CoreError::InvalidInput { field, reason } => {
-                assert!(
-                    field.starts_with("chapter_path_unresolvable:"),
-                    "root resolution failure carries the unresolvable shape: {field}"
+                assert_eq!(
+                    field,
+                    format!("chapter_path_unresolvable:{ROOT_UNRESOLVABLE_CODE}"),
+                    "root resolution failure carries its own machine code: {field}"
                 );
                 assert!(
                     reason.contains("workspace root"),

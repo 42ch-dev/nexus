@@ -1002,11 +1002,13 @@ fn work_artifact_parts(path_str: &str) -> Result<(&str, &Path), NexusApiError> {
 /// classification contract this boundary promises: `not_found` (real
 /// absence) → `NotFound`; `permission_denied` → `Forbidden`; kinds meaning a
 /// malformed request (`not_a_directory`) → `InvalidInput` (a 400-class
-/// request error); everything else → the quiet `Internal` fallback. The
-/// exact legacy unsuffixed field keeps its historical `NotFound` mapping,
-/// and `chapter_path_forbidden` stays the non-revealing outside-workspace
-/// shape. Pulled out of `execute_read_file` so the contract is assertable
-/// without filesystem tricks on any runner.
+/// request error); `root_unresolvable` (the workspace root itself failed to
+/// resolve) → `Internal`, never a file-level absence/escape verdict;
+/// everything else → the quiet `Internal` fallback. The exact legacy
+/// unsuffixed field keeps its historical `NotFound` mapping, and
+/// `chapter_path_forbidden` stays the non-revealing outside-workspace shape.
+/// Pulled out of `execute_read_file` so the contract is assertable without
+/// filesystem tricks on any runner.
 fn read_guard_error(e: NexusApiError, path_str: &str) -> NexusApiError {
     match e {
         NexusApiError::InvalidInput { ref field, .. } if field == "chapter_path_unresolvable" => {
@@ -1029,6 +1031,11 @@ fn read_guard_error(e: NexusApiError, path_str: &str) -> NexusApiError {
                     reason: format!(
                         "path '{path_str}' cannot resolve: a component is not a directory"
                     ),
+                },
+                // The workspace root, not the requested file, is unavailable:
+                // no file-level absence/escape verdict may be derived from it.
+                Some(crate::content::ROOT_UNRESOLVABLE_CODE) => NexusApiError::Internal {
+                    category: "WORKSPACE_ROOT_UNRESOLVABLE: workspace root is unavailable".into(),
                 },
                 _ => NexusApiError::Internal {
                     category: format!(
@@ -4904,6 +4911,25 @@ mod tests {
             ),
             "the exact legacy field keeps its historical NotFound mapping"
         );
+
+        // A workspace-root failure is never a file-level verdict: it must
+        // not claim the requested file is absent or outside the workspace.
+        let root_error =
+            read_guard_error(unresolvable(crate::content::ROOT_UNRESOLVABLE_CODE), "x");
+        assert!(
+            !matches!(root_error, NexusApiError::NotFound { .. })
+                && !matches!(root_error, NexusApiError::Forbidden { .. }),
+            "root_unresolvable is neither NotFound nor the escape Forbidden: {root_error:?}"
+        );
+        match &root_error {
+            NexusApiError::Internal { category } => {
+                assert!(
+                    !category.contains("file") && !category.contains("outside"),
+                    "the root category is not file-level: {category}"
+                );
+            }
+            other => panic!("expected Internal for root_unresolvable, got {other:?}"),
+        }
     }
 
     #[test]
