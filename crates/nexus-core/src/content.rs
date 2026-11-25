@@ -1130,4 +1130,30 @@ mod tests {
             );
         });
     }
+
+    /// The target is an existing directory, so prepare stages the temp file
+    /// (disarming `TempFileGuard`) and the commit rename fails: only the
+    /// `cleanup_temp_on_failure` call site can remove the staged temp.
+    #[tokio::test]
+    async fn failed_commit_removes_the_staged_temp_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("chapter");
+        std::fs::create_dir(&target).expect("target directory");
+
+        fsync_write_atomic(target.clone(), "new bytes")
+            .await
+            .expect_err("rename over a directory fails");
+
+        assert!(target.is_dir(), "failed write leaves the target untouched");
+        let residual: Vec<String> = std::fs::read_dir(dir.path())
+            .expect("read temp dir")
+            .map(|entry| entry.expect("dir entry").file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| name.contains(".md.tmp."))
+            .collect();
+        assert!(
+            residual.is_empty(),
+            "failed commit leaves no staged temp file: {residual:?}"
+        );
+    }
 }
