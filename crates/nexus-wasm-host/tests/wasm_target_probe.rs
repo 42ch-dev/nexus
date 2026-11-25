@@ -26,8 +26,13 @@ static SCRIPT_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Writes an executable shell script with `body` and returns its path.
 ///
-/// Every call gets a fresh file name and the bytes are synced to the file
-/// before the handle is closed, so no write fd outlives the exec.
+/// Every call gets a fresh file name; the script is flushed and fsynced, and
+/// the writing handle is dropped before `chmod` and exec. That closes this
+/// thread's descriptor, but not the freshly written script's `ETXTBSY` window
+/// (a concurrently forked child can still hold an inherited descriptor), so
+/// callers exec through `probe`, whose bounded `wait_until_executable` drain
+/// covers the remaining window and returns every non-`ETXTBSY` outcome
+/// unchanged.
 fn shell_script(dir: &Path, stem: &str, body: &str) -> PathBuf {
     let path = dir.join(format!(
         "{stem}-{}-{}.sh",
