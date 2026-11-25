@@ -83,7 +83,7 @@ pub fn wire_cast<T: serde::de::DeserializeOwned, S: serde::Serialize>(
 /// other surface can export it. Kinds meaning a malformed request get their
 /// own code (`not_a_directory`); `FilenameTooLong` has no stable
 /// `io::ErrorKind` variant on this toolchain, so it stays folded into
-/// `other` until the MSRV exposes it.
+/// `other`; the MSRV cannot expose a variant std does not define.
 ///
 /// [`ROOT_UNRESOLVABLE_CODE`] is not an `io::ErrorKind`: it marks the
 /// workspace root itself failing to resolve, emitted in the `must_exist` arm
