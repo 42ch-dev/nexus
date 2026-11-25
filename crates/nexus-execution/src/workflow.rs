@@ -10150,18 +10150,19 @@ mod tests {
         );
     }
 
-    /// An inline `acp.prompt` capability enter action is a prompt path: the
-    /// capability prompts through `default`, so admission must require the
-    /// `default` role binding even when only declared roles are bound.
-    #[tokio::test]
-    async fn capability_prompt_enter_action_requires_default_binding() {
+    /// Build the `acp.prompt` capability-enter manifest: one `prompt` state
+    /// whose enter action is the inline `acp.prompt` capability, exiting via
+    /// `exit_when` into the terminal `done` state. `writer` is the only
+    /// declared role, so `default` is bound only when the scenario requires it.
+    fn acp_prompt_manifest(
+        exit_when: nexus_contracts::local::orchestration::preset::ExitWhen,
+    ) -> nexus_contracts::local::orchestration::preset::PresetManifest {
         use nexus_contracts::local::orchestration::preset::{
-            EnterAction, ExitWhen, NextTarget, PresetHeader, PresetKind, PresetManifest,
+            EnterAction, NextTarget, PresetHeader, PresetKind, PresetManifest,
             PresetRoleDefinition, StateDefinition,
         };
-        use nexus_session_storage::run_state::AgentBinding;
 
-        let manifest = PresetManifest {
+        PresetManifest {
             preset: PresetHeader {
                 id: "cap-prompt".into(),
                 version: 1,
@@ -10187,7 +10188,7 @@ mod tests {
                         name: "acp.prompt".into(),
                         args: None,
                     }],
-                    exit_when: Some(ExitWhen::Manual),
+                    exit_when: Some(exit_when),
                     next: Some(NextTarget::Linear("done".into())),
                     terminal: false,
                     context_update: None,
@@ -10218,9 +10219,16 @@ mod tests {
                 system_prompt_file: "writer.md".into(),
                 recommended_skills: vec![],
             }],
-        };
+        }
+    }
 
-        // Only the applied roles are bound — no `default`.
+    /// Assert admission refuses the manifest when only `writer` is bound
+    /// (naming `default`), then admits once `default` is bound.
+    async fn assert_default_binding_required(
+        manifest: &nexus_contracts::local::orchestration::preset::PresetManifest,
+    ) {
+        use nexus_session_storage::run_state::AgentBinding;
+
         let mut bindings = std::collections::HashMap::new();
         bindings.insert(
             "writer".to_string(),
@@ -10229,7 +10237,7 @@ mod tests {
                 model: None,
             },
         );
-        let err = validate_agent_bindings(&manifest, &bindings, None)
+        let err = validate_agent_bindings(manifest, &bindings, None)
             .await
             .expect_err("acp.prompt without `default` must be refused at admission");
         assert!(
@@ -10244,7 +10252,6 @@ mod tests {
             "unexpected admission message: {message}"
         );
 
-        // Binding `default` satisfies the requirement.
         bindings.insert(
             "default".to_string(),
             AgentBinding {
@@ -10252,8 +10259,33 @@ mod tests {
                 model: None,
             },
         );
-        validate_agent_bindings(&manifest, &bindings, None)
+        validate_agent_bindings(manifest, &bindings, None)
             .await
             .expect("binding `default` admits the preset");
+    }
+
+    /// An inline `acp.prompt` capability enter action is a prompt path: the
+    /// capability prompts through `default`, so admission must require the
+    /// `default` role binding even when only declared roles are bound.
+    #[tokio::test]
+    async fn capability_prompt_enter_action_requires_default_binding() {
+        use nexus_contracts::local::orchestration::preset::ExitWhen;
+
+        assert_default_binding_required(&acp_prompt_manifest(ExitWhen::Manual)).await;
+    }
+
+    /// Same prompt path behind an `llm_judge` exit: the capability enter
+    /// action still resolves `default`, so a missing binding is refused and
+    /// a bound `default` passes.
+    #[tokio::test]
+    async fn capability_prompt_enter_action_with_llm_judge_exit_requires_default_binding() {
+        use nexus_contracts::local::orchestration::preset::ExitWhen;
+
+        assert_default_binding_required(&acp_prompt_manifest(ExitWhen::LlmJudge {
+            template_file: None,
+            judge_capability: None,
+            min_interval: None,
+        }))
+        .await;
     }
 }
