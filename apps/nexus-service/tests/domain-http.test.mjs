@@ -304,6 +304,33 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(large.status, 200, large.text);
   });
 
+  test('reading queries refuse chapter=0 with a typed 400 invalid_input', async () => {
+    for (const path of ['/v1/daemon/reading/progress', '/v1/daemon/reading/annotations']) {
+      const zero = await jsonFetch(`${baseUrl}${path}?work_id=wrk_missing&chapter=0`);
+      assert.equal(zero.status, 400, zero.text);
+      assert.equal(zero.payload.error.code, 'invalid_input', zero.text);
+      assert.equal(
+        zero.payload.error.message,
+        'chapter must be an integer greater than or equal to 1',
+        zero.text,
+      );
+
+      const nonNumeric = await jsonFetch(`${baseUrl}${path}?work_id=wrk_missing&chapter=abc`);
+      assert.equal(nonNumeric.status, 400, nonNumeric.text);
+      assert.equal(nonNumeric.payload.error.code, 'invalid_input', nonNumeric.text);
+      assert.equal(nonNumeric.payload.error.message, 'chapter must be an integer', nonNumeric.text);
+
+      const volumeZero = await jsonFetch(`${baseUrl}${path}?work_id=wrk_missing&chapter=1&volume=0`);
+      assert.equal(volumeZero.status, 400, volumeZero.text);
+      assert.equal(volumeZero.payload.error.code, 'invalid_input', volumeZero.text);
+      assert.equal(
+        volumeZero.payload.error.message,
+        'volume must be an integer greater than or equal to 1',
+        volumeZero.text,
+      );
+    }
+  });
+
   test('scene/beat authoring reaches the core owner over HTTP and persists', async () => {
     const creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-creative-'));
     const workspaceDir = join(
