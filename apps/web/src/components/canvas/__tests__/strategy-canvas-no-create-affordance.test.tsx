@@ -109,8 +109,6 @@ function expectInspectorOffersNoSave(compose: boolean) {
       form: originalFormOf(selectedState),
       onChange: () => {},
       setActiveSection: () => {},
-      selectedState,
-      promptTemplateRef: 'prompts/draft.md',
       selectedNode: null,
       parsed,
       danglingTargets: [],

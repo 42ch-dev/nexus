@@ -8,7 +8,7 @@ import { StrategyAltView } from '../strategy-alt-view';
 import { strategyNodeTypes } from '../strategy-nodes';
 import { buildStrategyGraphFromIr } from '@/lib/canvas/strategy-graph-ir';
 import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
-import type { ParsedPreset, PresetState } from '@/lib/canvas/preset-yaml';
+import type { ParsedPreset } from '@/lib/canvas/preset-yaml';
 
 import { EdgeInspector } from './inspectors/edge-inspector';
 import { PromptInspector } from './inspectors/prompt-inspector';
@@ -50,8 +50,6 @@ export interface StrategyCanvasAdapterContext {
   form: EditForm;
   onChange: <K extends keyof EditForm>(field: K, value: EditForm[K]) => void;
   setActiveSection: (section: Section) => void;
-  selectedState: PresetState | undefined;
-  promptTemplateRef: string | undefined;
   selectedNode: Node<StrategyNodeData> | null;
   parsed: ParsedPreset | undefined;
   danglingTargets: string[];

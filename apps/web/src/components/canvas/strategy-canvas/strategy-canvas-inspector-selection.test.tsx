@@ -1,144 +1,130 @@
 /**
  *
- * Regression for the stale-inspector selection bug: the orchestrator assigns
- * `ctxRef.current` AFTER `useCanvasSurface` runs, so on the selection-change
- * render the adapter context still holds the previous render's selection
- * (`ctx.selectedNode`/`ctx.selectedState` disagree with the node the hook's
- * memo passes). The inspector must follow the memo-keyed node argument, so
- * the harness below mirrors the orchestrator's assignment order exactly and
- * drives selection through `onNodesChange`. Broken behaviour: first selection
- * renders an empty body (`ctx.selectedState` undefined) and a re-selection
- * keeps showing the PREVIOUS state's sections (e.g. a transition target
- * input) until the selection identity stops changing.
+ * Regression for the stale-inspector selection bug, exercised through the
+ * production path: `StrategyCanvas` gates the inspector body on the
+ * orchestrator's `selectedState` and renders `surface.inspector` — the memo
+ * whose `renderInspector(node)` previously ignored its argument and read
+ * `ctxRef.current`, which the orchestrator assigns only after
+ * `useCanvasSurface` ran, so it carried the previous render's selection.
+ * Broken behaviour: first selection renders an empty editing body
+ * (`ctx.selectedState` undefined) and a re-selection keeps showing the
+ * PREVIOUS state's sections (the memoised node and the adapter's data
+ * disagree). CanvasShell is the only surface mock — the selection change is
+ * driven through the same `onNodesChange` prop the shell receives, shaped
+ * like a real React Flow click (the target selects, the others deselect).
  */
-import { useMemo, useRef } from 'react';
-import { act, render, screen } from '@testing-library/react';
-import { NodeChangeset, type Node } from '@xyflow/react';
-import { describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { NodeChangeset } from '@xyflow/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { UseCanvasSurfaceResult } from '../use-canvas-surface';
-import { useCanvasSurface, type CanvasSurfaceQueryResult } from '../use-canvas-surface';
-import type { StrategyNodeData, StrategyEdgeData } from '@/lib/canvas/strategy-graph';
-import { parsedPresetFromIr } from '@/lib/canvas/ir-preset';
-import { candidateDocument } from '@/test/simulation-fixture';
+import { StrategyCanvas } from '@/components/canvas/strategy-canvas';
+import { BrowserClient } from '@/lib/nexus';
+import { COMPOSE_FLAG_STORAGE_KEY } from '@/lib/canvas/strategy-compose-flag';
+import { useHandlers } from '@/test/msw-server';
+import { servedIrDocument } from '@/test/simulation-fixture';
+import { renderInApp } from '@/test/test-providers';
 
-import {
-  createStrategyCanvasAdapter,
-  type StrategyCanvasAdapterContext,
-  type StrategySurfaceGraph,
-} from './strategy-canvas-adapter';
+const shellProps = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
-type Surface = UseCanvasSurfaceResult<StrategyNodeData, StrategyEdgeData>;
+vi.mock('@/components/canvas/canvas-shell', () => ({
+  CanvasShell: (props: { children?: React.ReactNode } & Record<string, unknown>) => {
+    shellProps.current = props;
+    return <>{props.children}</>;
+  },
+  useNodeChangeHandler: () => () => {},
+}));
 
-/** Mirrors `StrategyCanvas`: the ctxRef write happens after the surface hook. */
-function SurfaceHarness({
-  exposed,
-}: {
-  exposed: { current: Surface | null };
-}) {
-  const ctxRef = useRef<StrategyCanvasAdapterContext>({
-    form: { label: '', description: '', nextTarget: '', promptBody: '' },
-    onChange: () => {},
-    setActiveSection: () => {},
-    selectedState: undefined,
-    promptTemplateRef: undefined,
-    selectedNode: null,
-    parsed: undefined,
-    danglingTargets: [],
-  });
+vi.mock('@/components/canvas/idea-input', () => ({
+  IdeaInput: () => null,
+}));
 
-  const adapter = useMemo(() => createStrategyCanvasAdapter(ctxRef), [ctxRef]);
+const STRATEGY_ID = 'novel-writing';
+const APPLIED_PATH = `/v1/daemon/strategies/${STRATEGY_ID}/applied`;
+const SESSIONS_PATH = '/v1/daemon/orchestration/sessions';
+const SCHEDULES_PATH = '/v1/daemon/orchestration/schedules';
 
-  const query = useMemo<CanvasSurfaceQueryResult<StrategySurfaceGraph>>(
-    () => ({
-      data: {
-        revision: 1,
-        activeSession: null,
-        trajectory: null,
-        document: candidateDocument(),
-      },
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch: () => {},
-    }),
-    [],
+const DOCUMENT = servedIrDocument({ id: STRATEGY_ID });
+
+function setupCanvas() {
+  window.localStorage.removeItem(COMPOSE_FLAG_STORAGE_KEY);
+  useHandlers(
+    http.get(SESSIONS_PATH, () => HttpResponse.json({ items: [] })),
+    http.get(SCHEDULES_PATH, () => HttpResponse.json({ items: [] })),
+    http.get(APPLIED_PATH, () =>
+      HttpResponse.json({
+        current_apply: {
+          apply_id: 'app_1',
+          approval_id: 'apr_42',
+          content_hash: 'hash-1',
+          applied_at: '2026-11-13T01:00:00Z',
+          supersedes_apply_id: null,
+        },
+        newest_approval: null,
+        applied_document: DOCUMENT,
+        applied_document_refusal: null,
+      }),
+    ),
   );
-
-  const surface = useCanvasSurface(adapter, query);
-
-  const selectedNode = surface.selectedNode as Node<StrategyNodeData> | null;
-  const stateId = selectedNode?.data.stateId;
-  const parsed = parsedPresetFromIr(candidateDocument());
-  const selectedState = stateId
-    ? parsed.manifest.states.find((s) => s.id === stateId)
-    : undefined;
-
-  // Same timing as the orchestrator: assigned after useCanvasSurface ran, so
-  // the inspector memo already computed with the previous render's ctx.
-  ctxRef.current = {
-    form: { label: '', description: '', nextTarget: '', promptBody: '' },
-    onChange: () => {},
-    setActiveSection: () => {},
-    selectedState,
-    promptTemplateRef: undefined,
-    selectedNode,
-    parsed,
-    danglingTargets: ctxRef.current.danglingTargets,
-  };
-
-  exposed.current = surface;
-
-  return <div data-testid="inspector-body">{surface.inspector}</div>;
+  return renderInApp(<StrategyCanvas presetId={STRATEGY_ID} />, { client: new BrowserClient() });
 }
 
-function selectNode(exposed: { current: Surface | null }, id: string) {
-  const surface = exposed.current!;
-  const changes = surface.nodes.map((n) => ({
-    id: n.id,
-    type: 'select' as const,
-    selected: n.id === id,
-  }));
+/**
+ * A React Flow single click selects the target and deselects everything
+ * else in one changeset; replicate that through the exact prop the shell owns.
+ */
+function clickSelectNode(id: string) {
+  const nodes = shellProps.current.nodes as Array<{ id: string }>;
   act(() => {
-    surface.onNodesChange(new NodeChangeset(changes));
+    (shellProps.current.onNodesChange as (changes: NodeChangeset) => void)(
+      new NodeChangeset(
+        nodes.map((node) => ({
+          id: node.id,
+          type: 'select' as const,
+          selected: node.id === id,
+        })),
+      ),
+    );
   });
 }
 
-describe('strategy inspector — selection renders in the same pass', () => {
-  it('opens the inspector body with the state fields for a fresh selection', () => {
-    const exposed = { current: null as Surface | null };
-    const { unmount } = render(<SurfaceHarness exposed={exposed} />);
+describe('strategy inspector — selection opens the body through the production gate', () => {
+  afterEach(() => {
+    cleanup();
+    window.localStorage.removeItem(COMPOSE_FLAG_STORAGE_KEY);
+  });
+
+  it('selection -> edit -> section body renders the state fields', async () => {
+    setupCanvas();
+    await screen.findByText('rev 0');
 
     expect(screen.queryByTestId('state-structural-disabled')).not.toBeInTheDocument();
 
-    selectNode(exposed, 'draft');
+    clickSelectNode('draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
     expect(screen.getByTestId('state-structural-disabled')).toBeInTheDocument();
-    expect(screen.getByLabelText(/label/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
-    // 'draft' has exactly one outgoing linear edge → the transition section shows.
+    expect(screen.getByLabelText('State inspector')).toBeInTheDocument();
+    // 'draft' has exactly one outgoing linear edge, so the transition section shows.
     expect(screen.getByTestId('transition-structural-disabled')).toBeInTheDocument();
-
-    unmount();
   });
 
-  it('re-selection re-renders the new node even though the memoised node and the adapter ctx disagree', () => {
-    const exposed = { current: null as Surface | null };
-    const { unmount } = render(<SurfaceHarness exposed={exposed} />);
+  it('re-selection re-renders the new node even though the memoised node and the adapter ctx disagree', async () => {
+    setupCanvas();
+    await screen.findByText('rev 0');
 
-    selectNode(exposed, 'draft');
+    clickSelectNode('draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByTestId('transition-structural-disabled')).toBeInTheDocument();
 
     // On this render the inspector memo recomputes with node='done' while
     // ctxRef.current still carries the previous render's selection ('draft').
     // The broken implementation read the ref and kept showing 'draft'.
-    selectNode(exposed, 'done');
+    clickSelectNode('done');
 
     expect(screen.getByTestId('state-structural-disabled')).toBeInTheDocument();
     // 'done' is terminal with no outgoing edges: the transition section must
     // disappear. Under the stale-ctx bug it persists (from 'draft').
     expect(screen.queryByTestId('transition-structural-disabled')).not.toBeInTheDocument();
-
-    unmount();
   });
 });

@@ -47,7 +47,6 @@ import {
   ValidationPanel,
   isSectionDirty,
   originalFormOf,
-  templateRefOf,
 } from './strategy-canvas/state-machine';
 import type { IdeaArtifact } from '@/components/canvas/idea-input';
 
@@ -91,8 +90,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     form: strategyState.form,
     onChange: () => {},
     setActiveSection: strategyState.setActiveSection,
-    selectedState: undefined,
-    promptTemplateRef: undefined,
     selectedNode: null,
     parsed: undefined,
     danglingTargets: [],
@@ -147,10 +144,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     const stateId = (node.data as StrategyNodeData).stateId;
     return strategyState.parsed?.manifest.states.find((s) => s.id === stateId);
   }, [surface.selectedNode, strategyState.parsed]);
-
-  const promptTemplateRef = useMemo(() => {
-    return selectedState ? templateRefOf(selectedState) : undefined;
-  }, [selectedState]);
 
   // It moved here because it depends on selectedState (now resolved from
   // surface.selectedNode by the orchestrator, not from hook-owned node state).
@@ -231,8 +224,6 @@ export function StrategyCanvas({ presetId, candidate, onApproveCandidate }: Stra
     form: strategyState.form,
     onChange: updateField,
     setActiveSection: strategyState.setActiveSection,
-    selectedState,
-    promptTemplateRef,
     selectedNode: surface.selectedNode as unknown as Node<StrategyNodeData> | null,
     parsed: strategyState.parsed,
     danglingTargets: ctxRef.current.danglingTargets,
