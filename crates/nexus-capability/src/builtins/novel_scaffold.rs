@@ -790,10 +790,23 @@ impl ScaffoldTransaction {
     /// would hold never land, so leaving them behind would change the tree a
     /// dry run promises to leave alone.
     ///
+    /// The read-only checks still run while recording — an occupied
+    /// non-directory path refuses instead of letting the dry run report
+    /// success — and only `create_dir_all` and its bookkeeping are skipped.
+    ///
     /// A freshly created directory is owned by this transaction and removed on
     /// rollback; a pre-existing one is never removed.
     fn create_dir(&mut self, path: &Path) -> Result<(), CapabilityError> {
         if self.recording {
+            if path.is_dir() {
+                return Ok(());
+            }
+            if path_is_occupied(path) {
+                return Err(CapabilityError::Internal(format!(
+                    "mkdir {}: occupied by a non-directory",
+                    path.display()
+                )));
+            }
             return Ok(());
         }
         let pre_existed = path_is_occupied(path);
@@ -1384,6 +1397,47 @@ mod tests {
             before_tree,
             tree_snapshot(&root),
             "a failed dry run must leave the Works tree untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn recording_run_still_refuses_an_occupied_directory_path() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let occupant = root
+            .join("recording-novel-occupied")
+            .join("Outlines")
+            .join("chapters");
+        std::fs::create_dir_all(occupant.parent().expect("occupant has a parent"))
+            .expect("mkdir parent");
+        std::fs::write(&occupant, "not a directory").expect("write occupant");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+            executor: Some(Arc::new(DryRunExecutor::at(tmp.path().to_path_buf()))),
+        };
+
+        let before_tree = tree_snapshot(&root);
+        let err = cap
+            .run(serde_json::json!({
+                "creator_id": "creator_test",
+                "work_id": "wrk_novel_dry_occupied",
+                "work_ref": "recording-novel-occupied",
+                "title": "Recording Novel Occupied",
+                "world_id": "wld_recording_novel_occupied",
+                "total_planned_chapters": 1,
+            }))
+            .await
+            .expect_err("a recording run must still refuse an occupied directory path");
+
+        assert!(
+            matches!(err, CapabilityError::Internal(_)),
+            "expected the occupied-directory refusal, got: {err}"
+        );
+        assert_eq!(
+            before_tree,
+            tree_snapshot(&root),
+            "the refusal must leave the tree untouched"
         );
     }
 }
