@@ -1,0 +1,24 @@
+-- I-000471: disposition of the `strategy_applies` UPDATE/DELETE triggers left behind by the
+-- append-only cutover. Comment only — this migration performs no SQL and changes no trigger body.
+--
+-- `20261116000001_strategy_applies_append_only.sql` installs an unconditional BEFORE UPDATE/DELETE
+-- abort on the table. The `guard_*` / `pinned_approval_*` / `outbox_*` families from
+-- `20261114000001_strategy_applies.sql` stay in place: `writer_protocol.rs` requires a guard trio on
+-- every persistent table, and the INSERT path they cover is still the only path that writes.
+-- Nothing is dropped, but which of them are dead is recorded here by name so a later reader — or a
+-- cleanup — can tell the two apart without reading trigger bodies:
+--
+--   Retired (cannot fire) — an AFTER trigger runs only after its statement succeeds, and the abort
+--   above refuses every UPDATE and DELETE on this table before that:
+--     * `outbox_strategy_applies_update`
+--     * `outbox_strategy_applies_delete`
+--
+--   Retained (must stay) — do not sweep these as dead:
+--     * `guard_strategy_applies_insert` / `guard_strategy_applies_update` /
+--       `guard_strategy_applies_delete`: the guard trio the crate's trigger-coverage assertion
+--       requires by name on every persistent table, UPDATE/DELETE included.
+--     * `pinned_approval_strategy_applies_insert` / `pinned_approval_strategy_applies_update`:
+--       the row-to-approval pin. The UPDATE arm is shadowed by the unconditional abort (BEFORE
+--       trigger order is not a contract), but it stays with the family.
+--     * `outbox_strategy_applies_insert`: a committed INSERT still publishes its `core_changes`
+--       event.
