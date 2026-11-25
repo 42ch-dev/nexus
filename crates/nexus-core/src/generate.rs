@@ -423,6 +423,7 @@ fn legal_node_ids(document: &WorkflowDocument) -> String {
 /// The stable `snake_case` identifier of one structural violation.
 const fn structural_kind(violation: &Violation) -> &'static str {
     match violation {
+        Violation::UnsupportedIrVersion { .. } => "unsupported_ir_version",
         Violation::DuplicateDocumentId(_) => "duplicate_document_id",
         Violation::DuplicateNodeId { .. } => "duplicate_node_id",
         Violation::DanglingEdge { .. } => "dangling_edge",
@@ -446,6 +447,36 @@ const fn structural_kind(violation: &Violation) -> &'static str {
 #[allow(clippy::too_many_lines)] // one match arm per Violation variant: per-kind formatters, one table
 fn structural_correction(violation: &Violation, document: &WorkflowDocument) -> Correction {
     let (location, observed, correction) = match violation {
+        Violation::UnsupportedIrVersion {
+            found,
+            supported,
+            fragment: false,
+            ..
+        } => (
+            format!("document {}", document.id.as_str()),
+            format!("ir_version {found} is newer than supported IR_VERSION {supported}"),
+            format!(
+                "set `ir_version` to {supported} or lower: this build validates documents written \
+                 against IR_VERSION {supported}"
+            ),
+        ),
+        Violation::UnsupportedIrVersion {
+            document: id,
+            found,
+            supported,
+            fragment: true,
+        } => (
+            format!("fragment {id}"),
+            format!(
+                "pattern fragment `{id}` declares ir_version {found}, newer than supported \
+                 IR_VERSION {supported}"
+            ),
+            format!(
+                "the version of `{id}` comes from the pinned pattern package, not this \
+                 document: regenerate the package against IR_VERSION {supported} or repin a \
+                 package built for it"
+            ),
+        ),
         Violation::DuplicateDocumentId(id) => (
             format!("document {id}"),
             format!("document id `{id}` is declared more than once in the set"),
@@ -843,8 +874,19 @@ mod tests {
     }
 
     /// Every structural kind, with what its correction must name.
+    #[allow(clippy::too_many_lines)] // one case tuple per Violation variant, like the match it covers
     fn structural_cases() -> Vec<(Violation, &'static str, &'static str)> {
         vec![
+            (
+                Violation::UnsupportedIrVersion {
+                    document: "generated".into(),
+                    fragment: false,
+                    found: 9,
+                    supported: 0,
+                },
+                "unsupported_ir_version",
+                "ir_version",
+            ),
             (
                 Violation::DuplicateDocumentId("generated".into()),
                 "duplicate_document_id",
@@ -948,7 +990,7 @@ mod tests {
     fn every_structural_kind_has_a_correction_naming_what_to_change() {
         let document = legal_document();
         let cases = structural_cases();
-        assert_eq!(cases.len(), 12, "the enum carries twelve variants");
+        assert_eq!(cases.len(), 13, "the enum carries thirteen variants");
         for (violation, kind, expected) in cases {
             let correction = structural_correction(&violation, &document);
             assert_eq!(correction.kind, kind, "{violation:?}");
@@ -962,6 +1004,60 @@ mod tests {
                 "{kind}: a bare Display string is not a correction"
             );
         }
+    }
+
+    #[test]
+    fn a_fragment_ir_version_correction_points_at_the_pattern_package() {
+        let correction = structural_correction(
+            &Violation::UnsupportedIrVersion {
+                document: "story.arc@1.0.0".into(),
+                fragment: true,
+                found: 9,
+                supported: 0,
+            },
+            &legal_document(),
+        );
+        assert_eq!(correction.kind, "unsupported_ir_version");
+        assert_eq!(correction.location, "fragment story.arc@1.0.0");
+        assert!(correction.observed.contains("story.arc@1.0.0"));
+        for named in ["pinned pattern package", "story.arc@1.0.0", "repin"] {
+            assert!(
+                correction.correction.contains(named),
+                "the correction must name `{named}`: {}",
+                correction.correction
+            );
+        }
+        assert!(
+            !correction.correction.contains("set `ir_version`"),
+            "the candidate document cannot fix a pinned fragment's version: {}",
+            correction.correction
+        );
+    }
+
+    /// A fragment whose id collides with the candidate document keeps its package correction:
+    /// the variant says what it is, so the correction never infers it from ids.
+    #[test]
+    fn a_fragment_sharing_the_document_id_still_gets_the_package_correction() {
+        let document = legal_document();
+        let correction = structural_correction(
+            &Violation::UnsupportedIrVersion {
+                document: document.id.as_str().to_owned(),
+                fragment: true,
+                found: 9,
+                supported: 0,
+            },
+            &document,
+        );
+        assert_eq!(
+            correction.location,
+            format!("fragment {}", document.id.as_str())
+        );
+        assert!(correction.correction.contains("pinned pattern package"));
+        assert!(
+            !correction.correction.contains("set `ir_version`"),
+            "an id collision must not turn a fragment into a document fix: {}",
+            correction.correction
+        );
     }
 
     #[test]

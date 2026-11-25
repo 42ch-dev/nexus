@@ -11,7 +11,7 @@
 
 use crate::{
     WorkflowDocument, WorkflowNestBinding, WorkflowNestChild, WorkflowNestChildKind, WorkflowNode,
-    WorkflowNodeEffectClass, WorkflowNodeKind,
+    WorkflowNodeEffectClass, WorkflowNodeKind, IR_VERSION,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -78,6 +78,16 @@ pub fn pattern_pin(child: &WorkflowNestChild) -> Option<(&str, &str)> {
 /// A structural violation. Every violation found is returned, never only the first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Violation {
+    /// A document's or resolved fragment's `ir_version` is newer than this build's `IR_VERSION`:
+    /// the body is refused rather than interpreted under rules it was not written against.
+    /// `fragment` marks a version carried by a pinned pattern package, so consumers do not
+    /// attribute the fix to the document under validation.
+    UnsupportedIrVersion {
+        document: String,
+        fragment: bool,
+        found: u64,
+        supported: u64,
+    },
     DuplicateDocumentId(String),
     DuplicateNodeId {
         document: String,
@@ -137,6 +147,26 @@ pub enum Violation {
 impl std::fmt::Display for Violation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UnsupportedIrVersion {
+                document,
+                fragment,
+                found,
+                supported,
+            } => {
+                if *fragment {
+                    write!(
+                        f,
+                        "pattern fragment `{document}`: ir_version {found} is newer than \
+                         supported IR_VERSION {supported}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "`{document}`: ir_version {found} is newer than supported IR_VERSION \
+                         {supported}"
+                    )
+                }
+            }
             Self::DuplicateDocumentId(id) => {
                 write!(f, "document id `{id}` appears more than once in the set")
             }
@@ -203,9 +233,10 @@ impl std::error::Error for Violation {}
 /// Validate a document set against the Q2 structural rules.
 ///
 /// `patterns` carries the pattern bodies the caller resolved; a pin with no entry there is a leaf,
-/// so this never requires a registry. A resolved fragment body gets [`validate_fragment`]'s four
-/// node-graph checks and nothing more: its nests join the nest walk below for cycles and depth, and
-/// [`validate_nests`] runs on documents only.
+/// so this never requires a registry. A resolved fragment body is first held to the same
+/// `ir_version` gate as a document, then gets [`validate_fragment`]'s four node-graph checks and
+/// nothing more: its nests join the nest walk below for cycles and depth, and [`validate_nests`]
+/// runs on documents only.
 ///
 /// # Errors
 ///
@@ -224,10 +255,26 @@ pub fn validate(
         }
     }
     for document in documents {
+        if document.ir_version > IR_VERSION {
+            violations.push(Violation::UnsupportedIrVersion {
+                document: document.id.as_str().to_owned(),
+                fragment: false,
+                found: document.ir_version,
+                supported: IR_VERSION,
+            });
+        }
         validate_document(document, &mut violations);
     }
     for pattern in patterns {
         if let PatternBodyKind::Fragment(fragment) = pattern.body {
+            if fragment.ir_version > IR_VERSION {
+                violations.push(Violation::UnsupportedIrVersion {
+                    document: fragment.id.as_str().to_owned(),
+                    fragment: true,
+                    found: fragment.ir_version,
+                    supported: IR_VERSION,
+                });
+            }
             validate_fragment(fragment, &mut violations);
         }
     }
@@ -986,6 +1033,75 @@ mod tests {
                 depth: 4,
             }]
         );
+    }
+
+    #[test]
+    fn rejects_an_ir_version_newer_than_this_build() {
+        let mut doc = document(
+            "future",
+            &json!([node("entry", "outer_state")]),
+            &json!([]),
+            &json!([]),
+        );
+        doc.ir_version = IR_VERSION + 1;
+
+        let violations = validate(&[&doc], &[]).unwrap_err();
+        assert_eq!(
+            violations,
+            vec![Violation::UnsupportedIrVersion {
+                document: "future".to_owned(),
+                fragment: false,
+                found: IR_VERSION + 1,
+                supported: IR_VERSION,
+            }]
+        );
+    }
+
+    #[test]
+    fn accepts_the_supported_ir_version() {
+        let doc = document(
+            "current",
+            &json!([node("entry", "outer_state")]),
+            &json!([]),
+            &json!([]),
+        );
+        assert_eq!(doc.ir_version, IR_VERSION);
+        assert_eq!(validate(&[&doc], &[]), Ok(()));
+    }
+
+    #[test]
+    fn rejects_a_fragment_with_an_ir_version_newer_than_this_build() {
+        let mut frag = document(
+            "frag",
+            &json!([node("entry", "inner_step")]),
+            &json!([]),
+            &json!([]),
+        );
+        frag.ir_version = IR_VERSION + 1;
+        let bodies = [fragment("frag.pat", &frag)];
+
+        let violations = validate(&[], &bodies).unwrap_err();
+        assert_eq!(
+            violations,
+            vec![Violation::UnsupportedIrVersion {
+                document: "frag".to_owned(),
+                fragment: true,
+                found: IR_VERSION + 1,
+                supported: IR_VERSION,
+            }]
+        );
+    }
+
+    #[test]
+    fn accepts_a_fragment_at_the_supported_ir_version() {
+        let frag = document(
+            "frag",
+            &json!([node("entry", "inner_step")]),
+            &json!([]),
+            &json!([]),
+        );
+        let bodies = [fragment("frag.pat", &frag)];
+        assert_eq!(validate(&[], &bodies), Ok(()));
     }
 
     /// A resolved pattern body, pinned at `1.0.0`.
