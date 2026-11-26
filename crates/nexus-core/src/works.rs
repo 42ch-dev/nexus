@@ -9,6 +9,7 @@ use nexus_contracts::{
     CreateWorkResponse, ListWorksQuery, ListWorksResponse, PaginationInfo,
     ReleaseCompletionLockRequest, WorkSummary,
 };
+use nexus_local_db::work_chapters::ReconcileSkip;
 use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
 use uuid::Uuid;
 
@@ -292,6 +293,9 @@ pub struct WorkReconcileReport {
     pub updated: u32,
     pub resynced: u32,
     pub preserved: u32,
+    /// Chapters whose frontmatter status write-back was skipped; carried from
+    /// the store's report so callers can put the detail on the wire.
+    pub skipped: Vec<ReconcileSkip>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -500,6 +504,7 @@ impl CoreService {
                 updated: report.updated,
                 resynced: report.resynced,
                 preserved: report.preserved,
+                skipped: report.skipped,
             })
     }
     /// # Errors
