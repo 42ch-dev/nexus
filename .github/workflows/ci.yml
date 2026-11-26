@@ -434,6 +434,8 @@ jobs:
           pnpm --filter @42ch/nexus-service run build
       - name: Lint
         run: pnpm run lint
+      - name: Pre-push hook lint scoping regression
+        run: node --test tooling/check-pre-push-hook.test.mjs
 
   # v1.222 review (6v6rFh): the boot/bootstrap and bind-gate regressions spawn a
   # real `dist/main.js`, which loads the gitignored native addon staged by
