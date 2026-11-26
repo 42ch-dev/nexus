@@ -124,6 +124,10 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
     };
 
     let mut spoke = SpokeKnowledgeEntry {
+        // The `spoke-knowledge-adoption` family stays UNCONSUMED (upstream
+        // 0.18/0.19): nexus holds no adoption provenance and serves no
+        // `knowledge.adopt`, so an emitted entry never carries an anchor.
+        adoption_anchor: None,
         body: spoke_body,
         canonical_name: KnowledgeEntryCanonicalName::try_from(entry.canonical_name.as_str())
             .expect("canonical_name is non-empty (validated)"),

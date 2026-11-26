@@ -4274,4 +4274,37 @@ mod tests {
             SpokeRejectCode::NotAuthorized
         );
     }
+
+    /// `memory.spaces.create` is a required port item since spoke 0.19, but
+    /// this fixture serves exactly its one operator-provisioned space: the
+    /// answer is the terminal §14.2 refusal, never an emulated second space.
+    #[tokio::test]
+    async fn create_space_is_refused_terminally() {
+        let scenario = Scenario::open().await;
+        let principal: spoke_operations::spoke_schemas::Principal =
+            serde_json::from_value(json!({ "principal_id": OPERATOR, "extensions": {} }))
+                .expect("a valid authenticated principal");
+        let request: spoke_operations::spoke_schemas::MemorySpacesCreateRequest =
+            serde_json::from_value(json!({
+                "space_id": "spc_second",
+                "idempotency_key": "create-second",
+            }))
+            .expect("a valid spaces.create request");
+
+        let reject = match spoke_operations::MemoryPort::create_space(
+            &scenario.provider,
+            &principal,
+            request,
+        )
+        .await
+        {
+            SpokeResult::Ok(_) => panic!("spaces.create must be refused, never served"),
+            SpokeResult::Reject(reject) => reject,
+        };
+
+        assert_eq!(reject.code, SpokeRejectCode::CapabilityPortMissing);
+        let details = reject.details.expect("the refusal carries details");
+        assert_eq!(details.get("op"), Some(&json!("memory.spaces.create")));
+        assert_eq!(details.get("retry_class"), Some(&json!("terminal")));
+    }
 }

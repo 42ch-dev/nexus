@@ -3969,7 +3969,7 @@ dependencies = [
  "nexus-memory-provider",
  "nexus-provider-ports",
  "serde",
- "serde_jcs",
+ "serde_jcs 0.2.0",
  "serde_json",
  "spoke-connect",
  "spoke-operations",
@@ -4949,7 +4949,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5466,6 +5466,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6518fc26bced4d53678a22d6e423e9d8716377def84545fe328236e3af070e7f"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f232fd0249f55adbe7f15bee58bbbd3d40708000b84e6482066d2ba599e08a9"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5581,7 +5587,18 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3a60f3fda61525e439ef6d67422118f11e986566997d9021c56867ad814a0aa"
 dependencies = [
- "ryu-js",
+ "ryu-js 0.2.2",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "serde_jcs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ca3f887a59db14b827b39ef0a56e37ac1dc98616de7482c9d245d314fa1b48b"
+dependencies = [
+ "ryu-js 1.0.4",
  "serde",
  "serde_json",
 ]
@@ -5857,9 +5874,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-connect"
-version = "0.17.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "660b161a89b000032ddeb01e8b3c0debd3299e0c94c806bf78ae8d65ec6abd86"
+checksum = "8a8fff4cddf17805af6f5bcf8800b1fc14c8b0401054e85d09bb2c488cd597f5"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -5869,7 +5886,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libp2p",
  "serde",
- "serde_jcs",
+ "serde_jcs 0.3.0",
  "serde_json",
  "spoke-operations",
  "spoke-schemas",
@@ -5880,15 +5897,15 @@ dependencies = [
 
 [[package]]
 name = "spoke-operations"
-version = "0.17.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a11d57d86f32dca808e9f0015be52cf7dda1903ac2e8b93b9e4f2cec7dc7a0a"
+checksum = "94edfcbdc7d9824da358b4e1f04cb99d7c3a04a8f88ecb50539fecb3173c3ec1"
 dependencies = [
  "async-trait",
  "chrono",
  "regress",
  "serde",
- "serde_jcs",
+ "serde_jcs 0.3.0",
  "serde_json",
  "sha2 0.11.1",
  "spoke-schemas",
@@ -5896,9 +5913,9 @@ dependencies = [
 
 [[package]]
 name = "spoke-schemas"
-version = "0.17.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "068078d605eed14a6dbe58fa4731f1c9f0914239f609639fbff9f9402c6f0d27"
+checksum = "3d657c75e033525a0f15b6e060be80de824a3b6dfb4530df40301b7ccadb2ac6"
 dependencies = [
  "chrono",
  "regress",

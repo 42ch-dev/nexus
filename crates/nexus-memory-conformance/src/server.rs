@@ -58,11 +58,11 @@ use spoke_operations::spoke_schemas::{
     MemoryRecordsPromoteResponse, MemoryRecordsUpdateRequest, MemoryRecordsUpdateResponse,
     MemoryReflectionsGenerateRequest, MemoryReflectionsGenerateResponse,
     MemoryReflectionsListRequest, MemoryReflectionsListResponse, MemoryReflectionsStateRequest,
-    MemoryReflectionsStateResponse, MemorySpacesFreezeRequest, MemorySpacesFreezeResponse,
-    MemorySpacesListRequest, MemorySpacesListResponse, MemorySpacesUnfreezeRequest,
-    MemorySpacesUnfreezeResponse, MemorySubjectsEnsureRequest, MemorySubjectsEnsureResponse,
-    MemorySubjectsFenceRequest, MemorySubjectsFenceResponse, MemorySubjectsGetRequest,
-    MemorySubjectsGetResponse, Principal,
+    MemoryReflectionsStateResponse, MemorySpacesCreateRequest, MemorySpacesCreateResponse,
+    MemorySpacesFreezeRequest, MemorySpacesFreezeResponse, MemorySpacesListRequest,
+    MemorySpacesListResponse, MemorySpacesUnfreezeRequest, MemorySpacesUnfreezeResponse,
+    MemorySubjectsEnsureRequest, MemorySubjectsEnsureResponse, MemorySubjectsFenceRequest,
+    MemorySubjectsFenceResponse, MemorySubjectsGetRequest, MemorySubjectsGetResponse, Principal,
 };
 use spoke_operations::{
     grant_covers, GrantRequirement, MemoryPort, SpokeReject, SpokeRejectCode, SpokeResult,
@@ -619,6 +619,18 @@ impl MemoryPort for FixtureMemoryProvider {
             })),
             Err(reject) => SpokeResult::Reject(reject),
         }
+    }
+
+    /// `memory.spaces.create` is not served: this fixture serves exactly the
+    /// one operator-provisioned space (`provider::provision_space`), and a
+    /// caller-named second space would break every slice's single-space
+    /// invariant. The refusal is terminal, never emulated (AGENTS §Key Rules).
+    async fn create_space(
+        &self,
+        _principal: &Principal,
+        _request: MemorySpacesCreateRequest,
+    ) -> SpokeResult<MemorySpacesCreateResponse> {
+        unsupported("memory.spaces.create")
     }
 
     async fn freeze_space(
