@@ -406,25 +406,47 @@ grandchild.stdout.once('data', () => setTimeout(() => process.exit(0), 250));
     const child = lifecycle.spawnLogged(process.execPath, ['-e', leaderScript], {
       label: 'nexus-service',
     });
-    await waitForChildOutput(child, 'grandchild-ready-marker');
+    let groupBefore = [];
+    try {
+      await waitForChildOutput(child, 'grandchild-ready-marker');
 
-    const groupBefore = lifecycle
-      .collectDescendants([child.pid], lifecycle.psRows())
-      .filter((row) => row.pid !== child.pid);
-    assert.ok(
-      groupBefore.length >= 1,
-      'the parked grandchild must be visible in the process tree before the kill',
-    );
+      groupBefore = lifecycle
+        .collectDescendants([child.pid], lifecycle.psRows())
+        .filter((row) => row.pid !== child.pid);
+      assert.ok(
+        groupBefore.length >= 1,
+        'the parked grandchild must be visible in the process tree before the kill',
+      );
 
-    await new Promise((resolveExit) => child.once('exit', resolveExit));
+      await new Promise((resolveExit) => child.once('exit', resolveExit));
 
-    const survivorsBefore = lifecycle.survivingGroupRows(groupBefore, child.pid);
-    assert.equal(survivorsBefore.length, 1, 'the parked grandchild must be reported as a survivor');
-    assert.equal(survivorsBefore[0].pid, groupBefore[0].pid);
+      // With the leader gone, the runner side must reach EOF while the parked
+      // grandchild still runs: a grandchild that inherited the runner's stdout
+      // never lets it end, and the file could not exit.
+      const eofDeadline = Date.now() + 2_000;
+      while (!child.stdout.readableEnded && Date.now() < eofDeadline) await sleep(20);
+      assert.equal(
+        child.stdout.readableEnded,
+        true,
+        'the runner stdout must reach EOF while only the parked grandchild remains',
+      );
 
-    lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
-    await Promise.race([child.__closed, sleep(2_000)]);
-    assert.equal(child.__closeSettled, true, 'the killed leader must settle through close');
+      const survivorsBefore = lifecycle.survivingGroupRows(groupBefore, child.pid);
+      assert.equal(survivorsBefore.length, 1, 'the parked grandchild must be reported as a survivor');
+      assert.equal(survivorsBefore[0].pid, groupBefore[0].pid);
+    } finally {
+      lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
+    }
+
+    // The kill is asynchronous: poll instead of assuming the descendant is
+    // already gone between two snapshots.
+    const reapDeadline = Date.now() + 2_000;
+    while (
+      Date.now() < reapDeadline &&
+      lifecycle.survivingGroupRows(groupBefore, child.pid).length > 0
+    ) {
+      await sleep(50);
+    }
     assert.equal(
       lifecycle.survivingGroupRows(groupBefore, child.pid).length,
       0,
