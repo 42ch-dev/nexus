@@ -73,8 +73,8 @@ use nexus_local_db::LocalDbError;
 use storage::{
     Admission, CandidateRow, CaptureError, Coverage, Fence, FenceAction, FenceTarget, GrantRow,
     MemoryStore, MigrationOutcome, NewCandidate, NewGrant, OpContext, Placement, ProfileRow,
-    ReceiptRow, RecordRead, RecordRow, ReflectionRow, ReviewDecision, Selection, SpaceRow,
-    StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
+    ReceiptRow, RecordRead, RecordRow, ReflectionRow, ReflectionWindow, ReviewDecision, Selection,
+    SpaceRow, StoreError, SubjectRow, RECEIPT_FAILED, RECEIPT_PENDING,
 };
 
 /// The Character binding a binding-local capture stands on (compass D15).
@@ -4177,7 +4177,7 @@ impl MemoryPort for LocalMemoryProvider {
             "missing_required_profile_kinds": missing_required_profile_kinds,
             "stale": stale,
             "state_digest": state_digest,
-            "last_reflection_id": last.map(|visible| visible.row.reflection_id.clone()),
+            "last_reflection_id": last.map(|visible| visible.reflection_id.clone()),
         }))
     }
 
@@ -4232,7 +4232,8 @@ impl MemoryPort for LocalMemoryProvider {
                 Ok(page) => page,
                 Err(error) => return deny(&error),
             };
-        let (rows, marker, ..) = match self
+        let limit = page_limit(request.limit);
+        let (page_rows, marker, more) = match self
             .store
             .reflections(
                 request.space_id.as_str(),
@@ -4240,16 +4241,21 @@ impl MemoryPort for LocalMemoryProvider {
                 selection.as_ref(),
                 filter.as_deref(),
                 principal_id,
+                ReflectionWindow { offset, limit },
             )
             .await
         {
-            Ok(rows) => rows,
+            Ok(page) => page,
             Err(error) => return deny(&store_error(error)),
         };
         if let Err(error) = verify_cursor(claimed.as_deref(), &marker) {
             return deny(&error);
         }
-        let (page_rows, next) = page(rows, page_limit(request.limit), offset);
+        let next_cursor = more.then(|| {
+            let consumed =
+                offset.saturating_add(u64::try_from(page_rows.len()).unwrap_or(u64::MAX));
+            encode_cursor(principal_id, &scope, consumed, &marker)
+        });
         let mut bodies = Vec::with_capacity(page_rows.len());
         for visible in &page_rows {
             match reflection_body(&visible.row, visible.stale) {
@@ -4257,7 +4263,6 @@ impl MemoryPort for LocalMemoryProvider {
                 Err(error) => return deny(&error),
             }
         }
-        let next_cursor = next.map(|offset| encode_cursor(principal_id, &scope, offset, &marker));
         respond(json!({
             "reflections": bodies,
             "next_cursor": next_cursor,

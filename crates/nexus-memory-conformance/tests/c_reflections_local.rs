@@ -1215,6 +1215,240 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
     );
 }
 
+/// §7.0.7/MEM-R026 (I-000349 fix round): the cursor is bound to the *visible*
+/// set, so a grant that expires between pages rebinds it. Expiry writes no
+/// grant row — only the clock moves past `expires_at` — and the second page
+/// must answer `CURSOR_INVALID` rather than slicing an offset over a set the
+/// caller may no longer see and silently skip rows it never received.
+///
+/// Two clocks are in play: `reflect_admission` samples the wall clock, the
+/// store's visibility check samples its proof-seam clock. The TTL is an hour
+/// of real time and the seam advances two, so the first page cannot be
+/// invalidated by elapsed test runtime while the second page reads the grant
+/// as expired — the case is deterministic on any CI speed.
+#[tokio::test]
+async fn c_071b_expired_grant_invalidates_the_list_cursor_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let (admin, grantee) = t3_setup(&provider).await;
+
+    let expiring = served(
+        provider
+            .grant(
+                &admin,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": T3_SUBJECT,
+                    "principal_id": T3_GRANTEE,
+                    "capabilities": ["reflect"],
+                    "expires_at": (chrono::Utc::now() + chrono::Duration::hours(1))
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    "idempotency_key": "t3c071b-reflect-expiring",
+                })),
+            )
+            .await,
+        "the expiring reflect grant",
+    );
+    assert_eq!(expiring["status"], json!("committed"), "{expiring}");
+
+    let digest = sufficient_basis(&provider, &admin).await;
+    for key in ["t3c071b-pin-a", "t3c071b-pin-b"] {
+        let receipt = served(
+            t3_generate(&provider, &admin, &digest, key).await,
+            "a committed generation",
+        );
+        assert_eq!(receipt["status"], json!("committed"), "{receipt}");
+    }
+
+    let page_one = t3_list(&provider, &grantee, None, Some(1)).await;
+    assert_eq!(
+        page_one["reflections"]
+            .as_array()
+            .expect("reflection rows")
+            .len(),
+        1,
+        "the first page serves under the live grant: {page_one}"
+    );
+    let cursor = page_one["next_cursor"]
+        .as_str()
+        .expect("a partial page names its continuation")
+        .to_owned();
+
+    // Past the grant's hour-long deadline in store time, with almost no real
+    // time elapsed: the first page cannot drift out from under the run.
+    provider.advance_clock(2 * 60 * 60);
+
+    expect_refusal(
+        provider
+            .list_reflections(
+                &grantee,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": T3_SUBJECT,
+                    "cursor": cursor,
+                })),
+            )
+            .await,
+        SpokeRejectCode::CursorInvalid,
+        "terminal",
+        "a cursor issued before the grant expired",
+    );
+}
+
+/// §7.0.7/MEM-R026 (I-000349 fix round): the cursor identity follows what the
+/// caller can see, never the envelope table. A reflection pinned outside a
+/// context-scoped peer's coverage leaves that peer's cursor valid — so a
+/// continuation is not refused, and nothing about the hidden generation leaks
+/// through the cursor — while the peer's own pages stay contiguous.
+#[tokio::test]
+async fn c_071c_hidden_reflection_keeps_the_list_cursor_local() {
+    let home = tempfile::TempDir::new().expect("temporary provider home");
+    let provider = LocalMemoryProvider::open(home.path().to_path_buf(), ADMIN, "default")
+        .await
+        .expect("open the local provider");
+    let (admin, grantee) = t3_setup(&provider).await;
+
+    let scoped = json!({
+        "mode": "selected_contexts",
+        "context_ids": [T3_CONTEXT_A],
+    });
+    let scoped_grant = served(
+        provider
+            .grant(
+                &admin,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": T3_SUBJECT,
+                    "principal_id": T3_GRANTEE,
+                    "capabilities": ["reflect"],
+                    "context_ids": [T3_CONTEXT_A],
+                    "shared_access": false,
+                    "idempotency_key": "t3c071c-reflect-a",
+                })),
+            )
+            .await,
+        "the context-scoped reflect grant",
+    );
+    assert_eq!(scoped_grant["status"], json!("committed"), "{scoped_grant}");
+
+    author_required_profile(&provider, &admin).await;
+    t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "cursor row a").await;
+    t3_record(&provider, &admin, T3_CONTEXT_A, T3_SOURCE_A, "cursor row b").await;
+    t3_record(&provider, &admin, T3_CONTEXT_B, T3_SOURCE_B, "hidden row b").await;
+
+    let digest = expect_state_digest(
+        &t3_state(&provider, &grantee, scoped.clone(), None).await,
+        "the peer's scoped basis",
+    );
+    for key in ["t3c071c-pin-a", "t3c071c-pin-b"] {
+        let receipt = served(
+            provider
+                .generate_reflection(
+                    &grantee,
+                    dto(json!({
+                        "space_id": provider.space_id(),
+                        "subject_id": T3_SUBJECT,
+                        "selection": scoped,
+                        "expected_state_digest": digest,
+                        "idempotency_key": key,
+                    })),
+                )
+                .await,
+            "the peer's scoped generation",
+        );
+        assert_eq!(receipt["status"], json!("committed"), "{receipt}");
+    }
+
+    let page_one = served(
+        provider
+            .list_reflections(
+                &grantee,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": T3_SUBJECT,
+                    "selection": scoped,
+                    "limit": 1,
+                })),
+            )
+            .await,
+        "the peer's first page",
+    );
+    assert_eq!(
+        page_one["reflections"]
+            .as_array()
+            .expect("reflection rows")
+            .len(),
+        1,
+        "the peer's first page serves one envelope: {page_one}"
+    );
+    let cursor = page_one["next_cursor"]
+        .as_str()
+        .expect("a partial page names its continuation")
+        .to_owned();
+
+    // Another principal generates a reflection pinned outside the peer's
+    // coverage: the peer may not see it, and must not learn it happened.
+    let hidden_digest = expect_state_digest(
+        &t3_state(
+            &provider,
+            &admin,
+            json!({ "mode": "selected_contexts", "context_ids": [T3_CONTEXT_B] }),
+            None,
+        )
+        .await,
+        "the hidden basis",
+    );
+    let hidden = served(
+        provider
+            .generate_reflection(
+                &admin,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": T3_SUBJECT,
+                    "selection": { "mode": "selected_contexts", "context_ids": [T3_CONTEXT_B] },
+                    "expected_state_digest": hidden_digest,
+                    "idempotency_key": "t3c071c-hidden",
+                })),
+            )
+            .await,
+        "the hidden generation",
+    );
+    assert_eq!(hidden["status"], json!("committed"), "{hidden}");
+
+    let page_two = served(
+        provider
+            .list_reflections(
+                &grantee,
+                dto(json!({
+                    "space_id": provider.space_id(),
+                    "subject_id": T3_SUBJECT,
+                    "selection": scoped,
+                    "cursor": cursor,
+                })),
+            )
+            .await,
+        "the continuation across a hidden generation",
+    );
+    assert_eq!(
+        page_two["reflections"]
+            .as_array()
+            .expect("reflection rows")
+            .len(),
+        1,
+        "the peer's continuation serves its own second envelope: {page_two}"
+    );
+    assert!(
+        page_two.get("next_cursor").is_none(),
+        "the peer's two-envelope listing is exhausted: {page_two}"
+    );
+    assert_ne!(
+        page_two["reflections"][0]["reflection_id"], hidden["result"]["reflection_id"],
+        "the hidden envelope never surfaces: {page_two}"
+    );
+}
+
 /// C-077: a tombstoned row leaves the authorized basis at read time — the
 /// published count drops, the digest moves, and the same exclusion governs
 /// the record listing. The envelope-exclusion half: a reflection pinned over
