@@ -647,7 +647,8 @@ fn print_validate_verdict(resp: &serde_json::Value) {
 /// `preset.yaml` file (asset checks run against its parent), a
 /// standalone YAML file (no asset checks — same as the daemon's
 /// `infer_bundle_root`), or a Workflow IR document (`*.ir.json`), which
-/// is validated directly (§ CLI parity surface).
+/// is validated as IR; a document the exporter refuses still validates
+/// structurally and reports that refusal as a warning.
 ///
 /// Moved from `system` (V1.153 P3) — the shared validator core, not
 /// re-implemented (AR-24).
@@ -743,10 +744,13 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 
 /// Validate a Workflow IR document directly (`... .ir.json`).
 ///
-/// The document is parsed as IR and the same checks the YAML path runs are
-/// applied to it, so both formats report the same diagnostics for the same
-/// defect. An IR file carries no bundle root, so asset checks are skipped
-/// exactly as for a standalone YAML file.
+/// The document is parsed as IR and checked structurally; when it is exportable, the loader-level
+/// manifest checks also run on the projected preset. Both formats report the same diagnostics for
+/// the same structural defect, but the IR entry is not a promise of exact YAML parity: a document
+/// the exporter refuses stays structurally valid, and that refusal is reported as a warning that
+/// names the export step — it can be any refusal the exporter raises (IR-only node kinds, header
+/// versions, edges or gates with no preset payload, inner-graph shapes), not one class. An IR file
+/// carries no bundle root, so asset checks are skipped exactly as for a standalone YAML file.
 fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::Value> {
     use nexus_capability::CapabilityRegistry;
     use nexus_preset::validation::{validate_workflow_ir, validate_workflow_ir_path_safety};
@@ -785,9 +789,13 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
                 errors.push(format!("{}: {}", problem.path, problem.error));
             }
         }
-        // `validate` must not pass a document `export` refuses: the refusal names the carrier it
-        // could not project (a node, its dependency, or the graph).
-        Err(error) => errors.push(format!("preset.export: {error}")),
+        // `validate_workflow_ir` is a structural IR check: a document the exporter refuses is
+        // still structurally valid, so this is a warning, and it covers whatever the exporter
+        // refuses — IR-only node kinds, header versions, edges or gates with no preset payload,
+        // and inner-graph shapes alike.
+        Err(error) => warnings.push(format!(
+            "preset.export: {error}; the document cannot be exported to a preset"
+        )),
     }
 
     for diagnostic in validate_workflow_ir_path_safety(&document)
@@ -1120,10 +1128,10 @@ mod tests {
         }
     }
 
-    /// A document `preset export` refuses must not pass `preset validate`: the IR validation entry
-    /// surfaces the export refusal instead of discarding it.
+    /// A structurally valid document the exporter refuses stays `valid: true`; the refusal is a
+    /// warning that says the document cannot become a preset.
     #[test]
-    fn validate_workflow_ir_file_reports_an_export_refusal() {
+    fn validate_workflow_ir_file_warns_about_an_export_refusal() {
         let manifest: nexus_contracts::local::orchestration::preset::PresetManifest =
             serde_yaml::from_str(
                 r"
@@ -1174,12 +1182,24 @@ inner_graphs:
         std::fs::write(&file, serde_json::to_string(&document).expect("json")).expect("write");
 
         let response = validate_workflow_ir_file(&file).expect("validates");
-        assert_eq!(response["valid"], serde_json::json!(false), "{response}");
-        let errors = response["errors"].as_array().expect("errors array");
+        assert_eq!(
+            response["valid"],
+            serde_json::json!(true),
+            "structure is valid: {response}"
+        );
+        assert_eq!(
+            response["errors"],
+            serde_json::json!([]),
+            "the export refusal is not a structural error: {response}"
+        );
+        let warnings = response["warnings"].as_array().expect("warnings array");
         assert!(
-            errors
-                .iter()
-                .any(|error| error.as_str().unwrap_or_default().contains("depends on")),
+            warnings.iter().any(|warning| {
+                let text = warning.as_str().unwrap_or_default();
+                text.contains("preset.export")
+                    && text.contains("depends on")
+                    && text.contains("cannot be exported to a preset")
+            }),
             "{response}"
         );
     }

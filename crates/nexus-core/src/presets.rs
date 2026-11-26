@@ -799,14 +799,23 @@ fn rename_state_references(
 
 // ─── Domain validation ─────────────────────────────────────────────────────
 
-/// Append `path: message` unless that exact rendered diagnostic is already present.
+/// Rendered `path: message` diagnostics, each appearing once in first-seen order.
 ///
 /// The semantic, path-safety and asset entries deliberately overlap (an unsafe asset path is
-/// reported by more than one), and both daemon responses must show each defect once.
-fn push_unique_diagnostic(seen: &mut Vec<String>, path: &str, message: &str) {
-    let rendered = format!("{path}: {message}");
-    if !seen.contains(&rendered) {
-        seen.push(rendered);
+/// reported by more than one), and both daemon responses must show each defect once. The set keeps
+/// the membership test O(1); the vector preserves reporting order.
+#[derive(Default)]
+struct RenderedDiagnostics {
+    seen: std::collections::HashSet<String>,
+    ordered: Vec<String>,
+}
+
+impl RenderedDiagnostics {
+    fn push(&mut self, path: &str, message: &str) {
+        let rendered = format!("{path}: {message}");
+        if self.seen.insert(rendered.clone()) {
+            self.ordered.push(rendered);
+        }
     }
 }
 
@@ -823,9 +832,9 @@ fn validate_preset_yaml(
 
     let caps = BuiltinCapabilityCatalog;
 
-    let mut errors: Vec<String> = Vec::new();
+    let mut errors = RenderedDiagnostics::default();
     for p in nexus_preset::loader_validate_manifest_compat(&manifest, &caps) {
-        push_unique_diagnostic(&mut errors, &p.path, &p.error);
+        errors.push(&p.path, &p.error);
     }
 
     let sem = nexus_preset::validate_preset_semantic(&manifest, &caps);
@@ -836,19 +845,19 @@ fn validate_preset_yaml(
         .chain(path_result.errors())
         .chain(asset_result.errors())
     {
-        push_unique_diagnostic(&mut errors, &d.path, &d.message);
+        errors.push(&d.path, &d.message);
     }
 
-    let mut warnings: Vec<String> = Vec::new();
+    let mut warnings = RenderedDiagnostics::default();
     for d in sem
         .warnings()
         .chain(path_result.warnings())
         .chain(asset_result.warnings())
     {
-        push_unique_diagnostic(&mut warnings, &d.path, &d.message);
+        warnings.push(&d.path, &d.message);
     }
 
-    Ok((errors, warnings))
+    Ok((errors.ordered, warnings.ordered))
 }
 
 // ─── Atomic persistence ────────────────────────────────────────────────────
@@ -2021,7 +2030,7 @@ fn validate_preset_file(
 
     // Combine diagnostics from path safety + semantic + asset checks. The rendered paths are
     // relative, never host paths, and each defect is reported once.
-    let mut errors: Vec<String> = Vec::new();
+    let mut errors = RenderedDiagnostics::default();
     for d in path_result
         .diagnostics
         .iter()
@@ -2029,11 +2038,11 @@ fn validate_preset_file(
         .chain(asset_result.diagnostics.iter())
         .filter(|d| d.severity == nexus_preset::DiagnosticSeverity::Error)
     {
-        push_unique_diagnostic(&mut errors, &d.path, &d.message);
+        errors.push(&d.path, &d.message);
     }
 
     // Warnings are reported separately in the response (informational).
-    let mut warnings: Vec<String> = Vec::new();
+    let mut warnings = RenderedDiagnostics::default();
     for d in path_result
         .diagnostics
         .iter()
@@ -2041,17 +2050,17 @@ fn validate_preset_file(
         .chain(asset_result.diagnostics.iter())
         .filter(|d| d.severity == nexus_preset::DiagnosticSeverity::Warning)
     {
-        push_unique_diagnostic(&mut warnings, &d.path, &d.message);
+        warnings.push(&d.path, &d.message);
     }
 
-    let valid = errors.is_empty();
+    let valid = errors.ordered.is_empty();
     Ok(ValidatePresetResponse {
         valid,
         id: Some(manifest.preset.id.clone()),
         version: Some(i64::from(manifest.preset.version)),
         state_count: Some(i64::try_from(manifest.states.len()).expect("bounded YAML state count")),
-        errors,
-        warnings,
+        errors: errors.ordered,
+        warnings: warnings.ordered,
     })
 }
 
