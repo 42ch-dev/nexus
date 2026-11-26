@@ -1195,7 +1195,7 @@ async fn execute_write_file(
         // and its `resource` is free text, so the caller reads the simulator
         // cause below, not a bare denial.
         //
-        // Audit cost, accepted: `execute()` audits every refusal as
+        // Audit cost, accepted: `execute_tool` audits every refusal as
         // `denied:<err_code>` into `acp_tool_audit_log`, and `err_code` maps
         // `Forbidden` to "forbidden", so the row reads `denied:forbidden` — the
         // simulator cause survives only in this returned `resource`.
