@@ -386,18 +386,29 @@ mod tests {
 
     #[test]
     fn reject_same_stage() {
-        let work = work_state("research", "active", "complete");
-        let err = check_stage_advance(&work, "research", false).unwrap_err();
-        assert_eq!(err.code, "FL_E_SAME_STAGE");
-        assert!(err.message.contains("already at stage"));
+        // A same-stage advance is refused from both an active and a completed stage.
+        for status in ["active", "complete"] {
+            let work = work_state("research", status, "complete");
+            let err = check_stage_advance(&work, "research", false).unwrap_err();
+            assert_eq!(err.code, "FL_E_SAME_STAGE", "{status}");
+            assert!(err.message.contains("already at stage"), "{status}");
+        }
     }
 
     #[test]
     fn reject_backwards() {
-        let work = work_state("research", "complete", "complete");
-        let err = check_stage_advance(&work, "intake", false).unwrap_err();
-        assert_eq!(err.code, "FL_E_BACKWARDS_ADVANCE");
-        assert!(err.message.contains("backwards"));
+        // Backwards covers any earlier stage, not just the immediately previous one.
+        for (from, to) in [
+            ("research", "intake"),
+            ("produce", "research"),
+            ("produce", "intake"),
+            ("persist", "research"),
+        ] {
+            let work = work_state(from, "complete", "complete");
+            let err = check_stage_advance(&work, to, false).unwrap_err();
+            assert_eq!(err.code, "FL_E_BACKWARDS_ADVANCE", "{from} -> {to}");
+            assert!(err.message.contains("backwards"), "{from} -> {to}");
+        }
     }
 
     #[test]
@@ -410,8 +421,14 @@ mod tests {
 
     #[test]
     fn allow_skip_with_force() {
-        let work = work_state("intake", "pending", "pending");
-        assert!(check_stage_advance(&work, "produce", true).is_ok());
+        // --force bypasses the adjacency gate for any later stage.
+        for target in ["produce", "persist"] {
+            let work = work_state("intake", "pending", "pending");
+            assert!(
+                check_stage_advance(&work, target, true).is_ok(),
+                "intake -> {target} with --force"
+            );
+        }
     }
 
     #[test]
