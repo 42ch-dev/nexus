@@ -744,13 +744,17 @@ fn validate_preset_local(path: &str) -> Result<serde_json::Value> {
 
 /// Validate a Workflow IR document directly (`... .ir.json`).
 ///
-/// The document is parsed as IR and checked structurally; when it is exportable, the loader-level
+/// A document whose `ir_version` is newer than supported is rejected up front as an `ir_version`
+/// error, before any structural check runs or any export is attempted (`export_preset` refuses the
+/// same header, so that class never reaches the warning arm below).
+///
+/// Otherwise the document is checked structurally; when it is exportable, the loader-level
 /// manifest checks also run on the projected preset. Both formats report the same diagnostics for
 /// the same structural defect, but the IR entry is not a promise of exact YAML parity: a document
 /// the exporter refuses stays structurally valid, and that refusal is reported as a warning that
-/// names the export step — it can be any refusal the exporter raises (IR-only node kinds, header
-/// versions, edges or gates with no preset payload, inner-graph shapes), not one class. An IR file
-/// carries no bundle root, so asset checks are skipped exactly as for a standalone YAML file.
+/// names the export step — it covers whatever else the exporter refuses (IR-only node kinds, edges
+/// or gates with no preset payload, inner-graph shapes), not one class. An IR file carries no
+/// bundle root, so asset checks are skipped exactly as for a standalone YAML file.
 fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::Value> {
     use nexus_capability::CapabilityRegistry;
     use nexus_preset::validation::{validate_workflow_ir, validate_workflow_ir_path_safety};
