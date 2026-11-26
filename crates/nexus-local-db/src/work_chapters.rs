@@ -515,6 +515,21 @@ pub async fn update_paths(
     Ok(())
 }
 
+/// Reason recorded for a chapter whose file frontmatter cannot be rendered.
+const UNRENDERABLE_FRONTMATTER_REASON: &str =
+    "frontmatter status cannot be rendered (no opening '---' or an unclosed frontmatter block)";
+
+/// A chapter file reconcile left untouched because its frontmatter status
+/// cannot be rendered.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ReconcileSkip {
+    /// Chapter path below the workspace root:
+    /// `Works/<work_ref>/Stories/<file>.md`.
+    pub path: String,
+    /// Why no bytes were written.
+    pub reason: &'static str,
+}
+
 /// Report from reconciling `work_chapters` with the filesystem.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReconcileReport {
@@ -526,10 +541,15 @@ pub struct ReconcileReport {
     ///
     /// These bytes are committed by the caller's Work byte-write port, never by
     /// [`apply_reconcile_diff`] — this counter is a file count, not a DB row
-    /// count.
+    /// count. A file whose frontmatter status cannot be rendered is never
+    /// counted here; it appears in [`ReconcileReport::skipped`] instead.
     pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,
+    /// Chapter files left unmodified because their frontmatter status cannot
+    /// be rendered (no opening `---`, or a block that never closes).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<ReconcileSkip>,
 }
 
 /// A single write decision produced by [`compute_reconcile_diff`] (V1.49 P3,
@@ -563,6 +583,10 @@ pub enum ReconcileOp {
     /// Resync the chapter file's frontmatter `status` to the DB source of
     /// truth (DB-as-SSOT; the file was ahead/conflicting).
     ///
+    /// Emitted only when [`render_frontmatter_status`] can produce the bytes;
+    /// a file it cannot render is recorded in [`ReconcileDiff::skipped`]
+    /// instead, so this op never stands for a write that silently no-ops.
+    ///
     /// **Index-only in [`apply_reconcile_diff`]**: that function treats this
     /// variant as a documented no-op. The bytes are rendered by
     /// [`render_frontmatter_status`] and committed by the caller's Work
@@ -584,7 +608,8 @@ pub enum ReconcileOp {
 }
 
 /// The read-only result of [`compute_reconcile_diff`]: an ordered list of
-/// [`ReconcileOp`]s plus the count of existing rows that need no write.
+/// [`ReconcileOp`]s, the count of existing rows that need no write, and the
+/// chapters whose frontmatter could not be rendered.
 ///
 /// Carrying the decisions (not the raw file/DB state) keeps [`apply_reconcile_diff`]
 /// cheap and free of re-reads, which is what makes the lock window short.
@@ -595,6 +620,9 @@ pub struct ReconcileDiff {
     pub ops: Vec<ReconcileOp>,
     /// Existing rows whose status and `word_count` already agree (no write).
     pub preserved: u32,
+    /// Chapters whose file frontmatter cannot be rendered, so no write
+    /// decision was produced for them.
+    pub skipped: Vec<ReconcileSkip>,
 }
 
 impl ReconcileDiff {
@@ -618,6 +646,7 @@ impl ReconcileDiff {
             updated,
             resynced,
             preserved: self.preserved,
+            skipped: self.skipped.clone(),
         }
     }
 }
@@ -876,10 +905,15 @@ pub async fn compute_reconcile_diff(
                 // chapter transition.
                 let status_conflicts = fm_status.as_ref().is_some_and(|s| s != &db_status);
                 if status_conflicts {
-                    diff.ops.push(ReconcileOp::ResyncFileStatus {
-                        rel_child: std::path::Path::new("Stories").join(&fname),
-                        db_status: db_status.clone(),
-                    });
+                    let rel_child = std::path::Path::new("Stories").join(&fname);
+                    if render_frontmatter_status(&content, &db_status).is_some() {
+                        diff.ops.push(ReconcileOp::ResyncFileStatus {
+                            rel_child,
+                            db_status: db_status.clone(),
+                        });
+                    } else {
+                        push_reconcile_skip(&mut diff, work_id, work_ref, &fname);
+                    }
                 }
 
                 // Mirror word_count from file to DB when present and different.
@@ -905,6 +939,23 @@ pub async fn compute_reconcile_diff(
     }
 
     Ok(diff)
+}
+
+/// Record one chapter whose frontmatter status cannot be rendered: no bytes
+/// can be written for it, so it is reported instead of counted as a resync.
+fn push_reconcile_skip(diff: &mut ReconcileDiff, work_id: &str, work_ref: &str, file_name: &str) {
+    let path = format!("Works/{work_ref}/Stories/{file_name}");
+    tracing::warn!(
+        target: "reconcile",
+        work_id,
+        work_ref,
+        path = %path,
+        "chapter frontmatter status cannot be rendered; file left unchanged"
+    );
+    diff.skipped.push(ReconcileSkip {
+        path,
+        reason: UNRENDERABLE_FRONTMATTER_REASON,
+    });
 }
 
 /// Write phase of reconcile (V1.49 P3, R-V148P4-W3).
@@ -2473,6 +2524,78 @@ mod tests {
         assert_eq!(report2.updated, 0);
         assert_eq!(report2.resynced, 0);
         assert_eq!(report2.preserved, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // I-000405: a chapter whose frontmatter status cannot be rendered is
+    // reported as skipped (path + reason), and no resync op is emitted for it,
+    // so the counters match what was actually written.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_reconcile_reports_unrenderable_frontmatter_as_skipped() {
+        let (dir, pool) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_recon_skip").await;
+        seed_chapters(
+            &pool,
+            "wrk_recon_skip",
+            "my-novel",
+            2,
+            "2026-06-07T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
+        std::fs::create_dir_all(&stories_dir).unwrap();
+        // Status conflicts with the DB row, but the frontmatter never closes,
+        // so no bytes can be rendered to resync it.
+        let broken = "---\ntitle: Broken\nchapter: 1\nstatus: draft\nUnclosed body";
+        let broken_path = stories_dir.join("ch01-broken.md");
+        std::fs::write(&broken_path, broken).unwrap();
+        std::fs::write(
+            stories_dir.join("ch02-ok.md"),
+            "---\ntitle: Ok\nchapter: 2\nstatus: not_started\n---\nBody",
+        )
+        .unwrap();
+
+        let diff = compute_reconcile_diff(&pool, "wrk_recon_skip", "my-novel", dir.path())
+            .await
+            .unwrap();
+        assert!(
+            !diff
+                .ops
+                .iter()
+                .any(|op| matches!(op, ReconcileOp::ResyncFileStatus { .. })),
+            "no resync op may stand for an unrenderable chapter: {:?}",
+            diff.ops
+        );
+        assert_eq!(diff.skipped.len(), 1, "one chapter cannot be rendered");
+        assert_eq!(
+            diff.skipped[0].path,
+            "Works/my-novel/Stories/ch01-broken.md"
+        );
+        assert!(
+            diff.skipped[0].reason.contains("cannot be rendered"),
+            "skip must carry a reason naming the failure, got {:?}",
+            diff.skipped[0].reason
+        );
+
+        let report = apply_reconcile_diff(&pool, "wrk_recon_skip", "2026-06-07T11:00:00Z", &diff)
+            .await
+            .unwrap();
+        assert_eq!(report.created, 0);
+        assert_eq!(report.updated, 0);
+        assert_eq!(report.resynced, 0, "no chapter file was written");
+        assert_eq!(report.preserved, 1, "ch02 is unchanged");
+        assert_eq!(report.skipped, diff.skipped, "the report carries the skip");
+        let accounted = report.created
+            + report.updated
+            + report.resynced
+            + report.preserved
+            + u32::try_from(report.skipped.len()).unwrap();
+        assert_eq!(accounted, 2, "every chapter is accounted for exactly once");
+        // The unrenderable file keeps its original bytes — nothing was lost.
+        assert_eq!(std::fs::read_to_string(&broken_path).unwrap(), broken);
     }
 
     // -----------------------------------------------------------------------

@@ -1148,6 +1148,7 @@ const fn reconcile_report_wire(
         updated: report.updated,
         resynced: report.resynced,
         preserved: report.preserved,
+        skipped: Vec::new(),
     }
 }
 
