@@ -13,7 +13,7 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus_capability::{CapabilityError, WorkspaceExecutor};
+use nexus_capability::WorkspaceExecutor;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::KbStore;
 use nexus_local_db::kb_extract_job::list_pending_for_world;
@@ -22,48 +22,12 @@ use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::quality_loop;
 use sqlx::SqlitePool;
 
-/// Test executor: commits Work bytes at the target the production port builds
-/// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
-/// checks the core port performs.
-struct DirectWriteExecutor;
+mod common;
 
-#[async_trait::async_trait]
-impl WorkspaceExecutor for DirectWriteExecutor {
-    async fn open(
-        &self,
-        _input: nexus_contracts::local::orchestration::WorkspaceOpenInput,
-    ) -> Result<nexus_contracts::local::orchestration::WorkspaceOpenOutput, CapabilityError> {
-        Err(CapabilityError::WorkerUnavailable)
-    }
+use common::{test_pool, DirectWriteExecutor};
 
-    async fn commit(
-        &self,
-        _input: nexus_contracts::local::orchestration::WorkspaceCommitInput,
-    ) -> Result<nexus_contracts::local::orchestration::WorkspaceCommitOutput, CapabilityError> {
-        Err(CapabilityError::WorkerUnavailable)
-    }
-
-    async fn commit_work_artifact(
-        &self,
-        input: nexus_contracts::local::orchestration::WorkArtifactCommitInput,
-    ) -> Result<nexus_contracts::local::orchestration::WorkArtifactCommitOutput, CapabilityError>
-    {
-        let target = std::path::Path::new(&input.workspace_root)
-            .join("Works")
-            .join(&input.work_ref)
-            .join(&input.rel_child);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| CapabilityError::Internal(format!("mkdir: {e}")))?;
-        }
-        std::fs::write(&target, &input.content)
-            .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
-        Ok(nexus_contracts::local::orchestration::WorkArtifactCommitOutput { committed: true })
-    }
-}
-
-fn executor() -> std::sync::Arc<dyn WorkspaceExecutor> {
-    std::sync::Arc::new(DirectWriteExecutor)
+fn executor(workspace_root: &std::path::Path) -> std::sync::Arc<dyn WorkspaceExecutor> {
+    std::sync::Arc::new(DirectWriteExecutor::new(workspace_root))
 }
 
 const CREATOR: &str = "ctr_missing_test";
@@ -104,10 +68,6 @@ fn novel_work(work_id: &str, chapter: i32) -> WorkRecord {
         lineage_from_work_id: None,
     }
 }
-
-mod common;
-
-use common::test_pool;
 
 async fn seed_world(pool: &SqlitePool) {
     nexus_local_db::kb_store::seed::world(
@@ -207,7 +167,7 @@ async fn ac1_finalize_detection_writes_missing_log() {
     seed_chapter_with_body(&pool, "wrk_ac1", 2, &body_rel).await;
     insert_novel_writing_schedule(&pool, "sch_ac1", "wrk_ac1").await;
 
-    let exec = executor();
+    let exec = executor(ws_dir.path());
     let count = quality_loop::detect_missing_kb_on_finalize(
         &pool,
         "sch_ac1",
@@ -265,7 +225,7 @@ async fn ac4_missing_candidates_not_written_to_extract_jobs() {
     seed_chapter_with_body(&pool, "wrk_ac4", 2, &body_rel).await;
     insert_novel_writing_schedule(&pool, "sch_ac4", "wrk_ac4").await;
 
-    let exec = executor();
+    let exec = executor(ws_dir.path());
     quality_loop::detect_missing_kb_on_finalize(
         &pool,
         "sch_ac4",
@@ -306,7 +266,7 @@ async fn ac6_existing_key_block_filters_known_entity() {
     seed_chapter_with_body(&pool, "wrk_ac6", 2, &body_rel).await;
     insert_novel_writing_schedule(&pool, "sch_ac6", "wrk_ac6").await;
 
-    let exec = executor();
+    let exec = executor(ws_dir.path());
     let count = quality_loop::detect_missing_kb_on_finalize(
         &pool,
         "sch_ac6",
@@ -371,7 +331,8 @@ async fn non_novel_writing_schedule_is_noop() {
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia was here.");
     seed_chapter_with_body(&pool, "wrk_noop", 1, &body_rel).await;
 
-    let exec = executor();
+    // No workspace_dir reaches the log writer, so the root is unused.
+    let exec = executor(std::path::Path::new(""));
     let count = quality_loop::detect_missing_kb_on_finalize(
         &pool,
         "sch_noop",
@@ -392,7 +353,8 @@ async fn missing_workspace_dir_is_noop() {
     works::create_work(&pool, &work).await.unwrap();
     insert_novel_writing_schedule(&pool, "sch_nows", "wrk_nows").await;
 
-    let exec = executor();
+    // No workspace_dir reaches the log writer, so the root is unused.
+    let exec = executor(std::path::Path::new(""));
     let count =
         quality_loop::detect_missing_kb_on_finalize(&pool, "sch_nows", None, None, Some(&exec))
             .await
