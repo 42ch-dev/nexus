@@ -52,9 +52,10 @@ echo "Expected lockstep pin: ${SPOKE_PIN}"
 echo ""
 
 # ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
-# The workspace [workspace.dependencies] declares exact pins for all three
-# crates; `spoke-operations` is the canonical source, so the other two are
-# asserted against it:
+# The workspace [workspace.dependencies] declares the pin line (`0.19`, patches
+# float) for all three crates; `spoke-operations` is the canonical source, so
+# the other two are asserted against it. The compare is textual, so a legacy
+# exact `=0.19` spelling also matches:
 #   spoke-schemas    = "<pin>"
 #   spoke-operations = "<pin>"     (canonical)
 #   spoke-connect    = "<pin>"     (opt-in behind feature `connect-host`)
