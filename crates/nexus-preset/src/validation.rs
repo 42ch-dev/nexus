@@ -568,8 +568,9 @@ fn manifest_referenced_inner_graphs(manifest: &PresetManifest) -> BTreeSet<&str>
 
 /// The inner graph names a document's inner-step node ids carry.
 ///
-/// Only [`validate_workflow_ir`] uses this: a manifest passes its keys instead. The caller must
-/// have refused slashed step ids first — they are what makes this split ambiguous.
+/// The last `/` segment of a node id is its step and everything before it is the graph, so a
+/// graph name may itself contain `/`. Only [`validate_workflow_ir`] uses this: a manifest passes
+/// its own `inner_graphs` keys instead.
 fn document_inner_graphs(document: &WorkflowDocument) -> BTreeSet<&str> {
     document
         .nodes

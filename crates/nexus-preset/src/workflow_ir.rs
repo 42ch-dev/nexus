@@ -1072,12 +1072,21 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                         .depends_on
                         .iter()
                         .map(|dependency| {
-                            dependency
+                            // The loader resolves `depends_on` only among one graph's own step ids,
+                            // so a same-graph dependency exports as its local id and anything else
+                            // (another graph's step) has no preset form.
+                            let local = dependency
                                 .strip_prefix(&format!("{graph}/"))
-                                .unwrap_or(dependency)
-                                .to_string()
+                                .unwrap_or(dependency);
+                            if local.contains('/') {
+                                return Err(refuse(format!(
+                                    "inner step `{}` depends on `{dependency}`, which is not a step of inner graph `{graph}`; a preset cannot express a cross-graph dependency",
+                                    node.id
+                                )));
+                            }
+                            Ok(local.to_string())
                         })
-                        .collect(),
+                        .collect::<Result<Vec<_>, WorkflowIrError>>()?,
                     template_file: node.template.clone(),
                     tool_policy: node.tool_policy.clone(),
                     agent: node.role.clone(),
@@ -1091,6 +1100,8 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
             }
         }
     }
+
+    refuse_dangling_graph_references(document, &steps)?;
 
     if steps.is_empty() {
         return Ok((states, None));
@@ -1107,6 +1118,38 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
         );
     }
     Ok((states, Some(graphs)))
+}
+
+/// Refuse a state `enter` reference that no inner step defines.
+///
+/// The loader rejects a dangling reference, and export must not overwrite a preset with a file the
+/// loader refuses. `defined` is the graph-name set the inner steps export under.
+fn refuse_dangling_graph_references(
+    document: &WorkflowDocument,
+    defined: &BTreeMap<String, Vec<GraphNode>>,
+) -> Result<(), WorkflowIrError> {
+    for node in &document.nodes {
+        if !matches!(
+            node.kind,
+            WorkflowNodeKind::OuterState | WorkflowNodeKind::Terminal
+        ) {
+            continue;
+        }
+        for enter in &node.enter {
+            if enter.kind != WorkflowEnterActionKind::InnerGraph {
+                continue;
+            }
+            if let Some(name) = enter.name.as_deref() {
+                if !defined.contains_key(name) {
+                    return Err(refuse(format!(
+                        "state `{}` enters inner graph `{name}`, but no inner step belongs to it; the document's graph structure cannot be exported",
+                        node.id
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn preset_header(document: &WorkflowDocument) -> Result<PresetHeader, WorkflowIrError> {
@@ -1995,6 +2038,134 @@ states:
             serde_json::to_value(&manifest).expect("manifest json"),
             "a graph name with a slash survives import and export unchanged"
         );
+    }
+
+    /// One state enters a graph and a nested graph; the parent graph carries a same-graph
+    /// dependency. Export must keep both expressible, and the loader must accept the result.
+    const GRAPH_REFERENCE_MANIFEST: &str = r"
+preset:
+  id: graph-refs
+  version: 1
+  kind: creator
+  description: graph references
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: lane
+      - kind: inner_graph
+        name: lane/utility
+    exit_when: { kind: graph_complete }
+    next: done
+  - id: done
+    terminal: true
+inner_graphs:
+  lane:
+    nodes:
+      - id: x
+        kind: acp_prompt
+      - id: y
+        kind: acp_prompt
+        depends_on: [x]
+  lane/utility:
+    nodes:
+      - id: check
+        kind: acp_prompt
+";
+
+    fn graph_reference_manifest() -> PresetManifest {
+        serde_yaml::from_str(GRAPH_REFERENCE_MANIFEST).expect("manifest parses")
+    }
+
+    /// Threads 1 and 2, positive: document -> manifest -> loader. The exported preset names the
+    /// graphs that own the steps and keeps the same-graph dependency local, and the loader accepts
+    /// it.
+    #[test]
+    fn exported_graph_references_and_dependencies_load_cleanly() {
+        let document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        let exported = export_preset(&document).expect("export");
+        let yaml = serde_yaml::to_string(&exported).expect("yaml");
+
+        let loaded = crate::load_preset_from_str(
+            &yaml,
+            &crate::capability_catalog::BuiltinCapabilityCatalog,
+        )
+        .expect("the loader accepts the exported preset");
+
+        let enters: Vec<&str> = loaded
+            .manifest
+            .states
+            .iter()
+            .flat_map(|state| state.enter.iter())
+            .filter_map(|enter| match enter {
+                crate::manifest::EnterAction::InnerGraph { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(enters, vec!["lane", "lane/utility"]);
+
+        let lane = loaded
+            .manifest
+            .inner_graphs
+            .as_ref()
+            .and_then(|graphs| graphs.get("lane"))
+            .expect("lane graph loads");
+        let y = lane
+            .nodes
+            .iter()
+            .find(|node| node.id == "y")
+            .expect("y step");
+        assert_eq!(y.depends_on, vec!["x".to_string()]);
+    }
+
+    /// Thread 1, negative: steps that only exist under a nested graph name leave the state's
+    /// `enter` dangling, and a preset cannot express that.
+    #[test]
+    fn export_refuses_a_state_entering_a_graph_with_no_steps() {
+        let mut document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        for node in &mut document.nodes {
+            if node.id == "lane/x" || node.id == "lane/y" {
+                node.id = node.id.replacen("lane/", "lane/nested/", 1);
+            }
+            for dependency in &mut node.depends_on {
+                if dependency == "lane/x" {
+                    *dependency = "lane/nested/x".to_string();
+                }
+            }
+        }
+
+        let error =
+            export_preset(&document).expect_err("a dangling graph reference has no preset form");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["state `a`", "lane"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// Thread 2, negative: the loader resolves `depends_on` only within one graph, so a
+    /// cross-graph dependency must be refused instead of exported as a local id.
+    #[test]
+    fn export_refuses_a_cross_graph_dependency() {
+        let mut document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "lane/y")
+            .expect("y step")
+            .depends_on = vec!["lane/utility/check".to_string()];
+
+        let error =
+            export_preset(&document).expect_err("a cross-graph dependency has no preset form");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["lane/y", "lane/utility/check", "cross-graph"] {
+            assert!(message.contains(expected), "{message}");
+        }
     }
 
     /// A step id is one id segment: a slashed step would export under a different graph than the

@@ -818,22 +818,32 @@ fn validate_preset_yaml(
         .collect();
 
     let sem = nexus_preset::validate_preset_semantic(&manifest, &caps);
-    for d in sem.errors() {
-        errors.push(format!("{}: {}", d.path, d.message));
-    }
-
     let path_result = nexus_preset::validate_path_safety(&manifest);
     let asset_result = nexus_preset::validate_assets_in_bundle(&manifest, bundle_root);
-    for d in path_result.errors().chain(asset_result.errors()) {
-        errors.push(format!("{}: {}", d.path, d.message));
+    // The semantic entry and the path-safety entry both check unsafe asset paths, so this merge
+    // point must not surface the same (path, message) twice.
+    for d in sem
+        .errors()
+        .chain(path_result.errors())
+        .chain(asset_result.errors())
+    {
+        let rendered = format!("{}: {}", d.path, d.message);
+        if !errors.contains(&rendered) {
+            errors.push(rendered);
+        }
     }
 
-    let warnings: Vec<String> = sem
+    let mut warnings: Vec<String> = Vec::new();
+    for d in sem
         .warnings()
         .chain(path_result.warnings())
         .chain(asset_result.warnings())
-        .map(|d| format!("{}: {}", d.path, d.message))
-        .collect();
+    {
+        let rendered = format!("{}: {}", d.path, d.message);
+        if !warnings.contains(&rendered) {
+            warnings.push(rendered);
+        }
+    }
 
     Ok((errors, warnings))
 }
@@ -2300,6 +2310,52 @@ fn profile_signal(signal: &SignalBinding) -> PresetProfileSignal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BUG-01: the semantic entry and the path-safety entry both report an unsafe asset path, so
+    /// the daemon merge point must surface it once.
+    #[test]
+    fn validate_preset_yaml_dedupes_semantic_and_path_safety_errors() {
+        let yaml = r"
+preset:
+  id: unsafe-path
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: shared_graph
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  shared_graph:
+    nodes:
+      - id: n1
+        kind: acp_prompt
+        template_file: ../evil.md
+";
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("unsafe-path");
+        std::fs::create_dir_all(&bundle).unwrap();
+
+        let (errors, _warnings) = validate_preset_yaml(&bundle, &yaml_value).expect("validates");
+        let traversal = errors
+            .iter()
+            .filter(|error| error.contains("directory traversal"))
+            .count();
+        assert_eq!(
+            traversal, 1,
+            "the same path-safety error must reach the user once: {errors:?}"
+        );
+    }
 
     #[test]
     fn yaml_write_failure_rolls_back_prompt_and_keeps_revision() {
