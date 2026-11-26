@@ -516,8 +516,8 @@ pub async fn update_paths(
 }
 
 /// Reason recorded when a chapter's frontmatter status write-back is skipped.
-const UNRENDERABLE_FRONTMATTER_REASON: &str = "frontmatter status write-back skipped: \
-     status cannot be rendered (no opening `---` or an unclosed block)";
+const UNRENDERABLE_FRONTMATTER_REASON: &str =
+    "status cannot be rendered (no opening `---` or an unclosed block)";
 
 /// One chapter whose frontmatter status write-back reconcile had to skip.
 ///
@@ -922,10 +922,7 @@ pub async fn compute_reconcile_diff(
                         // The status write-back cannot be produced. Report the
                         // skip; word-count mirroring for this chapter still
                         // applies below.
-                        diff.skipped.push(ReconcileSkip {
-                            path: format!("Works/{work_ref}/Stories/{fname}"),
-                            reason: UNRENDERABLE_FRONTMATTER_REASON,
-                        });
+                        record_skipped_status_write_back(&mut diff, work_id, work_ref, &fname);
                     }
                 }
 
@@ -952,6 +949,28 @@ pub async fn compute_reconcile_diff(
     }
 
     Ok(diff)
+}
+
+/// Record one skipped frontmatter status write-back and surface it to the
+/// operator on stderr.
+///
+/// Never `tracing`: under `Creator` commands the global subscriber's writer is
+/// stdout, so a `warn!` here would corrupt `creator works reconcile-chapters
+/// --json` output. Only the skip branch reaches this, never a rendered chapter.
+fn record_skipped_status_write_back(
+    diff: &mut ReconcileDiff,
+    work_id: &str,
+    work_ref: &str,
+    file_name: &str,
+) {
+    eprintln!(
+        "reconcile: work {work_id}: frontmatter status write-back skipped for \
+         Works/{work_ref}/Stories/{file_name}: {UNRENDERABLE_FRONTMATTER_REASON}"
+    );
+    diff.skipped.push(ReconcileSkip {
+        path: format!("Works/{work_ref}/Stories/{file_name}"),
+        reason: UNRENDERABLE_FRONTMATTER_REASON,
+    });
 }
 
 /// Write phase of reconcile (V1.49 P3, R-V148P4-W3).
