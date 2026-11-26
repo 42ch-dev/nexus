@@ -21,13 +21,13 @@
     "@radix-ui/react-slot": "^1.5.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "i18next": "^27.1.5",
-    "lucide-react": "^1.74.0",
+    "i18next": "^27.2.5",
+    "lucide-react": "^1.78.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-i18next": "^18.0.2",
-    "react-router": "^8.5.1",
-    "tailwind-merge": "^3.7.0"
+    "react-i18next": "^18.0.3",
+    "react-router": "^8.5.2",
+    "tailwind-merge": "^3.7.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^8.0.0",
@@ -42,7 +42,7 @@
     "tailwindcss": "^4.3.5",
     "typescript": "7.0.2",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   },
   "engines": {
     "node": ">=22.22",
