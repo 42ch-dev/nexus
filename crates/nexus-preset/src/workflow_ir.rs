@@ -46,7 +46,7 @@ use nexus_workflow_ir::{
     WorkflowRoleDefinition, WorkflowSignalBinding, WorkflowSignalBindingAction,
     WorkflowWorldBinding, WorkflowWorldBindingMode,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
 
@@ -267,6 +267,15 @@ pub fn import_preset_bundle(
         });
     }
 
+    // Last refusal: every asset read and the terminal count have already reported their own
+    // defects, so an unbound owner cannot mask a missing or unsafe asset. Manifest-only scans are
+    // deterministic, so this order is stable across runs.
+    if let Some((graph_name, binding, owner)) = unknown_output_owner(manifest) {
+        return Err(refuse(format!(
+            "inner graph `{graph_name}` output binding `{binding}` names owner `{owner}`, which is no node in the graph"
+        )));
+    }
+
     Ok(PresetIrImport {
         document: document_from_manifest(manifest, assets)?,
         assets: asset_bytes,
@@ -280,13 +289,14 @@ pub fn import_preset_bundle(
 /// the carriers, so an unregistered reference cannot bypass the asset checks.
 ///
 /// Unlike [`import_preset_bundle`] this does not refuse a manifest whose terminal markers disagree
-/// with `preset.terminal` or whose asset files are missing or unsafe — validation reports those
-/// defects on the document instead.
+/// with `preset.terminal`, whose asset files are missing or unsafe, or whose inner graph
+/// `output_binding` names no node — validation reports those defects on the projected document
+/// (the binding defect through [`crate::validation::validate_preset_semantic`]) instead of
+/// letting one refusal hide the others.
 ///
 /// # Errors
 ///
-/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id or an inner
-/// graph's `output_binding` names no node by its owner segment, and
+/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id, and
 /// [`WorkflowIrError::EmptyConditionalRules`] when a judged state's `next` is a
 /// `Conditional`/`Branches` form carrying no rules. A non-judged state's
 /// `{branches: [], default: <id>}` next is accepted and re-exports in that same form.
@@ -300,11 +310,6 @@ fn document_from_manifest(
     manifest: &PresetManifest,
     assets: Vec<WorkflowAssetRef>,
 ) -> Result<WorkflowDocument, WorkflowIrError> {
-    if let Some((graph_name, binding, owner)) = unknown_output_owner(manifest) {
-        return Err(refuse(format!(
-            "inner graph `{graph_name}` output binding `{binding}` names owner `{owner}`, which is no node in the graph"
-        )));
-    }
     let header = &manifest.preset;
     let id = WorkflowDocumentId::try_from(header.id.clone())
         .map_err(|e| refuse(format!("preset id `{}` is not an IR id: {e}", header.id)))?;
@@ -972,6 +977,17 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
     let mut steps: BTreeMap<String, Vec<GraphNode>> = BTreeMap::new();
     let mut bindings: BTreeMap<String, String> = BTreeMap::new();
     let outgoing = outgoing_edges(document);
+    // Every step id per graph, so a binding can be checked against its graph before any node is
+    // projected: import refuses an owner that names no step, and export must not hand out a
+    // manifest that import would then refuse.
+    let mut graph_steps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for node in &document.nodes {
+        if node.kind == WorkflowNodeKind::InnerStep {
+            if let Some((graph, step_id)) = node.id.split_once('/') {
+                graph_steps.entry(graph).or_default().insert(step_id);
+            }
+        }
+    }
 
     for node in &document.nodes {
         match &node.kind {
@@ -990,6 +1006,15 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                 })?;
                 let graph_key = graph.to_string();
                 if let Some(binding) = &node.output_binding {
+                    let owner = output_binding_owner(binding);
+                    if !graph_steps
+                        .get(graph)
+                        .is_some_and(|steps| steps.contains(owner))
+                    {
+                        return Err(refuse(format!(
+                            "inner graph `{graph_key}` output binding `{binding}` names owner `{owner}`, which is no node in the graph"
+                        )));
+                    }
                     // A graph exports exactly one binding: `output_binding_owner` binds it to a
                     // single step, so a second claim — same owner or another — has no projection.
                     if let Some(claimant) = bindings.get(&graph_key) {
@@ -1878,9 +1903,10 @@ states:
     }
 
     /// A dotted step id (`review.v2`) makes the loader's owner segment (`review`) name no step, so
-    /// the projection refuses instead of dropping the binding.
+    /// the bundle import refuses instead of dropping the binding.
     #[test]
     fn import_refuses_an_output_binding_whose_owner_is_no_step() {
+        let (dir, _) = bundle();
         let manifest: PresetManifest = serde_yaml::from_str(
             &MANIFEST.replace("- id: review", "- id: review.v2").replace(
                 "output_binding: review.text",
@@ -1889,11 +1915,41 @@ states:
         )
         .expect("manifest parses");
 
-        let error = import_preset_manifest(&manifest)
-            .expect_err("an owner segment that names no step is refused");
+        let error = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect_err("an owner segment that names no step is refused");
         assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
         let message = error.to_string();
         for expected in ["work_graph", "`review.v2.text`", "`review`"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// Export refuses the same shape as import: a binding whose owner is no sibling step must not
+    /// leave as a manifest that import would then refuse.
+    #[test]
+    fn export_refuses_an_output_binding_whose_owner_is_no_step() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        imported
+            .document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "work_graph/review")
+            .expect("review node")
+            .output_binding = Some("ghost.text".to_string());
+
+        let error = export_preset(&imported.document)
+            .expect_err("an owner that names no step has no projection");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["work_graph", "`ghost.text`", "`ghost`"] {
             assert!(message.contains(expected), "{message}");
         }
     }
