@@ -286,6 +286,9 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// The blocking temp-file write runs through the private
 /// [`crate::atomic_write`] kernel on Tokio's blocking pool.
 ///
+/// `content` is taken owned so the blocking task receives the caller's
+/// buffer instead of a copy made here.
+///
 /// The target is only replaced after the prepare await returns: dropping
 /// this future while the temp write is still queued or in flight leaves the
 /// previous content intact and unlinks the staged temp (see
@@ -294,7 +297,7 @@ pub async fn create_parent_dirs(parent: &Path) -> std::io::Result<()> {
 /// prepare await returns; once entered it is not interruptible, exactly
 /// like the old `tokio::fs::rename`. A panic mid-commit would surface as a
 /// join error with the rename potentially already applied, not a rollback.
-pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Result<()> {
+pub async fn fsync_write_atomic(target: PathBuf, content: String) -> std::io::Result<()> {
     let tmp_extension = format!(
         "md.tmp.{}.{}",
         std::process::id(),
@@ -310,10 +313,9 @@ pub async fn fsync_write_atomic(target: PathBuf, content: &str) -> std::io::Resu
     };
 
     let write_temp = temp_path.clone();
-    let write_content = content.to_string();
     let prepare_cancelled = Arc::clone(&cancelled);
     let prepare_result = match tokio::task::spawn_blocking(move || {
-        crate::atomic_write::prepare_temp(&write_temp, write_content.as_bytes())
+        crate::atomic_write::prepare_temp(&write_temp, content.as_bytes())
             .map_err(crate::atomic_write::AtomicWriteError::into_io)?;
         if prepare_cancelled.load(Ordering::SeqCst) {
             // The write future was dropped while this prepare was queued or
@@ -686,7 +688,7 @@ async fn read_guarded_file(
 pub async fn atomic_write_text(
     workspace_root: &Path,
     rel_path: &str,
-    content: &str,
+    content: String,
 ) -> Result<(), CoreError> {
     let target =
         resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), false)
@@ -1194,7 +1196,7 @@ mod tests {
             });
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            let write = fsync_write_atomic(target.clone(), "new bytes");
+            let write = fsync_write_atomic(target.clone(), "new bytes".to_string());
             let outcome = tokio::time::timeout(std::time::Duration::from_millis(200), write).await;
             assert!(
                 outcome.is_err(),
@@ -1234,7 +1236,7 @@ mod tests {
         let target = dir.path().join("chapter");
         std::fs::create_dir(&target).expect("target directory");
 
-        fsync_write_atomic(target.clone(), "new bytes")
+        fsync_write_atomic(target.clone(), "new bytes".to_string())
             .await
             .expect_err("rename over a directory fails");
 

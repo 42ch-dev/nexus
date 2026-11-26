@@ -325,7 +325,7 @@ impl WorkspaceExecutor for WorkspaceCommitExecutor {
             workspace_root: &requested_root,
             work_ref: &input.work_ref,
             rel_child,
-            content: &input.content,
+            content: input.content,
         })
         .await?;
         Ok(WorkArtifactCommitOutput { committed: true })
