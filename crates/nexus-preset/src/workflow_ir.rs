@@ -311,8 +311,22 @@ fn document_from_manifest(
     }
     if let Some(graphs) = &manifest.inner_graphs {
         for (graph_name, graph) in graphs {
+            // The graph's binding belongs to the step whose id prefixes it as `<step>.<field>`;
+            // reading the owner back from the binding's last segment drops a dotted field path.
+            let owner = graph.output_binding.as_deref().and_then(|binding| {
+                graph.nodes.iter().map(|step| step.id.as_str()).find(|id| {
+                    binding
+                        .strip_prefix(id)
+                        .is_some_and(|rest| rest.starts_with('.'))
+                })
+            });
             for step in &graph.nodes {
-                nodes.push(inner_step_node(graph_name, graph, step));
+                nodes.push(inner_step_node(
+                    graph_name,
+                    owner == Some(step.id.as_str()),
+                    graph,
+                    step,
+                ));
             }
         }
     }
@@ -418,10 +432,12 @@ fn state_node(state: &StateDefinition) -> WorkflowNode {
     }
 }
 
-fn inner_step_node(graph_name: &str, graph: &InnerGraph, step: &GraphNode) -> WorkflowNode {
-    let owns_output = graph.output_binding.as_deref().is_some_and(|binding| {
-        binding.rsplit_once('.').map_or(binding, |(owner, _)| owner) == step.id
-    });
+fn inner_step_node(
+    graph_name: &str,
+    owns_output: bool,
+    graph: &InnerGraph,
+    step: &GraphNode,
+) -> WorkflowNode {
     WorkflowNode {
         id: format!("{graph_name}/{}", step.id),
         kind: WorkflowNodeKind::InnerStep,
@@ -941,6 +957,11 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                 })?;
                 let graph_key = graph.to_string();
                 if let Some(binding) = &node.output_binding {
+                    if let Some(claimant) = bindings.get(&graph_key) {
+                        return Err(refuse(format!(
+                            "inner graph `{graph_key}` carries two output bindings (`{claimant}` and `{binding}`); a graph exports exactly one"
+                        )));
+                    }
                     bindings.insert(graph_key.clone(), binding.clone());
                 }
                 steps.entry(graph_key).or_default().push(GraphNode {
@@ -1701,6 +1722,87 @@ states:
         assert_eq!(reimported.edges.len(), 1);
         assert_eq!(reimported.edges[0].kind, WorkflowEdgeKind::Default);
         assert_eq!(reimported.edges[0].to, "done");
+    }
+
+    #[test]
+    fn export_keeps_the_single_inner_graph_output_binding() {
+        let (dir, manifest) = bundle();
+        let imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        let binding = |node_id: &str| {
+            imported
+                .document
+                .nodes
+                .iter()
+                .find(|node| node.id == node_id)
+                .and_then(|node| node.output_binding.clone())
+        };
+        assert_eq!(
+            binding("work_graph/review"),
+            Some("review.text".to_string())
+        );
+        assert_eq!(binding("work_graph/draft"), None);
+
+        let exported = export_preset(&imported.document).expect("one owner exports");
+        assert_eq!(
+            exported
+                .inner_graphs
+                .as_ref()
+                .and_then(|graphs| graphs.get("work_graph"))
+                .and_then(|graph| graph.output_binding.as_deref()),
+            Some("review.text")
+        );
+    }
+
+    #[test]
+    fn export_refuses_a_second_output_binding_for_one_inner_graph() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        imported
+            .document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "work_graph/draft")
+            .expect("draft node")
+            .output_binding = Some("draft.text".to_string());
+
+        let error = export_preset(&imported.document)
+            .expect_err("a graph carries exactly one output binding");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["work_graph", "review.text", "draft.text"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    #[test]
+    fn import_binds_output_to_the_step_whose_id_prefixes_it() {
+        let manifest: PresetManifest = serde_yaml::from_str(&MANIFEST.replace(
+            "output_binding: review.text",
+            "output_binding: review.output.text",
+        ))
+        .expect("manifest parses");
+        let document = import_preset_manifest(&manifest).expect("import");
+        let binding = |node_id: &str| {
+            document
+                .nodes
+                .iter()
+                .find(|node| node.id == node_id)
+                .and_then(|node| node.output_binding.clone())
+        };
+        assert_eq!(
+            binding("work_graph/review"),
+            Some("review.output.text".to_string()),
+            "a dotted field path still names its owner step"
+        );
+        assert_eq!(binding("work_graph/draft"), None);
     }
 
     #[test]
