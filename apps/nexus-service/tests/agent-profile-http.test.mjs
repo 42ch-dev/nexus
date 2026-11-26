@@ -57,11 +57,6 @@ describe('agent-profile (I-000064)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     service = await startProfileService(home);
     baseUrl = service.url;
   });

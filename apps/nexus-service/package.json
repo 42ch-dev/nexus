@@ -17,7 +17,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node tooling/run-service-tests.mjs",
+    "test": "node ../../packages/nexus-native/scripts/build.mjs && tsc -p tsconfig.json && node tooling/run-service-tests.mjs",
     "dev": "node --import tsx src/main.ts",
     "start": "node dist/main.js",
     "proof:open-smoke": "node src/open-smoke.mjs"

@@ -43,11 +43,6 @@ describe('route-inventory (P5-T5)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     service = await startInventoryService(home, 18_447, true);
     baseUrl = service.url;
   });

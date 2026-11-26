@@ -191,11 +191,6 @@ describe('workspace-http (v1219 shell Task 4)', () => {
   let state;
 
   before(async () => {
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0, 'service build failed');
     state = stubState();
     server = await startServer(state);
   });

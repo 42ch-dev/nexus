@@ -92,7 +92,7 @@ conn.execute("INSERT INTO orchestration_sessions (session_id, creator_id, preset
 conn.commit()
 `;
   const seeded = spawnSync('python3', ['-c', script, home], { encoding: 'utf8' });
-  assert.equal(seeded.status, 0, seeded.stderr || seeded.stdout);
+  assert.equal(seeded.status, 0, seeded.stderr.trim() ? seeded.stderr : seeded.stdout);
 }
 
 function observedParkPresetYaml(id) {
@@ -505,23 +505,6 @@ describe('workflow-observation-http (v1.195 P1-T3 same-run SSE transport)', () =
   }
 
   before(async () => {
-    assert.equal(
-      spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], { cwd: root, stdio: 'inherit' })
-        .status,
-      0,
-    );
-    assert.equal(
-      spawnSync('npx', ['tsc', '-p', 'packages/nexus-native/tsconfig.json'], {
-        cwd: root,
-        stdio: 'inherit',
-      }).status,
-      0,
-    );
-    assert.equal(
-      spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' }).status,
-      0,
-    );
-
     process.env.NEXUS_SSE_FIRST_PULL_DELAY_MS = '1';
     ({ sseTestHooks } = await import(join(serviceRoot, 'dist/sse.js')));
     ({ SSE_DRAIN_TIMEOUT_MS: drainTimeoutMs } = await import(join(serviceRoot, 'dist/config.js')));

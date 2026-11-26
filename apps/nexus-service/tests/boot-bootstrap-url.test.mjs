@@ -14,14 +14,14 @@
  *    `args.webDist` conjunct of the auto-open condition.
  */
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test, { after, before } from 'node:test';
+import test, { after } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const isWindows = process.platform === 'win32';
@@ -42,15 +42,6 @@ function tempDir(prefix) {
   tempDirs.push(dir);
   return dir;
 }
-
-before(() => {
-  if (existsSync(join(serviceRoot, 'dist', 'main.js'))) return;
-  const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-    cwd: serviceRoot,
-    stdio: 'inherit',
-  });
-  assert.equal(build.status, 0, 'service build failed');
-});
 
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));

@@ -158,18 +158,6 @@ describe('compute-http (v1.195 P2-T3)', () => {
 
   before(async () => {
     home = seededHome();
-    assert.equal(
-      spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], {
-        cwd: root,
-        stdio: 'inherit',
-      }).status,
-      0,
-    );
-    assert.equal(
-      spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' })
-        .status,
-      0,
-    );
     service = await startComputeService(home, 18_470);
     baseUrl = service.url;
   });

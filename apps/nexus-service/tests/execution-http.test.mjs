@@ -66,16 +66,6 @@ describe('execution-http (P5-T3)', () => {
 
   before(async () => {
     home = seedHome();
-    assert.equal(
-      spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], { cwd: root, stdio: 'inherit' })
-        .status,
-      0,
-    );
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     service = await startExecutionService(home, 18_444);
     baseUrl = service.url;
   });

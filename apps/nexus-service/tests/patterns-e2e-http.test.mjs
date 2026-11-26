@@ -50,11 +50,6 @@ describe('patterns end-to-end (v1.239 P3-T6)', () => {
     assert.equal(seed.status, 0, seed.stderr?.toString());
     cpSync(FIXTURE_PATTERNS, join(home, '.nexus42', 'patterns'), { recursive: true });
 
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     const { startService } = await import(join(serviceRoot, 'dist/index.js'));
     service = await startService({
       home,

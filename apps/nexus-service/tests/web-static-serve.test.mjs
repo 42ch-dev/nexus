@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -120,14 +119,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
   let createStaticFileHandler;
   let resolveWebDist;
   let parseCliArgs;
-
-  before(() => {
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
-  });
 
   before(async () => {
     ({ createStaticFileHandler, resolveWebDist } = await import(

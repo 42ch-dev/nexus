@@ -56,11 +56,6 @@ describe('domain-http (P5-T1)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     service = await startDomainService(home, 18_441);
     baseUrl = service.url;
   });

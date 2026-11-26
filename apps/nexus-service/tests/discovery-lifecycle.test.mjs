@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { after, before, describe, test } from 'node:test';
+import { after, describe, test } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
@@ -118,18 +118,6 @@ async function waitFor(predicate, timeoutMs = 8_000, stepMs = 100) {
 
 
 describe('discovery-lifecycle (P5-T4)', () => {
-  before(async () => {
-    assert.equal(
-      spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], { cwd: root, stdio: 'inherit' })
-        .status,
-      0,
-    );
-    assert.equal(
-      spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' }).status,
-      0,
-    );
-  });
-
   after(() => {
     for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
   });
