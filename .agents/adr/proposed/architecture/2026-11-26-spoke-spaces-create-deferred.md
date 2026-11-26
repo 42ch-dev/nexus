@@ -57,6 +57,6 @@ Keep the terminal refusal for the 0.19 cycle and do not implement client-named s
 
 ## Reopen triggers
 
-- A serve face defined by the MindCore adoption (`2026-11-21-adopt-mindcore-settlement-layer.md`) starts answering `memory.spaces.create`; that adoption currently keeps `MemoryPort` as Nexus's boundary and scopes MindCore to the settlement/recall workflows, so this trigger waits for its `WorkflowBinding` surface to include the operation, not merely for the adoption to start.
+- Whatever layer implements Nexus's `MemoryPort` boundary after the MindCore migration starts answering `memory.spaces.create`. The adoption record (`2026-11-21-adopt-mindcore-settlement-layer.md`) keeps `MemoryPort` as Nexus's boundary and scopes its `WorkflowBinding` to the settlement/recall workflows, so that binding is not the surface this trigger watches; the trigger is the boundary itself, not the adoption starting.
 - A peer or caller requires client-named space creation before the migration; then the product decisions in Alternative 1 become the work item.
 - Upstream SPOKE narrows the `spoke-memory` family so the operation is no longer implied by the advertised capability.
