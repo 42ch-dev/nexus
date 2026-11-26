@@ -515,18 +515,21 @@ pub async fn update_paths(
     Ok(())
 }
 
-/// Reason recorded for a chapter whose file frontmatter cannot be rendered.
-const UNRENDERABLE_FRONTMATTER_REASON: &str =
-    "frontmatter status cannot be rendered (no opening '---' or an unclosed frontmatter block)";
+/// Reason recorded when a chapter's frontmatter status write-back is skipped.
+const UNRENDERABLE_FRONTMATTER_REASON: &str = "frontmatter status write-back skipped: \
+     status cannot be rendered (no opening `---` or an unclosed block)";
 
-/// A chapter file reconcile left untouched because its frontmatter status
-/// cannot be rendered.
+/// One chapter whose frontmatter status write-back reconcile had to skip.
+///
+/// Only the file's `status` bytes are left alone: other decisions for the same
+/// chapter — word-count mirroring, for instance — are still produced and
+/// applied.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ReconcileSkip {
     /// Chapter path below the workspace root:
     /// `Works/<work_ref>/Stories/<file>.md`.
     pub path: String,
-    /// Why no bytes were written.
+    /// Why the status write-back was skipped.
     pub reason: &'static str,
 }
 
@@ -546,8 +549,12 @@ pub struct ReconcileReport {
     pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,
-    /// Chapter files left unmodified because their frontmatter status cannot
-    /// be rendered (no opening `---`, or a block that never closes).
+    /// Chapters whose frontmatter status write-back was skipped, with the
+    /// reason (no opening `---`, or a block that never closes).
+    ///
+    /// Per chapter, not per write decision: a chapter listed here can also
+    /// appear in [`ReconcileReport::updated`] when its `word_count` was
+    /// mirrored into the DB.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<ReconcileSkip>,
 }
@@ -620,8 +627,8 @@ pub struct ReconcileDiff {
     pub ops: Vec<ReconcileOp>,
     /// Existing rows whose status and `word_count` already agree (no write).
     pub preserved: u32,
-    /// Chapters whose file frontmatter cannot be rendered, so no write
-    /// decision was produced for them.
+    /// Chapters whose frontmatter status write-back was skipped; other ops for
+    /// them (word-count mirroring) are still produced.
     pub skipped: Vec<ReconcileSkip>,
 }
 
@@ -912,7 +919,13 @@ pub async fn compute_reconcile_diff(
                             db_status: db_status.clone(),
                         });
                     } else {
-                        push_reconcile_skip(&mut diff, work_id, work_ref, &fname);
+                        // The status write-back cannot be produced. Report the
+                        // skip; word-count mirroring for this chapter still
+                        // applies below.
+                        diff.skipped.push(ReconcileSkip {
+                            path: format!("Works/{work_ref}/Stories/{fname}"),
+                            reason: UNRENDERABLE_FRONTMATTER_REASON,
+                        });
                     }
                 }
 
@@ -939,23 +952,6 @@ pub async fn compute_reconcile_diff(
     }
 
     Ok(diff)
-}
-
-/// Record one chapter whose frontmatter status cannot be rendered: no bytes
-/// can be written for it, so it is reported instead of counted as a resync.
-fn push_reconcile_skip(diff: &mut ReconcileDiff, work_id: &str, work_ref: &str, file_name: &str) {
-    let path = format!("Works/{work_ref}/Stories/{file_name}");
-    tracing::warn!(
-        target: "reconcile",
-        work_id,
-        work_ref,
-        path = %path,
-        "chapter frontmatter status cannot be rendered; file left unchanged"
-    );
-    diff.skipped.push(ReconcileSkip {
-        path,
-        reason: UNRENDERABLE_FRONTMATTER_REASON,
-    });
 }
 
 /// Write phase of reconcile (V1.49 P3, R-V148P4-W3).
@@ -2593,9 +2589,83 @@ mod tests {
             + report.resynced
             + report.preserved
             + u32::try_from(report.skipped.len()).unwrap();
-        assert_eq!(accounted, 2, "every chapter is accounted for exactly once");
+        assert_eq!(
+            accounted, 2,
+            "no chapter here has a word-count op, so the counters partition both chapters"
+        );
         // The unrenderable file keeps its original bytes — nothing was lost.
         assert_eq!(std::fs::read_to_string(&broken_path).unwrap(), broken);
+    }
+
+    // -----------------------------------------------------------------------
+    // I-000405 (review): `skipped` names a skipped status write-back, not an
+    // untouched chapter — word-count mirroring for the same chapter still
+    // applies.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_reconcile_skips_status_write_back_but_mirrors_word_count() {
+        let (dir, pool) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_recon_skip_wc").await;
+        seed_chapters(
+            &pool,
+            "wrk_recon_skip_wc",
+            "my-novel",
+            1,
+            "2026-06-07T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
+        std::fs::create_dir_all(&stories_dir).unwrap();
+        let broken =
+            "---\ntitle: Broken\nchapter: 1\nstatus: draft\nword_count: 1200\nUnclosed body";
+        let broken_path = stories_dir.join("ch01-broken.md");
+        std::fs::write(&broken_path, broken).unwrap();
+
+        let diff = compute_reconcile_diff(&pool, "wrk_recon_skip_wc", "my-novel", dir.path())
+            .await
+            .unwrap();
+        assert!(
+            !diff
+                .ops
+                .iter()
+                .any(|op| matches!(op, ReconcileOp::ResyncFileStatus { .. })),
+            "the status write-back must be skipped: {:?}",
+            diff.ops
+        );
+        assert!(
+            diff.ops
+                .iter()
+                .any(|op| matches!(op, ReconcileOp::UpdateWordCount { chapter: 1, .. })),
+            "word-count mirroring must still be emitted: {:?}",
+            diff.ops
+        );
+        assert_eq!(diff.skipped.len(), 1, "one skipped status write-back");
+        assert_eq!(
+            diff.skipped[0].path,
+            "Works/my-novel/Stories/ch01-broken.md"
+        );
+
+        let report =
+            apply_reconcile_diff(&pool, "wrk_recon_skip_wc", "2026-06-07T11:00:00Z", &diff)
+                .await
+                .unwrap();
+        assert_eq!(report.updated, 1, "the word count is mirrored into the DB");
+        assert_eq!(report.resynced, 0);
+        assert_eq!(report.skipped, diff.skipped);
+
+        let row = get_chapter(&pool, "wrk_recon_skip_wc", 1, 1)
+            .await
+            .unwrap()
+            .expect("ch1");
+        assert_eq!(row.actual_word_count, Some(1200), "word_count is mirrored");
+        assert_eq!(row.status, "not_started", "status stays the DB SSOT");
+        assert_eq!(
+            std::fs::read_to_string(&broken_path).unwrap(),
+            broken,
+            "the file's frontmatter status is unchanged"
+        );
     }
 
     // -----------------------------------------------------------------------
