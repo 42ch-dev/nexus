@@ -19,25 +19,25 @@ use sqlx::SqlitePool;
 /// owner, title or slug is not a row any fixture wants.
 pub struct WorldSeed<'a> {
     /// `narrative_worlds.world_id`.
-    pub world_id: &'a str,
+    world_id: &'a str,
     /// `owner_creator_id`; also the minimal creator row's key.
-    pub owner_creator_id: &'a str,
+    owner_creator_id: &'a str,
     /// `narrative_worlds.title`.
-    pub title: &'a str,
+    title: &'a str,
     /// `narrative_worlds.slug`.
-    pub slug: &'a str,
+    slug: &'a str,
     /// `visibility`; defaults to `"private"`.
-    pub visibility: &'a str,
+    visibility: &'a str,
     /// `time_policy`; defaults to `"manual"`.
-    pub time_policy: &'a str,
+    time_policy: &'a str,
     /// The workspace the row belongs to; defaults to `"wrk_test"`.
-    pub workspace_id: &'a str,
+    workspace_id: &'a str,
     /// The minimal creator's display name; `None` keeps the owner's id.
-    pub display_name: Option<&'a str>,
+    display_name: Option<&'a str>,
     /// The world's root fork branch, when the fixture drives a timeline.
-    pub root_fork_branch_id: Option<&'a str>,
+    root_fork_branch_id: Option<&'a str>,
     /// The world's current timeline head, when the fixture drives a timeline.
-    pub current_timeline_head_id: Option<&'a str>,
+    current_timeline_head_id: Option<&'a str>,
 }
 
 impl<'a> WorldSeed<'a> {
@@ -95,10 +95,11 @@ impl<'a> WorldSeed<'a> {
         self
     }
 
-    /// The world's root fork branch.
+    /// The world's root fork branch; `None` clears it so the timeline falls
+    /// back to `fbk_root`.
     #[must_use]
-    pub const fn with_root_fork_branch_id(mut self, root_fork_branch_id: &'a str) -> Self {
-        self.root_fork_branch_id = Some(root_fork_branch_id);
+    pub const fn with_root_fork_branch_id(mut self, root_fork_branch_id: Option<&'a str>) -> Self {
+        self.root_fork_branch_id = root_fork_branch_id;
         self
     }
 
