@@ -51,7 +51,7 @@ function main() {
   const entry = join(pkgDir, "dist", "index.js");
   if (!existsSync(entry)) {
     process.stderr.write(
-      `dist/index.js is missing — run \`pnpm --filter @42ch/nexus-service run test\` (or \`… run build\`) first\n`,
+      `dist/index.js is missing — run \`pnpm --filter @42ch/nexus-service run test\` (builds dist and stages the native addon); \`… run build\` only writes dist\n`,
     );
     process.exitCode = 1;
     return;

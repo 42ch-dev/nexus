@@ -107,7 +107,7 @@ describe('world-rules-http (V1.198 P0-T3)', () => {
 
   before(async () => {
     home = seedHome();
-    service = await startDomainService(home, 18_451);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
 
     activeId = await createRule(baseUrl, { canonical_name: 'Kept rule' });

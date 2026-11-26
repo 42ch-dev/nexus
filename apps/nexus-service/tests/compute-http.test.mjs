@@ -158,7 +158,7 @@ describe('compute-http (v1.195 P2-T3)', () => {
 
   before(async () => {
     home = seededHome();
-    service = await startComputeService(home, 18_470);
+    service = await startComputeService(home, 0);
     baseUrl = service.url;
   });
 

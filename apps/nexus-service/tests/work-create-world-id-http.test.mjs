@@ -68,7 +68,7 @@ describe('create-work world_id curated refusal (v1.215 P1 T2)', () => {
 
   before(async () => {
     home = seedHome();
-    service = await startDomainService(home, 18_490);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
   });
 

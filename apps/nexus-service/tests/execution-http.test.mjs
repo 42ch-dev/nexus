@@ -66,7 +66,7 @@ describe('execution-http (P5-T3)', () => {
 
   before(async () => {
     home = seedHome();
-    service = await startExecutionService(home, 18_444);
+    service = await startExecutionService(home, 0);
     baseUrl = service.url;
   });
 
@@ -143,7 +143,7 @@ describe('execution-http (P5-T3)', () => {
     assert.ok(operationId, executed.text);
 
     await service.close();
-    service = await startExecutionService(home, 18_445);
+    service = await startExecutionService(home, 0);
     baseUrl = service.url;
 
     const settled = await jsonFetch(
@@ -168,7 +168,7 @@ describe('execution-http (P5-T3)', () => {
     assert.equal(seed.status, 0, 'orphan journal seed failed');
 
     await service.close();
-    service = await startExecutionService(home, 18_446);
+    service = await startExecutionService(home, 0);
     baseUrl = service.url;
 
     const afterReopen = await jsonFetch(

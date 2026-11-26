@@ -78,7 +78,7 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
       join(workspaceDir, 'meta.json'),
       JSON.stringify({ local_root: creativeRoot }),
     );
-    service = await startDomainService(home, 18_480);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
   });
 

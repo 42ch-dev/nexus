@@ -56,7 +56,7 @@ describe('domain-http (P5-T1)', () => {
 
   before(async () => {
     home = seedHome();
-    service = await startDomainService(home, 18_441);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
   });
 
@@ -177,7 +177,7 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(selected.payload.status, 'active');
 
     await service.close();
-    service = await startDomainService(home, 18_442);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
 
     const poolAfterReopen = await jsonFetch(`${baseUrl}/v1/daemon/works/pool`);
@@ -422,7 +422,7 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(beat.status, 'completed');
 
     await service.close();
-    service = await startDomainService(home, 18_443);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
 
     const reopened = await readOutline();
@@ -528,7 +528,7 @@ describe('domain-http (P5-T1)', () => {
     assert.equal(eventById(afterBind, eventId).world_event_id, referent);
 
     await service.close();
-    service = await startDomainService(home, 18_444);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
 
     const reopened = await readOutline();

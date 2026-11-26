@@ -58,7 +58,7 @@ describe('actor-http (P5-T2)', () => {
 
   before(async () => {
     home = seedHome();
-    service = await startActorService(home, 18_443);
+    service = await startActorService(home, 0);
     baseUrl = service.url;
   });
 
