@@ -1328,7 +1328,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 2.0.119",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3969,7 +3969,7 @@ dependencies = [
  "nexus-memory-provider",
  "nexus-provider-ports",
  "serde",
- "serde_jcs",
+ "serde_jcs 0.4.0",
  "serde_json",
  "spoke-connect",
  "spoke-operations",
@@ -4949,7 +4949,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5545,6 +5545,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-transcode"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "655b0cffa180a1a71ed523dc0a9aa9a2711f5d172c2f066393e76f386e9bba3c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5583,6 +5592,18 @@ checksum = "6ca3f887a59db14b827b39ef0a56e37ac1dc98616de7482c9d245d314fa1b48b"
 dependencies = [
  "ryu-js",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "serde_jcs"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4966857b5b2e83ae3cee6ce41480b800b3bf7a74597cf4a1ee47c5d4d63ed002"
+dependencies = [
+ "ryu-js",
+ "serde",
+ "serde-transcode",
  "serde_json",
 ]
 
@@ -5869,7 +5890,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libp2p",
  "serde",
- "serde_jcs",
+ "serde_jcs 0.3.0",
  "serde_json",
  "spoke-operations",
  "spoke-schemas",
@@ -5888,7 +5909,7 @@ dependencies = [
  "chrono",
  "regress",
  "serde",
- "serde_jcs",
+ "serde_jcs 0.3.0",
  "serde_json",
  "sha2 0.11.1",
  "spoke-schemas",
