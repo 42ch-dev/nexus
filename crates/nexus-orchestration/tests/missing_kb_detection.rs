@@ -331,8 +331,7 @@ async fn non_novel_writing_schedule_is_noop() {
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia was here.");
     seed_chapter_with_body(&pool, "wrk_noop", 1, &body_rel).await;
 
-    // No workspace_dir reaches the log writer, so the root is unused.
-    let exec = executor(std::path::Path::new(""));
+    let exec = executor(ws_dir.path());
     let count = quality_loop::detect_missing_kb_on_finalize(
         &pool,
         "sch_noop",
@@ -353,8 +352,10 @@ async fn missing_workspace_dir_is_noop() {
     works::create_work(&pool, &work).await.unwrap();
     insert_novel_writing_schedule(&pool, "sch_nows", "wrk_nows").await;
 
-    // No workspace_dir reaches the log writer, so the root is unused.
-    let exec = executor(std::path::Path::new(""));
+    // The no-op path passes no `workspace_dir`; the double still gets an
+    // absolute root so it never carries a relative one.
+    let exec_root = tempfile::tempdir().unwrap();
+    let exec = executor(exec_root.path());
     let count =
         quality_loop::detect_missing_kb_on_finalize(&pool, "sch_nows", None, None, Some(&exec))
             .await
