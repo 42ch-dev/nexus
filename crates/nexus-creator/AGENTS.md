@@ -14,4 +14,3 @@ used by the CLI.
 ## Dependencies
 
 - `nexus-contracts` (generated types)
-- `nexus-home-layout` (`~/.nexus42/` paths)

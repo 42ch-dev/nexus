@@ -14,4 +14,3 @@ workspace = true
 [dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 async-trait.workspace = true
-futures-core = "0.3"

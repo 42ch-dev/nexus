@@ -61,6 +61,18 @@ repository = "https://github.com/42ch/nexus"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+# Cargo's own `unused_dependencies` lint: a manifest-level check that a declared
+# dependency is actually reachable from the crate's source. Not covered by
+# `cargo clippy -- -D warnings` (that only reaches rustc/clippy lints), and
+# `[lints.cargo]` needs nightly, so it is inert on stable builds — verify with:
+#   cargo +nightly -Zunstable-options check --all-targets
+# Kept at `warn`, not `deny`: this lint cannot see `build.rs`-emitted cfgs, so
+# `crates/nexus-wasm-host`'s `include_dir` (used only when the wasm32 target is
+# installed, i.e. `not(nexus_no_wasm_target)`) reports as unused on a toolchain
+# without wasm32. That is the sole expected hit; everything else must stay clean.
+[workspace.lints.cargo]
+unused_dependencies = "warn"
+
 [workspace.lints.clippy]
 # Pedantic group
 pedantic = { level = "warn", priority = -1 }
@@ -101,24 +113,14 @@ dirs = "7"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
-axum = "0.8"
-tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors"] }
 url = "2"
 strum = { version = "0.28", features = ["derive"] }
-pulldown-cmark = "0.13"
-pulldown-cmark-frontmatter = "0.4"
 serde_yaml = "0.9"
 async-trait = "0.1"
 tempfile = "3"
 tokio-util = { version = "0.7", features = ["codec"] }
-hyper = "1"
-hyper-util = { version = "0.1", features = ["tokio"] }
-http-body-util = "0.1"
 toml = "1.1"
-statig = { version = "0.3", features = ["async"] }
 futures-util = "0.3"
-tokio-stream = "0.1"
 blake3 = "1"
 # V1.58 P0 T1 (R-V156P0-M001): sha2 workspace-managed — referenced as
 # `sha2.workspace = true` by crates that compute OCC content hashes.
@@ -132,7 +134,6 @@ rustix = { version = "1", features = ["fs", "process"] }
 handlebars = "6"
 which = "8"
 regex = "1"
-subtle = { version = "2", default-features = false }
 # V1.50 T-A P0 T2: cron expression parsing (novel-writing staggering spec §3.1)
 cron = "0.17"
 # V1.50 T-A P0 T2: IANA timezone validation (spec §3.1 `--tz`)
@@ -349,7 +350,6 @@ napi = { version = "=3.16.2", default-features = false, features = [
 ] }
 napi-derive = "=3.7.1"
 napi-build = "=2.6.0"
-futures-core = "0.3"
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited
