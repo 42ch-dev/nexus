@@ -557,6 +557,16 @@ impl CoreService {
         // Both current-row picks order by `applied_at DESC, apply_id DESC` — the same total order
         // [`current_apply`] reports — so a strategy holding two successor-less rows (only an
         // admitted non-core writer can create that) still names one defined row everywhere.
+        //
+        // The insert and its refusal probe decide in ONE snapshot (I-000469): the insert takes the
+        // write lock and the probe reads through the same transaction, so a supersede can never
+        // land between them and leave a no-row insert with no refusal to name.
+        let mut transaction = self
+            .inner
+            .pool
+            .begin()
+            .await
+            .map_err(|error| crate::error::local_db_err(error.into()))?;
         let written = sqlx::query_as::<_, (String, Option<String>)>(
             "INSERT INTO strategy_applies \
                (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
@@ -586,13 +596,26 @@ impl CoreService {
         .bind(strategy_id)
         .bind(&approval_id)
         .bind(strategy_id)
-        .fetch_optional(&self.inner.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(|error| crate::error::local_db_err(error.into()))?;
 
         let Some((apply_id, supersedes_apply_id)) = written else {
-            return Err(self.refuse_apply(strategy_id, &approval_id).await);
+            #[cfg(any(test, feature = "test-hooks"))]
+            reach_apply_refusal_seam(strategy_id, &approval_id).await;
+            let refusal = self
+                .refuse_apply(&mut transaction, strategy_id, &approval_id)
+                .await;
+            transaction
+                .rollback()
+                .await
+                .map_err(|error| crate::error::local_db_err(error.into()))?;
+            return Err(refusal);
         };
+        transaction
+            .commit()
+            .await
+            .map_err(|error| crate::error::local_db_err(error.into()))?;
 
         Ok(AppliedStrategy {
             apply_id,
@@ -673,19 +696,25 @@ impl CoreService {
         Ok((approval_id, stored_hash))
     }
 
-    /// Name why the apply statement wrote no row. The schedule is checked first because it is the
-    /// only precondition that lives outside the apply table; with it in place the sole remaining
-    /// predicate is the already-current guard, so this probe repeats that guard's own condition —
-    /// a successor-less row of this strategy naming this approval, in the same total order
-    /// [`current_apply`] uses. A probe that asked only for "the current row" would name a different
-    /// apply whenever a non-core writer left two successor-less rows, turning the typed conflict
-    /// into an internal fault.
-    async fn refuse_apply(&self, strategy_id: &str, approval_id: &str) -> CoreError {
+    /// Name why the apply statement wrote no row, reading through that statement's own
+    /// transaction: the probe therefore sees the snapshot the guard decided on. The schedule is
+    /// checked first because it is the only precondition that lives outside the apply table; with
+    /// it in place the sole remaining predicate is the already-current guard, so this probe repeats
+    /// that guard's own condition — a successor-less row of this strategy naming this approval, in
+    /// the same total order [`current_apply`] uses. A probe that asked only for "the current row"
+    /// would name a different apply whenever a non-core writer left two successor-less rows,
+    /// turning the typed conflict into an internal fault.
+    async fn refuse_apply(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        strategy_id: &str,
+        approval_id: &str,
+    ) -> CoreError {
         let scheduled: i64 = match sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM creator_schedules WHERE preset_id = ?)",
         )
         .bind(strategy_id)
-        .fetch_one(&self.inner.pool)
+        .fetch_one(&mut **transaction)
         .await
         {
             Ok(scheduled) => scheduled,
@@ -710,7 +739,7 @@ impl CoreService {
         )
         .bind(strategy_id)
         .bind(approval_id)
-        .fetch_optional(&self.inner.pool)
+        .fetch_optional(&mut **transaction)
         .await
         {
             Ok(current) => current,
@@ -726,6 +755,84 @@ impl CoreService {
                 .into_error()
             },
         )
+    }
+}
+
+/// Test-only seam in the guard→probe window (I-000469).
+///
+/// An armed apply of the named strategy and approval pauses between its guarded insert and the
+/// refusal probe, so a regression test can attempt the supersede that window used to allow. The
+/// probe still runs in the insert's transaction, so the attempt must be refused by the store's
+/// write lock rather than by the guard. Compiled out of the production build.
+#[cfg(any(test, feature = "test-hooks"))]
+static APPLY_REFUSAL_SEAM: tokio::sync::Mutex<Option<ApplyRefusalSeam>> =
+    tokio::sync::Mutex::const_new(None);
+
+#[cfg(any(test, feature = "test-hooks"))]
+struct ApplyRefusalSeam {
+    strategy_id: String,
+    approval_id: String,
+    reached: tokio::sync::oneshot::Sender<()>,
+    resume: tokio::sync::oneshot::Receiver<()>,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+async fn reach_apply_refusal_seam(strategy_id: &str, approval_id: &str) {
+    let seam = {
+        let mut slot = APPLY_REFUSAL_SEAM.lock().await;
+        let armed = slot
+            .as_ref()
+            .is_some_and(|seam| seam.strategy_id == strategy_id && seam.approval_id == approval_id);
+        if armed {
+            slot.take()
+        } else {
+            None
+        }
+    };
+    let Some(seam) = seam else {
+        return;
+    };
+    let _ = seam.reached.send(());
+    let _ = seam.resume.await;
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl CoreService {
+    /// Arm the apply guard→probe seam for one apply: `reached` resolves when the apply of
+    /// `approval_id` on `strategy_id` is paused inside the window, and sending on `resume`
+    /// releases it. `#[doc(hidden)]` test seam, compiled out of the production build.
+    ///
+    /// # Panics
+    ///
+    /// When the process-global slot still holds an unconsumed armed seam: a parked handshake
+    /// would otherwise sit there while another test arms its own, so overlapping seams are a loud
+    /// failure instead of a silent steal. A test must therefore key its pair to itself and arm
+    /// only once its previous seam was consumed.
+    #[doc(hidden)]
+    pub async fn arm_apply_refusal_seam(
+        &self,
+        strategy_id: &str,
+        approval_id: &str,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (reached, reached_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume) = tokio::sync::oneshot::channel();
+        let mut slot = APPLY_REFUSAL_SEAM.lock().await;
+        assert!(
+            slot.is_none(),
+            "the apply guard→probe seam already holds an unconsumed armed handshake: \
+             arm one seam at a time and let its apply take it"
+        );
+        *slot = Some(ApplyRefusalSeam {
+            strategy_id: strategy_id.to_owned(),
+            approval_id: approval_id.to_owned(),
+            reached,
+            resume,
+        });
+        drop(slot);
+        (reached_rx, resume_tx)
     }
 }
 
