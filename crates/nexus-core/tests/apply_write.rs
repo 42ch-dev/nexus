@@ -1029,6 +1029,84 @@ async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() 
     setup.core.close().await.unwrap();
 }
 
+/// I-000469: the guard and its refusal probe decide in ONE snapshot.
+///
+/// Determinism comes from the seam, not from timing: `arm_apply_refusal_seam` pauses the repeat
+/// apply between its guarded insert and the probe, so the supersede is attempted while that
+/// apply's transaction is open. The insert took the write lock, so the attempt cannot land and
+/// the probe still finds the row the guard saw; the repeat stays `already_applied`. With the old
+/// two-read shape the supersede committed in that window and the probe missed it, reporting the
+/// internal fault instead.
+#[tokio::test]
+async fn a_supersede_between_the_guard_and_its_probe_cannot_become_an_internal_fault() {
+    let setup = setup().await;
+    let (approval_id, hash, _) = seed_approval(&setup, STRATEGY, 1).await;
+    let (next_approval, next_hash, _) = seed_approval(&setup, STRATEGY, 2).await;
+    seed_schedule(setup.core.pool(), STRATEGY).await;
+    let applied = setup
+        .core
+        .apply_strategy(&setup.principal, STRATEGY, &hash)
+        .await
+        .unwrap();
+
+    let (reached, resume) = setup
+        .core
+        .arm_apply_refusal_seam(STRATEGY, &approval_id)
+        .await;
+
+    let supersede = async {
+        reached
+            .await
+            .expect("the seam is reached by the repeat apply");
+        let mut connection = setup.core.pool().acquire().await.unwrap();
+        // Fail fast instead of waiting out the engine's write-lock timeout: the apply's
+        // transaction holds that lock for the whole window.
+        sqlx::query("PRAGMA busy_timeout = 0")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+        let attempt = sqlx::query(
+            "INSERT INTO strategy_applies \
+             (apply_id, strategy_id, approval_id, content_hash, applied_at, applied_by, \
+              supersedes_apply_id) \
+             VALUES ('apl_raced', ?, ?, ?, '2026-02-01T00:00:00+00:00', 'test_writer', ?)",
+        )
+        .bind(STRATEGY)
+        .bind(&next_approval)
+        .bind(&next_hash)
+        .bind(&applied.apply_id)
+        .execute(&mut *connection)
+        .await;
+        let _ = resume.send(());
+        attempt
+    };
+
+    let (repeat, supersede) = tokio::join!(
+        setup.core.apply_strategy(&setup.principal, STRATEGY, &hash),
+        supersede
+    );
+
+    let error = repeat.expect_err("the repeat apply is a refusal");
+    assert_eq!(
+        reason(&error),
+        "already_applied",
+        "the probe answers from the guard's own snapshot, never the internal fault"
+    );
+    assert_eq!(refusal(&error)["apply_id"], applied.apply_id.as_str());
+    assert_eq!(refusal(&error)["approval_id"], approval_id.as_str());
+    let blocked = supersede.expect_err("the guard's write lock closes the window");
+    assert!(
+        blocked.to_string().contains("locked"),
+        "the supersede is refused by the open transaction's lock: {blocked}"
+    );
+    assert_eq!(
+        apply_rows(setup.core.pool()).await,
+        1,
+        "a supersede that cannot land leaves the store at one apply row"
+    );
+    setup.core.close().await.unwrap();
+}
+
 /// The package the pinned fixtures nest.
 const PINNED_PACKAGE: &str = "pinned-step";
 /// The package `PINNED_PACKAGE`'s own fragment nests, so the frozen snapshot carries a pin the
