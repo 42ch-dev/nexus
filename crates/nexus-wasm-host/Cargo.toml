@@ -38,7 +38,9 @@ tracing = { workspace = true }
 # Embeds compiled .wasm artifacts at compile time (compass Q10; mirrors the
 # `embedded-presets/` pattern in nexus-orchestration). The `embedded-modules/`
 # tree is generated and gitignored — `build.rs` compiles each module from
-# `modules/<id>/` (see `modules/README.md`).
+# `modules/<id>/` (see `modules/README.md`). Only referenced under
+# `not(nexus_no_wasm_target)`, so cargo's `unused_dependencies` lint reports it
+# on a toolchain without wasm32 — keep it (see the root `[workspace.lints.cargo]`).
 include_dir = "0.7"
 
 [dev-dependencies]
