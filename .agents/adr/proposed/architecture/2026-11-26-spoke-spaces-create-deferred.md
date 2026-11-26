@@ -11,9 +11,11 @@ SPOKE 0.19.1 makes `memory.spaces.create` a required method of `spoke_operations
 - the capability is advertised, and
 - the operation answers `CAPABILITY_PORT_MISSING` with `retry_class: terminal` (`crates/nexus-memory-provider/src/lib.rs:3174`; the conformance fixture does the same at `crates/nexus-memory-conformance/src/server.rs:630`).
 
-That refusal shape is the repository's existing answer for families a build does not serve, and it is honest about the code path — but its name reads as an implementation gap rather than a product decision. Before 0.19.1 the operation did not exist, so advertising the family carried no such expectation.
+That refusal shape is the repository's existing answer for families a build does not serve, and it is honest about the code path — but its name reads as an implementation gap rather than a product decision. Before 0.19.1 the operation did not exist, so advertising the family carried no such expectation; at the 0.17 pin the same request answered `op_unsupported` from the payload decoder, which is why older conformance runs show that shape.
 
-Implementing the operation is not a mechanical addition. Nexus spaces are operator-provisioned (`LocalMemoryProvider::provision`, spec §7.0.6), and several slices rely on the single-space invariant. A client-named creation path would owe an idempotent receipt, a creator default grant, an admin rule for an existing space, frozen-state handling, and a decision about how operator provisioning and client creation coexist.
+This record is written against the tree after the 0.19 upgrade (`spoke-schemas = "0.19"` in `Cargo.toml`), where `impl MemoryPort for LocalMemoryProvider` carries the terminal `create_space` shown above.
+
+Implementing the operation is not a mechanical addition. Nexus spaces are operator-provisioned (`MemoryStore::provision`, `crates/nexus-memory-provider/src/storage.rs:1319`, spec §7.0.6), and several slices rely on the single-space invariant. A client-named creation path would owe an idempotent receipt, a creator default grant, an admin rule for an existing space, frozen-state handling, and a decision about how operator provisioning and client creation coexist.
 
 Separately, this repository has already recorded that Nexus's memory layer will adopt MindCore's settlement and recall machinery (`2026-11-21-adopt-mindcore-settlement-layer.md`, proposed): MindCore supplies `recall_context`, `absorb`, and `deliberate` behind a Nexus-owned `WorkflowBinding`, and its adapter surface owns the operations Nexus's current provider does not. The owner's direction (2026-11-26) is that the underlying architecture is replaced by MindCore after Monaco, and that these operations are MindCore's by construction.
 
@@ -30,14 +32,14 @@ Keep the terminal refusal for the 0.19 cycle and do not implement client-named s
 
 1. **Implement `memory.spaces.create` now.** Rejected for this cycle: it would be discarded when the MindCore layer lands (owner direction 2026-11-26), and it would first require product decisions (who may create, quota, interaction with operator provisioning, the single-space invariant) that are not taken.
 2. **Narrow the advertised capability so the operation is not expected.** Rejected: the family is negotiated as a unit; withdrawing `spoke-memory` removes reflection and the record/receipt surface Nexus does serve.
-3. **Answer with `op_unsupported` instead of `capability_port_missing`.** Rejected for now: it is a different family-level answer and would misrepresent a capability Nexus advertises; the correct wording belongs to the MindCore adoption, where the operation is actually served.
+3. **Answer with `op_unsupported` instead of `capability_port_missing`.** Rejected for now, although `op_unsupported` was the answer at the 0.17 pin (the operation did not exist then, so the conformance suite pins that shape for pre-0.19 runs). With 0.19.1 the operation is part of the advertised family's surface, and `op_unsupported` would deny that the family is negotiated; the terminal `capability_port_missing` states the refusal without pretending the family is absent. Choosing a different answer is a wire-contract decision that belongs with the MindCore adoption, where the operation is actually served.
 4. **Emulate creation by provisioning lazily.** Rejected: it would create spaces Nexus's provisioning rules did not authorize and break the single-space invariant several slices depend on.
 
 ## Consequences
 
 - A 0.19 peer sees the operation in the manifest but receives a terminal refusal. The specification wording (decision point 3) is the mitigation; the refusal code remains a signal a peer may read as a build gap.
 - Nexus carries one behaviour difference against the 0.19 surface until the MindCore migration, with no user-visible change for Nexus's own callers (they never create spaces through this operation).
-- The MindCore adoption record (`2026-11-21-adopt-mindcore-settlement-layer.md`) gains one more operation it is expected to supply; this record does not itself authorize that adoption, it inherits its timeline and exit conditions.
+- This record does not authorize the MindCore adoption and does not claim it already covers this operation. The owner direction (2026-11-26) is that after Monaco the underlying memory architecture is replaced by MindCore, whose workflows already exist (`SpiMindWorkflows`, `mindcore-runtime`); `MemoryPort` remains Nexus's public provider boundary under the adoption record (`2026-11-21-adopt-mindcore-settlement-layer.md`), so whichever serve face satisfies `memory.spaces.create` there is defined by that adoption, not assumed here.
 
 ## Reopen triggers
 
