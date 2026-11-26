@@ -187,9 +187,9 @@ pub fn validate_preset_semantic(
         Ok(document) => validate_workflow_ir(&document, caps),
         Err(error) => projection_refusal(manifest, &error),
     };
-    // A binding whose owner names no node has no document carrier, so it is reported from the
-    // manifest next to every other diagnostic instead of refusing the projection and hiding the
-    // asset, path or structural defects the document checks would report.
+    // A binding whose owner names no node has no document carrier, so the manifest scan reports
+    // every affected graph: the projection refusal names the first one, and a graph it did not
+    // reach is still reported once here.
     check_manifest_output_bindings(manifest, &mut result);
     result
 }
@@ -253,7 +253,9 @@ pub fn validate_path_safety(manifest: &PresetManifest) -> ValidationResult {
 /// Map a projection refusal onto the manifest field that caused it.
 ///
 /// A projection error is not always the document id: a state's `next` can be the carrier that
-/// cannot be represented, so the diagnostic names that state rather than `preset.id`.
+/// cannot be represented, so the diagnostic names that state rather than `preset.id`. An inner
+/// graph's `output_binding` whose owner names no node is refused first by the projection and is
+/// reported at that graph.
 fn projection_refusal(
     manifest: &PresetManifest,
     error: &crate::workflow_ir::WorkflowIrError,
@@ -269,6 +271,17 @@ fn projection_refusal(
                     |index| format!("states[{index}].next"),
                 );
             (path, DiagnosticCategory::Structural)
+        }
+        crate::workflow_ir::WorkflowIrError::NotProjectable { .. } => {
+            crate::workflow_ir::unknown_output_owner(manifest).map_or_else(
+                || ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
+                |(graph, _, _)| {
+                    (
+                        format!("inner_graphs.{graph}.output_binding"),
+                        DiagnosticCategory::Structural,
+                    )
+                },
+            )
         }
         _ => ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
     };
@@ -456,14 +469,15 @@ fn check_terminal_marker_consistency(document: &WorkflowDocument, result: &mut V
 ///   a consistent diagnostic here).
 /// - Orphan inner graphs (defined but never referenced) produce a WARNING.
 fn check_inner_graph_references(document: &WorkflowDocument, result: &mut ValidationResult) {
-    // An inner graph exists as the `<graph>/<node>` prefix of its inner-step nodes.
+    // An inner graph exists as the `<graph>/<node>` prefix of its inner-step nodes, and the step is
+    // the last segment: a graph name may contain `/`.
     // shortcut: a graph with zero nodes has no IR carrier and a reference to it reads as missing,
     // upgrade: when the IR gains a graph record.
     let inner_graph_names: BTreeSet<&str> = document
         .nodes
         .iter()
         .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
-        .filter_map(|node| node.id.split_once('/').map(|(graph, _)| graph))
+        .filter_map(|node| node.id.rsplit_once('/').map(|(graph, _)| graph))
         .collect();
 
     let mut referenced: BTreeSet<&str> = BTreeSet::new();
@@ -523,7 +537,7 @@ fn check_inner_output_bindings(document: &WorkflowDocument, result: &mut Validat
         if node.kind != WorkflowNodeKind::InnerStep {
             continue;
         }
-        let Some((graph, step)) = node.id.split_once('/') else {
+        let Some((graph, step)) = node.id.rsplit_once('/') else {
             if node.output_binding.is_some() {
                 result.diagnostics.push(ValidationDiagnostic {
                     path: format!("nodes.{}.id", node.id),
@@ -585,13 +599,22 @@ fn check_inner_output_bindings(document: &WorkflowDocument, result: &mut Validat
 /// Report an inner graph `output_binding` whose owner segment names no node.
 ///
 /// [`check_inner_output_bindings`] cannot see this shape: the projection cannot place such a
-/// binding, so no inner-step node carries it. Reporting it from the manifest keeps the defect
-/// visible without refusing the projection, which would hide the asset and path diagnostics that
-/// the document checks must still produce.
+/// binding, so no inner-step node carries it. Reporting it from the manifest keeps every affected
+/// graph visible next to the projection refusal and the document diagnostics; a path the refusal
+/// already reported is skipped so each graph appears once, and [`crate::workflow_ir::unknown_output_owners`]
+/// yields graph-name order.
 fn check_manifest_output_bindings(manifest: &PresetManifest, result: &mut ValidationResult) {
-    if let Some((graph, binding, owner)) = crate::workflow_ir::unknown_output_owner(manifest) {
+    for (graph, binding, owner) in crate::workflow_ir::unknown_output_owners(manifest) {
+        let path = format!("inner_graphs.{graph}.output_binding");
+        if result
+            .diagnostics
+            .iter()
+            .any(|existing| existing.path == path)
+        {
+            continue;
+        }
         result.diagnostics.push(ValidationDiagnostic {
-            path: format!("inner_graphs.{graph}.output_binding"),
+            path,
             message: format!(
                 "inner graph '{graph}' output binding '{binding}' names owner '{owner}', which is no node in the graph"
             ),
@@ -878,7 +901,7 @@ pub fn collect_ir_asset_references(document: &WorkflowDocument) -> Vec<(String, 
         .iter()
         .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
     {
-        let Some((graph, _)) = node.id.split_once('/') else {
+        let Some((graph, _)) = node.id.rsplit_once('/') else {
             continue;
         };
         let k = inner_index.entry(graph).or_insert(0);
@@ -1826,8 +1849,8 @@ inner_graphs:
         );
     }
 
-    /// A binding whose owner segment names no node is reported from the manifest at the graph
-    /// that carries it, not at `preset.id`.
+    /// A binding whose owner segment names no node is refused by the projection and reported at
+    /// the graph that carries it, not at `preset.id`.
     #[test]
     fn unknown_binding_owner_is_reported_at_its_graph() {
         let yaml = BINDING_GRAPH_MANIFEST
@@ -1843,20 +1866,20 @@ inner_graphs:
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::Structural
                     && d.path == "inner_graphs.shared_graph.output_binding"
-                    && d.message.contains("names owner 'second'")
+                    && d.message.contains("names owner `second`")
             }),
             "expected owner refusal at the graph: {:?}",
             result.diagnostics
         );
     }
 
-    /// The owner defect must not refuse the projection: asset checks still run and report a
-    /// missing template instead of being hidden behind the binding error.
+    /// Every graph whose binding names no node is reported, in graph-name order, even though the
+    /// projection refusal names only the first one.
     #[test]
-    fn unknown_owner_does_not_hide_missing_assets() {
+    fn every_graph_with_an_unbound_owner_is_reported() {
         let yaml = r"
 preset:
-  id: owner-and-assets
+  id: two-unbound-owners
   version: 1
   kind: creator
   description: test
@@ -1868,47 +1891,44 @@ states:
   - id: a
     enter:
       - kind: inner_graph
-        name: shared_graph
-    exit_when:
-      kind: llm_judge
-      template_file: prompts/judge.md
-      judge_capability: judge.llm
-      min_interval: PT1H
+        name: alpha
+      - kind: inner_graph
+        name: beta
+    exit_when: { kind: graph_complete }
     next: b
   - id: b
     terminal: true
 inner_graphs:
-  shared_graph:
+  alpha:
     nodes:
-      - id: first.v2
+      - id: x.v1
         kind: acp_prompt
-        template_file: prompts/first.md
-      - id: second
+      - id: y
         kind: acp_prompt
-    output_binding: first.v2.text
+    output_binding: x.v1.text
+  beta:
+    nodes:
+      - id: m
+        kind: acp_prompt
+    output_binding: ghost.text
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let tmp = tempfile::tempdir().unwrap();
-        let bundle_root = tmp.path().join("owner-and-assets");
-        std::fs::create_dir_all(&bundle_root).unwrap();
 
-        let assets = validate_assets_in_bundle(&manifest, &bundle_root);
-        assert!(
-            assets.diagnostics.iter().any(|d| {
-                d.category == DiagnosticCategory::MissingAsset && d.message.contains("judge.md")
-            }),
-            "missing asset hidden: {:?}",
-            assets.diagnostics
-        );
-
-        let semantic = validate_preset_semantic(&manifest, &BuiltinCapabilityCatalog);
-        assert!(
-            semantic.diagnostics.iter().any(|d| {
-                d.path == "inner_graphs.shared_graph.output_binding"
-                    && d.message.contains("names owner 'first'")
-            }),
-            "owner defect not reported: {:?}",
-            semantic.diagnostics
+        let result = validate_preset_semantic(&manifest, &BuiltinCapabilityCatalog);
+        let paths: Vec<&str> = result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("names owner"))
+            .map(|d| d.path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "inner_graphs.alpha.output_binding",
+                "inner_graphs.beta.output_binding"
+            ],
+            "{:?}",
+            result.diagnostics
         );
     }
 
