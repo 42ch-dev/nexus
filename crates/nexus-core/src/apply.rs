@@ -772,9 +772,6 @@ static APPLY_REFUSAL_SEAM: tokio::sync::Mutex<Option<ApplyRefusalSeam>> =
 struct ApplyRefusalSeam {
     strategy_id: String,
     approval_id: String,
-    /// Set before the pause begins, so a test can prove its own apply took the seam instead of
-    /// inferring it from the pause.
-    taken: std::sync::Arc<std::sync::atomic::AtomicBool>,
     reached: tokio::sync::oneshot::Sender<()>,
     resume: tokio::sync::oneshot::Receiver<()>,
 }
@@ -795,7 +792,6 @@ async fn reach_apply_refusal_seam(strategy_id: &str, approval_id: &str) {
     let Some(seam) = seam else {
         return;
     };
-    seam.taken.store(true, std::sync::atomic::Ordering::SeqCst);
     let _ = seam.reached.send(());
     let _ = seam.resume.await;
 }
@@ -803,10 +799,15 @@ async fn reach_apply_refusal_seam(strategy_id: &str, approval_id: &str) {
 #[cfg(any(test, feature = "test-hooks"))]
 impl CoreService {
     /// Arm the apply guard→probe seam for one apply: `reached` resolves when the apply of
-    /// `approval_id` on `strategy_id` is paused inside the window, sending on `resume` releases
-    /// it, and `taken` turns true only when that exact apply took the slot (a test must key the
-    /// pair to itself: the seam is process-global). `#[doc(hidden)]` test seam, compiled out of
-    /// the production build.
+    /// `approval_id` on `strategy_id` is paused inside the window, and sending on `resume`
+    /// releases it. `#[doc(hidden)]` test seam, compiled out of the production build.
+    ///
+    /// # Panics
+    ///
+    /// When the process-global slot still holds an unconsumed armed seam: a parked handshake
+    /// would otherwise sit there while another test arms its own, so overlapping seams are a loud
+    /// failure instead of a silent steal. A test must therefore key its pair to itself and arm
+    /// only once its previous seam was consumed.
     #[doc(hidden)]
     pub async fn arm_apply_refusal_seam(
         &self,
@@ -815,19 +816,23 @@ impl CoreService {
     ) -> (
         tokio::sync::oneshot::Receiver<()>,
         tokio::sync::oneshot::Sender<()>,
-        std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) {
         let (reached, reached_rx) = tokio::sync::oneshot::channel();
         let (resume_tx, resume) = tokio::sync::oneshot::channel();
-        let taken = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        *APPLY_REFUSAL_SEAM.lock().await = Some(ApplyRefusalSeam {
+        let mut slot = APPLY_REFUSAL_SEAM.lock().await;
+        assert!(
+            slot.is_none(),
+            "the apply guard→probe seam already holds an unconsumed armed handshake: \
+             arm one seam at a time and let its apply take it"
+        );
+        *slot = Some(ApplyRefusalSeam {
             strategy_id: strategy_id.to_owned(),
             approval_id: approval_id.to_owned(),
-            taken: std::sync::Arc::clone(&taken),
             reached,
             resume,
         });
-        (reached_rx, resume_tx, taken)
+        drop(slot);
+        (reached_rx, resume_tx)
     }
 }
 

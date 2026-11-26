@@ -1043,8 +1043,9 @@ async fn a_repeat_apply_names_its_own_row_and_never_becomes_an_internal_fault() 
 /// internal fault instead.
 ///
 /// The seam is process-global and keyed by `(strategy_id, approval_id)`, so this test keys it to
-/// a strategy and approval pair no other test in this binary applies — and asserts its own apply
-/// took the slot instead of inferring that from the pause.
+/// a strategy and approval pair no other test in this binary applies; arming additionally panics
+/// while an earlier seam is still unconsumed, so a parked handshake from a parallel test fails
+/// loudly instead of being silently stolen.
 #[tokio::test]
 async fn a_supersede_between_the_guard_and_its_probe_cannot_become_an_internal_fault() {
     let setup = setup().await;
@@ -1058,7 +1059,7 @@ async fn a_supersede_between_the_guard_and_its_probe_cannot_become_an_internal_f
         .await
         .unwrap();
 
-    let (reached, resume, taken) = setup
+    let (reached, resume) = setup
         .core
         .arm_apply_refusal_seam(SEAM_STRATEGY, &approval_id)
         .await;
@@ -1097,10 +1098,6 @@ async fn a_supersede_between_the_guard_and_its_probe_cannot_become_an_internal_f
         supersede
     );
 
-    assert!(
-        taken.load(std::sync::atomic::Ordering::SeqCst),
-        "this test's own apply took the seam; a parallel test must not be able to consume it"
-    );
     let error = repeat.expect_err("the repeat apply is a refusal");
     assert_eq!(
         reason(&error),
