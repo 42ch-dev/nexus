@@ -36,7 +36,10 @@
 //!   (terminal, `details.last_known_status`) instead of silently re-executing.
 //!   Past `dedup_retention_seconds` the tombstone row itself is dropped and the
 //!   namespace is free again, on read and replay alike — a tombstone is not an
-//!   eternal answer. Every mutating entry point and every provider open first
+//!   eternal answer. A row whose journal intent is still unsettled is kept
+//!   until that intent settles (its settle records the outcome there): the
+//!   namespace is free either way, since [`probe`] frees an expired key in
+//!   place. Every mutating entry point and every provider open first
 //!   reclaims expired rows in a transaction of its own
 //!   ([`MemoryStore::reclaim_expired`]) — all namespaces, keyless
 //!   receipts included, and before the publication section a file-effect op
@@ -3133,11 +3136,17 @@ async fn record_soul_invalidation(
 ///
 /// Evicts every receipt body older than `receipt_retention_seconds` across all
 /// dedup namespaces and the keyless `memory.subjects.ensure` receipts too, then
-/// drops every tombstone older than `dedup_retention_seconds`. Eviction is a
-/// one-way rewrite — the payload is discarded, so a later clock move cannot
-/// resurrect it. [`MemoryStore::reclaim_expired`] owns the transaction and its
-/// commit; this function only writes the reclamation and the clock reading it
-/// was decided at into it.
+/// drops every tombstone older than `dedup_retention_seconds` whose intent has
+/// settled. Eviction is a one-way rewrite — the payload is discarded, so a later
+/// clock move cannot resurrect it. [`MemoryStore::reclaim_expired`] owns the
+/// transaction and its commit; this function only writes the reclamation and the
+/// clock reading it was decided at into it.
+///
+/// A receipt an unsettled journal intent still owns is kept: the settle that
+/// intent is owed records its terminal outcome on that row, and the sweep runs
+/// before the publication section that settles it. The row is reclaimed by the
+/// first sweep after the intent turns `applied`; until then the *namespace* is
+/// still free past the window, because [`probe`] frees an expired key in place.
 ///
 /// The same window bounds the two content families that would otherwise retain
 /// rows forever: an applied journal shell (its file content was scrubbed at
@@ -3159,13 +3168,20 @@ async fn retention_sweep(
     ))
     .execute(&mut **tx)
     .await?;
-    sqlx::query("DELETE FROM memory_receipts WHERE created_at < ?")
-        .bind(retention_cutoff(
-            now,
-            crate::policy::DEDUP_RETENTION_SECONDS,
-        ))
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM memory_receipts WHERE created_at < ? \
+         AND NOT EXISTS ( \
+             SELECT 1 FROM memory_journal \
+             WHERE memory_journal.receipt_id = memory_receipts.receipt_id \
+               AND memory_journal.state <> 'applied' \
+         )",
+    )
+    .bind(retention_cutoff(
+        now,
+        crate::policy::DEDUP_RETENTION_SECONDS,
+    ))
+    .execute(&mut **tx)
+    .await?;
     sqlx::query("DELETE FROM memory_journal WHERE state = 'applied' AND created_at < ?")
         .bind(retention_cutoff(
             now,

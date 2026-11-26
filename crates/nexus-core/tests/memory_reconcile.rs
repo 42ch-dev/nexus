@@ -2627,3 +2627,116 @@ async fn journal_retention_prunes_only_applied_shells() {
     );
     pool.close().await;
 }
+
+/// §7.1 `limits.dedup_retention_seconds` as the provider advertises it.
+async fn dedup_retention(provider: &LocalMemoryProvider) -> i64 {
+    let described = wire(&provider.describe(&admin(), dto(json!({}))).await);
+    i64::try_from(
+        described["limits"]["dedup_retention_seconds"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("missing limits.dedup_retention_seconds: {described}")),
+    )
+    .unwrap()
+}
+
+/// How many rows the namespace still holds for one receipt id.
+async fn receipt_rows(env: &Env, receipt_id: &str) -> i64 {
+    let pool = store_pool(env).await;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM memory_receipts WHERE receipt_id = ?")
+            .bind(receipt_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    count
+}
+
+/// The stored status of one receipt row, or `None` once retention dropped it.
+async fn receipt_status(env: &Env, receipt_id: &str) -> Option<String> {
+    let pool = store_pool(env).await;
+    let status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM memory_receipts WHERE receipt_id = ?")
+            .bind(receipt_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    status
+}
+
+/// I-000142: the retention sweep runs before the publication section, so it can
+/// reach a receipt whose journal intent is still unsettled — the predecessor a
+/// later operation is about to settle. Retention leaves that row alone: the
+/// settle it is owed records its terminal outcome there. Once the intent is
+/// `applied`, the next sweep reclaims it as usual.
+#[tokio::test]
+async fn a_receipt_whose_intent_is_still_unsettled_outlives_the_dedup_window() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+
+    // A commit whose response was lost: row and journal committed, the intent
+    // neither published nor settled — the receipt stays `pending`.
+    provider.inject_commit_fault(true);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-unsettled-intent", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let record_id = only_record_id(&env).await;
+    assert_eq!(journal_states(&env).await, vec!["pending"]);
+    let receipt_id = receipt_id_of_key(&env, "k-unsettled-intent").await;
+
+    // Age the namespace past the dedup window, then sweep from an operation that
+    // does not touch this record: the expired-tombstone rule alone would drop it.
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_sweeper" })),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        1,
+        "the sweep keeps the receipt its unsettled intent still owes"
+    );
+    assert_eq!(journal_states(&env).await, vec!["pending"]);
+
+    // An operation on that very target settles the predecessor before its own
+    // effect: the receipt the sweep just spared now carries the outcome.
+    let deleted = wire(
+        &provider
+            .delete_record(
+                &admin(),
+                delete_request("k-delete-unsettled", &record_id, 1),
+            )
+            .await,
+    );
+    receipt(&deleted);
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("committed"),
+        "the settle recorded its outcome on the receipt it kept"
+    );
+
+    // Only now — intent applied — is the row reclaimable.
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_sweeper_two" })),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "an applied intent's expired receipt is reclaimed by the next sweep"
+    );
+}
