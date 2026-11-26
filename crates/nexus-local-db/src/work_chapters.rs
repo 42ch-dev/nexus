@@ -922,7 +922,7 @@ pub async fn compute_reconcile_diff(
                         // The status write-back cannot be produced. Report the
                         // skip; word-count mirroring for this chapter still
                         // applies below.
-                        record_skipped_status_write_back(&mut diff, work_id, work_ref, &fname);
+                        record_skipped_status_write_back(&mut diff, work_ref, &fname);
                     }
                 }
 
@@ -951,22 +951,11 @@ pub async fn compute_reconcile_diff(
     Ok(diff)
 }
 
-/// Record one skipped frontmatter status write-back and surface it to the
-/// operator on stderr.
+/// Record one skipped frontmatter status write-back in the diff.
 ///
-/// Never `tracing`: under `Creator` commands the global subscriber's writer is
-/// stdout, so a `warn!` here would corrupt `creator works reconcile-chapters
-/// --json` output. Only the skip branch reaches this, never a rendered chapter.
-fn record_skipped_status_write_back(
-    diff: &mut ReconcileDiff,
-    work_id: &str,
-    work_ref: &str,
-    file_name: &str,
-) {
-    eprintln!(
-        "reconcile: work {work_id}: frontmatter status write-back skipped for \
-         Works/{work_ref}/Stories/{file_name}: {UNRENDERABLE_FRONTMATTER_REASON}"
-    );
+/// The detail reaches the caller through [`ReconcileReport::skipped`]; nothing
+/// is printed here, so `--json` output stays parseable.
+fn record_skipped_status_write_back(diff: &mut ReconcileDiff, work_ref: &str, file_name: &str) {
     diff.skipped.push(ReconcileSkip {
         path: format!("Works/{work_ref}/Stories/{file_name}"),
         reason: UNRENDERABLE_FRONTMATTER_REASON,

@@ -1140,7 +1140,7 @@ async fn reconcile(
 /// `nexus_local_db::work_chapters::ReconcileReport` is what the daemon route
 /// returned verbatim; the direct-core `--json` output keeps those field names
 /// and types.
-const fn reconcile_report_wire(
+fn reconcile_report_wire(
     report: &WorkReconcileReport,
 ) -> nexus_local_db::work_chapters::ReconcileReport {
     nexus_local_db::work_chapters::ReconcileReport {
@@ -1148,7 +1148,7 @@ const fn reconcile_report_wire(
         updated: report.updated,
         resynced: report.resynced,
         preserved: report.preserved,
-        skipped: Vec::new(),
+        skipped: report.skipped.clone(),
     }
 }
 
@@ -1160,7 +1160,8 @@ fn print_reconcile_report(resolved_id: &str, report: &WorkReconcileReport, is_dr
         updated,
         resynced,
         preserved,
-    } = *report;
+        skipped,
+    } = report;
     let label = if is_dry_run {
         "Dry run — no files modified. Reconcile preview"
     } else {
@@ -1171,6 +1172,15 @@ fn print_reconcile_report(resolved_id: &str, report: &WorkReconcileReport, is_dr
     println!("  Updated:   {updated}");
     println!("  Resynced:  {resynced}");
     println!("  Preserved: {preserved}");
+    for skip in skipped {
+        // The JSON value keeps the raw name; display escapes its control
+        // characters so a crafted file name cannot forge extra output lines.
+        println!(
+            "  Skipped:   {} — {}",
+            skip.path.escape_debug(),
+            skip.reason
+        );
+    }
 }
 
 /// Human-mode confirmation before a mutating reconcile (V1.49 P2).
