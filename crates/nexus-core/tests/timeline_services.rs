@@ -69,8 +69,9 @@ async fn fixture() -> Fixture {
 async fn seed_world(pool: &SqlitePool, world_id: &str, owner: &str, root_branch: Option<&str>) {
     let title = format!("Title {world_id}");
     let slug = format!("slug-{world_id}");
-    let mut seed = WorldSeed::new(world_id, owner, &title, &slug).with_workspace_id("ws");
-    seed.root_fork_branch_id = root_branch;
+    let seed = WorldSeed::new(world_id, owner, &title, &slug)
+        .with_workspace_id("ws")
+        .with_root_fork_branch_id(root_branch);
     world_with(pool, seed).await;
 }
 
