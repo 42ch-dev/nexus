@@ -537,6 +537,13 @@ pub struct ReconcileSkip {
 }
 
 /// Report from reconciling `work_chapters` with the filesystem.
+///
+/// The counters describe one reconcile diff: the dry-run preview returns
+/// [`ReconcileDiff::to_report`] unchanged. The committed run can add what no
+/// preview can predict — a chapter whose frontmatter stopped rendering between
+/// the diff and the write — by subtracting it from `resynced` and listing it in
+/// `skipped`, so those two fields can differ from the preview only by that
+/// apply-time window.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReconcileReport {
     /// Number of new chapter rows created.
@@ -546,13 +553,11 @@ pub struct ReconcileReport {
     /// Number of chapter files re-synced to the DB status (DB-as-SSOT).
     ///
     /// These bytes are committed by the caller's Work byte-write port, never by
-    /// [`apply_reconcile_diff`] — this counter is a file count, not a DB row
-    /// count, and [`ReconcileDiff::to_report`] counts the
-    /// [`ReconcileOp::ResyncFileStatus`] ops. The diff never emits that op for a
-    /// chapter whose frontmatter it cannot render; such a chapter is recorded in
-    /// [`ReconcileReport::skipped`] instead. A chapter the caller could not
-    /// write for the same reason — the file became unrenderable after the diff —
-    /// is subtracted from this counter and reported in `skipped` as well.
+    /// [`apply_reconcile_diff`] — a file count, not a DB row count, seeded from
+    /// the [`ReconcileOp::ResyncFileStatus`] ops. A chapter that cannot be
+    /// rendered when the diff runs never gets the op and appears in `skipped`;
+    /// one that stops rendering before the write is subtracted here and
+    /// reported in `skipped` too (dry-run parity: see the struct doc).
     pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,
@@ -576,8 +581,9 @@ pub struct ReconcileReport {
 /// "apply" phase lets the daemon hold the runtime lock **only** for the fast
 /// write phase, while the slow filesystem walk + per-chapter DB reads run
 /// unlocked. The [`ReconcileReport`] counters are derivable from a
-/// [`ReconcileDiff`] without re-reading state (see [`ReconcileDiff::to_report`]),
-/// so the dry-run preview and the mutating path produce identical counters.
+/// [`ReconcileDiff`] without re-reading state (see [`ReconcileDiff::to_report`]);
+/// the committed run adjusts only for the apply-time window described on
+/// [`ReconcileReport`].
 #[derive(Debug, Clone)]
 pub enum ReconcileOp {
     /// Insert a new chapter row, optionally applying a non-default status
@@ -597,9 +603,11 @@ pub enum ReconcileOp {
     /// Resync the chapter file's frontmatter `status` to the DB source of
     /// truth (DB-as-SSOT; the file was ahead/conflicting).
     ///
-    /// Emitted only when [`render_frontmatter_status`] can produce the bytes;
-    /// a file it cannot render is recorded in [`ReconcileDiff::skipped`]
-    /// instead, so this op never stands for a write that silently no-ops.
+    /// Emitted only when [`render_frontmatter_status`] can produce the bytes at
+    /// diff time; a file it cannot render then is recorded in
+    /// [`ReconcileDiff::skipped`] instead. The write phase re-renders the file,
+    /// so a chapter that stopped rendering in between is dropped from the
+    /// resync count and reported in [`ReconcileReport::skipped`].
     ///
     /// **Index-only in [`apply_reconcile_diff`]**: that function treats this
     /// variant as a documented no-op. The bytes are rendered by
@@ -641,8 +649,9 @@ pub struct ReconcileDiff {
 
 impl ReconcileDiff {
     /// Derive the [`ReconcileReport`] counters from this diff without touching
-    /// the DB or filesystem. Used by both the dry-run preview path and the
-    /// post-apply summary so the two paths can never disagree.
+    /// the DB or filesystem. This is the whole report for the dry-run preview;
+    /// the committed run starts from it and adjusts only for the apply-time
+    /// window described on [`ReconcileReport`].
     #[must_use]
     pub fn to_report(&self) -> ReconcileReport {
         let mut created = 0u32;
@@ -978,9 +987,11 @@ fn record_skipped_status_write_back(diff: &mut ReconcileDiff, work_ref: &str, fi
 /// Chapter-file frontmatter is **not** written here: each
 /// [`ReconcileOp::ResyncFileStatus`] is committed by the caller's Work
 /// byte-write port first, using [`render_frontmatter_status`] for the bytes.
-/// Returns a [`ReconcileReport`] derived from the diff (identical to what
-/// [`ReconcileDiff::to_report`] produces), so the report never depends on a
-/// post-write re-read.
+/// Returns a [`ReconcileReport`] derived from the diff exactly as
+/// [`ReconcileDiff::to_report`] does, so the report never depends on a
+/// post-write re-read. The caller's byte-write port owns the one adjustment
+/// this function cannot make — a chapter it could not write (see
+/// [`ReconcileReport`]).
 ///
 /// # Errors
 ///
