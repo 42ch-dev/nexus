@@ -37,9 +37,12 @@
 //!   Past `dedup_retention_seconds` the tombstone row itself is dropped and the
 //!   namespace is free again, on read and replay alike — a tombstone is not an
 //!   eternal answer. A row whose journal intent is still unsettled is kept
-//!   until that intent settles (its settle records the outcome there): the
-//!   namespace is free either way, since [`probe`] frees an expired key in
-//!   place. Every mutating entry point and every provider open first
+//!   until that intent settles (its settle records the outcome there), and it
+//!   is the one row whose key is *not* reused while it is owed: [`probe`]
+//!   answers `RECEIPT_EXPIRED` instead of freeing a namespace it cannot delete
+//!   the row for. Every receipt with a recorded outcome is freed in place at
+//!   the dedup window, on read and replay alike. Every mutating entry point and
+//!   every provider open first
 //!   reclaims expired rows in a transaction of its own
 //!   ([`MemoryStore::reclaim_expired`]) — all namespaces, keyless
 //!   receipts included, and before the publication section a file-effect op
@@ -3145,8 +3148,10 @@ async fn record_soul_invalidation(
 /// A receipt an unsettled journal intent still owns is kept: the settle that
 /// intent is owed records its terminal outcome on that row, and the sweep runs
 /// before the publication section that settles it. The row is reclaimed by the
-/// first sweep after the intent turns `applied`; until then the *namespace* is
-/// still free past the window, because [`probe`] frees an expired key in place.
+/// first sweep after the intent turns `applied`. While it is owed, that key is
+/// not reused either — [`probe`] answers `RECEIPT_EXPIRED` rather than freeing a
+/// namespace whose row it cannot delete; every receipt whose outcome is already
+/// recorded is still freed in place at the dedup window.
 ///
 /// The same window bounds the two content families that would otherwise retain
 /// rows forever: an applied journal shell (its file content was scrubbed at
@@ -3199,6 +3204,22 @@ async fn retention_sweep(
     Ok(())
 }
 
+/// Whether an unsettled journal intent still owns this receipt (§5.2): the
+/// settle that intent is owed is what records the terminal outcome on that row,
+/// so neither the retention sweep nor the dedup probe removes it first.
+async fn receipt_owes_settlement(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    receipt_id: &str,
+) -> StoreResult<bool> {
+    let unsettled: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM memory_journal WHERE receipt_id = ? AND state <> 'applied' LIMIT 1",
+    )
+    .bind(receipt_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(unsettled.is_some())
+}
+
 /// Probe the dedup namespace inside the caller's transaction.
 ///
 /// A keyless op (the `memory.subjects.ensure` exemption) binds NULL, which
@@ -3209,7 +3230,12 @@ async fn retention_sweep(
 /// the key to its `payload_digest` (§7.0.5), so a different payload is
 /// `IDEMPOTENCY_CONFLICT` at any age. A true replay is only `RECEIPT_EXPIRED`
 /// (terminal, never re-executed) once its body is gone, and a namespace past the
-/// dedup window is cleared here so the key starts over (§6.10/MEM-R021).
+/// dedup window is cleared here so the key starts over (§6.10/MEM-R021) — except
+/// when an unsettled journal intent still owns the row ([`receipt_owes_settlement`]):
+/// that settle has yet to record the outcome, and the namespace cannot be freed
+/// without deleting the row it writes to, so the key answers `RECEIPT_EXPIRED`
+/// and the caller re-keys. The row is reclaimed by the first sweep after its
+/// intent settles.
 async fn probe(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     ctx: &OpContext<'_>,
@@ -3242,6 +3268,11 @@ async fn probe(
             }
         }
         Retention::Expired => {
+            if receipt_owes_settlement(tx, &row.receipt_id).await? {
+                return Err(StoreError::ReceiptExpired {
+                    last_known_status: row.status,
+                });
+            }
             sqlx::query("DELETE FROM memory_receipts WHERE receipt_id = ?")
                 .bind(&row.receipt_id)
                 .execute(&mut **tx)
@@ -3261,9 +3292,10 @@ async fn probe(
 /// replay — stays with [`probe`] behind the caller's authorization, so this
 /// preflight reveals only that the caller's own key is bound.
 ///
-/// A receipt past the retention window is treated exactly as [`probe`] does
-/// (swept or swept-in-place, then the key starts over), so this preflight can
-/// never conflict a key the full probe would free.
+/// A receipt past the retained body's window is judged exactly as [`probe`]
+/// judges it — freed when its outcome is recorded, or answered `RECEIPT_EXPIRED`
+/// when its settle is still owed — and never as a conflict, so this preflight
+/// cannot conflict a key the full probe would refuse or free.
 async fn conflict_only_probe(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     ctx: &OpContext<'_>,

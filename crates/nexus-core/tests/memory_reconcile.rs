@@ -2740,3 +2740,92 @@ async fn a_receipt_whose_intent_is_still_unsettled_outlives_the_dedup_window() {
         "an applied intent's expired receipt is reclaimed by the next sweep"
     );
 }
+
+/// How many record rows the space holds.
+async fn record_rows(env: &Env) -> i64 {
+    let pool = store_pool(env).await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_records")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    count
+}
+
+/// I-000142 follow-up: the dedup probe and the retention sweep agree on a receipt
+/// whose settle is still owed. The namespace cannot be freed without deleting the
+/// row that settle records its outcome on, so the key is not reused: a same-key
+/// request answers `RECEIPT_EXPIRED` (terminal — use a new key) and the row stays
+/// until the settle lands, after which the next sweep reclaims it.
+#[tokio::test]
+async fn a_same_key_request_does_not_erase_an_unsettled_outcome() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+
+    // A commit whose response was lost: row and journal committed, the intent
+    // neither published nor settled — the receipt stays `pending`.
+    provider.inject_commit_fault(true);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-owed", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let record_id = only_record_id(&env).await;
+    let receipt_id = receipt_id_of_key(&env, "k-owed").await;
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("pending")
+    );
+    assert_eq!(journal_states(&env).await, vec!["pending"]);
+
+    // Age the namespace past the dedup window, then retry the same key.
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    let retried = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-owed", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&retried), "RECEIPT_EXPIRED");
+    assert_eq!(retry_class(&retried), "terminal");
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        1,
+        "the key is not freed while its settle is owed"
+    );
+    assert_eq!(
+        record_rows(&env).await,
+        1,
+        "no fresh effect ran under that key"
+    );
+
+    // Settling the predecessor records its outcome on that very row.
+    let deleted = wire(
+        &provider
+            .delete_record(&admin(), delete_request("k-owed-delete", &record_id, 1))
+            .await,
+    );
+    receipt(&deleted);
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("committed"),
+        "the settle recorded its outcome on the row it kept"
+    );
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+
+    // Only now — intent applied — is the row reclaimable.
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_owed_sweeper" })),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "an applied intent's expired receipt is reclaimed by the next sweep"
+    );
+}
