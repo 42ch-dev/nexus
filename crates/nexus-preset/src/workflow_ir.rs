@@ -215,7 +215,8 @@ impl AssetSource for EmbeddedAssetSource<'_> {
 /// Returns [`WorkflowIrError::AssetRead`] when a referenced asset is missing, unreadable, or
 /// refused by `source` (a [`FsAssetSource`] escape, for one),
 /// [`WorkflowIrError::NotProjectable`] when a referenced path is unsafe (absolute, `..`
-/// traversal) or the manifest header cannot form a document, and
+/// traversal), the manifest header cannot form a document, or an inner graph's
+/// `output_binding` names no node by its owner segment, and
 /// [`WorkflowIrError::EmptyConditionalRules`] when a judged state's `next` is a
 /// `Conditional`/`Branches` form carrying no rules. A non-judged state's
 /// `{branches: [], default: <id>}` next is accepted and re-exports in that same form.
@@ -284,7 +285,8 @@ pub fn import_preset_bundle(
 ///
 /// # Errors
 ///
-/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id, and
+/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id or an inner
+/// graph's `output_binding` names no node by its owner segment, and
 /// [`WorkflowIrError::EmptyConditionalRules`] when a judged state's `next` is a
 /// `Conditional`/`Branches` form carrying no rules. A non-judged state's
 /// `{branches: [], default: <id>}` next is accepted and re-exports in that same form.
@@ -298,6 +300,11 @@ fn document_from_manifest(
     manifest: &PresetManifest,
     assets: Vec<WorkflowAssetRef>,
 ) -> Result<WorkflowDocument, WorkflowIrError> {
+    if let Some((graph_name, binding, owner)) = unknown_output_owner(manifest) {
+        return Err(refuse(format!(
+            "inner graph `{graph_name}` output binding `{binding}` names owner `{owner}`, which is no node in the graph"
+        )));
+    }
     let header = &manifest.preset;
     let id = WorkflowDocumentId::try_from(header.id.clone())
         .map_err(|e| refuse(format!("preset id `{}` is not an IR id: {e}", header.id)))?;
@@ -431,6 +438,31 @@ fn state_node(state: &StateDefinition) -> WorkflowNode {
 /// re-derive it. A dotless binding names that node itself.
 pub(crate) fn output_binding_owner(binding: &str) -> &str {
     binding.split('.').next().unwrap_or(binding)
+}
+
+/// An inner graph `output_binding` whose owner segment names no node: `(graph, binding, owner)`.
+pub(crate) type UnknownOutputOwner<'a> = (&'a str, &'a str, &'a str);
+
+/// The first inner graph whose `output_binding` owner names no node in that graph.
+///
+/// One detection for the import refusal and validation's diagnostic path: the loader rejects the
+/// same shape as an unknown node, so the projection must refuse instead of dropping the binding.
+/// A dotted step id (`review.v2` with binding `review.v2.text`) is exactly this case — the owner
+/// is the first segment, which is no step.
+pub(crate) fn unknown_output_owner(manifest: &PresetManifest) -> Option<UnknownOutputOwner<'_>> {
+    manifest
+        .inner_graphs
+        .as_ref()?
+        .iter()
+        .find_map(|(graph, inner)| {
+            let binding = inner.output_binding.as_deref()?;
+            let owner = output_binding_owner(binding);
+            (!inner.nodes.iter().any(|step| step.id == owner)).then_some((
+                graph.as_str(),
+                binding,
+                owner,
+            ))
+        })
 }
 
 fn inner_step_node(
@@ -1843,6 +1875,27 @@ states:
             serde_json::to_value(&manifest).expect("manifest json"),
             "a dotless binding survives import and export unchanged"
         );
+    }
+
+    /// A dotted step id (`review.v2`) makes the loader's owner segment (`review`) name no step, so
+    /// the projection refuses instead of dropping the binding.
+    #[test]
+    fn import_refuses_an_output_binding_whose_owner_is_no_step() {
+        let manifest: PresetManifest = serde_yaml::from_str(
+            &MANIFEST.replace("- id: review", "- id: review.v2").replace(
+                "output_binding: review.text",
+                "output_binding: review.v2.text",
+            ),
+        )
+        .expect("manifest parses");
+
+        let error = import_preset_manifest(&manifest)
+            .expect_err("an owner segment that names no step is refused");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["work_graph", "`review.v2.text`", "`review`"] {
+            assert!(message.contains(expected), "{message}");
+        }
     }
 
     #[test]

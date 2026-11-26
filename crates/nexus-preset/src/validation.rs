@@ -248,7 +248,9 @@ pub fn validate_path_safety(manifest: &PresetManifest) -> ValidationResult {
 /// Map a projection refusal onto the manifest field that caused it.
 ///
 /// A projection error is not always the document id: a state's `next` can be the carrier that
-/// cannot be represented, so the diagnostic names that state rather than `preset.id`.
+/// cannot be represented, so the diagnostic names that state rather than `preset.id`. An inner
+/// graph's `output_binding` whose owner names no node is refused first by the projection and is
+/// reported at that graph.
 fn projection_refusal(
     manifest: &PresetManifest,
     error: &crate::workflow_ir::WorkflowIrError,
@@ -264,6 +266,17 @@ fn projection_refusal(
                     |index| format!("states[{index}].next"),
                 );
             (path, DiagnosticCategory::Structural)
+        }
+        crate::workflow_ir::WorkflowIrError::NotProjectable { .. } => {
+            crate::workflow_ir::unknown_output_owner(manifest).map_or_else(
+                || ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
+                |(graph, _, _)| {
+                    (
+                        format!("inner_graphs.{graph}.output_binding"),
+                        DiagnosticCategory::Structural,
+                    )
+                },
+            )
         }
         _ => ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
     };
@@ -505,17 +518,29 @@ fn check_inner_graph_references(document: &WorkflowDocument, result: &mut Valida
 /// Check that each inner graph carries at most one `output_binding`.
 ///
 /// A graph projects exactly one binding and the segment before the first dot names its owner step
-/// ([`crate::workflow_ir::output_binding_owner`], the loader's rule). Two claims in one graph —
-/// the same owner or another — would silently overwrite each other on export, so both are errors.
+/// ([`crate::workflow_ir::output_binding_owner`], the loader's rule). Export refuses a second
+/// claim in one graph, so validation reports the same shape — same owner or another — instead of
+/// passing a document that cannot round-trip. A claim on an inner step whose id is not
+/// `<graph>/<step>` has no graph to attribute it to, so it is an error rather than a silent skip.
 fn check_inner_output_bindings(document: &WorkflowDocument, result: &mut ValidationResult) {
     let mut claims: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
     for node in &document.nodes {
         if node.kind != WorkflowNodeKind::InnerStep {
             continue;
         }
-        let (Some(binding), Some((graph, _))) =
-            (node.output_binding.as_deref(), node.id.split_once('/'))
-        else {
+        let Some(binding) = node.output_binding.as_deref() else {
+            continue;
+        };
+        let Some((graph, _)) = node.id.split_once('/') else {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: format!("nodes.{}.id", node.id),
+                message: format!(
+                    "inner step id '{}' is not '<inner_graph>/<node_id>'; its output binding claim cannot be attributed to a graph",
+                    node.id
+                ),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::Structural,
+            });
             continue;
         };
         claims
@@ -1667,11 +1692,9 @@ states:
         );
     }
 
-    /// Two inner steps claiming one graph's `output_binding` have no export plane: a document
-    /// validated without exporting reports the collision as a structural error.
-    #[test]
-    fn two_output_bindings_for_one_inner_graph_are_error() {
-        let yaml = r"
+    /// One inner graph with two steps and one `output_binding`; the tests below rewrite the ids
+    /// and bindings on the projected document.
+    const BINDING_GRAPH_MANIFEST: &str = r"
 preset:
   id: stacked-bindings
   version: 1
@@ -1699,7 +1722,12 @@ inner_graphs:
         kind: acp_prompt
     output_binding: second.text
 ";
-        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+
+    /// Two inner steps claiming one graph's `output_binding` have no export plane: a document
+    /// validated without exporting reports the collision as a structural error.
+    #[test]
+    fn two_output_bindings_for_one_inner_graph_are_error() {
+        let manifest: PresetManifest = serde_yaml::from_str(BINDING_GRAPH_MANIFEST).unwrap();
         let caps = BuiltinCapabilityCatalog;
         let clean = validate_preset_semantic(&manifest, &caps);
         assert!(
@@ -1735,6 +1763,57 @@ inner_graphs:
                 result.diagnostics
             );
         }
+    }
+
+    /// An inner step id must be `<graph>/<step>`; a claim on a malformed id has no graph to
+    /// attribute it to, so the collision check reports it instead of skipping the claim.
+    #[test]
+    fn malformed_inner_step_id_with_a_binding_is_error() {
+        let manifest: PresetManifest = serde_yaml::from_str(BINDING_GRAPH_MANIFEST).unwrap();
+        let mut document = crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+        let node = document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "shared_graph/first")
+            .expect("first step node");
+        node.id = "first".to_string();
+        node.output_binding = Some("first.text".to_string());
+
+        let result = validate_workflow_ir(&document, &BuiltinCapabilityCatalog);
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::Structural
+                    && d.severity == DiagnosticSeverity::Error
+                    && d.message.contains("is not '<inner_graph>/<node_id>'")
+                    && d.message.contains("'first'")
+            }),
+            "expected malformed inner step id error: {:?}",
+            result.diagnostics
+        );
+    }
+
+    /// A binding whose owner segment names no node is refused by the projection and reported at
+    /// the graph that carries it, not at `preset.id`.
+    #[test]
+    fn unknown_binding_owner_is_reported_at_its_graph() {
+        let yaml = BINDING_GRAPH_MANIFEST
+            .replace("- id: second", "- id: second.v2")
+            .replace(
+                "output_binding: second.text",
+                "output_binding: second.v2.text",
+            );
+        let manifest: PresetManifest = serde_yaml::from_str(&yaml).unwrap();
+
+        let result = validate_preset_semantic(&manifest, &BuiltinCapabilityCatalog);
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::Structural
+                    && d.path == "inner_graphs.shared_graph.output_binding"
+                    && d.message.contains("`second`")
+            }),
+            "expected owner refusal at the graph: {:?}",
+            result.diagnostics
+        );
     }
 
     #[test]
