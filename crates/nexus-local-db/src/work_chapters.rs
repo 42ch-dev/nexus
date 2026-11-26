@@ -547,10 +547,12 @@ pub struct ReconcileReport {
     ///
     /// These bytes are committed by the caller's Work byte-write port, never by
     /// [`apply_reconcile_diff`] — this counter is a file count, not a DB row
-    /// count. A file whose frontmatter status cannot be rendered is never
-    /// counted here; it appears in [`ReconcileReport::skipped`] instead. That
-    /// includes a file that was renderable when the diff ran but stopped being
-    /// renderable before the write: the apply phase reports it the same way.
+    /// count, and [`ReconcileDiff::to_report`] counts the
+    /// [`ReconcileOp::ResyncFileStatus`] ops. The diff never emits that op for a
+    /// chapter whose frontmatter it cannot render; such a chapter is recorded in
+    /// [`ReconcileReport::skipped`] instead. A chapter the caller could not
+    /// write for the same reason — the file became unrenderable after the diff —
+    /// is subtracted from this counter and reported in `skipped` as well.
     pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,

@@ -13,6 +13,7 @@
 //! construction: that port lands nothing, so a dry run cannot rewrite a real
 //! chapter file.
 
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
 use nexus_home_layout::active_context::{
@@ -302,10 +303,17 @@ impl FsWorkArtifactPort {
                 // The file changed between the unlocked diff and this write, so
                 // nothing can be written: report the skip instead of counting a
                 // resync that never landed.
-                let path = format!("Works/{}/{}", request.work_ref, rel_child.display());
+                let path = format!(
+                    "Works/{}/{}",
+                    request.work_ref,
+                    rel_child.to_string_lossy().replace('\\', "/")
+                );
                 // stderr, not `tracing`: Creator commands send the subscriber to
-                // stdout, so a `warn!` here would corrupt `--json` output.
-                eprintln!(
+                // stdout, so a `warn!` here would corrupt `--json` output. The
+                // result is dropped on purpose — a rejected stderr write must not
+                // panic, because a panic here would strand the Work runtime lock.
+                let _ = writeln!(
+                    std::io::stderr(),
                     "reconcile: work {}: frontmatter status write-back skipped at apply time \
                      for {path}: {}",
                     request.work_id,
@@ -1391,5 +1399,74 @@ mod tests {
             "the file keeps the bytes the diff never wrote"
         );
         assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    /// The diff-phase and apply-phase skip producers must emit the same `path`
+    /// shape — `Works/<work_ref>/<child>` with forward slashes — so one field
+    /// never carries two spellings (`rel_child.display()` is platform-separated).
+    #[tokio::test]
+    async fn reconcile_apply_and_diff_skips_carry_the_same_path_shape() {
+        let fixture = fixture(true).await;
+        nexus_local_db::work_chapters::seed_chapters(
+            &fixture.pool,
+            WORK_ID,
+            WORK_REF,
+            2,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("seed chapters");
+        nexus_local_db::work_chapters::update_status(
+            &fixture.pool,
+            WORK_ID,
+            1,
+            1,
+            "draft",
+            None,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("chapter status");
+
+        // ch01 conflicts on status and is renderable when the diff runs; the
+        // recheck then breaks it, so only the apply phase skips it.
+        let conflicting = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&conflicting, "finalized", "Body text");
+        let ch01_broken = "---\nchapter: 1\nstatus: finalized\nUnclosed body";
+        // ch02's frontmatter never closes, so the diff phase itself skips it.
+        let ch02_broken = "---\nchapter: 2\nstatus: draft\nUnclosed body";
+        std::fs::write(
+            chapter_path(fixture.workspace.path(), "ch02-body.md"),
+            ch02_broken,
+        )
+        .expect("broken chapter");
+
+        let report = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| {
+                std::fs::write(&conflicting, ch01_broken).expect("break the frontmatter");
+                Ok(())
+            })
+            .await
+            .expect("reconcile");
+
+        let paths: Vec<&str> = report
+            .skipped
+            .iter()
+            .map(|skip| skip.path.as_str())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "Works/demo/Stories/ch02-body.md",
+                "Works/demo/Stories/ch01-intro.md",
+            ],
+            "the diff-phase skip comes first, then the apply-phase one"
+        );
+        assert!(
+            report.skipped.iter().all(|skip| !skip.path.contains('\\')),
+            "both producers must use forward slashes: {paths:?}"
+        );
+        assert_eq!(report.resynced, 0, "neither chapter was written");
     }
 }
