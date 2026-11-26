@@ -36,13 +36,15 @@
 //!   (terminal, `details.last_known_status`) instead of silently re-executing.
 //!   Past `dedup_retention_seconds` the tombstone row itself is dropped and the
 //!   namespace is free again, on read and replay alike — a tombstone is not an
-//!   eternal answer. A row whose journal intent is still unsettled is kept
-//!   until that intent settles (its settle records the outcome there), and it
-//!   is the one row whose key is *not* reused while it is owed: [`probe`]
-//!   answers `RECEIPT_EXPIRED` instead of freeing a namespace it cannot delete
-//!   the row for. Every receipt with a recorded outcome is freed in place at
-//!   the dedup window, on read and replay alike. Every mutating entry point and
-//!   every provider open first
+//!   eternal answer. One exception, and only one: a receipt whose journal intent
+//!   is still `pending`/`deferred` is kept until that intent settles, because its
+//!   settle has yet to record an outcome there; while it is owed, that key is not
+//!   reused either — [`probe`] answers `RECEIPT_EXPIRED` instead of freeing a
+//!   namespace it cannot delete the row for. A `quarantined` intent is not an
+//!   exception: quarantining already wrote the terminal `failed` outcome onto the
+//!   receipt, and its file-effect recovery needs only the journal row, so that
+//!   key is freed at the window like any other recorded outcome. Every mutating
+//!   entry point and every provider open first
 //!   reclaims expired rows in a transaction of its own
 //!   ([`MemoryStore::reclaim_expired`]) — all namespaces, keyless
 //!   receipts included, and before the publication section a file-effect op
@@ -3145,13 +3147,14 @@ async fn record_soul_invalidation(
 /// transaction and its commit; this function only writes the reclamation and the
 /// clock reading it was decided at into it.
 ///
-/// A receipt an unsettled journal intent still owns is kept: the settle that
+/// A receipt whose intent is still `pending`/`deferred` is kept: the settle that
 /// intent is owed records its terminal outcome on that row, and the sweep runs
 /// before the publication section that settles it. The row is reclaimed by the
 /// first sweep after the intent turns `applied`. While it is owed, that key is
 /// not reused either — [`probe`] answers `RECEIPT_EXPIRED` rather than freeing a
-/// namespace whose row it cannot delete; every receipt whose outcome is already
-/// recorded is still freed in place at the dedup window.
+/// namespace whose row it cannot delete. A `quarantined` intent does not hold its
+/// receipt: the terminal `failed` outcome is already recorded there, and the
+/// re-drive recovery owes it reads the journal, never this row.
 ///
 /// The same window bounds the two content families that would otherwise retain
 /// rows forever: an applied journal shell (its file content was scrubbed at
@@ -3178,7 +3181,7 @@ async fn retention_sweep(
          AND NOT EXISTS ( \
              SELECT 1 FROM memory_journal \
              WHERE memory_journal.receipt_id = memory_receipts.receipt_id \
-               AND memory_journal.state <> 'applied' \
+               AND memory_journal.state NOT IN ('applied', 'quarantined') \
          )",
     )
     .bind(retention_cutoff(
@@ -3204,15 +3207,25 @@ async fn retention_sweep(
     Ok(())
 }
 
-/// Whether an unsettled journal intent still owns this receipt (§5.2): the
-/// settle that intent is owed is what records the terminal outcome on that row,
-/// so neither the retention sweep nor the dedup probe removes it first.
+/// Whether this receipt's settle has yet to record an outcome there (§5.2).
+///
+/// Only `pending`/`deferred` count: those intents are unrecovered, so their
+/// receipt still carries no outcome and the settle that produces one is what
+/// writes that row. A `quarantined` intent already wrote its terminal `failed`
+/// outcome at quarantine time (`Settlement::Quarantined`), and its re-drive —
+/// [`MemoryStore::settle_unsettled`]'s bounded pass and
+/// [`MemoryStore::begin_publication`]'s target pass both fetch
+/// `state <> 'applied'` — reads only `memory_journal` and the files, so the
+/// receipt row is not needed for that recovery. An `applied`
+/// intent is settled. Both the retention sweep and the dedup probe remove only
+/// rows this predicate denies, so the two paths cannot drift.
 async fn receipt_owes_settlement(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     receipt_id: &str,
 ) -> StoreResult<bool> {
     let unsettled: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM memory_journal WHERE receipt_id = ? AND state <> 'applied' LIMIT 1",
+        "SELECT 1 FROM memory_journal \
+         WHERE receipt_id = ? AND state NOT IN ('applied', 'quarantined') LIMIT 1",
     )
     .bind(receipt_id)
     .fetch_optional(&mut **tx)
@@ -3231,11 +3244,11 @@ async fn receipt_owes_settlement(
 /// `IDEMPOTENCY_CONFLICT` at any age. A true replay is only `RECEIPT_EXPIRED`
 /// (terminal, never re-executed) once its body is gone, and a namespace past the
 /// dedup window is cleared here so the key starts over (§6.10/MEM-R021) — except
-/// when an unsettled journal intent still owns the row ([`receipt_owes_settlement`]):
-/// that settle has yet to record the outcome, and the namespace cannot be freed
-/// without deleting the row it writes to, so the key answers `RECEIPT_EXPIRED`
-/// and the caller re-keys. The row is reclaimed by the first sweep after its
-/// intent settles.
+/// when the row's settle is still owed ([`receipt_owes_settlement`], a
+/// `pending`/`deferred` intent): that settle has yet to record an outcome, and
+/// the namespace cannot be freed without deleting the row it writes to, so the
+/// key answers `RECEIPT_EXPIRED` and the caller re-keys. The row is reclaimed by
+/// the first sweep after its intent settles.
 async fn probe(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     ctx: &OpContext<'_>,

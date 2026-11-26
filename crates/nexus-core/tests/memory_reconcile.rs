@@ -2829,3 +2829,77 @@ async fn a_same_key_request_does_not_erase_an_unsettled_outcome() {
         "an applied intent's expired receipt is reclaimed by the next sweep"
     );
 }
+
+/// I-000142 design resolution: a `quarantined` intent does not reserve its
+/// receipt's key forever. Quarantining already recorded the terminal `failed`
+/// outcome on the receipt, and the re-drive recovery owes it reads only
+/// `memory_journal` and the files — never that row — so the key is freed at the
+/// dedup window like any other recorded outcome, while the journal keeps the
+/// file-effect recovery authority.
+#[tokio::test]
+async fn a_quarantined_write_frees_its_key_at_the_window() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    // Stop after the hidden staged write: the intent quarantines and the receipt
+    // takes its terminal `failed` outcome in the same transaction.
+    provider.inject_file_fault(false);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-quarantined", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let quarantined_record = only_record_id(&env).await;
+    let receipt_id = receipt_id_of_key(&env, "k-quarantined").await;
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("failed"),
+        "quarantine records the terminal outcome on the receipt"
+    );
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
+    let target = root.join(format!("records/{quarantined_record}.md"));
+    assert!(
+        !target.exists(),
+        "the staged projection is not published yet"
+    );
+
+    // Past the dedup window the key starts over: the row is reclaimed and the
+    // retried request performs a fresh effect under a fresh receipt.
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    let retried = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-quarantined", TEXT))
+            .await,
+    );
+    let retried = receipt(&retried);
+    assert_ne!(
+        retried["receipt_id"].as_str(),
+        Some(receipt_id.as_str()),
+        "the retry minted a fresh receipt: {retried}"
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "a quarantined receipt's key is freed at the dedup window"
+    );
+    assert_eq!(
+        journal_states(&env).await,
+        vec!["quarantined", "applied"],
+        "the quarantine is not terminal: its journal row is still the recovery authority"
+    );
+
+    // The next open re-drives it from the journal alone, with no receipt row.
+    drop(provider);
+    let provider = open_provider(&env).await;
+    let published = std::fs::read_to_string(&target).expect("recovery published the owed file");
+    assert!(published.contains(TEXT), "{published}");
+    let states = journal_states(&env).await;
+    assert!(
+        !states.iter().any(|state| state == "quarantined"),
+        "recovery re-drove the quarantine to a settled state: {states:?}"
+    );
+    drop(provider);
+}
