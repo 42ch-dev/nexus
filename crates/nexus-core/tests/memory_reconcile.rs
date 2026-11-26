@@ -2904,16 +2904,36 @@ async fn a_quarantined_write_frees_its_key_at_the_window() {
     drop(provider);
 }
 
+/// One captured `tracing` event: its level, its `message` field, and its
+/// `receipt_id` field when the event carries one.
+#[derive(Clone, Debug)]
+struct CapturedEvent {
+    level: String,
+    message: String,
+    receipt_id: Option<String>,
+}
+
 /// Captures this thread's `tracing` events so a contract about *what is logged*
 /// is asserted instead of assumed. `set_default` is thread-local and the test's
 /// `#[tokio::test]` runtime polls on the test thread, so the provider's settle
 /// events land here.
+///
+/// A sibling test can drive the same process-wide callsite concurrently on its
+/// own thread, so assertions go through [`Self::for_receipt`]: every property is
+/// judged per receipt id, never on totals.
 #[derive(Clone, Default)]
-struct CapturedEvents(Arc<std::sync::Mutex<Vec<String>>>);
+struct CapturedEvents(Arc<std::sync::Mutex<Vec<CapturedEvent>>>);
 
 impl CapturedEvents {
-    fn lines(&self) -> Vec<String> {
-        self.0.lock().expect("captured events").clone()
+    /// Every captured event whose `receipt_id` field is exactly `receipt_id`.
+    fn for_receipt(&self, receipt_id: &str) -> Vec<CapturedEvent> {
+        self.0
+            .lock()
+            .expect("captured events")
+            .iter()
+            .filter(|event| event.receipt_id.as_deref() == Some(receipt_id))
+            .cloned()
+            .collect()
     }
 }
 
@@ -2942,9 +2962,11 @@ impl tracing::Subscriber for CapturedEvents {
 
         impl tracing::field::Visit for Fields {
             fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                let text = format!("{value:?}");
+                let text = text.trim_matches('"');
                 match field.name() {
-                    "message" => self.message = format!("{value:?}"),
-                    "receipt_id" => self.receipt_id = Some(format!("{value:?}")),
+                    "message" => self.message = text.to_string(),
+                    "receipt_id" => self.receipt_id = Some(text.to_string()),
                     _ => {}
                 }
             }
@@ -2955,19 +2977,21 @@ impl tracing::Subscriber for CapturedEvents {
             receipt_id: None,
         };
         event.record(&mut fields);
-        self.0.lock().expect("captured events").push(format!(
-            "{} {} receipt={}",
-            event.metadata().level(),
-            fields.message,
-            fields.receipt_id.as_deref().unwrap_or("-")
-        ));
+        self.0.lock().expect("captured events").push(CapturedEvent {
+            level: event.metadata().level().to_string(),
+            message: fields.message,
+            receipt_id: fields.receipt_id,
+        });
     }
 }
 
 /// I-000142: a settle whose receipt retention already reclaimed is a *committed*
 /// settle, and it must not be reported as a skipped one. The journal row turns
-/// `applied`, the owed file is published, the receipt row stays gone, and the
-/// only line naming that receipt is the benign reclamation note at DEBUG.
+/// `applied`, the owed file is published, and the receipt row stays gone.
+///
+/// The log contract is asserted per receipt id, never on totals: at least one
+/// DEBUG `receipt reclaimed by retention` event names this receipt, and no event
+/// naming it says `settle skipped`.
 #[tokio::test]
 async fn a_settle_whose_receipt_was_reclaimed_is_not_reported_as_skipped() {
     let env = seed_env();
@@ -3028,22 +3052,17 @@ async fn a_settle_whose_receipt_was_reclaimed_is_not_reported_as_skipped() {
         .expect("the re-drive published the owed projection");
     assert!(published.contains(UPDATED), "{published}");
 
-    let lines = captured.lines();
-    let for_receipt: Vec<&String> = lines
-        .iter()
-        .filter(|line| line.contains(&receipt_id))
-        .collect();
+    let for_receipt = captured.for_receipt(&receipt_id);
     assert!(
-        for_receipt.iter().any(
-            |line| line.starts_with("DEBUG") && line.contains("receipt reclaimed by retention")
-        ),
-        "the reclamation is reported as the benign DEBUG outcome: {lines:?}"
+        for_receipt.iter().any(|event| event.level == "DEBUG"
+            && event.message.contains("receipt reclaimed by retention")),
+        "the reclamation is reported as the benign DEBUG outcome for this receipt: {for_receipt:?}"
     );
     assert!(
         !for_receipt
             .iter()
-            .any(|line| line.contains("settle skipped")),
-        "a reclaimed receipt is never reported as a skipped settle: {lines:?}"
+            .any(|event| event.message.contains("settle skipped")),
+        "a reclaimed receipt is never reported as a skipped settle: {for_receipt:?}"
     );
     drop(provider);
 }

@@ -2090,10 +2090,15 @@ impl MemoryStore {
     /// is never applied without its content gone, and re-driving a still
     /// unsettled entry re-publishes idempotently before settling it again.
     ///
-    /// `None` is the expected retention outcome, not a failure: the committed
-    /// journal transition is what settles the intent, and a receipt retention
-    /// already dropped has nothing left to record on. Callers log that case as
-    /// the benign reclamation it is.
+    /// `None` means the settlement committed but retention had already dropped
+    /// the receipt row, so there is nothing left to record on: the journal
+    /// transition is what settles the intent. [`Self::settle_intent`] reports
+    /// that as the benign reclamation it is (DEBUG, never the `settle skipped`
+    /// warning). The two callers that need the row still map `None` to
+    /// `CommitUnknown` — [`Self::commit_journalled`] and
+    /// [`Self::settle_replayed`] hold or have just read the receipt, so for them
+    /// a missing row after their own commit is contradictory and must stay on
+    /// the uncertain channel.
     async fn settle_journal(
         &self,
         receipt_id: &str,
