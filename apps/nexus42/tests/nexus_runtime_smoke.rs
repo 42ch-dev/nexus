@@ -191,20 +191,22 @@ fn probe_binary() -> PathBuf {
 
 /// Infer `<target>/<profile>` from the running test binary's path.
 ///
-/// Supported profiles are exactly `debug` and `release`. `bench` is out of
-/// scope: cargo's default `[profile.bench]` inherits `release` and builds into
+/// The inference names a profile by its own output directory, which covers
+/// the two built-in profiles (`debug` from `target/debug/`, `release` from
+/// `target/release/`) and every custom profile, since a custom profile owns
+/// its directory too — `--profile ci` builds into `target/ci/`, mirrored by
+/// `profile_build_args`'s `--profile <name>`. The one exception is `bench`:
+/// cargo's default `[profile.bench]` inherits `release` and builds into
 /// `target/release/`, so a bench-built test binary and a release-built one
 /// occupy the same path and this inference reports `release` for both. The
 /// smoke would then build and spawn the release artifact (`profile_artifact`)
 /// while its own test binary was compiled with the bench profile's settings —
-/// a run that proves a binary this invocation did not produce. Supporting
-/// bench would need a signal cargo does not carry here: the path names only
-/// the output directory, and build scripts see `PROFILE=debug|release` at
-/// best — never the directory the test binary itself was built from. A bench
-/// lane would have to pass the profile in explicitly.
-///
-/// Custom profiles remain supported because they own their directory, e.g.
-/// `target/ci/`, as `profile_build_args` mirrors with `--profile <name>`.
+/// a run that proves a binary this invocation did not produce. `bench` is
+/// therefore out of scope; supporting it needs a signal cargo does not carry
+/// here: the path names only the output directory, and build scripts see
+/// `PROFILE=debug|release` at best — never the directory the test binary
+/// itself was built from. A bench lane would have to pass the profile in
+/// explicitly.
 ///
 /// A compile-time `debug_assertions` switch is NOT enough: a custom profile
 /// (e.g. `--profile ci`) that inherits `dev` keeps debug assertions on while
