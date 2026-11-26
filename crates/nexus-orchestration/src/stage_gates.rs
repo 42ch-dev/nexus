@@ -398,7 +398,12 @@ mod tests {
     #[test]
     fn reject_backwards() {
         // Backwards covers any earlier stage, not just the immediately previous one.
-        for (from, to) in [("research", "intake"), ("produce", "research")] {
+        for (from, to) in [
+            ("research", "intake"),
+            ("produce", "research"),
+            ("produce", "intake"),
+            ("persist", "research"),
+        ] {
             let work = work_state(from, "complete", "complete");
             let err = check_stage_advance(&work, to, false).unwrap_err();
             assert_eq!(err.code, "FL_E_BACKWARDS_ADVANCE", "{from} -> {to}");
