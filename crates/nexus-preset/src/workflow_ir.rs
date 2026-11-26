@@ -311,15 +311,7 @@ fn document_from_manifest(
     }
     if let Some(graphs) = &manifest.inner_graphs {
         for (graph_name, graph) in graphs {
-            // The graph's binding belongs to the step whose id prefixes it as `<step>.<field>`;
-            // reading the owner back from the binding's last segment drops a dotted field path.
-            let owner = graph.output_binding.as_deref().and_then(|binding| {
-                graph.nodes.iter().map(|step| step.id.as_str()).find(|id| {
-                    binding
-                        .strip_prefix(id)
-                        .is_some_and(|rest| rest.starts_with('.'))
-                })
-            });
+            let owner = graph.output_binding.as_deref().map(output_binding_owner);
             for step in &graph.nodes {
                 nodes.push(inner_step_node(
                     graph_name,
@@ -430,6 +422,15 @@ fn state_node(state: &StateDefinition) -> WorkflowNode {
         child_workflow_id: None,
         collapsed_view: None,
     }
+}
+
+/// The node a preset `output_binding` names: the segment before the first dot.
+///
+/// This is the loader's rule (`loader.rs` validates the same segment) and the adapter's only owner
+/// rule: the binding names its owner directly, so no step-list scan or tail-segment reading may
+/// re-derive it. A dotless binding names that node itself.
+pub(crate) fn output_binding_owner(binding: &str) -> &str {
+    binding.split('.').next().unwrap_or(binding)
 }
 
 fn inner_step_node(
@@ -957,6 +958,8 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                 })?;
                 let graph_key = graph.to_string();
                 if let Some(binding) = &node.output_binding {
+                    // A graph exports exactly one binding: `output_binding_owner` binds it to a
+                    // single step, so a second claim — same owner or another — has no projection.
                     if let Some(claimant) = bindings.get(&graph_key) {
                         return Err(refuse(format!(
                             "inner graph `{graph_key}` carries two output bindings (`{claimant}` and `{binding}`); a graph exports exactly one"
@@ -1783,7 +1786,7 @@ states:
     }
 
     #[test]
-    fn import_binds_output_to_the_step_whose_id_prefixes_it() {
+    fn import_binds_output_to_the_owner_segment() {
         let manifest: PresetManifest = serde_yaml::from_str(&MANIFEST.replace(
             "output_binding: review.text",
             "output_binding: review.output.text",
@@ -1800,9 +1803,46 @@ states:
         assert_eq!(
             binding("work_graph/review"),
             Some("review.output.text".to_string()),
-            "a dotted field path still names its owner step"
+            "the segment before the first dot names the owner"
         );
         assert_eq!(binding("work_graph/draft"), None);
+    }
+
+    #[test]
+    fn import_and_export_keep_a_dotless_output_binding() {
+        let manifest: PresetManifest = serde_yaml::from_str(
+            &MANIFEST.replace("output_binding: review.text", "output_binding: review"),
+        )
+        .expect("manifest parses");
+        let document = import_preset_manifest(&manifest).expect("import");
+        let binding = |node_id: &str| {
+            document
+                .nodes
+                .iter()
+                .find(|node| node.id == node_id)
+                .and_then(|node| node.output_binding.clone())
+        };
+        assert_eq!(
+            binding("work_graph/review"),
+            Some("review".to_string()),
+            "a dotless binding names its own node"
+        );
+        assert_eq!(binding("work_graph/draft"), None);
+
+        let exported = export_preset(&document).expect("export");
+        assert_eq!(
+            exported
+                .inner_graphs
+                .as_ref()
+                .and_then(|graphs| graphs.get("work_graph"))
+                .and_then(|graph| graph.output_binding.as_deref()),
+            Some("review")
+        );
+        assert_eq!(
+            serde_json::to_value(&exported).expect("exported json"),
+            serde_json::to_value(&manifest).expect("manifest json"),
+            "a dotless binding survives import and export unchanged"
+        );
     }
 
     #[test]

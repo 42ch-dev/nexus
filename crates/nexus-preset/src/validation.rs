@@ -29,7 +29,7 @@ use nexus_workflow_ir::{
     WorkflowDocument, WorkflowEdge, WorkflowEdgeKind, WorkflowEnterActionKind, WorkflowMergeKind,
     WorkflowMetaKind, WorkflowMetaRunIntentsItem, WorkflowNode, WorkflowNodeKind,
 };
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
@@ -152,6 +152,7 @@ pub fn validate_workflow_ir(
     check_initial_to_terminal_reachability(document, &mut result);
     check_terminal_marker_consistency(document, &mut result);
     check_inner_graph_references(document, &mut result);
+    check_inner_output_bindings(document, &mut result);
     check_labeled_edge_duplicates(document, &mut result);
     check_merge_node_integrity(document, &mut result);
 
@@ -498,6 +499,46 @@ fn check_inner_graph_references(document: &WorkflowDocument, result: &mut Valida
                 category: DiagnosticCategory::OrphanInnerGraph,
             });
         }
+    }
+}
+
+/// Check that each inner graph carries at most one `output_binding`.
+///
+/// A graph projects exactly one binding and the segment before the first dot names its owner step
+/// ([`crate::workflow_ir::output_binding_owner`], the loader's rule). Two claims in one graph —
+/// the same owner or another — would silently overwrite each other on export, so both are errors.
+fn check_inner_output_bindings(document: &WorkflowDocument, result: &mut ValidationResult) {
+    let mut claims: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+    for node in &document.nodes {
+        if node.kind != WorkflowNodeKind::InnerStep {
+            continue;
+        }
+        let (Some(binding), Some((graph, _))) =
+            (node.output_binding.as_deref(), node.id.split_once('/'))
+        else {
+            continue;
+        };
+        claims
+            .entry(graph)
+            .or_default()
+            .push((node.id.as_str(), binding));
+    }
+
+    for (graph, claims) in claims.iter().filter(|(_, claims)| claims.len() > 1) {
+        let owners = claims
+            .iter()
+            .map(|(_, binding)| format!("'{}'", crate::workflow_ir::output_binding_owner(binding)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        result.diagnostics.push(ValidationDiagnostic {
+            path: format!("inner_graphs.{graph}.output_binding"),
+            message: format!(
+                "inner graph '{graph}' carries {} output bindings (owners {owners}); a graph carries exactly one",
+                claims.len()
+            ),
+            severity: DiagnosticSeverity::Error,
+            category: DiagnosticCategory::Structural,
+        });
     }
 }
 
@@ -1624,6 +1665,76 @@ states:
             "expected missing inner graph error: {:?}",
             result.diagnostics
         );
+    }
+
+    /// Two inner steps claiming one graph's `output_binding` have no export plane: a document
+    /// validated without exporting reports the collision as a structural error.
+    #[test]
+    fn two_output_bindings_for_one_inner_graph_are_error() {
+        let yaml = r"
+preset:
+  id: stacked-bindings
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: shared_graph
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  shared_graph:
+    nodes:
+      - id: first
+        kind: acp_prompt
+      - id: second
+        kind: acp_prompt
+    output_binding: second.text
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = BuiltinCapabilityCatalog;
+        let clean = validate_preset_semantic(&manifest, &caps);
+        assert!(
+            clean.diagnostics.is_empty(),
+            "one binding is valid: {:?}",
+            clean.diagnostics
+        );
+
+        for claims in [
+            ["first.text", "second.text"],
+            ["second.text", "second.text"],
+        ] {
+            let mut document =
+                crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+            for (node, binding) in document
+                .nodes
+                .iter_mut()
+                .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
+                .zip(claims)
+            {
+                node.output_binding = Some(binding.to_string());
+            }
+
+            let result = validate_workflow_ir(&document, &caps);
+            assert!(
+                result.diagnostics.iter().any(|d| {
+                    d.category == DiagnosticCategory::Structural
+                        && d.severity == DiagnosticSeverity::Error
+                        && d.path == "inner_graphs.shared_graph.output_binding"
+                        && d.message.contains("2 output bindings")
+                }),
+                "{claims:?}: expected duplicate binding error: {:?}",
+                result.diagnostics
+            );
+        }
     }
 
     #[test]
