@@ -156,6 +156,21 @@ fn reconcile_json(fixture: &DirectFixture, work_id: &str) -> serde_json::Value {
     })
 }
 
+/// Run the human (non-`--json`) dry-run preview and return its captured output.
+fn reconcile_human(fixture: &DirectFixture, work_id: &str) -> Output {
+    fixture
+        .command()
+        .args([
+            "creator",
+            "works",
+            "reconcile-chapters",
+            work_id,
+            "--dry-run",
+        ])
+        .output()
+        .expect("spawn nexus42")
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reconcile_json_carries_skipped_and_omits_it_when_empty() {
     let fixture = DirectFixture::new().await;
@@ -215,5 +230,96 @@ async fn reconcile_json_carries_skipped_and_omits_it_when_empty() {
         clean,
         json!({"created": 0, "updated": 0, "resynced": 0, "preserved": 1}),
         "the four counters and the key set must stay byte-compatible: {clean}"
+    );
+
+    let human = reconcile_human(&fixture, &broken_id);
+    assert!(
+        human.status.success(),
+        "the human reconcile must succeed: {}",
+        describe(&human)
+    );
+    let human_stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        human_stdout.contains("Skipped:   Works/reconcile-skip-novel/Stories/ch01-broken.md — "),
+        "the human report must name the skipped chapter: {human_stdout}"
+    );
+    assert!(
+        human_stdout
+            .lines()
+            .any(|line| line.contains("Skipped:") && line.contains("cannot be rendered")),
+        "the human skip line must carry the reason: {human_stdout}"
+    );
+    let clean_human = reconcile_human(&fixture, &clean_id);
+    assert!(
+        !String::from_utf8_lossy(&clean_human.stdout).contains("Skipped:"),
+        "a run with nothing skipped must not print a skip line: {}",
+        describe(&clean_human)
+    );
+}
+
+/// A chapter file name can carry control characters on Unix. The human line
+/// must escape them (one line, no forged output), while `--json` keeps the
+/// exact name as the wire value.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reconcile_human_output_escapes_a_multiline_skip_path() {
+    const INJECTED_REF: &str = "reconcile-skip-injected-novel";
+    const INJECTED_NAME: &str = "ch01-broken\nforged: line.md";
+
+    let fixture = DirectFixture::new().await;
+    let creator_id = fixture_creator_id(fixture.home.path());
+    let creative_root = fixture.home.path().join("creative");
+    register_creative_root(
+        &operational_workspace_dir(fixture.home.path(), &creator_id, WORKSPACE_SLUG),
+        &creator_id,
+        &creative_root,
+    );
+    let work_id = seed_novel_work(
+        &fixture,
+        &creator_id,
+        &creative_root,
+        INJECTED_REF,
+        BROKEN_CHAPTER,
+        INJECTED_NAME,
+    )
+    .await;
+
+    let human = reconcile_human(&fixture, &work_id);
+    assert!(
+        human.status.success(),
+        "the human reconcile must succeed: {}",
+        describe(&human)
+    );
+    let human_stdout = String::from_utf8_lossy(&human.stdout);
+    let skip_lines: Vec<&str> = human_stdout
+        .lines()
+        .filter(|line| line.contains("Skipped:"))
+        .collect();
+    assert_eq!(
+        skip_lines.len(),
+        1,
+        "the escaped path must stay on one line: {human_stdout}"
+    );
+    assert!(
+        skip_lines[0].contains("ch01-broken\\nforged: line.md"),
+        "the human line must escape the newline: {skip_lines:?}"
+    );
+    assert!(
+        !human_stdout.lines().any(|line| line.starts_with("forged:")),
+        "a raw newline must not forge a second output line: {human_stdout}"
+    );
+
+    let json = reconcile_json(&fixture, &work_id);
+    let wire_path = json
+        .get("skipped")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|skipped| skipped.first())
+        .and_then(|skip| skip.get("path"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| panic!("the unrenderable chapter must reach the wire: {json}"));
+    assert_eq!(
+        wire_path,
+        format!("Works/{INJECTED_REF}/Stories/{INJECTED_NAME}"),
+        "the wire value must keep the exact file name: {json}"
     );
 }

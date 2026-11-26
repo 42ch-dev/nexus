@@ -1173,7 +1173,13 @@ fn print_reconcile_report(resolved_id: &str, report: &WorkReconcileReport, is_dr
     println!("  Resynced:  {resynced}");
     println!("  Preserved: {preserved}");
     for skip in skipped {
-        println!("  Skipped:   {} — {}", skip.path, skip.reason);
+        // The JSON value keeps the raw name; display escapes its control
+        // characters so a crafted file name cannot forge extra output lines.
+        println!(
+            "  Skipped:   {} — {}",
+            skip.path.escape_debug(),
+            skip.reason
+        );
     }
 }
 
