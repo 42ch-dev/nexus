@@ -1220,6 +1220,12 @@ async fn c_071_terminal_receipt_and_pinned_basis_listing_local() {
 /// grant row — only the clock moves past `expires_at` — and the second page
 /// must answer `CURSOR_INVALID` rather than slicing an offset over a set the
 /// caller may no longer see and silently skip rows it never received.
+///
+/// Two clocks are in play: `reflect_admission` samples the wall clock, the
+/// store's visibility check samples its proof-seam clock. The TTL is an hour
+/// of real time and the seam advances two, so the first page cannot be
+/// invalidated by elapsed test runtime while the second page reads the grant
+/// as expired — the case is deterministic on any CI speed.
 #[tokio::test]
 async fn c_071b_expired_grant_invalidates_the_list_cursor_local() {
     let home = tempfile::TempDir::new().expect("temporary provider home");
@@ -1237,7 +1243,7 @@ async fn c_071b_expired_grant_invalidates_the_list_cursor_local() {
                     "subject_id": T3_SUBJECT,
                     "principal_id": T3_GRANTEE,
                     "capabilities": ["reflect"],
-                    "expires_at": (chrono::Utc::now() + chrono::Duration::seconds(60))
+                    "expires_at": (chrono::Utc::now() + chrono::Duration::hours(1))
                         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
                     "idempotency_key": "t3c071b-reflect-expiring",
                 })),
@@ -1270,7 +1276,9 @@ async fn c_071b_expired_grant_invalidates_the_list_cursor_local() {
         .expect("a partial page names its continuation")
         .to_owned();
 
-    provider.advance_clock(120);
+    // Past the grant's hour-long deadline in store time, with almost no real
+    // time elapsed: the first page cannot drift out from under the run.
+    provider.advance_clock(2 * 60 * 60);
 
     expect_refusal(
         provider
