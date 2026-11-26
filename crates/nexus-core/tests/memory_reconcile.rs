@@ -2627,3 +2627,442 @@ async fn journal_retention_prunes_only_applied_shells() {
     );
     pool.close().await;
 }
+
+/// §7.1 `limits.dedup_retention_seconds` as the provider advertises it.
+async fn dedup_retention(provider: &LocalMemoryProvider) -> i64 {
+    let described = wire(&provider.describe(&admin(), dto(json!({}))).await);
+    i64::try_from(
+        described["limits"]["dedup_retention_seconds"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("missing limits.dedup_retention_seconds: {described}")),
+    )
+    .unwrap()
+}
+
+/// How many rows the namespace still holds for one receipt id.
+async fn receipt_rows(env: &Env, receipt_id: &str) -> i64 {
+    let pool = store_pool(env).await;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM memory_receipts WHERE receipt_id = ?")
+            .bind(receipt_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    count
+}
+
+/// The stored status of one receipt row, or `None` once retention dropped it.
+async fn receipt_status(env: &Env, receipt_id: &str) -> Option<String> {
+    let pool = store_pool(env).await;
+    let status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM memory_receipts WHERE receipt_id = ?")
+            .bind(receipt_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    status
+}
+
+/// I-000142: the retention sweep runs before the publication section, so it can
+/// reach a receipt whose journal intent is still unsettled — the predecessor a
+/// later operation is about to settle. Retention leaves that row alone: the
+/// settle it is owed records its terminal outcome there. Once the intent is
+/// `applied`, the next sweep reclaims it as usual.
+#[tokio::test]
+async fn a_receipt_whose_intent_is_still_unsettled_outlives_the_dedup_window() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+
+    // A commit whose response was lost: row and journal committed, the intent
+    // neither published nor settled — the receipt stays `pending`.
+    provider.inject_commit_fault(true);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-unsettled-intent", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let record_id = only_record_id(&env).await;
+    assert_eq!(journal_states(&env).await, vec!["pending"]);
+    let receipt_id = receipt_id_of_key(&env, "k-unsettled-intent").await;
+
+    // Age the namespace past the dedup window, then sweep from an operation that
+    // does not touch this record: the expired-tombstone rule alone would drop it.
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_sweeper" })),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        1,
+        "the sweep keeps the receipt its unsettled intent still owes"
+    );
+    assert_eq!(journal_states(&env).await, vec!["pending"]);
+
+    // An operation on that very target settles the predecessor before its own
+    // effect: the receipt the sweep just spared now carries the outcome.
+    let deleted = wire(
+        &provider
+            .delete_record(
+                &admin(),
+                delete_request("k-delete-unsettled", &record_id, 1),
+            )
+            .await,
+    );
+    receipt(&deleted);
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("committed"),
+        "the settle recorded its outcome on the receipt it kept"
+    );
+
+    // Only now — intent applied — is the row reclaimable.
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_sweeper_two" })),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "an applied intent's expired receipt is reclaimed by the next sweep"
+    );
+}
+
+/// How many record rows the space holds.
+async fn record_rows(env: &Env) -> i64 {
+    let pool = store_pool(env).await;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_records")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    count
+}
+
+/// I-000142 follow-up: the dedup probe and the retention sweep agree on a receipt
+/// whose settle is still owed. The namespace cannot be freed without deleting the
+/// row that settle records its outcome on, so the key is not reused: a same-key
+/// request answers `RECEIPT_EXPIRED` (terminal — use a new key) and the row stays
+/// until the settle lands, after which the next sweep reclaims it.
+#[tokio::test]
+async fn a_same_key_request_does_not_erase_an_unsettled_outcome() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+
+    // A commit whose response was lost: row and journal committed, the intent
+    // neither published nor settled — the receipt stays `pending`.
+    provider.inject_commit_fault(true);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-owed", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let record_id = only_record_id(&env).await;
+    let receipt_id = receipt_id_of_key(&env, "k-owed").await;
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("pending")
+    );
+    assert_eq!(journal_states(&env).await, vec!["pending"]);
+
+    // Age the namespace past the dedup window, then retry the same key.
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    let retried = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-owed", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&retried), "RECEIPT_EXPIRED");
+    assert_eq!(retry_class(&retried), "terminal");
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        1,
+        "the key is not freed while its settle is owed"
+    );
+    assert_eq!(
+        record_rows(&env).await,
+        1,
+        "no fresh effect ran under that key"
+    );
+
+    // Settling the predecessor records its outcome on that very row.
+    let deleted = wire(
+        &provider
+            .delete_record(&admin(), delete_request("k-owed-delete", &record_id, 1))
+            .await,
+    );
+    receipt(&deleted);
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("committed"),
+        "the settle recorded its outcome on the row it kept"
+    );
+    assert_eq!(journal_states(&env).await, vec!["applied", "applied"]);
+
+    // Only now — intent applied — is the row reclaimable.
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_owed_sweeper" })),
+            )
+            .await,
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "an applied intent's expired receipt is reclaimed by the next sweep"
+    );
+}
+
+/// I-000142 design resolution: a `quarantined` intent does not reserve its
+/// receipt's key forever. Quarantining already recorded the terminal `failed`
+/// outcome on the receipt, and the re-drive recovery owes it reads only
+/// `memory_journal` and the files — never that row — so the key is freed at the
+/// dedup window like any other recorded outcome, while the journal keeps the
+/// file-effect recovery authority.
+#[tokio::test]
+async fn a_quarantined_write_frees_its_key_at_the_window() {
+    let env = seed_env();
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    // Stop after the hidden staged write: the intent quarantines and the receipt
+    // takes its terminal `failed` outcome in the same transaction.
+    provider.inject_file_fault(false);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-quarantined", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let quarantined_record = only_record_id(&env).await;
+    let receipt_id = receipt_id_of_key(&env, "k-quarantined").await;
+    assert_eq!(
+        receipt_status(&env, &receipt_id).await.as_deref(),
+        Some("failed"),
+        "quarantine records the terminal outcome on the receipt"
+    );
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
+    let target = root.join(format!("records/{quarantined_record}.md"));
+    assert!(
+        !target.exists(),
+        "the staged projection is not published yet"
+    );
+
+    // Past the dedup window the key starts over: the row is reclaimed and the
+    // retried request performs a fresh effect under a fresh receipt.
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    let retried = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-quarantined", TEXT))
+            .await,
+    );
+    let retried = receipt(&retried);
+    assert_ne!(
+        retried["receipt_id"].as_str(),
+        Some(receipt_id.as_str()),
+        "the retry minted a fresh receipt: {retried}"
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "a quarantined receipt's key is freed at the dedup window"
+    );
+    assert_eq!(
+        journal_states(&env).await,
+        vec!["quarantined", "applied"],
+        "the quarantine is not terminal: its journal row is still the recovery authority"
+    );
+
+    // The next open re-drives it from the journal alone, with no receipt row.
+    drop(provider);
+    let provider = open_provider(&env).await;
+    let published = std::fs::read_to_string(&target).expect("recovery published the owed file");
+    assert!(published.contains(TEXT), "{published}");
+    let states = journal_states(&env).await;
+    assert!(
+        !states.iter().any(|state| state == "quarantined"),
+        "recovery re-drove the quarantine to a settled state: {states:?}"
+    );
+    drop(provider);
+}
+
+/// One captured `tracing` event: its level, its `message` field, and its
+/// `receipt_id` field when the event carries one.
+#[derive(Clone, Debug)]
+struct CapturedEvent {
+    level: String,
+    message: String,
+    receipt_id: Option<String>,
+}
+
+/// Captures this thread's `tracing` events so a contract about *what is logged*
+/// is asserted instead of assumed. `set_default` is thread-local and the test's
+/// `#[tokio::test]` runtime polls on the test thread, so the provider's settle
+/// events land here.
+///
+/// A sibling test can drive the same process-wide callsite concurrently on its
+/// own thread, so assertions go through [`Self::for_receipt`]: every property is
+/// judged per receipt id, never on totals.
+#[derive(Clone, Default)]
+struct CapturedEvents(Arc<std::sync::Mutex<Vec<CapturedEvent>>>);
+
+impl CapturedEvents {
+    /// Every captured event whose `receipt_id` field is exactly `receipt_id`.
+    fn for_receipt(&self, receipt_id: &str) -> Vec<CapturedEvent> {
+        self.0
+            .lock()
+            .expect("captured events")
+            .iter()
+            .filter(|event| event.receipt_id.as_deref() == Some(receipt_id))
+            .cloned()
+            .collect()
+    }
+}
+
+impl tracing::Subscriber for CapturedEvents {
+    fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        struct Fields {
+            message: String,
+            receipt_id: Option<String>,
+        }
+
+        impl tracing::field::Visit for Fields {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                let text = format!("{value:?}");
+                let text = text.trim_matches('"');
+                match field.name() {
+                    "message" => self.message = text.to_string(),
+                    "receipt_id" => self.receipt_id = Some(text.to_string()),
+                    _ => {}
+                }
+            }
+        }
+
+        let mut fields = Fields {
+            message: String::new(),
+            receipt_id: None,
+        };
+        event.record(&mut fields);
+        self.0.lock().expect("captured events").push(CapturedEvent {
+            level: event.metadata().level().to_string(),
+            message: fields.message,
+            receipt_id: fields.receipt_id,
+        });
+    }
+}
+
+/// I-000142: a settle whose receipt retention already reclaimed is a *committed*
+/// settle, and it must not be reported as a skipped one. The journal row turns
+/// `applied`, the owed file is published, and the receipt row stays gone.
+///
+/// The log contract is asserted per receipt id, never on totals: at least one
+/// DEBUG `receipt reclaimed by retention` event names this receipt, and no event
+/// naming it says `settle skipped`.
+#[tokio::test]
+async fn a_settle_whose_receipt_was_reclaimed_is_not_reported_as_skipped() {
+    let env = seed_env();
+    let events = CapturedEvents::default();
+    let captured = events.clone();
+    let _guard = tracing::subscriber::set_default(events);
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    // Quarantine an intent, then let the dedup window reclaim its receipt: the
+    // re-drive that follows has no row to record on.
+    provider.inject_file_fault(false);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-reclaimed", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let record_id = only_record_id(&env).await;
+    let receipt_id = receipt_id_of_key(&env, "k-reclaimed").await;
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    // A sweeping write on another subject drops the quarantined receipt's row
+    // while leaving the journal row the recovery owes.
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_reclaimed_sweeper" })),
+            )
+            .await,
+    );
+    assert_eq!(receipt_rows(&env, &receipt_id).await, 0);
+
+    // A write on that very target re-drives the quarantine — with no receipt row
+    // left to record on.
+    let updated = wire(
+        &provider
+            .update_record(
+                &admin(),
+                update_request("k-reclaimed-update", &record_id, 1, UPDATED),
+            )
+            .await,
+    );
+    receipt(&updated);
+    assert_eq!(
+        journal_states(&env).await,
+        vec!["applied", "applied"],
+        "the re-drive committed the journal transition"
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "retention reclaimed the receipt; the settle does not resurrect it"
+    );
+    let published = std::fs::read_to_string(root.join(format!("records/{record_id}.md")))
+        .expect("the re-drive published the owed projection");
+    assert!(published.contains(UPDATED), "{published}");
+
+    let for_receipt = captured.for_receipt(&receipt_id);
+    assert!(
+        for_receipt.iter().any(|event| event.level == "DEBUG"
+            && event.message.contains("receipt reclaimed by retention")),
+        "the reclamation is reported as the benign DEBUG outcome for this receipt: {for_receipt:?}"
+    );
+    assert!(
+        !for_receipt
+            .iter()
+            .any(|event| event.message.contains("settle skipped")),
+        "a reclaimed receipt is never reported as a skipped settle: {for_receipt:?}"
+    );
+    drop(provider);
+}

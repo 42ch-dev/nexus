@@ -1288,3 +1288,68 @@ async fn restart_resumes_the_durable_retention_floor() {
          created_at {created_at} < floor {committed_at}"
     );
 }
+
+/// I-000142: the §6.10 sweep is planted **outside** the publication section.
+/// A parked publication is the witness — while the write holds the workspace
+/// gate and flock and has not opened its own transaction yet, the receipt the
+/// sweep reclaims is already gone. A sweep taken inside the section would still
+/// hold it at that instant.
+#[tokio::test]
+async fn retention_sweep_commits_before_the_publication_section() {
+    let env = seed_env();
+    let provider = Arc::new(open_provider(&env).await);
+    let admin = principal(CREATOR);
+    let (_, dedup_retention) = retention_limits(&provider, &admin).await;
+    wire(
+        &provider
+            .ensure_subject(&admin, ensure_request(SUBJECT))
+            .await,
+    );
+    let committed = wire(
+        &provider
+            .capture(&admin, capture_request("k-sweep-order", TEXT))
+            .await,
+    );
+    let receipt_id = receipt(&committed)["receipt_id"]
+        .as_str()
+        .expect("receipt id")
+        .to_owned();
+
+    provider.advance_clock(dedup_retention + 1);
+
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Barrier::new(2));
+    provider.park_next_publish(Arc::clone(&entered), Arc::clone(&release));
+    let writer = Arc::clone(&provider);
+    let pending = tokio::spawn(async move {
+        writer
+            .create_record(
+                &principal(CREATOR),
+                dto(json!({
+                    "space_id": SPACE,
+                    "subject_id": SUBJECT,
+                    "kind": "note",
+                    "content": { "text": TEXT },
+                    "scope": { "visibility": "shared" },
+                    "idempotency_key": "k-sweep-order-create",
+                })),
+            )
+            .await
+    });
+
+    entered.notified().await;
+    let pool = nexus_local_db::open_pool_read_only(&env.db_path)
+        .await
+        .unwrap();
+    assert_eq!(
+        receipt_rows(&pool, &receipt_id).await,
+        0,
+        "the sweep committed before the parked write took the publication section"
+    );
+    release.wait().await;
+    let created = wire(&pending.await.unwrap());
+    assert_eq!(
+        created["status"], "committed",
+        "the parked write completed once released: {created}"
+    );
+}

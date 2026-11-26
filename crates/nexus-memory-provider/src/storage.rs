@@ -36,10 +36,19 @@
 //!   (terminal, `details.last_known_status`) instead of silently re-executing.
 //!   Past `dedup_retention_seconds` the tombstone row itself is dropped and the
 //!   namespace is free again, on read and replay alike — a tombstone is not an
-//!   eternal answer. Every mutating entry point and every provider open first
+//!   eternal answer. One exception, and only one: a receipt whose journal intent
+//!   is still `pending`/`deferred` is kept until that intent settles, because its
+//!   settle has yet to record an outcome there; while it is owed, that key is not
+//!   reused either — [`probe`] answers `RECEIPT_EXPIRED` instead of freeing a
+//!   namespace it cannot delete the row for. A `quarantined` intent is not an
+//!   exception: quarantining already wrote the terminal `failed` outcome onto the
+//!   receipt, and its file-effect recovery needs only the journal row, so that
+//!   key is freed at the window like any other recorded outcome. Every mutating
+//!   entry point and every provider open first
 //!   reclaims expired rows in a transaction of its own
 //!   ([`MemoryStore::reclaim_expired`]) — all namespaces, keyless
-//!   receipts included — so eviction is committed whatever the operation then
+//!   receipts included, and before the publication section a file-effect op
+//!   would take — so eviction is committed whatever the operation then
 //!   does: a replay refusal, an authorization failure or any other early return
 //!   drops only the effect transaction. A sweep failure is logged and never
 //!   fails or rolls back the operation it precedes. `memory.receipts.get` stays
@@ -562,7 +571,8 @@ fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
 /// occupy a blocking worker: only the gate holder ever waits for the flock, which
 /// makes one blocked waiter per workspace the permanent ceiling — the holder's
 /// own file work cannot starve behind a crowd of its same-process peers. No path
-/// takes a write transaction before this section, so the pair cannot deadlock.
+/// holds a write transaction when it takes this section — the retention sweep's
+/// own transaction commits before it — so the pair cannot deadlock.
 /// The ceiling survives cancellation: the waiting task owns the gate guard
 /// ([`journal::PublishFlock::acquire`] takes it by value and returns it with the
 /// lease), so a cancelled publication drops only its future and cannot release
@@ -738,6 +748,23 @@ impl MemoryStore {
         self.pool.close().await;
     }
 
+    /// What every mutating entry point does before its write transaction: the
+    /// read-only refusal, the admission counter/gate, and the retention sweep.
+    ///
+    /// Split out so a caller that takes the publication section can run this
+    /// *before* that section: the sweep's own `BEGIN IMMEDIATE` parks up to the
+    /// `busy_timeout` and must not hold other writers' file effects behind this
+    /// operation's gate and flock.
+    async fn admit_write(&self) -> StoreResult<()> {
+        self.require_writable()?;
+        #[cfg(feature = "test-hooks")]
+        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
+        #[cfg(feature = "test-hooks")]
+        self.admission_gate().await;
+        self.reclaim_expired().await;
+        Ok(())
+    }
+
     /// Open an effect transaction and read the authorization clock **after** the
     /// write lock is held.
     ///
@@ -752,12 +779,15 @@ impl MemoryStore {
     async fn begin_admission(
         &self,
     ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
-        self.require_writable()?;
-        #[cfg(feature = "test-hooks")]
-        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
-        #[cfg(feature = "test-hooks")]
-        self.admission_gate().await;
-        self.reclaim_expired().await;
+        self.admit_write().await?;
+        self.begin_admission_tx().await
+    }
+
+    /// [`Self::begin_admission`]'s write transaction, for a caller that already
+    /// ran [`Self::admit_write`] before its publication section.
+    async fn begin_admission_tx(
+        &self,
+    ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
     }
@@ -1884,7 +1914,8 @@ impl MemoryStore {
             }
             return Err(error);
         }
-        self.settle_journal(&receipt_id, Settlement::Applied(result), now)
+        let settled = self
+            .settle_journal(&receipt_id, Settlement::Applied(result), now)
             .await
             .map_err(|error| match error {
                 StoreError::CommitUnknown(_) => error,
@@ -1892,7 +1923,15 @@ impl MemoryStore {
                     "journal settlement after COMMIT: {}",
                     describe(&other)
                 )),
-            })
+            })?;
+        // This commit wrote the receipt itself, and retention only reclaims rows
+        // past the dedup window, so the row cannot be gone here: a missing one is
+        // a settlement defect, reported on the same uncertain channel.
+        settled.ok_or_else(|| {
+            StoreError::CommitUnknown(format!(
+                "journal settlement after COMMIT: receipt {receipt_id} vanished"
+            ))
+        })
     }
 
     /// Append the receipt row to the still-open effect transaction.
@@ -2050,12 +2089,22 @@ impl MemoryStore {
     /// outcome. Doing all of it together makes the scrub crash-safe: the intent
     /// is never applied without its content gone, and re-driving a still
     /// unsettled entry re-publishes idempotently before settling it again.
+    ///
+    /// `None` means the settlement committed but retention had already dropped
+    /// the receipt row, so there is nothing left to record on: the journal
+    /// transition is what settles the intent. [`Self::settle_intent`] reports
+    /// that as the benign reclamation it is (DEBUG, never the `settle skipped`
+    /// warning). The two callers that need the row still map `None` to
+    /// `CommitUnknown` — [`Self::commit_journalled`] and
+    /// [`Self::settle_replayed`] hold or have just read the receipt, so for them
+    /// a missing row after their own commit is contradictory and must stay on
+    /// the uncertain channel.
     async fn settle_journal(
         &self,
         receipt_id: &str,
         settlement: Settlement<'_>,
         now: DateTime<Utc>,
-    ) -> StoreResult<ReceiptRow> {
+    ) -> StoreResult<Option<ReceiptRow>> {
         #[cfg(feature = "test-hooks")]
         let fault = self.settle_fault.swap(SETTLE_FAULT_NONE, Ordering::SeqCst);
         #[cfg(feature = "test-hooks")]
@@ -2136,7 +2185,7 @@ impl MemoryStore {
         tx.commit()
             .await
             .map_err(|e| StoreError::CommitUnknown(format!("journal settle COMMIT: {e}")))?;
-        row.ok_or_else(|| StoreError::NotFound(format!("receipt {receipt_id}")))
+        Ok(row)
     }
 
     /// §5.2 step 2: take the workspace publication lock and settle every earlier
@@ -2157,9 +2206,11 @@ impl MemoryStore {
     /// operation's in-transaction probe — instead of being gated on a later
     /// intent it did not create. A replay settles nothing: it produces no effect.
     ///
-    /// The section is taken before any transaction (**gate → flock →
-    /// transaction** is the one lock order this store uses) and held across the
-    /// operation's effect by the returned guard.
+    /// The caller has already run [`Self::admit_write`] — including the
+    /// retention sweep's own committed transaction — so the section is taken
+    /// before this operation's transaction (**gate → flock → transaction** is
+    /// the one lock order this store uses) and held across the operation's
+    /// effect by the returned guard.
     async fn begin_publication(
         &self,
         ctx: &OpContext<'_>,
@@ -2384,20 +2435,35 @@ impl MemoryStore {
     /// outcome. The caller holds the publication section (workspace gate and
     /// flock); the filesystem half runs inside [`PublicationGuard::files`],
     /// whose blocking task owns the lease until its last file operation returns.
+    ///
+    /// A receipt retention already reclaimed is the expected outcome of a
+    /// re-drive, not a skipped settle: the journal transition committed and the
+    /// row it would have written to is gone, so that case is logged as the
+    /// reclamation it is and only a real failure keeps the warning.
     async fn settle_intent(&self, publication: &mut PublicationGuard, entry: &JournalEntry) {
-        if let Err(error) = self.settle_entry(publication, entry).await {
-            tracing::warn!(receipt_id = %entry.receipt_id, ?error, "memory journal settle skipped");
+        match self.settle_entry(publication, entry).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                tracing::debug!(
+                    receipt_id = %entry.receipt_id,
+                    "memory journal settle committed; receipt reclaimed by retention"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(receipt_id = %entry.receipt_id, ?error, "memory journal settle skipped");
+            }
         }
     }
 
     /// [`Self::settle_intent`] returning the settled receipt: a re-drive
     /// publishes what the journal owes and then records the outcome in one
-    /// transaction.
+    /// transaction. `None` means the settlement committed but retention had
+    /// already reclaimed the receipt row it would have recorded on.
     async fn settle_entry(
         &self,
         publication: &mut PublicationGuard,
         entry: &JournalEntry,
-    ) -> StoreResult<ReceiptRow> {
+    ) -> StoreResult<Option<ReceiptRow>> {
         let (root, receipt_id, targets_json) = (
             self.files_root.clone(),
             entry.receipt_id.clone(),
@@ -2453,15 +2519,25 @@ impl MemoryStore {
                 row.receipt_id
             ))
         })?;
-        self.settle_entry(publication, &entry)
-            .await
-            .map_err(|error| match error {
-                StoreError::CommitUnknown(_) => error,
-                other => StoreError::CommitUnknown(format!(
-                    "journal settlement on replay after COMMIT: {}",
-                    describe(&other)
-                )),
-            })
+        let settled =
+            self.settle_entry(publication, &entry)
+                .await
+                .map_err(|error| match error {
+                    StoreError::CommitUnknown(_) => error,
+                    other => StoreError::CommitUnknown(format!(
+                        "journal settlement on replay after COMMIT: {}",
+                        describe(&other)
+                    )),
+                })?;
+        // The replay probe read this receipt moments ago, so retention cannot
+        // have reclaimed it in between: a missing row stays the uncertain answer
+        // it has always been here.
+        settled.ok_or_else(|| {
+            StoreError::CommitUnknown(format!(
+                "journal settlement on replay after COMMIT: receipt {} reclaimed",
+                entry.receipt_id
+            ))
+        })
     }
 
     /// §5.2 step 3 on the completed-marker path (P5-F2): settle every unsettled
@@ -3109,11 +3185,20 @@ async fn record_soul_invalidation(
 ///
 /// Evicts every receipt body older than `receipt_retention_seconds` across all
 /// dedup namespaces and the keyless `memory.subjects.ensure` receipts too, then
-/// drops every tombstone older than `dedup_retention_seconds`. Eviction is a
-/// one-way rewrite — the payload is discarded, so a later clock move cannot
-/// resurrect it. [`MemoryStore::reclaim_expired`] owns the transaction and its
-/// commit; this function only writes the reclamation and the clock reading it
-/// was decided at into it.
+/// drops every tombstone older than `dedup_retention_seconds` whose intent has
+/// settled. Eviction is a one-way rewrite — the payload is discarded, so a later
+/// clock move cannot resurrect it. [`MemoryStore::reclaim_expired`] owns the
+/// transaction and its commit; this function only writes the reclamation and the
+/// clock reading it was decided at into it.
+///
+/// A receipt whose intent is still `pending`/`deferred` is kept: the settle that
+/// intent is owed records its terminal outcome on that row, and the sweep runs
+/// before the publication section that settles it. The row is reclaimed by the
+/// first sweep after the intent turns `applied`. While it is owed, that key is
+/// not reused either — [`probe`] answers `RECEIPT_EXPIRED` rather than freeing a
+/// namespace whose row it cannot delete. A `quarantined` intent does not hold its
+/// receipt: the terminal `failed` outcome is already recorded there, and the
+/// re-drive recovery owes it reads the journal, never this row.
 ///
 /// The same window bounds the two content families that would otherwise retain
 /// rows forever: an applied journal shell (its file content was scrubbed at
@@ -3135,13 +3220,20 @@ async fn retention_sweep(
     ))
     .execute(&mut **tx)
     .await?;
-    sqlx::query("DELETE FROM memory_receipts WHERE created_at < ?")
-        .bind(retention_cutoff(
-            now,
-            crate::policy::DEDUP_RETENTION_SECONDS,
-        ))
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM memory_receipts WHERE created_at < ? \
+         AND NOT EXISTS ( \
+             SELECT 1 FROM memory_journal \
+             WHERE memory_journal.receipt_id = memory_receipts.receipt_id \
+               AND memory_journal.state NOT IN ('applied', 'quarantined') \
+         )",
+    )
+    .bind(retention_cutoff(
+        now,
+        crate::policy::DEDUP_RETENTION_SECONDS,
+    ))
+    .execute(&mut **tx)
+    .await?;
     sqlx::query("DELETE FROM memory_journal WHERE state = 'applied' AND created_at < ?")
         .bind(retention_cutoff(
             now,
@@ -3159,6 +3251,32 @@ async fn retention_sweep(
     Ok(())
 }
 
+/// Whether this receipt's settle has yet to record an outcome there (§5.2).
+///
+/// Only `pending`/`deferred` count: those intents are unrecovered, so their
+/// receipt still carries no outcome and the settle that produces one is what
+/// writes that row. A `quarantined` intent already wrote its terminal `failed`
+/// outcome at quarantine time (`Settlement::Quarantined`), and its re-drive —
+/// [`MemoryStore::settle_unsettled`]'s bounded pass and
+/// [`MemoryStore::begin_publication`]'s target pass both fetch
+/// `state <> 'applied'` — reads only `memory_journal` and the files, so the
+/// receipt row is not needed for that recovery. An `applied`
+/// intent is settled. Both the retention sweep and the dedup probe remove only
+/// rows this predicate denies, so the two paths cannot drift.
+async fn receipt_owes_settlement(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    receipt_id: &str,
+) -> StoreResult<bool> {
+    let unsettled: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM memory_journal \
+         WHERE receipt_id = ? AND state NOT IN ('applied', 'quarantined') LIMIT 1",
+    )
+    .bind(receipt_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(unsettled.is_some())
+}
+
 /// Probe the dedup namespace inside the caller's transaction.
 ///
 /// A keyless op (the `memory.subjects.ensure` exemption) binds NULL, which
@@ -3169,7 +3287,12 @@ async fn retention_sweep(
 /// the key to its `payload_digest` (§7.0.5), so a different payload is
 /// `IDEMPOTENCY_CONFLICT` at any age. A true replay is only `RECEIPT_EXPIRED`
 /// (terminal, never re-executed) once its body is gone, and a namespace past the
-/// dedup window is cleared here so the key starts over (§6.10/MEM-R021).
+/// dedup window is cleared here so the key starts over (§6.10/MEM-R021) — except
+/// when the row's settle is still owed ([`receipt_owes_settlement`], a
+/// `pending`/`deferred` intent): that settle has yet to record an outcome, and
+/// the namespace cannot be freed without deleting the row it writes to, so the
+/// key answers `RECEIPT_EXPIRED` and the caller re-keys. The row is reclaimed by
+/// the first sweep after its intent settles.
 async fn probe(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     ctx: &OpContext<'_>,
@@ -3202,6 +3325,11 @@ async fn probe(
             }
         }
         Retention::Expired => {
+            if receipt_owes_settlement(tx, &row.receipt_id).await? {
+                return Err(StoreError::ReceiptExpired {
+                    last_known_status: row.status,
+                });
+            }
             sqlx::query("DELETE FROM memory_receipts WHERE receipt_id = ?")
                 .bind(&row.receipt_id)
                 .execute(&mut **tx)
@@ -3221,9 +3349,10 @@ async fn probe(
 /// replay — stays with [`probe`] behind the caller's authorization, so this
 /// preflight reveals only that the caller's own key is bound.
 ///
-/// A receipt past the retention window is treated exactly as [`probe`] does
-/// (swept or swept-in-place, then the key starts over), so this preflight can
-/// never conflict a key the full probe would free.
+/// A receipt past the retained body's window is judged exactly as [`probe`]
+/// judges it — freed when its outcome is recorded, or answered `RECEIPT_EXPIRED`
+/// when its settle is still owed — and never as a conflict, so this preflight
+/// cannot conflict a key the full probe would refuse or free.
 async fn conflict_only_probe(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     ctx: &OpContext<'_>,
@@ -6175,8 +6304,9 @@ impl MemoryStore {
             admission
         };
         let targets = [journal::candidate_target(candidate_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, effective, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -6560,8 +6690,9 @@ impl MemoryStore {
     ) -> StoreResult<ReceiptRow> {
         let record_id = mint_record_id();
         let targets = [journal::record_target(&record_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, admission, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -6753,8 +6884,9 @@ impl MemoryStore {
             admission
         };
         let targets = [journal::record_target(record_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, effective, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -6951,8 +7083,9 @@ impl MemoryStore {
             admission
         };
         let targets = [journal::record_target(record_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, effective, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -7090,8 +7223,9 @@ impl MemoryStore {
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
     ) -> StoreResult<MigrationOutcome> {
+        self.admit_write().await?;
         let mut publication = self.begin_publication_section().await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(recorded) = legacy::migration_marker(&mut tx, ctx.space_id).await? {
             let mut snapshot =
@@ -7257,8 +7391,9 @@ impl MemoryStore {
         updated_by: &str,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::profile_target(subject_id, profile_kind)?];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, admission, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
