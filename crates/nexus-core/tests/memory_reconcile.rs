@@ -2903,3 +2903,147 @@ async fn a_quarantined_write_frees_its_key_at_the_window() {
     );
     drop(provider);
 }
+
+/// Captures this thread's `tracing` events so a contract about *what is logged*
+/// is asserted instead of assumed. `set_default` is thread-local and the test's
+/// `#[tokio::test]` runtime polls on the test thread, so the provider's settle
+/// events land here.
+#[derive(Clone, Default)]
+struct CapturedEvents(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl CapturedEvents {
+    fn lines(&self) -> Vec<String> {
+        self.0.lock().expect("captured events").clone()
+    }
+}
+
+impl tracing::Subscriber for CapturedEvents {
+    fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        struct Fields {
+            message: String,
+            receipt_id: Option<String>,
+        }
+
+        impl tracing::field::Visit for Fields {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                match field.name() {
+                    "message" => self.message = format!("{value:?}"),
+                    "receipt_id" => self.receipt_id = Some(format!("{value:?}")),
+                    _ => {}
+                }
+            }
+        }
+
+        let mut fields = Fields {
+            message: String::new(),
+            receipt_id: None,
+        };
+        event.record(&mut fields);
+        self.0.lock().expect("captured events").push(format!(
+            "{} {} receipt={}",
+            event.metadata().level(),
+            fields.message,
+            fields.receipt_id.as_deref().unwrap_or("-")
+        ));
+    }
+}
+
+/// I-000142: a settle whose receipt retention already reclaimed is a *committed*
+/// settle, and it must not be reported as a skipped one. The journal row turns
+/// `applied`, the owed file is published, the receipt row stays gone, and the
+/// only line naming that receipt is the benign reclamation note at DEBUG.
+#[tokio::test]
+async fn a_settle_whose_receipt_was_reclaimed_is_not_reported_as_skipped() {
+    let env = seed_env();
+    let events = CapturedEvents::default();
+    let captured = events.clone();
+    let _guard = tracing::subscriber::set_default(events);
+    let provider = open_provider(&env).await;
+    ensure(&provider).await;
+    let root = provider.file_root();
+
+    // Quarantine an intent, then let the dedup window reclaim its receipt: the
+    // re-drive that follows has no row to record on.
+    provider.inject_file_fault(false);
+    let lost = wire(
+        &provider
+            .create_record(&admin(), record_create_request("k-reclaimed", TEXT))
+            .await,
+    );
+    assert_eq!(error_code(&lost), "OUTCOME_UNCERTAIN");
+    let record_id = only_record_id(&env).await;
+    let receipt_id = receipt_id_of_key(&env, "k-reclaimed").await;
+    assert_eq!(journal_states(&env).await, vec!["quarantined"]);
+    provider.advance_clock(dedup_retention(&provider).await + 1);
+    // A sweeping write on another subject drops the quarantined receipt's row
+    // while leaving the journal row the recovery owes.
+    wire(
+        &provider
+            .ensure_subject(
+                &admin(),
+                dto(json!({ "space_id": SPACE, "subject_id": "sbj_reclaimed_sweeper" })),
+            )
+            .await,
+    );
+    assert_eq!(receipt_rows(&env, &receipt_id).await, 0);
+
+    // A write on that very target re-drives the quarantine — with no receipt row
+    // left to record on.
+    let updated = wire(
+        &provider
+            .update_record(
+                &admin(),
+                update_request("k-reclaimed-update", &record_id, 1, UPDATED),
+            )
+            .await,
+    );
+    receipt(&updated);
+    assert_eq!(
+        journal_states(&env).await,
+        vec!["applied", "applied"],
+        "the re-drive committed the journal transition"
+    );
+    assert_eq!(
+        receipt_rows(&env, &receipt_id).await,
+        0,
+        "retention reclaimed the receipt; the settle does not resurrect it"
+    );
+    let published = std::fs::read_to_string(root.join(format!("records/{record_id}.md")))
+        .expect("the re-drive published the owed projection");
+    assert!(published.contains(UPDATED), "{published}");
+
+    let lines = captured.lines();
+    let for_receipt: Vec<&String> = lines
+        .iter()
+        .filter(|line| line.contains(&receipt_id))
+        .collect();
+    assert!(
+        for_receipt.iter().any(
+            |line| line.starts_with("DEBUG") && line.contains("receipt reclaimed by retention")
+        ),
+        "the reclamation is reported as the benign DEBUG outcome: {lines:?}"
+    );
+    assert!(
+        !for_receipt
+            .iter()
+            .any(|line| line.contains("settle skipped")),
+        "a reclaimed receipt is never reported as a skipped settle: {lines:?}"
+    );
+    drop(provider);
+}

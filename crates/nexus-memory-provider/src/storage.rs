@@ -1914,7 +1914,8 @@ impl MemoryStore {
             }
             return Err(error);
         }
-        self.settle_journal(&receipt_id, Settlement::Applied(result), now)
+        let settled = self
+            .settle_journal(&receipt_id, Settlement::Applied(result), now)
             .await
             .map_err(|error| match error {
                 StoreError::CommitUnknown(_) => error,
@@ -1922,7 +1923,15 @@ impl MemoryStore {
                     "journal settlement after COMMIT: {}",
                     describe(&other)
                 )),
-            })
+            })?;
+        // This commit wrote the receipt itself, and retention only reclaims rows
+        // past the dedup window, so the row cannot be gone here: a missing one is
+        // a settlement defect, reported on the same uncertain channel.
+        settled.ok_or_else(|| {
+            StoreError::CommitUnknown(format!(
+                "journal settlement after COMMIT: receipt {receipt_id} vanished"
+            ))
+        })
     }
 
     /// Append the receipt row to the still-open effect transaction.
@@ -2080,12 +2089,17 @@ impl MemoryStore {
     /// outcome. Doing all of it together makes the scrub crash-safe: the intent
     /// is never applied without its content gone, and re-driving a still
     /// unsettled entry re-publishes idempotently before settling it again.
+    ///
+    /// `None` is the expected retention outcome, not a failure: the committed
+    /// journal transition is what settles the intent, and a receipt retention
+    /// already dropped has nothing left to record on. Callers log that case as
+    /// the benign reclamation it is.
     async fn settle_journal(
         &self,
         receipt_id: &str,
         settlement: Settlement<'_>,
         now: DateTime<Utc>,
-    ) -> StoreResult<ReceiptRow> {
+    ) -> StoreResult<Option<ReceiptRow>> {
         #[cfg(feature = "test-hooks")]
         let fault = self.settle_fault.swap(SETTLE_FAULT_NONE, Ordering::SeqCst);
         #[cfg(feature = "test-hooks")]
@@ -2166,7 +2180,7 @@ impl MemoryStore {
         tx.commit()
             .await
             .map_err(|e| StoreError::CommitUnknown(format!("journal settle COMMIT: {e}")))?;
-        row.ok_or_else(|| StoreError::NotFound(format!("receipt {receipt_id}")))
+        Ok(row)
     }
 
     /// §5.2 step 2: take the workspace publication lock and settle every earlier
@@ -2416,20 +2430,35 @@ impl MemoryStore {
     /// outcome. The caller holds the publication section (workspace gate and
     /// flock); the filesystem half runs inside [`PublicationGuard::files`],
     /// whose blocking task owns the lease until its last file operation returns.
+    ///
+    /// A receipt retention already reclaimed is the expected outcome of a
+    /// re-drive, not a skipped settle: the journal transition committed and the
+    /// row it would have written to is gone, so that case is logged as the
+    /// reclamation it is and only a real failure keeps the warning.
     async fn settle_intent(&self, publication: &mut PublicationGuard, entry: &JournalEntry) {
-        if let Err(error) = self.settle_entry(publication, entry).await {
-            tracing::warn!(receipt_id = %entry.receipt_id, ?error, "memory journal settle skipped");
+        match self.settle_entry(publication, entry).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                tracing::debug!(
+                    receipt_id = %entry.receipt_id,
+                    "memory journal settle committed; receipt reclaimed by retention"
+                );
+            }
+            Err(error) => {
+                tracing::warn!(receipt_id = %entry.receipt_id, ?error, "memory journal settle skipped");
+            }
         }
     }
 
     /// [`Self::settle_intent`] returning the settled receipt: a re-drive
     /// publishes what the journal owes and then records the outcome in one
-    /// transaction.
+    /// transaction. `None` means the settlement committed but retention had
+    /// already reclaimed the receipt row it would have recorded on.
     async fn settle_entry(
         &self,
         publication: &mut PublicationGuard,
         entry: &JournalEntry,
-    ) -> StoreResult<ReceiptRow> {
+    ) -> StoreResult<Option<ReceiptRow>> {
         let (root, receipt_id, targets_json) = (
             self.files_root.clone(),
             entry.receipt_id.clone(),
@@ -2485,15 +2514,25 @@ impl MemoryStore {
                 row.receipt_id
             ))
         })?;
-        self.settle_entry(publication, &entry)
-            .await
-            .map_err(|error| match error {
-                StoreError::CommitUnknown(_) => error,
-                other => StoreError::CommitUnknown(format!(
-                    "journal settlement on replay after COMMIT: {}",
-                    describe(&other)
-                )),
-            })
+        let settled =
+            self.settle_entry(publication, &entry)
+                .await
+                .map_err(|error| match error {
+                    StoreError::CommitUnknown(_) => error,
+                    other => StoreError::CommitUnknown(format!(
+                        "journal settlement on replay after COMMIT: {}",
+                        describe(&other)
+                    )),
+                })?;
+        // The replay probe read this receipt moments ago, so retention cannot
+        // have reclaimed it in between: a missing row stays the uncertain answer
+        // it has always been here.
+        settled.ok_or_else(|| {
+            StoreError::CommitUnknown(format!(
+                "journal settlement on replay after COMMIT: receipt {} reclaimed",
+                entry.receipt_id
+            ))
+        })
     }
 
     /// §5.2 step 3 on the completed-marker path (P5-F2): settle every unsettled
