@@ -119,8 +119,9 @@ pub(crate) struct WorkArtifactWrite<'a> {
     pub(crate) work_ref: &'a str,
     /// The artifact path below the Work root.
     pub(crate) rel_child: &'a Path,
-    /// The bytes to commit.
-    pub(crate) content: &'a str,
+    /// The bytes to commit. Owned so the durable write task takes the
+    /// caller's buffer without a copy at the port boundary.
+    pub(crate) content: String,
 }
 
 /// One reconcile admission handed to a [`WorkArtifactPort`].
@@ -298,11 +299,11 @@ impl FsWorkArtifactPort {
             else {
                 continue;
             };
-            self.write_locked(&WorkArtifactWrite {
+            self.write_locked(WorkArtifactWrite {
                 workspace_root: request.workspace_root,
                 work_ref: request.work_ref,
                 rel_child,
-                content: &rendered,
+                content: rendered,
             })
             .await?;
         }
@@ -315,7 +316,7 @@ impl FsWorkArtifactPort {
 
     /// The write itself, run while the caller holds the Work lock:
     /// boundary re-check → parent creation → durable atomic bytes.
-    async fn write_locked(&self, write: &WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
+    async fn write_locked(&self, write: WorkArtifactWrite<'_>) -> Result<(), NexusApiError> {
         let target = write
             .workspace_root
             .join("Works")
@@ -427,11 +428,11 @@ impl WorkArtifactPort for FsWorkArtifactPort {
         if current_holder.as_deref().is_some_and(|holder| {
             holder.starts_with(nexus_local_db::runtime_lock::SCHEDULE_HOLDER_PREFIX)
         }) {
-            return self.write_locked(&write).await;
+            return self.write_locked(write).await;
         }
 
         let lock = WorkLock::acquire(&self.pool, &creator_id, &work_id, "tool:fs_write").await?;
-        let result = self.write_locked(&write).await;
+        let result = self.write_locked(write).await;
         lock.release().await;
         result
     }
@@ -656,13 +657,13 @@ mod tests {
     fn write<'a>(
         fixture: &'a Fixture,
         rel_child: &'a Path,
-        content: &'a str,
+        content: &str,
     ) -> WorkArtifactWrite<'a> {
         WorkArtifactWrite {
             workspace_root: fixture.workspace.path(),
             work_ref: WORK_REF,
             rel_child,
-            content,
+            content: content.to_string(),
         }
     }
 
@@ -1140,7 +1141,7 @@ mod tests {
             workspace_root: fixture.workspace.path(),
             work_ref: work_path.0,
             rel_child: work_path.1,
-            content,
+            content: content.to_string(),
         };
 
         fixture.port.commit(write).await.expect("production commit");

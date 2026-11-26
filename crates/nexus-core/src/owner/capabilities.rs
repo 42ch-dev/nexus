@@ -1175,7 +1175,7 @@ async fn execute_write_file(
                 workspace_root: Path::new(&workspace_path_str),
                 work_ref,
                 rel_child,
-                content: &content,
+                content,
             })
             .await?;
     } else if context.recording_work_artifact.is_some() {
@@ -1986,7 +1986,7 @@ async fn execute_manuscript_chapter_update(
                 workspace_root: Path::new(&workspace_root),
                 work_ref: body_work_ref,
                 rel_child: body_rel_child,
-                content,
+                content: content.to_string(),
             })
             .await?;
         Some(canonical_path)
@@ -2687,7 +2687,7 @@ async fn execute_manuscript_write(
             workspace_root: workspace_root_path,
             work_ref: body_work_ref,
             rel_child: body_rel_child,
-            content,
+            content: content.to_string(),
         })
         .await?;
 

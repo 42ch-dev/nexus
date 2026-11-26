@@ -282,7 +282,7 @@ async fn atomic_write_outline(
     })?;
     let content = format!("---\n{yaml}---\n{body}");
 
-    fsync_write_atomic(target, &content)
+    fsync_write_atomic(target, content)
         .await
         .map_err(|e| OutlineFault::Internal {
             code: "OUTLINE_WRITE_ERROR".to_string(),
@@ -1236,7 +1236,7 @@ async fn persist_chapter_outline_content(
         })?;
     }
 
-    crate::content::atomic_write_text(workspace_root, &outline_path, &content)
+    crate::content::atomic_write_text(workspace_root, &outline_path, content)
         .await
         .map_err(OutlineFault::Core)
 }
