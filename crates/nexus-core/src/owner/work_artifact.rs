@@ -303,11 +303,15 @@ impl FsWorkArtifactPort {
                 // The file changed between the unlocked diff and this write, so
                 // nothing can be written: report the skip instead of counting a
                 // resync that never landed.
-                let path = format!(
-                    "Works/{}/{}",
-                    request.work_ref,
-                    rel_child.to_string_lossy().replace('\\', "/")
-                );
+                // Components joined with `/`: a separator never leaks the
+                // platform's, and a backslash that is part of a Unix file name
+                // survives because no byte is rewritten.
+                let rel = rel_child
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let path = format!("Works/{}/{rel}", request.work_ref);
                 // stderr, not `tracing`: Creator commands send the subscriber to
                 // stdout, so a `warn!` here would corrupt `--json` output. The
                 // result is dropped on purpose — a rejected stderr write must not
@@ -1402,8 +1406,9 @@ mod tests {
     }
 
     /// The diff-phase and apply-phase skip producers must emit the same `path`
-    /// shape — `Works/<work_ref>/<child>` with forward slashes — so one field
-    /// never carries two spellings (`rel_child.display()` is platform-separated).
+    /// shape — `Works/<work_ref>/<child>` with `/` separators — so one field
+    /// never carries two spellings. Separators come from the path components,
+    /// so a backslash that is part of a Unix file name survives untouched.
     #[tokio::test]
     async fn reconcile_apply_and_diff_skips_carry_the_same_path_shape() {
         let fixture = fixture(true).await;
@@ -1411,7 +1416,7 @@ mod tests {
             &fixture.pool,
             WORK_ID,
             WORK_REF,
-            2,
+            3,
             "2026-06-04T10:00:00Z",
         )
         .await
@@ -1440,11 +1445,40 @@ mod tests {
             ch02_broken,
         )
         .expect("broken chapter");
+        // A backslash is a legal file-name byte on Unix (unrepresentable on
+        // Windows, hence the gate): the apply path must keep it and still join
+        // the components with `/`.
+        #[cfg(unix)]
+        let weird_name = "ch03-a\\b.md";
+        #[cfg(unix)]
+        {
+            nexus_local_db::work_chapters::update_status(
+                &fixture.pool,
+                WORK_ID,
+                3,
+                1,
+                "draft",
+                None,
+                "2026-06-04T10:00:00Z",
+            )
+            .await
+            .expect("ch03 status");
+            let weird = chapter_path(fixture.workspace.path(), weird_name);
+            write_chapter(&weird, "finalized", "Body text");
+        }
+        #[cfg(unix)]
+        let ch03_broken = "---\nchapter: 3\nstatus: finalized\nUnclosed body";
 
         let report = fixture
             .port
             .reconcile(reconcile(&fixture, false), &|| {
                 std::fs::write(&conflicting, ch01_broken).expect("break the frontmatter");
+                #[cfg(unix)]
+                std::fs::write(
+                    chapter_path(fixture.workspace.path(), weird_name),
+                    ch03_broken,
+                )
+                .expect("break the backslash-named chapter");
                 Ok(())
             })
             .await
@@ -1456,17 +1490,32 @@ mod tests {
             .map(|skip| skip.path.as_str())
             .collect();
         assert_eq!(
-            paths,
-            vec![
-                "Works/demo/Stories/ch02-body.md",
-                "Works/demo/Stories/ch01-intro.md",
-            ],
-            "the diff-phase skip comes first, then the apply-phase one"
+            paths.first().copied(),
+            Some("Works/demo/Stories/ch02-body.md"),
+            "the diff-phase skip comes first: {paths:?}"
         );
+        // Apply-phase skips follow the op order (read_dir order), so compare
+        // them as a set.
+        let mut apply_skips: Vec<String> = paths
+            .iter()
+            .skip(1)
+            .map(|path| (*path).to_string())
+            .collect();
+        apply_skips.sort_unstable();
+        let mut expected = vec!["Works/demo/Stories/ch01-intro.md".to_string()];
+        // The diff-phase producer builds `Works/<ref>/Stories/<fname>`; the
+        // apply phase must agree for the same name, backslash included.
+        #[cfg(unix)]
+        expected.push(format!("Works/{WORK_REF}/Stories/{weird_name}"));
+        expected.sort_unstable();
+        assert_eq!(apply_skips, expected);
         assert!(
-            report.skipped.iter().all(|skip| !skip.path.contains('\\')),
-            "both producers must use forward slashes: {paths:?}"
+            report
+                .skipped
+                .iter()
+                .all(|skip| skip.path.starts_with("Works/demo/Stories/")),
+            "every skip path joins its root components with `/`: {paths:?}"
         );
-        assert_eq!(report.resynced, 0, "neither chapter was written");
+        assert_eq!(report.resynced, 0, "no chapter was written");
     }
 }
