@@ -12,4 +12,8 @@ export interface WorkReconcileReport {
   updated: number;
   resynced: number;
   preserved: number;
+  skipped?: {
+    path: string;
+    reason: string;
+  }[];
 }

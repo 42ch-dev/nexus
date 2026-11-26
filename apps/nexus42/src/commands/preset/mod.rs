@@ -795,8 +795,9 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
         }
         // `validate_workflow_ir` is a structural IR check: a document the exporter refuses is
         // still structurally valid, so this is a warning, and it covers whatever the exporter
-        // refuses — IR-only node kinds, header versions, edges or gates with no preset payload,
-        // and inner-graph shapes alike.
+        // refuses for content reasons — IR-only node kinds, edges or gates with no preset
+        // payload, and inner-graph shapes. An `ir_version` newer than supported never reaches
+        // here: the header is rejected as an error before the structural checks run.
         Err(error) => warnings.push(format!(
             "preset.export: {error}; the document cannot be exported to a preset"
         )),

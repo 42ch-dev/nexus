@@ -10,6 +10,7 @@
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use nexus_contracts::generated::core::works::work_reconcile_report::WorkReconcileReportSkippedItem as ReconcileSkipWireItem;
 use nexus_contracts::tristate::presence_string;
 use nexus_contracts::{
     AppendInspirationRequest, AppendInspirationResponse, BatchUpdateFindingsRequest,
@@ -513,6 +514,14 @@ impl NativeCore {
                 updated: u64::from(report.updated),
                 resynced: u64::from(report.resynced),
                 preserved: u64::from(report.preserved),
+                skipped: report
+                    .skipped
+                    .into_iter()
+                    .map(|skip| ReconcileSkipWireItem {
+                        path: skip.path,
+                        reason: skip.reason.to_string(),
+                    })
+                    .collect(),
             };
             Ok(wire)
         })

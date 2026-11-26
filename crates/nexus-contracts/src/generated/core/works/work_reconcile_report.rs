@@ -9,10 +9,24 @@ pub struct WorkReconcileReport {
     pub created: u64,
     pub preserved: u64,
     pub resynced: u64,
+    #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    pub skipped: ::std::vec::Vec<WorkReconcileReportSkippedItem>,
     pub updated: u64,
 }
 impl WorkReconcileReport {
     pub fn builder() -> builder::WorkReconcileReport {
+        Default::default()
+    }
+}
+///`WorkReconcileReportSkippedItem`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct WorkReconcileReportSkippedItem {
+    pub path: ::std::string::String,
+    pub reason: ::std::string::String,
+}
+impl WorkReconcileReportSkippedItem {
+    pub fn builder() -> builder::WorkReconcileReportSkippedItem {
         Default::default()
     }
 }
@@ -23,6 +37,10 @@ pub mod builder {
         created: ::std::result::Result<u64, ::std::string::String>,
         preserved: ::std::result::Result<u64, ::std::string::String>,
         resynced: ::std::result::Result<u64, ::std::string::String>,
+        skipped: ::std::result::Result<
+            ::std::vec::Vec<super::WorkReconcileReportSkippedItem>,
+            ::std::string::String,
+        >,
         updated: ::std::result::Result<u64, ::std::string::String>,
     }
     impl ::std::default::Default for WorkReconcileReport {
@@ -31,6 +49,7 @@ pub mod builder {
                 created: Err("no value supplied for created".to_string()),
                 preserved: Err("no value supplied for preserved".to_string()),
                 resynced: Err("no value supplied for resynced".to_string()),
+                skipped: Ok(Default::default()),
                 updated: Err("no value supplied for updated".to_string()),
             }
         }
@@ -72,6 +91,20 @@ pub mod builder {
                 });
             self
         }
+        pub fn skipped<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<
+                ::std::vec::Vec<super::WorkReconcileReportSkippedItem>,
+            >,
+            T::Error: ::std::fmt::Display,
+        {
+            self.skipped = value
+                .try_into()
+                .map_err(|e| {
+                    format!("error converting supplied value for skipped: {e}")
+                });
+            self
+        }
         pub fn updated<T>(mut self, value: T) -> Self
         where
             T: ::std::convert::TryInto<u64>,
@@ -94,6 +127,7 @@ pub mod builder {
                 created: value.created?,
                 preserved: value.preserved?,
                 resynced: value.resynced?,
+                skipped: value.skipped?,
                 updated: value.updated?,
             })
         }
@@ -104,7 +138,64 @@ pub mod builder {
                 created: Ok(value.created),
                 preserved: Ok(value.preserved),
                 resynced: Ok(value.resynced),
+                skipped: Ok(value.skipped),
                 updated: Ok(value.updated),
+            }
+        }
+    }
+    #[derive(Clone, Debug)]
+    pub struct WorkReconcileReportSkippedItem {
+        path: ::std::result::Result<::std::string::String, ::std::string::String>,
+        reason: ::std::result::Result<::std::string::String, ::std::string::String>,
+    }
+    impl ::std::default::Default for WorkReconcileReportSkippedItem {
+        fn default() -> Self {
+            Self {
+                path: Err("no value supplied for path".to_string()),
+                reason: Err("no value supplied for reason".to_string()),
+            }
+        }
+    }
+    impl WorkReconcileReportSkippedItem {
+        pub fn path<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<::std::string::String>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.path = value
+                .try_into()
+                .map_err(|e| format!("error converting supplied value for path: {e}"));
+            self
+        }
+        pub fn reason<T>(mut self, value: T) -> Self
+        where
+            T: ::std::convert::TryInto<::std::string::String>,
+            T::Error: ::std::fmt::Display,
+        {
+            self.reason = value
+                .try_into()
+                .map_err(|e| format!("error converting supplied value for reason: {e}"));
+            self
+        }
+    }
+    impl ::std::convert::TryFrom<WorkReconcileReportSkippedItem>
+    for super::WorkReconcileReportSkippedItem {
+        type Error = super::error::ConversionError;
+        fn try_from(
+            value: WorkReconcileReportSkippedItem,
+        ) -> ::std::result::Result<Self, super::error::ConversionError> {
+            Ok(Self {
+                path: value.path?,
+                reason: value.reason?,
+            })
+        }
+    }
+    impl ::std::convert::From<super::WorkReconcileReportSkippedItem>
+    for WorkReconcileReportSkippedItem {
+        fn from(value: super::WorkReconcileReportSkippedItem) -> Self {
+            Self {
+                path: Ok(value.path),
+                reason: Ok(value.reason),
             }
         }
     }
