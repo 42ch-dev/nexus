@@ -61,6 +61,7 @@ jobs:
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
               - '.oxlintrc.json'
+              - '.githooks/**'
               - '**/tsconfig.json'
               - '**/tsconfig.*.json'
               - '!**/*.md'
