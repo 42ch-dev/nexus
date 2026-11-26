@@ -259,7 +259,7 @@ pub use work_chapters::{
     is_script_complete, is_work_completed, next_chapter, next_chapter_volume_aware,
     render_frontmatter_status, seed_chapters, seed_chapters_multi_volume,
     seed_chapters_multi_volume_tx, update_paths, update_status, InsertChapterParams, ReconcileDiff,
-    ReconcileOp, ReconcileReport, WorkChapterRecord,
+    ReconcileOp, ReconcileReport, ReconcileSkip, WorkChapterRecord,
 };
 
 pub use force_gates_audit::{
