@@ -1232,8 +1232,9 @@ async fn scoped_admin_cannot_amplify_grant(
 
 /// C-096: a fresh provider's operator provisioning creates the initial space and
 /// administrator without any protocol grant cycle, and both are discoverable
-/// through `memory.describe` / `memory.spaces.list`. No protocol space-creation
-/// op exists.
+/// through `memory.describe` / `memory.spaces.list`. `memory.spaces.create`
+/// exists upstream since spoke 0.19 but stays unserved: the payload is
+/// validated at the responder and refused terminally at the port.
 async fn operator_bootstrap_is_callable_and_visible(
     matrix: &Matrix,
     resources: &mut OwnedResources,
@@ -1271,7 +1272,10 @@ async fn operator_bootstrap_is_callable_and_visible(
     );
 
     let raw = resources.open_raw_admin(matrix).await;
-    let invented = resources
+    // spoke 0.19 made `memory.spaces.create` a real protocol op: the served
+    // responder decodes and validates its payload before the port is reached,
+    // so a keyless line is an input error rather than an unknown op.
+    let keyless = resources
         .invoke(
             raw,
             "memory.spaces.create",
@@ -1279,9 +1283,33 @@ async fn operator_bootstrap_is_callable_and_visible(
         )
         .await;
     assert_eq!(
-        invented["error"]["code"],
-        json!("op_unsupported"),
-        "space creation is not a protocol op: {invented}"
+        keyless["error"]["code"],
+        json!("INVALID_INPUT"),
+        "{keyless}"
+    );
+    assert_eq!(
+        keyless["error"]["message"],
+        json!("invalid memory payload: missing field `idempotency_key`"),
+        "{keyless}"
+    );
+    // A well-formed request reaches the port, which refuses space creation
+    // terminally: this matrix serves only the operator-provisioned space.
+    let refused = resources
+        .invoke(
+            raw,
+            "memory.spaces.create",
+            &json!({ "space_id": "spc_unserved", "idempotency_key": "c096-create" }),
+        )
+        .await;
+    assert_eq!(
+        refused["error"]["code"],
+        json!("CAPABILITY_PORT_MISSING"),
+        "space creation stays unserved: {refused}"
+    );
+    assert_eq!(
+        refused["error"]["details"]["retry_class"],
+        json!("terminal"),
+        "{refused}"
     );
     resources
         .close_raw(raw)
@@ -1407,7 +1435,9 @@ async fn local_served_surface_refusal(
     _tasks: TaskSet,
 ) {
     let raw = resources.open_raw_admin(matrix).await;
-    let invented = resources
+    // Same 0.19 contract on the local leg: the payload is validated before the
+    // port, and a well-formed create is refused terminally by the provider.
+    let keyless = resources
         .invoke(
             raw,
             "memory.spaces.create",
@@ -1415,9 +1445,31 @@ async fn local_served_surface_refusal(
         )
         .await;
     assert_eq!(
-        invented["error"]["code"],
-        json!("op_unsupported"),
-        "{invented}"
+        keyless["error"]["code"],
+        json!("INVALID_INPUT"),
+        "{keyless}"
+    );
+    assert_eq!(
+        keyless["error"]["message"],
+        json!("invalid memory payload: missing field `idempotency_key`"),
+        "{keyless}"
+    );
+    let refused = resources
+        .invoke(
+            raw,
+            "memory.spaces.create",
+            &json!({ "space_id": "spc_unserved", "idempotency_key": "c096-local-create" }),
+        )
+        .await;
+    assert_eq!(
+        refused["error"]["code"],
+        json!("CAPABILITY_PORT_MISSING"),
+        "{refused}"
+    );
+    assert_eq!(
+        refused["error"]["details"]["retry_class"],
+        json!("terminal"),
+        "{refused}"
     );
     resources
         .close_raw(raw)

@@ -1,8 +1,10 @@
 //! Full `MemoryPort` assembly, the signed memory service and its admission.
 //!
-//! Every one of the 25 base operations delegates to the private SQLite
+//! Every one of the 25 served base operations delegates to the private SQLite
 //! implementation the earlier slices own — this module adds no base-operation
-//! semantics of its own. What it does own is the protocol frame around them:
+//! semantics of its own. The 26th base operation, `memory.spaces.create`
+//! (spoke 0.19), is refused terminally here: the fixture serves only its one
+//! operator-provisioned space. What it does own is the protocol frame around them:
 //!
 //! - **One transaction per mutation.** A mutating op resolves replay, runs the
 //!   private `*_in_tx` effect and stages its content-free receipt, dedup row and
