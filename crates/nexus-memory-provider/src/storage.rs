@@ -39,7 +39,8 @@
 //!   eternal answer. Every mutating entry point and every provider open first
 //!   reclaims expired rows in a transaction of its own
 //!   ([`MemoryStore::reclaim_expired`]) — all namespaces, keyless
-//!   receipts included — so eviction is committed whatever the operation then
+//!   receipts included, and before the publication section a file-effect op
+//!   would take — so eviction is committed whatever the operation then
 //!   does: a replay refusal, an authorization failure or any other early return
 //!   drops only the effect transaction. A sweep failure is logged and never
 //!   fails or rolls back the operation it precedes. `memory.receipts.get` stays
@@ -562,7 +563,8 @@ fn workspace_publish_gate(files_root: &Path) -> Arc<tokio::sync::Mutex<()>> {
 /// occupy a blocking worker: only the gate holder ever waits for the flock, which
 /// makes one blocked waiter per workspace the permanent ceiling — the holder's
 /// own file work cannot starve behind a crowd of its same-process peers. No path
-/// takes a write transaction before this section, so the pair cannot deadlock.
+/// holds a write transaction when it takes this section — the retention sweep's
+/// own transaction commits before it — so the pair cannot deadlock.
 /// The ceiling survives cancellation: the waiting task owns the gate guard
 /// ([`journal::PublishFlock::acquire`] takes it by value and returns it with the
 /// lease), so a cancelled publication drops only its future and cannot release
@@ -738,6 +740,23 @@ impl MemoryStore {
         self.pool.close().await;
     }
 
+    /// What every mutating entry point does before its write transaction: the
+    /// read-only refusal, the admission counter/gate, and the retention sweep.
+    ///
+    /// Split out so a caller that takes the publication section can run this
+    /// *before* that section: the sweep's own `BEGIN IMMEDIATE` parks up to the
+    /// `busy_timeout` and must not hold other writers' file effects behind this
+    /// operation's gate and flock.
+    async fn admit_write(&self) -> StoreResult<()> {
+        self.require_writable()?;
+        #[cfg(feature = "test-hooks")]
+        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
+        #[cfg(feature = "test-hooks")]
+        self.admission_gate().await;
+        self.reclaim_expired().await;
+        Ok(())
+    }
+
     /// Open an effect transaction and read the authorization clock **after** the
     /// write lock is held.
     ///
@@ -752,12 +771,15 @@ impl MemoryStore {
     async fn begin_admission(
         &self,
     ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
-        self.require_writable()?;
-        #[cfg(feature = "test-hooks")]
-        self.lock_attempts.fetch_add(1, Ordering::SeqCst);
-        #[cfg(feature = "test-hooks")]
-        self.admission_gate().await;
-        self.reclaim_expired().await;
+        self.admit_write().await?;
+        self.begin_admission_tx().await
+    }
+
+    /// [`Self::begin_admission`]'s write transaction, for a caller that already
+    /// ran [`Self::admit_write`] before its publication section.
+    async fn begin_admission_tx(
+        &self,
+    ) -> StoreResult<(sqlx::Transaction<'_, sqlx::Sqlite>, DateTime<Utc>)> {
         let tx = begin_immediate(&self.pool).await?;
         Ok((tx, self.now()))
     }
@@ -2157,9 +2179,11 @@ impl MemoryStore {
     /// operation's in-transaction probe — instead of being gated on a later
     /// intent it did not create. A replay settles nothing: it produces no effect.
     ///
-    /// The section is taken before any transaction (**gate → flock →
-    /// transaction** is the one lock order this store uses) and held across the
-    /// operation's effect by the returned guard.
+    /// The caller has already run [`Self::admit_write`] — including the
+    /// retention sweep's own committed transaction — so the section is taken
+    /// before this operation's transaction (**gate → flock → transaction** is
+    /// the one lock order this store uses) and held across the operation's
+    /// effect by the returned guard.
     async fn begin_publication(
         &self,
         ctx: &OpContext<'_>,
@@ -6175,8 +6199,9 @@ impl MemoryStore {
             admission
         };
         let targets = [journal::candidate_target(candidate_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, effective, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -6560,8 +6585,9 @@ impl MemoryStore {
     ) -> StoreResult<ReceiptRow> {
         let record_id = mint_record_id();
         let targets = [journal::record_target(&record_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, admission, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -6753,8 +6779,9 @@ impl MemoryStore {
             admission
         };
         let targets = [journal::record_target(record_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, effective, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -6951,8 +6978,9 @@ impl MemoryStore {
             admission
         };
         let targets = [journal::record_target(record_id)];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, effective, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, effective, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
@@ -7090,8 +7118,9 @@ impl MemoryStore {
         ctx: &OpContext<'_>,
         admission: &Admission<'_>,
     ) -> StoreResult<MigrationOutcome> {
+        self.admit_write().await?;
         let mut publication = self.begin_publication_section().await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(recorded) = legacy::migration_marker(&mut tx, ctx.space_id).await? {
             let mut snapshot =
@@ -7257,8 +7286,9 @@ impl MemoryStore {
         updated_by: &str,
     ) -> StoreResult<ReceiptRow> {
         let targets = [journal::profile_target(subject_id, profile_kind)?];
+        self.admit_write().await?;
         let mut publication = self.begin_publication(ctx, admission, &targets).await?;
-        let (mut tx, now) = self.begin_admission().await?;
+        let (mut tx, now) = self.begin_admission_tx().await?;
         let _ = authorize(&mut tx, admission, now).await?;
         if let Some(row) = probe(&mut tx, ctx, now).await? {
             tx.rollback().await?;
