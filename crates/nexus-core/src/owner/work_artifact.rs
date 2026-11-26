@@ -302,13 +302,17 @@ impl FsWorkArtifactPort {
                 // The file changed between the unlocked diff and this write, so
                 // nothing can be written: report the skip instead of counting a
                 // resync that never landed.
-                tracing::warn!(
-                    work_id = %request.work_id,
-                    path = %target.display(),
-                    "reconcile: frontmatter status write-back skipped at apply time"
+                let path = format!("Works/{}/{}", request.work_ref, rel_child.display());
+                // stderr, not `tracing`: Creator commands send the subscriber to
+                // stdout, so a `warn!` here would corrupt `--json` output.
+                eprintln!(
+                    "reconcile: work {}: frontmatter status write-back skipped at apply time \
+                     for {path}: {}",
+                    request.work_id,
+                    work_chapters::UNRENDERABLE_FRONTMATTER_REASON
                 );
                 skipped.push(work_chapters::ReconcileSkip {
-                    path: format!("Works/{}/{}", request.work_ref, rel_child.display()),
+                    path,
                     reason: work_chapters::UNRENDERABLE_FRONTMATTER_REASON,
                 });
                 unrendered += 1;
