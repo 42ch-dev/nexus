@@ -516,7 +516,10 @@ pub async fn update_paths(
 }
 
 /// Reason recorded when a chapter's frontmatter status write-back is skipped.
-const UNRENDERABLE_FRONTMATTER_REASON: &str =
+///
+/// Public so the apply phase — which re-renders the file it already diffed and
+/// can find it unrenderable — reports the skip with this exact wording.
+pub const UNRENDERABLE_FRONTMATTER_REASON: &str =
     "status cannot be rendered (no opening `---` or an unclosed block)";
 
 /// One chapter whose frontmatter status write-back reconcile had to skip.
@@ -545,7 +548,9 @@ pub struct ReconcileReport {
     /// These bytes are committed by the caller's Work byte-write port, never by
     /// [`apply_reconcile_diff`] — this counter is a file count, not a DB row
     /// count. A file whose frontmatter status cannot be rendered is never
-    /// counted here; it appears in [`ReconcileReport::skipped`] instead.
+    /// counted here; it appears in [`ReconcileReport::skipped`] instead. That
+    /// includes a file that was renderable when the diff ran but stopped being
+    /// renderable before the write: the apply phase reports it the same way.
     pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,

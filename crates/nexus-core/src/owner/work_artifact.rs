@@ -275,6 +275,8 @@ impl FsWorkArtifactPort {
         request: &WorkReconcile<'_>,
         diff: &ReconcileDiff,
     ) -> Result<ReconcileReport, NexusApiError> {
+        let mut unrendered = 0u32;
+        let mut skipped = diff.skipped.clone();
         for op in &diff.ops {
             let ReconcileOp::ResyncFileStatus {
                 rel_child,
@@ -297,6 +299,19 @@ impl FsWorkArtifactPort {
                 })?;
             let Some(rendered) = work_chapters::render_frontmatter_status(&content, db_status)
             else {
+                // The file changed between the unlocked diff and this write, so
+                // nothing can be written: report the skip instead of counting a
+                // resync that never landed.
+                tracing::warn!(
+                    work_id = %request.work_id,
+                    path = %target.display(),
+                    "reconcile: frontmatter status write-back skipped at apply time"
+                );
+                skipped.push(work_chapters::ReconcileSkip {
+                    path: format!("Works/{}/{}", request.work_ref, rel_child.display()),
+                    reason: work_chapters::UNRENDERABLE_FRONTMATTER_REASON,
+                });
+                unrendered += 1;
                 continue;
             };
             self.write_locked(WorkArtifactWrite {
@@ -307,11 +322,16 @@ impl FsWorkArtifactPort {
             })
             .await?;
         }
-        work_chapters::apply_reconcile_diff(&self.pool, request.work_id, request.now, diff)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!("DATABASE_ERROR: reconcile apply failed: {e}"),
-            })
+        let mut report =
+            work_chapters::apply_reconcile_diff(&self.pool, request.work_id, request.now, diff)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    category: format!("DATABASE_ERROR: reconcile apply failed: {e}"),
+                })?;
+        // `to_report` counts every resync op; the ones skipped above wrote nothing.
+        report.resynced = report.resynced.saturating_sub(unrendered);
+        report.skipped = skipped;
+        Ok(report)
     }
 
     /// The write itself, run while the caller holds the Work lock:
@@ -1328,5 +1348,44 @@ mod tests {
             None,
             "the lock is released on the error path"
         );
+    }
+
+    /// The unlocked diff sees a renderable chapter, then the file stops being
+    /// renderable before the write phase (the stale-diff window). The apply
+    /// phase must report the skip instead of counting a resync it never wrote.
+    #[tokio::test]
+    async fn reconcile_reports_a_chapter_that_became_unrenderable_after_the_diff() {
+        let fixture = fixture(true).await;
+        seed_chapter(&fixture.pool, "draft").await;
+        let path = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&path, "finalized", "Body text");
+        let broken = "---\nchapter: 1\nstatus: finalized\nUnclosed body";
+        let broken_path = path.clone();
+
+        let report = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| {
+                // The recheck runs between the unlocked diff and the write phase.
+                std::fs::write(&broken_path, broken).expect("break the frontmatter");
+                Ok(())
+            })
+            .await
+            .expect("reconcile");
+
+        assert_eq!(report.resynced, 0, "no resync byte was written");
+        assert_eq!(
+            report.skipped,
+            vec![nexus_local_db::work_chapters::ReconcileSkip {
+                path: "Works/demo/Stories/ch01-intro.md".to_string(),
+                reason: nexus_local_db::work_chapters::UNRENDERABLE_FRONTMATTER_REASON,
+            }],
+            "the outcome names the chapter and the reason"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            broken,
+            "the file keeps the bytes the diff never wrote"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
     }
 }
