@@ -46,7 +46,7 @@ use nexus_workflow_ir::{
     WorkflowRoleDefinition, WorkflowSignalBinding, WorkflowSignalBindingAction,
     WorkflowWorldBinding, WorkflowWorldBindingMode,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
 
@@ -215,7 +215,8 @@ impl AssetSource for EmbeddedAssetSource<'_> {
 /// Returns [`WorkflowIrError::AssetRead`] when a referenced asset is missing, unreadable, or
 /// refused by `source` (a [`FsAssetSource`] escape, for one),
 /// [`WorkflowIrError::NotProjectable`] when a referenced path is unsafe (absolute, `..`
-/// traversal) or the manifest header cannot form a document, and
+/// traversal), the manifest header cannot form a document, or an inner graph's
+/// `output_binding` names no node by its owner segment, and
 /// [`WorkflowIrError::EmptyConditionalRules`] when a judged state's `next` is a
 /// `Conditional`/`Branches` form carrying no rules. A non-judged state's
 /// `{branches: [], default: <id>}` next is accepted and re-exports in that same form.
@@ -266,6 +267,10 @@ pub fn import_preset_bundle(
         });
     }
 
+    // The projection runs last on purpose: every asset read and the terminal count above have
+    // already reported their own defects, so a projection refusal (an unbound owner, for one)
+    // cannot mask a missing or unsafe asset. Manifest-only scans are deterministic, so this order
+    // is stable across runs.
     Ok(PresetIrImport {
         document: document_from_manifest(manifest, assets)?,
         assets: asset_bytes,
@@ -280,11 +285,12 @@ pub fn import_preset_bundle(
 ///
 /// Unlike [`import_preset_bundle`] this does not refuse a manifest whose terminal markers disagree
 /// with `preset.terminal` or whose asset files are missing or unsafe — validation reports those
-/// defects on the document instead.
+/// defects on the projected document instead.
 ///
 /// # Errors
 ///
-/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id, and
+/// Returns [`WorkflowIrError::NotProjectable`] when `preset.id` is not a valid IR id or an inner
+/// graph's `output_binding` names no node by its owner segment, and
 /// [`WorkflowIrError::EmptyConditionalRules`] when a judged state's `next` is a
 /// `Conditional`/`Branches` form carrying no rules. A non-judged state's
 /// `{branches: [], default: <id>}` next is accepted and re-exports in that same form.
@@ -298,6 +304,18 @@ fn document_from_manifest(
     manifest: &PresetManifest,
     assets: Vec<WorkflowAssetRef>,
 ) -> Result<WorkflowDocument, WorkflowIrError> {
+    // A step id must be one segment: node ids are `<inner_graph>/<step>`, so a slashed step id
+    // would export it under a different graph.
+    if let Some((graph_name, step_id)) = slashed_inner_step(manifest) {
+        return Err(refuse(format!(
+            "inner graph `{graph_name}` step id `{step_id}` contains '/'; an inner step id is a single segment"
+        )));
+    }
+    if let Some((graph_name, binding, owner)) = unknown_output_owner(manifest) {
+        return Err(refuse(format!(
+            "inner graph `{graph_name}` output binding `{binding}` names owner `{owner}`, which is no node in the graph"
+        )));
+    }
     let header = &manifest.preset;
     let id = WorkflowDocumentId::try_from(header.id.clone())
         .map_err(|e| refuse(format!("preset id `{}` is not an IR id: {e}", header.id)))?;
@@ -311,8 +329,14 @@ fn document_from_manifest(
     }
     if let Some(graphs) = &manifest.inner_graphs {
         for (graph_name, graph) in graphs {
+            let owner = graph.output_binding.as_deref().map(output_binding_owner);
             for step in &graph.nodes {
-                nodes.push(inner_step_node(graph_name, graph, step));
+                nodes.push(inner_step_node(
+                    graph_name,
+                    owner == Some(step.id.as_str()),
+                    graph,
+                    step,
+                ));
             }
         }
     }
@@ -418,10 +442,79 @@ fn state_node(state: &StateDefinition) -> WorkflowNode {
     }
 }
 
-fn inner_step_node(graph_name: &str, graph: &InnerGraph, step: &GraphNode) -> WorkflowNode {
-    let owns_output = graph.output_binding.as_deref().is_some_and(|binding| {
-        binding.rsplit_once('.').map_or(binding, |(owner, _)| owner) == step.id
-    });
+/// The node a preset `output_binding` names: the segment before the first dot.
+///
+/// This is the loader's rule (`loader.rs` validates the same segment) and the adapter's only owner
+/// rule: the binding names its owner directly, so no step-list scan or tail-segment reading may
+/// re-derive it. A dotless binding names that node itself.
+pub(crate) fn output_binding_owner(binding: &str) -> &str {
+    binding.split('.').next().unwrap_or(binding)
+}
+
+/// An inner graph `output_binding` whose owner segment names no node: `(graph, binding, owner)`.
+pub(crate) type UnknownOutputOwner<'a> = (&'a str, &'a str, &'a str);
+
+/// Every inner graph whose `output_binding` owner names no node in that graph, in graph-name order.
+///
+/// One detection for the projection refusal and validation's diagnostics: the loader rejects the
+/// same shape as an unknown node, so a projection must refuse instead of dropping the binding.
+/// A dotted step id (`review.v2` with binding `review.v2.text`) is exactly this case — the owner
+/// is the first segment, which is no step.
+pub(crate) fn unknown_output_owners(manifest: &PresetManifest) -> Vec<UnknownOutputOwner<'_>> {
+    let Some(graphs) = manifest.inner_graphs.as_ref() else {
+        return Vec::new();
+    };
+    graphs
+        .iter()
+        .filter_map(|(graph, inner)| {
+            let binding = inner.output_binding.as_deref()?;
+            let owner = output_binding_owner(binding);
+            (!inner.nodes.iter().any(|step| step.id == owner)).then_some((
+                graph.as_str(),
+                binding,
+                owner,
+            ))
+        })
+        .collect()
+}
+
+/// The first inner graph whose `output_binding` owner names no node — the carrier a refusal names.
+pub(crate) fn unknown_output_owner(manifest: &PresetManifest) -> Option<UnknownOutputOwner<'_>> {
+    unknown_output_owners(manifest).into_iter().next()
+}
+
+/// Every inner step whose id contains `/`, as `(graph, step id)` in graph-name order.
+///
+/// The node-id encoding is `<inner_graph>/<step>` with one segment per step, so a slashed step id
+/// cannot be represented; the projection refuses the first one and validation names all of them.
+/// Graph names may contain `/`: the last segment is the step.
+pub(crate) fn slashed_inner_steps(manifest: &PresetManifest) -> Vec<(&str, &str)> {
+    let Some(graphs) = manifest.inner_graphs.as_ref() else {
+        return Vec::new();
+    };
+    graphs
+        .iter()
+        .flat_map(|(graph, inner)| {
+            inner
+                .nodes
+                .iter()
+                .filter(|step| step.id.contains('/'))
+                .map(|step| (graph.as_str(), step.id.as_str()))
+        })
+        .collect()
+}
+
+/// The first inner step whose id contains `/` — the carrier the projection refusal names.
+pub(crate) fn slashed_inner_step(manifest: &PresetManifest) -> Option<(&str, &str)> {
+    slashed_inner_steps(manifest).into_iter().next()
+}
+
+fn inner_step_node(
+    graph_name: &str,
+    owns_output: bool,
+    graph: &InnerGraph,
+    step: &GraphNode,
+) -> WorkflowNode {
     WorkflowNode {
         id: format!("{graph_name}/{}", step.id),
         kind: WorkflowNodeKind::InnerStep,
@@ -918,11 +1011,67 @@ pub fn export_preset(document: &WorkflowDocument) -> Result<PresetManifest, Work
     })
 }
 
+/// Inner step ids per graph, as the last-`/` rule derives them.
+fn inner_graph_steps(document: &WorkflowDocument) -> BTreeMap<&str, BTreeSet<&str>> {
+    let mut steps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for node in &document.nodes {
+        if node.kind == WorkflowNodeKind::InnerStep {
+            if let Some((graph, step_id)) = node.id.rsplit_once('/') {
+                steps.entry(graph).or_default().insert(step_id);
+            }
+        }
+    }
+    steps
+}
+
+/// Dependencies a preset cannot express, as `(node id, dependency, graph)`.
+///
+/// The loader resolves `depends_on` only against the graph's own step ids, so a dependency is
+/// expressible exactly when its id, once stripped of its own graph prefix, names a step of that
+/// graph. Everything else — another graph's step, or an id no step carries — is refused.
+fn unexpressible_dependencies(document: &WorkflowDocument) -> Vec<(&str, &str, &str)> {
+    let steps = inner_graph_steps(document);
+    let mut refused = Vec::new();
+    for node in &document.nodes {
+        if node.kind != WorkflowNodeKind::InnerStep {
+            continue;
+        }
+        let Some((graph, _)) = node.id.rsplit_once('/') else {
+            continue;
+        };
+        for dependency in &node.depends_on {
+            let local = dependency
+                .strip_prefix(&format!("{graph}/"))
+                .unwrap_or(dependency);
+            if !steps
+                .get(graph)
+                .is_some_and(|step_ids| step_ids.contains(local))
+            {
+                refused.push((node.id.as_str(), dependency.as_str(), graph));
+            }
+        }
+    }
+    refused
+}
+
 fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, WorkflowIrError> {
     let mut states = Vec::new();
     let mut steps: BTreeMap<String, Vec<GraphNode>> = BTreeMap::new();
     let mut bindings: BTreeMap<String, String> = BTreeMap::new();
     let outgoing = outgoing_edges(document);
+    // Every step id per graph, so a binding can be checked against its graph before any node is
+    // projected: import refuses an owner that names no step, and export must not hand out a
+    // manifest that import would then refuse. The step is the last `/` segment and the graph is
+    // everything before it — a graph name may itself contain `/`, and a nested key no state enters
+    // is simply an unused graph.
+    let graph_steps = inner_graph_steps(document);
+    if let Some((node_id, dependency, graph)) =
+        unexpressible_dependencies(document).into_iter().next()
+    {
+        return Err(refuse(format!(
+            "inner step `{node_id}` depends on `{dependency}`, which is not a step of inner graph `{graph}`; a preset cannot express that dependency"
+        )));
+    }
 
     for node in &document.nodes {
         match &node.kind {
@@ -933,7 +1082,7 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                 states.push(state_from_node(node, next_edges)?);
             }
             WorkflowNodeKind::InnerStep => {
-                let (graph, step_id) = node.id.split_once('/').ok_or_else(|| {
+                let (graph, step_id) = node.id.rsplit_once('/').ok_or_else(|| {
                     refuse(format!(
                         "inner step `{}` is not `<inner_graph>/<node_id>`",
                         node.id
@@ -941,6 +1090,22 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                 })?;
                 let graph_key = graph.to_string();
                 if let Some(binding) = &node.output_binding {
+                    let owner = output_binding_owner(binding);
+                    if !graph_steps
+                        .get(graph)
+                        .is_some_and(|steps| steps.contains(owner))
+                    {
+                        return Err(refuse(format!(
+                            "inner graph `{graph_key}` output binding `{binding}` names owner `{owner}`, which is no node in the graph"
+                        )));
+                    }
+                    // A graph exports exactly one binding: `output_binding_owner` binds it to a
+                    // single step, so a second claim — same owner or another — has no projection.
+                    if let Some(claimant) = bindings.get(&graph_key) {
+                        return Err(refuse(format!(
+                            "inner graph `{graph_key}` carries two output bindings (`{claimant}` and `{binding}`); a graph exports exactly one"
+                        )));
+                    }
                     bindings.insert(graph_key.clone(), binding.clone());
                 }
                 steps.entry(graph_key).or_default().push(GraphNode {
@@ -950,6 +1115,8 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                         .depends_on
                         .iter()
                         .map(|dependency| {
+                            // Validated by `unexpressible_dependencies`: the remainder names a step
+                            // of this graph, which is the only form the loader resolves.
                             dependency
                                 .strip_prefix(&format!("{graph}/"))
                                 .unwrap_or(dependency)
@@ -970,6 +1137,8 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
         }
     }
 
+    refuse_dangling_graph_references(document, &steps)?;
+
     if steps.is_empty() {
         return Ok((states, None));
     }
@@ -985,6 +1154,38 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
         );
     }
     Ok((states, Some(graphs)))
+}
+
+/// Refuse a state `enter` reference that no inner step defines.
+///
+/// The loader rejects a dangling reference, and export must not overwrite a preset with a file the
+/// loader refuses. `defined` is the graph-name set the inner steps export under.
+fn refuse_dangling_graph_references(
+    document: &WorkflowDocument,
+    defined: &BTreeMap<String, Vec<GraphNode>>,
+) -> Result<(), WorkflowIrError> {
+    for node in &document.nodes {
+        if !matches!(
+            node.kind,
+            WorkflowNodeKind::OuterState | WorkflowNodeKind::Terminal
+        ) {
+            continue;
+        }
+        for enter in &node.enter {
+            if enter.kind != WorkflowEnterActionKind::InnerGraph {
+                continue;
+            }
+            if let Some(name) = enter.name.as_deref() {
+                if !defined.contains_key(name) {
+                    return Err(refuse(format!(
+                        "state `{}` enters inner graph `{name}`, but no inner step belongs to it; the document's graph structure cannot be exported",
+                        node.id
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn preset_header(document: &WorkflowDocument) -> Result<PresetHeader, WorkflowIrError> {
@@ -1701,6 +1902,402 @@ states:
         assert_eq!(reimported.edges.len(), 1);
         assert_eq!(reimported.edges[0].kind, WorkflowEdgeKind::Default);
         assert_eq!(reimported.edges[0].to, "done");
+    }
+
+    #[test]
+    fn export_keeps_the_single_inner_graph_output_binding() {
+        let (dir, manifest) = bundle();
+        let imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        let binding = |node_id: &str| {
+            imported
+                .document
+                .nodes
+                .iter()
+                .find(|node| node.id == node_id)
+                .and_then(|node| node.output_binding.clone())
+        };
+        assert_eq!(
+            binding("work_graph/review"),
+            Some("review.text".to_string())
+        );
+        assert_eq!(binding("work_graph/draft"), None);
+
+        let exported = export_preset(&imported.document).expect("one owner exports");
+        assert_eq!(
+            exported
+                .inner_graphs
+                .as_ref()
+                .and_then(|graphs| graphs.get("work_graph"))
+                .and_then(|graph| graph.output_binding.as_deref()),
+            Some("review.text")
+        );
+    }
+
+    #[test]
+    fn export_refuses_a_second_output_binding_for_one_inner_graph() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        imported
+            .document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "work_graph/draft")
+            .expect("draft node")
+            .output_binding = Some("draft.text".to_string());
+
+        let error = export_preset(&imported.document)
+            .expect_err("a graph carries exactly one output binding");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["work_graph", "review.text", "draft.text"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    #[test]
+    fn import_binds_output_to_the_owner_segment() {
+        let manifest: PresetManifest = serde_yaml::from_str(&MANIFEST.replace(
+            "output_binding: review.text",
+            "output_binding: review.output.text",
+        ))
+        .expect("manifest parses");
+        let document = import_preset_manifest(&manifest).expect("import");
+        let binding = |node_id: &str| {
+            document
+                .nodes
+                .iter()
+                .find(|node| node.id == node_id)
+                .and_then(|node| node.output_binding.clone())
+        };
+        assert_eq!(
+            binding("work_graph/review"),
+            Some("review.output.text".to_string()),
+            "the segment before the first dot names the owner"
+        );
+        assert_eq!(binding("work_graph/draft"), None);
+    }
+
+    #[test]
+    fn import_and_export_keep_a_dotless_output_binding() {
+        let manifest: PresetManifest = serde_yaml::from_str(
+            &MANIFEST.replace("output_binding: review.text", "output_binding: review"),
+        )
+        .expect("manifest parses");
+        let document = import_preset_manifest(&manifest).expect("import");
+        let binding = |node_id: &str| {
+            document
+                .nodes
+                .iter()
+                .find(|node| node.id == node_id)
+                .and_then(|node| node.output_binding.clone())
+        };
+        assert_eq!(
+            binding("work_graph/review"),
+            Some("review".to_string()),
+            "a dotless binding names its own node"
+        );
+        assert_eq!(binding("work_graph/draft"), None);
+
+        let exported = export_preset(&document).expect("export");
+        assert_eq!(
+            exported
+                .inner_graphs
+                .as_ref()
+                .and_then(|graphs| graphs.get("work_graph"))
+                .and_then(|graph| graph.output_binding.as_deref()),
+            Some("review")
+        );
+        assert_eq!(
+            serde_json::to_value(&exported).expect("exported json"),
+            serde_json::to_value(&manifest).expect("manifest json"),
+            "a dotless binding survives import and export unchanged"
+        );
+    }
+
+    /// A dotted step id (`review.v2`) makes the loader's owner segment (`review`) name no step, so
+    /// every projection refuses instead of dropping the binding.
+    #[test]
+    fn import_refuses_an_output_binding_whose_owner_is_no_step() {
+        let manifest: PresetManifest = serde_yaml::from_str(
+            &MANIFEST.replace("- id: review", "- id: review.v2").replace(
+                "output_binding: review.text",
+                "output_binding: review.v2.text",
+            ),
+        )
+        .expect("manifest parses");
+
+        let error = import_preset_manifest(&manifest)
+            .expect_err("an owner segment that names no step is refused");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["work_graph", "`review.v2.text`", "`review`"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// An inner-graph name may contain `/`: the step is the last id segment, so export must not
+    /// split at the first one and turn the real owner into a phantom.
+    #[test]
+    fn import_and_export_round_trip_a_graph_name_with_a_slash() {
+        let (dir, _) = bundle();
+        let manifest: PresetManifest = serde_yaml::from_str(
+            &MANIFEST
+                .replace("  work_graph:", "  lane/work_graph:")
+                .replace("name: work_graph", "name: lane/work_graph"),
+        )
+        .expect("manifest parses");
+
+        let imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        let review = imported
+            .document
+            .nodes
+            .iter()
+            .find(|node| node.id == "lane/work_graph/review")
+            .expect("slashed graph step node");
+        assert_eq!(review.output_binding.as_deref(), Some("review.text"));
+
+        let exported = export_preset(&imported.document).expect("export");
+        assert_eq!(
+            serde_json::to_value(&exported).expect("exported json"),
+            serde_json::to_value(&manifest).expect("manifest json"),
+            "a graph name with a slash survives import and export unchanged"
+        );
+    }
+
+    /// One state enters a graph and a nested graph; the parent graph carries a same-graph
+    /// dependency. Export must keep both expressible, and the loader must accept the result.
+    const GRAPH_REFERENCE_MANIFEST: &str = r"
+preset:
+  id: graph-refs
+  version: 1
+  kind: creator
+  description: graph references
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: lane
+      - kind: inner_graph
+        name: lane/utility
+    exit_when: { kind: graph_complete }
+    next: done
+  - id: done
+    terminal: true
+inner_graphs:
+  lane:
+    nodes:
+      - id: x
+        kind: acp_prompt
+      - id: y
+        kind: acp_prompt
+        depends_on: [x]
+  lane/utility:
+    nodes:
+      - id: check
+        kind: acp_prompt
+";
+
+    fn graph_reference_manifest() -> PresetManifest {
+        serde_yaml::from_str(GRAPH_REFERENCE_MANIFEST).expect("manifest parses")
+    }
+
+    /// Threads 1 and 2, positive: document -> manifest -> loader. The exported preset names the
+    /// graphs that own the steps and keeps the same-graph dependency local, and the loader accepts
+    /// it.
+    #[test]
+    fn exported_graph_references_and_dependencies_load_cleanly() {
+        let document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        let exported = export_preset(&document).expect("export");
+        let yaml = serde_yaml::to_string(&exported).expect("yaml");
+
+        let loaded = crate::load_preset_from_str(
+            &yaml,
+            &crate::capability_catalog::BuiltinCapabilityCatalog,
+        )
+        .expect("the loader accepts the exported preset");
+
+        let enters: Vec<&str> = loaded
+            .manifest
+            .states
+            .iter()
+            .flat_map(|state| state.enter.iter())
+            .filter_map(|enter| match enter {
+                crate::manifest::EnterAction::InnerGraph { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(enters, vec!["lane", "lane/utility"]);
+
+        let lane = loaded
+            .manifest
+            .inner_graphs
+            .as_ref()
+            .and_then(|graphs| graphs.get("lane"))
+            .expect("lane graph loads");
+        let y = lane
+            .nodes
+            .iter()
+            .find(|node| node.id == "y")
+            .expect("y step");
+        assert_eq!(y.depends_on, vec!["x".to_string()]);
+    }
+
+    /// Thread 1, negative: steps that only exist under a nested graph name leave the state's
+    /// `enter` dangling, and a preset cannot express that.
+    #[test]
+    fn export_refuses_a_state_entering_a_graph_with_no_steps() {
+        let mut document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        for node in &mut document.nodes {
+            if node.id == "lane/x" || node.id == "lane/y" {
+                node.id = node.id.replacen("lane/", "lane/nested/", 1);
+            }
+            for dependency in &mut node.depends_on {
+                if dependency == "lane/x" {
+                    *dependency = "lane/nested/x".to_string();
+                }
+            }
+        }
+
+        let error =
+            export_preset(&document).expect_err("a dangling graph reference has no preset form");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["state `a`", "lane"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// Thread 2, negative: the loader resolves `depends_on` only within one graph, so a
+    /// cross-graph dependency must be refused instead of exported as a local id.
+    #[test]
+    fn export_refuses_a_cross_graph_dependency() {
+        let mut document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "lane/y")
+            .expect("y step")
+            .depends_on = vec!["lane/utility/check".to_string()];
+
+        let error =
+            export_preset(&document).expect_err("a cross-graph dependency has no preset form");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["lane/y", "lane/utility/check", "cannot express"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// A bare dependency id the graph does not carry is a loader "unknown node", so export refuses
+    /// it too — the valid same-graph direction is covered by the round-trip test above.
+    #[test]
+    fn export_refuses_an_unknown_bare_dependency() {
+        let mut document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "lane/y")
+            .expect("y step")
+            .depends_on = vec!["ghost".to_string()];
+
+        let error = export_preset(&document).expect_err("an unknown dependency has no preset form");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["lane/y", "ghost", "lane"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// A step id is one id segment: a slashed step would export under a different graph than the
+    /// state's `enter` names, so import refuses it.
+    #[test]
+    fn import_refuses_a_step_id_with_a_slash() {
+        let manifest: PresetManifest =
+            serde_yaml::from_str(&MANIFEST.replace("- id: draft", "- id: a/b"))
+                .expect("manifest parses");
+
+        let error = import_preset_manifest(&manifest).expect_err("a slashed step id is refused");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["work_graph", "`a/b`", "single segment"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// An inner graph no state enters is unreferenced, not malformed: it still exports, even when
+    /// its name contains `/`.
+    #[test]
+    fn export_keeps_an_unreferenced_nested_graph() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        let mut orphan = imported
+            .document
+            .nodes
+            .iter()
+            .find(|node| node.id == "work_graph/draft")
+            .expect("draft node")
+            .clone();
+        orphan.id = "lane/orphan/n1".to_string();
+        orphan.output_binding = None;
+        orphan.depends_on.clear();
+        imported.document.nodes.push(orphan);
+
+        let exported = export_preset(&imported.document).expect("an unreferenced graph exports");
+        let orphan_graph = exported
+            .inner_graphs
+            .as_ref()
+            .and_then(|graphs| graphs.get("lane/orphan"))
+            .expect("the unreferenced nested graph keeps its key");
+        assert_eq!(orphan_graph.nodes.len(), 1);
+        assert_eq!(orphan_graph.nodes[0].id, "n1");
+        assert!(orphan_graph.output_binding.is_none());
+    }
+
+    /// Export refuses the same shape as import: a binding whose owner is no sibling step must not
+    /// leave as a manifest that import would then refuse.
+    #[test]
+    fn export_refuses_an_output_binding_whose_owner_is_no_step() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        imported
+            .document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "work_graph/review")
+            .expect("review node")
+            .output_binding = Some("ghost.text".to_string());
+
+        let error = export_preset(&imported.document)
+            .expect_err("an owner that names no step has no projection");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["work_graph", "`ghost.text`", "`ghost`"] {
+            assert!(message.contains(expected), "{message}");
+        }
     }
 
     #[test]

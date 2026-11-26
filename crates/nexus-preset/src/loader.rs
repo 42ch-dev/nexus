@@ -858,7 +858,7 @@ fn validate_manifest(
             }
 
             if let Some(ref binding) = ig.output_binding {
-                let node_id = binding.split('.').next().unwrap_or(binding);
+                let node_id = crate::workflow_ir::output_binding_owner(binding);
                 if !node_ids.contains(node_id) {
                     problems.push(ValidationProblem {
                         path: format!("{ig_path}.output_binding"),
