@@ -1011,6 +1011,49 @@ pub fn export_preset(document: &WorkflowDocument) -> Result<PresetManifest, Work
     })
 }
 
+/// Inner step ids per graph, as the last-`/` rule derives them.
+fn inner_graph_steps(document: &WorkflowDocument) -> BTreeMap<&str, BTreeSet<&str>> {
+    let mut steps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for node in &document.nodes {
+        if node.kind == WorkflowNodeKind::InnerStep {
+            if let Some((graph, step_id)) = node.id.rsplit_once('/') {
+                steps.entry(graph).or_default().insert(step_id);
+            }
+        }
+    }
+    steps
+}
+
+/// Dependencies a preset cannot express, as `(node id, dependency, graph)`.
+///
+/// The loader resolves `depends_on` only against the graph's own step ids, so a dependency is
+/// expressible exactly when its id, once stripped of its own graph prefix, names a step of that
+/// graph. Everything else — another graph's step, or an id no step carries — is refused.
+fn unexpressible_dependencies(document: &WorkflowDocument) -> Vec<(&str, &str, &str)> {
+    let steps = inner_graph_steps(document);
+    let mut refused = Vec::new();
+    for node in &document.nodes {
+        if node.kind != WorkflowNodeKind::InnerStep {
+            continue;
+        }
+        let Some((graph, _)) = node.id.rsplit_once('/') else {
+            continue;
+        };
+        for dependency in &node.depends_on {
+            let local = dependency
+                .strip_prefix(&format!("{graph}/"))
+                .unwrap_or(dependency);
+            if !steps
+                .get(graph)
+                .is_some_and(|step_ids| step_ids.contains(local))
+            {
+                refused.push((node.id.as_str(), dependency.as_str(), graph));
+            }
+        }
+    }
+    refused
+}
+
 fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, WorkflowIrError> {
     let mut states = Vec::new();
     let mut steps: BTreeMap<String, Vec<GraphNode>> = BTreeMap::new();
@@ -1021,13 +1064,13 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
     // manifest that import would then refuse. The step is the last `/` segment and the graph is
     // everything before it — a graph name may itself contain `/`, and a nested key no state enters
     // is simply an unused graph.
-    let mut graph_steps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    for node in &document.nodes {
-        if node.kind == WorkflowNodeKind::InnerStep {
-            if let Some((graph, step_id)) = node.id.rsplit_once('/') {
-                graph_steps.entry(graph).or_default().insert(step_id);
-            }
-        }
+    let graph_steps = inner_graph_steps(document);
+    if let Some((node_id, dependency, graph)) =
+        unexpressible_dependencies(document).into_iter().next()
+    {
+        return Err(refuse(format!(
+            "inner step `{node_id}` depends on `{dependency}`, which is not a step of inner graph `{graph}`; a preset cannot express that dependency"
+        )));
     }
 
     for node in &document.nodes {
@@ -1072,21 +1115,14 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                         .depends_on
                         .iter()
                         .map(|dependency| {
-                            // The loader resolves `depends_on` only among one graph's own step ids,
-                            // so a same-graph dependency exports as its local id and anything else
-                            // (another graph's step) has no preset form.
-                            let local = dependency
+                            // Validated by `unexpressible_dependencies`: the remainder names a step
+                            // of this graph, which is the only form the loader resolves.
+                            dependency
                                 .strip_prefix(&format!("{graph}/"))
-                                .unwrap_or(dependency);
-                            if local.contains('/') {
-                                return Err(refuse(format!(
-                                    "inner step `{}` depends on `{dependency}`, which is not a step of inner graph `{graph}`; a preset cannot express a cross-graph dependency",
-                                    node.id
-                                )));
-                            }
-                            Ok(local.to_string())
+                                .unwrap_or(dependency)
+                                .to_string()
                         })
-                        .collect::<Result<Vec<_>, WorkflowIrError>>()?,
+                        .collect(),
                     template_file: node.template.clone(),
                     tool_policy: node.tool_policy.clone(),
                     agent: node.role.clone(),
@@ -2163,7 +2199,27 @@ inner_graphs:
             export_preset(&document).expect_err("a cross-graph dependency has no preset form");
         assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
         let message = error.to_string();
-        for expected in ["lane/y", "lane/utility/check", "cross-graph"] {
+        for expected in ["lane/y", "lane/utility/check", "cannot express"] {
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    /// A bare dependency id the graph does not carry is a loader "unknown node", so export refuses
+    /// it too — the valid same-graph direction is covered by the round-trip test above.
+    #[test]
+    fn export_refuses_an_unknown_bare_dependency() {
+        let mut document = import_preset_manifest(&graph_reference_manifest()).expect("import");
+        document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "lane/y")
+            .expect("y step")
+            .depends_on = vec!["ghost".to_string()];
+
+        let error = export_preset(&document).expect_err("an unknown dependency has no preset form");
+        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
+        let message = error.to_string();
+        for expected in ["lane/y", "ghost", "lane"] {
             assert!(message.contains(expected), "{message}");
         }
     }

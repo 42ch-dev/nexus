@@ -799,6 +799,17 @@ fn rename_state_references(
 
 // ─── Domain validation ─────────────────────────────────────────────────────
 
+/// Append `path: message` unless that exact rendered diagnostic is already present.
+///
+/// The semantic, path-safety and asset entries deliberately overlap (an unsafe asset path is
+/// reported by more than one), and both daemon responses must show each defect once.
+fn push_unique_diagnostic(seen: &mut Vec<String>, path: &str, message: &str) {
+    let rendered = format!("{path}: {message}");
+    if !seen.contains(&rendered) {
+        seen.push(rendered);
+    }
+}
+
 /// Run the same preset validation the loader uses and return (errors, warnings).
 fn validate_preset_yaml(
     bundle_root: &std::path::Path,
@@ -812,25 +823,20 @@ fn validate_preset_yaml(
 
     let caps = BuiltinCapabilityCatalog;
 
-    let mut errors: Vec<String> = nexus_preset::loader_validate_manifest_compat(&manifest, &caps)
-        .iter()
-        .map(|p| format!("{}: {}", p.path, p.error))
-        .collect();
+    let mut errors: Vec<String> = Vec::new();
+    for p in nexus_preset::loader_validate_manifest_compat(&manifest, &caps) {
+        push_unique_diagnostic(&mut errors, &p.path, &p.error);
+    }
 
     let sem = nexus_preset::validate_preset_semantic(&manifest, &caps);
     let path_result = nexus_preset::validate_path_safety(&manifest);
     let asset_result = nexus_preset::validate_assets_in_bundle(&manifest, bundle_root);
-    // The semantic entry and the path-safety entry both check unsafe asset paths, so this merge
-    // point must not surface the same (path, message) twice.
     for d in sem
         .errors()
         .chain(path_result.errors())
         .chain(asset_result.errors())
     {
-        let rendered = format!("{}: {}", d.path, d.message);
-        if !errors.contains(&rendered) {
-            errors.push(rendered);
-        }
+        push_unique_diagnostic(&mut errors, &d.path, &d.message);
     }
 
     let mut warnings: Vec<String> = Vec::new();
@@ -839,10 +845,7 @@ fn validate_preset_yaml(
         .chain(path_result.warnings())
         .chain(asset_result.warnings())
     {
-        let rendered = format!("{}: {}", d.path, d.message);
-        if !warnings.contains(&rendered) {
-            warnings.push(rendered);
-        }
+        push_unique_diagnostic(&mut warnings, &d.path, &d.message);
     }
 
     Ok((errors, warnings))
@@ -2016,7 +2019,8 @@ fn validate_preset_file(
             nexus_preset::validate_assets_in_bundle(&manifest, &bundle_root)
         });
 
-    // Combine diagnostics from path safety + semantic + asset checks
+    // Combine diagnostics from path safety + semantic + asset checks. The rendered paths are
+    // relative, never host paths, and each defect is reported once.
     let mut errors: Vec<String> = Vec::new();
     for d in path_result
         .diagnostics
@@ -2025,19 +2029,20 @@ fn validate_preset_file(
         .chain(asset_result.diagnostics.iter())
         .filter(|d| d.severity == nexus_preset::DiagnosticSeverity::Error)
     {
-        // Sanitize: use only the relative path, not full host FS path
-        errors.push(format!("{}: {}", d.path, d.message));
+        push_unique_diagnostic(&mut errors, &d.path, &d.message);
     }
 
     // Warnings are reported separately in the response (informational).
-    let warnings: Vec<String> = path_result
+    let mut warnings: Vec<String> = Vec::new();
+    for d in path_result
         .diagnostics
         .iter()
         .chain(sem_result.diagnostics.iter())
         .chain(asset_result.diagnostics.iter())
         .filter(|d| d.severity == nexus_preset::DiagnosticSeverity::Warning)
-        .map(|d| format!("{}: {}", d.path, d.message))
-        .collect();
+    {
+        push_unique_diagnostic(&mut warnings, &d.path, &d.message);
+    }
 
     let valid = errors.is_empty();
     Ok(ValidatePresetResponse {
@@ -2354,6 +2359,56 @@ inner_graphs:
         assert_eq!(
             traversal, 1,
             "the same path-safety error must reach the user once: {errors:?}"
+        );
+    }
+
+    /// Thread 2: the file entry point merges the same three results as the YAML one. A role prompt
+    /// with an unsafe path is reported by the semantic and path-safety checks (the loader's own
+    /// sweep does not cover role prompts), and the response must carry it once.
+    #[test]
+    fn validate_preset_file_dedupes_semantic_and_path_safety_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_path_buf();
+        let bundle = home.join("presets").join("unsafe-role");
+        std::fs::create_dir_all(&bundle).unwrap();
+        let yaml = r"preset:
+  id: unsafe-role
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: writer
+    description: Writer
+    system_prompt_file: ../evil.md
+    recommended_skills: [novel]
+";
+        let file = bundle.join("preset.yaml");
+        std::fs::write(&file, yaml).unwrap();
+        let request = ValidatePresetRequest {
+            path: file.to_string_lossy().into_owned(),
+        };
+
+        let response = validate_preset_file(&home, &request).expect("validates");
+        let traversal = response
+            .errors
+            .iter()
+            .filter(|error| error.contains("directory traversal"))
+            .count();
+        assert_eq!(
+            traversal, 1,
+            "the role prompt path-safety error must reach the user once: {:?}",
+            response.errors
         );
     }
 

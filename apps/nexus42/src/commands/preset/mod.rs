@@ -779,10 +779,15 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
 
     let caps = CapabilityRegistry::with_builtins();
 
-    if let Ok(manifest) = export_preset(&document) {
-        for problem in loader_validate_manifest_compat(&manifest, &caps) {
-            errors.push(format!("{}: {}", problem.path, problem.error));
+    match export_preset(&document) {
+        Ok(manifest) => {
+            for problem in loader_validate_manifest_compat(&manifest, &caps) {
+                errors.push(format!("{}: {}", problem.path, problem.error));
+            }
         }
+        // `validate` must not pass a document `export` refuses: the refusal names the carrier it
+        // could not project (a node, its dependency, or the graph).
+        Err(error) => errors.push(format!("preset.export: {error}")),
     }
 
     for diagnostic in validate_workflow_ir_path_safety(&document)
@@ -1113,6 +1118,70 @@ mod tests {
             PresetCli::try_parse_from(argv)
                 .unwrap_or_else(|e| panic!("{argv:?} should parse: {e}"));
         }
+    }
+
+    /// A document `preset export` refuses must not pass `preset validate`: the IR validation entry
+    /// surfaces the export refusal instead of discarding it.
+    #[test]
+    fn validate_workflow_ir_file_reports_an_export_refusal() {
+        let manifest: nexus_contracts::local::orchestration::preset::PresetManifest =
+            serde_yaml::from_str(
+                r"
+preset:
+  id: graph-refs
+  version: 1
+  kind: creator
+  description: graph references
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: lane
+    exit_when: { kind: graph_complete }
+    next: done
+  - id: done
+    terminal: true
+inner_graphs:
+  lane:
+    nodes:
+      - id: x
+        kind: acp_prompt
+      - id: y
+        kind: acp_prompt
+        depends_on: [x]
+  lane/utility:
+    nodes:
+      - id: check
+        kind: acp_prompt
+",
+            )
+            .expect("manifest parses");
+        let mut document =
+            nexus_preset::workflow_ir::import_preset_manifest(&manifest).expect("import");
+        document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "lane/y")
+            .expect("y step")
+            .depends_on = vec!["lane/utility/check".to_string()];
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("graph-refs.workflow.ir.json");
+        std::fs::write(&file, serde_json::to_string(&document).expect("json")).expect("write");
+
+        let response = validate_workflow_ir_file(&file).expect("validates");
+        assert_eq!(response["valid"], serde_json::json!(false), "{response}");
+        let errors = response["errors"].as_array().expect("errors array");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.as_str().unwrap_or_default().contains("depends on")),
+            "{response}"
+        );
     }
 
     #[test]
