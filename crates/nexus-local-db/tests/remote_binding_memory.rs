@@ -160,14 +160,17 @@ async fn dependencies(pool: &SqlitePool, binding_id: &str) -> (i64, i64) {
 }
 
 async fn fact_states(pool: &SqlitePool, binding_id: &str) -> Vec<(String, String, String)> {
-    sqlx::query_as(
+    sqlx::query!(
         "SELECT object_kind, object_id, state FROM remote_binding_memory_objects \
          WHERE binding_id = ? ORDER BY object_kind, object_id",
+        binding_id
     )
-    .bind(binding_id)
     .fetch_all(pool)
     .await
     .unwrap()
+    .into_iter()
+    .map(|row| (row.object_kind, row.object_id, row.state))
+    .collect()
 }
 
 async fn remove(seed: &Seed, pool: &SqlitePool) -> Result<(), LocalDbError> {
