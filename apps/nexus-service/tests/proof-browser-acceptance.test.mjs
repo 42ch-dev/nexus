@@ -390,9 +390,18 @@ describe('proof-browser abrupt-restart group kill (QC3-C3)', () => {
   test('a parked group descendant is DETECTED before the kill and gone after the shared group kill', async () => {
     const leaderScript = `
 const { spawn } = require('node:child_process');
-spawn(process.execPath, ['-e', 'process.stdout.write("grandchild-ready-marker"); setInterval(() => {}, 1_000);'], { stdio: ['ignore', 'inherit', 'inherit'] });
+const grandchild = spawn(process.execPath, ['-e', 'process.stdout.write("grandchild-ready-marker"); setInterval(() => {}, 1_000);'], { stdio: ['ignore', 'pipe', 'pipe'] });
+// The parked grandchild must never own the runner's stdout: an inherited fd
+// keeps the runner's pipe open after the file's tests finish, so the file never
+// exits. Its output reaches the runner through the leader's own pipes instead.
+grandchild.stdout.pipe(process.stdout);
+grandchild.stderr.pipe(process.stderr);
 process.stdout.write('leader-ready-marker');
-setTimeout(() => process.exit(0), 100);
+// Exit only after the grandchild's marker reached the runner, so the test's
+// process-tree snapshot always sees the grandchild under a live leader; the
+// fallback keeps a grandchild that never writes from parking the leader.
+setTimeout(() => process.exit(0), 2_000);
+grandchild.stdout.once('data', () => setTimeout(() => process.exit(0), 250));
 `;
     const child = lifecycle.spawnLogged(process.execPath, ['-e', leaderScript], {
       label: 'nexus-service',
