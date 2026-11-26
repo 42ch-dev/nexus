@@ -13,7 +13,6 @@
 //! construction: that port lands nothing, so a dry run cannot rewrite a real
 //! chapter file.
 
-use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
 use nexus_home_layout::active_context::{
@@ -312,17 +311,6 @@ impl FsWorkArtifactPort {
                     .collect::<Vec<_>>()
                     .join("/");
                 let path = format!("Works/{}/{rel}", request.work_ref);
-                // stderr, not `tracing`: Creator commands send the subscriber to
-                // stdout, so a `warn!` here would corrupt `--json` output. The
-                // result is dropped on purpose — a rejected stderr write must not
-                // panic, because a panic here would strand the Work runtime lock.
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "reconcile: work {}: frontmatter status write-back skipped at apply time \
-                     for {path}: {}",
-                    request.work_id,
-                    work_chapters::UNRENDERABLE_FRONTMATTER_REASON
-                );
                 skipped.push(work_chapters::ReconcileSkip {
                     path,
                     reason: work_chapters::UNRENDERABLE_FRONTMATTER_REASON,
