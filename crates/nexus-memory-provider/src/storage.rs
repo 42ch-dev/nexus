@@ -83,7 +83,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 #[cfg(feature = "test-hooks")]
 use std::sync::atomic::AtomicU8;
-#[cfg(feature = "test-hooks")]
+#[cfg(any(feature = "test-hooks", test))]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -4824,22 +4824,50 @@ fn pinned_staleness(
     ))
 }
 
+/// One page of the visible reflection order: the visible rows to skip and the
+/// page's own row count.
+#[derive(Clone, Copy, Debug)]
+pub struct ReflectionWindow {
+    pub offset: u64,
+    pub limit: u64,
+}
+
+/// The subject's reflection envelope-set identity: its row count and highest
+/// store-assigned `seq`. Envelopes are insert-only — never updated, deleted or
+/// swept — so this pair changes on every insert and on nothing else: it names
+/// the same set the row scan would, without materialising the rows.
+async fn reflection_set_identity(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+) -> StoreResult<(i64, i64)> {
+    let identity = sqlx::query_as::<_, (i64, i64)>(
+        "SELECT COUNT(*), COALESCE(MAX(seq), 0) FROM memory_reflections \
+         WHERE space_id = ? AND subject_id = ?",
+    )
+    .bind(space_id)
+    .bind(subject_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(identity)
+}
+
 /// The MEM-R026 invalidation marker for a reflection page: a digest over the
-/// visible envelope set, *every* record identity of the subject (live and
-/// tombstoned — any basis-affecting change rebinds an outstanding cursor even
-/// when no reflection row moved), the subject's profile revisions (the same
-/// sorted pairs the state digest composes), the space's grant revisions and
-/// the subject status. A state or grant change therefore answers a stale
-/// cursor with `CURSOR_INVALID` (§7.0.7).
+/// subject's envelope-set identity (any insert rebinds an outstanding cursor),
+/// *every* record identity of the subject (live and tombstoned — any
+/// basis-affecting change rebinds a cursor even when no reflection row moved),
+/// the subject's profile revisions (the same sorted pairs the state digest
+/// composes), the space's grant revisions and the subject status. A state or
+/// grant change therefore answers a stale cursor with `CURSOR_INVALID`
+/// (§7.0.7).
 fn reflection_marker(
-    reflections: &[(String, i64)],
+    reflections: (i64, i64),
     records: &[(String, i64)],
     profile_revisions: &[(String, i64)],
     grants: &[GrantRow],
     subject_status: Option<&str>,
 ) -> StoreResult<String> {
-    let mut reflections = reflections.to_vec();
-    reflections.sort();
+    let (reflection_count, reflection_max_seq) = reflections;
     let mut grant_revisions: Vec<(String, i64)> = grants
         .iter()
         .map(|grant| (grant.grant_id.clone(), grant.revision))
@@ -4848,7 +4876,7 @@ fn reflection_marker(
     match crate::digest_value(&json!({
         "records": records,
         "profile_revisions": profile_revisions,
-        "reflections": reflections,
+        "reflections": { "count": reflection_count, "max_seq": reflection_max_seq },
         "grants": grant_revisions,
         "subject": subject_status,
     })) {
@@ -4867,9 +4895,12 @@ impl MemoryStore {
     /// the caller's covered reflections only), the request's provenance
     /// filter names the pin's own filter exactly (a present request filter
     /// returns only envelopes pinned to it; an absent one narrows nothing),
-    /// and the pin's basis delta is not tombstoning. The marker binds the
-    /// page to the snapshot it was cut from, so any state or grant change
-    /// invalidates outstanding cursors.
+    /// and the pin's basis delta is not tombstoning. The page is cut by
+    /// `LIMIT`-bounded statements over the newest-first scan, so a read never
+    /// materialises the rows past the page; `more` reports whether a visible
+    /// row follows it. The marker binds the page to the snapshot it was cut
+    /// from, so any envelope insert, state or grant change invalidates
+    /// outstanding cursors.
     pub async fn reflections(
         &self,
         space_id: &str,
@@ -4877,7 +4908,8 @@ impl MemoryStore {
         request_selection: Option<&Selection>,
         request_filter: Option<&[String]>,
         principal_id: &str,
-    ) -> StoreResult<(Vec<VisibleReflection>, String, u64)> {
+        window: ReflectionWindow,
+    ) -> StoreResult<(Vec<VisibleReflection>, String, bool)> {
         self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
@@ -4887,9 +4919,15 @@ impl MemoryStore {
         let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         if withheld(unsettled.as_ref(), subject_id)? {
+            let marker = reflection_marker(
+                reflection_set_identity(&mut tx, space_id, subject_id).await?,
+                &[],
+                &[],
+                &grant_rows,
+                subject_status.as_deref(),
+            )?;
             tx.commit().await?;
-            let marker = reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
-            return Ok((Vec::new(), marker, 0));
+            return Ok((Vec::new(), marker, false));
         }
         let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
         let (all_live, all_tombstones) =
@@ -4897,7 +4935,7 @@ impl MemoryStore {
                 .await?;
         let mut all_records = all_live;
         all_records.extend(all_tombstones);
-        let visible = visible_reflections_in_tx(
+        let (page, more) = visible_reflections_in_tx(
             &mut tx,
             &grants,
             principal_id,
@@ -4907,22 +4945,18 @@ impl MemoryStore {
             request_selection,
             request_filter,
             now,
+            Some(window),
         )
         .await?;
-        tx.commit().await?;
-        let marker_set: Vec<(String, i64)> = visible
-            .iter()
-            .map(|visible| (visible.row.reflection_id.clone(), visible.row.revision))
-            .collect();
         let marker = reflection_marker(
-            &marker_set,
+            reflection_set_identity(&mut tx, space_id, subject_id).await?,
             &all_records,
             &profile_revisions,
             &grant_rows,
             subject_status.as_deref(),
         )?;
-        let total = u64::try_from(visible.len()).unwrap_or(u64::MAX);
-        Ok((visible, marker, total))
+        tx.commit().await?;
+        Ok((page, marker, more))
     }
 
     /// §7.25 state snapshot (inspector round 2): the authorized basis AND the
@@ -4971,7 +5005,7 @@ impl MemoryStore {
         let (records, _tombstones) =
             reflection_record_sets(&mut tx, selection, filter, space_id, subject_id).await?;
         let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
-        let visible = visible_reflections_in_tx(
+        let (visible, _more) = visible_reflections_in_tx(
             &mut tx,
             &grants,
             principal_id,
@@ -4981,6 +5015,7 @@ impl MemoryStore {
             Some(selection),
             filter,
             now,
+            None,
         )
         .await?;
         tx.commit().await?;
@@ -4994,8 +5029,63 @@ impl MemoryStore {
     }
 }
 
-/// The visible reflections one read transaction serves (§7.26): every
-/// reflection envelope of the subject this principal may see, newest first,
+/// Test-only seam for the paged reflection scan: how many rows its windowed
+/// statements materialised since the last take. Compiled out of production
+/// builds; it exists so a test can prove the page (not the whole set) is
+/// fetched.
+#[cfg(test)]
+static SCANNED_REFLECTION_ROWS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+fn reset_scan_probe() {
+    SCANNED_REFLECTION_ROWS.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+fn record_scanned_rows(rows: usize) {
+    SCANNED_REFLECTION_ROWS.fetch_add(rows, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+fn take_scanned_rows() -> usize {
+    SCANNED_REFLECTION_ROWS.swap(0, Ordering::Relaxed)
+}
+
+/// One `LIMIT`-bounded SQL page of the subject's reflection envelopes, newest
+/// first: the rows whose `seq` is below `after_seq`, at most `limit` of them.
+/// Absent bounds read the whole set (the state snapshot's scan).
+async fn reflection_rows_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+    after_seq: Option<i64>,
+    limit: Option<i64>,
+) -> StoreResult<Vec<ReflectionRow>> {
+    let mut sql = format!(
+        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
+         WHERE space_id = ? AND subject_id = ?"
+    );
+    if after_seq.is_some() {
+        sql.push_str(" AND seq < ?");
+    }
+    sql.push_str(" ORDER BY seq DESC");
+    if limit.is_some() {
+        sql.push_str(" LIMIT ?");
+    }
+    let mut query = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(subject_id);
+    if let Some(after_seq) = after_seq {
+        query = query.bind(after_seq);
+    }
+    if let Some(limit) = limit {
+        query = query.bind(limit);
+    }
+    Ok(query.fetch_all(&mut **tx).await?)
+}
+
+/// The visible reflections one read transaction serves (§7.26): the
+/// reflection envelopes of the subject this principal may see, newest first,
 /// with staleness recomputed per row at read time and C-077 rows excluded.
 /// Visible means all of: the caller's current `reflect` coverage admits the
 /// reflection's pinned selection, the request's selection scope covers the
@@ -5005,6 +5095,14 @@ impl MemoryStore {
 /// it; an absent one narrows nothing), and the pin's basis delta is not
 /// tombstoning. Caller-supplied rows come from the SAME transaction the
 /// caller opened, so every consumer of this helper serves one snapshot.
+///
+/// Visibility is a read-time verdict over pinned JSON columns, so it cannot
+/// ride the SQL predicate: the scan walks the newest-first order in
+/// `page_limit_with_probe`-bounded statements and stops at the page's first
+/// row past it. A window therefore materialises the skipped visible rows, the
+/// page and one probe row — never the rest of the set. Without a window the
+/// whole visible set is served (the state snapshot needs all of it), and the
+/// second return value is always `false`.
 #[allow(clippy::too_many_arguments)]
 async fn visible_reflections_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -5016,62 +5114,89 @@ async fn visible_reflections_in_tx(
     request_selection: Option<&Selection>,
     request_filter: Option<&[String]>,
     now: DateTime<Utc>,
-) -> StoreResult<Vec<VisibleReflection>> {
-    let sql = format!(
-        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
-         WHERE space_id = ? AND subject_id = ? \
-         ORDER BY seq DESC"
-    );
-    let rows = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
-        .bind(space_id)
-        .bind(subject_id)
-        .fetch_all(&mut **tx)
-        .await?;
+    window: Option<ReflectionWindow>,
+) -> StoreResult<(Vec<VisibleReflection>, bool)> {
     let mut probes: ReflectionProbeMap = HashMap::new();
     let request_filter_set = request_filter.map(crate::canonical_ids);
-    let mut visible = Vec::with_capacity(rows.len());
-    for row in rows {
-        let pinned = crate::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
-        let filter = pinned_filter(row.filter_json.as_ref())?;
-        let (live, tombstones) = {
-            let key = (
-                row.selection_json.clone(),
-                row.filter_json.clone().unwrap_or_default(),
-            );
-            match probes.entry(key) {
-                Entry::Occupied(entry) => entry.into_mut(),
-                Entry::Vacant(entry) => entry.insert(
-                    reflection_record_sets(tx, &pinned, filter.as_deref(), space_id, subject_id)
-                        .await?,
-                ),
-            }
-        };
-        let (stale, excluded) = pinned_staleness(
-            live,
-            tombstones,
-            profile_revisions,
-            &pinned,
-            filter.as_deref(),
-            &row.basis_json,
-        )?;
-        if excluded
-            || request_filter_set.as_ref().is_some_and(|requested| {
-                Some(requested) != filter.as_deref().map(crate::canonical_ids).as_ref()
-            })
-            || !covered(
-                grants,
-                principal_id,
-                space_id,
-                now,
-                &pinned.base_requirement("reflect", subject_id),
-            )
-            || !crate::selection_scope_covers(&pinned, request_selection)
-        {
-            continue;
+    let mut visible = Vec::new();
+    let mut skipped = 0u64;
+    let mut more = false;
+    let mut after_seq = None;
+    loop {
+        let batch = window.map(|window| page_limit_with_probe(window.limit));
+        let rows = reflection_rows_in_tx(tx, space_id, subject_id, after_seq, batch).await?;
+        #[cfg(test)]
+        if window.is_some() {
+            record_scanned_rows(rows.len());
         }
-        visible.push(VisibleReflection { row, stale });
+        let short =
+            batch.is_some_and(|batch| i64::try_from(rows.len()).unwrap_or(i64::MAX) < batch);
+        for row in rows {
+            after_seq = Some(row.seq);
+            let pinned =
+                crate::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
+            let filter = pinned_filter(row.filter_json.as_ref())?;
+            let (live, tombstones) = {
+                let key = (
+                    row.selection_json.clone(),
+                    row.filter_json.clone().unwrap_or_default(),
+                );
+                match probes.entry(key) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => entry.insert(
+                        reflection_record_sets(
+                            tx,
+                            &pinned,
+                            filter.as_deref(),
+                            space_id,
+                            subject_id,
+                        )
+                        .await?,
+                    ),
+                }
+            };
+            let (stale, excluded) = pinned_staleness(
+                live,
+                tombstones,
+                profile_revisions,
+                &pinned,
+                filter.as_deref(),
+                &row.basis_json,
+            )?;
+            if excluded
+                || request_filter_set.as_ref().is_some_and(|requested| {
+                    Some(requested) != filter.as_deref().map(crate::canonical_ids).as_ref()
+                })
+                || !covered(
+                    grants,
+                    principal_id,
+                    space_id,
+                    now,
+                    &pinned.base_requirement("reflect", subject_id),
+                )
+                || !crate::selection_scope_covers(&pinned, request_selection)
+            {
+                continue;
+            }
+            let Some(window) = window else {
+                visible.push(VisibleReflection { row, stale });
+                continue;
+            };
+            if skipped < window.offset {
+                skipped += 1;
+                continue;
+            }
+            if u64::try_from(visible.len()).unwrap_or(u64::MAX) >= window.limit {
+                more = true;
+                break;
+            }
+            visible.push(VisibleReflection { row, stale });
+        }
+        if window.is_none() || more || short {
+            break;
+        }
     }
-    Ok(visible)
+    Ok((visible, more))
 }
 
 impl MemoryStore {
@@ -7341,5 +7466,134 @@ pub fn content_digest(candidate: &CandidateRow) -> StoreResult<String> {
     match spoke_operations::jcs_sha256_hex(&content) {
         SpokeResult::Ok(digest) => Ok(digest),
         SpokeResult::Reject(reject) => Err(StoreError::Corrupt(reject.message)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        begin_immediate, insert_reflection, reset_scan_probe, take_scanned_rows, timestamp,
+        MemoryStore, NewReflection, ReflectionWindow,
+    };
+    use chrono::Utc;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    const SPACE: &str = "sp_page_probe";
+    const SUBJECT: &str = "sbj_page_probe";
+    const PRINCIPAL: &str = "ctr_page_probe";
+
+    const fn window(offset: u64, limit: u64) -> ReflectionWindow {
+        ReflectionWindow { offset, limit }
+    }
+
+    /// `reflections` envelopes, inserted in order so the newest-first read back
+    /// is `rfl_4`, `rfl_3`, …
+    async fn seeded_store(home: &Path, reflections: usize) -> MemoryStore {
+        let store = MemoryStore::open(&home.join("state.db"), PRINCIPAL, home)
+            .await
+            .expect("open the store");
+        store
+            .provision(
+                SPACE,
+                "host_page_probe",
+                PRINCIPAL,
+                "grant_page_probe",
+                None,
+                Utc::now(),
+            )
+            .await
+            .expect("provision the space");
+        let created_at = timestamp(Utc::now());
+        for index in 0..reflections {
+            let reflection_id = format!("rfl_{index}");
+            let mut tx = begin_immediate(&store.pool)
+                .await
+                .expect("write transaction");
+            insert_reflection(
+                &mut tx,
+                &NewReflection {
+                    reflection_id: &reflection_id,
+                    space_id: SPACE,
+                    subject_id: SUBJECT,
+                    requester_principal_id: PRINCIPAL,
+                    selection_json: "{\"mode\":\"subject_all\"}",
+                    filter_json: None,
+                    cognition_filter_json: None,
+                    // No records and no tombstones: the pin has no delta, so the
+                    // row is visible and never C-077-excluded.
+                    basis_json: "{\"source_set_digest\":\"pin\",\"state_digest\":\"pin\"}",
+                    engine_policy_version: crate::policy::ENGINE_POLICY_VERSION,
+                    model: None,
+                    schema_version: 1,
+                    revision: 1,
+                    extensions_json: "{}",
+                    created_at: &created_at,
+                    body_text: "body",
+                    body_format: "markdown",
+                    stale_cache: false,
+                    cost: None,
+                },
+            )
+            .await
+            .expect("insert a reflection envelope");
+            tx.commit().await.expect("commit the envelope");
+        }
+        store
+    }
+
+    fn ids(page: &[super::VisibleReflection]) -> Vec<&str> {
+        page.iter()
+            .map(|visible| visible.row.reflection_id.as_str())
+            .collect()
+    }
+
+    /// The listing page is cut by the SQL statement: a page smaller than the
+    /// row set materialises the page and one probe row, never the whole set,
+    /// and the continuation resumes on the same newest-first order.
+    #[tokio::test]
+    async fn a_reflection_page_fetches_only_its_own_rows() {
+        let home = TempDir::new().expect("temporary workspace home");
+        let store = seeded_store(home.path(), 5).await;
+
+        reset_scan_probe();
+        let (first, marker, more) = store
+            .reflections(SPACE, SUBJECT, None, None, PRINCIPAL, window(0, 2))
+            .await
+            .expect("the first page");
+        assert_eq!(
+            ids(&first),
+            ["rfl_4", "rfl_3"],
+            "a page smaller than the row set serves exactly the page, newest first"
+        );
+        assert!(more, "the page is not the end of the results");
+        assert_eq!(
+            marker.len(),
+            64,
+            "the marker binds the page to its snapshot"
+        );
+        assert_eq!(
+            take_scanned_rows(),
+            3,
+            "the statement materialises the page plus one probe row, not the whole set"
+        );
+
+        let (second, _, more) = store
+            .reflections(SPACE, SUBJECT, None, None, PRINCIPAL, window(2, 2))
+            .await
+            .expect("the continuation");
+        assert_eq!(
+            ids(&second),
+            ["rfl_2", "rfl_1"],
+            "the continuation resumes where the page ended"
+        );
+        assert!(more, "one row still follows");
+
+        let (last, _, more) = store
+            .reflections(SPACE, SUBJECT, None, None, PRINCIPAL, window(4, 2))
+            .await
+            .expect("the last page");
+        assert_eq!(ids(&last), ["rfl_0"], "the listing is exhausted");
+        assert!(!more, "an exhausted listing names no continuation");
     }
 }
