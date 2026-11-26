@@ -855,6 +855,9 @@ async fn a_disabled_lane_recovers_even_when_its_allowlist_omits_enable() {
 
 /// `allow` refuses a `payload.operation` no arm dispatches: a grant nothing
 /// would ever match is not a permission, and the refusal names the field.
+/// `InvalidInput` rather than `Forbidden` because the field is wrong, not the
+/// caller's context — the same distinction the simulated-context fs refusal
+/// draws when it reuses `Forbidden` for a context restriction.
 #[tokio::test]
 #[serial]
 async fn peer_control_allow_rejects_an_undispatched_operation() {
