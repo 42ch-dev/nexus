@@ -8,11 +8,17 @@
 
 #![allow(dead_code)] // one binary per test file; each uses a subset
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
 use tempfile::{NamedTempFile, TempDir};
+
+use nexus_capability::{CapabilityError, WorkspaceExecutor};
+use nexus_contracts::local::orchestration::{
+    WorkArtifactCommitInput, WorkArtifactCommitOutput, WorkspaceCommitInput, WorkspaceCommitOutput,
+    WorkspaceOpenInput, WorkspaceOpenOutput,
+};
 
 /// A fresh workspace DB and the temp dir that owns its file.
 struct TestDb {
@@ -58,4 +64,57 @@ pub async fn arc_pool_file_first() -> (NamedTempFile, Arc<SqlitePool>) {
     let db = NamedTempFile::new().unwrap();
     let pool = Arc::new(engine_pool(db.path()).await);
     (db, pool)
+}
+
+/// Test executor: commits Work bytes at the target the production port builds
+/// (`<workspace_root>/Works/<work_ref>/<rel_child>`), without the DB lock/row
+/// checks the core port performs.
+pub struct DirectWriteExecutor {
+    workspace_root: PathBuf,
+}
+
+impl DirectWriteExecutor {
+    pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
+        Self {
+            workspace_root: workspace_root.into(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl WorkspaceExecutor for DirectWriteExecutor {
+    fn workspace_root(&self) -> Result<PathBuf, CapabilityError> {
+        Ok(self.workspace_root.clone())
+    }
+
+    async fn open(
+        &self,
+        _input: WorkspaceOpenInput,
+    ) -> Result<WorkspaceOpenOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit(
+        &self,
+        _input: WorkspaceCommitInput,
+    ) -> Result<WorkspaceCommitOutput, CapabilityError> {
+        Err(CapabilityError::WorkerUnavailable)
+    }
+
+    async fn commit_work_artifact(
+        &self,
+        input: WorkArtifactCommitInput,
+    ) -> Result<WorkArtifactCommitOutput, CapabilityError> {
+        let target = Path::new(&input.workspace_root)
+            .join("Works")
+            .join(&input.work_ref)
+            .join(&input.rel_child);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| CapabilityError::Internal(format!("mkdir: {e}")))?;
+        }
+        std::fs::write(&target, &input.content)
+            .map_err(|e| CapabilityError::Internal(format!("write: {e}")))?;
+        Ok(WorkArtifactCommitOutput { committed: true })
+    }
 }
