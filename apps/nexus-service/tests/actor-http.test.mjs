@@ -58,12 +58,7 @@ describe('actor-http (P5-T2)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
-    service = await startActorService(home, 18_443);
+    service = await startActorService(home, 0);
     baseUrl = service.url;
   });
 
@@ -673,8 +668,6 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
 
   before(async () => {
     ({ home, creativeRoot, acpLog, peerLog } = seedJourneyHome('journey'));
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' });
-    assert.equal(build.status, 0, 'service TypeScript build must succeed');
     service = await startJourneyService(home);
     url = service.url;
     const status = await jsonFetch('/v1/daemon/runtime/status');

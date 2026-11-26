@@ -113,12 +113,7 @@ describe('world-kb-http (P4-T1)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
-    service = await startDomainService(home, 18_421);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
 
     const graph = await jsonFetch(`${baseUrl}/v1/daemon/worlds/${OWNED_WORLD}/kb/graph`);
@@ -161,7 +156,7 @@ describe('world-kb-http (P4-T1)', () => {
     const local = await startService({
       home,
       host: '127.0.0.1',
-      port: 18_422,
+      port: 0,
       allowRemote: false,
       domainOnly: true,
     });
@@ -185,7 +180,7 @@ describe('world-kb-http (P4-T1)', () => {
       if (previous === undefined) delete process.env.NEXUS42_DAEMON_API_KEY;
       else process.env.NEXUS42_DAEMON_API_KEY = previous;
     }
-    service = await startDomainService(home, 18_421);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
   });
 
@@ -340,7 +335,7 @@ describe('world-kb-http (P4-T1)', () => {
         startService({
           home,
           host: '0.0.0.0',
-          port: 18_423,
+          port: 0,
           allowRemote: false,
           domainOnly: true,
         }),
@@ -374,7 +369,7 @@ describe('world-kb-http provider readiness (P4-T1)', () => {
     service = await startService({
       home,
       host: '127.0.0.1',
-      port: 18_425,
+      port: 0,
       allowRemote: false,
     });
   });
@@ -415,7 +410,7 @@ describe('world-kb-http uninitialized profile (P4-T1)', () => {
 
   before(async () => {
     home = mkdtempSync(join(tmpdir(), 'nexus-service-uninit-'));
-    service = await startDomainService(home, 18_430);
+    service = await startDomainService(home, 0);
   });
 
   after(async () => {
@@ -481,7 +476,7 @@ describe('world-kb-http uninitialized profile (P4-T1)', () => {
     const local = await startService({
       home,
       host: '127.0.0.1',
-      port: 18_431,
+      port: 0,
       allowRemote: false,
     });
     try {
@@ -512,7 +507,7 @@ describe('world-kb-http transport bounds (P4-T1)', () => {
 
   before(async () => {
     home = seedHome();
-    service = await startDomainService(home, 18_440);
+    service = await startDomainService(home, 0);
   });
 
   after(async () => {
@@ -619,7 +614,7 @@ describe('world-kb-http tls (P4-T1)', () => {
     service = await startService({
       home,
       host: '127.0.0.1',
-      port: 18_441,
+      port: 0,
       allowRemote: false,
       domainOnly: true,
       tlsCert: certPath,
@@ -634,7 +629,7 @@ describe('world-kb-http tls (P4-T1)', () => {
   });
 
   test('serves HTTPS and reports the DER certificate fingerprint', async () => {
-    assert.match(service.url, /^https:\/\/127\.0\.0\.1:18441$/);
+    assert.match(service.url, /^https:\/\/127\.0\.0\.1:\d+$/);
 
     const health = await httpsGet(`${service.url}/v1/daemon/runtime/health`, pem);
     assert.equal(health.status, 200);
@@ -653,7 +648,7 @@ describe('world-kb-http tls (P4-T1)', () => {
     const noRemote = await startService({
       home,
       host: '10.0.0.5',
-      port: 18_442,
+      port: 0,
       allowRemote: false,
       domainOnly: true,
       tlsCert: certPath,
@@ -668,7 +663,7 @@ describe('world-kb-http tls (P4-T1)', () => {
     const noKey = await startService({
       home,
       host: '10.0.0.5',
-      port: 18_443,
+      port: 0,
       allowRemote: true,
       domainOnly: true,
       tlsCert: certPath,
@@ -809,7 +804,7 @@ describe('world-kb-http lifecycle (P4-T1)', () => {
   });
 
   test('close settles within the deadline while a request is still in flight', async () => {
-    const local = await startDomainService(home, 18_451);
+    const local = await startDomainService(home, 0);
     const port = Number(local.url.split(':')[2]);
     const socket = net.connect({ host: '127.0.0.1', port });
     socket.on('error', () => undefined);
@@ -831,7 +826,7 @@ describe('world-kb-http lifecycle (P4-T1)', () => {
   });
 
   test('an interrupted close stays retryable until the retained owner settles', async () => {
-    const local = await startDomainService(home, 18_450);
+    const local = await startDomainService(home, 0);
     binding.forceUnconfirmedCleanup(true);
     let first;
     try {

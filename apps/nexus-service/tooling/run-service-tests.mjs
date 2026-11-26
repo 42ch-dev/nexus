@@ -6,7 +6,7 @@
 // Self-check: `node tooling/run-service-tests.mjs --self-test` verifies the
 // child exit-code mapping (including 128+signal for signal-killed children).
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,9 +44,22 @@ function main() {
     return;
   }
 
+  // Every suite imports the built service instead of rebuilding it (a rebuild
+  // inside a suite races the other files on the one shared `dist/`). The
+  // `test` script stages the native addon and runs `tsc` before this runner; a
+  // direct suite run must fail here, by name, rather than at a dynamic import.
+  const entry = join(pkgDir, "dist", "index.js");
+  if (!existsSync(entry)) {
+    process.stderr.write(
+      `dist/index.js is missing — run \`pnpm --filter @42ch/nexus-service run test\` (builds dist and stages the native addon); \`… run build\` only writes dist\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const result = spawnSync(
     process.execPath,
-    ["--test", "--test-concurrency=1", "--test-timeout=180000", ...files],
+    ["--test", "--test-timeout=180000", ...files],
     { stdio: "inherit", cwd: pkgDir },
   );
   if (result.error) throw result.error;

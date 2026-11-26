@@ -160,11 +160,6 @@ describe('generate one-kernel drift guard (P6-T10)', { timeout: 600_000 }, () =>
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
   });
 
   after(async () => {

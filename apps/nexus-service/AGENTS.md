@@ -17,7 +17,9 @@ Standalone Node HTTP service over `@42ch/nexus-native` (v1.189 P4).
 
 ## Tests
 
+- `pnpm run test` — stages the native addon, compiles, then runs every suite concurrently
 - `node --test apps/nexus-service/tests/world-kb-http.test.mjs` (PM wave; seeds fixture + real native core)
+- Suites import the prebuilt service and native addon instead of rebuilding them (20-odd redundant rebuilds in one full run were most of its wall clock). A direct `node --test` run needs `node packages/nexus-native/scripts/build.mjs` and `pnpm run build` first.
 
 ## Ownership (P4)
 

@@ -11,7 +11,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { before, describe, test } from 'node:test';
+import { describe, test } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..', '..', '..');
@@ -215,18 +215,6 @@ const SIGSEGV_EXCLUSION =
 if (SIGSEGV_EXCLUSION) process.stderr.write(`\n[workflow-control-http] ${SIGSEGV_EXCLUSION}\n`);
 
 describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness)', () => {
-  before(() => {
-    assert.equal(
-      spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], { cwd: root, stdio: 'inherit' })
-        .status,
-      0,
-    );
-    assert.equal(
-      spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' }).status,
-      0,
-    );
-  });
-
   test('hosted readiness and owner: blank home stays uninitialized', async () => {
     const service = await startServiceOn(blankHome());
     try {
@@ -890,29 +878,10 @@ conn.execute("INSERT INTO creator_schedules (schedule_id, creator_id, preset_id,
 conn.commit()
 `;
   const seeded = spawnSync('python3', ['-c', script, home], { encoding: 'utf8' });
-  assert.equal(seeded.status, 0, seeded.stderr || seeded.stdout);
+  assert.equal(seeded.status, 0, seeded.stderr.trim() ? seeded.stderr : seeded.stdout);
 }
 
 describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { skip: SIGSEGV_EXCLUSION }, () => {
-  before(() => {
-    assert.equal(
-      spawnSync('node', ['packages/nexus-native/scripts/build.mjs'], { cwd: root, stdio: 'inherit' })
-        .status,
-      0,
-    );
-    assert.equal(
-      spawnSync('npx', ['tsc', '-p', 'packages/nexus-native/tsconfig.json'], {
-        cwd: root,
-        stdio: 'inherit',
-      }).status,
-      0,
-    );
-    assert.equal(
-      spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' }).status,
-      0,
-    );
-  });
-
   test('control round trip: create, list, inspect, session, append, resume and cancel act on one durable run', async () => {
     const home = seededHome(acpProviderConfig());
     const service = await startServiceOn(home);

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -21,10 +20,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..', '..');
 const serviceRoot = join(__dirname, '..');
 
-const ENABLED_PORT = 18_531;
-const DISABLED_PORT = 18_532;
-const KEYED_PORT = 18_533;
-const ESCAPE_PORT = 18_535;
+let ENABLED_PORT;
+let DISABLED_PORT;
+let KEYED_PORT;
+let ESCAPE_PORT;
 
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 
@@ -121,14 +120,6 @@ describe('web static serve (20261019-web-static-serve)', () => {
   let resolveWebDist;
   let parseCliArgs;
 
-  before(() => {
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
-  });
-
   before(async () => {
     ({ createStaticFileHandler, resolveWebDist } = await import(
       join(serviceRoot, 'dist', 'static-files.js')
@@ -146,7 +137,8 @@ describe('web static serve (20261019-web-static-serve)', () => {
 
     before(async () => {
       root = webDistFixture();
-      service = await startFixtureService(ENABLED_PORT, { webDist: root });
+      service = await startFixtureService(0, { webDist: root });
+      ENABLED_PORT = Number(new URL(service.url).port);
     });
 
     after(async () => {
@@ -453,7 +445,8 @@ describe('web static serve (20261019-web-static-serve)', () => {
     let service;
 
     before(async () => {
-      service = await startFixtureService(ESCAPE_PORT, { webDist: escapingIndexFixture() });
+      service = await startFixtureService(0, { webDist: escapingIndexFixture() });
+      ESCAPE_PORT = Number(new URL(service.url).port);
     });
 
     after(async () => {
@@ -476,7 +469,8 @@ describe('web static serve (20261019-web-static-serve)', () => {
 
     before(async () => {
       process.env.NEXUS42_DAEMON_API_KEY = 'web-static-test-key';
-      service = await startFixtureService(KEYED_PORT, { webDist: webDistFixture() });
+      service = await startFixtureService(0, { webDist: webDistFixture() });
+      KEYED_PORT = Number(new URL(service.url).port);
     });
 
     after(async () => {
@@ -502,7 +496,8 @@ describe('web static serve (20261019-web-static-serve)', () => {
     let service;
 
     before(async () => {
-      service = await startFixtureService(DISABLED_PORT, { webDist: null });
+      service = await startFixtureService(0, { webDist: null });
+      DISABLED_PORT = Number(new URL(service.url).port);
     });
 
     after(async () => {

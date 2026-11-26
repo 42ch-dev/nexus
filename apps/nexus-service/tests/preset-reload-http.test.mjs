@@ -49,11 +49,6 @@ describe('preset reload (POST /v1/daemon/presets/{id}:reload)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     const { startService } = await import(join(serviceRoot, 'dist/index.js'));
     service = await startService({
       home,

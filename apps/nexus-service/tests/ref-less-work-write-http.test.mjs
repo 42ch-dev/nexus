@@ -65,11 +65,6 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     creativeRoot = mkdtempSync(join(tmpdir(), 'nexus-service-ref-less-creative-'));
     const workspaceDir = join(
       home,
@@ -83,7 +78,7 @@ describe('ref-less work write refusal over HTTP (v1.210 P2 T2)', () => {
       join(workspaceDir, 'meta.json'),
       JSON.stringify({ local_root: creativeRoot }),
     );
-    service = await startDomainService(home, 18_480);
+    service = await startDomainService(home, 0);
     baseUrl = service.url;
   });
 

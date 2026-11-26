@@ -44,7 +44,7 @@ function config(overrides = {}) {
   return {
     home: '/nonexistent-nexus-home',
     host: '127.0.0.1',
-    port: 18_061,
+    port: 0,
     allowRemote: false,
     domainOnly: true,
     transport: 'http',

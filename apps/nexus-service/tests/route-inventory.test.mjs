@@ -43,12 +43,7 @@ describe('route-inventory (P5-T5)', () => {
 
   before(async () => {
     home = seedHome();
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
-    service = await startInventoryService(home, 18_447, true);
+    service = await startInventoryService(home, 0, true);
     baseUrl = service.url;
   });
 
@@ -304,7 +299,7 @@ describe('route-inventory (P5-T5)', () => {
     const previous = process.env.NEXUS42_DAEMON_API_KEY;
     process.env.NEXUS42_DAEMON_API_KEY = 'inventory-secret';
     try {
-      service = await startInventoryService(home, 18_448, true);
+      service = await startInventoryService(home, 0, true);
       baseUrl = service.url;
       const denied = await jsonFetch(`${baseUrl}${guardedIdentity[1]}`);
       assert.equal(denied.status, 401, denied.text);

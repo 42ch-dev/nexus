@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { before, describe, test } from 'node:test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,10 +16,6 @@ const serviceRoot = join(__dirname, '..');
 let sse;
 
 before(async () => {
-  assert.equal(
-    spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], { cwd: serviceRoot, stdio: 'inherit' }).status,
-    0,
-  );
   sse = await import(join(serviceRoot, 'dist/sse.js'));
 });
 

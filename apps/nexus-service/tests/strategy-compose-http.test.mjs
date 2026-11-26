@@ -148,11 +148,6 @@ describe('compose route (v1.239 P3-T7)', () => {
     assert.equal(seed.status, 0, seed.stderr?.toString());
     writeRegistry(home);
 
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     const { startService } = await import(join(serviceRoot, 'dist', 'index.js'));
     service = await startService({
       home,
@@ -419,11 +414,6 @@ describe('simulate over a composed candidate (v1.239 P3-T8)', () => {
     assert.equal(seed.status, 0, seed.stderr?.toString());
     writeRegistry(home);
 
-    const build = spawnSync('npx', ['tsc', '-p', 'tsconfig.json'], {
-      cwd: serviceRoot,
-      stdio: 'inherit',
-    });
-    assert.equal(build.status, 0);
     const { startService } = await import(join(serviceRoot, 'dist', 'index.js'));
     service = await startService({
       home,
