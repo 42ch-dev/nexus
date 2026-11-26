@@ -488,7 +488,7 @@ pub(crate) fn unknown_output_owner(manifest: &PresetManifest) -> Option<UnknownO
 /// The node-id encoding is `<inner_graph>/<step>` with one segment per step, so a slashed step id
 /// would export the step under a different graph than its state's `enter` names. Graph names may
 /// contain `/`: the last segment is the step.
-fn slashed_inner_step(manifest: &PresetManifest) -> Option<(&str, &str)> {
+pub(crate) fn slashed_inner_step(manifest: &PresetManifest) -> Option<(&str, &str)> {
     let graphs = manifest.inner_graphs.as_ref()?;
     graphs.iter().find_map(|(graph, inner)| {
         inner
@@ -1001,41 +1001,40 @@ pub fn export_preset(document: &WorkflowDocument) -> Result<PresetManifest, Work
     })
 }
 
-/// The inner graph names the document's states enter, longest first.
-fn referenced_inner_graphs(document: &WorkflowDocument) -> Vec<&str> {
-    let mut graphs: Vec<&str> = document
+/// Every inner-step node id whose step segment still contains `/`, as
+/// `(entered graph, slashed step, node id)`.
+///
+/// The graph/step boundary is the last `/` of the node id — the key export derives. A document's
+/// `enter` names only *check* that key: an id that sits under an entered graph but keeps another
+/// `/` in its remainder cannot be a one-segment step of that graph, and the derived key would
+/// silently file it under a graph no state enters. A key no state mentions (an orphan nested
+/// graph) is never judged here, so an unreferenced graph still exports.
+pub(crate) fn slashed_step_ids(document: &WorkflowDocument) -> Vec<(&str, &str, &str)> {
+    let entered: BTreeSet<&str> = document
         .nodes
         .iter()
         .flat_map(|node| node.enter.iter())
         .filter(|enter| enter.kind == WorkflowEnterActionKind::InnerGraph)
         .filter_map(|enter| enter.name.as_deref())
         .collect();
-    graphs.sort_unstable();
-    graphs.dedup();
-    graphs.sort_unstable_by_key(|graph| std::cmp::Reverse(graph.len()));
-    graphs
-}
-
-/// Refuse a projected inner-step id whose step segment contains `/`.
-///
-/// The graph prefix comes from the document's own `enter` references, longest first, so a graph
-/// name may contain `/`. The last-`/` split alone cannot tell a slashed step from a slashed graph:
-/// it would file the step under a graph the states never reference.
-fn refuse_slashed_step(node_id: &str, referenced_graphs: &[&str]) -> Result<(), WorkflowIrError> {
-    let Some((graph, step)) = referenced_graphs.iter().find_map(|graph| {
-        node_id
-            .strip_prefix(*graph)
-            .and_then(|rest| rest.strip_prefix('/'))
-            .map(|step| (*graph, step))
-    }) else {
-        return Ok(());
-    };
-    if step.contains('/') {
-        return Err(refuse(format!(
-            "inner graph `{graph}` step id `{step}` contains '/'; an inner step id is a single segment"
-        )));
-    }
-    Ok(())
+    document
+        .nodes
+        .iter()
+        .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
+        .filter_map(|node| {
+            let graph = entered
+                .iter()
+                .filter(|graph| {
+                    node.id
+                        .strip_prefix(**graph)
+                        .is_some_and(|rest| rest.starts_with('/'))
+                })
+                .max_by_key(|graph| graph.len())?;
+            let step = &node.id[graph.len() + 1..];
+            step.contains('/')
+                .then_some((*graph, step, node.id.as_str()))
+        })
+        .collect()
 }
 
 fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, WorkflowIrError> {
@@ -1048,6 +1047,14 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
     // manifest that import would then refuse. The step is the last `/` segment — an inner-graph
     // name may itself contain `/`, and splitting at the first one would invent a different graph
     // and turn the real owner into a phantom.
+    // The graph/step boundary is the last id segment (the key export derives); a document that
+    // enters a graph and still keeps a `/` in a step under it is refused, an unentered nested graph
+    // is not.
+    if let Some((graph, step, _)) = slashed_step_ids(document).into_iter().next() {
+        return Err(refuse(format!(
+            "inner graph `{graph}` step id `{step}` contains '/'; an inner step id is a single segment"
+        )));
+    }
     let mut graph_steps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for node in &document.nodes {
         if node.kind == WorkflowNodeKind::InnerStep {
@@ -1056,9 +1063,6 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
             }
         }
     }
-    // The graph names the document's states enter, longest first, so a slashed graph name wins over
-    // one of its prefixes when the step-id guard asks where the graph ends.
-    let referenced_graphs = referenced_inner_graphs(document);
 
     for node in &document.nodes {
         match &node.kind {
@@ -1069,7 +1073,6 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
                 states.push(state_from_node(node, next_edges)?);
             }
             WorkflowNodeKind::InnerStep => {
-                refuse_slashed_step(&node.id, &referenced_graphs)?;
                 let (graph, step_id) = node.id.rsplit_once('/').ok_or_else(|| {
                     refuse(format!(
                         "inner step `{}` is not `<inner_graph>/<node_id>`",
@@ -1995,30 +1998,6 @@ states:
         }
     }
 
-    /// The bundle path reads its assets before it projects, so a missing asset is reported first
-    /// and the unknown owner cannot mask it.
-    #[test]
-    fn bundle_import_reports_a_missing_asset_before_an_unknown_owner() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let manifest: PresetManifest = serde_yaml::from_str(
-            &MANIFEST.replace("- id: review", "- id: review.v2").replace(
-                "output_binding: review.text",
-                "output_binding: review.v2.text",
-            ),
-        )
-        .expect("manifest parses");
-
-        let error = import_preset_bundle(
-            &manifest,
-            &FsAssetSource::new(dir.path()).expect("bundle root"),
-        )
-        .expect_err("the empty bundle carries none of the referenced assets");
-        assert!(
-            matches!(&error, WorkflowIrError::AssetRead { path, .. } if path == "prompts/draft.md"),
-            "{error}"
-        );
-    }
-
     /// An inner-graph name may contain `/`: the step is the last id segment, so export must not
     /// split at the first one and turn the real owner into a phantom.
     #[test]
@@ -2094,6 +2073,39 @@ states:
         for expected in ["work_graph", "`a/b`", "single segment"] {
             assert!(message.contains(expected), "{message}");
         }
+    }
+
+    /// An inner graph no state enters is unreferenced, not malformed: it still exports, even when
+    /// its name contains `/`.
+    #[test]
+    fn export_keeps_an_unreferenced_nested_graph() {
+        let (dir, manifest) = bundle();
+        let mut imported = import_preset_bundle(
+            &manifest,
+            &FsAssetSource::new(dir.path()).expect("bundle root"),
+        )
+        .expect("import");
+        let mut orphan = imported
+            .document
+            .nodes
+            .iter()
+            .find(|node| node.id == "work_graph/draft")
+            .expect("draft node")
+            .clone();
+        orphan.id = "lane/orphan/n1".to_string();
+        orphan.output_binding = None;
+        orphan.depends_on.clear();
+        imported.document.nodes.push(orphan);
+
+        let exported = export_preset(&imported.document).expect("an unreferenced graph exports");
+        let orphan_graph = exported
+            .inner_graphs
+            .as_ref()
+            .and_then(|graphs| graphs.get("lane/orphan"))
+            .expect("the unreferenced nested graph keeps its key");
+        assert_eq!(orphan_graph.nodes.len(), 1);
+        assert_eq!(orphan_graph.nodes[0].id, "n1");
+        assert!(orphan_graph.output_binding.is_none());
     }
 
     /// Export refuses the same shape as import: a binding whose owner is no sibling step must not

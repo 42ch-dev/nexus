@@ -147,11 +147,37 @@ pub fn validate_workflow_ir(
     document: &WorkflowDocument,
     caps: &dyn CapabilityCatalog,
 ) -> ValidationResult {
+    // A slashed step id makes the node-id split untrustworthy: report it and skip the graph-name
+    // derivation rather than re-attributing the step to a graph no state enters.
+    let slashed = crate::workflow_ir::slashed_step_ids(document);
+    let defined = document_inner_graphs(document);
+    let mut result = validate_workflow_ir_with_graphs(document, caps, &defined, slashed.is_empty());
+    check_inner_step_ids(&slashed, &mut result);
+    result
+}
+
+/// The document checks, with the inner-graph names supplied by the caller.
+///
+/// A manifest knows its graph names (its `inner_graphs` keys); a document only carries them in
+/// node ids, so [`validate_workflow_ir`] derives them and passes `check_references: false` when a
+/// slashed step id makes that derivation ambiguous.
+fn validate_workflow_ir_with_graphs(
+    document: &WorkflowDocument,
+    caps: &dyn CapabilityCatalog,
+    defined: &BTreeSet<&str>,
+    check_references: bool,
+) -> ValidationResult {
     let mut result = ValidationResult::default();
 
     check_initial_to_terminal_reachability(document, &mut result);
     check_terminal_marker_consistency(document, &mut result);
-    check_inner_graph_references(document, &mut result);
+    if check_references {
+        check_inner_graph_names(
+            defined,
+            &document_referenced_inner_graphs(document),
+            &mut result,
+        );
+    }
     check_inner_output_bindings(document, &mut result);
     check_labeled_edge_duplicates(document, &mut result);
     check_merge_node_integrity(document, &mut result);
@@ -183,14 +209,28 @@ pub fn validate_preset_semantic(
     manifest: &PresetManifest,
     caps: &dyn CapabilityCatalog,
 ) -> ValidationResult {
-    let mut result = match crate::workflow_ir::import_preset_manifest(manifest) {
-        Ok(document) => validate_workflow_ir(&document, caps),
-        Err(error) => projection_refusal(manifest, &error),
-    };
-    // A binding whose owner names no node has no document carrier, so the manifest scan reports
-    // every affected graph: the projection refusal names the first one, and a graph it did not
-    // reach is still reported once here.
+    let mut result = ValidationResult::default();
+    // Checks that need no projection run first and always, so a projection refusal cannot hide a
+    // path or graph-reference defect.
+    check_path_safety_refs(&collect_asset_file_references(manifest), &mut result);
     check_manifest_output_bindings(manifest, &mut result);
+    match crate::workflow_ir::import_preset_manifest(manifest) {
+        Ok(document) => {
+            // The manifest keys are the graph names; deriving them from projected node ids could
+            // silently re-attribute a step whose id contains `/`.
+            let defined = manifest_inner_graphs(manifest);
+            merge_results(
+                &mut result,
+                validate_workflow_ir_with_graphs(&document, caps, &defined, true),
+            );
+        }
+        Err(error) => {
+            let defined = manifest_inner_graphs(manifest);
+            let referenced = manifest_referenced_inner_graphs(manifest);
+            check_inner_graph_names(&defined, &referenced, &mut result);
+            add_projection_refusal(manifest, &error, &mut result);
+        }
+    }
     result
 }
 
@@ -209,7 +249,7 @@ pub fn validate_workflow_ir_assets(
     bundle_root: &Path,
 ) -> ValidationResult {
     let mut result = ValidationResult::default();
-    check_bundle_id_vs_directory(document, bundle_root, &mut result);
+    check_bundle_id(document.id.as_str(), bundle_root, &mut result);
     check_asset_file_existence(document, bundle_root, &mut result);
     check_symlink_escapes(document, bundle_root, &mut result);
     result
@@ -224,10 +264,24 @@ pub fn validate_assets_in_bundle(
     manifest: &PresetManifest,
     bundle_root: &Path,
 ) -> ValidationResult {
+    let mut result = ValidationResult::default();
     match crate::workflow_ir::import_preset_manifest(manifest) {
-        Ok(document) => validate_workflow_ir_assets(&document, bundle_root),
-        Err(error) => projection_refusal(manifest, &error),
+        Ok(document) => {
+            check_bundle_id(document.id.as_str(), bundle_root, &mut result);
+            check_asset_file_existence(&document, bundle_root, &mut result);
+            check_symlink_escapes(&document, bundle_root, &mut result);
+        }
+        Err(error) => {
+            // Asset checks read the manifest's own references, so they survive a projection
+            // refusal; the refusal is one more diagnostic, not a short-circuit.
+            let references = collect_asset_file_references(manifest);
+            check_bundle_id(manifest.preset.id.as_str(), bundle_root, &mut result);
+            check_asset_file_existence_refs(&references, bundle_root, &mut result);
+            check_symlink_escapes_refs(&references, bundle_root, &mut result);
+            add_projection_refusal(manifest, &error, &mut result);
+        }
     }
+    result
 }
 
 /// Run path-safety structural checks over an IR document (A3).
@@ -244,22 +298,24 @@ pub fn validate_workflow_ir_path_safety(document: &WorkflowDocument) -> Validati
 /// Run path-safety structural checks against a manifest (A3, YAML entry — shared with loader).
 #[must_use]
 pub fn validate_path_safety(manifest: &PresetManifest) -> ValidationResult {
-    match crate::workflow_ir::import_preset_manifest(manifest) {
-        Ok(document) => validate_workflow_ir_path_safety(&document),
-        Err(error) => projection_refusal(manifest, &error),
+    let mut result = ValidationResult::default();
+    check_path_safety_refs(&collect_asset_file_references(manifest), &mut result);
+    if let Err(error) = crate::workflow_ir::import_preset_manifest(manifest) {
+        add_projection_refusal(manifest, &error, &mut result);
     }
+    result
 }
 
-/// Map a projection refusal onto the manifest field that caused it.
+/// Add a projection refusal to `result` at the manifest field that caused it.
 ///
 /// A projection error is not always the document id: a state's `next` can be the carrier that
-/// cannot be represented, so the diagnostic names that state rather than `preset.id`. An inner
-/// graph's `output_binding` whose owner names no node is refused first by the projection and is
-/// reported at that graph.
-fn projection_refusal(
+/// cannot be represented, an inner graph's `output_binding` can name no node, and an inner step id
+/// can contain `/`. Each lands on its own carrier, and an already-reported path is not repeated.
+fn add_projection_refusal(
     manifest: &PresetManifest,
     error: &crate::workflow_ir::WorkflowIrError,
-) -> ValidationResult {
+    result: &mut ValidationResult,
+) {
     let (path, category) = match error {
         crate::workflow_ir::WorkflowIrError::EmptyConditionalRules { state } => {
             let path = manifest
@@ -273,26 +329,45 @@ fn projection_refusal(
             (path, DiagnosticCategory::Structural)
         }
         crate::workflow_ir::WorkflowIrError::NotProjectable { .. } => {
-            crate::workflow_ir::unknown_output_owner(manifest).map_or_else(
-                || ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
-                |(graph, _, _)| {
-                    (
-                        format!("inner_graphs.{graph}.output_binding"),
-                        DiagnosticCategory::Structural,
-                    )
-                },
-            )
+            // The projection refuses the slashed step id before the owner, so this order mirrors
+            // `document_from_manifest`.
+            if let Some((graph, step)) = crate::workflow_ir::slashed_inner_step(manifest) {
+                (
+                    format!("inner_graphs.{graph}.nodes.{step}.id"),
+                    DiagnosticCategory::Structural,
+                )
+            } else {
+                crate::workflow_ir::unknown_output_owner(manifest).map_or_else(
+                    || ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
+                    |(graph, _, _)| {
+                        (
+                            format!("inner_graphs.{graph}.output_binding"),
+                            DiagnosticCategory::Structural,
+                        )
+                    },
+                )
+            }
         }
         _ => ("preset.id".to_string(), DiagnosticCategory::IdMismatch),
     };
-    ValidationResult {
-        diagnostics: vec![ValidationDiagnostic {
-            path,
-            message: error.to_string(),
-            severity: DiagnosticSeverity::Error,
-            category,
-        }],
+    if result
+        .diagnostics
+        .iter()
+        .any(|existing| existing.path == path)
+    {
+        return;
     }
+    result.diagnostics.push(ValidationDiagnostic {
+        path,
+        message: error.to_string(),
+        severity: DiagnosticSeverity::Error,
+        category,
+    });
+}
+
+/// Append `from`'s diagnostics to `into`.
+fn merge_results(into: &mut ValidationResult, from: ValidationResult) {
+    into.diagnostics.extend(from.diagnostics);
 }
 
 fn outer_states(document: &WorkflowDocument) -> impl Iterator<Item = (usize, &WorkflowNode)> {
@@ -464,35 +539,75 @@ fn check_terminal_marker_consistency(document: &WorkflowDocument, result: &mut V
     }
 }
 
-/// Check inner graph references:
-/// - Referenced inner graphs must exist (already in loader validation, but we add
-///   a consistent diagnostic here).
-/// - Orphan inner graphs (defined but never referenced) produce a WARNING.
-fn check_inner_graph_references(document: &WorkflowDocument, result: &mut ValidationResult) {
-    // An inner graph exists as the `<graph>/<node>` prefix of its inner-step nodes, and the step is
-    // the last segment: a graph name may contain `/`.
-    // shortcut: a graph with zero nodes has no IR carrier and a reference to it reads as missing,
-    // upgrade: when the IR gains a graph record.
-    let inner_graph_names: BTreeSet<&str> = document
+/// The inner graph names a manifest defines: its `inner_graphs` keys.
+fn manifest_inner_graphs(manifest: &PresetManifest) -> BTreeSet<&str> {
+    manifest
+        .inner_graphs
+        .as_ref()
+        .map(|graphs| graphs.keys().map(String::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// The inner graph names a manifest's states enter.
+fn manifest_referenced_inner_graphs(manifest: &PresetManifest) -> BTreeSet<&str> {
+    manifest
+        .states
+        .iter()
+        .flat_map(|state| state.enter.iter())
+        .filter_map(|enter| match enter {
+            EnterAction::InnerGraph { name } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The inner graph names a document's inner-step node ids carry.
+///
+/// Only [`validate_workflow_ir`] uses this: a manifest passes its keys instead. The caller must
+/// have refused slashed step ids first — they are what makes this split ambiguous.
+fn document_inner_graphs(document: &WorkflowDocument) -> BTreeSet<&str> {
+    document
         .nodes
         .iter()
         .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
         .filter_map(|node| node.id.rsplit_once('/').map(|(graph, _)| graph))
-        .collect();
+        .collect()
+}
 
-    let mut referenced: BTreeSet<&str> = BTreeSet::new();
-    for (_, node) in outer_states(document) {
-        for enter in &node.enter {
-            if enter.kind == WorkflowEnterActionKind::InnerGraph {
-                if let Some(name) = enter.name.as_deref() {
-                    referenced.insert(name);
-                }
-            }
-        }
+/// The inner graph names a document's states enter.
+fn document_referenced_inner_graphs(document: &WorkflowDocument) -> BTreeSet<&str> {
+    outer_states(document)
+        .flat_map(|(_, node)| node.enter.iter())
+        .filter(|enter| enter.kind == WorkflowEnterActionKind::InnerGraph)
+        .filter_map(|enter| enter.name.as_deref())
+        .collect()
+}
+
+/// Report an inner step id whose step segment still contains `/`.
+fn check_inner_step_ids(slashed: &[(&str, &str, &str)], result: &mut ValidationResult) {
+    for (graph, step, node_id) in slashed {
+        result.diagnostics.push(ValidationDiagnostic {
+            path: format!("nodes.{node_id}.id"),
+            message: format!(
+                "inner graph '{graph}' step id '{step}' contains '/'; an inner step id is a single segment"
+            ),
+            severity: DiagnosticSeverity::Error,
+            category: DiagnosticCategory::Structural,
+        });
     }
+}
 
-    for name in &referenced {
-        if !inner_graph_names.contains(name) {
+/// Check inner graph references against names the caller derived from its own structure:
+/// - Referenced inner graphs must exist (already in loader validation, but we add
+///   a consistent diagnostic here).
+/// - Orphan inner graphs (defined but never referenced) produce a WARNING.
+fn check_inner_graph_names(
+    defined: &BTreeSet<&str>,
+    referenced: &BTreeSet<&str>,
+    result: &mut ValidationResult,
+) {
+    for name in referenced {
+        if !defined.contains(name) {
             result.diagnostics.push(ValidationDiagnostic {
                 path: format!("enter.kind=inner_graph name={name}"),
                 message: format!("referenced inner graph '{name}' is not defined"),
@@ -502,11 +617,7 @@ fn check_inner_graph_references(document: &WorkflowDocument, result: &mut Valida
         }
     }
 
-    if inner_graph_names.is_empty() {
-        return;
-    }
-
-    for name in &inner_graph_names {
+    for name in defined {
         if !referenced.contains(name) {
             // Allows presets to define utility graphs for future use.
             result.diagnostics.push(ValidationDiagnostic {
@@ -941,12 +1052,21 @@ fn check_asset_file_existence(
     bundle_root: &Path,
     result: &mut ValidationResult,
 ) {
-    for (dot_path, rel_path) in collect_ir_asset_references(document) {
+    check_asset_file_existence_refs(&collect_ir_asset_references(document), bundle_root, result);
+}
+
+/// Existence check over `(dot_path, relative_path)` pairs.
+fn check_asset_file_existence_refs(
+    references: &[(String, String)],
+    bundle_root: &Path,
+    result: &mut ValidationResult,
+) {
+    for (dot_path, rel_path) in references {
         // Only check existence here.
-        let full_path = bundle_root.join(&rel_path);
+        let full_path = bundle_root.join(rel_path);
         if !full_path.exists() {
             result.diagnostics.push(ValidationDiagnostic {
-                path: dot_path,
+                path: dot_path.clone(),
                 message: format!(
                     "referenced file '{rel_path}' does not exist in bundle at {}",
                     bundle_root.display()
@@ -966,16 +1086,25 @@ fn check_symlink_escapes(
     bundle_root: &Path,
     result: &mut ValidationResult,
 ) {
+    check_symlink_escapes_refs(&collect_ir_asset_references(document), bundle_root, result);
+}
+
+/// Symlink-escape check over `(dot_path, relative_path)` pairs.
+fn check_symlink_escapes_refs(
+    references: &[(String, String)],
+    bundle_root: &Path,
+    result: &mut ValidationResult,
+) {
     let Ok(canonical_root) = bundle_root.canonicalize() else {
         return;
     };
 
-    for (dot_path, rel_path) in collect_ir_asset_references(document) {
-        let full_path = bundle_root.join(&rel_path);
+    for (dot_path, rel_path) in references {
+        let full_path = bundle_root.join(rel_path);
         if let Ok(canonical) = full_path.canonicalize() {
             if !canonical.starts_with(&canonical_root) {
                 result.diagnostics.push(ValidationDiagnostic {
-                    path: dot_path,
+                    path: dot_path.clone(),
                     message: format!(
                         "file '{rel_path}' resolves outside the bundle sandbox (symlink escape)"
                     ),
@@ -987,23 +1116,18 @@ fn check_symlink_escapes(
     }
 }
 
-/// Check that the document `id` matches the bundle directory basename.
+/// Check that a preset `id` matches the bundle directory basename.
 ///
 /// When loading from a bundle directory (e.g. `~/.nexus42/presets/my-preset/`),
 /// the `id` field in the YAML must match the directory name. This prevents
 /// identity spoofing and ensures filesystem-level consistency.
-fn check_bundle_id_vs_directory(
-    document: &WorkflowDocument,
-    bundle_root: &Path,
-    result: &mut ValidationResult,
-) {
+fn check_bundle_id(id: &str, bundle_root: &Path, result: &mut ValidationResult) {
     if let Some(dir_name) = bundle_root.file_name().and_then(|n| n.to_str()) {
-        let document_id = document.id.as_str();
-        if document_id != dir_name {
+        if id != dir_name {
             result.diagnostics.push(ValidationDiagnostic {
                 path: "preset.id".to_string(),
                 message: format!(
-                    "preset.id '{document_id}' does not match bundle directory name '{dir_name}'"
+                    "preset.id '{id}' does not match bundle directory name '{dir_name}'"
                 ),
                 severity: DiagnosticSeverity::Error,
                 category: DiagnosticCategory::IdMismatch,
@@ -1017,10 +1141,15 @@ fn check_bundle_id_vs_directory(
 /// Reuses `loader::assert_template_file_safe` to validate each path is free of
 /// `..` traversal, absolute paths, backslashes, null bytes, and control characters.
 fn check_path_safety(document: &WorkflowDocument, result: &mut ValidationResult) {
-    for (dot_path, rel_path) in collect_ir_asset_references(document) {
-        if let Err(reason) = super::loader::assert_template_file_safe(&rel_path) {
+    check_path_safety_refs(&collect_ir_asset_references(document), result);
+}
+
+/// Path-safety check over `(dot_path, relative_path)` pairs.
+fn check_path_safety_refs(references: &[(String, String)], result: &mut ValidationResult) {
+    for (dot_path, rel_path) in references {
+        if let Err(reason) = super::loader::assert_template_file_safe(rel_path) {
             result.diagnostics.push(ValidationDiagnostic {
-                path: dot_path,
+                path: dot_path.clone(),
                 message: reason,
                 severity: DiagnosticSeverity::Error,
                 category: DiagnosticCategory::PathSafety,
@@ -1866,7 +1995,7 @@ inner_graphs:
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::Structural
                     && d.path == "inner_graphs.shared_graph.output_binding"
-                    && d.message.contains("names owner `second`")
+                    && d.message.contains("names owner 'second'")
             }),
             "expected owner refusal at the graph: {:?}",
             result.diagnostics
@@ -1955,6 +2084,212 @@ inner_graphs:
             "expected unknown owner error: {:?}",
             result.diagnostics
         );
+    }
+
+    /// Plan A: the asset checks and the projection refusal are independent diagnostics. A missing
+    /// template and an unbound owner are both reported, each at its own carrier.
+    #[test]
+    fn missing_asset_and_unknown_owner_are_both_reported() {
+        let yaml = r"
+preset:
+  id: owner-and-assets
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: shared_graph
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/judge.md
+      judge_capability: judge.llm
+      min_interval: PT1H
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  shared_graph:
+    nodes:
+      - id: first.v2
+        kind: acp_prompt
+        template_file: prompts/first.md
+      - id: second
+        kind: acp_prompt
+    output_binding: first.v2.text
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle_root = tmp.path().join("owner-and-assets");
+        std::fs::create_dir_all(&bundle_root).unwrap();
+
+        let assets = validate_assets_in_bundle(&manifest, &bundle_root);
+        assert!(
+            assets.diagnostics.iter().any(|d| {
+                d.category == DiagnosticCategory::MissingAsset
+                    && d.path == "states[0].exit_when.template_file"
+            }),
+            "missing asset lost behind the projection refusal: {:?}",
+            assets.diagnostics
+        );
+        assert!(
+            assets.diagnostics.iter().any(|d| {
+                d.path == "inner_graphs.shared_graph.output_binding"
+                    && d.category == DiagnosticCategory::Structural
+            }),
+            "owner refusal not at its carrier: {:?}",
+            assets.diagnostics
+        );
+        assert!(
+            assets
+                .diagnostics
+                .iter()
+                .all(|d| !(d.path == "preset.id" && d.category == DiagnosticCategory::IdMismatch)),
+            "owner refusal fell through to preset.id: {:?}",
+            assets.diagnostics
+        );
+    }
+
+    /// Plan A: a graph-reference defect is reported even when the projection refuses, so one
+    /// defect cannot hide another.
+    #[test]
+    fn graph_reference_defects_survive_a_projection_refusal() {
+        let yaml = r"
+preset:
+  id: refused-with-graph-defects
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: missing_graph
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  shared_graph:
+    nodes:
+      - id: x.v1
+        kind: acp_prompt
+      - id: y
+        kind: acp_prompt
+    output_binding: x.v1.text
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+
+        let result = validate_preset_semantic(&manifest, &BuiltinCapabilityCatalog);
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.path == "enter.kind=inner_graph name=missing_graph"
+                    && d.category == DiagnosticCategory::Structural
+            }),
+            "missing graph reference lost: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.path == "inner_graphs.shared_graph" && d.severity == DiagnosticSeverity::Warning
+            }),
+            "orphan graph warning lost: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|d| {
+                d.path == "inner_graphs.shared_graph.output_binding"
+                    && d.category == DiagnosticCategory::Structural
+            }),
+            "owner refusal missing: {:?}",
+            result.diagnostics
+        );
+    }
+
+    /// Thread 1: a slashed step id is refused at its own carrier. The manifest's graph keys drive
+    /// the reference check, so no phantom graph is invented from the projected node id.
+    #[test]
+    fn slashed_step_id_is_reported_at_its_carrier_without_graph_phantoms() {
+        let yaml = r"
+preset:
+  id: slashed-step
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter:
+      - kind: inner_graph
+        name: shared_graph
+    exit_when: { kind: graph_complete }
+    next: b
+  - id: b
+    terminal: true
+inner_graphs:
+  shared_graph:
+    nodes:
+      - id: ok
+        kind: acp_prompt
+      - id: a/b
+        kind: acp_prompt
+";
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+
+        let result = validate_preset_semantic(&manifest, &BuiltinCapabilityCatalog);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "one defect must produce exactly one diagnostic: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(
+            result.diagnostics[0].path,
+            "inner_graphs.shared_graph.nodes.a/b.id"
+        );
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("step id `a/b` contains '/'"),
+            "{:?}",
+            result.diagnostics
+        );
+    }
+
+    /// Thread 1 (document entry): a slashed step id is reported at its node id, and the graph-name
+    /// derivation is skipped, so the ambiguous split cannot invent a phantom graph.
+    #[test]
+    fn document_slashed_step_id_skips_graph_derivation() {
+        let manifest: PresetManifest = serde_yaml::from_str(BINDING_GRAPH_MANIFEST).unwrap();
+        let mut document = crate::workflow_ir::import_preset_manifest(&manifest).expect("project");
+        let node = document
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == "shared_graph/first")
+            .expect("first step node");
+        node.id = "shared_graph/a/b".to_string();
+        node.output_binding = None;
+
+        let result = validate_workflow_ir(&document, &BuiltinCapabilityCatalog);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "a phantom graph must not be derived from the split: {:?}",
+            result.diagnostics
+        );
+        assert_eq!(result.diagnostics[0].path, "nodes.shared_graph/a/b.id");
     }
 
     #[test]
