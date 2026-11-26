@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -37,6 +38,26 @@ const IDENTITY = {
   GIT_COMMITTER_NAME: 'pre-push-sim',
   GIT_COMMITTER_EMAIL: 'pre-push-sim@example.invalid',
 };
+
+// Ambient Git state must not reach the fixtures: a caller's GIT_DIR et al.
+// redirect every command to another repository, and host config (signing,
+// hooks, injected GIT_CONFIG_COUNT entries) would change fixture commits.
+const GIT_AMBIENT = /^(GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_NAMESPACE|GIT_AUTHOR_.+|GIT_COMMITTER_.+|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
+
+function fixtureEnv(overrides = {}) {
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!GIT_AMBIENT.test(key)) env[key] = value;
+  }
+  return {
+    ...env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    ...IDENTITY,
+    ...overrides,
+  };
+}
 
 const STUB_PNPM = `#!/bin/sh
 printf '%s\\n' "$*" >> "$STUB_LOG"
@@ -70,7 +91,7 @@ function git(...args) {
   const result = spawnSync('git', args, {
     cwd: root,
     encoding: 'utf8',
-    env: { ...process.env, ...IDENTITY },
+    env: fixtureEnv(),
   });
   assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr}`);
   return result.stdout.trim();
@@ -90,11 +111,10 @@ function push(head, base) {
     cwd: root,
     encoding: 'utf8',
     input: `refs/heads/sim ${head} refs/heads/sim ${base}\n`,
-    env: {
-      ...process.env,
+    env: fixtureEnv({
       PATH: `${path.join(root, 'bin')}${path.delimiter}${process.env.PATH}`,
       STUB_LOG: stubLog,
-    },
+    }),
   });
   return {
     status: result.status,
@@ -157,4 +177,34 @@ test('mixed change set lints only the non-ignored path', () => {
   assert.match(invocation, /packages\/contracts\/src\/index\.ts/);
   assert.doesNotMatch(invocation, /generated/);
   assert.doesNotMatch(run.output, /Skipping oxlint/);
+});
+
+test('ambient Git env cannot redirect or restyle the fixture', () => {
+  const bogus = path.join(root, 'not-a-repo', 'bogus.git');
+  const ambient = {
+    GIT_DIR: bogus,
+    GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'commit.gpgsign',
+    GIT_CONFIG_VALUE_0: 'true',
+  };
+  const saved = Object.fromEntries(Object.keys(ambient).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, ambient);
+  try {
+    const prev = git('rev-parse', 'HEAD');
+    write(SOURCE, 'export const source = 4;\n');
+    const head = commit('ambient env');
+    const run = push(head, prev);
+
+    assert.equal(run.status, 0, run.output);
+    assert.match(oxlintInvocation(run.log), /packages\/contracts\/src\/index\.ts/);
+    assert.equal(git('rev-parse', 'HEAD'), head, 'commit must land in the disposable repo');
+    assert.doesNotMatch(git('log', '-1', '--format=%aI'), /^2000-/, 'ambient commit date must not leak');
+    assert.equal(existsSync(bogus), false, 'ambient GIT_DIR must not be used');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
