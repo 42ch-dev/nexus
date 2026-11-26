@@ -357,8 +357,8 @@ napi = { version = "=3.16.2", default-features = false, features = [
     "serde-json",
     "dyn-symbols",
 ] }
-napi-derive = "=3.7.1"
-napi-build = "=2.6.0"
+napi-derive = "=3.7.2"
+napi-build = "=2.7.0"
 
 # --- Dev profile: keep local `target/` smaller ---
 # Default `debug = true` (full) inflates deps/rlibs and test binaries. Line-limited
