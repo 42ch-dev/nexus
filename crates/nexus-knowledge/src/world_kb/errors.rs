@@ -159,6 +159,14 @@ pub enum KbError {
     /// silently normalizing to the default block type.
     #[error("unknown entry_type: {0}")]
     UnknownEntryType(String),
+
+    /// Wire `adoption_anchor` (`spoke-knowledge-adoption`, spoke 0.19) names a
+    /// foreign source entry the domain record cannot carry: reverse conversion
+    /// fails closed rather than importing the entry and later re-emitting it
+    /// without the anchor, which upstream refuses
+    /// (`ADOPTION_ANCHOR_IMMUTABLE`).
+    #[error("knowledge entry carries a spoke adoption anchor this host cannot represent")]
+    UnsupportedAdoptionAnchor,
 }
 
 #[cfg(test)]

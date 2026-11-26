@@ -26,6 +26,7 @@ use spoke_schemas::KnowledgeEntry;
 /// Construct a [`KnowledgeEntry`] with empty extensions and a minimal valid body.
 fn make_entry() -> KnowledgeEntry {
     KnowledgeEntry {
+        adoption_anchor: None,
         body: KnowledgeEntryBody::default(),
         canonical_name: KnowledgeEntryCanonicalName::try_from("Mira Vale".to_owned())
             .expect("non-empty canonical name"),

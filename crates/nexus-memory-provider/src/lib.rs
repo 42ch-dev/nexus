@@ -3167,6 +3167,18 @@ impl MemoryPort for LocalMemoryProvider {
         respond(json!({ "spaces": bodies, "next_cursor": next_cursor }))
     }
 
+    /// `memory.spaces.create` is not served: spaces are operator-provisioned
+    /// (`LocalMemoryProvider::provision`, §7.0.6), and no nexus surface asks
+    /// this provider to mint a caller-named space. Refused terminally, never
+    /// emulated — the same shape as the unadvertised families above.
+    async fn create_space(
+        &self,
+        _principal: &schemas::Principal,
+        _request: schemas::MemorySpacesCreateRequest,
+    ) -> SpokeResult<schemas::MemorySpacesCreateResponse> {
+        unsupported("memory.spaces.create")
+    }
+
     async fn freeze_space(
         &self,
         principal: &schemas::Principal,
