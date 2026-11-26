@@ -4832,42 +4832,29 @@ pub struct ReflectionWindow {
     pub limit: u64,
 }
 
-/// The subject's reflection envelope-set identity: its row count and highest
-/// store-assigned `seq`. Envelopes are insert-only — never updated, deleted or
-/// swept — so this pair changes on every insert and on nothing else: it names
-/// the same set the row scan would, without materialising the rows.
-async fn reflection_set_identity(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    space_id: &str,
-    subject_id: &str,
-) -> StoreResult<(i64, i64)> {
-    let identity = sqlx::query_as::<_, (i64, i64)>(
-        "SELECT COUNT(*), COALESCE(MAX(seq), 0) FROM memory_reflections \
-         WHERE space_id = ? AND subject_id = ?",
-    )
-    .bind(space_id)
-    .bind(subject_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    Ok(identity)
-}
-
 /// The MEM-R026 invalidation marker for a reflection page: a digest over the
-/// subject's envelope-set identity (any insert rebinds an outstanding cursor),
-/// *every* record identity of the subject (live and tombstoned — any
-/// basis-affecting change rebinds a cursor even when no reflection row moved),
-/// the subject's profile revisions (the same sorted pairs the state digest
-/// composes), the space's grant revisions and the subject status. A state or
-/// grant change therefore answers a stale cursor with `CURSOR_INVALID`
-/// (§7.0.7).
+/// **visible** envelope set, *every* record identity of the subject (live and
+/// tombstoned — any basis-affecting change rebinds an outstanding cursor even
+/// when no reflection row moved), the subject's profile revisions (the same
+/// sorted pairs the state digest composes), the space's grant revisions and
+/// the subject status.
+///
+/// The visible set, never the envelope table: a reflection the caller cannot
+/// see must leave the digest untouched (an envelope aggregate would let a
+/// context-scoped peer observe hidden generation activity), while anything
+/// that moves what this caller may read — a record, profile or grant write,
+/// a tombstone, or a grant expiring as the clock moves — must rebind the
+/// cursor. Grant expiry writes no row, so it is caught only by *recomputing*
+/// visibility at read time, which this marker's input already is.
 fn reflection_marker(
-    reflections: (i64, i64),
+    reflections: &[(String, i64)],
     records: &[(String, i64)],
     profile_revisions: &[(String, i64)],
     grants: &[GrantRow],
     subject_status: Option<&str>,
 ) -> StoreResult<String> {
-    let (reflection_count, reflection_max_seq) = reflections;
+    let mut reflections = reflections.to_vec();
+    reflections.sort();
     let mut grant_revisions: Vec<(String, i64)> = grants
         .iter()
         .map(|grant| (grant.grant_id.clone(), grant.revision))
@@ -4876,7 +4863,7 @@ fn reflection_marker(
     match crate::digest_value(&json!({
         "records": records,
         "profile_revisions": profile_revisions,
-        "reflections": { "count": reflection_count, "max_seq": reflection_max_seq },
+        "reflections": reflections,
         "grants": grant_revisions,
         "subject": subject_status,
     })) {
@@ -4886,8 +4873,8 @@ fn reflection_marker(
 }
 
 impl MemoryStore {
-    /// §7.26 list read path (and §7.25's `last_reflection_id` pick): every
-    /// reflection envelope of the subject this principal may see, newest
+    /// §7.26 list read path (and §7.25's `last_reflection_id` pick): one page
+    /// of the subject's reflection envelopes this principal may see, newest
     /// first, with staleness recomputed per row at read time and C-077 rows
     /// excluded. Visible means all of: the caller's current `reflect`
     /// coverage admits the reflection's pinned selection, the request's
@@ -4895,12 +4882,13 @@ impl MemoryStore {
     /// the caller's covered reflections only), the request's provenance
     /// filter names the pin's own filter exactly (a present request filter
     /// returns only envelopes pinned to it; an absent one narrows nothing),
-    /// and the pin's basis delta is not tombstoning. The page is cut by
-    /// `LIMIT`-bounded statements over the newest-first scan, so a read never
-    /// materialises the rows past the page; `more` reports whether a visible
-    /// row follows it. The marker binds the page to the snapshot it was cut
-    /// from, so any envelope insert, state or grant change invalidates
-    /// outstanding cursors.
+    /// and the pin's basis delta is not tombstoning.
+    ///
+    /// The cursor is bound to the *visible* set (see [`reflection_marker`]),
+    /// so the read resolves that set in a narrow projection scan and fetches
+    /// the page's own bodies by their `seq` — one `LIMIT`-bounded statement
+    /// over the page, never over the subject. `more` reports whether a visible
+    /// row follows the page.
     pub async fn reflections(
         &self,
         space_id: &str,
@@ -4919,13 +4907,7 @@ impl MemoryStore {
         let subject_status = subject_row.as_ref().map(|subject| subject.status.clone());
         let unsettled = unsettled_in(&mut tx, space_id, subject_id).await?;
         if withheld(unsettled.as_ref(), subject_id)? {
-            let marker = reflection_marker(
-                reflection_set_identity(&mut tx, space_id, subject_id).await?,
-                &[],
-                &[],
-                &grant_rows,
-                subject_status.as_deref(),
-            )?;
+            let marker = reflection_marker(&[], &[], &[], &grant_rows, subject_status.as_deref())?;
             tx.commit().await?;
             return Ok((Vec::new(), marker, false));
         }
@@ -4935,7 +4917,7 @@ impl MemoryStore {
                 .await?;
         let mut all_records = all_live;
         all_records.extend(all_tombstones);
-        let (page, more) = visible_reflections_in_tx(
+        let visible = visible_reflection_keys_in_tx(
             &mut tx,
             &grants,
             principal_id,
@@ -4945,16 +4927,41 @@ impl MemoryStore {
             request_selection,
             request_filter,
             now,
-            Some(window),
         )
         .await?;
+        let marker_set: Vec<(String, i64)> = visible
+            .iter()
+            .map(|row| (row.reflection_id.clone(), row.revision))
+            .collect();
         let marker = reflection_marker(
-            reflection_set_identity(&mut tx, space_id, subject_id).await?,
+            &marker_set,
             &all_records,
             &profile_revisions,
             &grant_rows,
             subject_status.as_deref(),
         )?;
+        let total = visible.len();
+        let start = usize::try_from(window.offset).unwrap_or(total).min(total);
+        let take = usize::try_from(window.limit).unwrap_or(total);
+        let page_keys = &visible[start..total.min(start.saturating_add(take))];
+        let more = start.saturating_add(page_keys.len()) < total;
+        let seqs: Vec<i64> = page_keys.iter().map(|row| row.seq).collect();
+        let rows = reflection_rows_by_seq_in_tx(&mut tx, space_id, subject_id, &seqs).await?;
+        let mut by_seq: HashMap<i64, ReflectionRow> =
+            rows.into_iter().map(|row| (row.seq, row)).collect();
+        let mut page = Vec::with_capacity(page_keys.len());
+        for key in page_keys {
+            let row = by_seq.remove(&key.seq).ok_or_else(|| {
+                StoreError::Corrupt(format!(
+                    "reflection {} vanished from its own page snapshot",
+                    key.reflection_id
+                ))
+            })?;
+            page.push(VisibleReflection {
+                row,
+                stale: key.stale,
+            });
+        }
         tx.commit().await?;
         Ok((page, marker, more))
     }
@@ -4965,8 +4972,9 @@ impl MemoryStore {
     /// `state_digest` with a newer staleness verdict. The basis half is
     /// [`Self::reflection_basis`]'s composition; the rows half is
     /// [`Self::reflections`]' visibility narrowing for the same
-    /// selection/filter, without the cursor marker the state op never
-    /// publishes.
+    /// selection/filter, as the visible order's own keys (the state body
+    /// publishes only the newest row's id and staleness) and without the
+    /// cursor marker the state op never publishes.
     pub async fn reflection_state_snapshot(
         &self,
         space_id: &str,
@@ -4974,7 +4982,7 @@ impl MemoryStore {
         selection: &Selection,
         filter: Option<&[String]>,
         principal_id: &str,
-    ) -> StoreResult<(ReflectionBasisSnapshot, Vec<VisibleReflection>)> {
+    ) -> StoreResult<(ReflectionBasisSnapshot, Vec<VisibleReflectionKey>)> {
         self.require_provisioned(space_id).await?;
         let (mut tx, now) = self.begin_read().await?;
         space_in_tx(&mut tx, space_id).await?;
@@ -5005,7 +5013,7 @@ impl MemoryStore {
         let (records, _tombstones) =
             reflection_record_sets(&mut tx, selection, filter, space_id, subject_id).await?;
         let profile_revisions = profile_revisions_in_tx(&mut tx, space_id, subject_id).await?;
-        let (visible, _more) = visible_reflections_in_tx(
+        let visible = visible_reflection_keys_in_tx(
             &mut tx,
             &grants,
             principal_id,
@@ -5015,7 +5023,6 @@ impl MemoryStore {
             Some(selection),
             filter,
             now,
-            None,
         )
         .await?;
         tx.commit().await?;
@@ -5051,60 +5058,48 @@ fn take_scanned_rows() -> usize {
     SCANNED_REFLECTION_ROWS.swap(0, Ordering::Relaxed)
 }
 
-/// One `LIMIT`-bounded SQL page of the subject's reflection envelopes, newest
-/// first: the rows whose `seq` is below `after_seq`, at most `limit` of them.
-/// Absent bounds read the whole set (the state snapshot's scan).
-async fn reflection_rows_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    space_id: &str,
-    subject_id: &str,
-    after_seq: Option<i64>,
-    limit: Option<i64>,
-) -> StoreResult<Vec<ReflectionRow>> {
-    let mut sql = format!(
-        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
-         WHERE space_id = ? AND subject_id = ?"
-    );
-    if after_seq.is_some() {
-        sql.push_str(" AND seq < ?");
-    }
-    sql.push_str(" ORDER BY seq DESC");
-    if limit.is_some() {
-        sql.push_str(" LIMIT ?");
-    }
-    let mut query = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
-        .bind(space_id)
-        .bind(subject_id);
-    if let Some(after_seq) = after_seq {
-        query = query.bind(after_seq);
-    }
-    if let Some(limit) = limit {
-        query = query.bind(limit);
-    }
-    Ok(query.fetch_all(&mut **tx).await?)
+/// One envelope of the subject, as the listing's visibility scan reads it: the
+/// pinned columns that decide visibility plus the identity and staleness the
+/// page and its cursor need — never the body.
+#[derive(sqlx::FromRow)]
+struct ReflectionKeyRow {
+    seq: i64,
+    reflection_id: String,
+    revision: i64,
+    selection_json: String,
+    filter_json: Option<String>,
+    basis_json: String,
 }
 
-/// The visible reflections one read transaction serves (§7.26): the
-/// reflection envelopes of the subject this principal may see, newest first,
-/// with staleness recomputed per row at read time and C-077 rows excluded.
-/// Visible means all of: the caller's current `reflect` coverage admits the
-/// reflection's pinned selection, the request's selection scope covers the
-/// pin (an absent request selection narrows to the caller's covered
-/// reflections only), the request's provenance filter names the pin's own
-/// filter exactly (a present request filter returns only envelopes pinned to
-/// it; an absent one narrows nothing), and the pin's basis delta is not
-/// tombstoning. Caller-supplied rows come from the SAME transaction the
-/// caller opened, so every consumer of this helper serves one snapshot.
+/// One visible envelope in the listing's page order, without its body.
+pub struct VisibleReflectionKey {
+    pub seq: i64,
+    pub reflection_id: String,
+    pub revision: i64,
+    pub stale: bool,
+}
+
+/// Every envelope of the subject this principal may see, newest first — the
+/// listing's page order and the set its cursor is bound to. Visible means all
+/// of: the caller's current `reflect` coverage admits the reflection's pinned
+/// selection (so a grant expiring as the clock moves stops admitting it), the
+/// request's selection scope covers the pin (an absent request selection
+/// narrows to the caller's covered reflections only), the request's provenance
+/// filter names the pin's own filter exactly (a present request filter returns
+/// only envelopes pinned to it; an absent one narrows nothing), and the pin's
+/// basis delta is not tombstoning. Caller-supplied rows come from the SAME
+/// transaction the caller opened, so every consumer of this helper serves one
+/// snapshot.
 ///
 /// Visibility is a read-time verdict over pinned JSON columns, so it cannot
-/// ride the SQL predicate: the scan walks the newest-first order in
-/// `page_limit_with_probe`-bounded statements and stops at the page's first
-/// row past it. A window therefore materialises the skipped visible rows, the
-/// page and one probe row — never the rest of the set. Without a window the
-/// whole visible set is served (the state snapshot needs all of it), and the
-/// second return value is always `false`.
+/// ride the SQL predicate and the scan visits every envelope — a narrow
+/// projection, never the bodies: the page's own bodies are fetched by
+/// [`reflection_rows_by_seq_in_tx`], so serving a page never materialises
+/// envelopes it does not serve. Skipping the scan would cost either a cursor
+/// blind to grant expiry and tombstones (it would silently skip rows) or an
+/// envelope aggregate that reports hidden generation to a context-scoped peer.
 #[allow(clippy::too_many_arguments)]
-async fn visible_reflections_in_tx(
+async fn visible_reflection_keys_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     grants: &[MemoryGrant],
     principal_id: &str,
@@ -5114,89 +5109,95 @@ async fn visible_reflections_in_tx(
     request_selection: Option<&Selection>,
     request_filter: Option<&[String]>,
     now: DateTime<Utc>,
-    window: Option<ReflectionWindow>,
-) -> StoreResult<(Vec<VisibleReflection>, bool)> {
+) -> StoreResult<Vec<VisibleReflectionKey>> {
+    let sql = "SELECT seq, reflection_id, revision, selection_json, filter_json, basis_json \
+               FROM memory_reflections WHERE space_id = ? AND subject_id = ? \
+               ORDER BY seq DESC";
+    let rows = sqlx::query_as::<_, ReflectionKeyRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(subject_id)
+        .fetch_all(&mut **tx)
+        .await?;
     let mut probes: ReflectionProbeMap = HashMap::new();
     let request_filter_set = request_filter.map(crate::canonical_ids);
-    let mut visible = Vec::new();
-    let mut skipped = 0u64;
-    let mut more = false;
-    let mut after_seq = None;
-    loop {
-        let batch = window.map(|window| page_limit_with_probe(window.limit));
-        let rows = reflection_rows_in_tx(tx, space_id, subject_id, after_seq, batch).await?;
-        #[cfg(test)]
-        if window.is_some() {
-            record_scanned_rows(rows.len());
-        }
-        let short =
-            batch.is_some_and(|batch| i64::try_from(rows.len()).unwrap_or(i64::MAX) < batch);
-        for row in rows {
-            after_seq = Some(row.seq);
-            let pinned =
-                crate::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
-            let filter = pinned_filter(row.filter_json.as_ref())?;
-            let (live, tombstones) = {
-                let key = (
-                    row.selection_json.clone(),
-                    row.filter_json.clone().unwrap_or_default(),
-                );
-                match probes.entry(key) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => entry.insert(
-                        reflection_record_sets(
-                            tx,
-                            &pinned,
-                            filter.as_deref(),
-                            space_id,
-                            subject_id,
-                        )
+    let mut visible = Vec::with_capacity(rows.len());
+    for row in rows {
+        let pinned = crate::pinned_selection(&row.selection_json).map_err(StoreError::Corrupt)?;
+        let filter = pinned_filter(row.filter_json.as_ref())?;
+        let (live, tombstones) = {
+            let key = (row.selection_json, row.filter_json.unwrap_or_default());
+            match probes.entry(key) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => entry.insert(
+                    reflection_record_sets(tx, &pinned, filter.as_deref(), space_id, subject_id)
                         .await?,
-                    ),
-                }
-            };
-            let (stale, excluded) = pinned_staleness(
-                live,
-                tombstones,
-                profile_revisions,
-                &pinned,
-                filter.as_deref(),
-                &row.basis_json,
-            )?;
-            if excluded
-                || request_filter_set.as_ref().is_some_and(|requested| {
-                    Some(requested) != filter.as_deref().map(crate::canonical_ids).as_ref()
-                })
-                || !covered(
-                    grants,
-                    principal_id,
-                    space_id,
-                    now,
-                    &pinned.base_requirement("reflect", subject_id),
-                )
-                || !crate::selection_scope_covers(&pinned, request_selection)
-            {
-                continue;
+                ),
             }
-            let Some(window) = window else {
-                visible.push(VisibleReflection { row, stale });
-                continue;
-            };
-            if skipped < window.offset {
-                skipped += 1;
-                continue;
-            }
-            if u64::try_from(visible.len()).unwrap_or(u64::MAX) >= window.limit {
-                more = true;
-                break;
-            }
-            visible.push(VisibleReflection { row, stale });
+        };
+        let (stale, excluded) = pinned_staleness(
+            live,
+            tombstones,
+            profile_revisions,
+            &pinned,
+            filter.as_deref(),
+            &row.basis_json,
+        )?;
+        if excluded
+            || request_filter_set.as_ref().is_some_and(|requested| {
+                Some(requested) != filter.as_deref().map(crate::canonical_ids).as_ref()
+            })
+            || !covered(
+                grants,
+                principal_id,
+                space_id,
+                now,
+                &pinned.base_requirement("reflect", subject_id),
+            )
+            || !crate::selection_scope_covers(&pinned, request_selection)
+        {
+            continue;
         }
-        if window.is_none() || more || short {
-            break;
-        }
+        visible.push(VisibleReflectionKey {
+            seq: row.seq,
+            reflection_id: row.reflection_id,
+            revision: row.revision,
+            stale,
+        });
     }
-    Ok((visible, more))
+    Ok(visible)
+}
+
+/// The page's own envelopes, newest first: bounded by the page's `seq` set and
+/// by `LIMIT`, so a listing read never materialises envelopes it does not
+/// serve.
+async fn reflection_rows_by_seq_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    space_id: &str,
+    subject_id: &str,
+    seqs: &[i64],
+) -> StoreResult<Vec<ReflectionRow>> {
+    if seqs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; seqs.len()].join(", ");
+    let sql = format!(
+        "SELECT {REFLECTION_COLUMNS} FROM memory_reflections \
+         WHERE space_id = ? AND subject_id = ? AND seq IN ({placeholders}) \
+         ORDER BY seq DESC LIMIT ?"
+    );
+    let mut query = sqlx::query_as::<_, ReflectionRow>(sqlx::AssertSqlSafe(sql))
+        .bind(space_id)
+        .bind(subject_id);
+    for seq in seqs {
+        query = query.bind(seq);
+    }
+    let rows = query
+        .bind(i64::try_from(seqs.len()).unwrap_or(i64::MAX))
+        .fetch_all(&mut **tx)
+        .await?;
+    #[cfg(test)]
+    record_scanned_rows(rows.len());
+    Ok(rows)
 }
 
 impl MemoryStore {
@@ -7548,9 +7549,11 @@ mod tests {
             .collect()
     }
 
-    /// The listing page is cut by the SQL statement: a page smaller than the
-    /// row set materialises the page and one probe row, never the whole set,
-    /// and the continuation resumes on the same newest-first order.
+    /// The listing page is cut by the SQL statement: serving a page smaller
+    /// than the row set materialises that page's own bodies only, and the
+    /// continuation resumes on the same newest-first order. The visibility
+    /// scan that binds the cursor reads a narrow projection (no bodies); it
+    /// is O(envelopes) until the pinned predicates are columns.
     #[tokio::test]
     async fn a_reflection_page_fetches_only_its_own_rows() {
         let home = TempDir::new().expect("temporary workspace home");
@@ -7574,8 +7577,8 @@ mod tests {
         );
         assert_eq!(
             take_scanned_rows(),
-            3,
-            "the statement materialises the page plus one probe row, not the whole set"
+            2,
+            "the page statement materialises the page's own bodies, never the whole set"
         );
 
         let (second, _, more) = store

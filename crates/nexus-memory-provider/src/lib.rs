@@ -4177,7 +4177,7 @@ impl MemoryPort for LocalMemoryProvider {
             "missing_required_profile_kinds": missing_required_profile_kinds,
             "stale": stale,
             "state_digest": state_digest,
-            "last_reflection_id": last.map(|visible| visible.row.reflection_id.clone()),
+            "last_reflection_id": last.map(|visible| visible.reflection_id.clone()),
         }))
     }
 
