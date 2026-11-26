@@ -483,20 +483,30 @@ pub(crate) fn unknown_output_owner(manifest: &PresetManifest) -> Option<UnknownO
     unknown_output_owners(manifest).into_iter().next()
 }
 
-/// The first inner step whose id contains `/`, as `(graph, step id)`.
+/// Every inner step whose id contains `/`, as `(graph, step id)` in graph-name order.
 ///
 /// The node-id encoding is `<inner_graph>/<step>` with one segment per step, so a slashed step id
-/// would export the step under a different graph than its state's `enter` names. Graph names may
-/// contain `/`: the last segment is the step.
+/// cannot be represented; the projection refuses the first one and validation names all of them.
+/// Graph names may contain `/`: the last segment is the step.
+pub(crate) fn slashed_inner_steps(manifest: &PresetManifest) -> Vec<(&str, &str)> {
+    let Some(graphs) = manifest.inner_graphs.as_ref() else {
+        return Vec::new();
+    };
+    graphs
+        .iter()
+        .flat_map(|(graph, inner)| {
+            inner
+                .nodes
+                .iter()
+                .filter(|step| step.id.contains('/'))
+                .map(|step| (graph.as_str(), step.id.as_str()))
+        })
+        .collect()
+}
+
+/// The first inner step whose id contains `/` — the carrier the projection refusal names.
 pub(crate) fn slashed_inner_step(manifest: &PresetManifest) -> Option<(&str, &str)> {
-    let graphs = manifest.inner_graphs.as_ref()?;
-    graphs.iter().find_map(|(graph, inner)| {
-        inner
-            .nodes
-            .iter()
-            .find(|step| step.id.contains('/'))
-            .map(|step| (graph.as_str(), step.id.as_str()))
-    })
+    slashed_inner_steps(manifest).into_iter().next()
 }
 
 fn inner_step_node(
@@ -1001,42 +1011,6 @@ pub fn export_preset(document: &WorkflowDocument) -> Result<PresetManifest, Work
     })
 }
 
-/// Every inner-step node id whose step segment still contains `/`, as
-/// `(entered graph, slashed step, node id)`.
-///
-/// The graph/step boundary is the last `/` of the node id — the key export derives. A document's
-/// `enter` names only *check* that key: an id that sits under an entered graph but keeps another
-/// `/` in its remainder cannot be a one-segment step of that graph, and the derived key would
-/// silently file it under a graph no state enters. A key no state mentions (an orphan nested
-/// graph) is never judged here, so an unreferenced graph still exports.
-pub(crate) fn slashed_step_ids(document: &WorkflowDocument) -> Vec<(&str, &str, &str)> {
-    let entered: BTreeSet<&str> = document
-        .nodes
-        .iter()
-        .flat_map(|node| node.enter.iter())
-        .filter(|enter| enter.kind == WorkflowEnterActionKind::InnerGraph)
-        .filter_map(|enter| enter.name.as_deref())
-        .collect();
-    document
-        .nodes
-        .iter()
-        .filter(|node| node.kind == WorkflowNodeKind::InnerStep)
-        .filter_map(|node| {
-            let graph = entered
-                .iter()
-                .filter(|graph| {
-                    node.id
-                        .strip_prefix(**graph)
-                        .is_some_and(|rest| rest.starts_with('/'))
-                })
-                .max_by_key(|graph| graph.len())?;
-            let step = &node.id[graph.len() + 1..];
-            step.contains('/')
-                .then_some((*graph, step, node.id.as_str()))
-        })
-        .collect()
-}
-
 fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, WorkflowIrError> {
     let mut states = Vec::new();
     let mut steps: BTreeMap<String, Vec<GraphNode>> = BTreeMap::new();
@@ -1044,17 +1018,9 @@ fn project_nodes(document: &WorkflowDocument) -> Result<ProjectedNodes, Workflow
     let outgoing = outgoing_edges(document);
     // Every step id per graph, so a binding can be checked against its graph before any node is
     // projected: import refuses an owner that names no step, and export must not hand out a
-    // manifest that import would then refuse. The step is the last `/` segment — an inner-graph
-    // name may itself contain `/`, and splitting at the first one would invent a different graph
-    // and turn the real owner into a phantom.
-    // The graph/step boundary is the last id segment (the key export derives); a document that
-    // enters a graph and still keeps a `/` in a step under it is refused, an unentered nested graph
-    // is not.
-    if let Some((graph, step, _)) = slashed_step_ids(document).into_iter().next() {
-        return Err(refuse(format!(
-            "inner graph `{graph}` step id `{step}` contains '/'; an inner step id is a single segment"
-        )));
-    }
+    // manifest that import would then refuse. The step is the last `/` segment and the graph is
+    // everything before it — a graph name may itself contain `/`, and a nested key no state enters
+    // is simply an unused graph.
     let mut graph_steps: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for node in &document.nodes {
         if node.kind == WorkflowNodeKind::InnerStep {
@@ -2040,34 +2006,6 @@ states:
                 .expect("manifest parses");
 
         let error = import_preset_manifest(&manifest).expect_err("a slashed step id is refused");
-        assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
-        let message = error.to_string();
-        for expected in ["work_graph", "`a/b`", "single segment"] {
-            assert!(message.contains(expected), "{message}");
-        }
-    }
-
-    /// A document built outside the adapter can carry a slashed step id; export refuses it rather
-    /// than filing the step under a different graph. The mutated step carries no binding, so the
-    /// owner guard cannot mask the defect: only this check can catch it.
-    #[test]
-    fn export_refuses_a_step_id_with_a_slash() {
-        let (dir, manifest) = bundle();
-        let mut imported = import_preset_bundle(
-            &manifest,
-            &FsAssetSource::new(dir.path()).expect("bundle root"),
-        )
-        .expect("import");
-        imported
-            .document
-            .nodes
-            .iter_mut()
-            .find(|node| node.id == "work_graph/draft")
-            .expect("draft node")
-            .id = "work_graph/a/b".to_string();
-
-        let error =
-            export_preset(&imported.document).expect_err("a slashed step id has no projection");
         assert!(matches!(error, WorkflowIrError::NotProjectable { .. }));
         let message = error.to_string();
         for expected in ["work_graph", "`a/b`", "single segment"] {
