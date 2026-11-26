@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT object_kind, object_id, state FROM remote_binding_memory_objects WHERE binding_id = ? ORDER BY object_kind, object_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "object_kind",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_binding_memory_objects",
+            "name": "object_kind"
+          }
+        }
+      },
+      {
+        "name": "object_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_binding_memory_objects",
+            "name": "object_id"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "remote_binding_memory_objects",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ca2f16055121c8e9fc604cac03ec61d2b6e687503ae72e19e09b9582400a9e6c"
+}
