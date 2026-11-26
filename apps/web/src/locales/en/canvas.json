@@ -351,8 +351,7 @@
     },
     "draftTransitionEditor": "Draft transition editor",
     "revisionBadge": {
-      "label": "rev {{revision}}",
-      "conflictTitle": "Revision conflict — refetch before editing"
+      "label": "rev {{revision}}"
     },
     "validation": {
       "title": "Validation",
@@ -436,23 +435,6 @@
     }
   },
   "conflict": {
-    "strategy": {
-      "title": "Harness Conflict"
-    },
-    "fields": {
-      "label": "Label",
-      "description": "Description",
-      "nextTarget": "Target",
-      "promptTemplate": "Prompt template",
-      "promptTemplateWithRef": "Prompt template ({{ref}})"
-    },
-    "serverContent": {
-      "none": "None",
-      "notFetched": "Not fetched"
-    },
-    "draftContent": {
-      "empty": "Empty"
-    },
     "serverSectionTitle": "Server version",
     "localSectionTitle": "Your edit",
     "useCurrent": "Use current",

@@ -21,7 +21,7 @@ export function CanvasHeader({
   onEditApplied,
 }: {
   revision: number;
-  status: 'clean' | 'dirty' | 'conflict';
+  status: 'clean' | 'dirty';
   activeSession: { current_task_id?: string; status: string } | null | undefined;
   showAlt: boolean;
   setShowAlt: (v: boolean) => void;

@@ -344,8 +344,7 @@
     },
     "draftTransitionEditor": "草稿转换编辑器",
     "revisionBadge": {
-      "label": "修订 {{revision}}",
-      "conflictTitle": "修订版本冲突——请先刷新再编辑"
+      "label": "修订 {{revision}}"
     },
     "validation": {
       "title": "校验",
@@ -429,23 +428,6 @@
     }
   },
   "conflict": {
-    "strategy": {
-      "title": "Harness 冲突"
-    },
-    "fields": {
-      "label": "标签",
-      "description": "描述",
-      "nextTarget": "目标",
-      "promptTemplate": "提示词模板",
-      "promptTemplateWithRef": "提示词模板（{{ref}}）"
-    },
-    "serverContent": {
-      "none": "无",
-      "notFetched": "未获取"
-    },
-    "draftContent": {
-      "empty": "空"
-    },
     "serverSectionTitle": "服务器版本",
     "localSectionTitle": "你的编辑",
     "useCurrent": "使用当前版本",
