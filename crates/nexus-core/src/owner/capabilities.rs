@@ -1180,9 +1180,25 @@ async fn execute_write_file(
             .await?;
     } else if context.recording_work_artifact.is_some() {
         // `recording_work_artifact` marks a simulated context: it never touches
-        // disk, and outside `Works/` there is no recorded seam to claim — the
-        // honest answer is a refusal naming the simulator restriction, not a
-        // permission-style denial (production would write this path).
+        // disk, and outside `Works/` there is no recorded seam to claim.
+        //
+        // `Forbidden` is reused deliberately: the cause is a context
+        // restriction, not an authorization decision. The tool error vocabulary
+        // is the closed generated `CoreErrorCode`
+        // (`schemas/core/core-error.schema.json`), which has no simulator code:
+        // `not_supported` is the unknown-tool answer
+        // (`CapabilityRegistry::dispatch`), `InvalidInput` would call a
+        // well-formed request malformed, and `Coded` exists for finer codes a
+        // retained surface already promises — minting one here is a new wire
+        // value without a schema entry. Within this tool `Forbidden` already
+        // means "this path/context is refused" (the out-of-root mapping above),
+        // and its `resource` is free text, so the caller reads the simulator
+        // cause below, not a bare denial.
+        //
+        // Audit cost, accepted: `execute()` audits every refusal as
+        // `denied:<err_code>` into `acp_tool_audit_log`, and `err_code` maps
+        // `Forbidden` to "forbidden", so the row reads `denied:forbidden` — the
+        // simulator cause survives only in this returned `resource`.
         return Err(NexusApiError::Forbidden {
             resource: format!(
                 "fs/write_text_file: simulated context — non-Works writes are not performed (production writes normally); requested '{path_str}'"
