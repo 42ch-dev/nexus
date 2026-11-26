@@ -23,6 +23,7 @@ use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::knowledge_entry::KnowledgeEntryRecord;
 use nexus_knowledge::world_kb::store::KbStoreError;
 use nexus_knowledge::world_kb::KbStore;
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::migrate::{Migration, Migrator};
 use sqlx::SqlitePool;
@@ -135,19 +136,11 @@ async fn seed_creator(pool: &SqlitePool) {
 }
 
 async fn seed_world(pool: &SqlitePool, world_id: &str) {
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', '2026-08-01T00:00:00Z')",
+    world_with(
+        pool,
+        WorldSeed::new(world_id, CREATOR, world_id, world_id).with_workspace_id("ws"),
     )
-    .bind(world_id)
-    .bind(CREATOR)
-    .bind(world_id)
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 async fn seed_character(pool: &SqlitePool, character_id: &str, display_name: &str) {
@@ -1546,6 +1539,7 @@ async fn seed_pre_cutover_creator(pool: &SqlitePool, creator_id: &str) {
 
 /// Seed a World whose stored controlling Creator is `owner_creator_id`.
 async fn seed_world_owned_by(pool: &SqlitePool, world_id: &str, owner_creator_id: &str) {
+    // seed: raw INSERT — the owner must stay unregistered; the abort fixtures need an unresolvable Creator.
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \

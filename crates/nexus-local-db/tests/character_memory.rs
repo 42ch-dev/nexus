@@ -8,6 +8,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::{
     add_actor_world_binding, capture_character_run, character_soul_narrative_fragment_stats,
     count_character_pending_reviews, create_character_fragment, create_character_pending_review,
@@ -52,19 +53,11 @@ async fn seed_creators_worlds(pool: &SqlitePool) {
             .unwrap();
     }
     for (world_id, owner) in [(WORLD_A, OWNER), (WORLD_B, OWNER), (WORLD_FOREIGN, OTHER)] {
-        sqlx::query(
-            "INSERT INTO narrative_worlds \
-             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-              time_policy, metadata_json, created_at) \
-             VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+        world_with(
+            pool,
+            WorldSeed::new(world_id, owner, world_id, world_id).with_workspace_id("ws"),
         )
-        .bind(world_id)
-        .bind(owner)
-        .bind(world_id)
-        .bind(world_id)
-        .execute(pool)
-        .await
-        .unwrap();
+        .await;
     }
 }
 
@@ -1206,6 +1199,7 @@ async fn archived_or_paused_world_rejects_provenance_writes_but_retains_reads() 
     let (pool, _dir) = fresh_pool().await;
     let s = seed(&pool).await;
 
+    // seed: raw INSERT — the fixture needs an already-archived World; `WorldSeed` seeds `status='active'`.
     sqlx::query(
         "INSERT INTO narrative_worlds \
          (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
@@ -1635,16 +1629,11 @@ async fn retained_reads_fail_closed_for_foreign_or_missing_world() {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES ('wld_gone', 'ws', ?, 'Gone', 'gone', 'active', 'private', 'manual', '{}', datetime('now'))",
+    world_with(
+        &pool,
+        WorldSeed::new("wld_gone", OWNER, "Gone", "gone").with_workspace_id("ws"),
     )
-    .bind(OWNER)
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
     sqlx::query(
         "INSERT INTO actor_world_bindings \
          (binding_id, character_id, world_id, status, created_at, updated_at) \
