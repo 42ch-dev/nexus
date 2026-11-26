@@ -166,7 +166,7 @@ nexus42 creator world create --title "E2 demo world"       # creates a world; no
 
 This guide never writes the SPOKE version as a literal — the lockstep release is
 recorded once, in this repository's manifests: `Cargo.toml` (`spoke-schemas` /
-`spoke-operations` / `spoke-connect`, exact pins) and `package.json`
+`spoke-operations` / `spoke-connect`, minor-line pins) and `package.json`
 (`@42ch/spoke-schemas` / `@42ch/spoke-operations`), and the drift gate reads
 the pin from `Cargo.toml` rather than a copy. Resolve it rather than copying it:
 

@@ -24,11 +24,11 @@ These are the architecture bedrock — do not re-litigate.
 #### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin on the **pinned upstream lockstep release** — version SSOT: the workspace manifest)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
-- **Rust (opt-in Connect Host and Memory Client):** `spoke-connect` (crates.io, lockstep exact pin on the same release) is consumed behind `connect-host` on `apps/nexus42` and behind the independent `memory-remote` client feature on `nexus-core`. The ordinary `nexus42` (`cli`) build and default `nexus-core` build MUST NOT link `spoke-connect`; `memory-remote` enables no host, execution, peer-control, rmcp, or cloud cohort. See §10 and [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md#7-feature-and-dependency-boundary).
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep minor-line pin on the **pinned upstream lockstep release** (`0.19` — patches float; the lockfile owns the resolved patch) — version SSOT: the workspace manifest)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep minor-line pin on the same release — the two root `package.json` pins)
+- **Rust (opt-in Connect Host and Memory Client):** `spoke-connect` (crates.io, lockstep minor-line pin on the same release) is consumed behind `connect-host` on `apps/nexus42` and behind the independent `memory-remote` client feature on `nexus-core`. The ordinary `nexus42` (`cli`) build and default `nexus-core` build MUST NOT link `spoke-connect`; `memory-remote` enables no host, execution, peer-control, rmcp, or cloud cohort. See §10 and [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md#7-feature-and-dependency-boundary).
 
-**Lockstep cutover:** all three Rust and both root npm pins move together in one custodian checkpoint (`tooling/check-wire-drift.sh` derives its pin from `Cargo.toml`, so it needs no edit). The `libp2p` companion pin stays at `=0.57.1` through the `spoke-connect` 0.17.0 lockstep (upstream's workspace pin is unchanged) and is verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
+**Lockstep cutover:** all three Rust and both root npm pins move together in one custodian checkpoint (`tooling/check-wire-drift.sh` derives its pin from `Cargo.toml`, so it needs no edit). The `libp2p` companion pin stays at `=0.57.1` through the `spoke-connect` 0.19 lockstep (upstream's workspace pin is unchanged) and is verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
 
 `schemas/domain/key-block.schema.json` does not exist, and no nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 
@@ -1038,11 +1038,11 @@ These are the architecture bedrock — do not re-litigate.
 #### 1.1 Consume spoke packages directly
 
 nexus depends on spoke's published packages directly:
-- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin on the **pinned upstream lockstep release** — version SSOT: the workspace manifest)
-- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep exact pin on the same release — the two root `package.json` pins)
-- **Rust (opt-in Connect Host and Memory Client):** `spoke-connect` (crates.io, lockstep exact pin on the same release) is consumed behind `connect-host` on `apps/nexus42` and behind the independent `memory-remote` client feature on `nexus-core`. The ordinary `nexus42` (`cli`) build and default `nexus-core` build MUST NOT link `spoke-connect`; `memory-remote` enables no host, execution, peer-control, rmcp, or cloud cohort. See §10 and [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md#7-feature-and-dependency-boundary).
+- **Rust:** `spoke-schemas` + `spoke-operations` (crates.io, lockstep minor-line pin on the **pinned upstream lockstep release** (`0.19` — patches float; the lockfile owns the resolved patch) — version SSOT: the workspace manifest)
+- **TypeScript:** `@42ch/spoke-schemas` + `@42ch/spoke-operations` (npm, lockstep minor-line pin on the same release — the two root `package.json` pins)
+- **Rust (opt-in Connect Host and Memory Client):** `spoke-connect` (crates.io, lockstep minor-line pin on the same release) is consumed behind `connect-host` on `apps/nexus42` and behind the independent `memory-remote` client feature on `nexus-core`. The ordinary `nexus42` (`cli`) build and default `nexus-core` build MUST NOT link `spoke-connect`; `memory-remote` enables no host, execution, peer-control, rmcp, or cloud cohort. See §10 and [spoke-memory-provider-binding.md](spoke-memory-provider-binding.md#7-feature-and-dependency-boundary).
 
-**Lockstep cutover:** all three Rust and both root npm pins move together in one custodian checkpoint (`tooling/check-wire-drift.sh` derives its pin from `Cargo.toml`, so it needs no edit). The `libp2p` companion pin stays at `=0.57.1` through the `spoke-connect` 0.17.0 lockstep (upstream's workspace pin is unchanged) and is verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
+**Lockstep cutover:** all three Rust and both root npm pins move together in one custodian checkpoint (`tooling/check-wire-drift.sh` derives its pin from `Cargo.toml`, so it needs no edit). The `libp2p` companion pin stays at `=0.57.1` through the `spoke-connect` 0.19 lockstep (upstream's workspace pin is unchanged) and is verified against the integrated lock graph. Both `connect-host` and `connect-client` feature consumers are covered; no default-build linkage expansion is introduced.
 
 `schemas/domain/key-block.schema.json` does not exist, and no nexus-local copy of spoke schemas exists. The atomic KB wire type is `KnowledgeEntry` from spoke.
 

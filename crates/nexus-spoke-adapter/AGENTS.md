@@ -23,7 +23,7 @@ Since V1.141 the crate also flat-re-exports spoke 0.4.0's adapter **port traits 
 ## Authority
 
 - Normative spec: [`docs/specs/architecture/spoke-adapter-architecture.md`](../../docs/specs/architecture/spoke-adapter-architecture.md) (tracked). §7.2 is the authoritative public API surface; §7.3 is the Surface B (ports + orchestrators) surface; §2 is the `extensions.nexus` contract.
-- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep exact pin on the **pinned upstream lockstep release** — the version SSOT is the workspace manifest, mirrored by the two root npm pins and checked by `tooling/check-wire-drift.sh`, which derives its pin from that manifest).
+- Upstream types: `spoke-schemas` + `spoke-operations` (crates.io, lockstep **minor-line** pin on the pinned upstream release — `0.19`, so patches float; the lockfiles own the resolved patch. The version SSOT is the workspace manifest, mirrored by the two root npm pins and checked by `tooling/check-wire-drift.sh`, which derives its pin from that manifest).
 - **Shipped (v1.191 P1):** the lockstep SPOKE release plus complete Actor-holder governance (native `holder_entry_id`/`disclosure`, Creator management vs ActorView admission, `creator_only` cutover) and the production extraction wrapper. Durable contract: [`docs/specs/architecture/holder-governance.md`](../../docs/specs/architecture/holder-governance.md). `spoke-connect` stays behind `connect-host` / `connect-client`.
 
 ## Key rules
@@ -45,7 +45,7 @@ This crate is the single place where native holder governance crosses the SPOKE 
 
 ## Dependencies
 
-- `spoke-schemas`, `spoke-operations` (workspace, lockstep exact pin on the pinned upstream release)
+- `spoke-schemas`, `spoke-operations` (workspace, lockstep minor-line pin `0.19` on the pinned upstream release — patches float)
 - `serde`, `serde_json`
 - `nexus-knowledge` (domain types + conversion seam, V1.145 P1a)
 - `nexus-local-db` (storage primitives — `SqliteKbStore`, `open_pool`, `run_migrations`, CAS helpers; V1.145 P1b adapter rehome)

@@ -3,8 +3,8 @@
 # check-wire-drift.sh — Wire/local schema drift detection CI gate
 #
 # Gates:
-#   1. Spoke version conformance — the lockstep spoke pin (spoke-adapter-
-#      architecture spec §1.1/§5.2) is honored in the Rust workspace
+#   1. Spoke version conformance — the lockstep spoke pin line (`0.19`, patches
+#      float; spoke-adapter-architecture spec §1.1/§5.2) is honored in the Rust workspace
 #      Cargo.toml (1a: the sibling crates match the canonical
 #      `spoke-operations` entry) and the root npm package.json (1b), for
 #      ALL spoke packages (spoke-schemas + spoke-operations + spoke-connect
@@ -22,10 +22,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Lockstep spoke pin. The workspace Cargo.toml `spoke-operations` entry is the
-# canonical source: every other declaration (the sibling crates, the root
-# package.json) MUST match it. A dependency bump updates the manifest; this gate
-# then catches a bump that missed a copy. `strategy-samples/**` is deliberately
+# Lockstep spoke pin line. The workspace Cargo.toml `spoke-operations` entry is
+# the canonical source: every other declaration (the sibling crates, the root
+# package.json) MUST match it. Pins name the minor line (`0.19`), so patches
+# float and the lockfile owns the resolved patch; the comparison is textual, so
+# a legacy `=0.19` spelling also matches (the leading `=` is stripped below). A
+# dependency bump updates the manifest; this gate then catches a bump that
+# missed a copy. `strategy-samples/**` is deliberately
 # ungated: it carries only `${PIN}` / `<semver>` placeholders, so there is no
 # version literal to compare. Never hardcode the version here — that turns every
 # minor/patch bump into a red CI run and forces a hand edit that merely restates
@@ -49,9 +52,10 @@ echo "Expected lockstep pin: ${SPOKE_PIN}"
 echo ""
 
 # ── Gate 1a: Rust crate pins (workspace Cargo.toml) ─────────────────────────
-# The workspace [workspace.dependencies] declares exact pins for all three
-# crates; `spoke-operations` is the canonical source, so the other two are
-# asserted against it:
+# The workspace [workspace.dependencies] declares the pin line (`0.19`, patches
+# float) for all three crates; `spoke-operations` is the canonical source, so
+# the other two are asserted against it. The compare is textual, so a legacy
+# exact `=0.19` spelling also matches:
 #   spoke-schemas    = "<pin>"
 #   spoke-operations = "<pin>"     (canonical)
 #   spoke-connect    = "<pin>"     (opt-in behind feature `connect-host`)

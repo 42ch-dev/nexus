@@ -23,11 +23,11 @@ importers:
   .:
     dependencies:
       '@42ch/spoke-operations':
-        specifier: 0.17.0
-        version: 0.17.0
+        specifier: '0.19'
+        version: 0.19.1
       '@42ch/spoke-schemas':
-        specifier: 0.17.0
-        version: 0.17.0
+        specifier: '0.19'
+        version: 0.19.1
     devDependencies:
       oxlint:
         specifier: ^1.94.0
@@ -464,12 +464,12 @@ importers:
 
 packages:
 
-  '@42ch/spoke-operations@0.17.0':
-    resolution: {integrity: sha512-C7o4S/YXUPe5I4eiB0v4J8VdXkxK8CYrFt9MPZTX7KMAqcj/S3c0T+83zULL6ltcdH6Eu5p2+g4CsdZMXTyfHw==}
+  '@42ch/spoke-operations@0.19.1':
+    resolution: {integrity: sha512-SJkglKR/RZkkiIUqZqnIRkrDnxIoVr5QAyTEPsRCfpdz0AetxwJ7M7iaU6XCdDE7yIxh90+0dr+H95J/CPgUkw==}
     engines: {node: '>=22'}
 
-  '@42ch/spoke-schemas@0.17.0':
-    resolution: {integrity: sha512-UX83sZBJlqwnwzgwjvJp2x+yODX2l5XfVszdP9XkJZyrY54fueg0hxbsKDvuhjqM8UMFh+agIiRx+KRxYA4dMQ==}
+  '@42ch/spoke-schemas@0.19.1':
+    resolution: {integrity: sha512-k1de47AdCYuT48BQcVUimt8evDVQHZHBCQrlvswGzAcT66DxEReI9GdhenhkkeG76pK79misenPtFoJujoGz4Q==}
 
   '@adobe/css-tools@4.5.0':
     resolution: {integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==}
@@ -3917,13 +3917,13 @@ packages:
 
 snapshots:
 
-  '@42ch/spoke-operations@0.17.0':
+  '@42ch/spoke-operations@0.19.1':
     dependencies:
-      '@42ch/spoke-schemas': 0.17.0
+      '@42ch/spoke-schemas': 0.19.1
       '@noble/hashes': 2.4.0
       canonicalize: 5.1.0
 
-  '@42ch/spoke-schemas@0.17.0': {}
+  '@42ch/spoke-schemas@0.19.1': {}
 
   '@adobe/css-tools@4.5.0': {}
 

@@ -30,6 +30,7 @@ use spoke_schemas::{Finding, KnowledgeEntry, PromoteRequest};
 
 fn make_knowledge_entry() -> KnowledgeEntry {
     KnowledgeEntry {
+        adoption_anchor: None,
         body: KnowledgeEntryBody::default(),
         canonical_name: KnowledgeEntryCanonicalName::try_from("Mira Vale".to_owned())
             .expect("non-empty canonical name"),

@@ -124,6 +124,10 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
     };
 
     let mut spoke = SpokeKnowledgeEntry {
+        // The `spoke-knowledge-adoption` family stays UNCONSUMED (upstream
+        // 0.18/0.19): nexus holds no adoption provenance and serves no
+        // `knowledge.adopt`, so an emitted entry never carries an anchor.
+        adoption_anchor: None,
         body: spoke_body,
         canonical_name: KnowledgeEntryCanonicalName::try_from(entry.canonical_name.as_str())
             .expect("canonical_name is non-empty (validated)"),
@@ -192,13 +196,21 @@ pub fn knowledge_record_to_spoke(entry: &KnowledgeEntryRecord) -> SpokeKnowledge
 /// # Errors
 ///
 /// Returns [`KbError::MissingOwner`] when no canonical owner key is present
-/// on the spoke type.
+/// on the spoke type, and [`KbError::UnsupportedAdoptionAnchor`] when the entry
+/// carries a `spoke-knowledge-adoption` anchor this host cannot represent.
 pub fn spoke_to_knowledge_record(
     entry: SpokeKnowledgeEntry,
 ) -> Result<KnowledgeEntryRecord, KbError> {
     let mut s = entry;
     let lossless_body_value = take_nexus_body(&mut s);
     refuse_legacy_creator_only(&s)?;
+    // `adoption_anchor` names a foreign source entry. `KnowledgeEntryRecord`
+    // has no field for it, so keeping the entry would mean re-emitting it
+    // without the anchor — exactly what upstream forbids
+    // (`ADOPTION_ANCHOR_IMMUTABLE`). Fail closed instead of dropping provenance.
+    if s.adoption_anchor.is_some() {
+        return Err(KbError::UnsupportedAdoptionAnchor);
+    }
     // Fail closed when absent, ambiguous, or malformed (non-string/null owner
     // key) — a spoke entry with anything other than exactly one valid owner
     // claim is rejected, never resolved by precedence. This stays the
@@ -839,6 +851,32 @@ mod tests {
         assert_eq!(attrs["role"], "protagonist");
         assert_eq!(attrs["age"].as_f64(), Some(28.0));
         assert_eq!(attrs["is_alive"], true);
+    }
+
+    /// The `spoke-knowledge-adoption` anchor has no native counterpart, so the
+    /// reverse seam refuses the entry instead of dropping its provenance
+    /// (upstream forbids removing an existing anchor on a later put).
+    #[test]
+    fn spoke_seam_refuses_an_entry_carrying_an_adoption_anchor() {
+        let kb = KnowledgeEntryRecord::new("wld_test", BlockType::Character, "Hero");
+        let mut spoke = knowledge_record_to_spoke(&kb);
+        spoke.adoption_anchor = Some(
+            serde_json::from_value::<spoke_schemas::data::knowledge_entry::AdoptionAnchor>(
+                serde_json::json!({
+                    "schema_version": 1,
+                    "source_scope_id": "spc_source",
+                    "source_entry_id": "ke_source",
+                    "source_revision": 1,
+                    "extensions": {},
+                }),
+            )
+            .expect("a schema-valid adoption anchor"),
+        );
+
+        assert!(matches!(
+            spoke_to_knowledge_record(spoke).unwrap_err(),
+            KbError::UnsupportedAdoptionAnchor
+        ));
     }
 
     #[test]

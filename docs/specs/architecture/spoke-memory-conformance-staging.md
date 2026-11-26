@@ -29,7 +29,7 @@ That statement is valid only when every N3, N3-refusal, N3-base, and reuse-plus-
 
 The fixture owns its file-backed SQLite database, migrations, policy, and bootstrap state. It does not depend on `LocalMemoryProvider`, `nexus-core` provider-private modules, `spoke-fixture-memory-engine`, a sibling checkout, an absolute path, an unpublished package, an echo service, or an in-memory substitute. Its integration tests may dev-depend on public `nexus-core` and `nexus42`; `nexus-core` never depends on the fixture crate.
 
-The fixture directly consumes published `spoke-schemas` (through `spoke-operations`), `spoke-operations`, and `spoke-connect`. The current published SPOKE lockstep is `0.17.0` with `libp2p 0.57.1`; workspace manifests own the exact versions. No source gate is waived for an unpublished or assumed interface.
+The fixture directly consumes published `spoke-schemas` (through `spoke-operations`), `spoke-operations`, and `spoke-connect`. The current published SPOKE lockstep is `0.19.1` on the `0.19` pin line with `libp2p 0.57.1`; workspace manifests own the `0.19` pin line (patches float; the lockfiles resolve the patch). No source gate is waived for an unpublished or assumed interface.
 
 **Ablation: the repository-owned fixture implementation** — removal would leave no reproducible independent durable leg because the upstream policy engine is unpublished; it is retained for genuine cross-provider conformance.
 
@@ -41,11 +41,11 @@ Operator bootstrap creates one space and its initial admin through fixture provi
 
 #### 2.3 Protocol and server composition
 
-The fixture implements the 25 base `MemoryPort` operations under `spoke-memory` with independently written deterministic admission, CAS, idempotency, candidate, recall, and profile policy. Published pure validators, digest functions, and grant helpers may be reused; Nexus local policy and storage code may not.
+The fixture implements 25 of the 26 base `MemoryPort` operations under `spoke-memory` with independently written deterministic admission, CAS, idempotency, candidate, recall, and profile policy. The 26th, `memory.spaces.create` (added upstream in spoke 0.19), is refused terminally (`CAPABILITY_PORT_MISSING`, `retry_class: terminal`): the fixture serves exactly its one operator-provisioned space. Published pure validators, digest functions, and grant helpers may be reused; Nexus local policy and storage code may not.
 
-`memory.describe` advertises only `spoke-memory` and a fixture-distinct `engine_policy_version`. Reflection and transfer methods return explicit `op_unsupported`; Connect dispatch returns `capability_missing` when the negotiated sub-capability is absent. Neither family is silently emulated or advertised.
+`memory.describe` advertises only `spoke-memory` and a fixture-distinct `engine_policy_version`. Reflection and transfer methods are refused terminally at the port (`CAPABILITY_PORT_MISSING`) and Connect dispatch answers `op_unsupported`/`capability_missing` when the negotiated sub-capability is absent — the port vocabulary has no `op_unsupported` code. Neither family is silently emulated or advertised.
 
-The published `MemoryPortService` owns the real 33-operation mapping, typed decode, unknown-operation refusal, and authenticated `MemoryAdmission`. `connect_responder` and `RemoteAdapter` own signed hello, negotiated-capability dispatch, and wire envelopes over the published loopback transport. Nexus `WsTransport` covers the separate WebSocket client seam. No Nexus memory-serving advertisement is added.
+The published `MemoryPortService` owns the real 34-operation mapping, typed decode, unknown-operation refusal, and authenticated `MemoryAdmission`. `connect_responder` and `RemoteAdapter` own signed hello, negotiated-capability dispatch, and wire envelopes over the published loopback transport. Nexus `WsTransport` covers the separate WebSocket client seam. No Nexus memory-serving advertisement is added.
 
 #### 2.4 Exact received-request digest bridge
 

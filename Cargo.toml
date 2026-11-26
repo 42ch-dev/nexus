@@ -279,8 +279,17 @@ regress = "0.12"
 # that `BaselinePorts` composes. nexus keeps the remote knowledge face
 # unserved (`LOCAL_CAPABILITIES` unchanged); consumers implement both traits.
 # libp2p stays =0.57.1.
-spoke-schemas = "=0.17.0"
-spoke-operations = "=0.17.0"
+# 0.17.0 → 0.19.1 (0.18 + 0.19): three wire domains narrow — SchemaVersion
+# ceiling 2^53-1, Timestamp strict RFC 3339 with an explicit offset, revision
+# integers inclusive [0, 2^53]; the knowledge get/put/list ops require
+# `spoke-knowledge` (nexus advertises none, so its remote refusal stands);
+# `KnowledgeEntry.adoption_anchor` arrives with the `spoke-knowledge-adoption`
+# family (UNCONSUMED — emitted absent) and `MemoryPort::create_space` becomes a
+# required port item (refused terminally: spaces stay operator-provisioned).
+# The pins now sit on the `0.19` minor line so patches float; libp2p stays
+# =0.57.1.
+spoke-schemas = "0.19"
+spoke-operations = "0.19"
 # V1.148 P3 N-C0 (DF-72): spoke-connect — Connect Host facade (signed
 # hello, allowlist, capability-token gate). V1.153 P0: 0.8.2 → 0.9.1
 # (dial-bound hello + envelope-auth v2 are internal to spoke-connect;
@@ -304,7 +313,7 @@ spoke-operations = "=0.17.0"
 # of every connect build; new normal deps (base64, chrono, getrandom, uuid,
 # serde_jcs); uniffi now optional (nexus enables neither ffi nor bindgen-cli);
 # remote_adapter public API and CapabilityTokenProof/Claims byte-identical.
-spoke-connect = "=0.17.0"
+spoke-connect = "0.19"
 # V1.148 P3 N-C0: libp2p — identity/PeerId/Multiaddr types for the
 # `nexus42 connect` CLI (ed25519 keypair + protobuf key serialization only).
 # V1.195 P4: 0.56.0 → 0.57.0 — lockstep with spoke-connect 0.14.1 (see the
