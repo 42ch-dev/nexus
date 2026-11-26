@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { type Edge, type Node, type NodeChangeset, type Viewport } from '@xyflow/react';
 
-import type { ConflictModalProps } from './conflict-modal';
-import type { CanvasSurfaceAdapter } from './canvas-surface-adapter';
+import type { CanvasSurfaceAdapter, ConflictModalProps } from './canvas-surface-adapter';
 import { useCanvasViewport } from './use-canvas-viewport';
 import { useAutoLayout } from './use-auto-layout';
 

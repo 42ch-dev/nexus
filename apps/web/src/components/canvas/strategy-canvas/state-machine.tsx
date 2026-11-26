@@ -53,21 +53,17 @@ export function RevisionBadge({
   status,
 }: {
   revision: number;
-  status: 'clean' | 'dirty' | 'conflict';
+  status: 'clean' | 'dirty';
 }) {
   const { t } = useTranslation('canvas');
   const color =
-    status === 'conflict'
-      ? 'border-canvas-write-conflict text-canvas-write-conflict bg-canvas-write-conflict/10'
-      : status === 'dirty'
-        ? 'border-canvas-write-dirty text-canvas-write-dirty bg-canvas-write-dirty/10'
-        : 'border-gray-alpha-400 text-gray-700 bg-background-100';
+    status === 'dirty'
+      ? 'border-canvas-write-dirty text-canvas-write-dirty bg-canvas-write-dirty/10'
+      : 'border-gray-alpha-400 text-gray-700 bg-background-100';
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 text-label-12 ${color}`}
-      title={status === 'conflict' ? t('strategy.revisionBadge.conflictTitle') : undefined}
     >
-      {status === 'conflict' ? <AlertTriangle className="h-3 w-3" aria-hidden /> : null}
       {t('strategy.revisionBadge.label', { revision })}
     </span>
   );

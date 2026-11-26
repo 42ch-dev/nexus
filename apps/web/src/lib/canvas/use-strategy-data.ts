@@ -211,9 +211,3 @@ export function useResumeStrategy() {
   });
 }
 
-/** True if the error is a Strategy revision conflict (HTTP 409). */
-export function isStrategyConflictError(
-  error: unknown,
-): error is NexusClientError & { details: { current_revision?: number } } {
-  return error instanceof NexusClientError && error.code === 'strategy_conflict';
-}

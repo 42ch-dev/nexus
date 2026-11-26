@@ -19,8 +19,7 @@ import type {
   WorkOutline,
 } from '@42ch/nexus-contracts';
 
-import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
-import type { ConflictModalProps } from '../conflict-modal';
+import type { CanvasSurfaceAdapter, ConflictModalProps } from '../canvas-surface-adapter';
 import { outlineNodeTypes } from './outline-nodes';
 import {
   outlineGraphSummary,

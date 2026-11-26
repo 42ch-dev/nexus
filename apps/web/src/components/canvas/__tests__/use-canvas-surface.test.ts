@@ -8,8 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { NodeChangeset, type NodeTypes, type Viewport } from '@xyflow/react';
 
-import type { ConflictModalProps } from '../conflict-modal';
-import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
+import type { CanvasSurfaceAdapter, ConflictModalProps } from '../canvas-surface-adapter';
 import {
   useCanvasSurface,
   type CanvasSurfaceQueryResult,

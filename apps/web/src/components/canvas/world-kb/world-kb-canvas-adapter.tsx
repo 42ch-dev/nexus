@@ -8,8 +8,7 @@
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
-import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
-import type { ConflictModalProps } from '../conflict-modal';
+import type { CanvasSurfaceAdapter, ConflictModalProps } from '../canvas-surface-adapter';
 import { worldKbNodeTypes } from './entity-node';
 import {
   anchorNodes,
