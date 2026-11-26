@@ -198,6 +198,26 @@ pub(crate) struct FsWorkArtifactPort {
     nexus_home: PathBuf,
 }
 
+/// Reconcile admits only an absolute workspace root.
+///
+/// The walk joins `Works/<work_ref>/Stories` under this root, so a relative
+/// root would resolve against the daemon's cwd instead of a workspace. An
+/// empty root is the absent case ([`NexusApiError::Uninitialized`], matching
+/// [`crate::content::CoreService::workspace_root`]) and is never client input;
+/// a relative root is malformed input and is named as such.
+fn validate_workspace_root(root: &Path) -> Result<(), NexusApiError> {
+    if root.as_os_str().is_empty() {
+        return Err(NexusApiError::Uninitialized);
+    }
+    if !root.is_absolute() {
+        return Err(NexusApiError::InvalidInput {
+            field: "workspace_root".to_string(),
+            reason: format!("'{}' must be an absolute workspace path", root.display()),
+        });
+    }
+    Ok(())
+}
+
 /// Boundary re-check for one artifact target; runs on the blocking pool.
 ///
 /// Mirrors the guard's canonical walk-up: the nearest existing ancestor must
@@ -421,6 +441,8 @@ impl WorkArtifactPort for FsWorkArtifactPort {
         request: WorkReconcile<'_>,
         recheck: &(dyn Fn() -> Result<(), NexusApiError> + Send + Sync),
     ) -> Result<ReconcileReport, NexusApiError> {
+        validate_workspace_root(request.workspace_root)?;
+
         work_chapters::ensure_novel_profile(&self.pool, request.work_id)
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -1220,6 +1242,62 @@ mod tests {
             None,
             "no lock is acquired for the refused admission"
         );
+    }
+
+    /// Reconcile's walk is rooted at the workspace; an empty root is the
+    /// absent-workspace state and a relative root is malformed input. Both are
+    /// refused before any read, each with its own variant.
+    #[tokio::test]
+    async fn reconcile_refuses_an_empty_or_relative_workspace_root() {
+        let fixture = fixture(true).await;
+        seed_chapter(&fixture.pool, "draft").await;
+        let path = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&path, "finalized", "Body text");
+
+        let absent = fixture
+            .port
+            .reconcile(
+                WorkReconcile {
+                    workspace_root: Path::new(""),
+                    ..reconcile(&fixture, false)
+                },
+                &|| Ok(()),
+            )
+            .await
+            .expect_err("an absent workspace root is refused");
+        assert!(
+            matches!(absent, NexusApiError::Uninitialized),
+            "an absent root is the uninitialized state, got {absent:?}"
+        );
+
+        let relative = fixture
+            .port
+            .reconcile(
+                WorkReconcile {
+                    workspace_root: Path::new("relative/workspace"),
+                    ..reconcile(&fixture, false)
+                },
+                &|| Ok(()),
+            )
+            .await
+            .expect_err("a relative workspace root is refused");
+        match relative {
+            NexusApiError::InvalidInput { field, .. } => assert_eq!(field, "workspace_root"),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "---\nchapter: 1\nstatus: finalized\n---\nBody text",
+            "a refused root writes no bytes"
+        );
+
+        let report = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| Ok(()))
+            .await
+            .expect("an absolute workspace root still walks");
+        assert_eq!(report.resynced, 1, "the valid root walks the real tree");
     }
 
     #[cfg(unix)]
