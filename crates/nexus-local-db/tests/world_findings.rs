@@ -11,6 +11,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::world_findings::{
     get_world_finding, insert_world_finding_in_tx, list_world_findings_by_target,
     list_world_findings_by_world,
@@ -28,26 +29,18 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
 /// Seed creator + world (FK target for `world_findings.world_id`), returning
 /// the world id.
 async fn seed_world(pool: &sqlx::SqlitePool, world_id: &str) {
-    // SAFETY: test-only fixture scaffolding — inserts match the creators /
-    // narrative_worlds DDL.
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-         VALUES ('ctr_findings_test', 'Findings Test', 'active', datetime('now'), '{}')",
+    world_with(
+        pool,
+        WorldSeed::new(
+            world_id,
+            "ctr_findings_test",
+            "Findings Test World",
+            "findings-test-world",
+        )
+        .with_workspace_id("wrk_findings_test")
+        .with_display_name("Findings Test"),
     )
-    .execute(pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-            (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-             time_policy, metadata_json) \
-         VALUES (?, 'wrk_findings_test', 'ctr_findings_test', 'Findings Test World', \
-                 'findings-test-world', 'active', 'private', 'manual', '{}')",
-    )
-    .bind(world_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 /// Insert a row inside a caller-owned transaction (the batch path AR-2 uses),

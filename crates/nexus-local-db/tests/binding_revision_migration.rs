@@ -5,6 +5,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::{read_versions, DB_SCHEMA_VERSION};
 use sqlx::migrate::{Migration, Migrator};
 use sqlx::SqlitePool;
@@ -64,20 +65,11 @@ async fn seed_v21_fixture(pool: &SqlitePool) {
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', ?)",
+    world_with(
+        pool,
+        WorldSeed::new(WORLD, CREATOR, WORLD, WORLD).with_workspace_id("ws"),
     )
-    .bind(WORLD)
-    .bind(CREATOR)
-    .bind(WORLD)
-    .bind(WORLD)
-    .bind(CREATED_AT)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
     sqlx::query(
         "INSERT INTO characters \
          (character_id, owner_creator_id, display_name, status, image_uri, persona_json, \

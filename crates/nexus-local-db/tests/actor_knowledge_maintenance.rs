@@ -8,7 +8,9 @@ use nexus_knowledge::world_kb::knowledge_entry::{
 };
 use nexus_local_db::kb_store::{
     cas_patch_actor_knowledge_in_tx, cas_update_key_block_modules_in_tx,
-    delete_actor_knowledge_in_tx, AuthoredAudience, SqliteKbStore,
+    delete_actor_knowledge_in_tx,
+    seed::{world_with, WorldSeed},
+    AuthoredAudience, SqliteKbStore,
 };
 use nexus_local_db::{
     author_actor_knowledge_entry, character_holder_entry_id, create_character_with_initial_binding,
@@ -37,18 +39,11 @@ async fn seed(pool: &SqlitePool) {
             .await
             .unwrap();
     }
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at) \
-         VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+    world_with(
+        pool,
+        WorldSeed::new(WORLD, OWNER, WORLD, WORLD).with_workspace_id("ws"),
     )
-    .bind(WORLD)
-    .bind(OWNER)
-    .bind(WORLD)
-    .bind(WORLD)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
 }
 
 async fn seed_character(pool: &SqlitePool) -> (String, String) {
@@ -708,15 +703,11 @@ async fn binding_owned_ke_foreign_world_read_returns_none() {
     let (pool, _dir) = fresh_pool().await;
     seed(&pool).await;
     let (chr, binding_id) = seed_character(&pool).await;
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at) \
-         VALUES ('wld_foreign', 'ws', ?, 'Foreign', 'foreign', 'active', 'private', 'manual', '{}', datetime('now'))",
+    world_with(
+        &pool,
+        WorldSeed::new("wld_foreign", OTHER, "Foreign", "foreign").with_workspace_id("ws"),
     )
-    .bind(OTHER)
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
     let store = SqliteKbStore::new(pool.clone());
     let kb = KnowledgeEntryRecord::for_binding(&binding_id, BlockType::InfoPoint, "bindingFact");
     let inserted = store
@@ -1290,17 +1281,11 @@ async fn v1191_audience_cas_world_container_audience_requires_an_active_binding(
     let (pool, _dir) = fresh_pool().await;
     seed(&pool).await;
     let (chr, binding) = seed_character(&pool).await;
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES ('wld_worldB', 'ws', ?, 'B', 'b', 'active', 'private', 'manual', '{}', \
-                 datetime('now'))",
+    world_with(
+        &pool,
+        WorldSeed::new("wld_worldB", OWNER, "B", "b").with_workspace_id("ws"),
     )
-    .bind(OWNER)
-    .execute(&pool)
-    .await
-    .unwrap();
+    .await;
     let unbound = seed_character_in(&pool, "wld_worldB", "Unbound").await;
     let mut tx = nexus_local_db::begin_immediate(&pool).await.unwrap();
     let resolved = nexus_local_db::kb_store::resolve_authored_audience_tx(

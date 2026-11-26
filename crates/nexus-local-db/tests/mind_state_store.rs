@@ -11,6 +11,7 @@
 
 use nexus_contracts::BlockType;
 use nexus_knowledge::world_kb::{KbStore, KnowledgeEntryRecord};
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::kb_store::SqliteKbStore;
 use nexus_local_db::mind_state_store::{
     delete_mind_state, get_mind_state, insert_mind_state, list_mind_states_by_holder,
@@ -25,29 +26,22 @@ async fn setup_db() -> (sqlx::SqlitePool, tempfile::TempDir) {
     (pool, dir)
 }
 
-/// Seed creator + world + a holder `kb_key_blocks` row (FK target for
-/// `mind_states.holder_entry_id`), returning the holder entry id.
+/// Seed creator + world (via [`world_with`]) + a holder `kb_key_blocks` row
+/// (FK target for `mind_states.holder_entry_id`), returning the holder entry
+/// id.
 async fn seed_holder(pool: &sqlx::SqlitePool) -> String {
-    // SAFETY: test-only fixture scaffolding — inserts match the creators /
-    // narrative_worlds / kb_key_blocks DDL.
-    sqlx::query(
-        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
-         VALUES ('ctr_mind_test', 'Mind Test', 'active', datetime('now'), '{}')",
+    world_with(
+        pool,
+        WorldSeed::new(
+            "wld_mind_test",
+            "ctr_mind_test",
+            "Mind Test World",
+            "mind-test-world",
+        )
+        .with_workspace_id("wrk_mind_test")
+        .with_display_name("Mind Test"),
     )
-    .execute(pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-            (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-             time_policy, metadata_json) \
-         VALUES ('wld_mind_test', 'wrk_mind_test', 'ctr_mind_test', 'Mind Test World', \
-                 'mind-test-world', 'active', 'private', 'manual', '{}')",
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-
+    .await;
     let store = SqliteKbStore::new(pool.clone());
     let kb = KnowledgeEntryRecord::new("wld_mind_test", BlockType::Character, "Bo");
     let holder_id = kb.entry_id.clone();

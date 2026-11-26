@@ -18,6 +18,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::writer_protocol::{
     acquire_store_reset_fence, acquire_writer_guard, init_guarded_pool, join_live_engine_pool,
     open_admitted_pool, open_guarded_pool, open_guarded_pool_arc, release_retained_writer_guards,
@@ -544,12 +545,11 @@ async fn revision_bump_not_doubled(dir: &Path) {
     ensure_creator_row(&pool, "ctr_test", "Test")
         .await
         .expect("creator row");
-    sqlx::query(
-        "INSERT INTO narrative_worlds (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy, metadata_json, created_at)              VALUES ('wld_rev', 'ws', 'ctr_test', 'Rev', 'rev', 'active', 'private', 'manual', '{}', datetime('now'))",
+    world_with(
+        &pool,
+        WorldSeed::new("wld_rev", "ctr_test", "Rev", "rev").with_workspace_id("ws"),
     )
-    .execute(&pool)
-    .await
-    .expect("seed world");
+    .await;
     sqlx::query(
         "INSERT INTO kb_key_blocks (key_block_id, world_id, block_type, canonical_name, status, body_json, revision, created_at)              VALUES ('kb_rev_probe', 'wld_rev', 'info_point', 'probe', 'confirmed', '{}', 0, datetime('now'))",
     )
@@ -826,17 +826,17 @@ async fn assert_holder_tables_require_admission(db: &Path) {
     .execute(&direct)
     .await
     .expect("creator subject row");
-    sqlx::query(
-        "INSERT INTO narrative_worlds \
-         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-          time_policy, metadata_json, created_at) \
-         VALUES ('wld_holder_writer', 'ws', 'ctr_holder_writer', 'Holder World', \
-                 'holder-world', 'active', 'private', 'manual', '{}', \
-                 '2026-09-18T00:00:00Z')",
+    world_with(
+        &direct,
+        WorldSeed::new(
+            "wld_holder_writer",
+            "ctr_holder_writer",
+            "Holder World",
+            "holder-world",
+        )
+        .with_workspace_id("ws"),
     )
-    .execute(&direct)
-    .await
-    .expect("world container for the quarantined atom");
+    .await;
     let holder = creator_holder_entry_id("ctr_holder_writer");
     sqlx::query("INSERT INTO knowledge_holders (holder_entry_id, creator_id) VALUES (?, ?)")
         .bind(&holder)

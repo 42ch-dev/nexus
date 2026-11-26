@@ -21,6 +21,7 @@
 //!   deletion.
 #![allow(clippy::unwrap_used)]
 
+use nexus_local_db::kb_store::seed::{world_with, WorldSeed};
 use nexus_local_db::{
     add_actor_world_binding, begin_immediate, create_character_with_initial_binding,
     insert_remote_binding_admission_tx, record_remote_binding_object_tx,
@@ -60,19 +61,11 @@ async fn seed(pool: &SqlitePool) -> Seed {
         .await
         .unwrap();
     for world in [WORLD_A, WORLD_B] {
-        sqlx::query(
-            "INSERT INTO narrative_worlds \
-             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
-              time_policy, metadata_json, created_at) \
-             VALUES (?, 'ws', ?, ?, ?, 'active', 'private', 'manual', '{}', datetime('now'))",
+        world_with(
+            pool,
+            WorldSeed::new(world, OWNER, world, world).with_workspace_id("ws"),
         )
-        .bind(world)
-        .bind(OWNER)
-        .bind(world)
-        .bind(world)
-        .execute(pool)
-        .await
-        .unwrap();
+        .await;
     }
     let created = create_character_with_initial_binding(
         pool,
