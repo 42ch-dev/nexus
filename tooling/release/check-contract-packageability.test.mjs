@@ -1398,8 +1398,15 @@ setInterval(() => {}, 1000);
 const SUICIDE_SPAWNER = `
 const { spawn } = require("node:child_process");
 const { existsSync, readFileSync } = require("node:fs");
+const rawMinimum = (process.env.NEXUS_FIXTURE_MIN_WRITES ?? "").trim();
+const minimumWrites = rawMinimum.length === 0 ? 2 : Number(rawMinimum);
+if (!Number.isInteger(minimumWrites) || minimumWrites < 1) {
+  process.stderr.write(
+    'fixture: NEXUS_FIXTURE_MIN_WRITES must be a positive integer, got "' + rawMinimum + '"\\n',
+  );
+  process.exit(5);
+}
 spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
-const minimumWrites = Number(process.env.NEXUS_FIXTURE_MIN_WRITES ?? "2");
 const deadline = Date.now() + 5000;
 const writes = (path) => (existsSync(path) ? readFileSync(path, "utf8").length : 0);
 const poll = setInterval(() => {
@@ -1411,7 +1418,9 @@ const poll = setInterval(() => {
   }
   if (Date.now() > deadline) {
     clearInterval(poll);
-    process.stderr.write("fixture: the marker writer never reached two writes\\n");
+    process.stderr.write(
+      "fixture: the marker writer never reached " + minimumWrites + " writes\\n",
+    );
     process.exit(4);
   }
 }, 25);
@@ -1899,6 +1908,11 @@ test(
         assert.notEqual(exit, "still-running", "the supervisor followed the command");
         assert.notEqual(
           exit.code,
+          5,
+          "fixture: NEXUS_FIXTURE_MIN_WRITES must be a positive integer",
+        );
+        assert.notEqual(
+          exit.code,
           4,
           "precondition: the marker writer never reached two writes within 5 s",
         );
@@ -1912,6 +1926,111 @@ test(
       } finally {
         suicide.kill("SIGKILL");
       }
+    } finally {
+      cleanupTempRepo(dir);
+    }
+  },
+);
+
+/**
+ * The fixture's bound parses like `NEXUS_RELEASE_DEADLINE_MS`: empty means the
+ * default, a positive integer is honoured, anything else is refused by name rather
+ * than silently becoming a bound that never arms or one that fires at once.
+ */
+test("the fixture's write bound parses like the deadline env", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-release-fixture-bound-"));
+  /** @param {string | undefined} value */
+  const runFixture = async (value) => {
+    const env = { ...process.env, MARKER: join(dir, `marker-${String(value)}.txt`) };
+    if (value === undefined) {
+      delete env.NEXUS_FIXTURE_MIN_WRITES;
+    } else {
+      env.NEXUS_FIXTURE_MIN_WRITES = value;
+    }
+    return new Promise((done) => {
+      const fixture = spawn(process.execPath, ["-e", SUICIDE_SPAWNER], {
+        stdio: ["ignore", "ignore", "pipe"],
+        env,
+      });
+      let stderr = "";
+      fixture.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      fixture.on("close", (code, signal) => done({ code, signal, stderr }));
+    });
+  };
+  try {
+    for (const value of [undefined, "", "  ", "2"]) {
+      const result = await runFixture(value);
+      assert.equal(
+        result.signal,
+        "SIGTERM",
+        `NEXUS_FIXTURE_MIN_WRITES=${JSON.stringify(value)} arms and kills itself`,
+      );
+    }
+
+    const unreachable = await runFixture("999");
+    assert.equal(unreachable.code, 4);
+    assert.match(unreachable.stderr, /never reached 999 writes/);
+
+    for (const value of ["x", "0", "-1"]) {
+      const invalid = await runFixture(value);
+      assert.equal(
+        invalid.code,
+        5,
+        `NEXUS_FIXTURE_MIN_WRITES=${value} must be refused`,
+      );
+      assert.match(
+        invalid.stderr,
+        /NEXUS_FIXTURE_MIN_WRITES must be a positive integer/,
+      );
+    }
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+/**
+ * A signal can arrive before `spawn` has reported. The caller still has to learn why
+ * its command never ran, so the supervisor records the signal, waits for the spawn
+ * verdict, and reports the cause instead of dying silently by the signal.
+ */
+test(
+  "a signal racing a failed spawn still reports the cause",
+  { skip: process.platform === "win32" ? "no process groups on Windows" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nexus-release-spawn-race-"));
+    const pidFile = join(dir, "supervisor.pid");
+    try {
+      const supervisor = spawn(
+        process.execPath,
+        [SUPERVISOR_PATH, "/nonexistent-nexus-command"],
+        {
+          detached: true,
+          stdio: ["ignore", "ignore", "pipe"],
+          env: { ...process.env, NEXUS_SUPERVISOR_PID_FILE: pidFile },
+        },
+      );
+      let stderr = "";
+      supervisor.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      const closed = new Promise((done) =>
+        supervisor.on("close", (code, signal) => done({ code, signal, stderr })),
+      );
+      // The pid appears only once the signal is handled, so this signal always
+      // reaches a handler, on either side of the spawn verdict.
+      await waitFor(() => existsSync(pidFile), 4000);
+      supervisor.kill("SIGTERM");
+
+      const exit = await Promise.race([
+        closed,
+        new Promise((done) => setTimeout(() => done("still-running"), 5000)),
+      ]);
+      assert.notEqual(exit, "still-running", "the supervisor reported and left");
+      assert.equal(exit.code, 127, "a command that never started exits 127");
+      assert.match(stderr, /could not run/, "the caller reads the cause");
+      assert.match(stderr, /ENOENT/, "the cause names the missing command");
     } finally {
       cleanupTempRepo(dir);
     }

@@ -44,18 +44,9 @@ if (command === undefined) {
   process.exit(SPAWN_FAILED);
 }
 
-// First thing, so nothing below can skip it: a caller that wants to signal this
-// process needs its pid, and it has no other way to learn one.
+// Read now, published below: a caller that signals the published pid must reach a
+// handler, so the file appears only once this process can act on that signal.
 const supervisorPidFile = process.env.NEXUS_SUPERVISOR_PID_FILE;
-if (supervisorPidFile !== undefined && supervisorPidFile.length > 0) {
-  try {
-    writeFileSync(supervisorPidFile, `${process.pid}\n`);
-  } catch (error) {
-    process.stderr.write(
-      `supervise-child: could not publish ${supervisorPidFile}: ${error.message}\n`,
-    );
-  }
-}
 
 const originalParent = process.ppid;
 
@@ -66,21 +57,24 @@ const originalParent = process.ppid;
  */
 const pidChannel = Number(process.env.NEXUS_CHILD_PID_FD ?? "");
 
+// Declared before the helpers so a signal handler installed above `spawn` can
+// reach it; the command is assigned right after those handlers are in place.
+let child = null;
+
 /**
  * Kill the command's group; this process is not in it, so it survives to exit.
  *
  * @param {{ assertPid?: boolean }} [options] `assertPid` belongs on paths where
- *   `spawn` has demonstrably succeeded (the command ran and exited); a signal that
- *   arrives before the pid is assigned must not turn into an uncaught exception,
- *   or the caller loses the "command never started" cause the error event carries.
+ *   `spawn` has demonstrably succeeded (the command ran and exited); before the
+ *   spawn reports, the caller must still learn why the command never ran.
  */
 function killCommandGroup({ assertPid = false } = {}) {
-  if (child.pid === undefined) {
+  if (child?.pid === undefined) {
     if (assertPid) {
       throw new Error(`supervise-child: ${command} has no pid after a spawn`);
     }
     process.stderr.write(
-      `supervise-child: ${command} has no pid yet; the spawn error carries the cause\n`,
+      `supervise-child: ${command} has no pid yet; the spawn has not reported\n`,
     );
     return;
   }
@@ -93,6 +87,39 @@ function killCommandGroup({ assertPid = false } = {}) {
   }
 }
 
+/**
+ * Write on stderr and leave with `code`. `writeSync` because a pipe write is
+ * asynchronous and `process.exit` would drop it, which is how a caller loses the
+ * cause it was told to expect.
+ *
+ * @param {string} message
+ * @param {number} code
+ */
+function fail(message, code) {
+  try {
+    writeSync(2, `${message}\n`);
+  } catch {
+    process.stderr.write(`${message}\n`);
+  }
+  process.exit(code);
+}
+
+/** @param {string} signal */
+function dieBySignal(signal) {
+  process.removeAllListeners(signal);
+  process.kill(process.pid, signal);
+}
+
+/**
+ * A signal that arrived before `spawn` reported. Commands are spawned with a pid
+ * synchronously, so this only happens when the spawn is about to fail: waiting for
+ * that event lets the caller read `could not run: <cause>` instead of a pointer to
+ * a cause that never arrives.
+ *
+ * @type {string | null}
+ */
+let pendingSignal = null;
+
 // A signal must both stop the build and be the reason this process dies: the
 // caller reads a timeout kill from the child's signal, and leaving a listener
 // installed would swallow the re-raise instead. These go in before `spawn` so an
@@ -100,10 +127,25 @@ function killCommandGroup({ assertPid = false } = {}) {
 // which would kill the supervisor and leave the command it is about to start.
 for (const signal of SIGNALS) {
   process.once(signal, () => {
+    if (child?.pid === undefined) {
+      pendingSignal = signal;
+      return;
+    }
     killCommandGroup();
-    process.removeAllListeners(signal);
-    process.kill(process.pid, signal);
+    dieBySignal(signal);
   });
+}
+
+// Published only now: a caller that reads this file and signals must reach the
+// handlers above, even if the command has not been spawned yet.
+if (supervisorPidFile !== undefined && supervisorPidFile.length > 0) {
+  try {
+    writeFileSync(supervisorPidFile, `${process.pid}\n`);
+  } catch (error) {
+    process.stderr.write(
+      `supervise-child: could not publish ${supervisorPidFile}: ${error.message}\n`,
+    );
+  }
 }
 
 /**
@@ -126,20 +168,28 @@ function commandStdio(channel) {
   return stdio;
 }
 
-const child = spawn(command, args, {
+child = spawn(command, args, {
   stdio: commandStdio(pidChannel),
   detached: true,
 });
 
-if (Number.isInteger(pidChannel) && pidChannel >= 3) {
-  child.on("spawn", () => {
+child.on("spawn", () => {
+  if (Number.isInteger(pidChannel) && pidChannel >= 3) {
     try {
       writeSync(pidChannel, `${child.pid}\n`);
     } catch {
       // The caller closed the channel; the group is still reaped on our signals.
     }
-  });
-}
+  }
+  if (pendingSignal !== null) {
+    // The command did start, so the early signal still gets its kill and its
+    // death by that signal.
+    const signal = pendingSignal;
+    pendingSignal = null;
+    killCommandGroup();
+    dieBySignal(signal);
+  }
+});
 
 const watch = setInterval(() => {
   if (process.ppid !== originalParent) {
@@ -151,8 +201,9 @@ const watch = setInterval(() => {
 
 child.on("error", (error) => {
   clearInterval(watch);
-  process.stderr.write(`${command} could not run: ${error.message}\n`);
-  process.exit(SPAWN_FAILED);
+  // Takes precedence over a pending signal: the caller asked for the command and
+  // has to learn why it never ran.
+  fail(`${command} could not run: ${error.message}`, SPAWN_FAILED);
 });
 
 child.on("exit", (code, signal) => {
@@ -164,8 +215,7 @@ child.on("exit", (code, signal) => {
     // ran and exited, so a missing pid here is a broken contract, not an early
     // signal.
     killCommandGroup({ assertPid: true });
-    process.removeAllListeners(signal);
-    process.kill(process.pid, signal);
+    dieBySignal(signal);
     return;
   }
   process.exit(code ?? 1);
