@@ -91,7 +91,9 @@ function killCommandGroup({ assertPid = false } = {}) {
  * Write on stderr and leave with `code`. Both attempts are synchronous: a pipe
  * write through the stream is asynchronous and `process.exit` would drop it, which
  * is how a caller loses the cause it was told to expect. `writeFileSync` on the raw
- * fd covers a `writeSync` that threw (EAGAIN on a full pipe).
+ * fd covers a `writeSync` that threw (EAGAIN on a full pipe), and the whole thing is
+ * guarded because the same non-blocking fd can refuse both: then the cause is
+ * undeliverable, but the exit code still has to be the one the caller reads.
  *
  * @param {string} message
  * @param {number} code
@@ -101,9 +103,14 @@ function fail(message, code) {
   try {
     writeSync(2, text);
   } catch {
-    writeFileSync(2, text);
+    try {
+      writeFileSync(2, text);
+    } catch {
+      // The fd itself is unusable; nothing can carry the message out.
+    }
+  } finally {
+    process.exit(code);
   }
-  process.exit(code);
 }
 
 /** @param {string} signal */

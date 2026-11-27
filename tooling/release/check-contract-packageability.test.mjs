@@ -1398,7 +1398,24 @@ setInterval(() => {}, 1000);
 const SUICIDE_SPAWNER = `
 const { spawn } = require("node:child_process");
 const { existsSync, readFileSync, writeSync } = require("node:fs");
-const say = (text) => writeSync(2, text + "\\n");
+const park = new Int32Array(new SharedArrayBuffer(4));
+// fd 2 is a non-blocking pipe under the supervisor, so a full pipe surfaces as
+// EAGAIN: retry synchronously for a few milliseconds instead of losing the line.
+const say = (text) => {
+  const bytes = Buffer.from(text + "\\n");
+  let offset = 0;
+  const until = Date.now() + 100;
+  while (offset < bytes.length) {
+    try {
+      offset += writeSync(2, bytes, offset);
+    } catch (error) {
+      if (error.code !== "EAGAIN" || Date.now() > until) {
+        throw error;
+      }
+      Atomics.wait(park, 0, 0, 2);
+    }
+  }
+};
 const rawMinimum = (process.env.NEXUS_FIXTURE_MIN_WRITES ?? "").trim();
 const minimumWrites = rawMinimum.length === 0 ? 2 : Number(rawMinimum);
 if (!Number.isInteger(minimumWrites) || minimumWrites < 1) {
@@ -1417,10 +1434,14 @@ const poll = setInterval(() => {
   }
   if (Date.now() > deadline) {
     clearInterval(poll);
-    say("fixture: the marker writer never reached " + minimumWrites + " writes");
-    // Nothing will reap this on the way out: the supervisor forwards an exit code
-    // instead of killing a group, so the fixture owns its writer.
-    writer.kill("SIGKILL");
+    try {
+      say("fixture: the marker writer never reached " + minimumWrites + " writes");
+    } finally {
+      // Nothing reaps this on the way out: the supervisor forwards an exit code
+      // instead of killing a group, so the fixture owns its writer - even when the
+      // line above could not be written.
+      writer.kill("SIGKILL");
+    }
     process.exit(4);
   }
 }, 25);
@@ -1937,9 +1958,12 @@ test(
  * default, a positive integer is honoured, anything else is refused by name rather
  * than silently becoming a bound that never arms or one that fires at once.
  *
- * Each case runs under `supervise-child.mjs`, so the marker writer the fixture
- * starts is reaped by the supervisor's group kill instead of outliving the test,
- * and every case ends by asserting that its marker stopped changing.
+ * Each case runs under `supervise-child.mjs` and ends by asserting its marker
+ * stopped changing. Who reaps the writer differs by case: the armed cases kill the
+ * fixture itself with SIGTERM, and the supervisor's group kill then takes the
+ * writer (`supervise-child.mjs` reaps only on a signalled command); the `999` case
+ * exits 4 normally, where the supervisor forwards the code and the fixture's own
+ * `writer.kill("SIGKILL")` is what stops it. Do not delete that explicit kill.
  */
 test("the fixture's write bound parses like the deadline env", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-release-fixture-bound-"));
