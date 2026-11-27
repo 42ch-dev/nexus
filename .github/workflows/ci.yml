@@ -281,13 +281,17 @@ jobs:
       # 95% of it the packageability file compiling the same contract crates
       # once per case. `checkContractPackageability` now shares one
       # extracted-archive cache and one Cargo target across those cases, so the
-      # graph compiles once per distinct crate: 327 s (45942850812) and 271 s
-      # (45944849798) on CI, 160 s on a 10-core darwin/arm64 host. That file
-      # asserts its own 720 s budget (its last test) — 2.2x the slower post-fix
-      # run, and above the 1.28x spread those seven runs showed — and hands every
-      # blocking child only the time left in it, so a case that outgrows the
-      # budget dies as a named failure (a case killed by the deadline names the
-      # command and `NEXUS_RELEASE_DEADLINE_MS`) three minutes before this
+      # graph compiles once per distinct crate: 327, 271, 329 and 322 s in
+      # 45942850812, 45944849798, 45949440689 and 45951819482. Running each
+      # deadline-bound child through `supervise-child.mjs` (so an interrupt
+      # cannot orphan a build) costs one node boot per child, measured 38 ms:
+      # +33 s on a 10-core darwin/arm64 host (149.8 s -> 188.2 s for the file),
+      # which is why the budget below is 720 s rather than the 480 s the
+      # pre-supervisor numbers justified. That file asserts its own 720 s budget
+      # (its last test), above the spread of every run recorded here, and hands
+      # every blocking child only the time left in it, so a case that outgrows
+      # the budget dies as a named failure (a case killed by the deadline names
+      # the command and `NEXUS_RELEASE_DEADLINE_MS`) three minutes before this
       # ceiling would kill the step with nothing to read. Raise the budget or the
       # ceiling only with fresh runs recorded here.
       - name: Run release tooling tests (version brackets and lockstep rules)
