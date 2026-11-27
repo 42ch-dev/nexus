@@ -243,7 +243,8 @@ export function approveStrategy(
  * by content hash only; the core recomputes the frozen document's hash, refuses an unknown or
  * foreign approval, changed bytes and a strategy with no schedule, and refuses a repeat apply of
  * the approval that is already current. Those are the core's refusals — this handler renders the
- * reason envelope verbatim and maps `already_applied` / `approval_hash_changed` to 409.
+ * reason envelope verbatim, and `mapNativeError` applies the classification table that decides
+ * which refusals are 409.
  */
 export function applyStrategy(
   service: ServiceCore,

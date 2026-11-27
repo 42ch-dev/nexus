@@ -1,0 +1,12 @@
+{
+  "approval_not_found": "client_error",
+  "approval_strategy_mismatch": "client_error",
+  "approval_hash_changed": "conflict",
+  "strategy_not_user_preset": "client_error",
+  "strategy_has_no_schedule": "client_error",
+  "already_applied": "conflict",
+  "document_unbuildable": "client_error",
+  "pin_changed": "client_error",
+  "pin_unavailable": "client_error",
+  "approval_pins_unverifiable": "client_error"
+}

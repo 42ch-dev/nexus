@@ -1,6 +1,8 @@
 import { parseNativeCoreError } from '@42ch/nexus-native';
 import type { CoreError } from '@42ch/nexus-contracts';
 
+import applyRefusalClasses from './apply-refusal-classes.json' with { type: 'json' };
+
 export interface ApiErrorBody {
   success: false;
   error: {
@@ -64,17 +66,23 @@ const PUBLIC_INTERNAL_MESSAGE = 'Internal server error';
  * needs a *different* request (another approval, a user preset, a schedule, an approval whose
  * document builds), so it keeps the core's client-error status; that includes
  * `document_unbuildable`, whose remedy is a new approval, not a retry.
+ *
+ * The rule is stated once, as `ApplyRefusal::class` in `crates/nexus-core/src/apply.rs`; the
+ * checked-in table below is its projection, and that crate's
+ * `the_service_classification_table_covers_every_variant` fails when a variant and its row
+ * disagree.
  */
-const APPLY_CONFLICT_REASONS: Readonly<Record<string, true>> = {
-  already_applied: true,
-  approval_hash_changed: true,
-};
+const APPLY_CONFLICT_REASONS: ReadonlySet<string> = new Set(
+  Object.entries(applyRefusalClasses as Record<string, string>)
+    .filter(([, refusalClass]) => refusalClass === 'conflict')
+    .map(([reason]) => reason),
+);
 
 /** The envelope code of a conflict-shaped apply refusal, or `undefined` for a client error. */
 function applyConflictCode(details: Record<string, unknown> | undefined): string | undefined {
   if (details?.code !== 'apply_refused') return undefined;
   const reason = String(details.reason);
-  return Object.hasOwn(APPLY_CONFLICT_REASONS, reason) ? reason : undefined;
+  return APPLY_CONFLICT_REASONS.has(reason) ? reason : undefined;
 }
 
 export function statusForCode(code: string): number {

@@ -126,6 +126,32 @@ pub enum ApplyRefusal {
     },
 }
 
+/// How the transport renders an [`ApplyRefusal`].
+///
+/// This is the one statement of the classification: the service's table
+/// (`apps/nexus-service/src/apply-refusal-classes.json`) is a projection of it, and
+/// `the_service_classification_table_covers_every_variant` asserts the two agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyRefusalClass {
+    /// The state the request named has moved, so retrying this exact request cannot succeed:
+    /// the transport answers 409 under the reason's own code.
+    Conflict,
+    /// The request needs a different approval, preset, schedule or document: the core's
+    /// client-error status (422 `invalid_input`).
+    ClientError,
+}
+
+impl ApplyRefusalClass {
+    /// The stable lowercase name the service classification table uses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Conflict => "conflict",
+            Self::ClientError => "client_error",
+        }
+    }
+}
+
 impl ApplyRefusal {
     /// The stable lowercase reason a client branches on.
     #[must_use]
@@ -141,6 +167,27 @@ impl ApplyRefusal {
             Self::PinChanged { .. } => "pin_changed",
             Self::PinUnavailable { .. } => "pin_unavailable",
             Self::PinsUnverifiable { .. } => "approval_pins_unverifiable",
+        }
+    }
+
+    /// The classification the service transport reads.
+    ///
+    /// Exhaustive on purpose: a new variant cannot be added without stating its class here, so it
+    /// cannot silently inherit the client-error side.
+    #[must_use]
+    pub const fn class(&self) -> ApplyRefusalClass {
+        match self {
+            Self::AlreadyApplied { .. } | Self::ApprovalHashChanged { .. } => {
+                ApplyRefusalClass::Conflict
+            }
+            Self::ApprovalNotFound { .. }
+            | Self::ApprovalStrategyMismatch { .. }
+            | Self::StrategyNotUserPreset { .. }
+            | Self::StrategyHasNoSchedule { .. }
+            | Self::DocumentUnbuildable { .. }
+            | Self::PinChanged { .. }
+            | Self::PinUnavailable { .. }
+            | Self::PinsUnverifiable { .. } => ApplyRefusalClass::ClientError,
         }
     }
 
@@ -1340,5 +1387,83 @@ mod tests {
         assert_eq!(refusal.reason(), "applied_document_unverifiable");
         let message = refusal.to_string();
         assert!(message.contains("ir-load") && message.contains("apl_test"));
+    }
+
+    /// One refusal per variant: the variant list the service table has to cover.
+    fn one_of_each_refusal() -> Vec<ApplyRefusal> {
+        vec![
+            ApplyRefusal::ApprovalNotFound {
+                content_hash: String::new(),
+            },
+            ApplyRefusal::ApprovalStrategyMismatch {
+                content_hash: String::new(),
+                approval_strategy_id: String::new(),
+                strategy_id: String::new(),
+            },
+            ApplyRefusal::ApprovalHashChanged {
+                approval_id: String::new(),
+                stored_hash: String::new(),
+                recomputed_hash: String::new(),
+            },
+            ApplyRefusal::StrategyNotUserPreset {
+                strategy_id: String::new(),
+            },
+            ApplyRefusal::StrategyHasNoSchedule {
+                strategy_id: String::new(),
+            },
+            ApplyRefusal::AlreadyApplied {
+                apply_id: String::new(),
+                approval_id: String::new(),
+            },
+            ApplyRefusal::DocumentUnbuildable {
+                builder_reason: String::new(),
+            },
+            ApplyRefusal::PinChanged {
+                nest_id: String::new(),
+                package_id: String::new(),
+                package_version: String::new(),
+                recorded_hash: String::new(),
+                scanned_hash: String::new(),
+            },
+            ApplyRefusal::PinUnavailable {
+                nest_id: String::new(),
+                package_id: String::new(),
+                package_version: String::new(),
+                recorded_hash: String::new(),
+            },
+            ApplyRefusal::PinsUnverifiable {
+                approval_id: String::new(),
+                detail: String::new(),
+            },
+        ]
+    }
+
+    #[test]
+    fn the_service_classification_table_covers_every_variant() {
+        let table: serde_json::Map<String, serde_json::Value> = serde_json::from_str(
+            &std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../apps/nexus-service/src/apply-refusal-classes.json"
+            ))
+            .expect("the service classification table is checked in"),
+        )
+        .expect("the service classification table decodes");
+
+        let refusals = one_of_each_refusal();
+        assert_eq!(
+            table.len(),
+            refusals.len(),
+            "the service table names every ApplyRefusal variant and nothing else"
+        );
+        for refusal in &refusals {
+            assert_eq!(
+                table
+                    .get(refusal.reason())
+                    .and_then(serde_json::Value::as_str),
+                Some(refusal.class().as_str()),
+                "{}'s service table row states the class `ApplyRefusal::class` assigns",
+                refusal.reason()
+            );
+        }
     }
 }
