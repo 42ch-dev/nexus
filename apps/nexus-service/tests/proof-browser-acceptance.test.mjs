@@ -406,6 +406,13 @@ grandchild.stdout.once('data', () => setTimeout(() => process.exit(0), 250));
     const child = lifecycle.spawnLogged(process.execPath, ['-e', leaderScript], {
       label: 'nexus-service',
     });
+    // Registered at spawn time: an exit emitted while the marker wait and the
+    // blocking ps snapshot run below is still observed, instead of surfacing
+    // later as a false "the leader never exited".
+    const leaderExited = new Promise((resolveExit) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolveExit(true);
+      else child.once('exit', () => resolveExit(true));
+    });
     let groupBefore = [];
     try {
       await waitForChildOutput(child, 'grandchild-ready-marker');
@@ -421,14 +428,14 @@ grandchild.stdout.once('data', () => setTimeout(() => process.exit(0), 250));
       // Bounded: a leader that never exits must fail here in 5s instead of
       // parking the file, which is the class of stall this fixture caused.
       let exitTimer;
-      const leaderExited = await Promise.race([
-        new Promise((resolveExit) => child.once('exit', () => resolveExit(true))),
+      const leaderExitedInTime = await Promise.race([
+        leaderExited,
         new Promise((resolveExit) => {
           exitTimer = setTimeout(() => resolveExit(false), 5_000);
         }),
       ]).finally(() => clearTimeout(exitTimer));
       assert.equal(
-        leaderExited,
+        leaderExitedInTime,
         true,
         'the leader must exit within 5s; a leader that never exits would park the file',
       );
