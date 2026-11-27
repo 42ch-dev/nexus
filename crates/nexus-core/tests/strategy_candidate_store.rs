@@ -8,7 +8,7 @@ use std::path::Path;
 use nexus_core::{
     CoreAccess, CoreError, CoreOpenOptions, CoreService, Principal, StrategyCandidateConflictError,
 };
-use nexus_workflow_ir::WorkflowDocument;
+use nexus_workflow_ir::{WorkflowDocument, WorkflowMergeKind};
 use sqlx::SqlitePool;
 use tempfile::TempDir;
 
@@ -191,6 +191,92 @@ async fn a_second_writer_at_the_pre_bump_revision_is_refused_not_merged() {
     assert_eq!(committed.revision, 1);
     assert_eq!(committed.document.meta.description, "writer b");
     assert_eq!(committed.document.revision, 1);
+    core.close().await.unwrap();
+}
+
+// Legacy rows: a negative count on a non-quorum merge
+// ---------------------------------------------------------------------------
+
+/// Rewrite the stored document's first node merge as raw JSON — the bytes an
+/// older writer could leave behind, which no fresh write can express.
+async fn store_raw_merge(core: &CoreService, merge_json: &str) {
+    sqlx::query(
+        "UPDATE strategy_candidates \
+            SET document_json = json_set(document_json, '$.nodes[0].merge', json(?)) \
+          WHERE strategy_id = ?",
+    )
+    .bind(merge_json)
+    .bind("novel-writing")
+    .execute(core.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_stored_all_merge_with_a_legacy_negative_count_still_reads() {
+    let (_tmp, core, principal) = setup().await;
+    core.commit_strategy_candidate(&principal, "novel-writing", 0, |document| {
+        Ok(document.clone())
+    })
+    .await
+    .unwrap();
+    store_raw_merge(&core, r#"{"kind":"all","n":-1}"#).await;
+
+    let candidate = core
+        .read_strategy_candidate(&principal, "novel-writing")
+        .await
+        .unwrap();
+    let merge = candidate.document.nodes[0]
+        .merge
+        .as_ref()
+        .expect("the node keeps its merge");
+    assert_eq!(merge.kind, WorkflowMergeKind::All);
+    assert_eq!(
+        merge.n, None,
+        "the unused legacy count is normalised away, not served"
+    );
+    core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_stored_quorum_merge_with_a_legacy_negative_count_is_still_refused() {
+    let (_tmp, core, principal) = setup().await;
+    core.commit_strategy_candidate(&principal, "novel-writing", 0, |document| {
+        Ok(document.clone())
+    })
+    .await
+    .unwrap();
+    store_raw_merge(&core, r#"{"kind":"quorum","n":-1,"m":2}"#).await;
+
+    match core
+        .read_strategy_candidate(&principal, "novel-writing")
+        .await
+        .unwrap_err()
+    {
+        CoreError::Internal { category } => assert!(
+            category.contains("does not decode"),
+            "a quorum's negative count must stay undecodable, got {category}"
+        ),
+        other => panic!("expected the stored-document decode refusal, got {other:?}"),
+    }
+    core.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_fresh_write_payload_with_a_negative_count_is_still_rejected() {
+    let (_tmp, core, principal) = setup().await;
+    let document = core
+        .read_strategy_candidate(&principal, "novel-writing")
+        .await
+        .unwrap()
+        .document;
+    let mut payload = serde_json::to_value(&document).unwrap();
+    payload["nodes"][0]["merge"] = serde_json::json!({"kind": "all", "n": -1});
+
+    assert!(
+        serde_json::from_value::<WorkflowDocument>(payload).is_err(),
+        "the write contract still keeps a merge count unsigned"
+    );
     core.close().await.unwrap();
 }
 

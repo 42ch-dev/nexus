@@ -120,6 +120,39 @@ pub async fn current_revision(pool: &SqlitePool, strategy_id: &str) -> CoreResul
         .map_err(|_| candidate_internal(format!("stored revision {revision} is negative")))
 }
 
+/// Older writes could persist a negative `n`/`m` on an `all`/`any` merge, where
+/// the counts carry no meaning. Clearing a negative one lets such a row decode
+/// without weakening the unsigned contract: a quorum's counts decide the merge,
+/// so a negative quorum count still fails deserialisation.
+fn normalise_legacy_merge_counts(document: &mut serde_json::Value) {
+    let Some(nodes) = document
+        .get_mut("nodes")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for node in nodes {
+        let Some(merge) = node
+            .get_mut("merge")
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            continue;
+        };
+        if merge.get("kind").and_then(serde_json::Value::as_str) == Some("quorum") {
+            continue;
+        }
+        for key in ["n", "m"] {
+            let negative = merge
+                .get(key)
+                .and_then(serde_json::Value::as_i64)
+                .is_some_and(|count| count < 0);
+            if negative {
+                merge.remove(key);
+            }
+        }
+    }
+}
+
 /// Project one stored row. The schema CHECKs already pin the document's id,
 /// state and revision to the row; a mismatch here means the row was tampered
 /// with outside the store, so this fails rather than serving it.
@@ -130,7 +163,10 @@ fn decode_stored(
 ) -> CoreResult<StrategyCandidate> {
     let revision = u64::try_from(revision)
         .map_err(|_| candidate_internal(format!("stored revision {revision} is negative")))?;
-    let document: WorkflowDocument = serde_json::from_str(document_json)
+    let mut stored: serde_json::Value = serde_json::from_str(document_json)
+        .map_err(|error| candidate_internal(format!("stored document does not decode: {error}")))?;
+    normalise_legacy_merge_counts(&mut stored);
+    let document: WorkflowDocument = serde_json::from_value(stored)
         .map_err(|error| candidate_internal(format!("stored document does not decode: {error}")))?;
     if document.revision != revision
         || document.id.as_str() != strategy_id
