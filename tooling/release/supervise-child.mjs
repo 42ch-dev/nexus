@@ -89,7 +89,10 @@ child.on("error", (error) => {
 child.on("exit", (code, signal) => {
   clearInterval(watch);
   if (signal !== null) {
-    // Forward the command's death as a signal, as `spawnSync` reports it.
+    // A command killed by a signal leaves whatever it started in its group:
+    // `cargo` compiling means `rustc` children still there. Reap the group first,
+    // then forward the death as a signal, as `spawnSync` reports it.
+    killCommandGroup();
     process.removeAllListeners(signal);
     process.kill(process.pid, signal);
     return;

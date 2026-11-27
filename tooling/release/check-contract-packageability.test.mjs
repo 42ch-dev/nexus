@@ -49,10 +49,10 @@ const FILE_STARTED = Date.now();
 /**
  * Measured budget for this file, left well below `timeout-minutes` so a regression
  * fails here with a number instead of being killed with nothing to read. The runs
- * behind it are recorded next to the CI step: 720 s is 2.2x the 327 s the step
- * measured in run 45942850812 (271 s in 45944849798, 160 s on a 10-core
- * darwin/arm64 host), and above the 1.28x spread of the seven runs that measured
- * the slow version.
+ * behind it are recorded next to the CI step: 720 s is 2.2x the slowest recorded
+ * run (327 s, 45942850812) and 3.3x the fastest (219 s, 45955451001), which spans
+ * the ~1.5x runner swing; locally the file measures 188.2 s on a 10-core
+ * darwin/arm64 host.
  */
 const FILE_BUDGET_SECONDS = 720;
 
@@ -1386,6 +1386,16 @@ spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileS
 setInterval(() => {}, 1000);
 `;
 
+/**
+ * Spawns the marker writer, then kills itself with SIGTERM: the writer stays in
+ * the same group, so only the supervisor reaping that group stops it.
+ */
+const SUICIDE_SPAWNER = `
+const { spawn } = require("node:child_process");
+spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
+setTimeout(() => process.kill(process.pid, "SIGTERM"), 400);
+`;
+
 /** Child that spends its deadline inside {@link run}. */
 const GROUP_CHILD = `
 import { run } from ${JSON.stringify(CHECKER_URL)};
@@ -1697,6 +1707,38 @@ test(
         );
       } finally {
         forwarding.kill("SIGKILL");
+      }
+
+      // A command that dies by a signal can leave its own group running; the
+      // supervisor must reap that group before it re-raises and exits.
+      const suicideMarker = join(dir, "suicide.txt");
+      const suicide = spawn(
+        process.execPath,
+        [SUPERVISOR_PATH, process.execPath, "-e", SUICIDE_SPAWNER],
+        {
+          detached: true,
+          stdio: "ignore",
+          env: { ...process.env, MARKER: suicideMarker },
+        },
+      );
+      try {
+        const closed = new Promise((done) =>
+          suicide.on("close", (code, signal) => done({ code, signal })),
+        );
+        const exit = await Promise.race([
+          closed,
+          new Promise((done) => setTimeout(() => done("still-running"), 5000)),
+        ]);
+        assert.notEqual(exit, "still-running", "the supervisor followed the command");
+        assert.equal(exit.signal, "SIGTERM", "the command's signal reaches the caller");
+        const writes = markerWrites(suicideMarker);
+        assert.ok(
+          writes >= 2,
+          `the grandchild ran before the command died (${writes} writes)`,
+        );
+        await assertMarkerSettles(suicideMarker);
+      } finally {
+        suicide.kill("SIGKILL");
       }
     } finally {
       cleanupTempRepo(dir);
