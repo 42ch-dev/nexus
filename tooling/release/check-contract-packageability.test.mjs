@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -1427,15 +1427,31 @@ async function waitFor(predicate, timeout) {
 }
 
 /**
- * Asserts the marker is byte-identical across a settle window, which is what
- * "the writer is gone" looks like from outside.
+ * Waits (bounded) for the marker to stop changing. A supervisor notices its
+ * parent's death on a 100 ms poll, so the writer can legitimately land one more
+ * byte after the caller is gone; what must hold is that the content settles across
+ * a 500 ms window and that a writer which never settles fails.
  *
  * @param {string} marker
- * @param {string} stopped
+ * @param {number} [timeout]
  */
-async function assertMarkerStopped(marker, stopped) {
-  await new Promise((done) => setTimeout(done, 500));
-  assert.equal(readFileSync(marker, "utf8"), stopped, "the reaped group stopped writing");
+async function assertMarkerSettles(marker, timeout = 3000) {
+  const limit = Date.now() + timeout;
+  let previous = readFileSync(marker, "utf8");
+  let stableSince = Date.now();
+  while (Date.now() < limit) {
+    await new Promise((done) => setTimeout(done, 50));
+    const current = readFileSync(marker, "utf8");
+    if (current === previous) {
+      if (Date.now() - stableSince >= 500) {
+        return;
+      }
+      continue;
+    }
+    previous = current;
+    stableSince = Date.now();
+  }
+  assert.fail(`the writer kept writing for ${timeout}ms (${previous.length} writes)`);
 }
 
 test(

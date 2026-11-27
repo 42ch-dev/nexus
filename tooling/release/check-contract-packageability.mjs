@@ -298,14 +298,21 @@ export function run(command, args, cwd, input) {
     maxBuffer: 64 * 1024 * 1024,
   };
   const deadline = childDeadline();
-  /** A deadline means a timeout, and a timeout kill needs a group to kill. */
+  if (deadline !== null) {
+    // The floor keeps a nearly-expired deadline from failing a `git` call that
+    // would have answered at once: a child over the floor is a real overrun. This
+    // applies on every platform: only the group machinery below is POSIX-only,
+    // and a hung child must never run past the budget just because it cannot be
+    // supervised.
+    options.timeout = Math.max(1000, deadline - Date.now());
+  }
+  // Detach and supervise on POSIX only: Windows has no process groups, so there a
+  // timeout still kills the child it started, and its own children are the
+  // platform's problem.
   const supervise = deadline !== null && process.platform !== "win32";
   if (supervise) {
     // Own process group, so a deadline kill reaches the grandchildren too.
     options.detached = true;
-    // The floor keeps a nearly-expired deadline from failing a `git` call that
-    // would have answered at once: a child over the floor is a real overrun.
-    options.timeout = Math.max(1000, deadline - Date.now());
   }
   const [spawnedCommand, spawnedArgs] = supervise
     ? supervised([command, ...args])
