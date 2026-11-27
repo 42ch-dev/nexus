@@ -199,21 +199,6 @@ async function observe(service) {
   return { status: response.payload, discovery: service.discovery };
 }
 
-/**
- * That evidence indicts only the P0-T6 block, so only P0-T6 carries this skip;
- * P0-T5 keeps its CI coverage and still runs there. Remove the skip when
- * I-000436 is closed.
- */
-const SIGSEGV_EXCLUSION =
-  process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true'
-    ? 'excluded, not absent: I-000436 — the P0-T6 block SIGSEGVs this process on the ' +
-      'GitHub linux runner ~58 s in, after P0-T5 had already run to completion ' +
-      '(run 43489148101, ubuntu-latest, Node 22); P0-T5 still runs on CI, and ' +
-      'every case passes on darwin/arm64'
-    : false;
-
-if (SIGSEGV_EXCLUSION) process.stderr.write(`\n[workflow-control-http] ${SIGSEGV_EXCLUSION}\n`);
-
 describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness)', () => {
   test('hosted readiness and owner: blank home stays uninitialized', async () => {
     const service = await startServiceOn(blankHome());
@@ -881,7 +866,7 @@ conn.commit()
   assert.equal(seeded.status, 0, seeded.stderr.trim() ? seeded.stderr : seeded.stdout);
 }
 
-describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { skip: SIGSEGV_EXCLUSION }, () => {
+describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () => {
   test('control round trip: create, list, inspect, session, append, resume and cancel act on one durable run', async () => {
     const home = seededHome(acpProviderConfig());
     const service = await startServiceOn(home);
