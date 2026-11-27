@@ -15,10 +15,15 @@
 # inventory edit. A file can only be skipped by an explicit opt-out row
 # (`path<TAB>-<TAB>0<TAB>disposition`) in the allowlist.
 #
-# Classification (F-002): a `#[cfg(test)]` line cuts production only when it
-# annotates a `mod` (the test module span is excluded); the scan otherwise runs
-# to EOF. A `#[cfg(test)]` on a non-module item (e.g. a test-only const) does
-# not hide production lines below it. An unclassifiable annotation fails closed.
+# Classification (F-002): a test-gated `cfg` attribute cuts production only
+# when it annotates a `mod` (the test module span is excluded); the scan
+# otherwise runs to EOF. Accepted spellings: `#[cfg(test)]`,
+# `#[cfg(all(…, test))]` and `#[cfg(any(test, …))]` — the last selects
+# test-support code that is also compiled under the named Features, so its
+# module body is excluded like `#[cfg(test)]`. `#[cfg(not(test))]` is never a
+# test gate. A test-gated attribute on a non-module item (e.g. a test-only
+# const), struct field or statement does not hide production lines below it;
+# one on an opaque body (macro invocation) fails closed.
 #
 # Exemptions (F-001): tooling/work-artifact-write-allowlist.tsv rows are
 # `path<TAB>symbol<TAB>expected_count<TAB>disposition` — exact path+symbol and
@@ -63,12 +68,15 @@ NAMED = [
 BUILTINS_GLOB = "crates/nexus-capability/src/builtins/*.rs"
 
 WRITE_RE = re.compile(r"(?<![\w])(?:std::fs|tokio::fs|fs)::write\s*\(")
-TEST_ATTR_RE = re.compile(r"^\s*#\[cfg\((?:all\()?test")
+CFG_ATTR_RE = re.compile(r"^\s*#\[cfg\((.*)\)\]")
 MOD_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z_]\w*")
 ITEM_RE = re.compile(
     r"^\s*(?:pub(?:\([^)]*\))?\s+)?"
     r"(?:const|static|fn|use|struct|enum|impl|trait|type|extern|macro_rules!)\b"
 )
+# A test-gated attribute on an opaque body could hide a module the span
+# tracker cannot follow, so the guard fails closed instead of scanning past it.
+OPAQUE_RE = re.compile(r"^\s*(?:\{|[A-Za-z_]\w*!)")
 FN_RE = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 IMPL_FOR_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+[^{]*?\bfor\s+([A-Za-z_]\w*)")
 IMPL_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+([A-Za-z_]\w*)")
@@ -147,12 +155,46 @@ def enclosing_symbol(lines, idx):
     return fn or "<unknown>"
 
 
+def cfg_predicates(expr):
+    """Bare predicate names in a `cfg(..)` body, dropping anything under `not(..)`."""
+    parts, depth, buf = [], 0, []
+    for ch in expr:
+        if depth == 0 and ch == ",":
+            parts.append("".join(buf))
+            buf = []
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        buf.append(ch)
+    parts.append("".join(buf))
+    names = set()
+    for part in parts:
+        m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:\((.*)\))?\s*(?:=.*)?$", part)
+        if not m:
+            continue
+        name, inner = m.group(1), m.group(2)
+        if name == "not":
+            continue
+        names.add(name)
+        if inner and name in ("all", "any"):
+            names |= cfg_predicates(inner)
+    return names
+
+
+def is_test_gate(line):
+    """`#[cfg(..)]` line whose predicates can hold under `test` (never `not(test)`)."""
+    m = CFG_ATTR_RE.match(line)
+    return bool(m) and "test" in cfg_predicates(m.group(1))
+
+
 def test_module_spans(rel, lines):
-    """Line indexes belonging to `#[cfg(test)] mod …` blocks."""
+    """Line indexes belonging to test-gated `mod …` blocks."""
     skip = set()
     i = 0
     while i < len(lines):
-        if not TEST_ATTR_RE.match(lines[i]):
+        if not is_test_gate(lines[i]):
             i += 1
             continue
         j = i + 1
@@ -163,7 +205,7 @@ def test_module_spans(rel, lines):
         ):
             j += 1
         if j >= len(lines):
-            fail(f"{rel}:{i + 1}: #[cfg(test)] at EOF — cannot classify the item")
+            fail(f"{rel}:{i + 1}: test-gated attribute at EOF — cannot classify the item")
             i += 1
             continue
         if MOD_RE.match(lines[j]):
@@ -171,7 +213,7 @@ def test_module_spans(rel, lines):
             while open_line < len(lines) and "{" not in lines[open_line]:
                 open_line += 1
             if open_line >= len(lines):
-                fail(f"{rel}:{i + 1}: #[cfg(test)] mod without a body")
+                fail(f"{rel}:{i + 1}: test-gated mod without a body")
                 i = j + 1
                 continue
             indent = len(lines[j]) - len(lines[j].lstrip())
@@ -184,7 +226,7 @@ def test_module_spans(rel, lines):
                     end = m
                     break
             if end is None:
-                fail(f"{rel}:{i + 1}: unclosed #[cfg(test)] mod")
+                fail(f"{rel}:{i + 1}: unclosed test-gated mod")
                 i = j + 1
                 continue
             skip.update(range(i, end + 1))
@@ -195,7 +237,14 @@ def test_module_spans(rel, lines):
             # so production below it stays visible.
             i += 1
             continue
-        fail(f"{rel}:{i + 1}: ambiguous #[cfg(test)] annotation — cannot classify the item")
+        if OPAQUE_RE.match(lines[j]):
+            fail(
+                f"{rel}:{i + 1}: test-gated attribute on an opaque body — "
+                "cannot classify the item"
+            )
+            i += 1
+            continue
+        # A struct field, expression or statement cannot open a module span.
         i += 1
     return skip
 

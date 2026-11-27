@@ -8,4 +8,3 @@
 crates/nexus-capability/src/builtins/essay_scaffold.rs	ScaffoldTransaction::drop	1	rollback-restore (P2 row 10): synchronous Drop cannot await; restores only pre-existing bytes, never creates content
 crates/nexus-capability/src/builtins/game_bible_scaffold.rs	ScaffoldTransaction::drop	1	rollback-restore (P2 row 12): synchronous Drop cannot await; restores only pre-existing bytes, never creates content
 crates/nexus-capability/src/builtins/script_scaffold.rs	ScaffoldTransaction::drop	1	rollback-restore (P2 row 17): synchronous Drop cannot await; restores only pre-existing bytes, never creates content
-crates/nexus-capability/src/builtins/work_commit.rs	RecordingExecutor::commit_work_artifact	1	test-gated fixture recorder (cfg(any(test, feature = "test-hooks"))): writes only into consumer-owned fixture dirs; never compiled into a production selection
