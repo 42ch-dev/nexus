@@ -1400,20 +1400,25 @@ const { spawn } = require("node:child_process");
 const { existsSync, readFileSync, writeSync } = require("node:fs");
 const park = new Int32Array(new SharedArrayBuffer(4));
 // fd 2 is a non-blocking pipe under the supervisor, so a full pipe surfaces as
-// EAGAIN: retry synchronously for a few milliseconds instead of losing the line.
+// EAGAIN: retry synchronously for a few milliseconds. This never throws - a line
+// that cannot be written must not cost the fixture the exit code its case asserts.
 const say = (text) => {
-  const bytes = Buffer.from(text + "\\n");
-  let offset = 0;
-  const until = Date.now() + 100;
-  while (offset < bytes.length) {
-    try {
-      offset += writeSync(2, bytes, offset);
-    } catch (error) {
-      if (error.code !== "EAGAIN" || Date.now() > until) {
-        throw error;
+  try {
+    const bytes = Buffer.from(text + "\\n");
+    let offset = 0;
+    const until = Date.now() + 100;
+    while (offset < bytes.length) {
+      try {
+        offset += writeSync(2, bytes, offset);
+      } catch (error) {
+        if (error.code !== "EAGAIN" || Date.now() > until) {
+          return;
+        }
+        Atomics.wait(park, 0, 0, 2);
       }
-      Atomics.wait(park, 0, 0, 2);
     }
+  } catch {
+    // Best effort only: nothing else can carry the message out.
   }
 };
 const rawMinimum = (process.env.NEXUS_FIXTURE_MIN_WRITES ?? "").trim();
