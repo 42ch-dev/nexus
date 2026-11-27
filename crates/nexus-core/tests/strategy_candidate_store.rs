@@ -262,8 +262,12 @@ async fn a_stored_quorum_merge_with_a_legacy_negative_count_is_still_refused() {
     core.close().await.unwrap();
 }
 
+/// A negative count never reaches the store: the document type a write carries
+/// (`commit_strategy_candidate`'s `WorkflowDocument`) refuses the payload at
+/// deserialisation. The store-level refusal of an already-stored negative
+/// count is `a_stored_quorum_merge_with_a_legacy_negative_count_is_still_refused`.
 #[tokio::test]
-async fn a_fresh_write_payload_with_a_negative_count_is_still_rejected() {
+async fn a_workflow_document_with_a_negative_count_does_not_deserialize() {
     let (_tmp, core, principal) = setup().await;
     let document = core
         .read_strategy_candidate(&principal, "novel-writing")
@@ -275,7 +279,7 @@ async fn a_fresh_write_payload_with_a_negative_count_is_still_rejected() {
 
     assert!(
         serde_json::from_value::<WorkflowDocument>(payload).is_err(),
-        "the write contract still keeps a merge count unsigned"
+        "the document contract keeps a merge count unsigned, so no write can carry -1"
     );
     core.close().await.unwrap();
 }
