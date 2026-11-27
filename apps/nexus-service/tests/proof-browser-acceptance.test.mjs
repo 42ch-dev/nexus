@@ -418,11 +418,24 @@ grandchild.stdout.once('data', () => setTimeout(() => process.exit(0), 250));
         'the parked grandchild must be visible in the process tree before the kill',
       );
 
-      await new Promise((resolveExit) => child.once('exit', resolveExit));
+      // Bounded: a leader that never exits must fail here in 5s instead of
+      // parking the file, which is the class of stall this fixture caused.
+      let exitTimer;
+      const leaderExited = await Promise.race([
+        new Promise((resolveExit) => child.once('exit', () => resolveExit(true))),
+        new Promise((resolveExit) => {
+          exitTimer = setTimeout(() => resolveExit(false), 5_000);
+        }),
+      ]).finally(() => clearTimeout(exitTimer));
+      assert.equal(
+        leaderExited,
+        true,
+        'the leader must exit within 5s; a leader that never exits would park the file',
+      );
 
-      // With the leader gone, the runner side must reach EOF while the parked
-      // grandchild still runs: a grandchild that inherited the runner's stdout
-      // never lets it end, and the file could not exit.
+      // Fixture guard, not harness coverage: this fails if the parked grandchild
+      // is ever given the runner's stdout again (the original stall), which the
+      // group-kill helpers cannot observe.
       const eofDeadline = Date.now() + 2_000;
       while (!child.stdout.readableEnded && Date.now() < eofDeadline) await sleep(20);
       assert.equal(
