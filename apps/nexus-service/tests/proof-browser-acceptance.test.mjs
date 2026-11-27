@@ -390,32 +390,83 @@ describe('proof-browser abrupt-restart group kill (QC3-C3)', () => {
   test('a parked group descendant is DETECTED before the kill and gone after the shared group kill', async () => {
     const leaderScript = `
 const { spawn } = require('node:child_process');
-spawn(process.execPath, ['-e', 'process.stdout.write("grandchild-ready-marker"); setInterval(() => {}, 1_000);'], { stdio: ['ignore', 'inherit', 'inherit'] });
+const grandchild = spawn(process.execPath, ['-e', 'process.stdout.write("grandchild-ready-marker"); setInterval(() => {}, 1_000);'], { stdio: ['ignore', 'pipe', 'pipe'] });
+// The parked grandchild must never own the runner's stdout: an inherited fd
+// keeps the runner's pipe open after the file's tests finish, so the file never
+// exits. Its output reaches the runner through the leader's own pipes instead.
+grandchild.stdout.pipe(process.stdout);
+grandchild.stderr.pipe(process.stderr);
 process.stdout.write('leader-ready-marker');
-setTimeout(() => process.exit(0), 100);
+// Exit only after the grandchild's marker reached the runner, so the test's
+// process-tree snapshot always sees the grandchild under a live leader; the
+// fallback keeps a grandchild that never writes from parking the leader.
+setTimeout(() => process.exit(0), 2_000);
+grandchild.stdout.once('data', () => setTimeout(() => process.exit(0), 250));
 `;
     const child = lifecycle.spawnLogged(process.execPath, ['-e', leaderScript], {
       label: 'nexus-service',
     });
-    await waitForChildOutput(child, 'grandchild-ready-marker');
+    // Registered at spawn time: an exit emitted while the marker wait and the
+    // blocking ps snapshot run below is still observed, instead of surfacing
+    // later as a false "the leader never exited".
+    const leaderExited = new Promise((resolveExit) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolveExit(true);
+      else child.once('exit', () => resolveExit(true));
+    });
+    let groupBefore = [];
+    try {
+      await waitForChildOutput(child, 'grandchild-ready-marker');
 
-    const groupBefore = lifecycle
-      .collectDescendants([child.pid], lifecycle.psRows())
-      .filter((row) => row.pid !== child.pid);
-    assert.ok(
-      groupBefore.length >= 1,
-      'the parked grandchild must be visible in the process tree before the kill',
-    );
+      groupBefore = lifecycle
+        .collectDescendants([child.pid], lifecycle.psRows())
+        .filter((row) => row.pid !== child.pid);
+      assert.ok(
+        groupBefore.length >= 1,
+        'the parked grandchild must be visible in the process tree before the kill',
+      );
 
-    await new Promise((resolveExit) => child.once('exit', resolveExit));
+      // Bounded: a leader that never exits must fail here in 5s instead of
+      // parking the file, which is the class of stall this fixture caused.
+      let exitTimer;
+      const leaderExitedInTime = await Promise.race([
+        leaderExited,
+        new Promise((resolveExit) => {
+          exitTimer = setTimeout(() => resolveExit(false), 5_000);
+        }),
+      ]).finally(() => clearTimeout(exitTimer));
+      assert.equal(
+        leaderExitedInTime,
+        true,
+        'the leader must exit within 5s; a leader that never exits would park the file',
+      );
 
-    const survivorsBefore = lifecycle.survivingGroupRows(groupBefore, child.pid);
-    assert.equal(survivorsBefore.length, 1, 'the parked grandchild must be reported as a survivor');
-    assert.equal(survivorsBefore[0].pid, groupBefore[0].pid);
+      // Fixture guard, not harness coverage: this fails if the parked grandchild
+      // is ever given the runner's stdout again (the original stall), which the
+      // group-kill helpers cannot observe.
+      const eofDeadline = Date.now() + 2_000;
+      while (!child.stdout.readableEnded && Date.now() < eofDeadline) await sleep(20);
+      assert.equal(
+        child.stdout.readableEnded,
+        true,
+        'the runner stdout must reach EOF while only the parked grandchild remains',
+      );
 
-    lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
-    await Promise.race([child.__closed, sleep(2_000)]);
-    assert.equal(child.__closeSettled, true, 'the killed leader must settle through close');
+      const survivorsBefore = lifecycle.survivingGroupRows(groupBefore, child.pid);
+      assert.equal(survivorsBefore.length, 1, 'the parked grandchild must be reported as a survivor');
+      assert.equal(survivorsBefore[0].pid, groupBefore[0].pid);
+    } finally {
+      lifecycle.signalProcessGroup(child.pid, 'SIGKILL');
+    }
+
+    // The kill is asynchronous: poll instead of assuming the descendant is
+    // already gone between two snapshots.
+    const reapDeadline = Date.now() + 2_000;
+    while (
+      Date.now() < reapDeadline &&
+      lifecycle.survivingGroupRows(groupBefore, child.pid).length > 0
+    ) {
+      await sleep(50);
+    }
     assert.equal(
       lifecycle.survivingGroupRows(groupBefore, child.pid).length,
       0,
