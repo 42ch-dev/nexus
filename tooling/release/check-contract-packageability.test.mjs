@@ -1484,9 +1484,12 @@ test(
         result.output,
         /error: .* exceeded the release tooling deadline \(NEXUS_RELEASE_DEADLINE_MS\)/,
       );
-      const stopped = readFileSync(marker, "utf8");
-      assert.notEqual(stopped, "", "the grandchild wrote before the kill");
-      await assertMarkerStopped(marker, stopped);
+      assert.notEqual(
+        readFileSync(marker, "utf8"),
+        "",
+        "the grandchild wrote before the kill",
+      );
+      await assertMarkerSettles(marker);
     } finally {
       cleanupTempRepo(dir);
     }
@@ -1524,9 +1527,12 @@ test(
           new Promise((done) => setTimeout(() => done("still-running"), 5000)),
         ]);
         assert.notEqual(exit, "still-running", "the checker died on SIGTERM");
-        const stopped = readFileSync(marker, "utf8");
-        assert.notEqual(stopped, "", "the grandchild wrote before the signal");
-        await assertMarkerStopped(marker, stopped);
+        assert.notEqual(
+          readFileSync(marker, "utf8"),
+          "",
+          "the grandchild wrote before the signal",
+        );
+        await assertMarkerSettles(marker);
       } finally {
         checker.kill("SIGKILL");
       }
@@ -1556,6 +1562,147 @@ test("a link and a plain file with the same bytes are different entries", () => 
     cleanupTempRepo(dir);
   }
 });
+
+/**
+ * Child that presents itself as Windows to {@link run}: it redefines the platform
+ * before a dynamic import, so the module takes the non-supervised branch and the
+ * timeout still has to bound the child. The sleeper is far longer than the
+ * deadline, so the probe only returns early if the timeout was applied.
+ */
+const WIN32_SHAPE_PROBE = `
+Object.defineProperty(process, "platform", { value: "win32" });
+const { run } = await import(${JSON.stringify(CHECKER_URL)});
+const started = Date.now();
+const result = run(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], process.cwd());
+process.stdout.write(
+  JSON.stringify({ ok: result.ok, output: result.output, elapsed: Date.now() - started }),
+);
+`;
+
+test("a child without process groups is still bounded by the deadline", async () => {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    ["--input-type=module", "-e", WIN32_SHAPE_PROBE],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 1500),
+      },
+    },
+  );
+  const result = JSON.parse(stdout);
+  assert.equal(result.ok, false);
+  assert.match(
+    result.output,
+    /error: .* exceeded the release tooling deadline \(NEXUS_RELEASE_DEADLINE_MS\)/,
+  );
+  assert.ok(
+    result.elapsed < 4000,
+    `the 5 s child had to be killed at the 1.5 s deadline, took ${result.elapsed}ms`,
+  );
+});
+
+/** The supervisor, as the caller under test invokes it. */
+const SUPERVISOR_PATH = join(
+  REPO_ROOT,
+  "tooling/release/supervise-child.mjs",
+);
+
+test(
+  "the supervisor forwards the command's exit code and dies by its own signal",
+  { skip: process.platform === "win32" ? "no process groups on Windows" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nexus-release-supervisor-"));
+    const marker = join(dir, "marker.txt");
+    try {
+      const exiting = spawnSync(
+        process.execPath,
+        [SUPERVISOR_PATH, process.execPath, "-e", "process.exit(3)"],
+        { detached: true, encoding: "utf8" },
+      );
+      assert.equal(exiting.status, 3, exiting.stderr);
+
+      const missing = spawnSync(
+        process.execPath,
+        [SUPERVISOR_PATH, "/nonexistent-nexus-command"],
+        { detached: true, encoding: "utf8" },
+      );
+      assert.equal(missing.status, 127);
+      assert.match(missing.stderr, /could not run/);
+
+      const supervisor = spawn(
+        process.execPath,
+        [SUPERVISOR_PATH, process.execPath, "-e", GROUP_SPAWNER],
+        {
+          detached: true,
+          stdio: "ignore",
+          env: { ...process.env, MARKER: marker },
+        },
+      );
+      try {
+        await waitFor(() => markerWrites(marker) >= 2, 4000);
+        const closed = new Promise((done) =>
+          supervisor.on("close", (code, signal) => done({ code, signal })),
+        );
+        supervisor.kill("SIGTERM");
+        const exit = await Promise.race([
+          closed,
+          new Promise((done) => setTimeout(() => done("still-running"), 5000)),
+        ]);
+        assert.notEqual(exit, "still-running", "the supervisor died on SIGTERM");
+        assert.equal(
+          exit.signal,
+          "SIGTERM",
+          "the caller reads the signal, not exit 0",
+        );
+        await assertMarkerSettles(marker);
+      } finally {
+        supervisor.kill("SIGKILL");
+      }
+
+      // The command dying by a signal is the other re-raise path: the supervisor
+      // has a listener for that signal installed, so it has to drop it first or
+      // the process keeps running instead of dying the way the command did.
+      const commandPidFile = join(dir, "command.pid");
+      const forwarding = spawn(
+        process.execPath,
+        [
+          SUPERVISOR_PATH,
+          process.execPath,
+          "-e",
+          "require('node:fs').writeFileSync(process.env.PID_FILE, String(process.pid)); setInterval(() => {}, 1000)",
+        ],
+        {
+          detached: true,
+          stdio: "ignore",
+          env: { ...process.env, PID_FILE: commandPidFile },
+        },
+      );
+      try {
+        await waitFor(() => existsSync(commandPidFile), 4000);
+        const closed = new Promise((done) =>
+          forwarding.on("close", (code, signal) => done({ code, signal })),
+        );
+        process.kill(Number(readFileSync(commandPidFile, "utf8")), "SIGTERM");
+        const exit = await Promise.race([
+          closed,
+          new Promise((done) => setTimeout(() => done("still-running"), 5000)),
+        ]);
+        assert.notEqual(exit, "still-running", "the supervisor followed the command");
+        assert.equal(
+          exit.signal,
+          "SIGTERM",
+          "the command's signal reaches the caller, not a swallowed exit",
+        );
+      } finally {
+        forwarding.kill("SIGKILL");
+      }
+    } finally {
+      cleanupTempRepo(dir);
+    }
+  },
+);
 
 /** Child that only reports whether {@link run} accepted the deadline. */
 const DEADLINE_PROBE = `
