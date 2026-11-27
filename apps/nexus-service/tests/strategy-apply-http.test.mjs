@@ -1,10 +1,29 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, describe, test } from 'node:test';
 
 const serviceRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * The one classification table the service reads. Its rows are pinned to `ApplyRefusal`'s
+ * variants by `crates/nexus-core/src/apply.rs`'s
+ * `the_service_classification_table_covers_every_variant`, so a refusal that is missing here
+ * fails there.
+ */
+const APPLY_REFUSAL_CLASSES = JSON.parse(
+  readFileSync(join(serviceRoot, 'src', 'apply-refusal-classes.json'), 'utf8'),
+);
+
+function reasonsWithClass(refusalClass) {
+  return Object.entries(APPLY_REFUSAL_CLASSES)
+    .filter(([, candidate]) => candidate === refusalClass)
+    .map(([reason]) => reason);
+}
+
+const CONFLICT_REASONS = reasonsWithClass('conflict');
+const CLIENT_ERROR_REASONS = reasonsWithClass('client_error');
 
 let routes;
 
@@ -140,8 +159,9 @@ describe('apply transport (POST /v1/daemon/strategies/{id}/apply)', () => {
     assert.deepEqual(status.body.newest_approval, NEWEST);
   });
 
-  test('the two state conflicts publish 409 under a conflict-naming code', async () => {
-    for (const reason of ['already_applied', 'approval_hash_changed']) {
+  test('the state conflicts publish 409 under a conflict-naming code', async () => {
+    assert.ok(CONFLICT_REASONS.length > 0, 'the table classifies at least one conflict');
+    for (const reason of CONFLICT_REASONS) {
       await assert.rejects(
         () =>
           routeFor('POST', APPLY_PATH).handle(
@@ -162,13 +182,11 @@ describe('apply transport (POST /v1/daemon/strategies/{id}/apply)', () => {
   });
 
   test('every other refusal keeps the core client-error status and code', async () => {
-    for (const reason of [
-      'approval_not_found',
-      'approval_strategy_mismatch',
-      'strategy_not_user_preset',
-      'strategy_has_no_schedule',
-      'document_unbuildable',
-    ]) {
+    assert.ok(
+      CLIENT_ERROR_REASONS.length > 0,
+      'the table classifies at least one client error',
+    );
+    for (const reason of CLIENT_ERROR_REASONS) {
       await assert.rejects(
         () =>
           routeFor('POST', APPLY_PATH).handle(
@@ -180,7 +198,7 @@ describe('apply transport (POST /v1/daemon/strategies/{id}/apply)', () => {
         (error) => {
           assert.equal(error.status, 422, reason);
           assert.equal(error.code, 'invalid_input', reason);
-          assert.equal(error.details.reason, reason);
+          assert.equal(error.details.reason, reason, reason);
           return true;
         },
       );

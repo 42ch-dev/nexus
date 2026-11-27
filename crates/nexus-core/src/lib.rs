@@ -83,8 +83,8 @@ pub use actors::{
 };
 #[cfg(feature = "execution")]
 pub use apply::{
-    AppliedDocumentRefusal, AppliedStrategy, StrategyAppliedStatus, StrategyApproval,
-    StrategyApprovals,
+    AppliedDocumentRefusal, AppliedStrategy, ApplyRefusal, ApplyRefusalClass,
+    StrategyAppliedStatus, StrategyApproval, StrategyApprovals,
 };
 pub use chronology::CoreWorkChronology;
 #[cfg(feature = "execution")]
