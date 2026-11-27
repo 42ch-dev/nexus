@@ -137,11 +137,13 @@ jobs:
           selected="$(jq -c --argjson keep "${keep}" \
             'map(select(.slug as $s | $keep | index($s))) | if length == 0 then error("no rows selected") else . end' \
             <<< "${all}")"
-          echo "matrix={\"include\":$(jq -c 'map(select(.matrix) | del(.matrix))' <<< "${selected}")}" >> "$GITHUB_OUTPUT"
-          echo "rows=$(jq -c 'map({suffix: .slug, short})' <<< "${selected}")" >> "$GITHUB_OUTPUT"
-          # An empty matrix include is invalid, so the matrix job is skipped when
-          # the run only covers the container row (a retry of linux-x64-gnu).
-          echo "host_rows=$(jq -r 'any(.matrix)' <<< "${selected}")" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix={\"include\":$(jq -c 'map(select(.matrix) | del(.matrix))' <<< "${selected}")}"
+            echo "rows=$(jq -c 'map({suffix: .slug, short})' <<< "${selected}")"
+            # An empty matrix include is invalid, so the matrix job is skipped
+            # when the run only covers the container row (a retry of the linux row).
+            echo "host_rows=$(jq -r 'any(.matrix)' <<< "${selected}")"
+          } >> "$GITHUB_OUTPUT"
           echo "rows: $(jq -c 'map(.slug)' <<< "${selected}")"
 
   native-package-proof:
