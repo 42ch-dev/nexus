@@ -329,10 +329,12 @@ impl nexus_capability::PromptExecutor for MockReviewExtract {
 
 /// A registry whose `nexus.llm.extract` runs on the mock executor, with the
 /// review hook's stored run identity (`run_<schedule_id>`) registered as a
-/// cancellable run.
+/// cancellable run and the engine pool available for the capability's
+/// stored-state target recheck.
 fn review_registry(
     schedule_id: &str,
     executor: std::sync::Arc<dyn nexus_capability::PromptExecutor>,
+    pool: &SqlitePool,
 ) -> nexus_capability::CapabilityRegistry {
     let mut cancels = std::collections::HashMap::new();
     cancels.insert(
@@ -340,7 +342,7 @@ fn review_registry(
         tokio_util::sync::CancellationToken::new(),
     );
     let deps = nexus_capability::CapabilityRuntimeDeps {
-        pool: None,
+        pool: Some(pool.clone()),
         prompt_executor: Some(executor),
         session_cancels: std::sync::Arc::new(std::sync::RwLock::new(cancels)),
         daemon_tool_dispatch: None,
@@ -414,7 +416,7 @@ async fn v1191_extract_review_hook_retains_candidate_and_relationship_ids() {
         pending: false,
         failing: false,
     });
-    let registry = review_registry("sch_t13_ok", executor.clone());
+    let registry = review_registry("sch_t13_ok", executor.clone(), &pool);
 
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
@@ -480,7 +482,7 @@ async fn v1191_extract_review_hook_without_a_run_identity_writes_nothing() {
         pending: false,
         failing: false,
     });
-    let registry = review_registry("sch_t13_norun", executor.clone());
+    let registry = review_registry("sch_t13_norun", executor.clone(), &pool);
 
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
@@ -519,7 +521,7 @@ async fn v1191_extract_review_hook_invalid_terminal_writes_nothing() {
         pending: false,
         failing: false,
     });
-    let registry = review_registry("sch_t13_bad", executor);
+    let registry = review_registry("sch_t13_bad", executor, &pool);
 
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
@@ -572,7 +574,7 @@ async fn v1191_extract_review_hook_stale_target_writes_nothing() {
         pending: false,
         failing: false,
     });
-    let registry = review_registry("sch_t13_stale", executor.clone());
+    let registry = review_registry("sch_t13_stale", executor.clone(), &pool);
 
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
@@ -611,7 +613,7 @@ async fn v1191_extract_review_hook_cancelled_run_writes_nothing() {
         pending: true,
         failing: false,
     });
-    let registry = review_registry("sch_t13_cancel", executor.clone());
+    let registry = review_registry("sch_t13_cancel", executor.clone(), &pool);
 
     let cancelled = tokio::time::timeout(
         std::time::Duration::from_millis(200),
@@ -659,7 +661,7 @@ async fn v1191_extract_review_hook_extractor_failure_writes_nothing() {
         pending: false,
         failing: true,
     });
-    let registry = review_registry("sch_t13_fail", executor.clone());
+    let registry = review_registry("sch_t13_fail", executor.clone(), &pool);
 
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
@@ -720,7 +722,7 @@ async fn v1191_extract_review_hook_drops_a_fabricated_citation() {
         pending: false,
         failing: false,
     });
-    let registry = review_registry("sch_t13_quote", executor);
+    let registry = review_registry("sch_t13_quote", executor, &pool);
 
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
@@ -796,7 +798,7 @@ async fn v1191_extract_review_hook_post_callback_cancel_writes_nothing() {
         pending: false,
         failing: false,
     });
-    let registry = review_registry("sch_t13_late", executor.clone());
+    let registry = review_registry("sch_t13_late", executor.clone(), &pool);
 
     let mut blocker = nexus_local_db::begin_immediate(&pool).await.unwrap();
     sqlx::query("UPDATE kb_extract_jobs SET status = status WHERE creator_id = ?")

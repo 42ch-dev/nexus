@@ -174,7 +174,7 @@ impl nexus_capability::PromptExecutor for MockLlmExtractWorker {
     }
 }
 
-fn registry_with_mock_worker() -> CapabilityRegistry {
+fn registry_with_mock_worker(pool: &SqlitePool) -> CapabilityRegistry {
     let mut cancels = std::collections::HashMap::new();
     for id in [
         "run_sch_v151_llm",
@@ -185,7 +185,7 @@ fn registry_with_mock_worker() -> CapabilityRegistry {
         cancels.insert(id.to_string(), tokio_util::sync::CancellationToken::new());
     }
     let deps = CapabilityRuntimeDeps {
-        pool: None,
+        pool: Some(pool.clone()),
         prompt_executor: Some(std::sync::Arc::new(MockLlmExtractWorker)),
         session_cancels: std::sync::Arc::new(std::sync::RwLock::new(cancels)),
         daemon_tool_dispatch: None,
@@ -213,7 +213,7 @@ async fn review_master_llm_path_writes_llm_payload() {
     seed_chapter_with_body(&pool, "wrk_v151_llm", 3, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_v151_llm", "wrk_v151_llm").await;
 
-    let registry = registry_with_mock_worker();
+    let registry = registry_with_mock_worker(&pool);
     let inserted = quality_loop::extract_kb_candidates_for_review(
         &pool,
         "sch_v151_llm",
@@ -308,7 +308,7 @@ async fn review_master_llm_path_is_idempotent() {
     seed_chapter_with_body(&pool, "wrk_v151_idem", 2, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_v151_idem", "wrk_v151_idem").await;
 
-    let registry = registry_with_mock_worker();
+    let registry = registry_with_mock_worker(&pool);
 
     let count1 = quality_loop::extract_kb_candidates_for_review(
         &pool,

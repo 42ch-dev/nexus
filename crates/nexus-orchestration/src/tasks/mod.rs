@@ -713,28 +713,24 @@ impl LlmExtractTask {
         let chapter_prose: String = context.get("chapter_prose").unwrap_or_default();
         let creator_id: String = context.get("_creator_id").unwrap_or_default();
         let session_id: String = context.get("_session_id").unwrap_or_default();
-        // v1.191 P1 T13: the trusted extraction target + admitted source
-        // identity the orchestration caller resolved from stored state. The
-        // capability refuses a missing target rather than extracting under an
-        // invented policy, so the task surfaces that refusal to its caller.
-        let target = match context.get::<serde_json::Value>("_extract_target") {
-            Some(value) => {
-                match nexus_capability::extraction_target::ExtractionTarget::from_context(&value) {
-                    Ok(target) => target,
-                    Err(e) => {
-                        return Ok(crate::quality_loop::LlmExtractOutcome::Refused(format!(
-                            "extract target: {e}"
-                        )));
-                    }
-                }
-            }
-            None => {
-                return Ok(crate::quality_loop::LlmExtractOutcome::Refused(
-                    "missing trusted extraction target: the orchestration caller must resolve \
-                     the job/task target policy"
-                        .to_string(),
-                ));
-            }
+        // v1.191 P1 T13 / I-000556: the graph context may be preset- or
+        // client-supplied, so it names only the World. The capability
+        // re-resolves the target (ownership + audience) from stored state.
+        let world_id = context
+            .get::<serde_json::Value>("_extract_target")
+            .and_then(|value| {
+                value
+                    .get("world_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .filter(|id| !id.is_empty());
+        let Some(world_id) = world_id else {
+            return Ok(crate::quality_loop::LlmExtractOutcome::Refused(
+                "missing trusted extraction target: the orchestration caller must name the \
+                 extraction World"
+                    .to_string(),
+            ));
         };
         let source_id: String = context.get("_extract_source_id").unwrap_or_default();
         // V1.55 P2 fix-wave (F-001): read work_profile from context so the
@@ -753,7 +749,7 @@ impl LlmExtractTask {
             &creator_id,
             &session_id,
             &work_profile,
-            &target,
+            &world_id,
             &source_id,
         )
         .await)
@@ -3335,12 +3331,16 @@ mod tests {
 
     /// The extraction run identity the `LlmExtractTask` fixtures run under.
     const EXTRACT_TASK_SESSION: &str = "sess_extract_task";
+    const EXTRACT_TASK_CREATOR: &str = "ctr_extract_task";
+    const EXTRACT_TASK_WORLD: &str = "wld_fixture";
 
     /// Decorate a task context with the trusted extraction context the
     /// production caller resolves from stored state before the model runs
-    /// (v1.191 P1 T13, durable §§3, 8): the target policy and the admitted
+    /// (v1.191 P1 T13, durable §§3, 8): the target World and the admitted
     /// chapter artifact, plus the real run identity.
     fn set_trusted_extract_context(ctx: &graph_flow::Context) {
+        ctx.set("_creator_id", EXTRACT_TASK_CREATOR.to_string())
+            .unwrap();
         ctx.set("_session_id", EXTRACT_TASK_SESSION.to_string())
             .unwrap();
         ctx.set(
@@ -3351,7 +3351,7 @@ mod tests {
         ctx.set(
             "_extract_target",
             serde_json::json!({
-                "world_id": "wld_fixture",
+                "world_id": EXTRACT_TASK_WORLD,
                 "holder_entry_id": null,
                 "disclosure": null,
             }),
@@ -3359,8 +3359,29 @@ mod tests {
         .unwrap();
     }
 
-    fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
+    /// A registry whose `nexus.llm.extract` runs on the mock executor against a
+    /// pool where [`EXTRACT_TASK_CREATOR`] owns [`EXTRACT_TASK_WORLD`], so the
+    /// capability's stored-state target recheck passes.
+    async fn extract_registry_with_mock(
+        response: &str,
+    ) -> (tempfile::TempDir, Arc<CapabilityRegistry>) {
         use nexus_capability::CapabilityRuntimeDeps;
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("extract-task.db");
+        let pool = nexus_local_db::init_engine_pool(&db_path)
+            .await
+            .unwrap()
+            .clone_pool();
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            EXTRACT_TASK_WORLD,
+            EXTRACT_TASK_CREATOR,
+            "Extract Task World",
+            "extract-task",
+            "private",
+            "manual",
+        )
+        .await;
         let map = session_cancels_with_default();
         // The capability resolves the coordinator token of the fixture's run id
         // (fail-closed contract) before the prompt reaches the mock executor.
@@ -3369,7 +3390,7 @@ mod tests {
             .entry(EXTRACT_TASK_SESSION.to_string())
             .or_default();
         let deps = CapabilityRuntimeDeps {
-            pool: None,
+            pool: Some(pool),
             prompt_executor: Some(std::sync::Arc::new(MockExtractProvider {
                 response: response.to_string(),
             })),
@@ -3378,18 +3399,19 @@ mod tests {
             cdn_config: None,
             workspace_executor: None,
         };
-        Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
+        (dir, Arc::new(CapabilityRegistry::with_runtime_deps(&deps)))
     }
 
     #[tokio::test]
     async fn llm_extract_task_with_mock_worker_returns_candidates() {
         // Golden LLM response → golden LlmExtractOutcome::Candidates.
-        let registry = extract_registry_with_mock(
+        let (_dir, registry) = extract_registry_with_mock(
             r#"{"candidates":[
                 {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.95,"source_quote":"Lin Xia drew her blade."},
                 {"canonical_name":"Azure Gate","block_type":"scene","summary":null,"confidence":0.8,"source_quote":"the Azure Gate groaned open"}
             ]}"#,
-        );
+        )
+        .await;
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
             "nexus.llm.extract".to_string(),
@@ -3469,7 +3491,7 @@ mod tests {
     async fn llm_extract_task_malformed_llm_json_returns_empty_candidates() {
         // Malformed LLM response → capability returns empty candidates;
         // task surfaces them as Candidates(vec![]) (best-effort, no error).
-        let registry = extract_registry_with_mock("not json at all");
+        let (_dir, registry) = extract_registry_with_mock("not json at all").await;
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
             "nexus.llm.extract".to_string(),
@@ -3491,9 +3513,10 @@ mod tests {
         // Regression for R-V151Q3-W001: LlmExtractTask must use the same
         // LLM→KbCandidate mapping as the review-time hook, including derived
         // novel_category in the proposed_payload.
-        let registry = extract_registry_with_mock(
+        let (_dir, registry) = extract_registry_with_mock(
             r#"{"candidates":[{"canonical_name":"Azure Gate","block_type":"scene","confidence":0.92,"source_quote":"...the eastern gate groaned open..."}]}"#,
-        );
+        )
+        .await;
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
             "nexus.llm.extract".to_string(),
@@ -3522,9 +3545,10 @@ mod tests {
     /// `candidate_from_llm_json_for_profile`, not a helper-level test.
     #[tokio::test]
     async fn llm_extract_task_with_game_bible_profile_produces_game_bible_candidate() {
-        let registry = extract_registry_with_mock(
+        let (_dir, registry) = extract_registry_with_mock(
             r#"{"candidates":[{"canonical_name":"Ironfang Legion","block_type":"faction","summary":"A ruthless mercenary company","confidence":0.93,"source_quote":"The Ironfang Legion marched through the gates at dawn."}]}"#,
-        );
+        )
+        .await;
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
             "nexus.llm.extract".to_string(),

@@ -17,7 +17,7 @@
 //!    — no heuristic fallback inside the capability (the caller's review-time
 //!    hook owns the fallback decision; see `quality_loop`).
 
-use crate::extraction_target::ExtractionTarget;
+use crate::extraction_target::{resolve_extraction_target, ExtractionTarget};
 use crate::{Capability, CapabilityError, PromptExecutor, PromptRequest, ToolPolicy};
 use async_trait::async_trait;
 use nexus_knowledge::world_kb::source_anchor::SourceAnchor;
@@ -45,19 +45,48 @@ struct ExtractionSlot {
     candidates: Vec<Value>,
 }
 
-/// Parse the trusted `_extract_target` context field.
+/// Resolve the trusted extraction target of this run from stored state.
 ///
-/// Fails closed: a missing target refuses the run instead of extracting under
-/// an invented policy.
-fn parse_extract_target(input: &Value) -> Result<ExtractionTarget, CapabilityError> {
-    let raw = input.get("_extract_target").ok_or_else(|| {
+/// The capability input is preset/client-reachable (`StateCompositeTask`
+/// forwards untrusted preset args), so it may name the World but never the
+/// governance pair: [`resolve_extraction_target`] rechecks that the stored
+/// Creator still owns that World and applies the service audience policy.
+///
+/// Fails closed when the trusted identity/target is missing or the engine pool
+/// is unavailable, so an unverifiable target never reaches the model.
+async fn resolve_extract_target(
+    input: &Value,
+    pool: Option<&sqlx::SqlitePool>,
+) -> Result<ExtractionTarget, CapabilityError> {
+    let world_id = input
+        .get("_extract_target")
+        .and_then(|target| target.get("world_id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            CapabilityError::Forbidden(
+                "missing trusted _extract_target: the orchestration caller must name the \
+                 extraction World"
+                    .to_string(),
+            )
+        })?;
+    let creator_id = input
+        .get("_creator_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            CapabilityError::Forbidden(
+                "missing trusted _creator_id: orchestration context must inject the run \
+                 creator"
+                    .to_string(),
+            )
+        })?;
+    let pool = pool.ok_or_else(|| {
         CapabilityError::Forbidden(
-            "missing trusted _extract_target: the orchestration caller must resolve the \
-             extraction job/task target policy"
-                .to_string(),
+            "extraction target cannot be verified without the engine pool".to_string(),
         )
     })?;
-    ExtractionTarget::from_context(raw)
+    resolve_extraction_target(pool, creator_id, world_id).await
 }
 
 /// Whether a model-supplied citation actually occurs in the admitted source.
@@ -204,6 +233,9 @@ pub struct LlmExtract {
     session_cancels: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
     >,
+    /// Engine pool used to recheck the World's stored ownership before the
+    /// model runs. Absent only in standalone/test mode, which refuses.
+    pool: Option<sqlx::SqlitePool>,
 }
 
 impl LlmExtract {
@@ -215,6 +247,7 @@ impl LlmExtract {
             session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            pool: None,
         }
     }
 
@@ -226,7 +259,15 @@ impl LlmExtract {
             session_cancels: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            pool: None,
         }
+    }
+
+    /// Builder-style engine pool for the stored-state target recheck.
+    #[must_use]
+    pub fn with_pool(mut self, pool: sqlx::SqlitePool) -> Self {
+        self.pool = Some(pool);
+        self
     }
 
     /// Builder-style per-run coordinator cancellation tokens (A1).
@@ -339,7 +380,7 @@ impl Capability for LlmExtract {
 
         let cancellation = crate::resolve_session_cancellation(&self.session_cancels, session_id)?;
 
-        let target = parse_extract_target(&input)?;
+        let target = resolve_extract_target(&input, self.pool.as_ref()).await?;
         let source_id = input
             .get("_extract_source_id")
             .and_then(|v| v.as_str())
@@ -707,12 +748,32 @@ mod tests {
         })
     }
 
+    const CREATOR: &str = "ctr_fixture";
+    const WORLD: &str = "wld_fixture";
+
+    /// A guarded engine pool with one World owned by [`CREATOR`].
+    async fn pool_with_world() -> (tempfile::TempDir, sqlx::SqlitePool) {
+        let (dir, pool) = crate::pool_test_support::fresh_pool().await;
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            WORLD,
+            CREATOR,
+            "Fixture World",
+            "fixture",
+            "private",
+            "manual",
+        )
+        .await;
+        (dir, pool)
+    }
+
     /// The trusted extraction context the orchestration caller resolves from
     /// stored state before the model runs (v1.191 P1 T13, durable §§3, 8).
     fn trusted_context(session_id: &str) -> Value {
         json!({
+            "_creator_id": CREATOR,
             "_extract_target": {
-                "world_id": "wld_fixture",
+                "world_id": WORLD,
                 "holder_entry_id": null,
                 "disclosure": null,
             },
@@ -738,13 +799,15 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_with_mock_executor_returns_candidates() {
+        let (_dir, pool) = pool_with_world().await;
         let cap = LlmExtract::with_prompt_executor(mock_executor(
             r#"{"candidates":[
                 {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."},
                 {"canonical_name":"Azure Gate","block_type":"scene","summary":null,"confidence":0.8,"source_quote":"the Azure Gate groaned open"}
             ]}"#,
         ))
-            .with_session_cancels(cancels_with(&["default"]));
+        .with_session_cancels(cancels_with(&["default"]))
+        .with_pool(pool);
         let input = with_trusted_context(
             json!({ "prompt": "extract", "chapter_prose": "..." }),
             "default",
@@ -759,10 +822,12 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_parses_code_fenced_json() {
+        let (_dir, pool) = pool_with_world().await;
         let cap = LlmExtract::with_prompt_executor(mock_executor(
             "```json\n{\"candidates\":[{\"canonical_name\":\"X\",\"block_type\":\"item\",\"confidence\":0.5,\"source_quote\":\"q\"}]}\n```",
         ))
-            .with_session_cancels(cancels_with(&["default"]));
+        .with_session_cancels(cancels_with(&["default"]))
+        .with_pool(pool);
         let input = with_trusted_context(
             json!({ "prompt": "extract", "chapter_prose": "..." }),
             "default",
@@ -775,8 +840,10 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_malformed_json_returns_empty_candidates() {
+        let (_dir, pool) = pool_with_world().await;
         let cap = LlmExtract::with_prompt_executor(mock_executor("this is not json at all"))
-            .with_session_cancels(cancels_with(&["default"]));
+            .with_session_cancels(cancels_with(&["default"]))
+            .with_pool(pool);
         let input = with_trusted_context(
             json!({ "prompt": "extract", "chapter_prose": "..." }),
             "default",
@@ -864,6 +931,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_with_mock_executor_returns_relationships() {
+        let (_dir, pool) = pool_with_world().await;
         let cap = LlmExtract::with_prompt_executor(mock_executor(
             r#"{"candidates":[
                 {"canonical_name":"Aria","block_type":"character","confidence":0.9,"source_quote":"Aria drew her blade."}
@@ -873,7 +941,8 @@ mod tests {
                  "source_quote":"Aria and Kael fought together"}
             ]}"#,
         ))
-            .with_session_cancels(cancels_with(&["default"]));
+        .with_session_cancels(cancels_with(&["default"]))
+        .with_pool(pool);
         let input = with_trusted_context(
             json!({ "prompt": "extract", "chapter_prose": "..." }),
             "default",
@@ -953,6 +1022,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_run_reaches_the_orchestrator_and_keeps_the_local_shape() {
+        let (_dir, pool) = pool_with_world().await;
         let executor = Arc::new(RunCapturingExecutor {
             response: json!({
                 "candidates": [
@@ -979,7 +1049,8 @@ mod tests {
             run_id: std::sync::Mutex::new(String::new()),
         });
         let cap = LlmExtract::with_prompt_executor(executor.clone())
-            .with_session_cancels(cancels_with(&["run_t13"]));
+            .with_session_cancels(cancels_with(&["run_t13"]))
+            .with_pool(pool);
         let input = with_trusted_context(
             json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
             "run_t13",
@@ -1014,10 +1085,12 @@ mod tests {
 
     #[tokio::test]
     async fn v1191_extract_model_output_cannot_choose_governance() {
+        let (_dir, pool) = pool_with_world().await;
         let cap = LlmExtract::with_prompt_executor(mock_executor(
             r#"{"candidates":[{"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."}]}"#,
         ))
-        .with_session_cancels(cancels_with(&["run_t13"]));
+        .with_session_cancels(cancels_with(&["run_t13"]))
+        .with_pool(pool);
         let mut input = with_trusted_context(
             json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
             "run_t13",
@@ -1043,9 +1116,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn v1191_extract_context_governance_is_never_caller_chosen() {
+        // The preset/client-reachable input may name the World, but the
+        // governance pair comes from the service audience policy: a forged
+        // pair in `_extract_target` must not reach the wire record.
+        let (_dir, pool) = pool_with_world().await;
+        let cap = LlmExtract::with_prompt_executor(mock_executor(
+            r#"{"candidates":[{"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."}]}"#,
+        ))
+        .with_session_cancels(cancels_with(&["run_t13"]))
+        .with_pool(pool);
+        let mut input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
+            "run_t13",
+        );
+        input["_extract_target"]["holder_entry_id"] = json!("hld_forged");
+        input["_extract_target"]["disclosure"] = json!("owner-private");
+
+        let result = cap.run(input).await.expect("the run is accepted");
+        let wire = result["extract_run"]["candidates"]
+            .as_array()
+            .expect("wire candidates");
+        assert_eq!(wire.len(), 1);
+        assert_eq!(
+            wire[0]["owner"],
+            Value::Null,
+            "the caller cannot name a holder"
+        );
+        assert_eq!(
+            wire[0]["disclosure"],
+            Value::Null,
+            "the caller cannot make the row owner-private"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1191_forged_world_target_never_reaches_the_model() {
+        // Negative control (I-000556): the capability input is preset-reachable
+        // (StateCompositeTask enter action), so a World the trusted Creator does
+        // not own must refuse BEFORE the model is called.
+        let (_dir, pool) = pool_with_world().await;
+        let cap = LlmExtract::with_prompt_executor(mock_executor(
+            r#"{"candidates":[{"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.9,"source_quote":"Lin Xia drew her blade."}]}"#,
+        ))
+        .with_session_cancels(cancels_with(&["run_t13"]))
+        .with_pool(pool);
+        let mut input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
+            "run_t13",
+        );
+        // `WORLD` exists but belongs to `CREATOR`; the attacker names it.
+        input["_creator_id"] = json!("ctr_attacker");
+        let error = cap
+            .run(input)
+            .await
+            .expect_err("a World the creator does not own must refuse");
+        assert!(
+            error.to_string().contains("missing or not owned"),
+            "ownership refusal expected, got: {error}"
+        );
+
+        // A stale/never-existing World refuses the same way.
+        let mut input = with_trusted_context(
+            json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
+            "run_t13",
+        );
+        input["_extract_target"]["world_id"] = json!("wld_stale");
+        let error = cap
+            .run(input)
+            .await
+            .expect_err("a World that no longer exists must refuse");
+        assert!(
+            error.to_string().contains("missing or not owned"),
+            "ownership refusal expected, got: {error}"
+        );
+    }
+
+    #[tokio::test]
     async fn v1191_extract_missing_trusted_context_refuses() {
+        let (_dir, pool) = pool_with_world().await;
         let cap = LlmExtract::with_prompt_executor(mock_executor("{\"candidates\":[]}"))
-            .with_session_cancels(cancels_with(&["run_t13"]));
+            .with_session_cancels(cancels_with(&["run_t13"]))
+            .with_pool(pool);
         let error = cap
             .run(json!({
                 "prompt": "extract",
@@ -1075,5 +1227,21 @@ mod tests {
             error.to_string().contains("_extract_source_id"),
             "error: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn v1191_extract_without_engine_pool_refuses() {
+        // Fail closed: an unverifiable target never reaches the model, so a
+        // registry built without the engine pool cannot extract.
+        let cap = LlmExtract::with_prompt_executor(mock_executor("{\"candidates\":[]}"))
+            .with_session_cancels(cancels_with(&["run_t13"]));
+        let error = cap
+            .run(with_trusted_context(
+                json!({ "prompt": "extract", "chapter_prose": "Lin Xia drew her blade." }),
+                "run_t13",
+            ))
+            .await
+            .expect_err("a pool-less capability must refuse");
+        assert!(error.to_string().contains("engine pool"), "error: {error}");
     }
 }
