@@ -567,7 +567,11 @@ jobs:
           fi
           if [ "${FORK_PR}" = "true" ]; then
             retry_record false '' '' 'not attempted (fork PR)'
-            echo "::warning::rows ${cancelled} were cancelled by the runner; the automatic retry is NOT attempted for a pull request from a fork (${DISPATCH_REF} lives in the fork, not in ${REPO}). Re-run it from the fork with: gh workflow run rft-native-proof.yml --repo <fork> --ref ${DISPATCH_REF} -f rows=${cancelled}"
+            # The head branch is contributor-controlled: print it once as plain
+            # data and keep it out of anything a maintainer might paste. The
+            # command below carries placeholders only.
+            echo "fork PR head branch (data, not a command): ${DISPATCH_REF}"
+            echo "::warning::rows ${cancelled} were cancelled by the runner; the automatic retry is NOT attempted for a pull request from a fork (its head branch lives in the fork, not in ${REPO}). Re-run it from the fork with: gh workflow run rft-native-proof.yml --repo <fork> --ref <head-branch> -f rows=<rows>"
             exit 0
           fi
           started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
