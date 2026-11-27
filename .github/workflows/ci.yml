@@ -790,6 +790,13 @@ jobs:
           esac
       - name: Work artifact write guard
         run: bash tooling/check-work-artifact-writes.sh
+      # I-000408: the cfg classification decides whether a test-gated module is
+      # excluded from the inventory scan. The fixtures pin the accepted
+      # spellings (`cfg(test)`, `cfg(all(…, test))`), the spellings that stay
+      # production (`cfg(any(test, …))`, `cfg(not(test))`, a field annotation)
+      # and the fail-closed opaque-body branch.
+      - name: Work artifact write guard — cfg classification fixtures
+        run: bash tooling/check-work-artifact-writes.test.sh
 
   # Compute module DX — SDK + modules (V1.170 P0, AR-12). Runs only when
   # module-affecting paths change (or on manual workflow_dispatch). The leg is

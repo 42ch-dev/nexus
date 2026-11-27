@@ -17,13 +17,13 @@
 #
 # Classification (F-002): a test-gated `cfg` attribute cuts production only
 # when it annotates a `mod` (the test module span is excluded); the scan
-# otherwise runs to EOF. Accepted spellings: `#[cfg(test)]`,
-# `#[cfg(all(…, test))]` and `#[cfg(any(test, …))]` — the last selects
-# test-support code that is also compiled under the named Features, so its
-# module body is excluded like `#[cfg(test)]`. `#[cfg(not(test))]` is never a
-# test gate. A test-gated attribute on a non-module item (e.g. a test-only
-# const), struct field or statement does not hide production lines below it;
-# one on an opaque body (macro invocation) fails closed.
+# otherwise runs to EOF. Only predicates that require `test` compilation are
+# gates: `#[cfg(test)]` and `#[cfg(all(…, test))]`. `#[cfg(any(test, …))]` is
+# not a gate — another disjunct (e.g. a production feature) can hold without
+# test — and neither is `#[cfg(not(test))]` or `#[cfg(feature = "test")]`. A
+# test-gated attribute on a non-module item (e.g. a test-only const), struct
+# field or statement does not hide production lines below it; one on an opaque
+# body (`{ … }` or a macro invocation) fails closed.
 #
 # Exemptions (F-001): tooling/work-artifact-write-allowlist.tsv rows are
 # `path<TAB>symbol<TAB>expected_count<TAB>disposition` — exact path+symbol and
@@ -155,8 +155,8 @@ def enclosing_symbol(lines, idx):
     return fn or "<unknown>"
 
 
-def cfg_predicates(expr):
-    """Bare predicate names in a `cfg(..)` body, dropping anything under `not(..)`."""
+def split_top_level(expr):
+    """Comma-separated items of `expr` at paren depth 0."""
     parts, depth, buf = [], 0, []
     for ch in expr:
         if depth == 0 and ch == ",":
@@ -169,24 +169,39 @@ def cfg_predicates(expr):
             depth -= 1
         buf.append(ch)
     parts.append("".join(buf))
-    names = set()
-    for part in parts:
-        m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:\((.*)\))?\s*(?:=.*)?$", part)
-        if not m:
-            continue
-        name, inner = m.group(1), m.group(2)
-        if name == "not":
-            continue
-        names.add(name)
-        if inner and name in ("all", "any"):
-            names |= cfg_predicates(inner)
-    return names
+    return parts
+
+
+def requires_test(expr):
+    """True only when the predicate set holds *only* under test compilation.
+
+    `test` and a conjunct of `all(..)` require it; `any(..)` requires it only
+    when every disjunct does, so `any(test, feature = ..)` never counts.
+    """
+    parts = split_top_level(expr)
+    if len(parts) > 1:
+        # `cfg(a, b)` is not valid Rust; require test from every part.
+        return all(requires_test(part) for part in parts)
+    m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:\((.*)\))?\s*(=.*)?$", parts[0])
+    if not m:
+        return False
+    name, inner, is_key = m.group(1), m.group(2), m.group(3)
+    if is_key is not None:
+        # `key = "value"` predicate (e.g. `feature = "test"`): never a gate.
+        return False
+    if inner is None:
+        return name == "test"
+    if name == "all":
+        return any(requires_test(item) for item in split_top_level(inner))
+    if name == "any":
+        return all(requires_test(item) for item in split_top_level(inner))
+    return False
 
 
 def is_test_gate(line):
-    """`#[cfg(..)]` line whose predicates can hold under `test` (never `not(test)`)."""
+    """`#[cfg(..)]` line that compiles only under `test` (never `any(test, ..)`)."""
     m = CFG_ATTR_RE.match(line)
-    return bool(m) and "test" in cfg_predicates(m.group(1))
+    return bool(m) and requires_test(m.group(1))
 
 
 def test_module_spans(rel, lines):
