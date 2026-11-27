@@ -129,6 +129,30 @@ const SKIPPED_STAGE_ENTRIES = new Set([
   "target",
 ]);
 
+/** @type {number | null | undefined} */
+let deadlineMemo;
+
+/**
+ * Wall clock the caller allows this process, as epoch milliseconds in
+ * `NEXUS_RELEASE_DEADLINE_MS`. Every child gets what is left of it, so a case
+ * that outgrows its budget dies as a named failure inside that budget instead of
+ * letting the whole step be killed with nothing to read. Unset means no
+ * deadline, which is what the CLI gate uses. Read on first child, not at import,
+ * so a runner that imports this module can set the budget in its own body.
+ *
+ * @returns {number | null}
+ */
+function childDeadline() {
+  if (deadlineMemo === undefined) {
+    const raw = process.env.NEXUS_RELEASE_DEADLINE_MS?.trim();
+    const value =
+      raw === undefined || raw.length === 0 ? Number.NaN : Number(raw);
+    deadlineMemo = Number.isFinite(value) && value > 0 ? value : null;
+  }
+  return deadlineMemo;
+}
+
+
 /**
  * @param {string} manifestContents
  * @param {import("./version-surfaces.mjs").ContractBracketEntry[]} entries
@@ -203,19 +227,33 @@ function contractDependencies(manifestContents, entries) {
  * @returns {{ ok: boolean; stdout: string; stderr: string; output: string }}
  */
 function run(command, args, cwd, input) {
-  const result = spawnSync(command, args, {
+  /** @type {{ cwd: string; encoding: "utf8"; env: Record<string, string | undefined>; input?: string; maxBuffer: number; timeout?: number }} */
+  const options = {
     cwd,
     encoding: "utf8",
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
     input,
     maxBuffer: 64 * 1024 * 1024,
-  });
+  };
+  const deadline = childDeadline();
+  if (deadline !== null) {
+    // The floor keeps a nearly-expired deadline from failing a `git` call that
+    // would have answered at once: a child over the floor is a real overrun.
+    options.timeout = Math.max(1000, deadline - Date.now());
+  }
+  const result = spawnSync(command, args, options);
   if (result.error !== undefined) {
+    // `error:` keeps the deadline visible in the row's cause, which every caller
+    // builds with {@link firstErrorLine}; a bare "could not run" would read as a
+    // crash and hide that the case outgrew the budget.
     return {
       ok: false,
       stdout: "",
       stderr: "",
-      output: `${command} could not run: ${result.error.message}`,
+      output:
+        result.error.code === "ETIMEDOUT"
+          ? `error: ${command} ${args[0] ?? ""} exceeded the release tooling deadline (NEXUS_RELEASE_DEADLINE_MS)`
+          : `${command} could not run: ${result.error.message}`,
     };
   }
   const stdout = result.stdout ?? "";
@@ -578,37 +616,82 @@ function treeDigest(root) {
 }
 
 /**
+ * Rename `source` onto `target` as the sole decision about who publishes: no
+ * check-then-use on the destination, so two producers racing for one digest
+ * cannot both believe they won. `false` means another producer published first.
+ *
+ * @param {string} source
+ * @param {string} target
+ * @returns {boolean}
+ */
+function renameIntoPlace(source, target) {
+  try {
+    renameSync(source, target);
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST" || error?.code === "ENOTEMPTY") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Publish one extracted archive under `target`, which may already exist because
+ * another producer got there first. Returns after exactly one directory holds the
+ * content; the caller's extraction is gone either way.
+ *
+ * @param {string} extractedRoot
+ * @param {string} target
+ * @returns {boolean} true when this call published the entry, false when another
+ *   producer had already published it
+ */
+function publishExtraction(extractedRoot, target) {
+  mkdirSync(dirname(target), { recursive: true });
+  let published;
+  try {
+    published = renameIntoPlace(extractedRoot, target);
+  } catch (error) {
+    if (error?.code !== "EXDEV") {
+      throw error;
+    }
+    // `shareRoot` is on another filesystem: stage a copy beside the target so the
+    // publish itself is still one rename, never a copy onto a live directory.
+    const staging = mkdtempSync(join(dirname(target), "incoming-"));
+    try {
+      const staged = join(staging, "root");
+      cpSync(extractedRoot, staged, { recursive: true });
+      published = renameIntoPlace(staged, target);
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  }
+  // A rename that won already moved the source away; this clears the loser's copy
+  // and the copied source of an `EXDEV` publish.
+  rmSync(extractedRoot, { recursive: true, force: true });
+  return published;
+}
+
+/**
  * Move one extracted archive into the shared cache and return the root Cargo
  * should resolve: the caller's own extraction when no `shareRoot` is in use,
  * the cache entry once it is. A cache hit drops the caller's copy.
  *
- * Callers sharing one root must run one at a time; nothing here guards a
- * concurrent publish.
+ * Two producers may publish the same digest at once — the rename decides, and the
+ * loser reads the winner's complete directory. Concurrent *builds* against one
+ * root are still not supported: the consumer target dir is a single Cargo lock
+ * and a single set of executables, so callers run one process at a time.
  *
  * @param {string} extractedRoot
  * @param {string | null} shareRoot
  * @returns {string}
  */
-function shareArchive(extractedRoot, shareRoot) {
+export function shareArchive(extractedRoot, shareRoot) {
   if (shareRoot === null) {
     return extractedRoot;
   }
   const shared = join(shareRoot, "archives", treeDigest(extractedRoot));
-  if (existsSync(shared)) {
-    rmSync(extractedRoot, { recursive: true, force: true });
-    return shared;
-  }
-  mkdirSync(dirname(shared), { recursive: true });
-  try {
-    renameSync(extractedRoot, shared);
-  } catch (error) {
-    if (error?.code !== "EXDEV") {
-      throw error;
-    }
-    // `shareRoot` may sit on another filesystem than the scratch tree.
-    cpSync(extractedRoot, shared, { recursive: true });
-    rmSync(extractedRoot, { recursive: true, force: true });
-  }
+  publishExtraction(extractedRoot, shared);
   return shared;
 }
 
@@ -937,6 +1020,8 @@ function runConsumer({
       "--quiet",
       ...patchArgs,
       "--target-dir",
+      // One dir for every consumer: they build the same sources, and the guest
+      // target below keeps the per-entry isolation that still matters.
       join(buildRoot, "consumers"),
       ...(mode === "test" ? ["--", "--nocapture"] : []),
     ],

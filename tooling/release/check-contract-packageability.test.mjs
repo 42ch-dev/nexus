@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -8,13 +10,17 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { after, test } from "node:test";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { VERSION_BRACKETS_PATH } from "./version-surfaces.mjs";
 import {
   checkContractPackageability,
+  shareArchive,
   verifyStagedSource,
 } from "./check-contract-packageability.mjs";
 import {
@@ -40,13 +46,21 @@ const SHARE_ROOT = mkdtempSync(join(tmpdir(), "nexus-release-share-"));
 const FILE_STARTED = Date.now();
 
 /**
- * Measured budget for this file, left below `timeout-minutes` so a regression
- * fails here with a number instead of being killed with nothing to read. The
- * runs behind it are recorded next to the CI step: 480 s is 1.5x the 327 s the
- * step measured in run 45942850812, and above the 1.28x spread of the seven
- * runs that measured the slow version.
+ * Measured budget for this file, left well below `timeout-minutes` so a regression
+ * fails here with a number instead of being killed with nothing to read. The runs
+ * behind it are recorded next to the CI step: 720 s is 2.2x the 327 s the step
+ * measured in run 45942850812 (271 s in 45944849798, 160 s on a 10-core
+ * darwin/arm64 host), and above the 1.28x spread of the seven runs that measured
+ * the slow version.
  */
-const FILE_BUDGET_SECONDS = 480;
+const FILE_BUDGET_SECONDS = 720;
+
+// Every blocking child (`cargo`, `git`, `tar`) may run only until this file's
+// budget expires, so a case that outgrows it dies as a named failure inside the
+// budget instead of being killed with the whole step.
+process.env.NEXUS_RELEASE_DEADLINE_MS ??= String(
+  FILE_STARTED + FILE_BUDGET_SECONDS * 1000,
+);
 
 /**
  * @param {string} dir
@@ -1235,12 +1249,108 @@ test("the consumer accounting must name every carrier entry once", () => {
 });
 
 /**
+ * An extracted archive's shape, minus Cargo: the same sources with only the
+ * staging stamp differing is exactly how two cases of equal content arrive here,
+ * so {@link treeDigest} has to call them one entry.
+ *
+ * @param {string} parent
+ * @param {string} stamp
+ * @returns {string}
+ */
+function extractedVariant(parent, stamp) {
+  const root = join(parent, `extracted-${stamp}`);
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(
+    join(root, "Cargo.toml"),
+    '[package]\nname = "nexus-publish-race"\nversion = "0.1.0"\n',
+  );
+  writeFileSync(join(root, "src", "lib.rs"), "pub fn race() {}\n");
+  writeFileSync(
+    join(root, ".cargo_vcs_info.json"),
+    `{"git":{"sha1":"${stamp}"}}\n`,
+  );
+  return root;
+}
+
+/** Child publisher: one archive, one share root, printed result. */
+const PUBLISH_CHILD = `
+import { shareArchive } from ${JSON.stringify(
+  pathToFileURL(
+    join(REPO_ROOT, "tooling/release/check-contract-packageability.mjs"),
+  ).href,
+)};
+process.stdout.write(
+  shareArchive(process.env.PUBLISH_ROOT, process.env.PUBLISH_SHARE),
+);
+`;
+
+const execFileAsync = promisify(execFile);
+
+test("two publishers of one digest keep one directory and drop the loser's copy", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-release-race-"));
+  const share = join(dir, "share");
+  const first = extractedVariant(dir, "aaaa");
+  const second = extractedVariant(dir, "bbbb");
+  try {
+    const publish = (root) =>
+      execFileAsync(process.execPath, ["--input-type=module", "-e", PUBLISH_CHILD], {
+        encoding: "utf8",
+        env: { ...process.env, PUBLISH_ROOT: root, PUBLISH_SHARE: share },
+      });
+    const results = await Promise.all([publish(first), publish(second)]);
+    const published = results.map((result) => result.stdout.trim());
+
+    assert.equal(
+      published[0],
+      published[1],
+      "both publishers must resolve the same entry",
+    );
+    assert.ok(
+      published[0].startsWith(join(share, "archives")),
+      `published path ${published[0]} is under the share root`,
+    );
+    assert.deepEqual(
+      readdirSync(join(share, "archives")),
+      [basename(published[0])],
+      "the digest owns exactly one directory",
+    );
+    assert.deepEqual(
+      [first, second].filter((root) => existsSync(root)),
+      [],
+      "each publisher's own extraction is gone",
+    );
+    assert.match(
+      readFileSync(join(published[0], "src", "lib.rs"), "utf8"),
+      /pub fn race/,
+      "the published entry carries the sources",
+    );
+
+    const late = extractedVariant(dir, "cccc");
+    assert.equal(
+      shareArchive(late, share),
+      published[0],
+      "a publish that loses to an existing entry reads the winner",
+    );
+    assert.equal(existsSync(late), false, "the loser drops its own extraction");
+    assert.equal(
+      readdirSync(join(share, "archives")).length,
+      1,
+      "the loser does not add a second directory",
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+/**
  * Guards the CI step's wall clock, not the checker's behaviour: the step stops
  * this file at `timeout-minutes`, and a job killed there says nothing about
  * which case grew. Failing on the file's own duration instead names the number
  * minutes earlier, and the per-test durations above name the case. The budget
  * is measured — the runs behind it are recorded next to the CI step — so it only
- * fires on a regression, never on an ordinary slow runner.
+ * fires on a regression, never on an ordinary slow runner. A case that runs past
+ * it is killed first: every child is spawned against
+ * `NEXUS_RELEASE_DEADLINE_MS`, set above from this budget.
  */
 test("the file stays inside the CI step's measured budget", () => {
   const seconds = (Date.now() - FILE_STARTED) / 1000;
