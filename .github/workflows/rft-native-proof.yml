@@ -20,7 +20,11 @@ name: RFT Native Package Proof
 #     `pass`. `cancelled` is its own state: a runner that cancels a row job
 #     (run 44798291720: darwin-arm64, zero recorded steps) is not a code
 #     defect, so it does not fail the verdict — it is retried once within the
-#     workflow and stays visible as `cancelled` (I-000561).
+#     workflow and stays visible as `cancelled` (I-000561). A pull request from
+#     a fork cannot be retried into this repository, so it records
+#     `retry: "not attempted (fork PR)"` instead of dispatching silently; and a
+#     run whose per-row job conclusions cannot be read fails the verdict rather
+#     than inferring a row state from the matrix aggregate.
 on:
   workflow_dispatch:
     inputs:
@@ -450,14 +454,16 @@ jobs:
   # A runner that cancels a row job (run 44798291720: darwin-arm64, zero recorded
   # steps) leaves no evidence behind, which used to require a human to rerun the
   # whole workflow. Re-dispatch only the cancelled rows instead, once: a retry
-  # run carries `rows` and therefore never dispatches another retry.
+  # run carries `retry_of` and therefore never dispatches another retry.
   retry-cancelled-rows:
     name: Retry cancelled rows (once)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [rft-matrix, native-package-proof, linux-gnu-proof]
+    # After the summary, not beside it: the retry run merges this run's matrix
+    # artifact, which does not exist until the summary uploaded it.
+    needs: [rft-matrix, native-package-proof, linux-gnu-proof, native-package-matrix-summary]
     if: |-
-      !cancelled() && inputs.rows == '' &&
+      !cancelled() && inputs.retry_of == '' &&
       (needs.native-package-proof.result != 'success' || needs.linux-gnu-proof.result != 'success')
     # The summary owns the verdict. A dispatch that cannot list the run's jobs or
     # is refused must not turn a runner cancellation into a red run.
@@ -473,6 +479,9 @@ jobs:
           # pull_request runs live on refs/pull/<n>/merge, which cannot be
           # dispatched; the head branch is the dispatchable identity there.
           DISPATCH_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          # A fork's branch does not exist in this repository, so `ref` cannot
+          # name it: the dispatch is skipped and recorded instead of failing.
+          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           set -euo pipefail
           # Per-leg conclusions, not the matrix aggregate: one cancelled leg
@@ -486,6 +495,12 @@ jobs:
             exit 0
           fi
           echo "Cancelled rows: ${cancelled}"
+          if [ "${FORK_PR}" = "true" ]; then
+            # The summary records retry="not attempted (fork PR)" for the same
+            # reason; this annotation is the visible half of that record.
+            echo "::warning::rows ${cancelled} were cancelled by the runner; the automatic retry is NOT attempted for a pull request from a fork (${DISPATCH_REF} lives in the fork, not in ${GITHUB_REPOSITORY}). Re-run it from the fork: gh workflow run rft-native-proof.yml --ref ${DISPATCH_REF} -f rows=${cancelled}"
+            exit 0
+          fi
           jq -nc --arg ref "${DISPATCH_REF}" --arg rows "${cancelled}" --arg retry_of "${RUN_ID}" \
             '{ref: $ref, inputs: {rows: $rows, retry_of: $retry_of}}' \
             | gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/rft-native-proof.yml/dispatches" --input -
@@ -501,7 +516,12 @@ jobs:
         with:
           filter: blob:none
 
+      # A lane can produce zero evidence artifacts (every row cancelled by the
+      # runner). download-artifact fails when the pattern matches nothing, so
+      # this step must not own the verdict: the per-row states below record the
+      # absence and `evidence_artifacts: none` names it in the matrix.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        continue-on-error: true
         with:
           pattern: rft-native-evidence-*
           merge-multiple: true
@@ -519,6 +539,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Resolve per-row job conclusions
+        id: conclusions
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -526,13 +547,19 @@ jobs:
           set -euo pipefail
           # Job names equal the row slugs (`name: matrix.slug` on the matrix job
           # and `name: linux-x64-gnu`), so the run's own jobs name each row state.
+          # There is no aggregate fallback: one cancelled leg makes the matrix
+          # result `abandoned` (run 44798291720 attempt 1), which names no row and
+          # cannot tell cancellation from failure, so an unresolved map fails the
+          # verdict instead of inventing row states.
           if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
                --jq '[.jobs[] | select(.conclusion != null) | {key: .name, value: .conclusion}] | from_entries' \
                > row-conclusions.json; then
             cat row-conclusions.json
+            echo "resolved=true" >> "$GITHUB_OUTPUT"
           else
-            echo '::warning::per-row job conclusions unavailable; falling back to the job-level results'
+            echo '::warning::per-row job conclusions unavailable; the verdict will fail rather than fall back to the matrix aggregate'
             echo '{}' > row-conclusions.json
+            echo "resolved=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Consolidate matrix evidence
@@ -540,6 +567,10 @@ jobs:
         env:
           MATRIX_JOB_RESULT: ${{ needs.native-package-proof.result }}
           LINUX_JOB_RESULT: ${{ needs.linux-gnu-proof.result }}
+          CONCLUSIONS_RESOLVED: ${{ steps.conclusions.outputs.resolved }}
+          # True when the PR head branch lives in a fork: the retry cannot be
+          # dispatched into this repository and is recorded as not attempted.
+          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
           # The rows this run owes, from its own rft-matrix (lane or retry).
           EXPECTED_ROWS: ${{ needs.rft-matrix.outputs.rows }}
           RETRY_OF: ${{ inputs.retry_of }}
@@ -550,23 +581,90 @@ jobs:
           import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
           const root = 'rft-native-evidence';
+          const SCHEMA = 'rft-p3-t1-native-package-matrix/v2';
+          const ROW_STATES = ['pass', 'cancelled', 'missing', 'failed'];
+          const runSha = process.env.GITHUB_SHA ?? null;
+          const retryOf = process.env.RETRY_OF || '';
+          const forkPr = process.env.FORK_PR === 'true';
           // Rows this run owes: its lane on a normal run, the cancelled rows on a
           // retry run. `rft-matrix` is the single source of that list.
           const expected = JSON.parse(process.env.EXPECTED_ROWS || '[]');
-          const conclusions = JSON.parse(readFileSync('row-conclusions.json', 'utf8'));
-          // `needs` is one aggregate for all matrix legs and reads `abandoned`
-          // when a single leg is cancelled, so it is only the fallback.
-          const conclusionOf = (suffix) =>
-            conclusions[suffix] ??
-            (suffix === 'linux-x64-gnu' ? process.env.LINUX_JOB_RESULT : process.env.MATRIX_JOB_RESULT) ??
-            'unknown';
-          const retryOf = process.env.RETRY_OF || '';
+          const conclusionsPath = 'row-conclusions.json';
+          const conclusions = existsSync(conclusionsPath) ? JSON.parse(readFileSync(conclusionsPath, 'utf8')) : {};
+          const payload = (fields) => ({
+            schema: SCHEMA,
+            source_sha: runSha,
+            run_id: process.env.GITHUB_RUN_ID ?? null,
+            utc: new Date().toISOString(),
+            jobs: { native_package_proof: process.env.MATRIX_JOB_RESULT, linux_gnu_proof: process.env.LINUX_JOB_RESULT },
+            pinned: {
+              rust_toolchain: process.env.RUST_TOOLCHAIN,
+              node_floor: process.env.NODE_FLOOR,
+              node_cohort: process.env.NODE_COHORT,
+              pnpm: process.env.PNPM_VERSION,
+              manylinux_image: process.env.MANYLINUX_IMAGE,
+              manylinux_digest: process.env.MANYLINUX_IMAGE_DIGEST,
+              rustup_init_version: process.env.RUSTUP_INIT_VERSION,
+              rustup_init_sha256: process.env.RUSTUP_INIT_SHA256,
+            },
+            ...fields,
+          });
+          const writeMatrix = (fields) => {
+            const value = payload(fields);
+            mkdirSync(process.env.EVIDENCE, { recursive: true });
+            writeFileSync(join(process.env.EVIDENCE, 'native-package-matrix.json'), JSON.stringify(value, null, 2) + '\n');
+            return value;
+          };
+          // The four-state model needs each row's own job conclusion. The matrix
+          // aggregate cannot supply it (one cancelled leg reads `abandoned` and
+          // names no row), so an unresolved map fails the verdict instead of
+          // inventing a row state from an aggregate.
+          if (process.env.CONCLUSIONS_RESOLVED !== 'true' || Object.keys(conclusions).length === 0) {
+            writeMatrix({
+              job_conclusion_source: 'unresolved',
+              evidence_artifacts: existsSync(root) ? 'uploaded' : 'none',
+              retry: retryOf === '' ? null : { of_run_id: Number(retryOf), merged: false },
+              rows: [],
+              cancelled_rows: [],
+              blocking_rows: [],
+              decision: 'fail',
+              note: 'per-row job conclusions could not be resolved from the run jobs API; the four-state verdict needs them, so no state is inferred from the matrix aggregate',
+            });
+            console.error(
+              '::error::P3-T1 native package matrix is fail — cannot resolve per-row job conclusions ' +
+                '(the run jobs API did not answer); the matrix aggregate cannot name a row state',
+            );
+            process.exit(1);
+          }
+          // A retry only completes the same commit's proof: rows from another
+          // commit or from the previous schema are never merged, and never count
+          // as non-blocking.
           const originMatrixPath = join('origin-matrix', 'native-package-matrix.json');
           const originMatrix =
             retryOf !== '' && existsSync(originMatrixPath)
               ? JSON.parse(readFileSync(originMatrixPath, 'utf8'))
               : null;
-          const originRows = originMatrix ? originMatrix.rows : [];
+          let mergeError = null;
+          if (retryOf !== '') {
+            if (originMatrix === null) {
+              mergeError = 'cannot read the origin run matrix (' + originMatrixPath + ')';
+            } else if (originMatrix.schema !== SCHEMA) {
+              mergeError =
+                'origin run matrix schema is ' + JSON.stringify(originMatrix.schema) + ', expected ' + SCHEMA;
+            } else if (originMatrix.source_sha !== runSha) {
+              mergeError =
+                'origin run matrix is from ' + JSON.stringify(originMatrix.source_sha) + ', this run is ' +
+                JSON.stringify(runSha) + ' — rows from different commits are not merged';
+            } else {
+              const foreign = (originMatrix.rows || []).filter((row) => !ROW_STATES.includes(row.status));
+              if (foreign.length > 0) {
+                mergeError =
+                  'origin run matrix has rows with an unrecognised status: ' +
+                  foreign.map((row) => row.suffix + '=' + row.status).join(', ');
+              }
+            }
+          }
+          const originRows = mergeError === null && originMatrix ? originMatrix.rows : [];
           const out = [];
           for (const row of expected) {
             const files = {
@@ -598,7 +696,7 @@ jobs:
               states.build_inputs = 'recorded';
             }
             const values = Object.values(states);
-            const jobConclusion = conclusionOf(row.suffix);
+            const jobConclusion = conclusions[row.suffix] ?? 'unknown';
             // Four distinct row states (I-000561). A runner-cancelled job never
             // produced evidence and is not a code defect; a successful job
             // without evidence is `missing` and a failed job is `failed` — both
@@ -638,41 +736,31 @@ jobs:
           const blockingRows = merged
             .filter((row) => row.status === 'missing' || row.status === 'failed')
             .map((row) => row.suffix);
-          const mergeFailed = retryOf !== '' && originMatrix === null;
-          const decision = mergeFailed || merged.length === 0 || blockingRows.length > 0 ? 'fail' : 'pass';
-          const payload = {
-            schema: 'rft-p3-t1-native-package-matrix/v2',
-            source_sha: process.env.GITHUB_SHA ?? null,
-            // `run-jobs` = per-leg conclusions from the API; `aggregate` = the
-            // matrix job result (a cancelled leg then reads `abandoned`, which
-            // cannot name the row, so every matrix row is fail-closed).
-            job_conclusion_source: Object.keys(conclusions).length > 0 ? 'run-jobs' : 'aggregate',
-            run_id: process.env.GITHUB_RUN_ID ?? null,
-            retry:
-              retryOf === ''
-                ? null
-                : { of_run_id: Number(retryOf), merged_rows: originRows.map((row) => row.suffix) },
-            utc: new Date().toISOString(),
-            jobs: { native_package_proof: process.env.MATRIX_JOB_RESULT, linux_gnu_proof: process.env.LINUX_JOB_RESULT },
+          // A fork PR's head branch does not exist in this repository, so the
+          // automatic retry is not attempted and the artifact records that fact
+          // instead of leaving the cancelled row silently unexplained.
+          const retryRecord =
+            retryOf !== ''
+              ? {
+                  of_run_id: Number(retryOf),
+                  merged: mergeError === null,
+                  ...(mergeError === null ? { merged_rows: originRows.map((row) => row.suffix) } : { error: mergeError }),
+                }
+              : cancelledRows.length > 0 && forkPr
+                ? 'not attempted (fork PR)'
+                : null;
+          const decision = mergeError !== null || merged.length === 0 || blockingRows.length > 0 ? 'fail' : 'pass';
+          writeMatrix({
+            job_conclusion_source: 'run-jobs',
+            evidence_artifacts: existsSync(root) ? 'uploaded' : 'none',
+            retry: retryRecord,
             build_inputs: merged.map((row) => row.build_inputs).filter(Boolean),
-            pinned: {
-              rust_toolchain: process.env.RUST_TOOLCHAIN,
-              node_floor: process.env.NODE_FLOOR,
-              node_cohort: process.env.NODE_COHORT,
-              pnpm: process.env.PNPM_VERSION,
-              manylinux_image: process.env.MANYLINUX_IMAGE,
-              manylinux_digest: process.env.MANYLINUX_IMAGE_DIGEST,
-              rustup_init_version: process.env.RUSTUP_INIT_VERSION,
-              rustup_init_sha256: process.env.RUSTUP_INIT_SHA256,
-            },
             rows: merged,
             cancelled_rows: cancelledRows,
             blocking_rows: blockingRows,
             decision,
             note: 'row status: pass | cancelled (the runner cancelled the job, no evidence was possible, retried once automatically) | missing (the job succeeded but produced no evidence) | failed (the job failed). missing and failed block P3; cancelled never does (I-000561)',
-          };
-          mkdirSync(process.env.EVIDENCE, { recursive: true });
-          writeFileSync(join(process.env.EVIDENCE, 'native-package-matrix.json'), JSON.stringify(payload, null, 2) + '\n');
+          });
           console.log(JSON.stringify(merged, null, 2));
           if (cancelledRows.length > 0) {
             console.warn(
@@ -680,15 +768,20 @@ jobs:
                 ' — no evidence was possible; retried once automatically (I-000561)',
             );
           }
-          if (decision !== 'pass') {
-            console.error(
-              '::error::P3-T1 native package matrix is ' + decision + ' — ' +
-                (mergeFailed
-                  ? 'the retry run could not read the origin run matrix'
-                  : merged.length === 0
-                    ? 'no row was evaluated'
-                    : blockingRows.join(', ') + ' is missing or failed evidence'),
+          if (retryRecord === 'not attempted (fork PR)') {
+            console.warn(
+              '::warning::P3-T1 the automatic retry is not attempted for a pull request from a fork; ' +
+                'the cancelled row(s) stay unproven: ' + cancelledRows.join(', '),
             );
+          }
+          if (decision !== 'pass') {
+            const reason =
+              mergeError !== null
+                ? 'refusing to merge the origin run matrix: ' + mergeError
+                : merged.length === 0
+                  ? 'no row was evaluated'
+                  : blockingRows.join(', ') + ' is missing or failed evidence';
+            console.error('::error::P3-T1 native package matrix is ' + decision + ' — ' + reason);
             process.exit(1);
           }
           JS
