@@ -21,14 +21,16 @@
 # disjunct (e.g. a production feature) can hold without test — and neither is
 # `#[cfg(not(test))]` or `#[cfg(feature = "test")]`. A gate cuts a span only
 # for an item whose `{ … }` body the tracker can match: a `mod … { }` or a
-# macro invocation (`mac!`, `path::mac!`, `::mac!`). A `mod … { }` body is
-# delimited by indentation (unchanged); a macro body by brace depth, ignoring
-# `{`/`}` inside literals and comments, so a body that opens and closes on one
-# line or is misindented is matched exactly, and an unbalanced one fails closed.
-# An out-of-line `mod tests;` opens no span (its body is another file), and a
-# gate on a non-module item (e.g. a test-only const), struct field or statement
-# does not hide production lines below it. An opaque body the tracker cannot
-# delimit (a bare `{ … }` block or a non-brace macro invocation such as
+# macro invocation (`mac!`, `path::mac!`, `::mac!`). Each file is lexed once
+# (`code_mask`), so braces inside `//` and `/* */` comments, `"…"`/`b"…"`
+# strings, `r#"…"#`/`br#"…"#` raw strings and `'x'` char literals do not count,
+# and a lifetime (`'a`) is not a char literal. Both body kinds close at the
+# matching code brace, so a body that opens and closes on one line is that one
+# line, a misindented body is matched exactly, and an unbalanced one fails
+# closed. An out-of-line `mod tests;` opens no span (its body is another file),
+# and a gate on a non-module item (e.g. a test-only const), struct field or
+# statement does not hide production lines below it. An opaque body the tracker
+# cannot delimit (a bare `{ … }` block or a non-brace macro invocation such as
 # `include!(…)`) fails closed.
 #
 # Exemptions (F-001): tooling/work-artifact-write-allowlist.tsv rows are
@@ -228,85 +230,144 @@ def test_gate_match(line):
     return m
 
 
-def quoted_end(text, quote_at, quote):
-    """Index just past the literal opened at `quote_at`, or `len(text)` if open."""
-    k = quote_at + 1
-    while k < len(text):
-        if text[k] == "\\":
-            k += 2
-            continue
-        if text[k] == quote:
-            return k + 1
-        k += 1
-    return len(text)
+def char_literal_end(text, k):
+    """Index just past a `'x'` / `'\\n'` char literal at `k`, else None.
 
-
-def literal_end(text, k):
-    """Index just past a string/char literal starting at `k`, else None.
-
-    A lifetime (`'a`) is not a char literal, so scanning passes through it.
+    A lifetime (`'a`, as in `<'a>`) is not a char literal and matches nothing.
     """
-    raw = RAW_STRING_RE.match(text, k)
-    if raw:
-        closing = '"' + raw.group(1)
-        end = text.find(closing, raw.end())
-        return len(text) if end < 0 else end + len(closing)
-    if text.startswith('b"', k):
-        return quoted_end(text, k + 1, '"')
-    if text[k] == '"':
-        return quoted_end(text, k, '"')
-    if text[k] == "'":
-        if k + 1 < len(text) and text[k + 1] == "\\":
-            return quoted_end(text, k, "'")
-        if k + 2 < len(text) and text[k + 2] == "'":
-            return k + 3
+    after = k + 1
+    if after >= len(text):
+        return None
+    if text[after] == "\\":
+        end = text.find("'", after + 2)
+        return end + 1 if end >= 0 else None
+    if text[after] != "'" and after + 1 < len(text) and text[after + 1] == "'":
+        return after + 2
     return None
 
 
-def depth_body_end(lines, first, start_col):
-    """Last line of the `{ … }` body opening at `lines[first][start_col:]`.
+def literal_span(line, k):
+    """`(end, carry)` for a literal opening at `k`, else None.
 
-    Depth, not indentation: the body may open and close on this line, and its
-    content need not be indented. A multi-line literal or block comment is not
-    followed across lines, so a stray brace there can only shorten the span.
+    `end` is just past the literal (or `len(line)` when it continues on the
+    next line); `carry` is the lexer state the next line starts in.
     """
-    depth = 0
-    in_block_comment = False
-    for idx in range(first, len(lines)):
-        text = lines[idx]
-        k = start_col if idx == first else 0
-        while k < len(text):
-            if in_block_comment:
-                if text.startswith("*/", k):
-                    in_block_comment = False
+    raw = RAW_STRING_RE.match(line, k)
+    if raw:
+        closing = '"' + raw.group(1)
+        end = line.find(closing, raw.end())
+        if end < 0:
+            return len(line), ("raw", raw.group(1))
+        return end + len(closing), None
+    if line.startswith('b"', k):
+        k += 1
+    if line[k] == '"':
+        j = k + 1
+        while j < len(line):
+            if line[j] == "\\":
+                j += 2
+                continue
+            if line[j] == '"':
+                return j + 1, None
+            j += 1
+        return len(line), "string"
+    if line[k] == "'":
+        end = char_literal_end(line, k)
+        if end is not None:
+            return end, None
+    return None
+
+
+def code_mask(lines):
+    """Per-line copies of `lines` with comments and literals blanked to spaces.
+
+    One lexical pass per file, so a brace count sees only code. Block comments,
+    plain strings and raw strings carry across lines; a lifetime stays code.
+    """
+    masked = []
+    mode = None
+    for line in lines:
+        out = list(line)
+        k = 0
+        while k < len(line):
+            if mode == "block":
+                if line.startswith("*/", k):
+                    out[k:k + 2] = [" "] * 2
+                    mode = None
                     k += 2
                     continue
+                out[k] = " "
                 k += 1
                 continue
-            if text.startswith("//", k):
+            if mode == "string":
+                if line[k] == "\\" and k + 1 < len(line):
+                    out[k:k + 2] = [" "] * 2
+                    k += 2
+                    continue
+                out[k] = " "
+                if line[k] == '"':
+                    mode = None
+                k += 1
+                continue
+            if mode is not None:  # ("raw", hashes)
+                closing = '"' + mode[1]
+                if line.startswith(closing, k):
+                    out[k:k + len(closing)] = [" "] * len(closing)
+                    mode = None
+                    k += len(closing)
+                    continue
+                out[k] = " "
+                k += 1
+                continue
+            if line.startswith("//", k):
+                out[k:] = [" "] * (len(line) - k)
                 break
-            if text.startswith("/*", k):
-                in_block_comment = True
+            if line.startswith("/*", k):
+                out[k:k + 2] = [" "] * 2
+                mode = "block"
                 k += 2
                 continue
-            end = literal_end(text, k)
-            if end is not None:
+            span = literal_span(line, k)
+            if span is not None:
+                end, mode = span
+                end = min(end, len(line))
+                out[k:end] = [" "] * (end - k)
                 k = end
                 continue
+            k += 1
+        masked.append("".join(out))
+    return masked
+
+
+def body_open(masked, line, col):
+    """First code `{` at or after `masked[line][col]` as `(line, col)`."""
+    for idx in range(line, len(masked)):
+        brace = masked[idx].find("{", col if idx == line else 0)
+        if brace >= 0:
+            return idx, brace
+    return None, None
+
+
+def body_end(masked, open_line, open_col):
+    """Last line of the `{ … }` body opening at `masked[open_line][open_col]`."""
+    depth = 0
+    for idx in range(open_line, len(masked)):
+        text = masked[idx]
+        k = open_col if idx == open_line else 0
+        while k < len(text):
             if text[k] == "{":
                 depth += 1
             elif text[k] == "}":
                 depth -= 1
                 if depth == 0:
                     return idx
-                if depth < 0:
-                    return None
             k += 1
     return None
 
 
 def test_module_spans(rel, lines):
     """Line indexes belonging to test-gated `mod … { }` / `mac! { }` spans."""
+    masked = code_mask(lines)
     skip = set()
     i = 0
     while i < len(lines):
@@ -315,62 +376,49 @@ def test_module_spans(rel, lines):
             i += 1
             continue
         # The gated item may start on the attribute's own line
-        # (`#[cfg(test)] mac! { .. }`).
+        # (`#[cfg(test)] mod tests { }`).
         rest = lines[i][attr.end():]
         same_line = bool(rest.strip()) and not rest.lstrip().startswith("//")
         if same_line:
-            j = i
-            item = rest
+            item_line = i
+            item_col = attr.end() + (len(rest) - len(rest.lstrip()))
         else:
-            j = i + 1
-            while j < len(lines) and (
-                not lines[j].strip()
-                or lines[j].lstrip().startswith("#[")
-                or lines[j].lstrip().startswith("//")
+            item_line = i + 1
+            while item_line < len(lines) and (
+                not lines[item_line].strip()
+                or lines[item_line].lstrip().startswith("#[")
+                or lines[item_line].lstrip().startswith("//")
             ):
-                j += 1
-            if j >= len(lines):
+                item_line += 1
+            if item_line >= len(lines):
                 fail(f"{rel}:{i + 1}: test-gated attribute at EOF — cannot classify the item")
                 i += 1
                 continue
-            item = lines[j]
+            item_col = 0
+        item = lines[item_line][item_col:]
         if MOD_DECL_RE.match(item):
             # Out-of-line `mod tests;`: the body is another file, so this
             # declaration opens no span and the code below stays production.
             i += 1
             continue
         if MOD_RE.match(item):
-            # Module bodies keep the indentation heuristic.
-            open_line = j
-            while open_line < len(lines) and "{" not in lines[open_line]:
-                open_line += 1
-            if open_line >= len(lines):
-                fail(f"{rel}:{i + 1}: test-gated item without a body")
-                i = j + 1
+            kind = "mod"
+        elif MACRO_BODY_RE.match(item):
+            kind = "macro"
+        else:
+            kind = None
+        if kind is not None:
+            # Both body kinds close at the matching brace in the masked code;
+            # a body that opens and closes on one line is that one line.
+            open_line, open_col = body_open(masked, item_line, item_col)
+            if open_line is None:
+                fail(f"{rel}:{i + 1}: test-gated {kind} without a body")
+                i = item_line + 1
                 continue
-            indent = len(lines[j]) - len(lines[j].lstrip())
-            end = None
-            for m in range(open_line + 1, len(lines)):
-                stripped = lines[m].lstrip()
-                if not stripped:
-                    continue
-                if stripped.startswith("}") and (len(lines[m]) - len(stripped)) <= indent:
-                    end = m
-                    break
+            end = body_end(masked, open_line, open_col)
             if end is None:
-                fail(f"{rel}:{i + 1}: unclosed test-gated body")
-                i = j + 1
-                continue
-            skip.update(range(i, end + 1))
-            i = end + 1
-            continue
-        if MACRO_BODY_RE.match(item):
-            # Macro-invocation bodies are delimited by brace depth.
-            start_col = item.index("{") if j > i else attr.end() + item.index("{")
-            end = depth_body_end(lines, j, start_col)
-            if end is None:
-                fail(f"{rel}:{i + 1}: test-gated macro body is unbalanced")
-                i = j + 1
+                fail(f"{rel}:{i + 1}: test-gated {kind} body is unbalanced")
+                i = item_line + 1
                 continue
             skip.update(range(i, end + 1))
             i = end + 1

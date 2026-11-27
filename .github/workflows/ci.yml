@@ -794,9 +794,10 @@ jobs:
       # excluded from the inventory scan. The fixtures pin the accepted
       # spellings (`cfg(test)`, `cfg(all(…, test))`, trailing comma included),
       # the shapes that stay production (`cfg(any(test, …))`, `cfg(not(test))`,
-      # a field annotation, an out-of-line `mod tests;`), the macro bodies that
-      # are excluded (path-qualified, one-line, misindented), the unbalanced-body
-      # diagnostic and the fail-closed opaque-body branch.
+      # a field annotation, an out-of-line `mod tests;`), the lexed brace
+      # matching (one-line `mod tests { }`, one-line and misindented macro
+      # bodies, braces inside multi-line strings ignored), the named
+      # unbalanced-body diagnostics and the fail-closed opaque-body branch.
       - name: Work artifact write guard — cfg classification fixtures
         run: bash tooling/check-work-artifact-writes.test.sh
 
