@@ -870,13 +870,13 @@ conn.commit()
  * Unguarded on purpose (I-000436): run 43489148101's SIGSEGV landed in this
  * block's first case, 61.1 s into the file's process and 21.8 s after its last
  * write, after `seededHome()` and during `startServiceOn`, with P0-T5 having
- * finished all ten cases. It passes unguarded on ubuntu-latest (runs
- * 45941494235, 45943402321) and on darwin/arm64, so a reappearance must fail
- * CI instead of skipping. The crash is linux-only, so diagnose it on the linux
- * runner: first a `before()` that runs `packages/nexus-native/scripts/build.mjs`
- * (double-`dlopen` of the addon in one process), then, from
- * `apps/nexus-service` with the addon staged and `dist/` built, the crashing
- * native stack:
+ * finished all ten cases. The block runs unguarded on every platform on
+ * purpose, so a reappearance must fail CI instead of skipping. The original
+ * crash appeared only on the linux runner and has not reappeared there (runs
+ * 45941494235, 45943402321); if it does, reproduce it there: first a `before()`
+ * that runs `packages/nexus-native/scripts/build.mjs` (double-`dlopen` of the
+ * addon in one process), then, from `apps/nexus-service` with the addon staged
+ * and `dist/` built, the crashing native stack:
  *   gdb -batch -ex run -ex "thread apply all bt" --args node --test --test-timeout=180000 tests/workflow-control-http.test.mjs
  */
 describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () => {
