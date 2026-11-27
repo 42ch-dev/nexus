@@ -11,7 +11,9 @@
 # annotation and an out-of-line `mod tests;` declaration stay scanned. Both
 # body kinds close at the matching code brace from the per-file lexer — one-line
 # bodies included, braces inside multi-line strings/comments ignored — and an
-# unbalanced body fails closed with a named diagnostic.
+# unbalanced body fails closed with a named diagnostic. Every classification
+# (gate, item kind, write count, symbol) reads the mask, so a gate or a
+# `std::fs::write` inside a string or comment is not code.
 #
 # Usage (from repository root): bash tooling/check-work-artifact-writes.test.sh
 # Exit codes: 0 — every fixture matched its expected result; 1 — mismatch.
@@ -69,6 +71,12 @@ expect macro_body_one_line.rs 1 "direct write: macro_body_one_line.rs write_fixt
 expect macro_body_one_line.rs 1 "FAILED: 1 unexempted direct write(s)"
 expect macro_body_unbalanced.rs 1 "$UNBALANCED_MSG"
 expect mod_body_unbalanced.rs 1 "test-gated mod body is unbalanced"
+expect gate_in_string.rs 1 "direct write: gate_in_string.rs production"
+expect gate_in_string.rs 1 "FAILED: 1 unexempted direct write(s)"
+expect gate_in_block_comment.rs 1 "direct write: gate_in_block_comment.rs production"
+expect gate_in_block_comment.rs 1 "FAILED: 1 unexempted direct write(s)"
+expect gate_in_raw_string.rs 1 "direct write: gate_in_raw_string.rs production"
+expect gate_in_raw_string.rs 1 "FAILED: 1 unexempted direct write(s)"
 expect opaque_macro_attr.rs 1 "$OPAQUE_MSG"
 expect opaque_block_attr.rs 1 "$OPAQUE_MSG"
 

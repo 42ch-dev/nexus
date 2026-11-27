@@ -22,8 +22,10 @@
 # `#[cfg(not(test))]` or `#[cfg(feature = "test")]`. A gate cuts a span only
 # for an item whose `{ … }` body the tracker can match: a `mod … { }` or a
 # macro invocation (`mac!`, `path::mac!`, `::mac!`). Each file is lexed once
-# (`code_mask`), so braces inside `//` and `/* */` comments, `"…"`/`b"…"`
-# strings, `r#"…"#`/`br#"…"#` raw strings and `'x'` char literals do not count,
+# (`code_mask`) and every decision reads the mask — gate detection, item
+# classification, body matching, the write count and the symbol — so a
+# `#[cfg(test)]` or `fs::write` inside `//` or `/* */` comments, `"…"`/`b"…"`
+# strings, `r#"…"#`/`br#"…"#` raw strings or `'x'` char literals is not code,
 # and a lifetime (`'a`) is not a char literal. Both body kinds close at the
 # matching code brace, so a body that opens and closes on one line is that one
 # line, a misindented body is matched exactly, and an unbalanced one fails
@@ -149,12 +151,12 @@ def load_allowlist():
     return rows, opt_outs
 
 
-def enclosing_symbol(lines, idx):
-    """Enclosing `Impl::fn` (or bare `fn`) for the 0-based hit line."""
+def enclosing_symbol(masked, idx):
+    """Enclosing `Impl::fn` (or bare `fn`) for the 0-based hit line, from code."""
     fn = impl = None
     impl_locked = False
     for j in range(idx - 1, -1, -1):
-        line = lines[j]
+        line = masked[j]
         if fn is None:
             m = FN_RE.search(line)
             if m:
@@ -365,37 +367,39 @@ def body_end(masked, open_line, open_col):
     return None
 
 
-def test_module_spans(rel, lines):
-    """Line indexes belonging to test-gated `mod … { }` / `mac! { }` spans."""
-    masked = code_mask(lines)
+def test_module_spans(rel, masked):
+    """Line indexes belonging to test-gated `mod … { }` / `mac! { }` spans.
+
+    Every decision reads the mask (gate, item kind, body braces); line numbers
+    come from list indices, so masked and raw indices stay interchangeable.
+    """
     skip = set()
     i = 0
-    while i < len(lines):
-        attr = test_gate_match(lines[i])
+    while i < len(masked):
+        attr = test_gate_match(masked[i])
         if attr is None:
             i += 1
             continue
         # The gated item may start on the attribute's own line
         # (`#[cfg(test)] mod tests { }`).
-        rest = lines[i][attr.end():]
-        same_line = bool(rest.strip()) and not rest.lstrip().startswith("//")
+        rest = masked[i][attr.end():]
+        same_line = bool(rest.strip())
         if same_line:
             item_line = i
             item_col = attr.end() + (len(rest) - len(rest.lstrip()))
         else:
             item_line = i + 1
-            while item_line < len(lines) and (
-                not lines[item_line].strip()
-                or lines[item_line].lstrip().startswith("#[")
-                or lines[item_line].lstrip().startswith("//")
+            while item_line < len(masked) and (
+                not masked[item_line].strip()
+                or masked[item_line].lstrip().startswith("#[")
             ):
                 item_line += 1
-            if item_line >= len(lines):
+            if item_line >= len(masked):
                 fail(f"{rel}:{i + 1}: test-gated attribute at EOF — cannot classify the item")
                 i += 1
                 continue
             item_col = 0
-        item = lines[item_line][item_col:]
+        item = masked[item_line][item_col:]
         if MOD_DECL_RE.match(item):
             # Out-of-line `mod tests;`: the body is another file, so this
             # declaration opens no span and the code below stays production.
@@ -444,17 +448,19 @@ def scan_file(path, base):
     with open(path, encoding="utf-8") as fh:
         lines = fh.read().splitlines()
     rel = os.path.relpath(os.path.realpath(path), os.path.realpath(base))
-    skip = test_module_spans(rel, lines)
+    masked = code_mask(lines)
+    skip = test_module_spans(rel, masked)
     hits = []
-    for idx, line in enumerate(lines):
+    for idx, raw in enumerate(lines):
         if idx in skip:
             continue
         # Count every call, not every matching line: two direct writes on one
-        # line must register as two hits.
-        occurrences = len(WRITE_RE.findall(line))
+        # line must register as two hits. Classification reads the mask; the raw
+        # line is only the text printed for a hit.
+        occurrences = len(WRITE_RE.findall(masked[idx]))
         if occurrences:
-            symbol = enclosing_symbol(lines, idx)
-            hits.extend([(idx, line.strip(), symbol)] * occurrences)
+            symbol = enclosing_symbol(masked, idx)
+            hits.extend([(idx, raw.strip(), symbol)] * occurrences)
     return rel, hits
 
 
