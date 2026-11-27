@@ -3,7 +3,7 @@
  "$id": "https://nexus42.invalid/schemas/core/works/work-reconcile-report.schema.json",
  "schema_version": 1,
  "title": "WorkReconcileReport",
- "description": "Chapter reconcile counters (DB-as-SSOT resync); identical for the dry-run preview and the committed run.",
+ "description": "Chapter reconcile counters (DB-as-SSOT resync). The counters describe one reconcile diff, which is exactly what the dry-run preview reports. The committed run can differ only by an apply-time skip: a chapter that stopped rendering between the diff and the write is subtracted from `resynced` and listed in `skipped`.",
  "type": "object",
  "required": [
   "created",

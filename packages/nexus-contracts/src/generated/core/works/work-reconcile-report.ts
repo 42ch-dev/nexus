@@ -5,7 +5,7 @@
  */
 
 /**
- * Chapter reconcile counters (DB-as-SSOT resync); identical for the dry-run preview and the committed run.
+ * Chapter reconcile counters (DB-as-SSOT resync). The counters describe one reconcile diff, which is exactly what the dry-run preview reports. The committed run can differ only by an apply-time skip: a chapter that stopped rendering between the diff and the write is subtracted from `resynced` and listed in `skipped`.
  */
 export interface WorkReconcileReport {
   created: number;

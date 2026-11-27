@@ -275,6 +275,8 @@ impl FsWorkArtifactPort {
         request: &WorkReconcile<'_>,
         diff: &ReconcileDiff,
     ) -> Result<ReconcileReport, NexusApiError> {
+        let mut unrendered = 0u32;
+        let mut skipped = diff.skipped.clone();
         for op in &diff.ops {
             let ReconcileOp::ResyncFileStatus {
                 rel_child,
@@ -297,6 +299,23 @@ impl FsWorkArtifactPort {
                 })?;
             let Some(rendered) = work_chapters::render_frontmatter_status(&content, db_status)
             else {
+                // The file changed between the unlocked diff and this write, so
+                // nothing can be written: report the skip instead of counting a
+                // resync that never landed.
+                // Components joined with `/`: a separator never leaks the
+                // platform's, and a backslash that is part of a Unix file name
+                // survives because no byte is rewritten.
+                let rel = rel_child
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let path = format!("Works/{}/{rel}", request.work_ref);
+                skipped.push(work_chapters::ReconcileSkip {
+                    path,
+                    reason: work_chapters::UNRENDERABLE_FRONTMATTER_REASON,
+                });
+                unrendered += 1;
                 continue;
             };
             self.write_locked(WorkArtifactWrite {
@@ -307,11 +326,16 @@ impl FsWorkArtifactPort {
             })
             .await?;
         }
-        work_chapters::apply_reconcile_diff(&self.pool, request.work_id, request.now, diff)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                category: format!("DATABASE_ERROR: reconcile apply failed: {e}"),
-            })
+        let mut report =
+            work_chapters::apply_reconcile_diff(&self.pool, request.work_id, request.now, diff)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    category: format!("DATABASE_ERROR: reconcile apply failed: {e}"),
+                })?;
+        // `to_report` counts every resync op; the ones skipped above wrote nothing.
+        report.resynced = report.resynced.saturating_sub(unrendered);
+        report.skipped = skipped;
+        Ok(report)
     }
 
     /// The write itself, run while the caller holds the Work lock:
@@ -1328,5 +1352,158 @@ mod tests {
             None,
             "the lock is released on the error path"
         );
+    }
+
+    /// The unlocked diff sees a renderable chapter, then the file stops being
+    /// renderable before the write phase (the stale-diff window). The apply
+    /// phase must report the skip instead of counting a resync it never wrote.
+    #[tokio::test]
+    async fn reconcile_reports_a_chapter_that_became_unrenderable_after_the_diff() {
+        let fixture = fixture(true).await;
+        seed_chapter(&fixture.pool, "draft").await;
+        let path = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&path, "finalized", "Body text");
+        let broken = "---\nchapter: 1\nstatus: finalized\nUnclosed body";
+        let broken_path = path.clone();
+
+        let report = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| {
+                // The recheck runs between the unlocked diff and the write phase.
+                std::fs::write(&broken_path, broken).expect("break the frontmatter");
+                Ok(())
+            })
+            .await
+            .expect("reconcile");
+
+        assert_eq!(report.resynced, 0, "no resync byte was written");
+        assert_eq!(
+            report.skipped,
+            vec![nexus_local_db::work_chapters::ReconcileSkip {
+                path: "Works/demo/Stories/ch01-intro.md".to_string(),
+                reason: nexus_local_db::work_chapters::UNRENDERABLE_FRONTMATTER_REASON,
+            }],
+            "the outcome names the chapter and the reason"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            broken,
+            "the file keeps the bytes the diff never wrote"
+        );
+        assert_eq!(holder(&fixture.pool).await, None, "the lock is released");
+    }
+
+    /// The diff-phase and apply-phase skip producers must emit the same `path`
+    /// shape — `Works/<work_ref>/<child>` with `/` separators — so one field
+    /// never carries two spellings. Separators come from the path components,
+    /// so a backslash that is part of a Unix file name survives untouched.
+    #[tokio::test]
+    async fn reconcile_apply_and_diff_skips_carry_the_same_path_shape() {
+        let fixture = fixture(true).await;
+        nexus_local_db::work_chapters::seed_chapters(
+            &fixture.pool,
+            WORK_ID,
+            WORK_REF,
+            3,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("seed chapters");
+        nexus_local_db::work_chapters::update_status(
+            &fixture.pool,
+            WORK_ID,
+            1,
+            1,
+            "draft",
+            None,
+            "2026-06-04T10:00:00Z",
+        )
+        .await
+        .expect("chapter status");
+
+        // ch01 conflicts on status and is renderable when the diff runs; the
+        // recheck then breaks it, so only the apply phase skips it.
+        let conflicting = chapter_path(fixture.workspace.path(), "ch01-intro.md");
+        write_chapter(&conflicting, "finalized", "Body text");
+        let ch01_broken = "---\nchapter: 1\nstatus: finalized\nUnclosed body";
+        // ch02's frontmatter never closes, so the diff phase itself skips it.
+        let ch02_broken = "---\nchapter: 2\nstatus: draft\nUnclosed body";
+        std::fs::write(
+            chapter_path(fixture.workspace.path(), "ch02-body.md"),
+            ch02_broken,
+        )
+        .expect("broken chapter");
+        // A backslash is a legal file-name byte on Unix (unrepresentable on
+        // Windows, hence the gate): the apply path must keep it and still join
+        // the components with `/`.
+        #[cfg(unix)]
+        let weird_name = "ch03-a\\b.md";
+        #[cfg(unix)]
+        {
+            nexus_local_db::work_chapters::update_status(
+                &fixture.pool,
+                WORK_ID,
+                3,
+                1,
+                "draft",
+                None,
+                "2026-06-04T10:00:00Z",
+            )
+            .await
+            .expect("ch03 status");
+            let weird = chapter_path(fixture.workspace.path(), weird_name);
+            write_chapter(&weird, "finalized", "Body text");
+        }
+        #[cfg(unix)]
+        let ch03_broken = "---\nchapter: 3\nstatus: finalized\nUnclosed body";
+
+        let report = fixture
+            .port
+            .reconcile(reconcile(&fixture, false), &|| {
+                std::fs::write(&conflicting, ch01_broken).expect("break the frontmatter");
+                #[cfg(unix)]
+                std::fs::write(
+                    chapter_path(fixture.workspace.path(), weird_name),
+                    ch03_broken,
+                )
+                .expect("break the backslash-named chapter");
+                Ok(())
+            })
+            .await
+            .expect("reconcile");
+
+        let paths: Vec<&str> = report
+            .skipped
+            .iter()
+            .map(|skip| skip.path.as_str())
+            .collect();
+        assert_eq!(
+            paths.first().copied(),
+            Some("Works/demo/Stories/ch02-body.md"),
+            "the diff-phase skip comes first: {paths:?}"
+        );
+        // Apply-phase skips follow the op order (read_dir order), so compare
+        // them as a set.
+        let mut apply_skips: Vec<String> = paths
+            .iter()
+            .skip(1)
+            .map(|path| (*path).to_string())
+            .collect();
+        apply_skips.sort_unstable();
+        let mut expected = vec!["Works/demo/Stories/ch01-intro.md".to_string()];
+        // The diff-phase producer builds `Works/<ref>/Stories/<fname>`; the
+        // apply phase must agree for the same name, backslash included.
+        #[cfg(unix)]
+        expected.push(format!("Works/{WORK_REF}/Stories/{weird_name}"));
+        expected.sort_unstable();
+        assert_eq!(apply_skips, expected);
+        assert!(
+            report
+                .skipped
+                .iter()
+                .all(|skip| skip.path.starts_with("Works/demo/Stories/")),
+            "every skip path joins its root components with `/`: {paths:?}"
+        );
+        assert_eq!(report.resynced, 0, "no chapter was written");
     }
 }
