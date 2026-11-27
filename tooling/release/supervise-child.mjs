@@ -66,12 +66,23 @@ const originalParent = process.ppid;
  */
 const pidChannel = Number(process.env.NEXUS_CHILD_PID_FD ?? "");
 
-/** Kill the command's group; this process is not in it, so it survives to exit. */
-function killCommandGroup() {
+/**
+ * Kill the command's group; this process is not in it, so it survives to exit.
+ *
+ * @param {{ assertPid?: boolean }} [options] `assertPid` belongs on paths where
+ *   `spawn` has demonstrably succeeded (the command ran and exited); a signal that
+ *   arrives before the pid is assigned must not turn into an uncaught exception,
+ *   or the caller loses the "command never started" cause the error event carries.
+ */
+function killCommandGroup({ assertPid = false } = {}) {
   if (child.pid === undefined) {
-    // Not a state to handle: `spawn` assigns the pid before it returns, and a
-    // failed spawn reports through the error event instead. Say so loudly.
-    throw new Error(`supervise-child: ${command} has no pid after a spawn`);
+    if (assertPid) {
+      throw new Error(`supervise-child: ${command} has no pid after a spawn`);
+    }
+    process.stderr.write(
+      `supervise-child: ${command} has no pid yet; the spawn error carries the cause\n`,
+    );
+    return;
   }
   try {
     process.kill(-child.pid, "SIGKILL");
@@ -149,8 +160,10 @@ child.on("exit", (code, signal) => {
   if (signal !== null) {
     // A command killed by a signal leaves whatever it started in its group:
     // `cargo` compiling means `rustc` children still there. Reap the group first,
-    // then forward the death as a signal, as `spawnSync` reports it.
-    killCommandGroup();
+    // then forward the death as a signal, as `spawnSync` reports it. The command
+    // ran and exited, so a missing pid here is a broken contract, not an early
+    // signal.
+    killCommandGroup({ assertPid: true });
     process.removeAllListeners(signal);
     process.kill(process.pid, signal);
     return;

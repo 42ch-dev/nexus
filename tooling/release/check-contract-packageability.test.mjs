@@ -1388,21 +1388,23 @@ setInterval(() => {}, 1000);
 
 /**
  * Spawns the marker writer, then kills itself with SIGTERM once the writer has
- * been observed working (two writes), so the precondition is established by the
- * marker rather than by a wall clock a loaded runner may not meet. If two writes
- * never arrive within 5 s it reports that as its own failure (exit 4) instead of
- * killing itself, so the test names the unmet precondition rather than a kill
- * that never happened.
+ * been observed working (two writes by default), so the precondition is established
+ * by the marker rather than by a wall clock a loaded runner may not meet. If the
+ * writes never arrive within 5 s it reports that as its own failure (exit 4) instead
+ * of killing itself. That bound is the shorter one on purpose: the test's race
+ * guard is 12 s, so a genuinely unmet precondition surfaces as this exit, never as a
+ * forwarding defect. `NEXUS_FIXTURE_MIN_WRITES` raises the bar for that control.
  */
 const SUICIDE_SPAWNER = `
 const { spawn } = require("node:child_process");
 const { existsSync, readFileSync } = require("node:fs");
 spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
+const minimumWrites = Number(process.env.NEXUS_FIXTURE_MIN_WRITES ?? "2");
 const deadline = Date.now() + 5000;
 const writes = (path) => (existsSync(path) ? readFileSync(path, "utf8").length : 0);
 const poll = setInterval(() => {
   const seen = writes(process.env.MARKER);
-  if (seen >= 2) {
+  if (seen >= minimumWrites) {
     clearInterval(poll);
     process.kill(process.pid, "SIGTERM");
     return;
@@ -1633,8 +1635,10 @@ test(
             // A killed supervisor keeps the caller's stdio open through the
             // command, so `spawnSync` cannot return at the kill: it returns when
             // this deadline fires, which is when the backstop has to act. It sits
-            // above the marker wait below so the precondition can still be met.
-            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 6000),
+            // above the two bounded preconditions below (pid file 4 s + marker
+            // 4 s) with room to spare, so a slow precondition never reads as a
+            // deadline.
+            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 15000),
           },
         },
       );
@@ -1645,14 +1649,16 @@ test(
       try {
         const supervisor = await supervisorPidFrom(supervisorPidFile);
         await waitFor(() => markerWrites(marker) >= 2, 4000);
-        process.kill(supervisor, "SIGKILL");
-
+        // Listen before killing: a checker that exits promptly must be observed
+        // as an exit, not as a guard that never saw one.
         const closed = new Promise((done) =>
           checker.on("close", (code, signal) => done({ code, signal })),
         );
+        process.kill(supervisor, "SIGKILL");
+
         const exit = await Promise.race([
           closed,
-          new Promise((done) => setTimeout(() => done("still-running"), 10000)),
+          new Promise((done) => setTimeout(() => done("still-running"), 20000)),
         ]);
         assert.notEqual(
           exit,
@@ -1886,7 +1892,9 @@ test(
         );
         const exit = await Promise.race([
           closed,
-          new Promise((done) => setTimeout(() => done("still-running"), 5000)),
+          // Above the fixture's own 5 s bound, so an unmet precondition exits 4
+          // and is reported as that, not as a guard that fired first.
+          new Promise((done) => setTimeout(() => done("still-running"), 12000)),
         ]);
         assert.notEqual(exit, "still-running", "the supervisor followed the command");
         assert.notEqual(
