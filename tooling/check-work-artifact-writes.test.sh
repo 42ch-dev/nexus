@@ -8,8 +8,10 @@
 # `cfg(all(…, test))`; a trailing comma does not change them), and only for an
 # item whose `{ … }` body is matchable (a `mod … { }` or a macro invocation,
 # including `path::mac!`). `cfg(any(test, …))`, `cfg(not(test))`, a field
-# annotation and an out-of-line `mod tests;` declaration stay scanned; a body
-# the tracker cannot delimit fails closed.
+# annotation and an out-of-line `mod tests;` declaration stay scanned; a macro
+# body is delimited by brace depth (a one-line or misindented body is matched
+# exactly, an unbalanced one fails closed); any other body the tracker cannot
+# delimit fails closed.
 #
 # Usage (from repository root): bash tooling/check-work-artifact-writes.test.sh
 # Exit codes: 0 — every fixture matched its expected result; 1 — mismatch.
@@ -46,6 +48,7 @@ expect() {
 
 WRITE_MSG="work artifact direct write"
 OPAQUE_MSG="test-gated attribute on an opaque body"
+UNBALANCED_MSG="test-gated macro body is unbalanced"
 
 expect cfg_test.rs 0
 expect cfg_all_feature_test.rs 0
@@ -55,6 +58,10 @@ expect cfg_not_test.rs 1 "$WRITE_MSG"
 expect cfg_any_test_field.rs 1 "$WRITE_MSG"
 expect mod_decl_no_span.rs 1 "$WRITE_MSG"
 expect macro_path_attr.rs 0
+expect macro_body_misindented.rs 0
+expect macro_body_one_line.rs 1 "direct write: macro_body_one_line.rs write_fixture"
+expect macro_body_one_line.rs 1 "FAILED: 1 unexempted direct write(s)"
+expect macro_body_unbalanced.rs 1 "$UNBALANCED_MSG"
 expect opaque_macro_attr.rs 1 "$OPAQUE_MSG"
 expect opaque_block_attr.rs 1 "$OPAQUE_MSG"
 

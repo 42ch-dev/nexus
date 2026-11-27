@@ -21,12 +21,15 @@
 # disjunct (e.g. a production feature) can hold without test — and neither is
 # `#[cfg(not(test))]` or `#[cfg(feature = "test")]`. A gate cuts a span only
 # for an item whose `{ … }` body the tracker can match: a `mod … { }` or a
-# macro invocation (`mac!`, `path::mac!`, `::mac!`). An out-of-line
-# `mod tests;` opens no span (its body is another file), and a gate on a
-# non-module item (e.g. a test-only const), struct field or statement does not
-# hide production lines below it. An opaque body the tracker cannot delimit (a
-# bare `{ … }` block or a non-brace macro invocation such as `include!(…)`)
-# fails closed.
+# macro invocation (`mac!`, `path::mac!`, `::mac!`). A `mod … { }` body is
+# delimited by indentation (unchanged); a macro body by brace depth, ignoring
+# `{`/`}` inside literals and comments, so a body that opens and closes on one
+# line or is misindented is matched exactly, and an unbalanced one fails closed.
+# An out-of-line `mod tests;` opens no span (its body is another file), and a
+# gate on a non-module item (e.g. a test-only const), struct field or statement
+# does not hide production lines below it. An opaque body the tracker cannot
+# delimit (a bare `{ … }` block or a non-brace macro invocation such as
+# `include!(…)`) fails closed.
 #
 # Exemptions (F-001): tooling/work-artifact-write-allowlist.tsv rows are
 # `path<TAB>symbol<TAB>expected_count<TAB>disposition` — exact path+symbol and
@@ -72,6 +75,9 @@ BUILTINS_GLOB = "crates/nexus-capability/src/builtins/*.rs"
 
 WRITE_RE = re.compile(r"(?<![\w])(?:std::fs|tokio::fs|fs)::write\s*\(")
 CFG_ATTR_RE = re.compile(r"^\s*#\[cfg\((.*)\)\]")
+# A raw or byte-raw string opener (`r"…"`, `r#"…"#`, `br#"…"#`): braces inside
+# it do not count toward a macro body's depth.
+RAW_STRING_RE = re.compile(r'b?r(#*)"')
 MOD_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z_]\w*")
 # An out-of-line `mod tests;` declaration: the body lives in another file, so it
 # opens no span here.
@@ -214,10 +220,89 @@ def requires_test(expr):
     return False
 
 
-def is_test_gate(line):
-    """`#[cfg(..)]` line that compiles only under `test` (never `any(test, ..)`)."""
+def test_gate_match(line):
+    """The `#[cfg(..)]` match when the line compiles only under test, else None."""
     m = CFG_ATTR_RE.match(line)
-    return bool(m) and requires_test(m.group(1))
+    if not m or not requires_test(m.group(1)):
+        return None
+    return m
+
+
+def quoted_end(text, quote_at, quote):
+    """Index just past the literal opened at `quote_at`, or `len(text)` if open."""
+    k = quote_at + 1
+    while k < len(text):
+        if text[k] == "\\":
+            k += 2
+            continue
+        if text[k] == quote:
+            return k + 1
+        k += 1
+    return len(text)
+
+
+def literal_end(text, k):
+    """Index just past a string/char literal starting at `k`, else None.
+
+    A lifetime (`'a`) is not a char literal, so scanning passes through it.
+    """
+    raw = RAW_STRING_RE.match(text, k)
+    if raw:
+        closing = '"' + raw.group(1)
+        end = text.find(closing, raw.end())
+        return len(text) if end < 0 else end + len(closing)
+    if text.startswith('b"', k):
+        return quoted_end(text, k + 1, '"')
+    if text[k] == '"':
+        return quoted_end(text, k, '"')
+    if text[k] == "'":
+        if k + 1 < len(text) and text[k + 1] == "\\":
+            return quoted_end(text, k, "'")
+        if k + 2 < len(text) and text[k + 2] == "'":
+            return k + 3
+    return None
+
+
+def depth_body_end(lines, first, start_col):
+    """Last line of the `{ … }` body opening at `lines[first][start_col:]`.
+
+    Depth, not indentation: the body may open and close on this line, and its
+    content need not be indented. A multi-line literal or block comment is not
+    followed across lines, so a stray brace there can only shorten the span.
+    """
+    depth = 0
+    in_block_comment = False
+    for idx in range(first, len(lines)):
+        text = lines[idx]
+        k = start_col if idx == first else 0
+        while k < len(text):
+            if in_block_comment:
+                if text.startswith("*/", k):
+                    in_block_comment = False
+                    k += 2
+                    continue
+                k += 1
+                continue
+            if text.startswith("//", k):
+                break
+            if text.startswith("/*", k):
+                in_block_comment = True
+                k += 2
+                continue
+            end = literal_end(text, k)
+            if end is not None:
+                k = end
+                continue
+            if text[k] == "{":
+                depth += 1
+            elif text[k] == "}":
+                depth -= 1
+                if depth == 0:
+                    return idx
+                if depth < 0:
+                    return None
+            k += 1
+    return None
 
 
 def test_module_spans(rel, lines):
@@ -225,26 +310,37 @@ def test_module_spans(rel, lines):
     skip = set()
     i = 0
     while i < len(lines):
-        if not is_test_gate(lines[i]):
+        attr = test_gate_match(lines[i])
+        if attr is None:
             i += 1
             continue
-        j = i + 1
-        while j < len(lines) and (
-            not lines[j].strip()
-            or lines[j].lstrip().startswith("#[")
-            or lines[j].lstrip().startswith("//")
-        ):
-            j += 1
-        if j >= len(lines):
-            fail(f"{rel}:{i + 1}: test-gated attribute at EOF — cannot classify the item")
-            i += 1
-            continue
-        if MOD_DECL_RE.match(lines[j]):
+        # The gated item may start on the attribute's own line
+        # (`#[cfg(test)] mac! { .. }`).
+        rest = lines[i][attr.end():]
+        same_line = bool(rest.strip()) and not rest.lstrip().startswith("//")
+        if same_line:
+            j = i
+            item = rest
+        else:
+            j = i + 1
+            while j < len(lines) and (
+                not lines[j].strip()
+                or lines[j].lstrip().startswith("#[")
+                or lines[j].lstrip().startswith("//")
+            ):
+                j += 1
+            if j >= len(lines):
+                fail(f"{rel}:{i + 1}: test-gated attribute at EOF — cannot classify the item")
+                i += 1
+                continue
+            item = lines[j]
+        if MOD_DECL_RE.match(item):
             # Out-of-line `mod tests;`: the body is another file, so this
             # declaration opens no span and the code below stays production.
             i += 1
             continue
-        if MOD_RE.match(lines[j]) or MACRO_BODY_RE.match(lines[j]):
+        if MOD_RE.match(item):
+            # Module bodies keep the indentation heuristic.
             open_line = j
             while open_line < len(lines) and "{" not in lines[open_line]:
                 open_line += 1
@@ -268,12 +364,23 @@ def test_module_spans(rel, lines):
             skip.update(range(i, end + 1))
             i = end + 1
             continue
-        if ITEM_RE.match(lines[j]):
+        if MACRO_BODY_RE.match(item):
+            # Macro-invocation bodies are delimited by brace depth.
+            start_col = item.index("{") if j > i else attr.end() + item.index("{")
+            end = depth_body_end(lines, j, start_col)
+            if end is None:
+                fail(f"{rel}:{i + 1}: test-gated macro body is unbalanced")
+                i = j + 1
+                continue
+            skip.update(range(i, end + 1))
+            i = end + 1
+            continue
+        if ITEM_RE.match(item):
             # Test-only non-module item (e.g. a ledger const): not a cut point,
             # so production below it stays visible.
             i += 1
             continue
-        if OPAQUE_RE.match(lines[j]):
+        if OPAQUE_RE.match(item):
             fail(
                 f"{rel}:{i + 1}: test-gated attribute on an opaque body — "
                 "cannot classify the item"
