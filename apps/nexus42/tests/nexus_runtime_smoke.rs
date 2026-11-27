@@ -450,8 +450,9 @@ fn session_tag(session: &str) -> String {
 /// divergence: exactly one line whose first token is `prefix` and which carries
 /// a `<16 lowercase hex>` `session_tag=` token and no raw `session=` token.
 ///
-/// `DIAL_OK` and `COMPUTE_OK` both use that one shape, so the same parse covers
-/// either line and a probe that reverts one of them to a raw id fails here.
+/// `DIAL_OK` carries the connect session the probe opened and `COMPUTE_OK` the
+/// session id the compute response carries; the same parse covers either line,
+/// and a probe that reverts one of them to a raw id fails here.
 fn probe_session_tag<'a>(stdout: &'a str, prefix: &str) -> Result<&'a str, String> {
     let mut lines = stdout
         .lines()
@@ -1281,7 +1282,8 @@ tools.nexus.list_observed_peers,tools.nexus.list_modules";
         assert_eq!(
             compute_tag,
             session_tag(COMPUTE_SESSION),
-            "COMPUTE_OK must tag the staged compute session:\n{stdout}"
+            "COMPUTE_OK must tag the session id the compute response reports, \
+             and it must be the requested compute session:\n{stdout}"
         );
         assert_eq!(
             assert_compute_result(&stdout, COMPUTE_SESSION),

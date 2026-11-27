@@ -16,7 +16,7 @@
 //! SESSION_OK                         # session still usable after refusals
 //! UPSERT_OK                          # --world: in-scope write after the refusal
 //! SESSION_ALIVE_OK                   # the session still works after a refusal
-//! COMPUTE_OK session_tag=<16hex> entry=<id> current_hp=<n>  # real retained compute
+//! COMPUTE_OK session_tag=<16hex> entry=<id> current_hp=<n>  # compute response's own session/entry ids (tagged)
 //! ```
 //!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
@@ -31,11 +31,12 @@
 //!
 //! The optional `--world <world-id>` half writes two combatants through the
 //! served `upsert` op after the refusal and prints `SESSION_ALIVE_OK` — proof
-//! the session is still usable. Adding `--compute-session <id>` then runs
-//! `compute` against the session the host's workspace has staged. Both are
-//! opt-in because the packaged probe also dials hosts that staged no compute
-//! fixture, and a host without the wasm32 target can still prove session
-//! survival after a refusal.
+//! the session is still usable. Adding `--compute-session <id>` asks the host
+//! to `compute` on that staged session; the `COMPUTE_OK` line then tags the
+//! **session id the response reports**, so it does not restate the request.
+//! Both are opt-in because the packaged probe also dials hosts that staged no
+//! compute fixture, and a host without the wasm32 target can still prove
+//! session survival after a refusal.
 
 use libp2p::identity::Keypair;
 use spoke_connect::{parse_multiaddr, ConnectConfig, SpokeConnectNode};
@@ -50,9 +51,10 @@ fn fixed_keypair(seed: u8) -> Keypair {
     Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
 }
 
-/// The session identity every probe line carries: a `<16hex>` `DefaultHasher`
-/// tag, never the raw id. `DIAL_OK` and `COMPUTE_OK` both use this shape so the
-/// smoke test reads either line with one parser.
+/// The session identity a probe line reports: a `<16hex>` `DefaultHasher` tag,
+/// never the raw id. `DIAL_OK` tags the connect session the probe established;
+/// `COMPUTE_OK` tags the session id the compute **response** carries. Both use
+/// this shape so the smoke test reads either line with one parser.
 fn session_tag(session_id: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -304,9 +306,23 @@ async fn run_retained_ops(
                 computed.payload
             )
         })?;
+    // Tag and entry come from the RESPONSE, not from the request arguments: a
+    // lane that resolved another session must print that session's tag.
+    let returned_session = computed.payload["session_id"].as_str().ok_or_else(|| {
+        format!(
+            "compute response has no string session_id: {}",
+            computed.payload
+        )
+    })?;
+    let returned_entry = computed.payload["entry_id"].as_str().ok_or_else(|| {
+        format!(
+            "compute response has no string entry_id: {}",
+            computed.payload
+        )
+    })?;
     println!(
-        "COMPUTE_OK session_tag={} entry=kb_atk current_hp={current_hp}",
-        session_tag(session_id)
+        "COMPUTE_OK session_tag={} entry={returned_entry} current_hp={current_hp}",
+        session_tag(returned_session)
     );
     Ok(())
 }
