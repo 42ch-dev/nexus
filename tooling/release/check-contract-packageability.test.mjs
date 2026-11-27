@@ -1389,19 +1389,28 @@ setInterval(() => {}, 1000);
 /**
  * Spawns the marker writer, then kills itself with SIGTERM once the writer has
  * been observed working (two writes), so the precondition is established by the
- * marker rather than by a wall clock a loaded runner may not meet. The 3 s bound
- * only stops a writer that never starts from hanging the fixture.
+ * marker rather than by a wall clock a loaded runner may not meet. If two writes
+ * never arrive within 5 s it reports that as its own failure (exit 4) instead of
+ * killing itself, so the test names the unmet precondition rather than a kill
+ * that never happened.
  */
 const SUICIDE_SPAWNER = `
 const { spawn } = require("node:child_process");
 const { existsSync, readFileSync } = require("node:fs");
 spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
-const deadline = Date.now() + 3000;
+const deadline = Date.now() + 5000;
 const writes = (path) => (existsSync(path) ? readFileSync(path, "utf8").length : 0);
 const poll = setInterval(() => {
-  if (writes(process.env.MARKER) >= 2 || Date.now() > deadline) {
+  const seen = writes(process.env.MARKER);
+  if (seen >= 2) {
     clearInterval(poll);
     process.kill(process.pid, "SIGTERM");
+    return;
+  }
+  if (Date.now() > deadline) {
+    clearInterval(poll);
+    process.stderr.write("fixture: the marker writer never reached two writes\\n");
+    process.exit(4);
   }
 }, 25);
 `;
@@ -1582,23 +1591,26 @@ async function assertNothingWrites(marker, timeout = 3000) {
 }
 
 /**
- * The supervisor child of `parentPid`, found by its script name: the caller cannot
- * know the pid it never saw, and the point of the test is to kill it outright.
+ * The supervisor's own pid, from the file it publishes at startup. A caller that
+ * has to signal it outright cannot know that pid any other way, and this keeps the
+ * test off external tools.
  *
- * @param {number} parentPid
- * @returns {number | undefined}
+ * @param {string} pidFile
+ * @param {number} [timeout]
+ * @returns {Promise<number>}
  */
-function supervisorPidFor(parentPid) {
-  const found = spawnSync(
-    "pgrep",
-    ["-P", String(parentPid), "-f", "supervise-child.mjs"],
-    { encoding: "utf8" },
-  );
-  if (found.status !== 0) {
-    return undefined;
+async function supervisorPidFrom(pidFile, timeout = 4000) {
+  const limit = Date.now() + timeout;
+  while (Date.now() < limit) {
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, "utf8").trim());
+      if (Number.isInteger(pid) && pid > 0) {
+        return pid;
+      }
+    }
+    await new Promise((done) => setTimeout(done, 25));
   }
-  const pid = Number(found.stdout.trim().split("\n")[0]);
-  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  assert.fail(`the supervisor published no pid in ${pidFile} within ${timeout}ms`);
 }
 
 test(
@@ -1607,6 +1619,7 @@ test(
   async () => {
     const dir = mkdtempSync(join(tmpdir(), "nexus-release-backstop-"));
     const marker = join(dir, "marker.txt");
+    const supervisorPidFile = join(dir, "supervisor.pid");
     try {
       const checker = spawn(
         process.execPath,
@@ -1616,10 +1629,12 @@ test(
           env: {
             ...process.env,
             MARKER: marker,
+            NEXUS_SUPERVISOR_PID_FILE: supervisorPidFile,
             // A killed supervisor keeps the caller's stdio open through the
             // command, so `spawnSync` cannot return at the kill: it returns when
-            // this deadline fires, which is when the backstop has to act.
-            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 3000),
+            // this deadline fires, which is when the backstop has to act. It sits
+            // above the marker wait below so the precondition can still be met.
+            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 6000),
           },
         },
       );
@@ -1628,9 +1643,8 @@ test(
         stdout += chunk;
       });
       try {
+        const supervisor = await supervisorPidFrom(supervisorPidFile);
         await waitFor(() => markerWrites(marker) >= 2, 4000);
-        const supervisor = supervisorPidFor(checker.pid);
-        assert.ok(supervisor !== undefined, "the checker started a supervisor");
         process.kill(supervisor, "SIGKILL");
 
         const closed = new Promise((done) =>
@@ -1638,7 +1652,7 @@ test(
         );
         const exit = await Promise.race([
           closed,
-          new Promise((done) => setTimeout(() => done("still-running"), 8000)),
+          new Promise((done) => setTimeout(() => done("still-running"), 10000)),
         ]);
         assert.notEqual(
           exit,
@@ -1875,6 +1889,11 @@ test(
           new Promise((done) => setTimeout(() => done("still-running"), 5000)),
         ]);
         assert.notEqual(exit, "still-running", "the supervisor followed the command");
+        assert.notEqual(
+          exit.code,
+          4,
+          "precondition: the marker writer never reached two writes within 5 s",
+        );
         assert.equal(exit.signal, "SIGTERM", "the command's signal reaches the caller");
         const writes = markerWrites(suicideMarker);
         assert.ok(

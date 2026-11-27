@@ -28,7 +28,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { writeSync } from "node:fs";
+import { writeFileSync, writeSync } from "node:fs";
 
 /** How often a reparented supervisor notices, in milliseconds. */
 const PARENT_POLL_MS = 100;
@@ -44,6 +44,19 @@ if (command === undefined) {
   process.exit(SPAWN_FAILED);
 }
 
+// First thing, so nothing below can skip it: a caller that wants to signal this
+// process needs its pid, and it has no other way to learn one.
+const supervisorPidFile = process.env.NEXUS_SUPERVISOR_PID_FILE;
+if (supervisorPidFile !== undefined && supervisorPidFile.length > 0) {
+  try {
+    writeFileSync(supervisorPidFile, `${process.pid}\n`);
+  } catch (error) {
+    process.stderr.write(
+      `supervise-child: could not publish ${supervisorPidFile}: ${error.message}\n`,
+    );
+  }
+}
+
 const originalParent = process.ppid;
 
 /**
@@ -56,12 +69,9 @@ const pidChannel = Number(process.env.NEXUS_CHILD_PID_FD ?? "");
 /** Kill the command's group; this process is not in it, so it survives to exit. */
 function killCommandGroup() {
   if (child.pid === undefined) {
-    // `spawn` assigns the pid before it returns unless the spawn itself failed,
-    // in which case no command exists. Say so instead of skipping silently.
-    process.stderr.write(
-      `supervise-child: ${command} has no pid, nothing to reap\n`,
-    );
-    return;
+    // Not a state to handle: `spawn` assigns the pid before it returns, and a
+    // failed spawn reports through the error event instead. Say so loudly.
+    throw new Error(`supervise-child: ${command} has no pid after a spawn`);
   }
   try {
     process.kill(-child.pid, "SIGKILL");
@@ -85,10 +95,28 @@ for (const signal of SIGNALS) {
   });
 }
 
-// fd 3 stays the caller's pipe; the command must not inherit it, or the caller's
-// read would wait for the build instead of for the report.
+/**
+ * The command's stdio is this process's own three streams plus one ignored entry
+ * for every fd the caller's channel occupies, so the channel fd is never inherited
+ * by the command (the caller's read would then wait for the build) and cannot
+ * drift from `NEXUS_CHILD_PID_FD`.
+ *
+ * @param {number} channel
+ * @returns {("inherit" | "ignore")[]}
+ */
+function commandStdio(channel) {
+  const stdio = ["inherit", "inherit", "inherit"];
+  if (Number.isInteger(channel) && channel >= 3) {
+    while (stdio.length < channel) {
+      stdio.push("ignore");
+    }
+    stdio.push("ignore");
+  }
+  return stdio;
+}
+
 const child = spawn(command, args, {
-  stdio: ["inherit", "inherit", "inherit", "ignore"],
+  stdio: commandStdio(pidChannel),
   detached: true,
 });
 
