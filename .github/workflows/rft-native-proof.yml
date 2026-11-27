@@ -35,6 +35,11 @@ name: RFT Native Package Proof
 #     actually ran differs from `dispatch_sha`; and a run whose per-row job
 #     conclusions cannot be read fails the verdict rather than inferring a row
 #     state from the matrix aggregate.
+#     Schema `rft-p3-t1-native-package-matrix/v3` is an incompatible change from
+#     v2: `fork_cancelled_rows` is replaced by `undispatched_cancelled_rows`,
+#     `retry.origin_sha` now names the commit the cancelled rows ran at (with
+#     `retry.dispatch_sha` alongside), and a row carries a `note` plus
+#     `no_evidence_uploaded`. v2 artifacts must not be read as v3.
 on:
   workflow_dispatch:
     inputs:
@@ -671,7 +676,7 @@ jobs:
           import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
           const root = 'rft-native-evidence';
-          const SCHEMA = 'rft-p3-t1-native-package-matrix/v2';
+          const SCHEMA = 'rft-p3-t1-native-package-matrix/v3';
           const runSha = process.env.GITHUB_SHA ?? null;
           const retryOf = process.env.RETRY_OF || '';
           // The commit the cancelled rows ran at (on a pull request: the
@@ -692,19 +697,25 @@ jobs:
           // another run's matrix, so a verdict cannot mix two commits.
           const retryRecordPath = join('retry-record', 'retry.json');
           const retryInfo = existsSync(retryRecordPath) ? JSON.parse(readFileSync(retryRecordPath, 'utf8')) : null;
-          // A cancelled row is non-blocking only when a retry was actually
-          // dispatched to re-prove it; otherwise its evidence is absent and the
+          // A cancelled row is non-blocking only when the retry record says this
+          // very row was dispatched to re-prove it. Anything else — a record that
+          // names other rows, a refusal, a missing record, a run that is itself
+          // the retry — leaves the row's evidence absent, so it blocks and the
           // reason is named on the row.
-          const retryDispatched = retryInfo !== null && retryInfo.attempted === true;
-          const noRetryReason =
-            retryOf !== ''
-              ? 'this is the retry run'
-              : retryInfo === null
-                ? 'no retry record'
-                : typeof retryInfo.note === 'string' && retryInfo.note !== ''
-                  ? retryInfo.note
-                  : 'no retry dispatched';
-          const NO_RETRY_NOTE = 'cancelled, no retry dispatched (' + noRetryReason + ')';
+          const dispatchedRows =
+            retryInfo !== null && retryInfo.attempted === true && Array.isArray(retryInfo.rows)
+              ? retryInfo.rows
+              : [];
+          const noRetryReasonFor = (suffix) => {
+            if (retryOf !== '') return 'this is the retry run';
+            if (retryInfo === null) return 'no retry record';
+            if (retryInfo.attempted !== true) {
+              return typeof retryInfo.note === 'string' && retryInfo.note !== ''
+                ? retryInfo.note
+                : 'no retry dispatched';
+            }
+            return dispatchedRows.includes(suffix) ? '' : 'not in the dispatched row list';
+          };
           const payload = (fields) => ({
             schema: SCHEMA,
             source_sha: runSha,
@@ -816,11 +827,12 @@ jobs:
             if (evidenceComplete) {
               status = 'pass';
             } else if (jobConclusion === 'cancelled') {
-              if (retryDispatched) {
+              const noRetry = noRetryReasonFor(row.suffix);
+              if (noRetry === '') {
                 status = 'cancelled';
               } else {
                 status = 'missing';
-                note = NO_RETRY_NOTE;
+                note = 'cancelled, no retry dispatched (' + noRetry + ')';
               }
             } else if (jobConclusion !== 'success') {
               status = 'failed';
@@ -844,24 +856,28 @@ jobs:
             });
           }
           const cancelledRows = out.filter((row) => row.status === 'cancelled').map((row) => row.suffix);
-          // Cancelled rows with no dispatch behind them: their evidence is absent
-          // and they block, so they are named separately from the non-blocking
-          // `cancelled` rows above.
-          const undispatchedCancelRows = out
-            .filter((row) => row.note === NO_RETRY_NOTE)
-            .map((row) => row.suffix);
+          // Cancelled rows the retry record does not cover for: their evidence is
+          // absent and they block, so they are named separately from the
+          // non-blocking `cancelled` rows above.
+          const undispatchedCancelRows = out.filter(
+            (row) => row.job_conclusion === 'cancelled' && row.status === 'missing',
+          );
+          const undispatchedReason = [
+            ...new Set(undispatchedCancelRows.map((row) => noRetryReasonFor(row.suffix))),
+          ].join('; ');
           const blockingRows = out
             .filter((row) => row.status === 'missing' || row.status === 'failed')
             .map((row) => row.suffix);
           // A retry run says which run it re-proves and which two commits are in
           // play; an origin run reports what the retry job decided (a dispatch
           // record, a refusal, or nothing). Neither claims evidence from the
-          // other run.
+          // other run. With no record, `cancelledRows` is necessarily empty (every
+          // cancelled row blocked as missing), so only the blocking set decides.
           const retry =
             retryOf !== ''
               ? { of_run_id: Number(retryOf), origin_sha: originSha, dispatch_sha: dispatchSha, sha: runSha }
               : retryInfo === null
-                ? cancelledRows.length === 0 && undispatchedCancelRows.length === 0
+                ? undispatchedCancelRows.length === 0
                   ? null
                   : 'unknown (the retry job reported nothing)'
                 : retryInfo.attempted === true
@@ -876,6 +892,7 @@ jobs:
                     ? retryInfo.note
                     : null;
           const decision = out.length === 0 || blockingRows.length > 0 ? 'fail' : 'pass';
+          const undispatchedNames = undispatchedCancelRows.map((row) => row.suffix);
           writeMatrix({
             job_conclusion_source: 'run-jobs',
             evidence_artifacts: existsSync(root) ? 'uploaded' : 'none',
@@ -883,10 +900,10 @@ jobs:
             build_inputs: out.map((row) => row.build_inputs).filter(Boolean),
             rows: out,
             cancelled_rows: cancelledRows,
-            undispatched_cancelled_rows: undispatchedCancelRows,
+            undispatched_cancelled_rows: undispatchedNames,
             blocking_rows: blockingRows,
             decision,
-            note: 'row status: pass (its evidence is complete and valid, whatever the job state) | cancelled (the runner cancelled the job and the automatic retry was dispatched to re-prove it) | missing (no evidence: the job succeeded without producing it, or a cancelled row has no dispatch behind it) | failed (the job failed). missing and failed block P3; cancelled blocks nothing only because a dispatch exists (I-000561)',
+            note: 'row status: pass (its evidence is complete and valid, whatever the job state) | cancelled (the runner cancelled the job and the automatic retry was dispatched for that row) | missing (no evidence: the job succeeded without producing it, or a cancelled row is not covered by a dispatch) | failed (the job failed). missing and failed block P3; cancelled blocks nothing only because a dispatch covers that row (I-000561)',
           });
           console.log(JSON.stringify(out, null, 2));
           warnRetrySha();
@@ -896,19 +913,19 @@ jobs:
                 ' — no evidence was possible; the dispatched retry re-proves them (I-000561)',
             );
           }
-          if (undispatchedCancelRows.length > 0) {
+          if (undispatchedNames.length > 0) {
             console.warn(
-              '::warning::P3-T1 cancelled row(s) with no retry dispatched: ' + undispatchedCancelRows.join(', ') +
-                ' — recorded as missing and blocking (' + noRetryReason + ')',
+              '::warning::P3-T1 cancelled row(s) with no retry dispatched: ' + undispatchedNames.join(', ') +
+                ' — recorded as missing and blocking (' + undispatchedReason + ')',
             );
           }
           if (decision !== 'pass') {
             const reason =
               out.length === 0
                 ? 'no row was evaluated'
-                : undispatchedCancelRows.length > 0
-                  ? undispatchedCancelRows.join(', ') + ' was cancelled with no retry dispatched (' +
-                    noRetryReason + '), so its evidence is absent'
+                : undispatchedNames.length > 0
+                  ? undispatchedNames.join(', ') + ' was cancelled with no retry dispatched (' +
+                    undispatchedReason + '), so its evidence is absent'
                   : blockingRows.join(', ') + ' is missing or failed evidence';
             console.error('::error::P3-T1 native package matrix is ' + decision + ' — ' + reason);
             process.exit(1);
