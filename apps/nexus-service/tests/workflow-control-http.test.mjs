@@ -199,21 +199,6 @@ async function observe(service) {
   return { status: response.payload, discovery: service.discovery };
 }
 
-/**
- * That evidence indicts only the P0-T6 block, so only P0-T6 carries this skip;
- * P0-T5 keeps its CI coverage and still runs there. Remove the skip when
- * I-000436 is closed.
- */
-const SIGSEGV_EXCLUSION =
-  process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true'
-    ? 'excluded, not absent: I-000436 — the P0-T6 block SIGSEGVs this process on the ' +
-      'GitHub linux runner ~58 s in, after P0-T5 had already run to completion ' +
-      '(run 43489148101, ubuntu-latest, Node 22); P0-T5 still runs on CI, and ' +
-      'every case passes on darwin/arm64'
-    : false;
-
-if (SIGSEGV_EXCLUSION) process.stderr.write(`\n[workflow-control-http] ${SIGSEGV_EXCLUSION}\n`);
-
 describe('workflow-control-http (v1.195 P0-T5 native boot and truthful readiness)', () => {
   test('hosted readiness and owner: blank home stays uninitialized', async () => {
     const service = await startServiceOn(blankHome());
@@ -881,7 +866,20 @@ conn.commit()
   assert.equal(seeded.status, 0, seeded.stderr.trim() ? seeded.stderr : seeded.stdout);
 }
 
-describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', { skip: SIGSEGV_EXCLUSION }, () => {
+/**
+ * Unguarded on purpose (I-000436): run 43489148101's SIGSEGV landed in this
+ * block's first case, 61.1 s into the file's process and 21.8 s after its last
+ * write, after `seededHome()` and during `startServiceOn`, with P0-T5 having
+ * finished all ten cases. The block runs unguarded on every platform on
+ * purpose, so a reappearance must fail CI instead of skipping. The original
+ * crash appeared only on the linux runner and has not reappeared there (runs
+ * 45941494235, 45943402321); if it does, reproduce it there: first a `before()`
+ * that runs `packages/nexus-native/scripts/build.mjs` (double-`dlopen` of the
+ * addon in one process), then, from `apps/nexus-service` with the addon staged
+ * and `dist/` built, the crashing native stack:
+ *   gdb -batch -ex run -ex "thread apply all bt" --args node --test --test-timeout=180000 tests/workflow-control-http.test.mjs
+ */
+describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () => {
   test('control round trip: create, list, inspect, session, append, resume and cancel act on one durable run', async () => {
     const home = seededHome(acpProviderConfig());
     const service = await startServiceOn(home);
