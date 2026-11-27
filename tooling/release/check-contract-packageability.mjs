@@ -45,6 +45,17 @@
  * skipped on both sides of that verification, because its contents are not part
  * of this revision's tree.
  *
+ * A caller may pass a `shareRoot` — which the caller removes — to reuse
+ * compiled work across several runs: extracted archives are cached there under
+ * a digest of their source (see {@link treeDigest}), and the consumer target dir
+ * lives there too, so a second case that ships the same sources resolves and
+ * builds from Cargo's own cache instead of compiling the contract graph again.
+ * The digest ignores `.cargo_vcs_info.json` because `cargo package` stamps it
+ * with the staging commit, which is the only way two runs of identical sources
+ * differ. Nothing else is shared: each run still stages, packs, extracts and
+ * reports on its own inputs, and the CLI never passes a `shareRoot`, so a gate
+ * run stays hermetic.
+ *
  * CLI: node tooling/release/check-contract-packageability.mjs [--json] [--require-clean]
  *
  * Exit 0 when all contract crates are packageable (and every present consumer
@@ -59,14 +70,19 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
+  constants,
   cpSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -101,6 +117,29 @@ const GUEST_DIR = "guest";
 
 const SCRATCH_PREFIX = "nexus-contract-package-";
 
+/**
+ * `cargo package` writes this file with the packing commit, so it is the one
+ * path two archives of identical sources disagree on. {@link treeDigest} skips
+ * it, which is what lets both archives share one extracted cache entry.
+ */
+const VCS_STAMP_PATH = ".cargo_vcs_info.json";
+
+/**
+ * Runs one deadline-bound child in its own process group and takes that group
+ * down when it is signalled or its parent disappears. `spawnSync` cannot do this
+ * from here: it blocks the loop, so a signal is not dispatched while it waits.
+ */
+const SUPERVISOR_PATH = fileURLToPath(
+  new URL("./supervise-child.mjs", import.meta.url),
+);
+
+/**
+ * fd the supervisor publishes the command's group pid on. The parent keeps this
+ * pipe (it is not the command's stdio), so the pid is readable even when the
+ * supervisor was killed before it could act.
+ */
+const PID_CHANNEL_FD = 3;
+
 const SKIPPED_STAGE_ENTRIES = new Set([
   ".direnv",
   ".git",
@@ -109,6 +148,40 @@ const SKIPPED_STAGE_ENTRIES = new Set([
   "node_modules",
   "target",
 ]);
+
+/** @type {number | null | undefined} */
+let deadlineMemo;
+
+/**
+ * Wall clock the caller allows this process, as epoch milliseconds in
+ * `NEXUS_RELEASE_DEADLINE_MS`. Every child gets what is left of it, so a case
+ * that outgrows its budget dies as a named failure inside that budget instead of
+ * letting the whole step be killed with nothing to read. Unset or empty means no
+ * deadline, which is what the CLI gate uses; anything else must be a future
+ * integer, because a malformed value silently read as "unset" is a budget nobody
+ * is enforcing. Read on the first child, not at import, so a runner that imports
+ * this module can set the budget in its own body.
+ *
+ * @returns {number | null}
+ */
+function childDeadline() {
+  if (deadlineMemo === undefined) {
+    const raw = process.env.NEXUS_RELEASE_DEADLINE_MS?.trim();
+    if (raw === undefined || raw.length === 0) {
+      deadlineMemo = null;
+    } else {
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value <= Date.now()) {
+        throw new Error(
+          `release tooling deadline (NEXUS_RELEASE_DEADLINE_MS) must be a future epoch-millisecond timestamp, got "${raw}"`,
+        );
+      }
+      deadlineMemo = value;
+    }
+  }
+  return deadlineMemo;
+}
+
 
 /**
  * @param {string} manifestContents
@@ -177,26 +250,117 @@ function contractDependencies(manifestContents, entries) {
  */
 
 /**
+ * Backstop for the supervised group: the supervisor takes its whole group down
+ * when it is signalled or orphaned, so this only matters if the supervisor itself
+ * is gone before it could act. `spawnSync`'s timeout kills the process it started,
+ * never the `rustc` children of that process, and a group pid is the only handle
+ * on them. Windows has no process groups: there only the wrapper dies.
+ *
+ * @param {number | undefined} pid
+ */
+function killChildGroup(pid) {
+  if (pid === undefined || process.platform === "win32") {
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if (error?.code !== "ESRCH") {
+      throw error;
+    }
+  }
+}
+
+/**
+ * A child under a deadline runs through {@link SUPERVISOR_PATH}: `spawnSync`
+ * blocks the loop, so a signal delivered to *this* process while a build runs is
+ * not dispatched to it at all (measured: a `SIGTERM` during a 3 s `spawnSync`
+ * reached no handler and the call returned normally). The supervisor is the
+ * process that can react — it leads the group and takes it down when it is
+ * signalled or reparented. Without a deadline nothing is detached, so the caller
+ * and its children share one group and an interrupt reaches them all by itself,
+ * which is the CLI gate.
+ *
+ * @param {string[]} command
+ * @returns {string[]}
+ */
+function supervised(command) {
+  return [process.execPath, [SUPERVISOR_PATH, ...command]];
+}
+
+/**
+ * The command's group pid the supervisor published on fd 3. The supervisor is a
+ * separate group of its own, so its pid is useless for reaping the build: only
+ * the command's group reaches `rustc`.
+ *
+ * @param {{ output?: string[] }} result
+ * @returns {number | undefined}
+ */
+function publishedGroupPid(result) {
+  const raw = result.output?.[PID_CHANNEL_FD]?.trim();
+  const pid = Number(raw);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+/**
  * @param {string} command
  * @param {string[]} args
  * @param {string} cwd
  * @param {string} [input] Stdin content, for the batched `hash-object` read.
  * @returns {{ ok: boolean; stdout: string; stderr: string; output: string }}
  */
-function run(command, args, cwd, input) {
-  const result = spawnSync(command, args, {
+export function run(command, args, cwd, input) {
+  /** @type {{ cwd: string; encoding: "utf8"; env: Record<string, string | undefined>; input?: string; maxBuffer: number; timeout?: number; detached?: boolean; stdio?: ("pipe" | "ignore")[] }} */
+  const options = {
     cwd,
     encoding: "utf8",
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
     input,
     maxBuffer: 64 * 1024 * 1024,
-  });
+  };
+  const deadline = childDeadline();
+  if (deadline !== null) {
+    // The floor keeps a nearly-expired deadline from failing a `git` call that
+    // would have answered at once: a child over the floor is a real overrun. This
+    // applies on every platform: only the group machinery below is POSIX-only,
+    // and a hung child must never run past the budget just because it cannot be
+    // supervised.
+    options.timeout = Math.max(1000, deadline - Date.now());
+  }
+  // Detach and supervise on POSIX only: Windows has no process groups, so there a
+  // timeout still kills the child it started, and its own children are the
+  // platform's problem.
+  const supervise = deadline !== null && process.platform !== "win32";
+  if (supervise) {
+    // Own process group, so a deadline kill reaches the supervisor's pid, and one
+    // more pipe for the group pid it publishes.
+    options.detached = true;
+    options.stdio = ["pipe", "pipe", "pipe", "pipe"];
+    options.env.NEXUS_CHILD_PID_FD = String(PID_CHANNEL_FD);
+  }
+  const [spawnedCommand, spawnedArgs] = supervise
+    ? supervised([command, ...args])
+    : [command, args];
+  const result = spawnSync(spawnedCommand, spawnedArgs, options);
+  if (result.error?.code === "ETIMEDOUT" || result.signal !== null) {
+    // The supervisor reaps its own signals, but it may have died without running
+    // any handler (SIGKILL): then the published group is the only handle on the
+    // build, and the supervisor's group reaches nothing.
+    killChildGroup(publishedGroupPid(result));
+    killChildGroup(result.pid);
+  }
   if (result.error !== undefined) {
+    // `error:` keeps the deadline visible in the row's cause, which every caller
+    // builds with {@link firstErrorLine}; a bare "could not run" would read as a
+    // crash and hide that the case outgrew the budget.
     return {
       ok: false,
       stdout: "",
       stderr: "",
-      output: `${command} could not run: ${result.error.message}`,
+      output:
+        result.error.code === "ETIMEDOUT"
+          ? `error: ${command} ${args[0] ?? ""} exceeded the release tooling deadline (NEXUS_RELEASE_DEADLINE_MS)`
+          : `${command} could not run: ${result.error.message}`,
     };
   }
   const stdout = result.stdout ?? "";
@@ -356,6 +520,7 @@ function workspacePolicy(stageRoot) {
  *   scratchRoot: string;
  *   stageRoot: string;
  *   targetRoot: string;
+ *   shareRoot: string | null;
  * }} input
  * @returns {{
  *   ok: boolean;
@@ -373,6 +538,7 @@ function packAndInspect({
   scratchRoot,
   stageRoot,
   targetRoot,
+  shareRoot,
 }) {
   const manifestPath = join(stageRoot, entry.manifest);
   const manifestContents = readFileSync(manifestPath, "utf8");
@@ -457,7 +623,7 @@ function packAndInspect({
       archive,
     );
   }
-  const extractedRoot = join(extractDir, roots[0]);
+  const extractedRoot = shareArchive(join(extractDir, roots[0]), shareRoot);
 
   const metadata = run(
     "cargo",
@@ -530,6 +696,140 @@ function inside(candidate, root) {
   const target = resolve(candidate);
   const base = resolve(root);
   return target === base || target.startsWith(`${base}${sep}`);
+}
+
+/**
+ * Content digest of an extracted archive, ignoring {@link VCS_STAMP_PATH}. Two
+ * runs that ship the same sources produce the same digest, so they resolve the
+ * package from the same directory and Cargo reuses the compiled graph; any
+ * source difference — including a dropped file — yields another digest and thus
+ * another directory, never a stale artifact.
+ *
+ * Every entry is opened once and read through the descriptor: nothing is stat'ed
+ * and then re-opened by path, so a link swapped in between cannot make the digest
+ * describe a file that is not the one that was hashed. `O_NOFOLLOW` turns a link
+ * into `ELOOP`, and a link is data — its stored target — exactly as Git records
+ * it.
+ *
+ * Windows has no `O_NOFOLLOW`, so there a descriptor follows the link and the
+ * entry would collapse into the target's bytes. Its link case therefore comes
+ * from the `dirent` the walk already enumerated — not from a second look at the
+ * path — so the same tree hashes the same way on both platforms.
+ *
+ * @param {string} root
+ * @returns {string}
+ */
+function treeDigest(root) {
+  const hash = createHash("sha256");
+  for (const { path, dirent } of stagedEntries(
+    root,
+    new Set([VCS_STAMP_PATH]),
+  )) {
+    const absolute = join(root, path);
+    hash.update(`${path}\0`);
+    if (process.platform === "win32" && dirent.isSymbolicLink()) {
+      hash.update(`link:${readlinkSync(absolute)}\0`);
+      continue;
+    }
+    let fd;
+    try {
+      fd = openSync(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    } catch (error) {
+      if (error?.code !== "ELOOP") {
+        throw error;
+      }
+      hash.update(`link:${readlinkSync(absolute)}\0`);
+      continue;
+    }
+    try {
+      hash.update(`mode:${fstatSync(fd).mode}\0`);
+      hash.update(readFileSync(fd));
+      hash.update("\0");
+    } finally {
+      closeSync(fd);
+    }
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * Rename `source` onto `target` as the sole decision about who publishes: no
+ * check-then-use on the destination, so two producers racing for one digest
+ * cannot both believe they won. `false` means another producer published first.
+ *
+ * @param {string} source
+ * @param {string} target
+ * @returns {boolean}
+ */
+function renameIntoPlace(source, target) {
+  try {
+    renameSync(source, target);
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST" || error?.code === "ENOTEMPTY") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Publish one extracted archive under `target`, which may already exist because
+ * another producer got there first. Returns after exactly one directory holds the
+ * content; the caller's extraction is gone either way.
+ *
+ * @param {string} extractedRoot
+ * @param {string} target
+ * @returns {boolean} true when this call published the entry, false when another
+ *   producer had already published it
+ */
+function publishExtraction(extractedRoot, target) {
+  mkdirSync(dirname(target), { recursive: true });
+  let published;
+  try {
+    published = renameIntoPlace(extractedRoot, target);
+  } catch (error) {
+    if (error?.code !== "EXDEV") {
+      throw error;
+    }
+    // `shareRoot` is on another filesystem: stage a copy beside the target so the
+    // publish itself is still one rename, never a copy onto a live directory.
+    const staging = mkdtempSync(join(dirname(target), "incoming-"));
+    try {
+      const staged = join(staging, "root");
+      cpSync(extractedRoot, staged, { recursive: true });
+      published = renameIntoPlace(staged, target);
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  }
+  // A rename that won already moved the source away; this clears the loser's copy
+  // and the copied source of an `EXDEV` publish.
+  rmSync(extractedRoot, { recursive: true, force: true });
+  return published;
+}
+
+/**
+ * Move one extracted archive into the shared cache and return the root Cargo
+ * should resolve: the caller's own extraction when no `shareRoot` is in use,
+ * the cache entry once it is. A cache hit drops the caller's copy.
+ *
+ * Two producers may publish the same digest at once — the rename decides, and the
+ * loser reads the winner's complete directory. Concurrent *builds* against one
+ * root are still not supported: the consumer target dir is a single Cargo lock
+ * and a single set of executables, so callers run one process at a time.
+ *
+ * @param {string} extractedRoot
+ * @param {string | null} shareRoot
+ * @returns {string}
+ */
+export function shareArchive(extractedRoot, shareRoot) {
+  if (shareRoot === null) {
+    return extractedRoot;
+  }
+  const shared = join(shareRoot, "archives", treeDigest(extractedRoot));
+  publishExtraction(extractedRoot, shared);
+  return shared;
 }
 
 /**
@@ -617,7 +917,7 @@ function readConsumerAccounting(stageRoot, entries) {
 /**
  * @param {{
  *   consumerRoot: string;
- *   targetRoot: string;
+ *   buildRoot: string;
  *   entryName: string;
  *   patchArgs: string[];
  * }} input
@@ -627,13 +927,13 @@ function readConsumerAccounting(stageRoot, entries) {
  *   artifact: {artifact: string, bytes: number, sha256: string} | null;
  * }}
  */
-function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
+function buildGuest({ consumerRoot, buildRoot, entryName, patchArgs }) {
   const guestManifest = join(consumerRoot, GUEST_DIR, "Cargo.toml");
   if (!existsSync(guestManifest)) {
     return { ok: true, cause: null, artifact: null };
   }
 
-  const guestTargetDir = join(targetRoot, "guests", entryName);
+  const guestTargetDir = join(buildRoot, "guests", entryName);
   const built = run(
     "cargo",
     [
@@ -697,7 +997,7 @@ function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
  *   repoRoot: string;
  *   stageRoot: string;
  *   scratchRoot: string;
- *   targetRoot: string;
+ *   buildRoot: string;
  *   entryName: string;
  *   fixture: string;
  *   archives: Map<string, {root: string, sha256: string, version: string}>;
@@ -709,7 +1009,7 @@ function runConsumer({
   repoRoot,
   stageRoot,
   scratchRoot,
-  targetRoot,
+  buildRoot,
   entryName,
   fixture,
   archives,
@@ -857,7 +1157,9 @@ function runConsumer({
       "--quiet",
       ...patchArgs,
       "--target-dir",
-      join(targetRoot, "consumers", entryName),
+      // One dir for every consumer: they build the same sources, and the guest
+      // target below keeps the per-entry isolation that still matters.
+      join(buildRoot, "consumers"),
       ...(mode === "test" ? ["--", "--nocapture"] : []),
     ],
     consumerRoot,
@@ -872,7 +1174,7 @@ function runConsumer({
     };
   }
 
-  const guest = buildGuest({ consumerRoot, targetRoot, entryName, patchArgs });
+  const guest = buildGuest({ consumerRoot, buildRoot, entryName, patchArgs });
   evidence.guest = guest.artifact;
   if (!guest.ok) {
     return { ...evidence, cause: guest.cause };
@@ -965,13 +1267,16 @@ function blobId(bytes) {
  * are not compared. Only paths the revision itself names are pruned — this is
  * not a general "skip directories" exemption.
  *
+ * The entry comes from the enumeration, so a caller that needs to know whether a
+ * path is a link reads it here instead of stat'ing the path again.
+ *
  * @param {string} directory
  * @param {Set<string>} gitlinks
- * @returns {string[]}
+ * @returns {{ path: string; dirent: import("node:fs").Dirent }[]}
  */
-function stagedPaths(directory, gitlinks) {
-  /** @type {string[]} */
-  const paths = [];
+function stagedEntries(directory, gitlinks) {
+  /** @type {{ path: string; dirent: import("node:fs").Dirent }[]} */
+  const entries = [];
   /** @param {string} relative */
   const walk = (relative) => {
     const absolute = relative.length === 0 ? directory : join(directory, relative);
@@ -984,11 +1289,22 @@ function stagedPaths(directory, gitlinks) {
         walk(path);
         continue;
       }
-      paths.push(path);
+      entries.push({ path, dirent });
     }
   };
   walk("");
-  return paths.sort();
+  return entries.sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
+}
+
+/**
+ * @param {string} directory
+ * @param {Set<string>} gitlinks
+ * @returns {string[]}
+ */
+function stagedPaths(directory, gitlinks) {
+  return stagedEntries(directory, gitlinks).map((entry) => entry.path);
 }
 
 /**
@@ -1120,9 +1436,13 @@ export function verifyStagedSource(repoRoot, sha, directory) {
 
 /**
  * @param {string} repoRoot
+ * @param {{ shareRoot?: string }} [options] `shareRoot` reuses extracted
+ *   archives and one consumer target dir across calls (see the module comment);
+ *   callers sharing one must run one at a time.
  * @returns {PackageabilityReport}
  */
-export function checkContractPackageability(repoRoot) {
+export function checkContractPackageability(repoRoot, options = {}) {
+  const shareRoot = options.shareRoot ?? null;
   const entries = readVersionBrackets(repoRoot);
   let source = /** @type {{sha: string | null; clean: boolean; mismatch?: string[]}} */ (
     workingSourceState(repoRoot)
@@ -1132,6 +1452,13 @@ export function checkContractPackageability(repoRoot) {
   const scratchRoot = mkdtempSync(join(scratchParent, SCRATCH_PREFIX));
   const stageRoot = join(scratchRoot, "stage");
   const targetRoot = join(scratchRoot, "target");
+  /**
+   * Consumer builds land here: one dir per run normally, one dir shared by every
+   * call when `shareRoot` is given, so Cargo reuses the compiled graph instead of
+   * rebuilding the same contract crates per case.
+   */
+  const buildRoot =
+    shareRoot === null ? join(scratchRoot, "build") : join(shareRoot, "build");
   /** @type {PackageResult[]} */
   const results = [];
   /** @type {Map<string, {root: string, sha256: string, version: string}>} */
@@ -1156,6 +1483,7 @@ export function checkContractPackageability(repoRoot) {
         scratchRoot,
         stageRoot,
         targetRoot,
+        shareRoot,
       });
       /** @type {PackageResult} */
       const row = {
@@ -1196,7 +1524,7 @@ export function checkContractPackageability(repoRoot) {
           repoRoot,
           stageRoot,
           scratchRoot,
-          targetRoot,
+          buildRoot,
           entryName: row.name,
           fixture,
           archives,
