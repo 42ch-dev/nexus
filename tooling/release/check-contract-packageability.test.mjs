@@ -40,6 +40,12 @@ const SHARE_ROOT = mkdtempSync(join(tmpdir(), "nexus-release-share-"));
 const FILE_STARTED = Date.now();
 
 /**
+ * Measured budget for this file, `timeout-minutes` minus room for the rest of
+ * the step's files: the runs behind it are recorded next to the CI step.
+ */
+const FILE_BUDGET_SECONDS = 420;
+
+/**
  * @param {string} dir
  * @returns {import("./check-contract-packageability.mjs").PackageabilityReport}
  */
@@ -1223,4 +1229,21 @@ test("the consumer accounting must name every carrier entry once", () => {
   } finally {
     cleanupTempRepo(dir);
   }
+});
+
+/**
+ * Guards the CI step's wall clock, not the checker's behaviour: the step stops
+ * this file at `timeout-minutes`, and a job killed there says nothing about
+ * which case grew. Failing on the file's own duration instead names the number
+ * minutes earlier, and the per-test durations above name the case. The budget
+ * is measured — the runs behind it are recorded next to the CI step — so it only
+ * fires on a regression, never on an ordinary slow runner.
+ */
+test("the file stays inside the CI step's measured budget", () => {
+  const seconds = (Date.now() - FILE_STARTED) / 1000;
+  console.log(`check-contract-packageability suite: ${seconds.toFixed(1)}s`);
+  assert.ok(
+    seconds <= FILE_BUDGET_SECONDS,
+    `this file took ${seconds.toFixed(1)}s, over its ${FILE_BUDGET_SECONDS}s budget; the per-test durations above name the case that grew`,
+  );
 });
