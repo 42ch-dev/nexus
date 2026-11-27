@@ -1400,7 +1400,8 @@ mod tests {
             panic!("unexpected error shape: {error:?}");
         };
         assert!(
-            category.starts_with("config_lock: denied acquisition") && category.contains("Unproven"),
+            category.starts_with("config_lock: denied acquisition")
+                && category.contains("Unproven"),
             "the real denial is classified, not read as an unlocked local default: {error:?}"
         );
     }
