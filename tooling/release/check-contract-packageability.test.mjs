@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { VERSION_BRACKETS_PATH } from "./version-surfaces.mjs";
 import {
   checkContractPackageability,
@@ -27,6 +27,27 @@ import {
   runReleaseScript,
   writeRepoFile,
 } from "./test-harness.mjs";
+
+/**
+ * One compiled-artifact cache for the whole file: every case that ships the
+ * same contract crates resolves them from the same directories, so Cargo builds
+ * that graph once instead of once per case. Each case still stages, packs and
+ * reports on its own inputs. See `shareRoot` in the checker.
+ */
+const SHARE_ROOT = mkdtempSync(join(tmpdir(), "nexus-release-share-"));
+
+/** Wall-clock start of the file, the budget test below reads it. */
+const FILE_STARTED = Date.now();
+
+/**
+ * @param {string} dir
+ * @returns {import("./check-contract-packageability.mjs").PackageabilityReport}
+ */
+function check(dir) {
+  return checkContractPackageability(dir, { shareRoot: SHARE_ROOT });
+}
+
+after(() => cleanupTempRepo(SHARE_ROOT));
 
 /** Repository-root-relative discovery path the checker reads. */
 const CONSUMER_FIXTURES_PATH = "tooling/release/fixtures/package-consumers";
@@ -161,7 +182,7 @@ test("every carrier entry is packaged and reported with archive evidence", () =>
   const dir = tinyFixture();
   try {
     const lockBefore = readFileSync(join(dir, "Cargo.lock"), "utf8");
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
     assert.equal(report.firstFailure, null);
     assert.deepEqual(
@@ -191,7 +212,7 @@ test("every carrier entry is packaged and reported with archive evidence", () =>
 test("a crate Cargo refuses to pack fails the report and names the first failure", () => {
   const dir = tinyFixture({ withSource: false });
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     assert.equal(report.firstFailure, "nexus-tiny-contract");
     const [row] = report.results;
@@ -216,7 +237,7 @@ test("a manifest that is not a crate fails instead of being skipped", () => {
       })}\n`,
     );
     assert.throws(
-      () => checkContractPackageability(dir),
+      () => check(dir),
       /not-a-crate\/Cargo\.toml: missing \[package\]\.name/,
     );
   } finally {
@@ -246,7 +267,7 @@ test("staging fails closed when Git cannot list the working source", () => {
       )}\n`,
     );
     assert.throws(
-      () => checkContractPackageability(dir),
+      () => check(dir),
       /staging failed: git ls-files failed/,
     );
   } finally {
@@ -257,7 +278,7 @@ test("staging fails closed when Git cannot list the working source", () => {
 test("a consumer builds and runs the public API of the selected archive", () => {
   const dir = consumerFixtureRepo("positive-api-call", "nexus-fixture-public");
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
 
     const [row] = report.results;
@@ -302,7 +323,7 @@ test("staging leaves gitignored working files out of the packed archive", () => 
       "the probe build script must be gitignored",
     );
 
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
     const [row] = report.results;
     assert.equal(row.archive.file, "nexus-fixture-public-0.1.0.crate");
@@ -317,7 +338,7 @@ test("an archive missing a packed module fails the consumer with a named cause a
   const before = scratchEntries();
   const dir = consumerFixtureRepo("missing-packed-input", "nexus-fixture-generated");
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     assert.equal(report.firstFailure, "nexus-fixture-generated");
 
@@ -344,7 +365,7 @@ test("an incompatible sibling requirement fails locked offline resolution", () =
     "nexus-fixture-sibling",
   );
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     assert.equal(report.firstFailure, "nexus-fixture-sibling");
 
@@ -365,7 +386,7 @@ test("a private dependency fails before any resolution", () => {
     "nexus-fixture-anchor",
   );
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     assert.equal(report.firstFailure, "nexus-fixture-anchor");
 
@@ -386,7 +407,7 @@ test("a path dependency is refused even when its source exists", () => {
     "nexus-fixture-escape",
   );
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     assert.equal(report.firstFailure, "nexus-fixture-escape");
 
@@ -409,7 +430,7 @@ test("a consumer-supplied Cargo config is refused before any resolution", () => 
     "nexus-fixture-config",
   );
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     assert.equal(report.firstFailure, "nexus-fixture-config");
 
@@ -552,7 +573,7 @@ function moduleConsumerRepo(entryName, modules) {
 test("the contracts consumer round-trips a generated object from its archive", () => {
   const dir = realConsumerRepo("nexus-contracts", ["nexus-contracts"]);
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
     assert.equal(report.firstFailure, null);
 
@@ -584,7 +605,7 @@ test("the workflow-ir consumer rejects a dangling reference from its archive", (
     "nexus-workflow-ir",
   ]);
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
 
     const row = rowFor(report, "nexus-workflow-ir");
@@ -617,7 +638,7 @@ test("the pattern consumer scans every packed package and pins its template memb
     "nexus-pattern",
   ]);
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
 
     const row = rowFor(report, "nexus-pattern");
@@ -652,7 +673,7 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
     assert.equal(git(dir, ["add", "-A"]).status, 0);
     assert.equal(git(dir, ["commit", "-qm", "drop packed template"]).status, 0);
 
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     assert.notEqual(report.firstFailure, null);
 
@@ -662,7 +683,9 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
     assert.match(row.consumer.cause, /consumer run failed/);
     assert.match(
       row.consumer.output,
-      /archives\/nexus-pattern\/nexus-pattern-[\d.]+\/src\/\.\.\/tests\/fixtures\/patterns\/step-with-judge\/templates\/verdict\.md/,
+      // The archive the consumer reads is extracted under the shared cache, one
+      // directory per source digest (`archives/<sha256>/`).
+      /archives\/[0-9a-f]{64}\/src\/\.\.\/tests\/fixtures\/patterns\/step-with-judge\/templates\/verdict\.md/,
       row.consumer.output,
     );
   } finally {
@@ -673,7 +696,7 @@ test("a pattern archive that drops an otherwise-unreferenced template fails the 
 test("the module-sdk consumer builds a wasm32 guest through nexus_entry and the host API separately", () => {
   const dir = moduleConsumerRepo("nexus-module-sdk", ["nexus-module-sdk"]);
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
 
     const row = rowFor(report, "nexus-module-sdk");
@@ -713,7 +736,7 @@ test("the module-manifest consumer validates, injects and verifies the digest an
     "nexus-module-manifest",
   ]);
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
 
     const row = rowFor(report, "nexus-module-manifest");
@@ -735,7 +758,7 @@ test("the module-test consumer runs its ABI tests against the dev-dependency fro
     "nexus-module-test",
   ]);
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
 
     const row = rowFor(report, "nexus-module-test");
@@ -775,7 +798,7 @@ test("the narrative consumer reads a world and its KbStore entries from archives
     "nexus-narrative",
   ]);
   try {
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
 
     const row = rowFor(report, "nexus-narrative");
@@ -836,7 +859,7 @@ test("a tracked relative symlink stages verbatim, so a clean checkout is clean e
       "track a relative link",
     ]);
 
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
     assert.equal(report.source.clean, true, JSON.stringify(report.source));
     assert.equal(report.source.mismatch, undefined);
@@ -896,7 +919,7 @@ test("an archive no passing consumer consumes fails as a pack-only result", () =
       }),
     );
 
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     const uncovered = rowFor(report, "nexus-tiny-contract");
     assert.equal(uncovered.ok, false);
@@ -1028,7 +1051,7 @@ test("a patch a consumer declares but never resolves does not count as coverage"
     );
     initGitRepo(dir);
 
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     const row = rowFor(report, "nexus-tiny-contract");
     assert.equal(row.ok, false);
@@ -1057,7 +1080,7 @@ test("a repository without the consumer accounting fails instead of packing", ()
   try {
     rmSync(join(dir, CONSUMER_ACCOUNTING_PATH));
     assert.throws(
-      () => checkContractPackageability(dir),
+      () => check(dir),
       /consumer accounting failed: tooling\/release\/fixtures\/package-consumers\.json is missing/,
     );
   } finally {
@@ -1074,7 +1097,7 @@ test("removing a declared fixture fails until the accounting is edited", () => {
       force: true,
     });
     assert.throws(
-      () => checkContractPackageability(dir),
+      () => check(dir),
       /consumer accounting failed: .*nexus-fixture-public declares the fixture nexus-fixture-public, which is not in the tree/,
     );
 
@@ -1083,7 +1106,7 @@ test("removing a declared fixture fails until the accounting is edited", () => {
       CONSUMER_ACCOUNTING_PATH,
       consumerAccounting({ "nexus-fixture-public": null }),
     );
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
     assert.equal(report.consumerAccounting.fixtures.length, 0);
     assert.deepEqual(
@@ -1110,7 +1133,7 @@ test("the declared fixture directory is the one that runs", () => {
       CONSUMER_ACCOUNTING_PATH,
       consumerAccounting({ "nexus-fixture-public": "fixture-renamed" }),
     );
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, true, JSON.stringify(report.results, null, 2));
     const row = rowFor(report, "nexus-fixture-public");
     assert.equal(row.consumer.ok, true, row.consumer.cause ?? "");
@@ -1144,7 +1167,7 @@ test("declaring another entry's fixture fails as a misdirected declaration", () 
     gitOk(dir, ["add", "-A"]);
     gitOk(dir, ["commit", "-qm", "declare the wrong fixture"]);
 
-    const report = checkContractPackageability(dir);
+    const report = check(dir);
     assert.equal(report.ok, false);
     const misdirected = rowFor(report, "nexus-workflow-ir");
     assert.equal(misdirected.ok, false);
@@ -1180,12 +1203,12 @@ test("the consumer accounting must name every carrier entry once", () => {
       consumerAccounting({ "nexus-other-contract": null }),
     );
     assert.throws(
-      () => checkContractPackageability(dir),
+      () => check(dir),
       /records nexus-other-contract, which is not a carrier entry/,
     );
     writeRepoFile(dir, CONSUMER_ACCOUNTING_PATH, "{}\n");
     assert.throws(
-      () => checkContractPackageability(dir),
+      () => check(dir),
       /nexus-tiny-contract is not recorded/,
     );
     writeRepoFile(
@@ -1194,7 +1217,7 @@ test("the consumer accounting must name every carrier entry once", () => {
       `${JSON.stringify({ "nexus-tiny-contract": { fixture: null } })}\n`,
     );
     assert.throws(
-      () => checkContractPackageability(dir),
+      () => check(dir),
       /nexus-tiny-contract has no fixture, so it needs a reason/,
     );
   } finally {

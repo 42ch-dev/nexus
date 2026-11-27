@@ -45,6 +45,16 @@
  * skipped on both sides of that verification, because its contents are not part
  * of this revision's tree.
  *
+ * A caller may pass a `shareRoot` to reuse compiled work across several runs:
+ * extracted archives are cached there under a digest of their source (see
+ * {@link treeDigest}), and the consumer target dir lives there too, so a second
+ * case that ships the same sources resolves and builds from Cargo's own cache
+ * instead of compiling the contract graph again. The digest ignores
+ * `.cargo_vcs_info.json` because `cargo package` stamps it with the staging
+ * commit, which is the only way two runs of identical sources differ. Nothing
+ * else is shared: each run still stages, packs, extracts and reports on its own
+ * inputs, and the CLI never passes a `shareRoot`, so a gate run stays hermetic.
+ *
  * CLI: node tooling/release/check-contract-packageability.mjs [--json] [--require-clean]
  *
  * Exit 0 when all contract crates are packageable (and every present consumer
@@ -67,6 +77,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -100,6 +111,13 @@ const CONSUMER_ACCOUNTING_PATH = "tooling/release/fixtures/package-consumers.jso
 const GUEST_DIR = "guest";
 
 const SCRATCH_PREFIX = "nexus-contract-package-";
+
+/**
+ * `cargo package` writes this file with the packing commit, so it is the one
+ * path two archives of identical sources disagree on. {@link treeDigest} skips
+ * it, which is what lets both archives share one extracted cache entry.
+ */
+const VCS_STAMP_PATH = ".cargo_vcs_info.json";
 
 const SKIPPED_STAGE_ENTRIES = new Set([
   ".direnv",
@@ -356,6 +374,7 @@ function workspacePolicy(stageRoot) {
  *   scratchRoot: string;
  *   stageRoot: string;
  *   targetRoot: string;
+ *   shareRoot: string | null;
  * }} input
  * @returns {{
  *   ok: boolean;
@@ -373,6 +392,7 @@ function packAndInspect({
   scratchRoot,
   stageRoot,
   targetRoot,
+  shareRoot,
 }) {
   const manifestPath = join(stageRoot, entry.manifest);
   const manifestContents = readFileSync(manifestPath, "utf8");
@@ -457,7 +477,7 @@ function packAndInspect({
       archive,
     );
   }
-  const extractedRoot = join(extractDir, roots[0]);
+  const extractedRoot = shareArchive(join(extractDir, roots[0]), shareRoot);
 
   const metadata = run(
     "cargo",
@@ -530,6 +550,65 @@ function inside(candidate, root) {
   const target = resolve(candidate);
   const base = resolve(root);
   return target === base || target.startsWith(`${base}${sep}`);
+}
+
+/**
+ * Content digest of an extracted archive, ignoring {@link VCS_STAMP_PATH}. Two
+ * runs that ship the same sources produce the same digest, so they resolve the
+ * package from the same directory and Cargo reuses the compiled graph; any
+ * source difference — including a dropped file — yields another digest and thus
+ * another directory, never a stale artifact.
+ *
+ * @param {string} root
+ * @returns {string}
+ */
+function treeDigest(root) {
+  const hash = createHash("sha256");
+  for (const path of stagedPaths(root, new Set([VCS_STAMP_PATH]))) {
+    const absolute = join(root, path);
+    const stats = lstatSync(absolute);
+    hash.update(`${stats.mode}:${path}\0`);
+    hash.update(
+      stats.isSymbolicLink() ? readlinkSync(absolute) : readFileSync(absolute),
+    );
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+/**
+ * Move one extracted archive into the shared cache and return the root Cargo
+ * should resolve: the caller's own extraction when no `shareRoot` is in use,
+ * the cache entry once it is. A cache hit drops the caller's copy.
+ *
+ * Callers sharing one root must run one at a time; nothing here guards a
+ * concurrent publish.
+ *
+ * @param {string} extractedRoot
+ * @param {string | null} shareRoot
+ * @returns {string}
+ */
+function shareArchive(extractedRoot, shareRoot) {
+  if (shareRoot === null) {
+    return extractedRoot;
+  }
+  const shared = join(shareRoot, "archives", treeDigest(extractedRoot));
+  if (existsSync(shared)) {
+    rmSync(extractedRoot, { recursive: true, force: true });
+    return shared;
+  }
+  mkdirSync(dirname(shared), { recursive: true });
+  try {
+    renameSync(extractedRoot, shared);
+  } catch (error) {
+    if (error?.code !== "EXDEV") {
+      throw error;
+    }
+    // `shareRoot` may sit on another filesystem than the scratch tree.
+    cpSync(extractedRoot, shared, { recursive: true });
+    rmSync(extractedRoot, { recursive: true, force: true });
+  }
+  return shared;
 }
 
 /**
@@ -617,7 +696,7 @@ function readConsumerAccounting(stageRoot, entries) {
 /**
  * @param {{
  *   consumerRoot: string;
- *   targetRoot: string;
+ *   buildRoot: string;
  *   entryName: string;
  *   patchArgs: string[];
  * }} input
@@ -627,13 +706,13 @@ function readConsumerAccounting(stageRoot, entries) {
  *   artifact: {artifact: string, bytes: number, sha256: string} | null;
  * }}
  */
-function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
+function buildGuest({ consumerRoot, buildRoot, entryName, patchArgs }) {
   const guestManifest = join(consumerRoot, GUEST_DIR, "Cargo.toml");
   if (!existsSync(guestManifest)) {
     return { ok: true, cause: null, artifact: null };
   }
 
-  const guestTargetDir = join(targetRoot, "guests", entryName);
+  const guestTargetDir = join(buildRoot, "guests", entryName);
   const built = run(
     "cargo",
     [
@@ -697,7 +776,7 @@ function buildGuest({ consumerRoot, targetRoot, entryName, patchArgs }) {
  *   repoRoot: string;
  *   stageRoot: string;
  *   scratchRoot: string;
- *   targetRoot: string;
+ *   buildRoot: string;
  *   entryName: string;
  *   fixture: string;
  *   archives: Map<string, {root: string, sha256: string, version: string}>;
@@ -709,7 +788,7 @@ function runConsumer({
   repoRoot,
   stageRoot,
   scratchRoot,
-  targetRoot,
+  buildRoot,
   entryName,
   fixture,
   archives,
@@ -857,7 +936,7 @@ function runConsumer({
       "--quiet",
       ...patchArgs,
       "--target-dir",
-      join(targetRoot, "consumers", entryName),
+      join(buildRoot, "consumers"),
       ...(mode === "test" ? ["--", "--nocapture"] : []),
     ],
     consumerRoot,
@@ -872,7 +951,7 @@ function runConsumer({
     };
   }
 
-  const guest = buildGuest({ consumerRoot, targetRoot, entryName, patchArgs });
+  const guest = buildGuest({ consumerRoot, buildRoot, entryName, patchArgs });
   evidence.guest = guest.artifact;
   if (!guest.ok) {
     return { ...evidence, cause: guest.cause };
@@ -1120,9 +1199,13 @@ export function verifyStagedSource(repoRoot, sha, directory) {
 
 /**
  * @param {string} repoRoot
+ * @param {{ shareRoot?: string }} [options] `shareRoot` reuses extracted
+ *   archives and one consumer target dir across calls (see the module comment);
+ *   callers sharing one must run one at a time.
  * @returns {PackageabilityReport}
  */
-export function checkContractPackageability(repoRoot) {
+export function checkContractPackageability(repoRoot, options = {}) {
+  const shareRoot = options.shareRoot ?? null;
   const entries = readVersionBrackets(repoRoot);
   let source = /** @type {{sha: string | null; clean: boolean; mismatch?: string[]}} */ (
     workingSourceState(repoRoot)
@@ -1132,6 +1215,13 @@ export function checkContractPackageability(repoRoot) {
   const scratchRoot = mkdtempSync(join(scratchParent, SCRATCH_PREFIX));
   const stageRoot = join(scratchRoot, "stage");
   const targetRoot = join(scratchRoot, "target");
+  /**
+   * Consumer builds land here: one dir per run normally, one dir shared by every
+   * call when `shareRoot` is given, so Cargo reuses the compiled graph instead of
+   * rebuilding the same contract crates per case.
+   */
+  const buildRoot =
+    shareRoot === null ? join(scratchRoot, "build") : join(shareRoot, "build");
   /** @type {PackageResult[]} */
   const results = [];
   /** @type {Map<string, {root: string, sha256: string, version: string}>} */
@@ -1156,6 +1246,7 @@ export function checkContractPackageability(repoRoot) {
         scratchRoot,
         stageRoot,
         targetRoot,
+        shareRoot,
       });
       /** @type {PackageResult} */
       const row = {
@@ -1196,7 +1287,7 @@ export function checkContractPackageability(repoRoot) {
           repoRoot,
           stageRoot,
           scratchRoot,
-          targetRoot,
+          buildRoot,
           entryName: row.name,
           fixture,
           archives,
