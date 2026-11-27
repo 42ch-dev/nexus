@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -1272,13 +1273,14 @@ function extractedVariant(parent, stamp) {
   return root;
 }
 
+/** This checker, as a URL a child process can import. */
+const CHECKER_URL = pathToFileURL(
+  join(REPO_ROOT, "tooling/release/check-contract-packageability.mjs"),
+).href;
+
 /** Child publisher: one archive, one share root, printed result. */
 const PUBLISH_CHILD = `
-import { shareArchive } from ${JSON.stringify(
-  pathToFileURL(
-    join(REPO_ROOT, "tooling/release/check-contract-packageability.mjs"),
-  ).href,
-)};
+import { shareArchive } from ${JSON.stringify(CHECKER_URL)};
 process.stdout.write(
   shareArchive(process.env.PUBLISH_ROOT, process.env.PUBLISH_SHARE),
 );
@@ -1340,6 +1342,134 @@ test("two publishers of one digest keep one directory and drop the loser's copy"
   } finally {
     cleanupTempRepo(dir);
   }
+});
+
+test("a link in the sources hashes by its stored target", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-release-link-"));
+  const share = join(dir, "share");
+  const variant = (stamp, target) => {
+    const root = extractedVariant(dir, stamp);
+    symlinkSync(target, join(root, "src", "linked.rs"));
+    return root;
+  };
+  const first = variant("a1", "../real.rs");
+  const second = variant("b2", "../real.rs");
+  const third = variant("c3", "../other.rs");
+  try {
+    const entry = shareArchive(first, share);
+    assert.ok(entry.startsWith(join(share, "archives")), entry);
+    assert.equal(
+      shareArchive(second, share),
+      entry,
+      "same bytes and same link target publish one entry",
+    );
+    assert.notEqual(
+      shareArchive(third, share),
+      entry,
+      "a different link target is a different entry",
+    );
+    assert.equal(readdirSync(join(share, "archives")).length, 2);
+    assert.equal(
+      readlinkSync(join(entry, "src", "linked.rs")),
+      "../real.rs",
+      "the published entry keeps the link itself",
+    );
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
+
+/** Spawns the marker writer and then blocks, so only a group kill ends it. */
+const GROUP_SPAWNER = `
+const { spawn } = require("node:child_process");
+spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
+setInterval(() => {}, 1000);
+`;
+
+/** Child that spends its deadline inside {@link run}. */
+const GROUP_CHILD = `
+import { run } from ${JSON.stringify(CHECKER_URL)};
+const result = run(process.execPath, ["-e", ${JSON.stringify(GROUP_SPAWNER)}], process.cwd());
+process.stdout.write(JSON.stringify({ ok: result.ok, output: result.output }));
+`;
+
+test(
+  "a child over its deadline is killed with the grandchildren it started",
+  { skip: process.platform === "win32" ? "no process groups on Windows" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nexus-release-group-"));
+    const marker = join(dir, "marker.txt");
+    try {
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        ["--input-type=module", "-e", GROUP_CHILD],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            MARKER: marker,
+            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 1000),
+          },
+        },
+      );
+      const result = JSON.parse(stdout);
+      assert.equal(result.ok, false);
+      assert.match(
+        result.output,
+        /error: .* exceeded the release tooling deadline \(NEXUS_RELEASE_DEADLINE_MS\)/,
+      );
+      const stopped = readFileSync(marker, "utf8");
+      assert.notEqual(stopped, "", "the grandchild wrote before the kill");
+      await new Promise((done) => setTimeout(done, 500));
+      assert.equal(
+        readFileSync(marker, "utf8"),
+        stopped,
+        "the killed group stopped writing",
+      );
+    } finally {
+      cleanupTempRepo(dir);
+    }
+  },
+);
+
+/** Child that only reports whether {@link run} accepted the deadline. */
+const DEADLINE_PROBE = `
+import { run } from ${JSON.stringify(CHECKER_URL)};
+const result = run(process.execPath, ["-e", ""], process.cwd());
+process.stdout.write(JSON.stringify({ ok: result.ok }));
+`;
+
+test("a malformed or expired deadline is refused by name", async () => {
+  for (const raw of ["abc", "0", String(Date.now() - 1000)]) {
+    const failure = await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", DEADLINE_PROBE],
+      {
+        encoding: "utf8",
+        env: { ...process.env, NEXUS_RELEASE_DEADLINE_MS: raw },
+      },
+    ).then(
+      () => null,
+      (error) => error,
+    );
+    assert.ok(failure !== null, `NEXUS_RELEASE_DEADLINE_MS=${raw} must fail`);
+    assert.match(
+      failure.stderr,
+      new RegExp(
+        `release tooling deadline \\(NEXUS_RELEASE_DEADLINE_MS\\) must be a future epoch-millisecond timestamp, got "${raw}"`,
+      ),
+    );
+  }
+
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    ["--input-type=module", "-e", DEADLINE_PROBE],
+    {
+      encoding: "utf8",
+      env: { ...process.env, NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 60000) },
+    },
+  );
+  assert.deepEqual(JSON.parse(stdout), { ok: true });
 });
 
 /**

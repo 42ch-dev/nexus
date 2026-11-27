@@ -70,11 +70,15 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
+  constants,
   cpSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -136,18 +140,28 @@ let deadlineMemo;
  * Wall clock the caller allows this process, as epoch milliseconds in
  * `NEXUS_RELEASE_DEADLINE_MS`. Every child gets what is left of it, so a case
  * that outgrows its budget dies as a named failure inside that budget instead of
- * letting the whole step be killed with nothing to read. Unset means no
- * deadline, which is what the CLI gate uses. Read on first child, not at import,
- * so a runner that imports this module can set the budget in its own body.
+ * letting the whole step be killed with nothing to read. Unset or empty means no
+ * deadline, which is what the CLI gate uses; anything else must be a future
+ * integer, because a malformed value silently read as "unset" is a budget nobody
+ * is enforcing. Read on the first child, not at import, so a runner that imports
+ * this module can set the budget in its own body.
  *
  * @returns {number | null}
  */
 function childDeadline() {
   if (deadlineMemo === undefined) {
     const raw = process.env.NEXUS_RELEASE_DEADLINE_MS?.trim();
-    const value =
-      raw === undefined || raw.length === 0 ? Number.NaN : Number(raw);
-    deadlineMemo = Number.isFinite(value) && value > 0 ? value : null;
+    if (raw === undefined || raw.length === 0) {
+      deadlineMemo = null;
+    } else {
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value <= Date.now()) {
+        throw new Error(
+          `release tooling deadline (NEXUS_RELEASE_DEADLINE_MS) must be a future epoch-millisecond timestamp, got "${raw}"`,
+        );
+      }
+      deadlineMemo = value;
+    }
   }
   return deadlineMemo;
 }
@@ -220,20 +234,45 @@ function contractDependencies(manifestContents, entries) {
  */
 
 /**
+ * Kill what the child left behind. `spawnSync`'s timeout kills the process it
+ * started, but `cargo` starts `rustc` (and build scripts) as children of its own,
+ * which keep writing into the shared build tree after the wrapper is gone. The
+ * child is spawned `detached`, so it leads a process group and the negative pid
+ * reaches that whole group. Windows has no process groups: it keeps the old
+ * behaviour, where only the wrapper is killed.
+ *
+ * @param {number | undefined} pid
+ */
+function killChildGroup(pid) {
+  if (pid === undefined || process.platform === "win32") {
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if (error?.code !== "ESRCH") {
+      throw error;
+    }
+  }
+}
+
+/**
  * @param {string} command
  * @param {string[]} args
  * @param {string} cwd
  * @param {string} [input] Stdin content, for the batched `hash-object` read.
  * @returns {{ ok: boolean; stdout: string; stderr: string; output: string }}
  */
-function run(command, args, cwd, input) {
-  /** @type {{ cwd: string; encoding: "utf8"; env: Record<string, string | undefined>; input?: string; maxBuffer: number; timeout?: number }} */
+export function run(command, args, cwd, input) {
+  /** @type {{ cwd: string; encoding: "utf8"; env: Record<string, string | undefined>; input?: string; maxBuffer: number; timeout?: number; detached?: boolean }} */
   const options = {
     cwd,
     encoding: "utf8",
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
     input,
     maxBuffer: 64 * 1024 * 1024,
+    // Own process group, so a deadline kill reaches the grandchildren too.
+    detached: true,
   };
   const deadline = childDeadline();
   if (deadline !== null) {
@@ -242,6 +281,9 @@ function run(command, args, cwd, input) {
     options.timeout = Math.max(1000, deadline - Date.now());
   }
   const result = spawnSync(command, args, options);
+  if (result.error?.code === "ETIMEDOUT" || result.signal !== null) {
+    killChildGroup(result.pid);
+  }
   if (result.error !== undefined) {
     // `error:` keeps the deadline visible in the row's cause, which every caller
     // builds with {@link firstErrorLine}; a bare "could not run" would read as a
@@ -598,6 +640,13 @@ function inside(candidate, root) {
  * source difference — including a dropped file — yields another digest and thus
  * another directory, never a stale artifact.
  *
+ * Every entry is opened once and read through the descriptor: nothing is stat'ed
+ * and then re-opened by path, so a link swapped in between cannot make the digest
+ * describe a file that is not the one that was hashed. `O_NOFOLLOW` turns a link
+ * into `ELOOP`, and a link is data — its stored target — exactly as Git records
+ * it. Windows has no `O_NOFOLLOW`, so there a link is followed; the digest is
+ * only ever compared within one host.
+ *
  * @param {string} root
  * @returns {string}
  */
@@ -605,12 +654,24 @@ function treeDigest(root) {
   const hash = createHash("sha256");
   for (const path of stagedPaths(root, new Set([VCS_STAMP_PATH]))) {
     const absolute = join(root, path);
-    const stats = lstatSync(absolute);
-    hash.update(`${stats.mode}:${path}\0`);
-    hash.update(
-      stats.isSymbolicLink() ? readlinkSync(absolute) : readFileSync(absolute),
-    );
-    hash.update("\0");
+    hash.update(`${path}\0`);
+    let fd;
+    try {
+      fd = openSync(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    } catch (error) {
+      if (error?.code !== "ELOOP") {
+        throw error;
+      }
+      hash.update(`link:${readlinkSync(absolute)}\0`);
+      continue;
+    }
+    try {
+      hash.update(`mode:${fstatSync(fd).mode}\0`);
+      hash.update(readFileSync(fd));
+      hash.update("\0");
+    } finally {
+      closeSync(fd);
+    }
   }
   return hash.digest("hex");
 }
