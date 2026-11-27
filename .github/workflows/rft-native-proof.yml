@@ -14,11 +14,65 @@ name: RFT Native Package Proof
 #     cross-loading, install-only or unsigned-substitute pass;
 #   - a missing runner, missing image or mismatched toolchain fails the row
 #     with the measured value recorded in the evidence — never a green pass;
-#   - `native-package-matrix.json` reports `unavailable` for a row whose
-#     evidence file is absent, and the job fails: a missing row blocks P3
-#     (plan: "Missing row blocks P3; missing input = blocked").
+#   - `native-package-matrix.json` reports one of four row states and the job
+#     fails on the two that mean the proof did not run: `missing` (no evidence)
+#     and `failed` (the job failed), plus `pass` and `cancelled`.
+#     Evidence comes first: a row that uploaded a complete, valid proof is
+#     `pass`, whatever the job's later state. A runner-cancelled row job
+#     (run 44798291720: darwin-arm64, zero recorded steps) is not a code defect,
+#     and it stays non-blocking `cancelled` **only when the automatic retry was
+#     actually dispatched** to re-prove it. Without that dispatch — a fork PR
+#     (its branch is not in this repository), an invalid ref, a refused or
+#     missing dispatch record — the row's evidence is absent, so it is
+#     `missing` with the reason in its note and it blocks (I-000561).
+#     The retry runs only the cancelled rows and produces its own verdict; no
+#     evidence is merged across runs, so a verdict never mixes two commits.
+#     Two shas keep that honest: `origin_sha` is the commit the cancelled rows
+#     ran at (`github.sha`, i.e. the synthetic merge commit on a pull request)
+#     and `dispatch_sha` is the commit the retry targets (the PR head sha there,
+#     else `github.sha`). A moving `--ref` cannot dispatch a commit, so the retry
+#     run records both, re-proves `dispatch_sha`, and warns when the sha it
+#     actually ran differs from `dispatch_sha`; and a run whose per-row job
+#     conclusions cannot be read fails the verdict rather than inferring a row
+#     state from the matrix aggregate.
+#     Schema `rft-p3-t1-native-package-matrix/v3`. Field by field against the
+#     last v2 writer, nothing was added, removed or renamed: same top-level keys,
+#     same row keys, same `retry` keys. A row `note`, `no_evidence_uploaded`,
+#     `undispatched_cancelled_rows` and `retry.origin_sha`/`dispatch_sha` all
+#     already existed in v2. The id moved for a contract change the shape cannot
+#     show: from v3 a `cancelled` row is non-blocking only when the retry record
+#     lists that row, so a row cancelled after the record is `missing` and
+#     blocks — the last v2 writer excused it with a run-global flag. "v2" is also
+#     not one shape (`retry.merged_rows`, then `fork_cancelled_rows`, then
+#     `undispatched_cancelled_rows` with `retry.dispatch_sha`, each at a
+#     different v2 revision). So `schema`'s value names the contract and
+#     semantics, not the shape: structure is checked by field presence, not by
+#     the id. And because one id has covered several shapes, never infer a shape
+#     from the id alone, and never read a v3 artifact with v2 row-state semantics
+#     (or the reverse).
 on:
   workflow_dispatch:
+    inputs:
+      # Internal: the retry dispatch below fills these. Empty = the full lane.
+      rows:
+        description: 'Comma-separated row slugs to run (default: the whole lane)'
+        required: false
+        default: ''
+      retry_of:
+        description: 'Run id this dispatch is the one automatic retry of'
+        required: false
+        default: ''
+      # `origin_sha` is where the cancelled rows ran (`github.sha`: the synthetic
+      # merge commit on a pull request). `dispatch_sha` is what the retry
+      # targets and re-proves (the PR head sha there, else `github.sha`).
+      origin_sha:
+        description: 'Commit the cancelled rows ran at (origin run github.sha; the PR merge commit on a pull request)'
+        required: false
+        default: ''
+      dispatch_sha:
+        description: 'Commit the retry targets (PR head sha, else github.sha); compared with the sha the retry run actually ran'
+        required: false
+        default: ''
   schedule:
     # Nightly full four-platform proof on main: the PR lane runs only the
     # fastest row, so this is the drift check that covers the other rows.
@@ -36,7 +90,10 @@ on:
     paths: *proof-paths
 
 concurrency:
-  group: rft-native-proof-${{ github.ref }}
+  # A retry run is dispatched onto the same ref, so it must not share the
+  # origin run's group: cancel-in-progress would cancel the very run that is
+  # dispatching it.
+  group: rft-native-proof-${{ github.ref }}${{ inputs.retry_of != '' && format('-retry-{0}', inputs.retry_of) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -77,27 +134,61 @@ env:
 
 jobs:
   rft-matrix:
-    # GitHub job-level `if` cannot read the matrix context, so the PR lane is
-    # expressed as a dynamic matrix instead of per-row skips.
+    # GitHub job-level `if` cannot read the matrix context, so the lane is
+    # expressed as a dynamic matrix instead of per-row skips. This step is the
+    # single source of truth for which rows a run must produce: the summary
+    # evaluates exactly that list, and the retry dispatch narrows it to the rows
+    # a runner cancelled.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.rows.outputs.matrix }}
+      rows: ${{ steps.rows.outputs.rows }}
+      host_rows: ${{ steps.rows.outputs.host_rows }}
     steps:
       - id: rows
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ROWS_INPUT: ${{ inputs.rows }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          set -euo pipefail
+          all='[
+            {"slug":"win32-x64-msvc","os":"windows-2022","short":"win","target":"x86_64-pc-windows-msvc","matrix":true},
+            {"slug":"darwin-arm64","os":"macos-15","short":"macarm","target":"aarch64-apple-darwin","matrix":true},
+            {"slug":"darwin-x64","os":"macos-15-intel","short":"macx64","target":"x86_64-apple-darwin","matrix":true},
+            {"slug":"linux-x64-gnu","os":"ubuntu-24.04","short":"linux","target":"x86_64-unknown-linux-gnu","matrix":false}
+          ]'
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
             # PR lane: only the fastest row. The packaging/ABI hazards this
             # workflow guards are per-row identical for generic cross-platform
             # code; the full matrix covers the other rows on main/nightly.
-            echo 'matrix={"include":[{"slug":"darwin-arm64","os":"macos-15","short":"macarm","target":"aarch64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+            keep='["darwin-arm64"]'
+          elif [ -n "${ROWS_INPUT}" ]; then
+            keep="$(printf '%s' "${ROWS_INPUT}" | jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))')"
           else
-            echo 'matrix={"include":[{"slug":"win32-x64-msvc","os":"windows-2022","short":"win","target":"x86_64-pc-windows-msvc"},{"slug":"darwin-arm64","os":"macos-15","short":"macarm","target":"aarch64-apple-darwin"},{"slug":"darwin-x64","os":"macos-15-intel","short":"macx64","target":"x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+            keep="$(jq -c 'map(.slug)' <<< "${all}")"
           fi
+          unknown="$(jq -nc --argjson keep "${keep}" --argjson all "${all}" '$keep - ($all | map(.slug))')"
+          if [ "${unknown}" != "[]" ]; then
+            echo "::error::unknown row slug(s) ${unknown}; known rows: $(jq -rc 'map(.slug)' <<< "${all}")"
+            exit 1
+          fi
+          selected="$(jq -c --argjson keep "${keep}" \
+            'map(select(.slug as $s | $keep | index($s))) | if length == 0 then error("no rows selected") else . end' \
+            <<< "${all}")"
+          {
+            echo "matrix={\"include\":$(jq -c 'map(select(.matrix) | del(.matrix))' <<< "${selected}")}"
+            echo "rows=$(jq -c 'map({suffix: .slug, short})' <<< "${selected}")"
+            # An empty matrix include is invalid, so the matrix job is skipped
+            # when the run only covers the container row (a retry of the linux row).
+            echo "host_rows=$(jq -r 'any(.matrix)' <<< "${selected}")"
+          } >> "$GITHUB_OUTPUT"
+          echo "rows: $(jq -c 'map(.slug)' <<< "${selected}")"
 
   native-package-proof:
     needs: rft-matrix
+    if: needs.rft-matrix.outputs.host_rows == 'true'
     name: ${{ matrix.slug }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -248,9 +339,10 @@ jobs:
     name: linux-x64-gnu
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    # PR lane runs darwin-arm64 only (see native-package-proof above); the
-    # glibc-2.28 container proof belongs to the main/nightly/dispatch lane.
-    if: github.event_name != 'pull_request'
+    # PR lane runs darwin-arm64 only (see rft-matrix above); the glibc-2.28
+    # container proof belongs to the main/nightly/dispatch lane, and a retry
+    # dispatch narrows the lane to the rows it was given.
+    if: github.event_name != 'pull_request' && (inputs.rows == '' || contains(inputs.rows, 'linux-x64-gnu'))
     container:
       # Pinned by immutable digest (see MANYLINUX_IMAGE_DIGEST). A tag, even a
       # version-looking one, can be repointed; a digest cannot.
@@ -395,28 +487,202 @@ jobs:
             ${{ env.EVIDENCE }}/install-linux24/install-proof.json
           if-no-files-found: warn
 
+  # A runner that cancels a row job (run 44798291720: darwin-arm64, zero recorded
+  # steps) leaves no evidence behind, which used to require a human to rerun the
+  # whole workflow. Re-dispatch only the cancelled rows instead, once: a retry
+  # run carries `retry_of` and therefore never dispatches another retry. The
+  # retry run produces its own verdict for those rows; nothing is merged across
+  # runs, so a verdict never mixes two commits.
+  retry-cancelled-rows:
+    name: Retry cancelled rows (once)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [rft-matrix, native-package-proof, linux-gnu-proof]
+    # Only a row this lane owes can be retried: `host_rows` says whether the
+    # matrix side runs at all, and a `skipped` linux row is not part of the PR
+    # lane rather than a failure (I-000561 review).
+    if: |-
+      !cancelled() && inputs.retry_of == '' && (
+        (needs.rft-matrix.outputs.host_rows == 'true' && needs.native-package-proof.result != 'success') ||
+        (needs.linux-gnu-proof.result != 'success' && needs.linux-gnu-proof.result != 'skipped')
+      )
+    # The summary owns the verdict. A dispatch that cannot list the run's jobs or
+    # is refused must not turn a runner cancellation into a red run; what this
+    # job decided reaches the summary through the `rft-native-retry` artifact.
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - name: Re-dispatch the cancelled rows
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          # Two different commits: the rows ran at `github.sha` (on a pull request
+          # that is the synthetic merge commit, which nothing can dispatch), and
+          # the retry targets the PR head sha instead.
+          ORIGIN_SHA: ${{ github.sha }}
+          # pull_request runs live on refs/pull/<n>/merge, which cannot be
+          # dispatched; the head branch is the dispatchable identity there.
+          DISPATCH_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          DISPATCH_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # A fork's branch does not exist in this repository, so `ref` cannot
+          # name it: the dispatch is skipped and recorded instead of failing.
+          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+          # Every value below reaches this shell through `env:`, never through an
+          # inline expression, and the dispatch body is built by jq (no string
+          # interpolation into shell or JSON).
+          known_slug='win32-x64-msvc|darwin-arm64|darwin-x64|linux-x64-gnu'
+          retry_record() { # $1 attempted, $2 run id (or ""), $3 url (or ""), $4 note
+            jq -nc --argjson attempted "$1" --arg run_id "$2" --arg url "$3" --arg note "$4" \
+              --arg rows "${cancelled:-}" \
+              '{attempted: $attempted,
+                rows: ($rows | split(",") | map(select(. != ""))),
+                dispatched_run_id: (if $run_id == "" then null else ($run_id | tonumber) end),
+                run_url: (if $url == "" then null else $url end),
+                note: $note}' > retry.json
+          }
+          # Per-leg conclusions, not the matrix aggregate: one cancelled leg
+          # makes the aggregate `abandoned` (run 44798291720 attempt 1), which
+          # names no row and cannot tell cancellation from failure.
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "cancelled") | .name' > cancelled.txt
+          cancelled="$(grep -Ex "${known_slug}" cancelled.txt | paste -sd, - || true)"
+          if [ -z "${cancelled}" ]; then
+            retry_record false '' '' 'no row job was cancelled'
+            echo "No row job was cancelled by the runner; nothing to retry."
+            exit 0
+          fi
+          echo "Cancelled rows: ${cancelled}"
+          # git's own validator: legal branch names such as `fix/a+b` or
+          # `release@2` must pass. A refusal is a policy outcome, not an error.
+          if ! git check-ref-format --branch "${DISPATCH_REF}" >/dev/null 2>&1; then
+            retry_record false '' '' 'refused: not a valid branch name'
+            echo "::warning::rows ${cancelled} were cancelled by the runner, but ${DISPATCH_REF} is not a valid branch name to dispatch; no automatic retry was attempted"
+            exit 0
+          fi
+          if [ "${FORK_PR}" = "true" ]; then
+            retry_record false '' '' 'not attempted (fork PR)'
+            # The head branch is contributor-controlled: print it once as plain
+            # data and keep it out of anything a maintainer might paste. The
+            # command below carries placeholders only.
+            echo "fork PR head branch (data, not a command): ${DISPATCH_REF}"
+            echo "::warning::rows ${cancelled} were cancelled by the runner; the automatic retry is NOT attempted for a pull request from a fork (its head branch lives in the fork, not in ${REPO}). Re-run it from the fork with: gh workflow run rft-native-proof.yml --repo <fork> --ref <head-branch> -f rows=<rows>"
+            exit 0
+          fi
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # `origin_sha` says where the cancelled rows ran; `dispatch_sha` says
+          # what the retry targets and re-proves. A moving `--ref` cannot dispatch
+          # a commit, so the retry run reports the difference rather than claiming
+          # it re-proved the origin commit.
+          jq -nc --arg ref "${DISPATCH_REF}" --arg rows "${cancelled}" --arg retry_of "${RUN_ID}" \
+            --arg origin_sha "${ORIGIN_SHA}" --arg dispatch_sha "${DISPATCH_SHA}" \
+            '{ref: $ref, inputs: {rows: $rows, retry_of: $retry_of, origin_sha: $origin_sha, dispatch_sha: $dispatch_sha}}' \
+            | gh api -X POST "repos/${REPO}/actions/workflows/rft-native-proof.yml/dispatches" --input -
+          # The dispatch endpoint returns no run id, so resolve it from the runs
+          # it just created. This is a record only: the verdict never depends on
+          # it, and a miss leaves the dispatch itself intact.
+          new_run=''
+          for _ in 1 2 3 4 5; do
+            # A failed listing must not abort the job: the dispatch already
+            # happened, and the record below then says the id was not resolved.
+            new_run="$(gh api "repos/${REPO}/actions/workflows/rft-native-proof.yml/runs?event=workflow_dispatch&per_page=20" \
+              | jq -r --arg sha "${DISPATCH_SHA}" --arg after "${started_at}" \
+                  '.workflow_runs[] | select(.head_sha == $sha and .created_at >= $after) | .id' \
+              | sort -n | tail -1)" || new_run=''
+            if [ -n "${new_run}" ]; then break; fi
+            sleep 2
+          done
+          if [ -n "${new_run}" ]; then
+            run_url="${SERVER_URL}/${REPO}/actions/runs/${new_run}"
+            retry_record true "${new_run}" "${run_url}" "dispatched (run ${new_run})"
+            echo "::warning::rows ${cancelled} were cancelled by the runner — dispatched the one automatic retry: ${run_url}"
+          else
+            retry_record true '' '' 'dispatched (run id not resolved yet)'
+            echo "::warning::rows ${cancelled} were cancelled by the runner — dispatched the one automatic retry; it is the newest workflow_dispatch run of this workflow: ${SERVER_URL}/${REPO}/actions/workflows/rft-native-proof.yml"
+          fi
+
+      - name: Upload the retry record
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: rft-native-retry
+          path: retry.json
+          if-no-files-found: ignore
+
   native-package-matrix-summary:
     name: Matrix summary
     runs-on: ubuntu-latest
-    needs: [native-package-proof, linux-gnu-proof]
+    # `retry-cancelled-rows` is read for its record only; the verdict below never
+    # depends on it (it runs with continue-on-error).
+    needs: [rft-matrix, native-package-proof, linux-gnu-proof, retry-cancelled-rows]
     if: always()
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           filter: blob:none
 
+      # A lane can produce zero evidence artifacts (every row cancelled by the
+      # runner). download-artifact fails when the pattern matches nothing, so
+      # this step must not own the verdict: the per-row states below record the
+      # absence and `evidence_artifacts: none` names it in the matrix.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        continue-on-error: true
         with:
           pattern: rft-native-evidence-*
           merge-multiple: true
           path: rft-native-evidence
+
+      # What the retry job decided (dispatched + run link, not attempted, or
+      # nothing). This is a record, not an input to the verdict. A retry run
+      # produces its own verdict for its own rows; nothing is merged across runs.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        continue-on-error: true
+        with:
+          name: rft-native-retry
+          path: retry-record
+
+      - name: Resolve per-row job conclusions
+        id: conclusions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Job names equal the row slugs (`name: matrix.slug` on the matrix job
+          # and `name: linux-x64-gnu`), so the run's own jobs name each row state.
+          # There is no aggregate fallback: one cancelled leg makes the matrix
+          # result `abandoned` (run 44798291720 attempt 1), which names no row and
+          # cannot tell cancellation from failure, so an unresolved map fails the
+          # verdict instead of inventing row states.
+          if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
+               --jq '[.jobs[] | select(.conclusion != null) | {key: .name, value: .conclusion}] | from_entries' \
+               > row-conclusions.json; then
+            cat row-conclusions.json
+            echo "resolved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo '::warning::per-row job conclusions unavailable; the verdict will fail rather than fall back to the matrix aggregate'
+            echo '{}' > row-conclusions.json
+            echo "resolved=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Consolidate matrix evidence
         shell: bash
         env:
           MATRIX_JOB_RESULT: ${{ needs.native-package-proof.result }}
           LINUX_JOB_RESULT: ${{ needs.linux-gnu-proof.result }}
-          PR_LANE: ${{ github.event_name == 'pull_request' }}
+          CONCLUSIONS_RESOLVED: ${{ steps.conclusions.outputs.resolved }}
+          # The rows this run owes, from its own rft-matrix (lane or retry).
+          EXPECTED_ROWS: ${{ needs.rft-matrix.outputs.rows }}
+          RETRY_OF: ${{ inputs.retry_of }}
+          # `origin_sha` = where the cancelled rows ran (the PR merge commit);
+          # `dispatch_sha` = what the retry targets and must have re-proved.
+          ORIGIN_SHA: ${{ inputs.origin_sha }}
+          DISPATCH_SHA: ${{ inputs.dispatch_sha }}
         run: |
           set -euo pipefail
           mkdir -p "${EVIDENCE}"
@@ -424,24 +690,113 @@ jobs:
           import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { join } from 'node:path';
           const root = 'rft-native-evidence';
-          const prLane = process.env.PR_LANE === 'true';
-          const rows = prLane
-            ? [
-                // PR lane runs darwin-arm64 only (see rft-matrix above): the
-                // summary evaluates exactly the rows this run should have
-                // produced. A missing should-run row stays fail-closed
-                // ('unavailable' is never a pass).
-                { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
-              ]
-            : [
-                { suffix: 'linux-x64-gnu', short: 'linux', job_result: process.env.LINUX_JOB_RESULT },
-                { suffix: 'win32-x64-msvc', short: 'win', job_result: process.env.MATRIX_JOB_RESULT },
-                { suffix: 'darwin-arm64', short: 'macarm', job_result: process.env.MATRIX_JOB_RESULT },
-                { suffix: 'darwin-x64', short: 'macx64', job_result: process.env.MATRIX_JOB_RESULT },
-          ];
+          const SCHEMA = 'rft-p3-t1-native-package-matrix/v3';
+          const runSha = process.env.GITHUB_SHA ?? null;
+          const retryOf = process.env.RETRY_OF || '';
+          // The commit the cancelled rows ran at (on a pull request: the
+          // synthetic merge commit). Recorded as provenance only — nothing can
+          // dispatch it, and it is never compared with this run's sha.
+          const originSha = (process.env.ORIGIN_SHA || '') || null;
+          // The commit the retry targets and must have re-proved (the PR head sha
+          // there, else the origin's `github.sha`). This is the one compared with
+          // the sha this run actually ran.
+          const dispatchSha = (process.env.DISPATCH_SHA || '') || null;
+          // Rows this run owes: its lane on a normal run, the cancelled rows on a
+          // retry run. `rft-matrix` is the single source of that list.
+          const expected = JSON.parse(process.env.EXPECTED_ROWS || '[]');
+          const conclusionsPath = 'row-conclusions.json';
+          const conclusions = existsSync(conclusionsPath) ? JSON.parse(readFileSync(conclusionsPath, 'utf8')) : {};
+          // What the retry job reported (`rft-native-retry`). A record only: the
+          // verdict below is computed from this run's own rows, never from
+          // another run's matrix, so a verdict cannot mix two commits.
+          const retryRecordPath = join('retry-record', 'retry.json');
+          const retryInfo = existsSync(retryRecordPath) ? JSON.parse(readFileSync(retryRecordPath, 'utf8')) : null;
+          // A cancelled row is non-blocking only when the retry record says this
+          // very row was dispatched to re-prove it. Anything else — a record that
+          // names other rows, a refusal, a missing record, a run that is itself
+          // the retry — leaves the row's evidence absent, so it blocks and the
+          // reason is named on the row.
+          const dispatchedRows =
+            retryInfo !== null && retryInfo.attempted === true && Array.isArray(retryInfo.rows)
+              ? retryInfo.rows
+              : [];
+          const noRetryReasonFor = (suffix) => {
+            if (retryOf !== '') return 'this is the retry run';
+            if (retryInfo === null) return 'no retry record';
+            if (retryInfo.attempted !== true) {
+              return typeof retryInfo.note === 'string' && retryInfo.note !== ''
+                ? retryInfo.note
+                : 'no retry dispatched';
+            }
+            return dispatchedRows.includes(suffix) ? '' : 'not in the dispatched row list';
+          };
+          const payload = (fields) => ({
+            schema: SCHEMA,
+            source_sha: runSha,
+            run_id: process.env.GITHUB_RUN_ID ?? null,
+            utc: new Date().toISOString(),
+            jobs: { native_package_proof: process.env.MATRIX_JOB_RESULT, linux_gnu_proof: process.env.LINUX_JOB_RESULT },
+            pinned: {
+              rust_toolchain: process.env.RUST_TOOLCHAIN,
+              node_floor: process.env.NODE_FLOOR,
+              node_cohort: process.env.NODE_COHORT,
+              pnpm: process.env.PNPM_VERSION,
+              manylinux_image: process.env.MANYLINUX_IMAGE,
+              manylinux_digest: process.env.MANYLINUX_IMAGE_DIGEST,
+              rustup_init_version: process.env.RUSTUP_INIT_VERSION,
+              rustup_init_sha256: process.env.RUSTUP_INIT_SHA256,
+            },
+            ...fields,
+          });
+          const writeMatrix = (fields) => {
+            const value = payload(fields);
+            mkdirSync(process.env.EVIDENCE, { recursive: true });
+            writeFileSync(join(process.env.EVIDENCE, 'native-package-matrix.json'), JSON.stringify(value, null, 2) + '\n');
+            return value;
+          };
+          // The retry run records both commits it is about: the one it re-proved
+          // and the one the cancelled rows came from. A difference is named on
+          // every path, including the one that exits below.
+          const warnRetrySha = () => {
+            if (retryOf === '') return;
+            if (dispatchSha === null) {
+              console.warn(
+                '::warning::P3-T1 this retry does not record the dispatch sha; the commit it re-proved (' +
+                  runSha + ') cannot be compared with what the dispatch targeted',
+              );
+            } else if (dispatchSha !== runSha) {
+              console.warn(
+                '::warning::P3-T1 retry re-proved ' + runSha + '; the dispatch targeted ' + dispatchSha,
+              );
+            }
+          };
+          // The four-state model needs each row's own job conclusion. The matrix
+          // aggregate cannot supply it (one cancelled leg reads `abandoned` and
+          // names no row), so an unresolved map fails the verdict instead of
+          // inventing a row state from an aggregate.
+          if (process.env.CONCLUSIONS_RESOLVED !== 'true' || Object.keys(conclusions).length === 0) {
+            writeMatrix({
+              job_conclusion_source: 'unresolved',
+              evidence_artifacts: existsSync(root) ? 'uploaded' : 'none',
+              retry:
+                retryOf === ''
+                  ? null
+                  : { of_run_id: Number(retryOf), origin_sha: originSha, dispatch_sha: dispatchSha, sha: runSha },
+              rows: [],
+              cancelled_rows: [],
+              blocking_rows: [],
+              decision: 'fail',
+              note: 'per-row job conclusions could not be resolved from the run jobs API; the four-state verdict needs them, so no state is inferred from the matrix aggregate',
+            });
+            warnRetrySha();
+            console.error(
+              '::error::P3-T1 native package matrix is fail — cannot resolve per-row job conclusions ' +
+                '(the run jobs API did not answer); the matrix aggregate cannot name a row state',
+            );
+            process.exit(1);
+          }
           const out = [];
-          const buildInputs = [];
-          for (const row of rows) {
+          for (const row of expected) {
             const files = {
               package_receipt: join(root, 'native-packages', row.suffix, 'package-receipt.json'),
               binary_inspection: join(root, 'native-binary-' + row.suffix, 'binary-inspection.json'),
@@ -452,7 +807,6 @@ jobs:
             const immutableInputs = existsSync(immutableInputsPath)
               ? JSON.parse(readFileSync(immutableInputsPath, 'utf8'))
               : null;
-            if (immutableInputs) buildInputs.push(immutableInputs);
             const states = {};
             const missing = [];
             for (const [key, path] of Object.entries(files)) {
@@ -472,60 +826,122 @@ jobs:
               states.build_inputs = 'recorded';
             }
             const values = Object.values(states);
-            const status = values.includes('fail')
-              ? 'fail'
-              : values.every((value) => value === 'pass' || value === 'recorded')
-                ? 'pass'
-                : 'unavailable';
+            const jobConclusion = conclusions[row.suffix] ?? 'unknown';
+            // Evidence first: a row that uploaded a complete, valid proof has
+            // proof, so it is `pass` whatever the job's later state — a cancelled
+            // job that still uploaded evidence must not be called missing.
+            const evidenceComplete =
+              missing.length === 0 && values.every((value) => value === 'pass' || value === 'recorded');
+            // Four row states (I-000561). A cancelled job alone is non-blocking
+            // only when a retry was actually dispatched to re-prove the row;
+            // without a dispatch its evidence is absent, so it blocks as
+            // `missing` with the reason named on the row.
+            let status;
+            let note;
+            if (evidenceComplete) {
+              status = 'pass';
+            } else if (jobConclusion === 'cancelled') {
+              const noRetry = noRetryReasonFor(row.suffix);
+              if (noRetry === '') {
+                status = 'cancelled';
+              } else {
+                status = 'missing';
+                note = 'cancelled, no retry dispatched (' + noRetry + ')';
+              }
+            } else if (jobConclusion !== 'success') {
+              status = 'failed';
+            } else if (values.includes('fail')) {
+              status = 'failed';
+            } else {
+              status = 'missing';
+            }
             out.push({
               suffix: row.suffix,
-              job_result: row.job_result,
+              short: row.short,
+              job_conclusion: jobConclusion,
               states,
+              // Nothing for this row was uploaded: named explicitly so a reader
+              // of the matrix does not have to infer it from five paths.
+              no_evidence_uploaded: missing.length === Object.keys(files).length + 1,
               missing_evidence: missing,
               build_inputs: immutableInputs,
               status,
+              ...(note === undefined ? {} : { note }),
             });
           }
-          // PR lane: linux-gnu-proof is skipped by design, so only the host
-          // matrix job result gates the decision.
-          const jobFailure = prLane
-            ? process.env.MATRIX_JOB_RESULT !== 'success'
-            : [process.env.MATRIX_JOB_RESULT, process.env.LINUX_JOB_RESULT].some(
-                (result) => result !== 'success',
-              );
-          const decision = jobFailure
-            ? 'fail'
-            : out.every((row) => row.status === 'pass')
-              ? 'pass'
-              : out.some((row) => row.status === 'fail')
-                ? 'fail'
-                : 'unavailable';
-          const payload = {
-            schema: 'rft-p3-t1-native-package-matrix/v1',
-            source_sha: process.env.GITHUB_SHA ?? null,
-            run_id: process.env.GITHUB_RUN_ID ?? null,
-            utc: new Date().toISOString(),
-            jobs: { native_package_proof: process.env.MATRIX_JOB_RESULT, linux_gnu_proof: process.env.LINUX_JOB_RESULT },
-            build_inputs: buildInputs,
-            pinned: {
-              rust_toolchain: process.env.RUST_TOOLCHAIN,
-              node_floor: process.env.NODE_FLOOR,
-              node_cohort: process.env.NODE_COHORT,
-              pnpm: process.env.PNPM_VERSION,
-              manylinux_image: process.env.MANYLINUX_IMAGE,
-              manylinux_digest: process.env.MANYLINUX_IMAGE_DIGEST,
-              rustup_init_version: process.env.RUSTUP_INIT_VERSION,
-              rustup_init_sha256: process.env.RUSTUP_INIT_SHA256,
-            },
+          const cancelledRows = out.filter((row) => row.status === 'cancelled').map((row) => row.suffix);
+          // Cancelled rows the retry record does not cover for: their evidence is
+          // absent and they block, so they are named separately from the
+          // non-blocking `cancelled` rows above.
+          const undispatchedCancelRows = out.filter(
+            (row) => row.job_conclusion === 'cancelled' && row.status === 'missing',
+          );
+          const undispatchedReason = [
+            ...new Set(undispatchedCancelRows.map((row) => noRetryReasonFor(row.suffix))),
+          ].join('; ');
+          const blockingRows = out
+            .filter((row) => row.status === 'missing' || row.status === 'failed')
+            .map((row) => row.suffix);
+          // A retry run says which run it re-proves and which two commits are in
+          // play; an origin run reports what the retry job decided (a dispatch
+          // record, a refusal, or nothing). Neither claims evidence from the
+          // other run. With no record, `cancelledRows` is necessarily empty (every
+          // cancelled row blocked as missing), so only the blocking set decides.
+          const retry =
+            retryOf !== ''
+              ? { of_run_id: Number(retryOf), origin_sha: originSha, dispatch_sha: dispatchSha, sha: runSha }
+              : retryInfo === null
+                ? undispatchedCancelRows.length === 0
+                  ? null
+                  : 'unknown (the retry job reported nothing)'
+                : retryInfo.attempted === true
+                  ? {
+                      status: retryInfo.note,
+                      rows: retryInfo.rows,
+                      ...(retryInfo.dispatched_run_id === null
+                        ? {}
+                        : { run_id: retryInfo.dispatched_run_id, run_url: retryInfo.run_url }),
+                    }
+                  : retryInfo.rows.length > 0
+                    ? retryInfo.note
+                    : null;
+          const decision = out.length === 0 || blockingRows.length > 0 ? 'fail' : 'pass';
+          const undispatchedNames = undispatchedCancelRows.map((row) => row.suffix);
+          writeMatrix({
+            job_conclusion_source: 'run-jobs',
+            evidence_artifacts: existsSync(root) ? 'uploaded' : 'none',
+            retry,
+            build_inputs: out.map((row) => row.build_inputs).filter(Boolean),
             rows: out,
+            cancelled_rows: cancelledRows,
+            undispatched_cancelled_rows: undispatchedNames,
+            blocking_rows: blockingRows,
             decision,
-            note: 'unavailable means the evidence file was never produced (runner, image or toolchain contract missing) — it blocks P3 and is never a pass',
-          };
-          mkdirSync(process.env.EVIDENCE, { recursive: true });
-          writeFileSync(join(process.env.EVIDENCE, 'native-package-matrix.json'), JSON.stringify(payload, null, 2) + '\n');
+            note: 'row status: pass (its evidence is complete and valid, whatever the job state) | cancelled (the runner cancelled the job and the automatic retry was dispatched for that row) | missing (no evidence: the job succeeded without producing it, or a cancelled row is not covered by a dispatch) | failed (the job failed). missing and failed block P3; cancelled blocks nothing only because a dispatch covers that row (I-000561)',
+          });
           console.log(JSON.stringify(out, null, 2));
+          warnRetrySha();
+          if (cancelledRows.length > 0) {
+            console.warn(
+              '::warning::P3-T1 row(s) cancelled by the runner: ' + cancelledRows.join(', ') +
+                ' — no evidence was possible; the dispatched retry re-proves them (I-000561)',
+            );
+          }
+          if (undispatchedNames.length > 0) {
+            console.warn(
+              '::warning::P3-T1 cancelled row(s) with no retry dispatched: ' + undispatchedNames.join(', ') +
+                ' — recorded as missing and blocking (' + undispatchedReason + ')',
+            );
+          }
           if (decision !== 'pass') {
-            console.error('::error::P3-T1 native package matrix is ' + decision + ' — a missing row blocks P3');
+            const reason =
+              out.length === 0
+                ? 'no row was evaluated'
+                : undispatchedNames.length > 0
+                  ? undispatchedNames.join(', ') + ' was cancelled with no retry dispatched (' +
+                    undispatchedReason + '), so its evidence is absent'
+                  : blockingRows.join(', ') + ' is missing or failed evidence';
+            console.error('::error::P3-T1 native package matrix is ' + decision + ' — ' + reason);
             process.exit(1);
           }
           JS
