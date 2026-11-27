@@ -45,15 +45,16 @@
  * skipped on both sides of that verification, because its contents are not part
  * of this revision's tree.
  *
- * A caller may pass a `shareRoot` to reuse compiled work across several runs:
- * extracted archives are cached there under a digest of their source (see
- * {@link treeDigest}), and the consumer target dir lives there too, so a second
- * case that ships the same sources resolves and builds from Cargo's own cache
- * instead of compiling the contract graph again. The digest ignores
- * `.cargo_vcs_info.json` because `cargo package` stamps it with the staging
- * commit, which is the only way two runs of identical sources differ. Nothing
- * else is shared: each run still stages, packs, extracts and reports on its own
- * inputs, and the CLI never passes a `shareRoot`, so a gate run stays hermetic.
+ * A caller may pass a `shareRoot` — which the caller removes — to reuse
+ * compiled work across several runs: extracted archives are cached there under
+ * a digest of their source (see {@link treeDigest}), and the consumer target dir
+ * lives there too, so a second case that ships the same sources resolves and
+ * builds from Cargo's own cache instead of compiling the contract graph again.
+ * The digest ignores `.cargo_vcs_info.json` because `cargo package` stamps it
+ * with the staging commit, which is the only way two runs of identical sources
+ * differ. Nothing else is shared: each run still stages, packs, extracts and
+ * reports on its own inputs, and the CLI never passes a `shareRoot`, so a gate
+ * run stays hermetic.
  *
  * CLI: node tooling/release/check-contract-packageability.mjs [--json] [--require-clean]
  *
