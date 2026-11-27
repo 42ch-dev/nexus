@@ -471,9 +471,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [rft-matrix, native-package-proof, linux-gnu-proof]
+    # Only a row this lane owes can be retried: `host_rows` says whether the
+    # matrix side runs at all, and a `skipped` linux row is not part of the PR
+    # lane rather than a failure (I-000561 review).
     if: |-
-      !cancelled() && inputs.retry_of == '' &&
-      (needs.native-package-proof.result != 'success' || needs.linux-gnu-proof.result != 'success')
+      !cancelled() && inputs.retry_of == '' && (
+        (needs.rft-matrix.outputs.host_rows == 'true' && needs.native-package-proof.result != 'success') ||
+        (needs.linux-gnu-proof.result != 'success' && needs.linux-gnu-proof.result != 'skipped')
+      )
     # The summary owns the verdict. A dispatch that cannot list the run's jobs or
     # is refused must not turn a runner cancellation into a red run; what this
     # job decided reaches the summary through the `rft-native-retry` artifact.
@@ -488,12 +493,11 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
           SERVER_URL: ${{ github.server_url }}
-          # The commit whose rows were cancelled; the retry run records it so a
-          # re-proof of a newer branch tip is never mistaken for the same commit.
-          ORIGIN_SHA: ${{ github.sha }}
           # pull_request runs live on refs/pull/<n>/merge, which cannot be
           # dispatched; the head branch is the dispatchable identity there, and
-          # its head commit is the sha the dispatched run will carry.
+          # its head commit is the sha the dispatched run will carry — so it is
+          # also the commit the cancelled rows came from (never the synthetic
+          # merge commit, which would differ on every PR retry).
           DISPATCH_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
           DISPATCH_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # A fork's branch does not exist in this repository, so `ref` cannot
@@ -526,24 +530,25 @@ jobs:
             exit 0
           fi
           echo "Cancelled rows: ${cancelled}"
-          case "${DISPATCH_REF}" in
-            '' | *[!A-Za-z0-9._/-]*)
-              retry_record false '' '' 'refused: unexpected dispatch ref'
-              echo "::error::refusing to dispatch: the ref is not a plain branch name"
-              exit 1
-              ;;
-          esac
+          # git's own validator: legal branch names such as `fix/a+b` or
+          # `release@2` must pass. A refusal is a policy outcome, not an error.
+          if ! git check-ref-format --branch "${DISPATCH_REF}" >/dev/null 2>&1; then
+            retry_record false '' '' 'refused: not a valid branch name'
+            echo "::warning::rows ${cancelled} were cancelled by the runner, but ${DISPATCH_REF} is not a valid branch name to dispatch; no automatic retry was attempted"
+            exit 0
+          fi
           if [ "${FORK_PR}" = "true" ]; then
             retry_record false '' '' 'not attempted (fork PR)'
             echo "::warning::rows ${cancelled} were cancelled by the runner; the automatic retry is NOT attempted for a pull request from a fork (${DISPATCH_REF} lives in the fork, not in ${REPO}). Re-run it from the fork with: gh workflow run rft-native-proof.yml --repo <fork> --ref ${DISPATCH_REF} -f rows=${cancelled}"
             exit 0
           fi
           started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          # `origin_sha` records which commit the cancelled rows came from: a
-          # moving `--ref` cannot dispatch a sha, so the retry run reports the
-          # difference instead of claiming it re-proved the same commit.
+          # `origin_sha` is the commit this dispatch targets (the identity the
+          # ref resolves to, not the synthetic PR merge commit): a moving `--ref`
+          # cannot dispatch a sha, so the retry run reports the difference
+          # instead of claiming it re-proved the same commit.
           jq -nc --arg ref "${DISPATCH_REF}" --arg rows "${cancelled}" --arg retry_of "${RUN_ID}" \
-            --arg origin_sha "${ORIGIN_SHA}" \
+            --arg origin_sha "${DISPATCH_SHA}" \
             '{ref: $ref, inputs: {rows: $rows, retry_of: $retry_of, origin_sha: $origin_sha}}' \
             | gh api -X POST "repos/${REPO}/actions/workflows/rft-native-proof.yml/dispatches" --input -
           # The dispatch endpoint returns no run id, so resolve it from the runs
@@ -695,6 +700,22 @@ jobs:
             writeFileSync(join(process.env.EVIDENCE, 'native-package-matrix.json'), JSON.stringify(value, null, 2) + '\n');
             return value;
           };
+          // The retry run records both commits it is about: the one it re-proved
+          // and the one the cancelled rows came from. A difference is named on
+          // every path, including the one that exits below.
+          const warnRetrySha = () => {
+            if (retryOf === '') return;
+            if (originSha === null) {
+              console.warn(
+                '::warning::P3-T1 this retry does not record the origin sha; the cancelled rows came from an ' +
+                  'unknown commit (this run re-proved ' + runSha + ')',
+              );
+            } else if (originSha !== runSha) {
+              console.warn(
+                '::warning::P3-T1 retry re-proved ' + runSha + '; the cancelled rows came from ' + originSha,
+              );
+            }
+          };
           // The four-state model needs each row's own job conclusion. The matrix
           // aggregate cannot supply it (one cancelled leg reads `abandoned` and
           // names no row), so an unresolved map fails the verdict instead of
@@ -703,13 +724,14 @@ jobs:
             writeMatrix({
               job_conclusion_source: 'unresolved',
               evidence_artifacts: existsSync(root) ? 'uploaded' : 'none',
-              retry: retryOf === '' ? null : { of_run_id: Number(retryOf) },
+              retry: retryOf === '' ? null : { of_run_id: Number(retryOf), origin_sha: originSha, sha: runSha },
               rows: [],
               cancelled_rows: [],
               blocking_rows: [],
               decision: 'fail',
               note: 'per-row job conclusions could not be resolved from the run jobs API; the four-state verdict needs them, so no state is inferred from the matrix aggregate',
             });
+            warnRetrySha();
             console.error(
               '::error::P3-T1 native package matrix is fail — cannot resolve per-row job conclusions ' +
                 '(the run jobs API did not answer); the matrix aggregate cannot name a row state',
@@ -813,16 +835,7 @@ jobs:
             note: 'row status: pass | cancelled (the runner cancelled the job, so no evidence was possible; the cancelled rows are re-run once by a separate dispatch and that run carries their verdict) | missing (the job succeeded but produced no evidence) | failed (the job failed). missing and failed block P3; cancelled never does (I-000561)',
           });
           console.log(JSON.stringify(out, null, 2));
-          if (retryOf !== '' && originSha === null) {
-            console.warn(
-              '::warning::P3-T1 this retry does not record the origin sha; the cancelled rows came from an ' +
-                'unknown commit (this run re-proved ' + runSha + ')',
-            );
-          } else if (retryOf !== '' && originSha !== runSha) {
-            console.warn(
-              '::warning::P3-T1 retry re-proved ' + runSha + '; the cancelled rows came from ' + originSha,
-            );
-          }
+          warnRetrySha();
           if (cancelledRows.length > 0) {
             console.warn(
               '::warning::P3-T1 row(s) cancelled by the runner: ' + cancelledRows.join(', ') +
