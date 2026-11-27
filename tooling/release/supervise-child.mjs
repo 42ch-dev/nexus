@@ -88,18 +88,20 @@ function killCommandGroup({ assertPid = false } = {}) {
 }
 
 /**
- * Write on stderr and leave with `code`. `writeSync` because a pipe write is
- * asynchronous and `process.exit` would drop it, which is how a caller loses the
- * cause it was told to expect.
+ * Write on stderr and leave with `code`. Both attempts are synchronous: a pipe
+ * write through the stream is asynchronous and `process.exit` would drop it, which
+ * is how a caller loses the cause it was told to expect. `writeFileSync` on the raw
+ * fd covers a `writeSync` that threw (EAGAIN on a full pipe).
  *
  * @param {string} message
  * @param {number} code
  */
 function fail(message, code) {
+  const text = `${message}\n`;
   try {
-    writeSync(2, `${message}\n`);
+    writeSync(2, text);
   } catch {
-    process.stderr.write(`${message}\n`);
+    writeFileSync(2, text);
   }
   process.exit(code);
 }
@@ -110,16 +112,6 @@ function dieBySignal(signal) {
   process.kill(process.pid, signal);
 }
 
-/**
- * A signal that arrived before `spawn` reported. Commands are spawned with a pid
- * synchronously, so this only happens when the spawn is about to fail: waiting for
- * that event lets the caller read `could not run: <cause>` instead of a pointer to
- * a cause that never arrives.
- *
- * @type {string | null}
- */
-let pendingSignal = null;
-
 // A signal must both stop the build and be the reason this process dies: the
 // caller reads a timeout kill from the child's signal, and leaving a listener
 // installed would swallow the re-raise instead. These go in before `spawn` so an
@@ -128,7 +120,10 @@ let pendingSignal = null;
 for (const signal of SIGNALS) {
   process.once(signal, () => {
     if (child?.pid === undefined) {
-      pendingSignal = signal;
+      // No command to kill: `spawn` assigns a pid synchronously on success, so this
+      // is a spawn that is about to fail, and its `error` event reports why with
+      // exit 127. Killing nothing and letting that verdict run is what keeps the
+      // cause, which a second exit here would replace with silence.
       return;
     }
     killCommandGroup();
@@ -180,14 +175,6 @@ child.on("spawn", () => {
     } catch {
       // The caller closed the channel; the group is still reaped on our signals.
     }
-  }
-  if (pendingSignal !== null) {
-    // The command did start, so the early signal still gets its kill and its
-    // death by that signal.
-    const signal = pendingSignal;
-    pendingSignal = null;
-    killCommandGroup();
-    dieBySignal(signal);
   }
 });
 

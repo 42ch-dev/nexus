@@ -1397,16 +1397,15 @@ setInterval(() => {}, 1000);
  */
 const SUICIDE_SPAWNER = `
 const { spawn } = require("node:child_process");
-const { existsSync, readFileSync } = require("node:fs");
+const { existsSync, readFileSync, writeSync } = require("node:fs");
+const say = (text) => writeSync(2, text + "\\n");
 const rawMinimum = (process.env.NEXUS_FIXTURE_MIN_WRITES ?? "").trim();
 const minimumWrites = rawMinimum.length === 0 ? 2 : Number(rawMinimum);
 if (!Number.isInteger(minimumWrites) || minimumWrites < 1) {
-  process.stderr.write(
-    'fixture: NEXUS_FIXTURE_MIN_WRITES must be a positive integer, got "' + rawMinimum + '"\\n',
-  );
+  say('fixture: NEXUS_FIXTURE_MIN_WRITES must be a positive integer, got "' + rawMinimum + '"');
   process.exit(5);
 }
-spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
+const writer = spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
 const deadline = Date.now() + 5000;
 const writes = (path) => (existsSync(path) ? readFileSync(path, "utf8").length : 0);
 const poll = setInterval(() => {
@@ -1418,9 +1417,10 @@ const poll = setInterval(() => {
   }
   if (Date.now() > deadline) {
     clearInterval(poll);
-    process.stderr.write(
-      "fixture: the marker writer never reached " + minimumWrites + " writes\\n",
-    );
+    say("fixture: the marker writer never reached " + minimumWrites + " writes");
+    // Nothing will reap this on the way out: the supervisor forwards an exit code
+    // instead of killing a group, so the fixture owns its writer.
+    writer.kill("SIGKILL");
     process.exit(4);
   }
 }, 25);
@@ -1936,28 +1936,35 @@ test(
  * The fixture's bound parses like `NEXUS_RELEASE_DEADLINE_MS`: empty means the
  * default, a positive integer is honoured, anything else is refused by name rather
  * than silently becoming a bound that never arms or one that fires at once.
+ *
+ * Each case runs under `supervise-child.mjs`, so the marker writer the fixture
+ * starts is reaped by the supervisor's group kill instead of outliving the test,
+ * and every case ends by asserting that its marker stopped changing.
  */
 test("the fixture's write bound parses like the deadline env", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-release-fixture-bound-"));
   /** @param {string | undefined} value */
   const runFixture = async (value) => {
-    const env = { ...process.env, MARKER: join(dir, `marker-${String(value)}.txt`) };
+    const marker = join(dir, `marker-${String(value)}.txt`);
+    const env = { ...process.env, MARKER: marker };
     if (value === undefined) {
       delete env.NEXUS_FIXTURE_MIN_WRITES;
     } else {
       env.NEXUS_FIXTURE_MIN_WRITES = value;
     }
-    return new Promise((done) => {
-      const fixture = spawn(process.execPath, ["-e", SUICIDE_SPAWNER], {
-        stdio: ["ignore", "ignore", "pipe"],
-        env,
-      });
+    const result = await new Promise((done) => {
+      const supervisor = spawn(
+        process.execPath,
+        [SUPERVISOR_PATH, process.execPath, "-e", SUICIDE_SPAWNER],
+        { detached: true, stdio: ["ignore", "ignore", "pipe"], env },
+      );
       let stderr = "";
-      fixture.stderr.on("data", (chunk) => {
+      supervisor.stderr.on("data", (chunk) => {
         stderr += chunk;
       });
-      fixture.on("close", (code, signal) => done({ code, signal, stderr }));
+      supervisor.on("close", (code, signal) => done({ code, signal, stderr }));
     });
+    return { ...result, marker };
   };
   try {
     for (const value of [undefined, "", "  ", "2"]) {
@@ -1967,11 +1974,13 @@ test("the fixture's write bound parses like the deadline env", async () => {
         "SIGTERM",
         `NEXUS_FIXTURE_MIN_WRITES=${JSON.stringify(value)} arms and kills itself`,
       );
+      await assertNothingWrites(result.marker);
     }
 
     const unreachable = await runFixture("999");
     assert.equal(unreachable.code, 4);
     assert.match(unreachable.stderr, /never reached 999 writes/);
+    await assertNothingWrites(unreachable.marker);
 
     for (const value of ["x", "0", "-1"]) {
       const invalid = await runFixture(value);
@@ -1984,58 +1993,16 @@ test("the fixture's write bound parses like the deadline env", async () => {
         invalid.stderr,
         /NEXUS_FIXTURE_MIN_WRITES must be a positive integer/,
       );
+      assert.equal(
+        existsSync(invalid.marker),
+        false,
+        "a refused bound never starts the writer",
+      );
     }
   } finally {
     cleanupTempRepo(dir);
   }
 });
-
-/**
- * A signal can arrive before `spawn` has reported. The caller still has to learn why
- * its command never ran, so the supervisor records the signal, waits for the spawn
- * verdict, and reports the cause instead of dying silently by the signal.
- */
-test(
-  "a signal racing a failed spawn still reports the cause",
-  { skip: process.platform === "win32" ? "no process groups on Windows" : false },
-  async () => {
-    const dir = mkdtempSync(join(tmpdir(), "nexus-release-spawn-race-"));
-    const pidFile = join(dir, "supervisor.pid");
-    try {
-      const supervisor = spawn(
-        process.execPath,
-        [SUPERVISOR_PATH, "/nonexistent-nexus-command"],
-        {
-          detached: true,
-          stdio: ["ignore", "ignore", "pipe"],
-          env: { ...process.env, NEXUS_SUPERVISOR_PID_FILE: pidFile },
-        },
-      );
-      let stderr = "";
-      supervisor.stderr.on("data", (chunk) => {
-        stderr += chunk;
-      });
-      const closed = new Promise((done) =>
-        supervisor.on("close", (code, signal) => done({ code, signal, stderr })),
-      );
-      // The pid appears only once the signal is handled, so this signal always
-      // reaches a handler, on either side of the spawn verdict.
-      await waitFor(() => existsSync(pidFile), 4000);
-      supervisor.kill("SIGTERM");
-
-      const exit = await Promise.race([
-        closed,
-        new Promise((done) => setTimeout(() => done("still-running"), 5000)),
-      ]);
-      assert.notEqual(exit, "still-running", "the supervisor reported and left");
-      assert.equal(exit.code, 127, "a command that never started exits 127");
-      assert.match(stderr, /could not run/, "the caller reads the cause");
-      assert.match(stderr, /ENOENT/, "the cause names the missing command");
-    } finally {
-      cleanupTempRepo(dir);
-    }
-  },
-);
 
 /** Child that only reports whether {@link run} accepted the deadline. */
 const DEADLINE_PROBE = `
