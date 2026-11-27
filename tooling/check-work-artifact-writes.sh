@@ -15,15 +15,18 @@
 # inventory edit. A file can only be skipped by an explicit opt-out row
 # (`path<TAB>-<TAB>0<TAB>disposition`) in the allowlist.
 #
-# Classification (F-002): a test-gated `cfg` attribute cuts production only
-# when it annotates a `mod` (the test module span is excluded); the scan
-# otherwise runs to EOF. Only predicates that require `test` compilation are
-# gates: `#[cfg(test)]` and `#[cfg(all(…, test))]`. `#[cfg(any(test, …))]` is
-# not a gate — another disjunct (e.g. a production feature) can hold without
-# test — and neither is `#[cfg(not(test))]` or `#[cfg(feature = "test")]`. A
-# test-gated attribute on a non-module item (e.g. a test-only const), struct
-# field or statement does not hide production lines below it; one on an opaque
-# body (`{ … }` or a macro invocation) fails closed.
+# Classification (F-002): only predicates that require `test` compilation are
+# gates: `#[cfg(test)]` and `#[cfg(all(…, test))]` (a trailing comma in the
+# predicate list is ignored). `#[cfg(any(test, …))]` is not a gate — another
+# disjunct (e.g. a production feature) can hold without test — and neither is
+# `#[cfg(not(test))]` or `#[cfg(feature = "test")]`. A gate cuts a span only
+# for an item whose `{ … }` body the tracker can match: a `mod … { }` or a
+# macro invocation (`mac!`, `path::mac!`, `::mac!`). An out-of-line
+# `mod tests;` opens no span (its body is another file), and a gate on a
+# non-module item (e.g. a test-only const), struct field or statement does not
+# hide production lines below it. An opaque body the tracker cannot delimit (a
+# bare `{ … }` block or a non-brace macro invocation such as `include!(…)`)
+# fails closed.
 #
 # Exemptions (F-001): tooling/work-artifact-write-allowlist.tsv rows are
 # `path<TAB>symbol<TAB>expected_count<TAB>disposition` — exact path+symbol and
@@ -70,13 +73,21 @@ BUILTINS_GLOB = "crates/nexus-capability/src/builtins/*.rs"
 WRITE_RE = re.compile(r"(?<![\w])(?:std::fs|tokio::fs|fs)::write\s*\(")
 CFG_ATTR_RE = re.compile(r"^\s*#\[cfg\((.*)\)\]")
 MOD_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z_]\w*")
+# An out-of-line `mod tests;` declaration: the body lives in another file, so it
+# opens no span here.
+MOD_DECL_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+[A-Za-z_]\w*\s*;")
+# A test-gated macro invocation with a `{ … }` token tree (`mac!`, `path::mac!`,
+# `::mac!`): the tracker can match its closing brace, so the body is excluded
+# like a `mod … { }` span.
+MACRO_BODY_RE = re.compile(r"^\s*(?:::)?(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*!\s*\{")
 ITEM_RE = re.compile(
     r"^\s*(?:pub(?:\([^)]*\))?\s+)?"
     r"(?:const|static|fn|use|struct|enum|impl|trait|type|extern|macro_rules!)\b"
 )
-# A test-gated attribute on an opaque body could hide a module the span
-# tracker cannot follow, so the guard fails closed instead of scanning past it.
-OPAQUE_RE = re.compile(r"^\s*(?:\{|[A-Za-z_]\w*!)")
+# A test-gated attribute on an opaque body (a bare block, or a macro invocation
+# without a `{ … }` body) could hide a module the span tracker cannot follow, so
+# the guard fails closed instead of scanning past it.
+OPAQUE_RE = re.compile(r"^\s*(?:\{|(?:::)?(?:[A-Za-z_]\w*::)*[A-Za-z_]\w*!)")
 FN_RE = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 IMPL_FOR_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+[^{]*?\bfor\s+([A-Za-z_]\w*)")
 IMPL_RE = re.compile(r"\bimpl(?:\s*<[^>]*>)?\s+([A-Za-z_]\w*)")
@@ -156,7 +167,7 @@ def enclosing_symbol(lines, idx):
 
 
 def split_top_level(expr):
-    """Comma-separated items of `expr` at paren depth 0."""
+    """Comma-separated non-empty items of `expr` at paren depth 0."""
     parts, depth, buf = [], 0, []
     for ch in expr:
         if depth == 0 and ch == ",":
@@ -169,7 +180,8 @@ def split_top_level(expr):
             depth -= 1
         buf.append(ch)
     parts.append("".join(buf))
-    return parts
+    # A trailing comma (`any(test,)`) or a stray comma leaves an empty part.
+    return [part for part in parts if part.strip()]
 
 
 def requires_test(expr):
@@ -182,6 +194,8 @@ def requires_test(expr):
     if len(parts) > 1:
         # `cfg(a, b)` is not valid Rust; require test from every part.
         return all(requires_test(part) for part in parts)
+    if not parts:
+        return False
     m = re.match(r"\s*([A-Za-z_]\w*)\s*(?:\((.*)\))?\s*(=.*)?$", parts[0])
     if not m:
         return False
@@ -194,7 +208,9 @@ def requires_test(expr):
     if name == "all":
         return any(requires_test(item) for item in split_top_level(inner))
     if name == "any":
-        return all(requires_test(item) for item in split_top_level(inner))
+        disjuncts = split_top_level(inner)
+        # Empty `any()` never holds; otherwise every disjunct must require test.
+        return bool(disjuncts) and all(requires_test(item) for item in disjuncts)
     return False
 
 
@@ -205,7 +221,7 @@ def is_test_gate(line):
 
 
 def test_module_spans(rel, lines):
-    """Line indexes belonging to test-gated `mod …` blocks."""
+    """Line indexes belonging to test-gated `mod … { }` / `mac! { }` spans."""
     skip = set()
     i = 0
     while i < len(lines):
@@ -223,12 +239,17 @@ def test_module_spans(rel, lines):
             fail(f"{rel}:{i + 1}: test-gated attribute at EOF — cannot classify the item")
             i += 1
             continue
-        if MOD_RE.match(lines[j]):
+        if MOD_DECL_RE.match(lines[j]):
+            # Out-of-line `mod tests;`: the body is another file, so this
+            # declaration opens no span and the code below stays production.
+            i += 1
+            continue
+        if MOD_RE.match(lines[j]) or MACRO_BODY_RE.match(lines[j]):
             open_line = j
             while open_line < len(lines) and "{" not in lines[open_line]:
                 open_line += 1
             if open_line >= len(lines):
-                fail(f"{rel}:{i + 1}: test-gated mod without a body")
+                fail(f"{rel}:{i + 1}: test-gated item without a body")
                 i = j + 1
                 continue
             indent = len(lines[j]) - len(lines[j].lstrip())
@@ -241,7 +262,7 @@ def test_module_spans(rel, lines):
                     end = m
                     break
             if end is None:
-                fail(f"{rel}:{i + 1}: unclosed test-gated mod")
+                fail(f"{rel}:{i + 1}: unclosed test-gated body")
                 i = j + 1
                 continue
             skip.update(range(i, end + 1))

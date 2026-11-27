@@ -4,9 +4,12 @@
 # byte-write guard's `cfg` classification (I-000408).
 #
 # Each fixture is scanned through the guard's fixture mode. Only predicates
-# that require `test` compilation cut a module span (`cfg(test)`,
-# `cfg(all(…, test))`); `cfg(any(test, …))`, `cfg(not(test))` and a test-gated
-# attribute on a field stay scanned, and an opaque body fails closed.
+# that require `test` compilation cut a span (`cfg(test)`,
+# `cfg(all(…, test))`; a trailing comma does not change them), and only for an
+# item whose `{ … }` body is matchable (a `mod … { }` or a macro invocation,
+# including `path::mac!`). `cfg(any(test, …))`, `cfg(not(test))`, a field
+# annotation and an out-of-line `mod tests;` declaration stay scanned; a body
+# the tracker cannot delimit fails closed.
 #
 # Usage (from repository root): bash tooling/check-work-artifact-writes.test.sh
 # Exit codes: 0 — every fixture matched its expected result; 1 — mismatch.
@@ -46,9 +49,12 @@ OPAQUE_MSG="test-gated attribute on an opaque body"
 
 expect cfg_test.rs 0
 expect cfg_all_feature_test.rs 0
+expect cfg_any_test_trailing_comma.rs 0
 expect cfg_any_test_wasm.rs 1 "$WRITE_MSG"
 expect cfg_not_test.rs 1 "$WRITE_MSG"
 expect cfg_any_test_field.rs 1 "$WRITE_MSG"
+expect mod_decl_no_span.rs 1 "$WRITE_MSG"
+expect macro_path_attr.rs 0
 expect opaque_macro_attr.rs 1 "$OPAQUE_MSG"
 expect opaque_block_attr.rs 1 "$OPAQUE_MSG"
 
