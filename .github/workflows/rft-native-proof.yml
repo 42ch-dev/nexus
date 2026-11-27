@@ -537,11 +537,13 @@ jobs:
           # it, and a miss leaves the dispatch itself intact.
           new_run=''
           for _ in 1 2 3 4 5; do
+            # A failed listing must not abort the job: the dispatch already
+            # happened, and the record below then says the id was not resolved.
             new_run="$(gh api "repos/${REPO}/actions/workflows/rft-native-proof.yml/runs?event=workflow_dispatch&per_page=20" \
               | jq -r --arg sha "${DISPATCH_SHA}" --arg after "${started_at}" \
                   '.workflow_runs[] | select(.head_sha == $sha and .created_at >= $after) | .id' \
-              | sort -n | tail -1)"
-            [ -n "${new_run}" ] && break
+              | sort -n | tail -1)" || new_run=''
+            if [ -n "${new_run}" ]; then break; fi
             sleep 2
           done
           if [ -n "${new_run}" ]; then
