@@ -50,8 +50,8 @@ const FILE_STARTED = Date.now();
  * Measured budget for this file, left well below `timeout-minutes` so a regression
  * fails here with a number instead of being killed with nothing to read. The runs
  * behind it are recorded next to the CI step: 720 s is 2.2x the slowest recorded
- * run (327 s, 45942850812) and 3.3x the fastest (219 s, 45955451001), which spans
- * the ~1.5x runner swing; locally the file measures 188.2 s on a 10-core
+ * run (329 s in 45949440689) and 3.3x the fastest (219 s in 45955451001), which
+ * spans the 1.5x runner swing; locally the file measures 188.2 s on a 10-core
  * darwin/arm64 host.
  */
 const FILE_BUDGET_SECONDS = 720;
@@ -1387,13 +1387,23 @@ setInterval(() => {}, 1000);
 `;
 
 /**
- * Spawns the marker writer, then kills itself with SIGTERM: the writer stays in
- * the same group, so only the supervisor reaping that group stops it.
+ * Spawns the marker writer, then kills itself with SIGTERM once the writer has
+ * been observed working (two writes), so the precondition is established by the
+ * marker rather than by a wall clock a loaded runner may not meet. The 3 s bound
+ * only stops a writer that never starts from hanging the fixture.
  */
 const SUICIDE_SPAWNER = `
 const { spawn } = require("node:child_process");
+const { existsSync, readFileSync } = require("node:fs");
 spawn(process.execPath, ["-e", "setInterval(() => require('node:fs').appendFileSync(process.env.MARKER, '.'), 100)"], { stdio: "ignore" });
-setTimeout(() => process.kill(process.pid, "SIGTERM"), 400);
+const deadline = Date.now() + 3000;
+const writes = (path) => (existsSync(path) ? readFileSync(path, "utf8").length : 0);
+const poll = setInterval(() => {
+  if (writes(process.env.MARKER) >= 2 || Date.now() > deadline) {
+    clearInterval(poll);
+    process.kill(process.pid, "SIGTERM");
+  }
+}, 25);
 `;
 
 /** Child that spends its deadline inside {@link run}. */

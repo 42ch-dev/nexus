@@ -285,8 +285,9 @@ jobs:
       #
       # After that change the step measured 327, 271, 329 and 322 s (45942850812,
       # 45944849798, 45949440689, 45951819482) and 219 s on a faster runner
-      # (45955451001): a ~1.5x swing between runners on unchanged work. The budget
-      # below is sized for the slow end of that swing, not for any one measurement.
+      # (45955451001): a 1.5x swing between runners on unchanged work (329/219).
+      # The budget below is sized for the slow end of that swing, not for any one
+      # measurement.
       #
       # Supervision of deadline-bound children (`supervise-child.mjs`, so an
       # interrupt cannot orphan a build) costs one process per child: 38 ms
@@ -295,13 +296,13 @@ jobs:
       # which the margin below absorbs; it is not what sets the budget.
       #
       # The file asserts its own 720 s budget in its last test: 2.2x the slowest
-      # recorded run (327 s), 3.3x the fastest (219 s), and 180 s under this 15
-      # minute ceiling. It also hands every blocking child only the time left in
-      # it, so a case that outgrows the budget dies as a named failure — one
-      # killed by the deadline names the command and `NEXUS_RELEASE_DEADLINE_MS` —
-      # about three minutes before the ceiling would kill the step with nothing
-      # to read. Raise the budget or the ceiling only with fresh runs recorded
-      # here.
+      # recorded run (329 s, 720/329 = 2.19) and 3.3x the fastest (219 s,
+      # 720/219 = 3.29), 180 s under this 15 minute ceiling (900 - 720). It also
+      # hands every blocking child only the time left in it, so a case that
+      # outgrows the budget dies as a named failure — one killed by the deadline
+      # names the command and `NEXUS_RELEASE_DEADLINE_MS` — about three minutes
+      # before the ceiling would kill the step with nothing to read. Raise the
+      # budget or the ceiling only with fresh runs recorded here.
       - name: Run release tooling tests (version brackets and lockstep rules)
         timeout-minutes: 15
         run: node --test 'tooling/release/*.test.mjs'
