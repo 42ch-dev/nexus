@@ -866,6 +866,16 @@ conn.commit()
   assert.equal(seeded.status, 0, seeded.stderr.trim() ? seeded.stderr : seeded.stdout);
 }
 
+/**
+ * Unguarded on purpose (I-000436): run 43489148101's SIGSEGV landed in this
+ * block's first case, 61.1 s into the file's process and 21.8 s after its last
+ * write, after `seededHome()` and during `startServiceOn`, with P0-T5 having
+ * finished all ten cases. It passes unguarded on ubuntu-latest (runs
+ * 45941494235, 45943402321) and on darwin/arm64, so a reappearance must fail
+ * CI instead of skipping. Diagnose with a `before()` that runs
+ * `packages/nexus-native/scripts/build.mjs` (double-`dlopen` of the addon in
+ * one process), then `gdb -batch -ex run -ex "thread apply all bt"`.
+ */
 describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () => {
   test('control round trip: create, list, inspect, session, append, resume and cancel act on one durable run', async () => {
     const home = seededHome(acpProviderConfig());
