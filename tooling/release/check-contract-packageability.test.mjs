@@ -40,10 +40,13 @@ const SHARE_ROOT = mkdtempSync(join(tmpdir(), "nexus-release-share-"));
 const FILE_STARTED = Date.now();
 
 /**
- * Measured budget for this file, `timeout-minutes` minus room for the rest of
- * the step's files: the runs behind it are recorded next to the CI step.
+ * Measured budget for this file, left below `timeout-minutes` so a regression
+ * fails here with a number instead of being killed with nothing to read. The
+ * runs behind it are recorded next to the CI step: 480 s is 1.5x the 327 s the
+ * step measured in run 45942850812, and above the 1.28x spread of the seven
+ * runs that measured the slow version.
  */
-const FILE_BUDGET_SECONDS = 420;
+const FILE_BUDGET_SECONDS = 480;
 
 /**
  * @param {string} dir

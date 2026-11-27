@@ -273,6 +273,20 @@ jobs:
       # packageability loop) must be green on the PR that changes them, not only
       # in the manually dispatched new-release preflight. Runs after the step
       # above so the registry cache already holds every contract crate graph.
+      #
+      # Measured, so a rerun is never needed to tell flake from regression: this
+      # step took 447, 447, 478, 496, 532, 567 and 574 s (p95 574) in runs
+      # 45844665144, 45875020677, 45918917534, 45926211760, 45899689270,
+      # 45881602225 and 45929045994, and was killed at 606 s in 45936969244 —
+      # 95% of it the packageability file compiling the same contract crates
+      # once per case (`cargo run` per fixture, nothing else in the case is
+      # above 1.5 s). `checkContractPackageability` now shares one
+      # extracted-archive cache and one Cargo target across those cases, so the
+      # graph compiles once per distinct crate: 327 s in 45942850812. That file
+      # also asserts its own 480 s budget (its last test), which fails with the
+      # measured seconds — and the per-test durations name the slow case — about
+      # two minutes before `timeout-minutes` would kill the step with nothing to
+      # read. Raise that budget only with fresh runs recorded here.
       - name: Run release tooling tests (version brackets and lockstep rules)
         timeout-minutes: 10
         run: node --test 'tooling/release/*.test.mjs'
