@@ -15,10 +15,10 @@ import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -199,8 +199,12 @@ test('ambient Git env cannot redirect or restyle the fixture', () => {
     assert.equal(run.status, 0, run.output);
     assert.match(oxlintInvocation(run.log), /packages\/contracts\/src\/index\.ts/);
     assert.equal(git('rev-parse', 'HEAD'), head, 'commit must land in the disposable repo');
+    assert.equal(
+      realpathSync(git('rev-parse', '--show-toplevel')),
+      realpathSync(root),
+      'fixture commands must resolve the disposable repo, not the ambient one',
+    );
     assert.doesNotMatch(git('log', '-1', '--format=%aI'), /^2000-/, 'ambient commit date must not leak');
-    assert.equal(existsSync(bogus), false, 'ambient GIT_DIR must not be used');
   } finally {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
