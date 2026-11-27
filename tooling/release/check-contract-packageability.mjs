@@ -124,6 +124,15 @@ const SCRATCH_PREFIX = "nexus-contract-package-";
  */
 const VCS_STAMP_PATH = ".cargo_vcs_info.json";
 
+/**
+ * Runs one deadline-bound child in its own process group and takes that group
+ * down when it is signalled or its parent disappears. `spawnSync` cannot do this
+ * from here: it blocks the loop, so a signal is not dispatched while it waits.
+ */
+const SUPERVISOR_PATH = fileURLToPath(
+  new URL("./supervise-child.mjs", import.meta.url),
+);
+
 const SKIPPED_STAGE_ENTRIES = new Set([
   ".direnv",
   ".git",
@@ -234,12 +243,11 @@ function contractDependencies(manifestContents, entries) {
  */
 
 /**
- * Kill what the child left behind. `spawnSync`'s timeout kills the process it
- * started, but `cargo` starts `rustc` (and build scripts) as children of its own,
- * which keep writing into the shared build tree after the wrapper is gone. The
- * child is spawned `detached`, so it leads a process group and the negative pid
- * reaches that whole group. Windows has no process groups: it keeps the old
- * behaviour, where only the wrapper is killed.
+ * Backstop for the supervised group: the supervisor takes its whole group down
+ * when it is signalled or orphaned, so this only matters if the supervisor itself
+ * is gone before it could act. `spawnSync`'s timeout kills the process it started,
+ * never the `rustc` children of that process, and a group pid is the only handle
+ * on them. Windows has no process groups: there only the wrapper dies.
  *
  * @param {number | undefined} pid
  */
@@ -257,6 +265,23 @@ function killChildGroup(pid) {
 }
 
 /**
+ * A child under a deadline runs through {@link SUPERVISOR_PATH}: `spawnSync`
+ * blocks the loop, so a signal delivered to *this* process while a build runs is
+ * not dispatched to it at all (measured: a `SIGTERM` during a 3 s `spawnSync`
+ * reached no handler and the call returned normally). The supervisor is the
+ * process that can react — it leads the group and takes it down when it is
+ * signalled or reparented. Without a deadline nothing is detached, so the caller
+ * and its children share one group and an interrupt reaches them all by itself,
+ * which is the CLI gate.
+ *
+ * @param {string[]} command
+ * @returns {string[]}
+ */
+function supervised(command) {
+  return [process.execPath, [SUPERVISOR_PATH, ...command]];
+}
+
+/**
  * @param {string} command
  * @param {string[]} args
  * @param {string} cwd
@@ -271,16 +296,21 @@ export function run(command, args, cwd, input) {
     env: { ...process.env, CARGO_TERM_COLOR: "never" },
     input,
     maxBuffer: 64 * 1024 * 1024,
-    // Own process group, so a deadline kill reaches the grandchildren too.
-    detached: true,
   };
   const deadline = childDeadline();
-  if (deadline !== null) {
+  /** A deadline means a timeout, and a timeout kill needs a group to kill. */
+  const supervise = deadline !== null && process.platform !== "win32";
+  if (supervise) {
+    // Own process group, so a deadline kill reaches the grandchildren too.
+    options.detached = true;
     // The floor keeps a nearly-expired deadline from failing a `git` call that
     // would have answered at once: a child over the floor is a real overrun.
     options.timeout = Math.max(1000, deadline - Date.now());
   }
-  const result = spawnSync(command, args, options);
+  const [spawnedCommand, spawnedArgs] = supervise
+    ? supervised([command, ...args])
+    : [command, args];
+  const result = spawnSync(spawnedCommand, spawnedArgs, options);
   if (result.error?.code === "ETIMEDOUT" || result.signal !== null) {
     killChildGroup(result.pid);
   }
@@ -644,17 +674,28 @@ function inside(candidate, root) {
  * and then re-opened by path, so a link swapped in between cannot make the digest
  * describe a file that is not the one that was hashed. `O_NOFOLLOW` turns a link
  * into `ELOOP`, and a link is data — its stored target — exactly as Git records
- * it. Windows has no `O_NOFOLLOW`, so there a link is followed; the digest is
- * only ever compared within one host.
+ * it.
+ *
+ * Windows has no `O_NOFOLLOW`, so there a descriptor follows the link and the
+ * entry would collapse into the target's bytes. Its link case therefore comes
+ * from the `dirent` the walk already enumerated — not from a second look at the
+ * path — so the same tree hashes the same way on both platforms.
  *
  * @param {string} root
  * @returns {string}
  */
 function treeDigest(root) {
   const hash = createHash("sha256");
-  for (const path of stagedPaths(root, new Set([VCS_STAMP_PATH]))) {
+  for (const { path, dirent } of stagedEntries(
+    root,
+    new Set([VCS_STAMP_PATH]),
+  )) {
     const absolute = join(root, path);
     hash.update(`${path}\0`);
+    if (process.platform === "win32" && dirent.isSymbolicLink()) {
+      hash.update(`link:${readlinkSync(absolute)}\0`);
+      continue;
+    }
     let fd;
     try {
       fd = openSync(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -1191,13 +1232,16 @@ function blobId(bytes) {
  * are not compared. Only paths the revision itself names are pruned — this is
  * not a general "skip directories" exemption.
  *
+ * The entry comes from the enumeration, so a caller that needs to know whether a
+ * path is a link reads it here instead of stat'ing the path again.
+ *
  * @param {string} directory
  * @param {Set<string>} gitlinks
- * @returns {string[]}
+ * @returns {{ path: string; dirent: import("node:fs").Dirent }[]}
  */
-function stagedPaths(directory, gitlinks) {
-  /** @type {string[]} */
-  const paths = [];
+function stagedEntries(directory, gitlinks) {
+  /** @type {{ path: string; dirent: import("node:fs").Dirent }[]} */
+  const entries = [];
   /** @param {string} relative */
   const walk = (relative) => {
     const absolute = relative.length === 0 ? directory : join(directory, relative);
@@ -1210,11 +1254,22 @@ function stagedPaths(directory, gitlinks) {
         walk(path);
         continue;
       }
-      paths.push(path);
+      entries.push({ path, dirent });
     }
   };
   walk("");
-  return paths.sort();
+  return entries.sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
+}
+
+/**
+ * @param {string} directory
+ * @param {Set<string>} gitlinks
+ * @returns {string[]}
+ */
+function stagedPaths(directory, gitlinks) {
+  return stagedEntries(directory, gitlinks).map((entry) => entry.path);
 }
 
 /**

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -1393,6 +1393,51 @@ const result = run(process.execPath, ["-e", ${JSON.stringify(GROUP_SPAWNER)}], p
 process.stdout.write(JSON.stringify({ ok: result.ok, output: result.output }));
 `;
 
+/** Child that sits inside {@link run} until something kills it. */
+const INTERRUPT_CHILD = `
+import { run } from ${JSON.stringify(CHECKER_URL)};
+const result = run(process.execPath, ["-e", ${JSON.stringify(GROUP_SPAWNER)}], process.cwd());
+process.stdout.write(JSON.stringify({ ok: result.ok }));
+`;
+
+/**
+ * Markers written so far, so a phase can wait for the writer to be live instead
+ * of racing its startup against the deadline.
+ *
+ * @param {string} marker
+ * @returns {number}
+ */
+function markerWrites(marker) {
+  return existsSync(marker) ? readFileSync(marker, "utf8").length : 0;
+}
+
+/**
+ * @param {() => boolean} predicate
+ * @param {number} timeout
+ */
+async function waitFor(predicate, timeout) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((done) => setTimeout(done, 50));
+  }
+  throw new Error(`condition not met within ${timeout}ms`);
+}
+
+/**
+ * Asserts the marker is byte-identical across a settle window, which is what
+ * "the writer is gone" looks like from outside.
+ *
+ * @param {string} marker
+ * @param {string} stopped
+ */
+async function assertMarkerStopped(marker, stopped) {
+  await new Promise((done) => setTimeout(done, 500));
+  assert.equal(readFileSync(marker, "utf8"), stopped, "the reaped group stopped writing");
+}
+
 test(
   "a child over its deadline is killed with the grandchildren it started",
   { skip: process.platform === "win32" ? "no process groups on Windows" : false },
@@ -1400,7 +1445,9 @@ test(
     const dir = mkdtempSync(join(tmpdir(), "nexus-release-group-"));
     const marker = join(dir, "marker.txt");
     try {
-      const { stdout } = await execFileAsync(
+      // Phase 1: the writer is live (two writes observed) before any deadline.
+      // Phase 2: the deadline fires with the writer still working.
+      const pending = execFileAsync(
         process.execPath,
         ["--input-type=module", "-e", GROUP_CHILD],
         {
@@ -1408,10 +1455,13 @@ test(
           env: {
             ...process.env,
             MARKER: marker,
-            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 1000),
+            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 5000),
           },
         },
       );
+      await waitFor(() => markerWrites(marker) >= 2, 4000);
+      const { stdout } = await pending;
+
       const result = JSON.parse(stdout);
       assert.equal(result.ok, false);
       assert.match(
@@ -1420,17 +1470,76 @@ test(
       );
       const stopped = readFileSync(marker, "utf8");
       assert.notEqual(stopped, "", "the grandchild wrote before the kill");
-      await new Promise((done) => setTimeout(done, 500));
-      assert.equal(
-        readFileSync(marker, "utf8"),
-        stopped,
-        "the killed group stopped writing",
-      );
+      await assertMarkerStopped(marker, stopped);
     } finally {
       cleanupTempRepo(dir);
     }
   },
 );
+
+test(
+  "interrupting the checker takes its running child down with it",
+  { skip: process.platform === "win32" ? "no process groups on Windows" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nexus-release-interrupt-"));
+    const marker = join(dir, "marker.txt");
+    try {
+      const checker = spawn(
+        process.execPath,
+        ["--input-type=module", "-e", INTERRUPT_CHILD],
+        {
+          stdio: "ignore",
+          env: {
+            ...process.env,
+            MARKER: marker,
+            // Far away: the signal, not the deadline, must end this child.
+            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 30000),
+          },
+        },
+      );
+      try {
+        await waitFor(() => markerWrites(marker) >= 2, 4000);
+        const closed = new Promise((done) =>
+          checker.on("close", (code, signal) => done({ code, signal })),
+        );
+        checker.kill("SIGTERM");
+        const exit = await Promise.race([
+          closed,
+          new Promise((done) => setTimeout(() => done("still-running"), 5000)),
+        ]);
+        assert.notEqual(exit, "still-running", "the checker died on SIGTERM");
+        const stopped = readFileSync(marker, "utf8");
+        assert.notEqual(stopped, "", "the grandchild wrote before the signal");
+        await assertMarkerStopped(marker, stopped);
+      } finally {
+        checker.kill("SIGKILL");
+      }
+    } finally {
+      cleanupTempRepo(dir);
+    }
+  },
+);
+
+test("a link and a plain file with the same bytes are different entries", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-release-linkfile-"));
+  const share = join(dir, "share");
+  const linked = extractedVariant(dir, "plain");
+  symlinkSync("../real.rs", join(linked, "src", "linked.rs"));
+  const plain = extractedVariant(dir, "twice");
+  writeFileSync(join(plain, "src", "linked.rs"), "../real.rs");
+  try {
+    const linkEntry = shareArchive(linked, share);
+    const plainEntry = shareArchive(plain, share);
+    assert.notEqual(
+      plainEntry,
+      linkEntry,
+      "a link hashes as its target, not as the bytes of a file that spells it",
+    );
+    assert.equal(readdirSync(join(share, "archives")).length, 2);
+  } finally {
+    cleanupTempRepo(dir);
+  }
+});
 
 /** Child that only reports whether {@link run} accepted the deadline. */
 const DEADLINE_PROBE = `
