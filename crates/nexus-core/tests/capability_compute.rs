@@ -1111,8 +1111,26 @@ async fn failing_prompt_executor_is_a_typed_failure_not_a_fabricated_success() {
         "extract-run".to_string(),
         tokio_util::sync::CancellationToken::new(),
     )])));
+    // The capability rechecks that the stored Creator still owns the target
+    // World, so the fixture needs the pool that holds it.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("llm-extract-wiring.db");
+    let pool = nexus_local_db::init_engine_pool(&db_path)
+        .await
+        .unwrap()
+        .clone_pool();
+    nexus_local_db::kb_store::seed::world(
+        &pool,
+        "wld_wiring",
+        "test_creator",
+        "Wiring World",
+        "wiring",
+        "private",
+        "manual",
+    )
+    .await;
     let deps = CapabilityRuntimeDeps {
-        pool: None,
+        pool: Some(pool),
         prompt_executor: Some(Arc::new(FailingExecutor) as Arc<dyn PromptExecutor>),
         session_cancels,
         daemon_tool_dispatch: None,

@@ -1,8 +1,12 @@
 //! Trusted extraction target (v1.191 P1 T13).
 //!
-//! Moved verbatim from `nexus-orchestration/src/quality_loop.rs`; the
-//! review-time hook in `quality_loop` and the extraction builtins consume the
-//! same single implementation — no second resolver exists.
+//! [`resolve_extraction_target`] is the only resolver of an
+//! [`ExtractionTarget`]: it rechecks stored ownership and applies the
+//! service's audience policy. No JSON parser turns caller input into a target;
+//! callers may name the World, never the target. The review-time hook resolves
+//! before the model runs, and the `nexus.llm.extract` capability re-resolves
+//! the World id it is handed, so preset/client/model-supplied JSON cannot
+//! become a target on its own.
 
 use crate::CapabilityError;
 use nexus_knowledge::world_kb::KnowledgeGovernance;
@@ -20,49 +24,6 @@ pub struct ExtractionTarget {
     pub world_id: String,
     /// The governance pair the service decided for this target.
     pub governance: KnowledgeGovernance,
-}
-
-impl ExtractionTarget {
-    /// The trusted-context JSON field the extraction capability consumes.
-    #[must_use]
-    pub fn context_value(&self) -> serde_json::Value {
-        serde_json::json!({
-            "world_id": self.world_id,
-            "holder_entry_id": self.governance.holder_entry_id,
-            "disclosure": self.governance.disclosure,
-        })
-    }
-
-    /// Parse a trusted target out of its context value.
-    ///
-    /// Fails closed on an empty container or a malformed native governance
-    /// pair, so a caller cannot hand the extractor an invented policy.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CapabilityError::Forbidden`] for a missing/empty `world_id` or
-    /// a pair the domain rules refuse.
-    pub fn from_context(value: &serde_json::Value) -> Result<Self, CapabilityError> {
-        let world_id = value.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
-        if world_id.is_empty() {
-            return Err(CapabilityError::Forbidden(
-                "extraction target world_id must be non-empty".to_string(),
-            ));
-        }
-        let holder_entry_id = value.get("holder_entry_id").and_then(|v| v.as_str());
-        let disclosure = value.get("disclosure").and_then(|v| v.as_str());
-        nexus_knowledge::world_kb::validate_native_governance(holder_entry_id, disclosure)
-            .map_err(|e| {
-                CapabilityError::Forbidden(format!("extraction target governance: {e}"))
-            })?;
-        Ok(Self {
-            world_id: world_id.to_string(),
-            governance: KnowledgeGovernance {
-                holder_entry_id: holder_entry_id.map(str::to_owned),
-                disclosure: disclosure.map(str::to_owned),
-            },
-        })
-    }
 }
 
 /// Resolve the trusted extraction target of one production run from stored

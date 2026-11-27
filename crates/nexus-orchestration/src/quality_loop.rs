@@ -713,9 +713,11 @@ pub(crate) enum LlmExtractOutcome {
 /// `LlmExtractTask::evaluate` (closes R-V151Q3-W001).
 ///
 /// Resolves the capability from `registry`, builds the canonical input shape
-/// `{ prompt, chapter_prose, _creator_id, _session_id }`, and parses the
-/// `candidates` array through [`candidate_from_llm_json_for_profile`] scoped
-/// to `work_profile`.
+/// `{ prompt, chapter_prose, _creator_id, _session_id, _extract_target: {
+/// world_id }, _extract_source_id }`, and parses the `candidates` array
+/// through [`candidate_from_llm_json_for_profile`] scoped to
+/// `work_profile`. The capability re-resolves the World's stored ownership
+/// before the model runs, so this seam only names the World.
 ///
 /// Returns [`LlmExtractOutcome::WorkerUnavailable`] when no worker IPC is
 /// available, so callers can distinguish "no worker" from "zero candidates"
@@ -740,7 +742,7 @@ pub(crate) async fn run_llm_extract(
     creator_id: &str,
     session_id: &str,
     work_profile: &str,
-    target: &ExtractionTarget,
+    world_id: &str,
     source_id: &str,
 ) -> LlmExtractOutcome {
     let Some(registry) = registry else {
@@ -768,9 +770,10 @@ pub(crate) async fn run_llm_extract(
         // schedule's stored session (v1.191 P1 T13). The capability refuses an
         // empty/missing identity instead of inventing a default run.
         "_session_id": session_id,
-        // The trusted job/task target policy resolved from stored state before
-        // the model ran (durable §§3, 8). Never model output.
-        "_extract_target": target.context_value(),
+        // The World whose target the capability re-resolves from stored state
+        // before the model runs (durable §§3, 8). The governance pair never
+        // crosses this boundary: the capability owns the audience policy.
+        "_extract_target": { "world_id": world_id },
         // The admitted chapter artifact the run is resolved over.
         "_extract_source_id": source_id,
     });
@@ -848,7 +851,7 @@ async fn extract_via_llm(
         // schedule's stored session — never an empty placeholder.
         &ctx.run_id,
         &ctx.work_profile,
-        target,
+        &target.world_id,
         &ctx.source_id,
     )
     .await

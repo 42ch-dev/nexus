@@ -801,13 +801,19 @@ impl CapabilityRegistry {
         );
 
         // V1.51 T-A P0: nexus.llm.extract reuses the same prompt executor as
-        // judge.llm / context.summarize / acp.prompt (compass §0.1 #7).
+        // judge.llm / context.summarize / acp.prompt (compass §0.1 #7). It also
+        // gets the engine pool so it can re-resolve the World target's stored
+        // ownership rather than trusting the (preset-reachable) input.
         let llm_extract =
             deps.prompt_executor
                 .as_ref()
                 .map_or_else(builtins::LlmExtract::new, |executor| {
-                    builtins::LlmExtract::with_prompt_executor(executor.clone())
-                        .with_session_cancels(deps.session_cancels.clone())
+                    let cap = builtins::LlmExtract::with_prompt_executor(executor.clone())
+                        .with_session_cancels(deps.session_cancels.clone());
+                    match deps.pool.as_ref() {
+                        Some(pool) => cap.with_pool(pool.clone()),
+                        None => cap,
+                    }
                 });
 
         let acp_prompt =
