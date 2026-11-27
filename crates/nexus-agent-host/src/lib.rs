@@ -309,7 +309,9 @@ pub(crate) mod test_support {
         }
     }
 
-    #[cfg(windows)]
+    /// Serializes wrapper writes against the sweep recreating the directory.
+    /// Platform-neutral so the poisoning test can take the same static that
+    /// [`fixture_launch`] acquires on Windows.
     static SHIM_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Acquire `mutex`, recovering from poisoning.
@@ -347,15 +349,19 @@ pub(crate) mod test_support {
         format!("{stem}-{id}.cmd")
     }
 
-    /// Write the `.cmd` wrapper for `fixture` into `shim_dir`, creating the
-    /// directory when it is missing (a previous sweep may have removed it).
+    /// Write the `.cmd` wrapper for `fixture` into `shim_dir` using
+    /// `interpreter`, creating the directory when it is missing (a previous
+    /// sweep may have removed it).
     ///
-    /// Each call writes a fresh [`shim_name`] so no two launches contend for
-    /// one path.
-    #[cfg(windows)]
-    fn write_shim(shim_dir: &std::path::Path, fixture: &std::path::Path) -> std::path::PathBuf {
+    /// Each call takes a fresh [`shim_name`] so no two launches contend for
+    /// one path. Platform-neutral — the caller supplies the interpreter —
+    /// so the naming and body are asserted on the path launches actually use.
+    fn write_shim_with(
+        shim_dir: &std::path::Path,
+        fixture: &std::path::Path,
+        interpreter: &std::path::Path,
+    ) -> std::path::PathBuf {
         std::fs::create_dir_all(shim_dir).expect("recreate fixture shim dir");
-        let interpreter = python_path();
         let shim = shim_dir.join(shim_name(fixture, next_shim_id()));
         let body = format!(
             "@echo off\r\n\"{}\" \"{}\" %*\r\n",
@@ -364,6 +370,12 @@ pub(crate) mod test_support {
         );
         std::fs::write(&shim, body).expect("write fixture shim");
         shim
+    }
+
+    /// Write the `.cmd` wrapper for `fixture` with a discovered interpreter.
+    #[cfg(windows)]
+    fn write_shim(shim_dir: &std::path::Path, fixture: &std::path::Path) -> std::path::PathBuf {
+        write_shim_with(shim_dir, fixture, &python_path())
     }
 
     /// Resolve a Python fixture to a program the current platform can spawn.
@@ -408,38 +420,52 @@ pub(crate) mod test_support {
     }
 
     /// Pins that a panic while holding the shim lock does not take sibling
-    /// launches down: the next acquisition recovers the poisoned guard.
+    /// launches down: the lock `fixture_launch` acquires on Windows is poisoned
+    /// here and must still be acquirable through [`lock_recovering`].
+    ///
+    /// `fixture_launch` only takes the lock on Windows, so this asserts the
+    /// acquisition itself on every platform; the Windows-only launch path is
+    /// covered by compilation of `fixture_launch`, not by this process.
     #[test]
     fn poisoned_shim_lock_still_admits_sibling_launch() {
-        let mutex = std::sync::Mutex::new(());
         let holder = std::panic::catch_unwind(|| {
-            let _guard = mutex.lock().expect("first acquisition");
+            let _guard = SHIM_LOCK.lock().expect("first acquisition");
             panic!("hold the shim lock while panicking");
         });
         assert!(holder.is_err(), "the holder must have panicked");
         assert!(
-            mutex.lock().is_err(),
-            "the lock must be poisoned before recovery is exercised"
+            SHIM_LOCK.lock().is_err(),
+            "the shim lock must be poisoned before recovery is exercised"
         );
-        drop(lock_recovering(&mutex));
+        drop(lock_recovering(&SHIM_LOCK));
     }
 
-    /// Pins that same-stem fixtures never share one wrapper path: a shared
-    /// path is what a concurrent launch rewrites under a running child.
+    /// Pins that two launches of same-stem fixtures write two wrappers: the
+    /// second must not reuse, and so overwrite, the first one's path.
     #[test]
     fn same_stem_fixtures_get_distinct_shims() {
-        let first = shim_name(
-            std::path::Path::new("/fixtures/a/mock_claude_cli.py"),
-            next_shim_id(),
+        let dir = tempfile::tempdir().expect("temp dir");
+        let interpreter = std::path::Path::new(r"C:\Python312\python.exe");
+        let first_fixture = std::path::Path::new("/fixtures/a/mock_claude_cli.py");
+        let second_fixture = std::path::Path::new("/fixtures/b/mock_claude_cli.py");
+        let first = write_shim_with(dir.path(), first_fixture, interpreter);
+        let second = write_shim_with(dir.path(), second_fixture, interpreter);
+        assert_ne!(
+            first,
+            second,
+            "same-stem fixtures share a shim: {}",
+            first.display()
         );
-        let second = shim_name(
-            std::path::Path::new("/fixtures/b/mock_claude_cli.py"),
-            next_shim_id(),
-        );
-        assert_ne!(first, second, "same-stem fixtures share a shim: {first}");
         assert!(
-            first.starts_with("mock_claude_cli-"),
-            "unexpected shim name: {first}"
+            first.is_file() && second.is_file(),
+            "wrapper missing: {} / {}",
+            first.display(),
+            second.display()
+        );
+        let first_body = std::fs::read_to_string(&first).expect("read first shim");
+        assert!(
+            first_body.contains("/fixtures/a/mock_claude_cli.py"),
+            "first wrapper lost its fixture: {first_body}"
         );
     }
 
