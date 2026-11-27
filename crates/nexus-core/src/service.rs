@@ -1358,13 +1358,16 @@ mod tests {
     /// the probe's independent stat through the filesystem, so the snapshot's
     /// classification branch sees a genuine `PermissionDenied` instead of a
     /// fabricated one. The classification is `Unproven` — nothing about
-    /// writers was established — so the snapshot must refuse; relaxing the
-    /// split to fall back for any authority would instead return the local
-    /// default from the absent document.
+    /// writers was established — so the snapshot must refuse. Relaxing the
+    /// split to fall back for any authority still fails this case, but only
+    /// through the category assertion: the unlocked read is itself denied by
+    /// the same mode, so `expect_err` alone also passes on the fallback's
+    /// `config_load:` error.
     ///
     /// Unix-only, skipped (with the reason on stderr) on root or
-    /// privileged-container runners where mode 000 denies nothing — the
-    /// real-chmod precedent in `owner::capabilities`.
+    /// privileged-container runners where mode 000 denies nothing, and on a
+    /// host whose policy denies only one of the two probes — the real-chmod
+    /// precedent in `owner::capabilities`.
     #[cfg(unix)]
     #[test]
     fn a_real_permission_denied_home_fails_closed() {
@@ -1377,18 +1380,30 @@ mod tests {
             .expect("seal the home");
         let _restore = Restore(sealed.clone());
 
-        // Probe before asserting: root and privileged containers ignore mode
-        // 000, so there is no real denial to classify — skip, do not fail.
-        let denied = matches!(
+        // `Unproven` needs BOTH denials: the lock-file create and the probe's
+        // independent `symlink_metadata` of the lock entry. Root and
+        // privileged containers ignore mode 000, and a path-specific policy
+        // can deny one probe but not the other — either way the case is not
+        // the shape this test names, so skip with the probe results instead
+        // of failing on the wrong reason.
+        let create_denied = matches!(
             std::fs::File::create(sealed.join("probe"))
                 .as_ref()
                 .map_err(std::io::Error::kind),
             Err(std::io::ErrorKind::PermissionDenied)
         );
-        if !denied {
+        let stat_denied = matches!(
+            std::fs::symlink_metadata(sealed.join("config.toml.lock"))
+                .as_ref()
+                .map_err(std::io::Error::kind),
+            Err(std::io::ErrorKind::PermissionDenied)
+        );
+        if !(create_denied && stat_denied) {
             eprintln!(
-                "skipping real permission-denial assertion: mode 000 does not deny \
-                 creates on this runner (root or privileged container)"
+                "skipping real permission-denial assertion: mode 000 does not deny both \
+                 probes on this runner (create denied: {create_denied}, \
+                 symlink_metadata denied: {stat_denied}); root or privileged container, \
+                 or a policy that denies only one of the two"
             );
             return;
         }
@@ -1402,7 +1417,9 @@ mod tests {
         assert!(
             category.starts_with("config_lock: denied acquisition")
                 && category.contains("Unproven"),
-            "the real denial is classified, not read as an unlocked local default: {error:?}"
+            "the real denial is classified as config_lock, not attempted as an unlocked \
+             read; the fallback's own read is denied too, so expect_err alone would not \
+             catch it: {error:?}"
         );
     }
 
