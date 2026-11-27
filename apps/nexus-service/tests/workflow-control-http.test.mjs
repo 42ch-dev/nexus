@@ -872,9 +872,12 @@ conn.commit()
  * write, after `seededHome()` and during `startServiceOn`, with P0-T5 having
  * finished all ten cases. It passes unguarded on ubuntu-latest (runs
  * 45941494235, 45943402321) and on darwin/arm64, so a reappearance must fail
- * CI instead of skipping. Diagnose with a `before()` that runs
- * `packages/nexus-native/scripts/build.mjs` (double-`dlopen` of the addon in
- * one process), then `gdb -batch -ex run -ex "thread apply all bt"`.
+ * CI instead of skipping. The crash is linux-only, so diagnose it on the linux
+ * runner: first a `before()` that runs `packages/nexus-native/scripts/build.mjs`
+ * (double-`dlopen` of the addon in one process), then, from
+ * `apps/nexus-service` with the addon staged and `dist/` built, the crashing
+ * native stack:
+ *   gdb -batch -ex run -ex "thread apply all bt" --args node --test --test-timeout=180000 tests/workflow-control-http.test.mjs
  */
 describe('workflow-control-http (v1.195 P0-T6 native/HTTP control closure)', () => {
   test('control round trip: create, list, inspect, session, append, resume and cancel act on one durable run', async () => {
