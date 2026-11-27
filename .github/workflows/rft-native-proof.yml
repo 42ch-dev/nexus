@@ -22,7 +22,10 @@ name: RFT Native Package Proof
 #     defect, so it does not fail the verdict — the cancelled rows are re-run
 #     once by a separate dispatch that carries its own verdict (no evidence is
 #     merged across runs, so a verdict never mixes two commits), and they stay
-#     visible as `cancelled` here (I-000561). A pull request from a fork cannot
+#     visible as `cancelled` here (I-000561). Because a moving `--ref` cannot
+#     dispatch a commit, the retry run records the sha it re-proved
+#     (`retry.sha`) next to the one the cancelled rows came from
+#     (`retry.origin_sha`) and warns when they differ. A pull request from a fork cannot
 #     be retried into this repository, so it records
 #     `retry: "not attempted (fork PR)"` instead of dispatching silently; and a
 #     run whose per-row job conclusions cannot be read fails the verdict rather
@@ -37,6 +40,10 @@ on:
         default: ''
       retry_of:
         description: 'Run id this dispatch is the one automatic retry of'
+        required: false
+        default: ''
+      origin_sha:
+        description: 'Commit the cancelled rows came from (the origin run github.sha); recorded by the retry run'
         required: false
         default: ''
   schedule:
@@ -481,6 +488,9 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
           SERVER_URL: ${{ github.server_url }}
+          # The commit whose rows were cancelled; the retry run records it so a
+          # re-proof of a newer branch tip is never mistaken for the same commit.
+          ORIGIN_SHA: ${{ github.sha }}
           # pull_request runs live on refs/pull/<n>/merge, which cannot be
           # dispatched; the head branch is the dispatchable identity there, and
           # its head commit is the sha the dispatched run will carry.
@@ -529,8 +539,12 @@ jobs:
             exit 0
           fi
           started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # `origin_sha` records which commit the cancelled rows came from: a
+          # moving `--ref` cannot dispatch a sha, so the retry run reports the
+          # difference instead of claiming it re-proved the same commit.
           jq -nc --arg ref "${DISPATCH_REF}" --arg rows "${cancelled}" --arg retry_of "${RUN_ID}" \
-            '{ref: $ref, inputs: {rows: $rows, retry_of: $retry_of}}' \
+            --arg origin_sha "${ORIGIN_SHA}" \
+            '{ref: $ref, inputs: {rows: $rows, retry_of: $retry_of, origin_sha: $origin_sha}}' \
             | gh api -X POST "repos/${REPO}/actions/workflows/rft-native-proof.yml/dispatches" --input -
           # The dispatch endpoint returns no run id, so resolve it from the runs
           # it just created. This is a record only: the verdict never depends on
@@ -628,6 +642,10 @@ jobs:
           # The rows this run owes, from its own rft-matrix (lane or retry).
           EXPECTED_ROWS: ${{ needs.rft-matrix.outputs.rows }}
           RETRY_OF: ${{ inputs.retry_of }}
+          # The commit the cancelled rows came from, as recorded by the dispatch.
+          # Empty on a normal run and for a retry dispatched before this input
+          # existed.
+          ORIGIN_SHA: ${{ inputs.origin_sha }}
         run: |
           set -euo pipefail
           mkdir -p "${EVIDENCE}"
@@ -638,6 +656,11 @@ jobs:
           const SCHEMA = 'rft-p3-t1-native-package-matrix/v2';
           const runSha = process.env.GITHUB_SHA ?? null;
           const retryOf = process.env.RETRY_OF || '';
+          // The commit the cancelled rows came from, as the dispatch recorded it.
+          // `null` when the dispatch carried none (an older retry, or a manual
+          // retry) — a moving `--ref` cannot dispatch a sha, so this is recorded,
+          // never assumed equal to this run's commit.
+          const originSha = (process.env.ORIGIN_SHA || '') || null;
           // Rows this run owes: its lane on a normal run, the cancelled rows on a
           // retry run. `rft-matrix` is the single source of that list.
           const expected = JSON.parse(process.env.EXPECTED_ROWS || '[]');
@@ -763,7 +786,7 @@ jobs:
           // Neither claims evidence from the other run.
           const retry =
             retryOf !== ''
-              ? { of_run_id: Number(retryOf) }
+              ? { of_run_id: Number(retryOf), origin_sha: originSha, sha: runSha }
               : cancelledRows.length === 0
                 ? null
                 : retryInfo === null
@@ -790,6 +813,16 @@ jobs:
             note: 'row status: pass | cancelled (the runner cancelled the job, so no evidence was possible; the cancelled rows are re-run once by a separate dispatch and that run carries their verdict) | missing (the job succeeded but produced no evidence) | failed (the job failed). missing and failed block P3; cancelled never does (I-000561)',
           });
           console.log(JSON.stringify(out, null, 2));
+          if (retryOf !== '' && originSha === null) {
+            console.warn(
+              '::warning::P3-T1 this retry does not record the origin sha; the cancelled rows came from an ' +
+                'unknown commit (this run re-proved ' + runSha + ')',
+            );
+          } else if (retryOf !== '' && originSha !== runSha) {
+            console.warn(
+              '::warning::P3-T1 retry re-proved ' + runSha + '; the cancelled rows came from ' + originSha,
+            );
+          }
           if (cancelledRows.length > 0) {
             console.warn(
               '::warning::P3-T1 row(s) cancelled by the runner: ' + cancelledRows.join(', ') +
