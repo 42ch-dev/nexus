@@ -133,6 +133,13 @@ const SUPERVISOR_PATH = fileURLToPath(
   new URL("./supervise-child.mjs", import.meta.url),
 );
 
+/**
+ * fd the supervisor publishes the command's group pid on. The parent keeps this
+ * pipe (it is not the command's stdio), so the pid is readable even when the
+ * supervisor was killed before it could act.
+ */
+const PID_CHANNEL_FD = 3;
+
 const SKIPPED_STAGE_ENTRIES = new Set([
   ".direnv",
   ".git",
@@ -282,6 +289,20 @@ function supervised(command) {
 }
 
 /**
+ * The command's group pid the supervisor published on fd 3. The supervisor is a
+ * separate group of its own, so its pid is useless for reaping the build: only
+ * the command's group reaches `rustc`.
+ *
+ * @param {{ output?: string[] }} result
+ * @returns {number | undefined}
+ */
+function publishedGroupPid(result) {
+  const raw = result.output?.[PID_CHANNEL_FD]?.trim();
+  const pid = Number(raw);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+/**
  * @param {string} command
  * @param {string[]} args
  * @param {string} cwd
@@ -289,7 +310,7 @@ function supervised(command) {
  * @returns {{ ok: boolean; stdout: string; stderr: string; output: string }}
  */
 export function run(command, args, cwd, input) {
-  /** @type {{ cwd: string; encoding: "utf8"; env: Record<string, string | undefined>; input?: string; maxBuffer: number; timeout?: number; detached?: boolean }} */
+  /** @type {{ cwd: string; encoding: "utf8"; env: Record<string, string | undefined>; input?: string; maxBuffer: number; timeout?: number; detached?: boolean; stdio?: ("pipe" | "ignore")[] }} */
   const options = {
     cwd,
     encoding: "utf8",
@@ -311,14 +332,21 @@ export function run(command, args, cwd, input) {
   // platform's problem.
   const supervise = deadline !== null && process.platform !== "win32";
   if (supervise) {
-    // Own process group, so a deadline kill reaches the grandchildren too.
+    // Own process group, so a deadline kill reaches the supervisor's pid, and one
+    // more pipe for the group pid it publishes.
     options.detached = true;
+    options.stdio = ["pipe", "pipe", "pipe", "pipe"];
+    options.env.NEXUS_CHILD_PID_FD = String(PID_CHANNEL_FD);
   }
   const [spawnedCommand, spawnedArgs] = supervise
     ? supervised([command, ...args])
     : [command, args];
   const result = spawnSync(spawnedCommand, spawnedArgs, options);
   if (result.error?.code === "ETIMEDOUT" || result.signal !== null) {
+    // The supervisor reaps its own signals, but it may have died without running
+    // any handler (SIGKILL): then the published group is the only handle on the
+    // build, and the supervisor's group reaches nothing.
+    killChildGroup(publishedGroupPid(result));
     killChildGroup(result.pid);
   }
   if (result.error !== undefined) {

@@ -1552,6 +1552,143 @@ test(
   },
 );
 
+/**
+ * Settles a marker that may never have been created: a signal delivered before the
+ * command starts leaves nothing to reap, which is a valid outcome, but anything
+ * that did start must stop.
+ *
+ * @param {string} marker
+ * @param {number} [timeout]
+ */
+async function assertNothingWrites(marker, timeout = 3000) {
+  const limit = Date.now() + timeout;
+  while (!existsSync(marker) && Date.now() < limit) {
+    await new Promise((done) => setTimeout(done, 50));
+  }
+  if (!existsSync(marker)) {
+    return;
+  }
+  await assertMarkerSettles(marker, timeout);
+}
+
+/**
+ * The supervisor child of `parentPid`, found by its script name: the caller cannot
+ * know the pid it never saw, and the point of the test is to kill it outright.
+ *
+ * @param {number} parentPid
+ * @returns {number | undefined}
+ */
+function supervisorPidFor(parentPid) {
+  const found = spawnSync(
+    "pgrep",
+    ["-P", String(parentPid), "-f", "supervise-child.mjs"],
+    { encoding: "utf8" },
+  );
+  if (found.status !== 0) {
+    return undefined;
+  }
+  const pid = Number(found.stdout.trim().split("\n")[0]);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+test(
+  "a supervisor killed outright leaves the caller a handle on its group",
+  { skip: process.platform === "win32" ? "no process groups on Windows" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nexus-release-backstop-"));
+    const marker = join(dir, "marker.txt");
+    try {
+      const checker = spawn(
+        process.execPath,
+        ["--input-type=module", "-e", GROUP_CHILD],
+        {
+          stdio: ["ignore", "pipe", "ignore"],
+          env: {
+            ...process.env,
+            MARKER: marker,
+            // A killed supervisor keeps the caller's stdio open through the
+            // command, so `spawnSync` cannot return at the kill: it returns when
+            // this deadline fires, which is when the backstop has to act.
+            NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 3000),
+          },
+        },
+      );
+      let stdout = "";
+      checker.stdout?.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      try {
+        await waitFor(() => markerWrites(marker) >= 2, 4000);
+        const supervisor = supervisorPidFor(checker.pid);
+        assert.ok(supervisor !== undefined, "the checker started a supervisor");
+        process.kill(supervisor, "SIGKILL");
+
+        const closed = new Promise((done) =>
+          checker.on("close", (code, signal) => done({ code, signal })),
+        );
+        const exit = await Promise.race([
+          closed,
+          new Promise((done) => setTimeout(() => done("still-running"), 8000)),
+        ]);
+        assert.notEqual(
+          exit,
+          "still-running",
+          "the caller returned after its supervisor was killed",
+        );
+        const reported = JSON.parse(stdout);
+        assert.equal(reported.ok, false, "a killed child is a failed run");
+        assert.match(
+          reported.output,
+          /exceeded the release tooling deadline/,
+          "the deadline is what ends the wait",
+        );
+        await assertMarkerSettles(marker);
+      } finally {
+        checker.kill("SIGKILL");
+      }
+    } finally {
+      cleanupTempRepo(dir);
+    }
+  },
+);
+
+test(
+  "a signal in the first milliseconds still ends the group it started",
+  { skip: process.platform === "win32" ? "no process groups on Windows" : false },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nexus-release-early-"));
+    const marker = join(dir, "marker.txt");
+    try {
+      const supervisor = spawn(
+        process.execPath,
+        [SUPERVISOR_PATH, process.execPath, "-e", GROUP_SPAWNER],
+        {
+          detached: true,
+          stdio: "ignore",
+          env: { ...process.env, MARKER: marker },
+        },
+      );
+      try {
+        const closed = new Promise((done) =>
+          supervisor.on("close", (code, signal) => done({ code, signal })),
+        );
+        await new Promise((done) => setTimeout(done, 50));
+        supervisor.kill("SIGTERM");
+        const exit = await Promise.race([
+          closed,
+          new Promise((done) => setTimeout(() => done("still-running"), 5000)),
+        ]);
+        assert.notEqual(exit, "still-running", "the supervisor died on the signal");
+        await assertNothingWrites(marker);
+      } finally {
+        supervisor.kill("SIGKILL");
+      }
+    } finally {
+      cleanupTempRepo(dir);
+    }
+  },
+);
+
 test("a link and a plain file with the same bytes are different entries", () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-release-linkfile-"));
   const share = join(dir, "share");
@@ -1576,30 +1713,28 @@ test("a link and a plain file with the same bytes are different entries", () => 
 /**
  * Child that presents itself as Windows to {@link run}: it redefines the platform
  * before a dynamic import, so the module takes the non-supervised branch and the
- * timeout still has to bound the child. The sleeper is far longer than the
- * deadline, so the probe only returns early if the timeout was applied.
+ * timeout still has to bound the child. Its deadline starts *after* the import, so
+ * a slow import can never expire it before the call; the sleeper is far longer
+ * than that deadline, so an early return can only come from the timeout.
  */
 const WIN32_SHAPE_PROBE = `
 Object.defineProperty(process, "platform", { value: "win32" });
 const { run } = await import(${JSON.stringify(CHECKER_URL)});
+process.env.NEXUS_RELEASE_DEADLINE_MS = String(Date.now() + 2000);
 const started = Date.now();
-const result = run(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], process.cwd());
+const result = run(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], process.cwd());
 process.stdout.write(
   JSON.stringify({ ok: result.ok, output: result.output, elapsed: Date.now() - started }),
 );
 `;
 
 test("a child without process groups is still bounded by the deadline", async () => {
+  const env = { ...process.env };
+  delete env.NEXUS_RELEASE_DEADLINE_MS;
   const { stdout } = await execFileAsync(
     process.execPath,
     ["--input-type=module", "-e", WIN32_SHAPE_PROBE],
-    {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        NEXUS_RELEASE_DEADLINE_MS: String(Date.now() + 1500),
-      },
-    },
+    { encoding: "utf8", env },
   );
   const result = JSON.parse(stdout);
   assert.equal(result.ok, false);
@@ -1608,8 +1743,8 @@ test("a child without process groups is still bounded by the deadline", async ()
     /error: .* exceeded the release tooling deadline \(NEXUS_RELEASE_DEADLINE_MS\)/,
   );
   assert.ok(
-    result.elapsed < 4000,
-    `the 5 s child had to be killed at the 1.5 s deadline, took ${result.elapsed}ms`,
+    result.elapsed > 1000 && result.elapsed < 6000,
+    `the 20 s child had to die at the probe's own 2 s deadline, took ${result.elapsed}ms`,
   );
 });
 

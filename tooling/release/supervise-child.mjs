@@ -28,6 +28,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { writeSync } from "node:fs";
 
 /** How often a reparented supervisor notices, in milliseconds. */
 const PARENT_POLL_MS = 100;
@@ -45,11 +46,21 @@ if (command === undefined) {
 
 const originalParent = process.ppid;
 
-const child = spawn(command, args, { stdio: "inherit", detached: true });
+/**
+ * The caller may hand us an fd to publish the command's group pid on, so that a
+ * supervisor killed without a chance to act (SIGKILL) still leaves the caller a
+ * handle on the group it cannot reap itself.
+ */
+const pidChannel = Number(process.env.NEXUS_CHILD_PID_FD ?? "");
 
 /** Kill the command's group; this process is not in it, so it survives to exit. */
 function killCommandGroup() {
   if (child.pid === undefined) {
+    // `spawn` assigns the pid before it returns unless the spawn itself failed,
+    // in which case no command exists. Say so instead of skipping silently.
+    process.stderr.write(
+      `supervise-child: ${command} has no pid, nothing to reap\n`,
+    );
     return;
   }
   try {
@@ -63,12 +74,31 @@ function killCommandGroup() {
 
 // A signal must both stop the build and be the reason this process dies: the
 // caller reads a timeout kill from the child's signal, and leaving a listener
-// installed would swallow the re-raise instead.
+// installed would swallow the re-raise instead. These go in before `spawn` so an
+// early signal is handled by this process rather than the default disposition,
+// which would kill the supervisor and leave the command it is about to start.
 for (const signal of SIGNALS) {
   process.once(signal, () => {
     killCommandGroup();
     process.removeAllListeners(signal);
     process.kill(process.pid, signal);
+  });
+}
+
+// fd 3 stays the caller's pipe; the command must not inherit it, or the caller's
+// read would wait for the build instead of for the report.
+const child = spawn(command, args, {
+  stdio: ["inherit", "inherit", "inherit", "ignore"],
+  detached: true,
+});
+
+if (Number.isInteger(pidChannel) && pidChannel >= 3) {
+  child.on("spawn", () => {
+    try {
+      writeSync(pidChannel, `${child.pid}\n`);
+    } catch {
+      // The caller closed the channel; the group is still reaped on our signals.
+    }
   });
 }
 
