@@ -309,17 +309,74 @@ pub(crate) mod test_support {
         }
     }
 
-    /// Write the `.cmd` wrapper for `fixture` into `shim_dir`, creating the
-    /// directory when it is missing (a previous sweep may have removed it).
-    #[cfg(windows)]
-    fn write_shim(shim_dir: &std::path::Path, fixture: &std::path::Path) -> std::path::PathBuf {
-        std::fs::create_dir_all(shim_dir).expect("recreate fixture shim dir");
-        let interpreter = python_path();
-        let name = fixture
+    /// Serializes wrapper writes against the sweep recreating the directory.
+    /// Platform-neutral so the poisoning test can take the same static that
+    /// [`fixture_launch`] acquires on Windows.
+    static SHIM_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Acquire `mutex`, recovering from poisoning.
+    ///
+    /// A sibling test panicking while it holds the shim lock must not turn
+    /// every later `fixture_launch` into a `PoisonError`: the guarded value is
+    /// `()`, so there is no invariant a panicking holder could have broken.
+    fn lock_recovering<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        mutex
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Restores [`SHIM_LOCK`] to an unpoisoned state when dropped.
+    ///
+    /// The poisoning test must poison the process-global static to prove
+    /// recovery, and sibling tests keep launching fixtures through it; the
+    /// restore runs on `Drop` so a failing assertion cannot leave the lock
+    /// poisoned for the rest of the binary.
+    struct ShimLockUnpoison;
+
+    impl Drop for ShimLockUnpoison {
+        fn drop(&mut self) {
+            SHIM_LOCK.clear_poison();
+        }
+    }
+
+    /// Counter distinguishing wrappers for launches of the same fixture.
+    fn next_shim_id() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Name of the `.cmd` wrapper written for one launch of `fixture`.
+    ///
+    /// The name carries a per-launch id rather than the fixture stem alone:
+    /// concurrent launches of one fixture used to share a single wrapper path,
+    /// so a second launch rewrote the wrapper a spawned `cmd.exe` still held
+    /// open (Windows os error 32, sharing violation) and, for same-named
+    /// fixtures in different directories, replaced its body with another
+    /// fixture's. Retrying the shared write cannot wait out a child that runs
+    /// for the whole test, so every launch gets its own file instead.
+    fn shim_name(fixture: &std::path::Path, id: u64) -> String {
+        let stem = fixture
             .file_stem()
             .expect("fixture filename")
             .to_string_lossy();
-        let shim = shim_dir.join(format!("{name}.cmd"));
+        format!("{stem}-{id}.cmd")
+    }
+
+    /// Write the `.cmd` wrapper for `fixture` into `shim_dir` using
+    /// `interpreter`, creating the directory when it is missing (a previous
+    /// sweep may have removed it).
+    ///
+    /// Each call takes a fresh [`shim_name`] so no two launches contend for
+    /// one path. Platform-neutral — the caller supplies the interpreter —
+    /// so the naming and body are asserted on the path launches actually use.
+    fn write_shim_with(
+        shim_dir: &std::path::Path,
+        fixture: &std::path::Path,
+        interpreter: &std::path::Path,
+    ) -> std::path::PathBuf {
+        std::fs::create_dir_all(shim_dir).expect("recreate fixture shim dir");
+        let shim = shim_dir.join(shim_name(fixture, next_shim_id()));
         let body = format!(
             "@echo off\r\n\"{}\" \"{}\" %*\r\n",
             interpreter.display(),
@@ -327,6 +384,12 @@ pub(crate) mod test_support {
         );
         std::fs::write(&shim, body).expect("write fixture shim");
         shim
+    }
+
+    /// Write the `.cmd` wrapper for `fixture` with a discovered interpreter.
+    #[cfg(windows)]
+    fn write_shim(shim_dir: &std::path::Path, fixture: &std::path::Path) -> std::path::PathBuf {
+        write_shim_with(shim_dir, fixture, &python_path())
     }
 
     /// Resolve a Python fixture to a program the current platform can spawn.
@@ -341,9 +404,7 @@ pub(crate) mod test_support {
         }
         #[cfg(windows)]
         {
-            use std::sync::Mutex;
-            static SHIM_LOCK: Mutex<()> = Mutex::new(());
-            let _guard = SHIM_LOCK.lock().expect("fixture shim lock");
+            let _guard = lock_recovering(&SHIM_LOCK);
             write_shim(&SHIM_DIR, fixture)
         }
     }
@@ -370,6 +431,62 @@ pub(crate) mod test_support {
             panic!("Python is unavailable through `py -3` and `python`");
         });
         PYTHON.clone()
+    }
+
+    /// Pins that a panic while holding the shim lock does not take sibling
+    /// launches down: the lock `fixture_launch` acquires on Windows is poisoned
+    /// here and must still be acquirable through [`lock_recovering`].
+    ///
+    /// `fixture_launch` only takes the lock on Windows, so this asserts the
+    /// acquisition itself on every platform; the Windows-only launch path is
+    /// covered by compilation of `fixture_launch`, not by this process.
+    #[test]
+    fn poisoned_shim_lock_still_admits_sibling_launch() {
+        let restore = ShimLockUnpoison;
+        let holder = std::panic::catch_unwind(|| {
+            let _guard = SHIM_LOCK.lock().expect("first acquisition");
+            panic!("hold the shim lock while panicking");
+        });
+        assert!(holder.is_err(), "the holder must have panicked");
+        assert!(
+            SHIM_LOCK.lock().is_err(),
+            "the shim lock must be poisoned before recovery is exercised"
+        );
+        drop(lock_recovering(&SHIM_LOCK));
+        drop(restore);
+        assert!(
+            SHIM_LOCK.lock().is_ok(),
+            "the guard must leave the shim lock unpoisoned"
+        );
+    }
+
+    /// Pins that two launches of same-stem fixtures write two wrappers: the
+    /// second must not reuse, and so overwrite, the first one's path.
+    #[test]
+    fn same_stem_fixtures_get_distinct_shims() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let interpreter = std::path::Path::new(r"C:\Python312\python.exe");
+        let first_fixture = std::path::Path::new("/fixtures/a/mock_claude_cli.py");
+        let second_fixture = std::path::Path::new("/fixtures/b/mock_claude_cli.py");
+        let first = write_shim_with(dir.path(), first_fixture, interpreter);
+        let second = write_shim_with(dir.path(), second_fixture, interpreter);
+        assert_ne!(
+            first,
+            second,
+            "same-stem fixtures share a shim: {}",
+            first.display()
+        );
+        assert!(
+            first.is_file() && second.is_file(),
+            "wrapper missing: {} / {}",
+            first.display(),
+            second.display()
+        );
+        let first_body = std::fs::read_to_string(&first).expect("read first shim");
+        assert!(
+            first_body.contains("/fixtures/a/mock_claude_cli.py"),
+            "first wrapper lost its fixture: {first_body}"
+        );
     }
 
     /// Pins the shim lifecycle: `fixture_launch` writes into `SHIM_DIR`, a
