@@ -16,7 +16,8 @@ ranges=$(mktemp)
 diff_raw=$(mktemp)
 files=$(mktemp)
 lint_files=$(mktemp)
-trap 'rm -f "$ranges" "$diff_raw" "$files" "$lint_files"' EXIT HUP INT TERM
+lint_targets=$(mktemp)
+trap 'rm -f "$ranges" "$diff_raw" "$files" "$lint_files" "$lint_targets"' EXIT HUP INT TERM
 
 # Collect one "<from> <to>" range per pushed branch from Git's stdin refspec.
 # Deletions and non-branch refs (tags) have nothing committable to check.
@@ -60,8 +61,25 @@ xargs -0 sh -c '
   done
 ' sh < "$files" > "$lint_files"
 if [ -s "$lint_files" ]; then
-  echo "Running oxlint:"
-  xargs -0 pnpm exec oxlint < "$lint_files"
+  # oxlint exits 1 ("No files found to lint") when every path is ignored by
+  # .oxlintrc.json, so drop ignored paths and skip the step if none are left.
+  node -e '
+    const fs = require("node:fs");
+    const { matchesGlob } = require("node:path");
+    let patterns = [];
+    try {
+      patterns = JSON.parse(fs.readFileSync(".oxlintrc.json", "utf8")).ignorePatterns || [];
+    } catch {} // no/invalid config: lint everything, as before
+    const files = fs.readFileSync(0, "utf8").split("\0").filter(Boolean);
+    const lintable = files.filter((file) => !patterns.some((p) => matchesGlob(file, p)));
+    process.stdout.write(lintable.map((file) => file + "\0").join(""));
+  ' < "$lint_files" > "$lint_targets"
+  if [ -s "$lint_targets" ]; then
+    echo "Running oxlint:"
+    xargs -0 pnpm exec oxlint < "$lint_targets"
+  else
+    echo "Skipping oxlint: every changed lint file is ignored by .oxlintrc.json."
+  fi
 fi
 # Attribution includes package configs (tsconfig/package.json). Root
 # dependency files (lockfile, root package.json/tsconfig) check everything.
