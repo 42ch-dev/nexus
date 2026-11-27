@@ -35,11 +35,19 @@ name: RFT Native Package Proof
 #     actually ran differs from `dispatch_sha`; and a run whose per-row job
 #     conclusions cannot be read fails the verdict rather than inferring a row
 #     state from the matrix aggregate.
-#     Schema `rft-p3-t1-native-package-matrix/v3` is an incompatible change from
-#     v2: `fork_cancelled_rows` is replaced by `undispatched_cancelled_rows`,
-#     `retry.origin_sha` now names the commit the cancelled rows ran at (with
-#     `retry.dispatch_sha` alongside), and a row carries a `note` plus
-#     `no_evidence_uploaded`. v2 artifacts must not be read as v3.
+#     Schema `rft-p3-t1-native-package-matrix/v3`. Field by field against the
+#     last v2 writer, nothing was added, removed or renamed: same top-level keys,
+#     same row keys, same `retry` keys. A row `note`, `no_evidence_uploaded`,
+#     `undispatched_cancelled_rows` and `retry.origin_sha`/`dispatch_sha` all
+#     already existed in v2. The id moved for a contract change the shape cannot
+#     show: from v3 a `cancelled` row is non-blocking only when the retry record
+#     lists that row, so a row cancelled after the record is `missing` and
+#     blocks — the last v2 writer excused it with a run-global flag. "v2" is also
+#     not one shape (`retry.merged_rows`, then `fork_cancelled_rows`, then
+#     `undispatched_cancelled_rows` with `retry.dispatch_sha`, each at a
+#     different v2 revision), so read `schema` as the shape gate: never infer a
+#     shape from "v2" alone, and never read a v3 artifact with v2 row-state
+#     semantics (or the reverse).
 on:
   workflow_dispatch:
     inputs:
