@@ -787,21 +787,28 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
 
     let caps = CapabilityRegistry::with_builtins();
 
-    match export_preset(&document) {
+    // One state per outer state/terminal node is what the projection emits, so the manifest's
+    // own count keeps `state_count` tied to the facade instead of re-deriving its predicate.
+    let state_count = match export_preset(&document) {
         Ok(manifest) => {
             for problem in loader_validate_manifest_compat(&manifest, &caps) {
                 errors.push(format!("{}: {}", problem.path, problem.error));
             }
+            manifest.states.len()
         }
         // `validate_workflow_ir` is a structural IR check: a document the exporter refuses is
         // still structurally valid, so this is a warning, and it covers whatever the exporter
         // refuses for content reasons — IR-only node kinds, edges or gates with no preset
         // payload, and inner-graph shapes. An `ir_version` newer than supported never reaches
         // here: the header is rejected as an error before the structural checks run.
-        Err(error) => warnings.push(format!(
-            "preset.export: {error}; the document cannot be exported to a preset"
-        )),
-    }
+        Err(error) => {
+            warnings.push(format!(
+                "preset.export: {error}; the document cannot be exported to a preset"
+            ));
+            // No projection exists to count, so fall back to the nodes it would have projected.
+            outer_state_count(&document)
+        }
+    };
 
     for diagnostic in validate_workflow_ir_path_safety(&document)
         .diagnostics
@@ -814,7 +821,7 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
     Ok(validation_response(
         document.id.as_str(),
         serde_json::json!(document.version),
-        outer_state_count(&document),
+        state_count,
         &errors,
         &warnings,
     ))
@@ -822,6 +829,10 @@ fn validate_workflow_ir_file(file_path: &std::path::Path) -> Result<serde_json::
 
 /// States the YAML verdict counts: outer states and terminals. Inner steps are
 /// graph children of a state, not states of their own.
+///
+/// IR validation only falls back here when there is no projection to count
+/// (`ir_version` too new, or the exporter refuses the document); an exported
+/// manifest supplies its own count.
 fn outer_state_count(document: &WorkflowDocument) -> usize {
     document
         .nodes
@@ -1206,6 +1217,42 @@ inner_graphs:
                     && text.contains("cannot be exported to a preset")
             }),
             "{response}"
+        );
+        assert_eq!(
+            response["state_count"],
+            serde_json::json!(2),
+            "a refused export has no projection to count, so the verdict counts the outer states directly: {response}"
+        );
+    }
+
+    /// The IR verdict's `state_count` is the exported manifest's own count, so it follows the
+    /// facade instead of re-deriving the `OuterState|Terminal` predicate.
+    ///
+    /// A document where the two would disagree is not expressible: `project_nodes` emits exactly
+    /// one preset state per outer state/terminal node and refuses everything else, so an accepted
+    /// document always has equal counts. If that projection ever changes, this assertion is what
+    /// catches the reported count drifting away from it.
+    #[test]
+    fn local_validate_ir_state_count_is_the_exported_manifest_count() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let file = repo_root
+            .join("crates/nexus-preset/tests/fixtures/workflow-ir/game-narrative.workflow.ir.json");
+        let document: WorkflowDocument =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let manifest = nexus_preset::export_preset(&document).expect("fixture exports");
+
+        let response = validate_workflow_ir_file(&file).expect("validates");
+        let reported = &response["state_count"];
+
+        assert_eq!(
+            reported,
+            &serde_json::json!(manifest.states.len()),
+            "the verdict must report the projection's own count: {response}"
+        );
+        assert_eq!(
+            reported,
+            &serde_json::json!(outer_state_count(&document)),
+            "an accepted projection emits one state per outer state/terminal node: {response}"
         );
     }
 
