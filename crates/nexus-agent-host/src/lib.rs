@@ -325,6 +325,20 @@ pub(crate) mod test_support {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Restores [`SHIM_LOCK`] to an unpoisoned state when dropped.
+    ///
+    /// The poisoning test must poison the process-global static to prove
+    /// recovery, and sibling tests keep launching fixtures through it; the
+    /// restore runs on `Drop` so a failing assertion cannot leave the lock
+    /// poisoned for the rest of the binary.
+    struct ShimLockUnpoison;
+
+    impl Drop for ShimLockUnpoison {
+        fn drop(&mut self) {
+            SHIM_LOCK.clear_poison();
+        }
+    }
+
     /// Counter distinguishing wrappers for launches of the same fixture.
     fn next_shim_id() -> u64 {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -428,6 +442,7 @@ pub(crate) mod test_support {
     /// covered by compilation of `fixture_launch`, not by this process.
     #[test]
     fn poisoned_shim_lock_still_admits_sibling_launch() {
+        let restore = ShimLockUnpoison;
         let holder = std::panic::catch_unwind(|| {
             let _guard = SHIM_LOCK.lock().expect("first acquisition");
             panic!("hold the shim lock while panicking");
@@ -438,6 +453,11 @@ pub(crate) mod test_support {
             "the shim lock must be poisoned before recovery is exercised"
         );
         drop(lock_recovering(&SHIM_LOCK));
+        drop(restore);
+        assert!(
+            SHIM_LOCK.lock().is_ok(),
+            "the guard must leave the shim lock unpoisoned"
+        );
     }
 
     /// Pins that two launches of same-stem fixtures write two wrappers: the
