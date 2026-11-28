@@ -733,11 +733,16 @@ pub enum WiredOuterGraphError {
 /// Build the wired outer graph a run executes under its resolved apply: the
 /// APPLIED document when the strategy has one, else the loaded bundle's manifest.
 ///
-/// Every admission seam and recovery chooses between these same two builders
-/// over the same wiring, so this is the ONE place that choice lives — no seam
-/// can build a graph its run was not admitted under. Each caller maps the
+/// Every seam that chooses between the two builders — both admission seams, the
+/// preset trait entry and store-backed recovery — goes through here, so none of
+/// them can build a graph its run was not admitted under. Each caller maps the
 /// failure into its own refusal type: the arms fail for different reasons and
 /// each site words them itself.
+///
+/// `reconstruct_runner_legacy` calls [`build_wired_outer_graph_from_ir`]
+/// directly: it makes no choice (a summary that resolves no applied document
+/// refuses before any build), and routing it through here would force it to
+/// word two arms it can never take.
 ///
 /// `(None, None)` returns [`WiredOuterGraphError::NoSource`] instead of a
 /// graph, so each caller keeps its own no-source refusal.
@@ -748,7 +753,7 @@ pub enum WiredOuterGraphError {
     clippy::too_many_arguments,
     clippy::needless_pass_by_value,
     clippy::implicit_hasher
-)]
+)] // mirrors build_wired_outer_graph*'s allow: the dispatch handles are consumed per call, the cancel map is the engine's own, and the arity is theirs plus map_error
 pub fn build_wired_outer_graph_for_apply<E>(
     applied: Option<&WorkflowDocument>,
     loaded: Option<&LoadedPreset>,
