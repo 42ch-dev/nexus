@@ -150,7 +150,7 @@ pub trait AssetSource {
     ///
     /// # Errors
     ///
-    /// Returns the source's own failure — canonicalization, a sandbox escape, or IO.
+    /// Returns the source's own failure — a sandbox escape, a non-regular target, or IO.
     /// A missing entry is `Ok(None)` for an embedded source and the source's own
     /// `NotFound` error for a filesystem source; callers treat both as missing.
     fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error>;
@@ -163,7 +163,8 @@ pub struct FsAssetSource {
 }
 
 impl FsAssetSource {
-    /// Canonicalize `root` once; every read joins and resolves inside it.
+    /// Canonicalize `root` once; every read opens one descriptor and accepts it
+    /// only while that descriptor's own path stays inside this root.
     ///
     /// # Errors
     ///

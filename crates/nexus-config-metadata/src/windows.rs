@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::{AsRawHandle, FromRawHandle as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 
 use windows_sys::Win32::Foundation::{GENERIC_WRITE, INVALID_HANDLE_VALUE};
@@ -221,6 +221,46 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     Ok(u64::from(information.nNumberOfLinks))
+}
+
+/// The final path of the object an open handle references.
+///
+/// `GetFinalPathNameByHandleW` resolves the handle, not a pathname, so the
+/// answer names the object the handle is bound to even if names were replaced
+/// after the open. The result is the verbatim (`\\?\`-prefixed) form — the same
+/// form `std::fs::canonicalize` returns on this platform — so a caller's
+/// canonical root compares directly.
+pub fn final_path(file: &File) -> io::Result<PathBuf> {
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_DOS,
+    };
+
+    let handle = file.as_raw_handle() as HANDLE;
+    let mut buffer = vec![0u16; 512];
+    loop {
+        // SAFETY: `handle` is the live handle `file` owns, and `buffer` is
+        // writable for its whole length; the call writes at most that many
+        // UTF-16 units into it.
+        let written = unsafe {
+            GetFinalPathNameByHandleW(
+                handle,
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+            )
+        };
+        if written == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let written = written as usize;
+        // A full buffer means the required length did not include room for the
+        // terminating NUL; grow to that reported length and ask again.
+        if written < buffer.len() {
+            return Ok(PathBuf::from(String::from_utf16_lossy(&buffer[..written])));
+        }
+        buffer.resize(written + 1, 0);
+    }
 }
 
 /// Create the staged document file with no sharing, so no other principal can

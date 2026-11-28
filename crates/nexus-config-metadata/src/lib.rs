@@ -279,6 +279,23 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
     }
 }
 
+/// The final path of the object an open handle references.
+///
+/// The query resolves the handle itself (`GetFinalPathNameByHandleW`), never a
+/// pathname, so it names the object the handle is bound to even when names were
+/// replaced after the open. A descriptor-confined reader compares this path with
+/// its canonical root instead of re-resolving a pathname it cannot trust. The
+/// result is the verbatim (`\\?\`-prefixed) form, the same form
+/// [`std::fs::canonicalize`] returns on this platform.
+///
+/// # Errors
+///
+/// The native error the handle query reported.
+#[cfg(windows)]
+pub fn final_path(file: &File) -> io::Result<PathBuf> {
+    windows::final_path(file)
+}
+
 /// The Windows credential privacy gate the memory credential loader consumes.
 ///
 /// It reports whether the caller's already-open file handle grants access only

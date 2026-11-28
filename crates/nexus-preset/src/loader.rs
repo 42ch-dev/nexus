@@ -450,29 +450,28 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
 
 /// Read a referenced asset through one descriptor confined to `root`.
 ///
-/// `root` must already be canonical. Existence and symlink checks inspect a
-/// path, so an asset replaced between such a check and this read would
-/// otherwise supply unvalidated bytes; here the bytes come from the descriptor
-/// that was verified to be the file the (still) in-bundle path names.
+/// `root` must already be canonical. The opened descriptor decides, never a
+/// second resolution of the pathname: the bytes come from that same descriptor,
+/// and only a descriptor whose own path lies under `root` is accepted. Replacing
+/// the asset between an existence check and this read therefore cannot hand
+/// back bytes the check never saw. An in-bundle symlink is followed and
+/// accepted; a target outside the bundle is refused.
 pub(crate) fn read_confined_asset(root: &Path, rel: &str) -> std::io::Result<Vec<u8>> {
     use std::io::Read as _;
 
-    let path = root.join(rel);
-    let escape = || {
-        std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("asset `{rel}` resolves outside the bundle sandbox (symlink escape)"),
-        )
-    };
-    let mut file = open_asset(&path)?;
-    let resolved = path.canonicalize().map_err(|_| escape())?;
-    if !resolved.starts_with(root) {
-        return Err(escape());
+    let mut file = open_asset(&root.join(rel))?;
+    // A FIFO, socket or device answers the open (`O_NONBLOCK` keeps it from
+    // blocking) but is never an asset: refuse it before any byte is read.
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("asset `{rel}` is not a regular file"),
+        ));
     }
-    if !same_file(&file, &resolved) {
+    if !descriptor_path(&file)?.starts_with(root) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            format!("asset `{rel}` changed while it was being read"),
+            format!("asset `{rel}` resolves outside the bundle sandbox (symlink escape)"),
         ));
     }
     let mut bytes = Vec::new();
@@ -480,21 +479,25 @@ pub(crate) fn read_confined_asset(root: &Path, rel: &str) -> std::io::Result<Vec
     Ok(bytes)
 }
 
+/// `O_NONBLOCK` is what keeps a FIFO substitution from blocking the open before
+/// the descriptor can be inspected; `O_CLOEXEC` keeps it out of child processes.
 #[cfg(unix)]
 fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
-    std::fs::File::open(path)
+    use nix::fcntl::{open, OFlag};
+    use nix::sys::stat::Mode;
+
+    open(
+        path,
+        OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map(std::fs::File::from)
+    .map_err(std::io::Error::from)
 }
 
-/// Open the leaf as the reparse point it is, so a link cannot redirect the read.
 #[cfg(windows)]
 fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
+    std::fs::File::open(path)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -502,31 +505,50 @@ fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::open(path)
 }
 
-/// Whether the open descriptor is the file the canonical `resolved` path names.
-#[cfg(unix)]
-fn same_file(file: &std::fs::File, resolved: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
+/// The path the descriptor itself is bound to, with every symlink it followed
+/// already resolved by the open.
+///
+/// Linux names it behind `/proc/self/fd`; an unlinked file carries a
+/// ` (deleted)` suffix and is refused rather than read.
+#[cfg(target_os = "linux")]
+fn descriptor_path(file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::ffi::OsStrExt as _;
 
-    match (file.metadata(), std::fs::metadata(resolved)) {
-        (Ok(opened), Ok(target)) => (opened.dev(), opened.ino()) == (target.dev(), target.ino()),
-        _ => false,
+    let linked = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
+    if linked.as_os_str().as_bytes().ends_with(b" (deleted)") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "asset was removed while it was being read",
+        ));
     }
+    Ok(linked)
 }
 
-/// The leaf was opened as its own reparse point, so a link is refused here.
+/// macOS names the descriptor's own path through `fcntl(F_GETPATH)`.
+#[cfg(target_os = "macos")]
+fn descriptor_path(file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+    use nix::fcntl::{fcntl, FcntlArg};
+
+    let mut path = std::path::PathBuf::new();
+    fcntl(file, FcntlArg::F_GETPATH(&mut path)).map_err(std::io::Error::from)?;
+    Ok(path)
+}
+
+/// Windows asks the handle for its final path through the workspace's audited
+/// native bridge; the answer is the object the bytes would come from.
 #[cfg(windows)]
-fn same_file(file: &std::fs::File, _resolved: &Path) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
-    file.metadata()
-        .is_ok_and(|opened| opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0)
+fn descriptor_path(file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+    nexus_config_metadata::final_path(file)
 }
 
-/// No descriptor identity exists on this target, so the read fails closed.
-#[cfg(not(any(unix, windows)))]
-fn same_file(_file: &std::fs::File, _resolved: &Path) -> bool {
-    false
+/// No descriptor-path query is wired for this target, so the read fails closed.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn descriptor_path(_file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "cannot verify asset confinement on this platform",
+    ))
 }
 
 /// Collect all `template_file` paths from a manifest as `(dot_path, &str)` pairs.
@@ -2892,13 +2914,9 @@ gates:
         }
     }
 
-    /// An asset replaced between the path checks and the identity read must not
-    /// contribute the replacement's bytes. A hand-placed symlink is the
-    /// deterministic form of that swap; the raced form creates the same link
-    /// between `validate_assets_in_bundle` and the read below.
-    #[test]
+    /// A bundle whose single role prompt is `prompts/writer.md`.
     #[cfg(unix)]
-    fn identity_read_refuses_an_asset_swapped_for_an_escaping_symlink() {
+    fn role_prompt_bundle() -> (tempfile::TempDir, std::path::PathBuf, PresetManifest) {
         let tmp = tempfile::tempdir().unwrap();
         let bundle = tmp.path().join("swapped");
         std::fs::create_dir_all(bundle.join("prompts")).unwrap();
@@ -2925,6 +2943,49 @@ roles:
 ",
         )
         .unwrap();
+        (tmp, bundle, manifest)
+    }
+
+    /// An in-bundle symlink is an ordinary bundle layout: the read follows it —
+    /// exactly as `validate_assets_in_bundle` accepts it — and hands back the
+    /// linked target's bytes.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_accepts_an_in_bundle_symlink() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink(
+            bundle.join("prompts/real.md"),
+            bundle.join("prompts/writer.md"),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"linked bytes"
+        );
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// A link that leaves the bundle is refused, and what is judged is the
+    /// descriptor the open captured: the deterministic form of the check/read
+    /// race is this hand-placed link, and whichever object the open captures is
+    /// either under the root (its own bytes are what the read returns) or
+    /// refused here — never bytes from outside.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_refuses_an_asset_swapped_for_an_escaping_symlink() {
+        let (tmp, bundle, manifest) = role_prompt_bundle();
         assert_eq!(
             crate::validation::validate_assets_in_bundle(&manifest, &bundle)
                 .errors()
@@ -2945,6 +3006,58 @@ roles:
                 .any(|problem| problem.error.contains("outside the bundle sandbox")),
             "expected a sandbox refusal, got: {:?}",
             error.problems()
+        );
+    }
+
+    /// A missing asset keeps its real IO error: the sandbox text is reserved for
+    /// a descriptor that genuinely resolves outside the root.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_reports_a_missing_asset_as_io() {
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+
+        let error = preset_source_identity(&manifest, Some(&bundle), None).unwrap_err();
+        let problems = error.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.error.contains("failed to read referenced asset")),
+            "expected the read failure to surface, got: {problems:?}"
+        );
+        assert!(
+            !problems
+                .iter()
+                .any(|problem| problem.error.contains("outside the bundle sandbox")),
+            "a missing asset is not a sandbox escape: {problems:?}"
+        );
+    }
+
+    /// A FIFO in an asset's place is refused from the descriptor, and the open
+    /// must not wait for a writer: `O_NONBLOCK` is what keeps this from hanging.
+    /// The timeout turns a regression into a fast failure instead of a hung run.
+    #[test]
+    #[cfg(unix)]
+    fn fifo_asset_is_refused_without_blocking() {
+        let (_tmp, bundle, _manifest) = role_prompt_bundle();
+        let fifo = bundle.join("prompts/writer.md");
+        std::fs::remove_file(&fifo).unwrap();
+        nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::from_bits_truncate(0o600)).unwrap();
+
+        let root = bundle;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sender
+                .send(super::read_confined_asset(&root, "prompts/writer.md"))
+                .ok();
+        });
+        let error = receiver
+            .recv_timeout(std::time::Duration::from_secs(8))
+            .expect("a FIFO asset must not block the read")
+            .expect_err("a FIFO is not a readable asset");
+        assert!(
+            error.to_string().contains("not a regular file"),
+            "unexpected refusal: {error}"
         );
     }
 }
