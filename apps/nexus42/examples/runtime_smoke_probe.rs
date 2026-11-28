@@ -19,6 +19,22 @@
 //! COMPUTE_OK session_tag=<16hex> entry=<id> current_hp=<n>  # compute response's own session/entry ids (tagged)
 //! ```
 //!
+//! No line prints a raw session id: `local-runtime-boundary.md` §4.1 scopes
+//! session identifiers out of operator smoke output, so the probe never
+//! constructs a line containing one — session lines carry a `session_tag`,
+//! failure lines a redacted error kind. A failing `--compute-session <id>` run
+//! was given that id on the operator's own command line, so the probe does not
+//! echo it back.
+//!
+//! Peer-supplied values are forwarded verbatim for diagnosis. This list is the
+//! one `local-runtime-boundary.md` §4.1 delegates to, so a new peer-value line
+//! extends it here: the host's own code strings (`*_CODE=`, plus the
+//! `wire code=` inside a failure line) and refusal text (`*_MESSAGE=`), its
+//! manifest (`MANIFEST_JSON=`, whose `extensions` is an open map) with the ops
+//! derived from it (`SERVED_OPS=`), and the ids/values it reports back
+//! (`remote=`, `entry=`, `current_hp=`). They are the peer's output, not
+//! identifiers the probe constructs.
+//!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
 //! `allowlist.json` entry is deterministic across runs. Usage:
 //!
@@ -51,15 +67,56 @@ fn fixed_keypair(seed: u8) -> Keypair {
     Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
 }
 
-/// The session identity a probe line reports: a `<16hex>` `DefaultHasher` tag,
-/// never the raw id. `DIAL_OK` tags the connect session the probe established;
-/// `COMPUTE_OK` tags the session id the compute **response** carries. Both use
-/// this shape so the smoke test reads either line with one parser.
+/// The session identity a probe line reports: a `<16hex>` `DefaultHasher`
+/// digest, never the raw id — operator smoke output tags a session instead of
+/// publishing its id (`local-runtime-boundary.md` §4.1). `DIAL_OK` tags the
+/// connect session the probe established; `COMPUTE_OK` tags the session id the
+/// compute **response** carries. Both use this shape so the smoke test reads
+/// either line with one parser.
 fn session_tag(session_id: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     session_id.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+/// Redacted description of an invoke failure: the error kind, plus the wire
+/// code for a remote refusal. The envelope and response payload are left out —
+/// a failure body can restate the raw session id (§4.1).
+fn describe_invoke_error(error: &spoke_connect::InvokeError) -> String {
+    use spoke_connect::InvokeError;
+    match error {
+        InvokeError::Wire(envelope) => format!("wire code={}", envelope.code),
+        InvokeError::Transport(_) => "transport".to_string(),
+        InvokeError::SessionClosed => "session closed".to_string(),
+        InvokeError::SequenceExhausted => "sequence exhausted".to_string(),
+        InvokeError::CorrelationMismatch => "correlation mismatch".to_string(),
+    }
+}
+
+/// An invoke that was expected to refuse, described without its payload.
+fn describe_invoke_outcome<T>(outcome: &Result<T, spoke_connect::InvokeError>) -> String {
+    match outcome {
+        Ok(_) => "succeeded".to_string(),
+        Err(error) => describe_invoke_error(error),
+    }
+}
+
+/// Connect/handshake failure kind. No variant payload — a peer-supplied reason
+/// or address never reaches probe output.
+const fn describe_connect_error(error: &spoke_connect::ConnectError) -> &'static str {
+    use spoke_connect::ConnectError;
+    match error {
+        ConnectError::NotAllowlisted { .. } => "peer not allowlisted",
+        ConnectError::InvalidHelloSignature => "invalid hello signature",
+        ConnectError::NonceReplay => "hello nonce replayed",
+        ConnectError::HandshakeFailed { .. } => "handshake failed",
+        ConnectError::ProtocolVersionMismatch { .. } => "protocol version mismatch",
+        ConnectError::Transport(_) => "transport",
+        ConnectError::Config(_) => "invalid config",
+        ConnectError::AuthFailed(_) => "capability token invalid",
+        ConnectError::Timeout(_) => "timed out",
+    }
 }
 
 /// Minimal peer manifest (the probe is a reference peer — mirrors the
@@ -147,7 +204,7 @@ async fn main() {
     let node = match SpokeConnectNode::start(config).await {
         Ok(node) => node,
         Err(e) => {
-            eprintln!("PROBE_NODE_START_FAILED: {e:?}");
+            eprintln!("PROBE_NODE_START_FAILED: {}", describe_connect_error(&e));
             std::process::exit(1);
         }
     };
@@ -158,7 +215,7 @@ async fn main() {
     {
         Ok(session) => session,
         Err(e) => {
-            println!("DIAL_REJECTED: {e:?}");
+            println!("DIAL_REJECTED: {}", describe_connect_error(&e));
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -184,7 +241,10 @@ async fn main() {
             report_refusal("UNSERVED_REFUSAL", &envelope);
         }
         other => {
-            println!("REFUSAL_UNEXPECTED: project {other:?}");
+            println!(
+                "REFUSAL_UNEXPECTED: project {}",
+                describe_invoke_outcome(&other)
+            );
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -198,7 +258,7 @@ async fn main() {
             println!("SESSION_OK");
         }
         other => {
-            println!("SESSION_CHECK_FAILED: {other:?}");
+            println!("SESSION_CHECK_FAILED: {}", describe_invoke_outcome(&other));
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -220,6 +280,10 @@ async fn main() {
 /// The product keeps ONE `op_unsupported` code for served-op, op-scope and
 /// payload denials (no cross-peer scope leak); the reason text is what
 /// distinguishes "not provided" from "outside the granted scope".
+///
+/// `_MESSAGE=` is the peer's own text passed through verbatim — the probe does
+/// not construct it and adds no identifier of its own (`local-runtime-boundary.md`
+/// §4.1).
 fn report_refusal(
     tag: &str,
     envelope: &spoke_schemas::connect::connect_invoke_response::ErrorEnvelope,
@@ -278,7 +342,7 @@ async fn run_retained_ops(
             }),
         )
         .await
-        .map_err(|e| format!("upsert rejected: {e:?}"))?;
+        .map_err(|e| format!("upsert rejected: {}", describe_invoke_error(&e)))?;
     println!("UPSERT_OK");
     println!("SESSION_ALIVE_OK");
 
@@ -297,29 +361,18 @@ async fn run_retained_ops(
             }),
         )
         .await
-        .map_err(|e| format!("compute rejected: {e:?}"))?;
+        .map_err(|e| format!("compute rejected: {}", describe_invoke_error(&e)))?;
     let current_hp = computed.payload["computable"]["character"]["current_hp"]
         .as_i64()
-        .ok_or_else(|| {
-            format!(
-                "compute response has no numeric current_hp: {}",
-                computed.payload
-            )
-        })?;
+        .ok_or("compute response has no numeric current_hp")?;
     // Tag and entry come from the RESPONSE, not from the request arguments: a
     // lane that resolved another session must print that session's tag.
-    let returned_session = computed.payload["session_id"].as_str().ok_or_else(|| {
-        format!(
-            "compute response has no string session_id: {}",
-            computed.payload
-        )
-    })?;
-    let returned_entry = computed.payload["entry_id"].as_str().ok_or_else(|| {
-        format!(
-            "compute response has no string entry_id: {}",
-            computed.payload
-        )
-    })?;
+    let returned_session = computed.payload["session_id"]
+        .as_str()
+        .ok_or("compute response has no string session_id")?;
+    let returned_entry = computed.payload["entry_id"]
+        .as_str()
+        .ok_or("compute response has no string entry_id")?;
     println!(
         "COMPUTE_OK session_tag={} entry={returned_entry} current_hp={current_hp}",
         session_tag(returned_session)
