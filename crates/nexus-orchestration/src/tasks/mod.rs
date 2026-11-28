@@ -4,9 +4,12 @@
 //!
 //! # Trace correlation
 //!
-//! Tracked as I-000628. Context keys are `_run_id`, `_last_capability_call_id`
-//! and `_trace_file`; trace DTOs come from
-//! `nexus-contracts::local::acp_runtime::trace`.
+//! The work is tracked in I-000628, which also holds its acceptance. That work
+//! will introduce the context keys `_run_id`, `_last_capability_call_id` and
+//! `_trace_file`, and emit trace DTOs from
+//! `nexus-contracts::local::acp_runtime::trace`. No code path writes these keys
+//! or consumes them for tracing yet — `build_context_json` only lists `_run_id`
+//! as a passthrough key — so readers must not depend on them.
 
 use crate::engine::OrchestrationEngine;
 use async_trait::async_trait;
