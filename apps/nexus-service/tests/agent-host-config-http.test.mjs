@@ -32,6 +32,10 @@ function routeFor(method) {
 const handle = (method, service, body) =>
   routeFor(method).handle(service, [], new URLSearchParams(), body);
 
+/** An omitted `enabled` means default-enabled, so only an explicit `false` disables. */
+const enabledIds = (providers) =>
+  providers.filter((provider) => provider.enabled !== false).map(({ id }) => id);
+
 const DEFAULT_CONFIG = {
   max_sessions: 4,
   max_ops_per_session: 1,
@@ -160,17 +164,13 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
 
       assert.deepEqual(saves[0].providers, providers, 'the document is stored as submitted');
       assert.deepEqual(
-        response.body.providers
-          .filter((provider) => provider.enabled !== false)
-          .map(({ id }) => id),
+        enabledIds(response.body.providers),
         ['owner-acp'],
         'the single enabled id owns readiness regardless of position',
       );
       assert.equal(restarts.length, 1);
       assert.deepEqual(
-        restarts[0].providers
-          .filter((provider) => provider.enabled !== false)
-          .map(({ id }) => id),
+        enabledIds(restarts[0].providers),
         ['owner-acp'],
         'the restart is applied with the single enabled provider',
       );
@@ -180,39 +180,85 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
   });
 
   test('a document with zero enabled providers saves unchanged', async () => {
-    const providers = [
+    const expected = [
       { id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: false },
       { id: 'second-acp', protocol: 'acp', command: null, enabled: false },
     ];
     const { service, saves } = storeService(DEFAULT_CONFIG);
 
-    const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers });
-
-    assert.equal(saves.length, 1);
-    assert.deepEqual(saves[0].providers, providers);
-    assert.deepEqual(response.body.providers, providers);
-  });
-
-  test('a no-op save disables nothing', async () => {
-    const provider = {
-      id: 'claude-acp',
-      protocol: 'acp',
-      command: 'claude-agent-acp',
-      enabled: true,
-    };
-    const disabled = { id: 'codex-acp', protocol: 'acp', command: null, enabled: false };
-    const { service, saves } = storeService({
-      ...DEFAULT_CONFIG,
-      providers: [provider, disabled],
-    });
-
     const response = await handle('PUT', service, {
       ...DEFAULT_CONFIG,
-      providers: [provider, disabled],
+      providers: [
+        { id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: false },
+        { id: 'second-acp', protocol: 'acp', command: null, enabled: false },
+      ],
     });
 
-    assert.deepEqual(response.body.providers, [provider, disabled]);
-    assert.deepEqual(saves[0].providers, [provider, disabled]);
+    assert.equal(saves.length, 1);
+    assert.deepEqual(saves[0].providers, expected);
+    assert.deepEqual(response.body.providers, expected);
+  });
+
+  test('a no-op save keeps the enabled set and hands the default-enabled document to the core', async () => {
+    // An omitted `enabled` means enabled. The service hands the parsed document to the native
+    // core untouched; the core materialises `enabled = true` when it writes `config.toml`
+    // (`ProviderConfig.enabled` in `crates/nexus-agent-host/src/config.rs`, serialized by
+    // `save_config`), so the omission is a handler property, not an on-disk shape.
+    const defaultEnabled = () => ({ id: 'claude-acp', protocol: 'acp', command: 'claude-agent-acp' });
+    const disabled = () => ({ id: 'codex-acp', protocol: 'acp', command: null, enabled: false });
+
+    // The expected documents come from separate factory calls, so a rewrite that mutates the
+    // submitted providers in place cannot pass by comparing an array with itself.
+    for (const [submitted, expected] of [
+      [
+        [defaultEnabled(), disabled()],
+        [defaultEnabled(), disabled()],
+      ],
+      [
+        [disabled(), defaultEnabled()],
+        [disabled(), defaultEnabled()],
+      ],
+    ]) {
+      const { service, saves, restarts } = storeService({
+        ...DEFAULT_CONFIG,
+        providers: [defaultEnabled(), disabled()],
+      });
+      const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers: submitted });
+
+      assert.deepEqual(
+        saves[0].providers,
+        expected,
+        'the handler hands the core the document as submitted, order and omission intact',
+      );
+      assert.deepEqual(
+        response.body.providers.map(({ id }) => id),
+        expected.map(({ id }) => id),
+        'the response keeps the persisted order',
+      );
+      assert.deepEqual(enabledIds(saves[0].providers), ['claude-acp']);
+      assert.deepEqual(enabledIds(response.body.providers), ['claude-acp']);
+      assert.deepEqual(
+        enabledIds(restarts[0].providers),
+        ['claude-acp'],
+        'the restarted owner sees the same default-enabled provider in either order',
+      );
+      assert.equal(service.providerReady, true);
+      assert.equal(service.engineEpoch, 7);
+    }
+
+    // The omission counts as enabled, so it must also carry the enabled command requirement.
+    await assert.rejects(
+      () =>
+        handle('PUT', storeService(DEFAULT_CONFIG).service, {
+          ...DEFAULT_CONFIG,
+          providers: [{ id: 'claude-acp', protocol: 'acp' }],
+        }),
+      (error) => {
+        assert.equal(error.code, 'invalid_input');
+        assert.match(error.message, /command is required when provider 'claude-acp' is enabled/);
+        return true;
+      },
+    );
   });
 
   test('two overlapping PUTs apply in order and both restart', async () => {
