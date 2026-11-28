@@ -44,7 +44,7 @@
  *
  * Conflict policy (T4 — architect-locked §5): reuses `WorldKbConflictError`
  * (HTTP 409) + `WorldKbValidationError` (HTTP 422); no Timeline-specific
- * conflict DTO. `extractConflict` parses the canonical `ErrorResponse`
+ * conflict DTO. `extractTimelineConflict` parses the canonical `ErrorResponse`
  * envelope into a `TimelineConflictInfo`; the modal is orchestrator-owned,
  * mirroring the World KB adapter.
  *
@@ -1349,7 +1349,7 @@ export function summarizeTimelineGraph(
  *     The inspector receives the full ctxRef so it stays decoupled from
  *     stale closures.
  *   - Conflict UX is orchestrator-owned (mirrors World KB). Use
- *     `extractConflict(error)` for the typed parse.
+ *     `extractTimelineConflict(error)` for the typed parse.
  *
  * T5 extensions over T4:
  *   - `renderAltView()` — renders the non-spatial sortable Timeline entity
