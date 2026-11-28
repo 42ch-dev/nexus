@@ -715,6 +715,82 @@ pub fn build_wired_outer_graph_from_ir(
     Ok(wire_outer_topology(builder, &manifest, &document.entry).build()?)
 }
 
+/// Why [`build_wired_outer_graph_for_apply`] produced no graph.
+#[derive(Debug, thiserror::Error)]
+pub enum WiredOuterGraphError {
+    /// Neither an applied document nor a loaded bundle was supplied; the
+    /// caller owns the refusal wording.
+    #[error("neither an applied document nor a loaded preset was supplied")]
+    NoSource,
+    /// The applied document cannot project to an executable outer graph.
+    #[error(transparent)]
+    Ir(#[from] IrOuterGraphError),
+    /// The loaded bundle's manifest cannot build a wired outer graph.
+    #[error(transparent)]
+    Manifest(#[from] graph_flow::GraphError),
+}
+
+/// Build the wired outer graph a run executes under its resolved apply: the
+/// APPLIED document when the strategy has one, else the loaded bundle's manifest.
+///
+/// Every seam that chooses between the two builders — both admission seams, the
+/// preset trait entry and store-backed recovery — goes through here, so none of
+/// them can build a graph its run was not admitted under. Each caller maps the
+/// failure into its own refusal type: the arms fail for different reasons and
+/// each site words them itself.
+///
+/// `reconstruct_runner_legacy` calls [`build_wired_outer_graph_from_ir`]
+/// directly: it makes no choice (a summary that resolves no applied document
+/// refuses before any build), and routing it through here would force it to
+/// word two arms it can never take.
+///
+/// `(None, None)` returns [`WiredOuterGraphError::NoSource`] instead of a
+/// graph, so each caller keeps its own no-source refusal.
+///
+/// # Errors
+/// [`WiredOuterGraphError`], mapped through `map_error`.
+#[allow(
+    clippy::too_many_arguments,
+    clippy::needless_pass_by_value,
+    clippy::implicit_hasher
+)] // mirrors build_wired_outer_graph*'s allow: the dispatch handles are consumed per call, the cancel map is the engine's own, and the arity is theirs plus map_error
+pub fn build_wired_outer_graph_for_apply<E>(
+    applied: Option<&WorkflowDocument>,
+    loaded: Option<&LoadedPreset>,
+    engine: &Arc<dyn crate::engine::OrchestrationEngine>,
+    caps: &Arc<CapabilityRegistry>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn nexus_capability::DaemonToolDispatch>>,
+    prompt_executor: Option<std::sync::Arc<dyn nexus_capability::PromptExecutor>>,
+    session_cancels: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+    >,
+    map_error: impl FnOnce(WiredOuterGraphError) -> E,
+) -> Result<graph_flow::Graph, E> {
+    let built = match (applied, loaded) {
+        (Some(document), loaded) => build_wired_outer_graph_from_ir(
+            document,
+            ir_template_source(loaded),
+            engine,
+            caps,
+            daemon_tool_dispatch,
+            prompt_executor,
+            session_cancels,
+        )
+        .map_err(WiredOuterGraphError::from),
+        (None, Some(loaded)) => build_wired_outer_graph(
+            loaded,
+            engine,
+            caps,
+            daemon_tool_dispatch,
+            prompt_executor,
+            session_cancels,
+        )
+        .map_err(WiredOuterGraphError::from),
+        (None, None) => Err(WiredOuterGraphError::NoSource),
+    };
+    built.map_err(map_error)
+}
+
 /// Start `builder` at `entry` and wire every projected transition onto it.
 ///
 /// The single definition of the outer topology: [`build_wired_outer_graph_from_ir`]
