@@ -929,7 +929,10 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(prompt.status, 200, prompt.text);
 
     const launchesBeforeBusy = launchPids(acpLog, peerLog);
-    assert.ok(launchesBeforeBusy.size > 0, 'the Busy session provider launch must be on record before the reuse');
+    assert.ok(
+      launchPids(peerLog).size > 0,
+      'the peer launch must be on record before the Busy reuse',
+    );
     const busy = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: actorBody({ provider_id: LATE_PROVIDER }),
