@@ -4097,6 +4097,7 @@ dependencies = [
  "nexus-contracts",
  "nexus-workflow-ir",
  "nix 0.32.0",
+ "rustix",
  "serde",
  "serde_json",
  "serde_yaml",

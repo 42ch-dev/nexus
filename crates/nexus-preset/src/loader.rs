@@ -450,38 +450,45 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
 
 /// Read a referenced asset through one descriptor confined to `root`.
 ///
-/// `root` must already be canonical. The opened descriptor decides, never a
-/// second resolution of the pathname: the bytes come from that same descriptor,
-/// and only a descriptor whose own path lies under `root` is accepted. Replacing
-/// the asset between an existence check and this read therefore cannot hand
-/// back bytes the check never saw. An in-bundle symlink is followed and
-/// accepted; a target outside the bundle is refused.
+/// `root` must already be canonical. The descriptor decides, never a second
+/// resolution of the pathname: the bytes come from the descriptor the
+/// confinement check approved. Replacing the asset between an existence check
+/// and this read therefore cannot hand back bytes the check never saw. An
+/// in-bundle symlink is followed; a target outside the bundle is refused.
 pub(crate) fn read_confined_asset(root: &Path, rel: &str) -> std::io::Result<Vec<u8>> {
     use std::io::Read as _;
 
-    let mut file = open_asset(&root.join(rel))?;
-    // A FIFO, socket or device answers the open (`O_NONBLOCK` keeps it from
-    // blocking) but is never an asset: refuse it before any byte is read.
-    if !file.metadata()?.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("asset `{rel}` is not a regular file"),
-        ));
-    }
-    if !descriptor_path(&file)?.starts_with(root) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("asset `{rel}` resolves outside the bundle sandbox (symlink escape)"),
-        ));
-    }
+    let mut file = open_confined(root, rel)?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn escape(rel: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!("asset `{rel}` resolves outside the bundle sandbox (symlink escape)"),
+    )
+}
+
+/// A FIFO, socket or device answers the open (`O_NONBLOCK` keeps it from
+/// blocking) but is never an asset, and its descriptor name says nothing about
+/// the bundle: refuse it before any path query or byte read.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn reject_non_regular(rel: &str, file: &std::fs::File) -> std::io::Result<()> {
+    if file.metadata()?.is_file() {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("asset `{rel}` is not a regular file"),
+    ))
+}
+
 /// `O_NONBLOCK` is what keeps a FIFO substitution from blocking the open before
 /// the descriptor can be inspected; `O_CLOEXEC` keeps it out of child processes.
-#[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
     use nix::fcntl::{open, OFlag};
     use nix::sys::stat::Mode;
@@ -495,56 +502,102 @@ fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
     .map_err(std::io::Error::from)
 }
 
-#[cfg(windows)]
-fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
-    std::fs::File::open(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
-    std::fs::File::open(path)
-}
-
-/// The path the descriptor itself is bound to, with every symlink it followed
-/// already resolved by the open.
-///
-/// Linux names it behind `/proc/self/fd`; an unlinked file carries a
-/// ` (deleted)` suffix and is refused rather than read.
+/// The kernel proves confinement: `openat2` resolves `rel` relative to a
+/// descriptor on `root` and fails with `EXDEV` for any resolution that leaves
+/// it.
 #[cfg(target_os = "linux")]
-fn descriptor_path(file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
+    match open_beneath(root, rel) {
+        Ok(file) => {
+            reject_non_regular(rel, &file)?;
+            Ok(file)
+        }
+        Err(rustix::io::Errno::XDEV) => Err(escape(rel)),
+        // Kernels before 5.6 have no `openat2`; only then fall back.
+        Err(rustix::io::Errno::NOSYS) => open_confined_via_proc(root, rel),
+        Err(errno) => Err(std::io::Error::from(errno)),
+    }
+}
+
+/// `BENEATH`, not `NO_SYMLINKS`: the validation pass accepts in-bundle symlinks,
+/// so they must resolve here too — the kernel refuses only links that leave the
+/// root. (Absolute link targets are refused by `BENEATH` even when they stay
+/// inside; that is stricter than validation and fails closed.)
+#[cfg(target_os = "linux")]
+fn open_beneath(root: &Path, rel: &str) -> Result<std::fs::File, rustix::io::Errno> {
+    use rustix::fs::{open, openat2, Mode, OFlags, ResolveFlags};
+
+    let dir = open(
+        root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let fd = openat2(
+        &dir,
+        rel,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+        ResolveFlags::BENEATH,
+    )?;
+    Ok(std::fs::File::from(fd))
+}
+
+/// Fallback for kernels without `openat2`: `/proc/self/fd` names the object the
+/// open captured, and its link count — never the shape of the name — says
+/// whether that object still has a directory entry.
+#[cfg(target_os = "linux")]
+fn open_confined_via_proc(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
     use std::os::fd::AsRawFd as _;
     use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::fs::MetadataExt as _;
 
-    let linked = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
-    if linked.as_os_str().as_bytes().ends_with(b" (deleted)") {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "asset was removed while it was being read",
-        ));
+    let file = open_asset(&root.join(rel))?;
+    reject_non_regular(rel, &file)?;
+    let unlinked = file.metadata()?.nlink() == 0;
+    let mut resolved = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
+    if unlinked {
+        // The kernel appends this marker only for a link with no directory
+        // entry left, which is exactly `st_nlink == 0`.
+        if let Some(stripped) = resolved.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
+            resolved = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(stripped));
+        }
     }
-    Ok(linked)
+    if !resolved.starts_with(root) {
+        return Err(escape(rel));
+    }
+    Ok(file)
 }
 
 /// macOS names the descriptor's own path through `fcntl(F_GETPATH)`.
 #[cfg(target_os = "macos")]
-fn descriptor_path(file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
     use nix::fcntl::{fcntl, FcntlArg};
 
+    let file = open_asset(&root.join(rel))?;
+    reject_non_regular(rel, &file)?;
     let mut path = std::path::PathBuf::new();
-    fcntl(file, FcntlArg::F_GETPATH(&mut path)).map_err(std::io::Error::from)?;
-    Ok(path)
+    fcntl(&file, FcntlArg::F_GETPATH(&mut path)).map_err(std::io::Error::from)?;
+    if !path.starts_with(root) {
+        return Err(escape(rel));
+    }
+    Ok(file)
 }
 
 /// Windows asks the handle for its final path through the workspace's audited
 /// native bridge; the answer is the object the bytes would come from.
 #[cfg(windows)]
-fn descriptor_path(file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
-    nexus_config_metadata::final_path(file)
+fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
+    let file = std::fs::File::open(root.join(rel))?;
+    reject_non_regular(rel, &file)?;
+    if !nexus_config_metadata::final_path(&file)?.starts_with(root) {
+        return Err(escape(rel));
+    }
+    Ok(file)
 }
 
-/// No descriptor-path query is wired for this target, so the read fails closed.
+/// No confinement proof is wired for this target, so the read fails closed.
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn descriptor_path(_file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+fn open_confined(_root: &Path, _rel: &str) -> std::io::Result<std::fs::File> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "cannot verify asset confinement on this platform",
@@ -2914,14 +2967,16 @@ gates:
         }
     }
 
-    /// A bundle whose single role prompt is `prompts/writer.md`.
+    /// A bundle whose single role prompt is `asset`, a `prompts/…` relative path.
     #[cfg(unix)]
-    fn role_prompt_bundle() -> (tempfile::TempDir, std::path::PathBuf, PresetManifest) {
+    fn role_prompt_bundle_with(
+        asset: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf, PresetManifest) {
         let tmp = tempfile::tempdir().unwrap();
         let bundle = tmp.path().join("swapped");
         std::fs::create_dir_all(bundle.join("prompts")).unwrap();
-        std::fs::write(bundle.join("prompts/writer.md"), "in bundle").unwrap();
-        let manifest: PresetManifest = serde_yaml::from_str(
+        std::fs::write(bundle.join(asset), "in bundle").unwrap();
+        let manifest: PresetManifest = serde_yaml::from_str(&format!(
             r"
 preset:
   id: swapped
@@ -2932,23 +2987,30 @@ preset:
   terminal: b
 states:
   - id: a
-    exit_when: { kind: manual }
+    exit_when: {{ kind: manual }}
     next: b
   - id: b
     terminal: true
 roles:
   - id: writer
     description: Writer
-    system_prompt_file: prompts/writer.md
-",
-        )
+    system_prompt_file: {asset}
+"
+        ))
         .unwrap();
         (tmp, bundle, manifest)
     }
 
+    #[cfg(unix)]
+    fn role_prompt_bundle() -> (tempfile::TempDir, std::path::PathBuf, PresetManifest) {
+        role_prompt_bundle_with("prompts/writer.md")
+    }
+
     /// An in-bundle symlink is an ordinary bundle layout: the read follows it —
     /// exactly as `validate_assets_in_bundle` accepts it — and hands back the
-    /// linked target's bytes.
+    /// linked target's bytes. The link is relative, the form every arm follows
+    /// (Linux's kernel `BENEATH` refuses absolute targets even when they stay
+    /// inside, which is stricter and fails closed).
     #[test]
     #[cfg(unix)]
     fn identity_read_accepts_an_in_bundle_symlink() {
@@ -2957,11 +3019,7 @@ roles:
         let (_tmp, bundle, manifest) = role_prompt_bundle();
         std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
         std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
-        std::os::unix::fs::symlink(
-            bundle.join("prompts/real.md"),
-            bundle.join("prompts/writer.md"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink("real.md", bundle.join("prompts/writer.md")).unwrap();
         assert_eq!(
             crate::validation::validate_assets_in_bundle(&manifest, &bundle)
                 .errors()
@@ -2974,6 +3032,28 @@ roles:
             source.read_asset("prompts/writer.md").unwrap().unwrap(),
             b"linked bytes"
         );
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// A file whose own name ends with the procfs deletion marker is an ordinary
+    /// bundle asset: deletion is decided from the descriptor's link count, never
+    /// from the shape of its name.
+    #[test]
+    #[cfg(unix)]
+    fn asset_named_like_a_deleted_proc_link_is_accepted() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let asset = "prompts/note (deleted)";
+        let (_tmp, bundle, manifest) = role_prompt_bundle_with(asset);
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(source.read_asset(asset).unwrap().unwrap(), b"in bundle");
         preset_source_identity(&manifest, Some(&bundle), None).unwrap();
     }
 

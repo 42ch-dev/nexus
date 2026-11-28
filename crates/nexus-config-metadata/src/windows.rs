@@ -227,10 +227,13 @@ pub fn link_count(target: &Path) -> io::Result<u64> {
 ///
 /// `GetFinalPathNameByHandleW` resolves the handle, not a pathname, so the
 /// answer names the object the handle is bound to even if names were replaced
-/// after the open. The result is the verbatim (`\\?\`-prefixed) form — the same
-/// form `std::fs::canonicalize` returns on this platform — so a caller's
-/// canonical root compares directly.
+/// after the open. The buffer is decoded straight to an `OsString` — no lossy
+/// text round-trip — so two distinct NTFS names can never compare equal. The
+/// result is the verbatim (`\\?\`-prefixed) form, the same form
+/// `std::fs::canonicalize` returns on this platform, so a caller's canonical
+/// root compares directly.
 pub fn final_path(file: &File) -> io::Result<PathBuf> {
+    use std::os::windows::ffi::OsStringExt as _;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::Storage::FileSystem::{
         GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_DOS,
@@ -257,7 +260,9 @@ pub fn final_path(file: &File) -> io::Result<PathBuf> {
         // A full buffer means the required length did not include room for the
         // terminating NUL; grow to that reported length and ask again.
         if written < buffer.len() {
-            return Ok(PathBuf::from(String::from_utf16_lossy(&buffer[..written])));
+            return Ok(PathBuf::from(std::ffi::OsString::from_wide(
+                &buffer[..written],
+            )));
         }
         buffer.resize(written + 1, 0);
     }
