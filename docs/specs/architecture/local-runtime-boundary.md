@@ -96,7 +96,9 @@ Rules:
 #### 4.1 Secrets
 
 - Refresh/access tokens should use a credential store when possible
-- Logs must redact tokens
+- Logs must redact tokens, and must not carry credentials or raw session identifiers in cleartext
+- A session is reported instead as a stable tag derived from its id — `<16 lowercase hex>` — so an operator can correlate lines to one session without holding an identifier that would authorize a replay
+- Implementation example: `apps/nexus42/examples/runtime_smoke_probe.rs` prints `session_tag=<16 lowercase hex>` and never `session=<id>` on its `DIAL_OK` / `COMPUTE_OK` lines; this section is the rule, that probe is one consumer of it
 
 #### 4.2 Filesystem
 

@@ -19,6 +19,11 @@
 //! COMPUTE_OK session_tag=<16hex> entry=<id> current_hp=<n>  # compute response's own session/entry ids (tagged)
 //! ```
 //!
+//! No line prints a raw session id: `local-runtime-boundary.md` §4.1
+//! (`docs/specs/architecture/local-runtime-boundary.md`) keeps credentials and
+//! session identifiers out of cleartext logs, so each line carries a
+//! `session_tag` instead.
+//!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
 //! `allowlist.json` entry is deterministic across runs. Usage:
 //!
@@ -52,9 +57,10 @@ fn fixed_keypair(seed: u8) -> Keypair {
 }
 
 /// The session identity a probe line reports: a `<16hex>` `DefaultHasher` tag,
-/// never the raw id. `DIAL_OK` tags the connect session the probe established;
-/// `COMPUTE_OK` tags the session id the compute **response** carries. Both use
-/// this shape so the smoke test reads either line with one parser.
+/// never the raw id, per `local-runtime-boundary.md` §4.1. `DIAL_OK` tags the
+/// connect session the probe established; `COMPUTE_OK` tags the session id the
+/// compute **response** carries. Both use this shape so the smoke test reads
+/// either line with one parser.
 fn session_tag(session_id: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
