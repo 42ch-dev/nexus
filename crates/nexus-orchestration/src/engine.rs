@@ -3608,41 +3608,34 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired = match (&applied, &loaded) {
-            (Some(document), _) => crate::preset_runtime::build_wired_outer_graph_from_ir(
-                document,
-                crate::preset_runtime::ir_template_source(loaded.as_ref()),
-                &engine_proxy,
-                &caps,
-                self.daemon_tool_dispatch.clone(),
-                self.prompt_executor.clone(),
-                self.session_cancels.clone(),
-            )
-            .map_err(|error| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
-                    "R6: applied document of session {} is not buildable: {error} \
-                     (reconstruction_unavailable, non-replayable)",
-                    session_id.0
-                )))
-            })?,
-            (None, Some(loaded)) => crate::preset_runtime::build_wired_outer_graph(
-                loaded,
-                &engine_proxy,
-                &caps,
-                self.daemon_tool_dispatch.clone(),
-                self.prompt_executor.clone(),
-                self.session_cancels.clone(),
-            )?,
-            (None, None) => {
-                return Err(EngineError::GraphFlow(
-                    graph_flow::GraphError::StorageError(format!(
+        let wired = crate::preset_runtime::build_wired_outer_graph_for_apply(
+            applied.as_ref(),
+            loaded.as_ref(),
+            &engine_proxy,
+            &caps,
+            self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
+            |error| match error {
+                crate::preset_runtime::WiredOuterGraphError::NoSource => {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
                         "R6: session {} has neither an applied document nor a reloadable bundle; \
                          its graph cannot be rebuilt (non-replayable)",
                         session_id.0
-                    )),
-                ));
-            }
-        };
+                    )))
+                }
+                crate::preset_runtime::WiredOuterGraphError::Ir(error) => {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(format!(
+                        "R6: applied document of session {} is not buildable: {error} \
+                         (reconstruction_unavailable, non-replayable)",
+                        session_id.0
+                    )))
+                }
+                crate::preset_runtime::WiredOuterGraphError::Manifest(error) => {
+                    EngineError::GraphFlow(error)
+                }
+            },
+        )?;
 
         let runner = Arc::new(FlowRunner::new(Arc::new(wired), self.state.storage.clone()));
 
@@ -3884,28 +3877,23 @@ impl GraphFlowEngine {
                 )),
             ));
         }
-        let wired = match &applied {
-            Some(applied) => crate::preset_runtime::build_wired_outer_graph_from_ir(
-                &applied.document,
-                crate::preset_runtime::ir_template_source(Some(loaded)),
-                &proxy,
-                &caps,
-                self.daemon_tool_dispatch.clone(),
-                self.prompt_executor.clone(),
-                self.session_cancels.clone(),
-            )
-            .map_err(|error| {
-                EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
-            })?,
-            None => crate::preset_runtime::build_wired_outer_graph(
-                loaded,
-                &proxy,
-                &caps,
-                self.daemon_tool_dispatch.clone(),
-                self.prompt_executor.clone(),
-                self.session_cancels.clone(),
-            )?,
-        };
+        let wired = crate::preset_runtime::build_wired_outer_graph_for_apply(
+            applied.as_ref().map(|applied| &applied.document),
+            Some(loaded),
+            &proxy,
+            &caps,
+            self.daemon_tool_dispatch.clone(),
+            self.prompt_executor.clone(),
+            self.session_cancels.clone(),
+            |error| match error {
+                crate::preset_runtime::WiredOuterGraphError::Manifest(error) => {
+                    EngineError::GraphFlow(error)
+                }
+                error => {
+                    EngineError::GraphFlow(graph_flow::GraphError::StorageError(error.to_string()))
+                }
+            },
+        )?;
         self.start_preset_run(
             loaded,
             creator_id,
