@@ -453,6 +453,18 @@ function readLog(path) {
   }
 }
 
+/** Launch identities: both fixture peers log `start` with their own pid as their
+ * first write, and a session create only returns after that peer answered
+ * `initialize`, so any admitted session's pid is already recorded. A provider
+ * still writing other events does not move the set — only a new process does. */
+function launchPids(...paths) {
+  const pids = new Set();
+  for (const path of paths) {
+    for (const entry of readLog(path)) if (entry.event === 'start') pids.add(entry.pid);
+  }
+  return pids;
+}
+
 function realpathOf(path) {
   return execFileSync('python3', ['-c', `import os,sys;print(os.path.realpath(sys.argv[1]))`, path], { encoding: 'utf8' }).trim();
 }
@@ -891,7 +903,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     });
     assert.equal(prompt.status, 200, prompt.text);
 
-    const launchesBeforeBusy = readLog(acpLog).length + readLog(peerLog).length;
+    const launchesBeforeBusy = launchPids(acpLog, peerLog);
     const busy = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: actorBody({ provider_id: LATE_PROVIDER }),
@@ -899,7 +911,11 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(busy.status, 409, busy.text);
     assert.equal(busy.payload.error.code, 'owner_busy');
     assert.equal(busy.payload.error.details.conflict_code, 'actor_session_busy');
-    assert.equal(readLog(acpLog).length + readLog(peerLog).length, launchesBeforeBusy, 'a Busy reuse must not launch');
+    assert.deepEqual(
+      [...launchPids(acpLog, peerLog)].filter((pid) => !launchesBeforeBusy.has(pid)),
+      [],
+      'a Busy reuse must not launch a provider',
+    );
 
     const cancel = await jsonFetch(`/v1/daemon/agent-host/operations/${prompt.payload.operation_id}`, {
       method: 'POST',
