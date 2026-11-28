@@ -152,8 +152,6 @@ interface CanvasSurfaceAdapter<TGraph, TNodeData, TEdgeData> {
   edgeTypes?: EdgeTypes;
   /** Dagre layout options; omit to opt out of auto-layout. */
   layoutOptions?: CanvasSurfaceLayoutOptions;
-  /** Conflict DTO → conflict-modal props (optional). */
-  adaptConflict?(error: unknown): ConflictModalProps | null;
   /** Inspector routing: which inspector renders for a selected node. */
   renderInspector?(node: Node<TNodeData>): ReactNode;
   /** Non-spatial alt-view companion (table/list). */
@@ -181,7 +179,7 @@ const surface = useCanvasSurface(adapter, queryResult);
 2. Projects the daemon graph with `adapter.projectGraph` (memoized; adapter must be stable).
 3. Merges new projections with the existing local React Flow state, preserving manual positions and selection for nodes that already exist.
 4. Applies `useAutoLayout` when `adapter.layoutOptions` is defined.
-5. Computes `summaryText`, `altView`, `inspector`, and `conflict` from the adapter.
+5. Computes `summaryText`, `altView`, and `inspector` from the adapter. Conflict state is **not** part of the shared contract: each surface orchestrator owns its own conflict state and modal (e.g. Outline renders `OutlineConflictDialog` from orchestrator-local state; the Timeline orchestrator parses errors with `extractTimelineConflict`).
 6. Exposes `relayout()` only when the adapter opts into layout.
 
 Surfaces should pass the returned `nodes`, `edges`, `nodeTypes`, `onNodesChange`, `summaryText`, `relayout`, and the overlay children (`inspector`, `altView`) to `CanvasShell`.
@@ -203,7 +201,7 @@ Surfaces should pass the returned `nodes`, `edges`, `nodeTypes`, `onNodesChange`
 2. Implement `CanvasSurfaceAdapter<TGraph, TNodeData, TEdgeData>`:
    - `projectGraph` converts the daemon DTO into React Flow nodes/edges.
    - `nodeTypes` registers the custom node components.
-   - Optionally provide `edgeTypes`, `layoutOptions`, `adaptConflict`, `renderInspector`, `renderAltView`.
+   - Optionally provide `edgeTypes`, `layoutOptions`, `renderInspector`, `renderAltView`.
    - `summarizeGraph` returns a string for the screen-reader live region.
 3. If the adapter needs mutable orchestrator state (e.g., selected node, form state, callbacks), build it with a stable factory that reads from a mutable `React.RefObject` context. The adapter object itself must stay stable so `useCanvasSurface` does not re-project on every render.
 4. In the surface orchestrator, call `useCanvasSurface(adapter, queryResult)` where `queryResult` conforms to `CanvasSurfaceQueryResult<TGraph>`.
@@ -277,7 +275,7 @@ The Timeline surface is **World-scoped**. It projects a World's history — even
 
 - **Reuses** `WorldKbConflictError` (HTTP 409 — stale `expected_version`) and `WorldKbValidationError` (HTTP 422 — domain-rule failure) from V1.73.
 - **No Timeline-specific conflict DTO.** Conflict-modal copy is **world-kb-flavored**, reusing the V1.73 entity-patch / V1.74 relationship-patch copy tokens.
-- The `adaptConflict(error)` adapter method parses the canonical `ErrorResponse` envelope and projects `WorldKbConflictError` / `WorldKbValidationError` `details` to the existing conflict-modal props (Use current / Reapply my edit / Review side-by-side).
+- The orchestrator-owned pure helper `extractTimelineConflict(error)` parses the canonical `ErrorResponse` envelope and projects `WorldKbConflictError` / `WorldKbValidationError` `details` to the surface-owned conflict-modal props (Use current / Reapply my edit / Review side-by-side). The adapter interface has no conflict member.
 
 ##### Honest empty-state
 

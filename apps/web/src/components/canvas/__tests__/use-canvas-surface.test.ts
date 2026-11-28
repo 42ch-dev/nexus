@@ -1,6 +1,6 @@
 /**
  *
- * Pins: projection correctness, conflict-state handling, alt-view toggle, and
+ * Pins: projection correctness, alt-view toggle, and
  * viewport delegation. React Flow / CanvasShell are not mounted; the hook is
  * exercised directly via `renderHook`.
  */
@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { NodeChangeset, type NodeTypes, type Viewport } from '@xyflow/react';
 
-import type { CanvasSurfaceAdapter, ConflictModalProps } from '../canvas-surface-adapter';
+import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import {
   useCanvasSurface,
   type CanvasSurfaceQueryResult,
@@ -44,22 +44,6 @@ function makeAdapter(): CanvasSurfaceAdapter<
     nodeTypes,
     summarizeGraph(graph) {
       return `Graph with ${graph.items.length} items`;
-    },
-    adaptConflict(_error) {
-      return {
-        open: true,
-        currentRevision: 1,
-        draft: {
-          label: '',
-          description: '',
-          nextTarget: '',
-          promptBody: '',
-        },
-        changedFields: ['label'],
-        onUseCurrent: () => {},
-        onReapply: () => {},
-        onDismiss: () => {},
-      } satisfies ConflictModalProps;
     },
     renderAltView() {
       return 'alt-view';
@@ -238,43 +222,6 @@ describe('useCanvasSurface', () => {
       result.current.setShowAlt(true);
     });
     expect(result.current.showAlt).toBe(true);
-  });
-
-  it('auto-populates conflict from query errors', () => {
-    const adapter = makeAdapter();
-    const query = makeQuery({
-      data: undefined,
-      isError: true,
-      error: new Error('graph failed'),
-    });
-    const { result } = renderHook(
-      ({ adapter, query }) => useCanvasSurface(adapter, query),
-      { initialProps: { adapter, query } },
-    );
-
-    expect(result.current.isError).toBe(true);
-    expect(result.current.conflict).not.toBeNull();
-  });
-
-  it('exposes handleConflict and setConflict for manual conflict management', () => {
-    const adapter = makeAdapter();
-    const query = makeQuery();
-    const { result } = renderHook(
-      ({ adapter, query }) => useCanvasSurface(adapter, query),
-      { initialProps: { adapter, query } },
-    );
-
-    expect(result.current.conflict).toBeNull();
-
-    act(() => {
-      result.current.handleConflict(new Error('patch conflict'));
-    });
-    expect(result.current.conflict).not.toBeNull();
-
-    act(() => {
-      result.current.setConflict(null);
-    });
-    expect(result.current.conflict).toBeNull();
   });
 
   it('delegates viewport caching to useCanvasViewport', () => {

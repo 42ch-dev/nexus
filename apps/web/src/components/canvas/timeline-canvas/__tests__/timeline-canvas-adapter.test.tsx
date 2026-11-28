@@ -534,7 +534,7 @@ describe('TimelineCanvasAdapter.summarizeGraph — honest temporal disclaimer', 
 
 
 describe('TimelineCanvasAdapter — T2 write-boundary isolation', () => {
-  it('projectGraph + summarizeGraph + adaptConflict do NOT invoke any client method', () => {
+  it('projectGraph + summarizeGraph do NOT invoke any client method', () => {
     const ctx = makeContext();
     const ctxRef = { current: ctx };
     const adapter = createTimelineCanvasAdapter(ctxRef);
@@ -553,7 +553,6 @@ describe('TimelineCanvasAdapter — T2 write-boundary isolation', () => {
 
     adapter.projectGraph(graph);
     adapter.summarizeGraph(graph);
-    adapter.adaptConflict?.(new Error('simulated 409'));
 
     const client = ctx.client as unknown as {
       getWorldKbGraph: ReturnType<typeof vi.fn>;
@@ -573,8 +572,4 @@ describe('TimelineCanvasAdapter — T2 write-boundary isolation', () => {
     expect(client.patchTimelineEvent).not.toHaveBeenCalled();
   });
 
-  it('adaptConflict returns null for V1.122 P1 T2 (conflict UX is T4 scope)', () => {
-    const adapter = createTimelineCanvasAdapter({ current: makeContext() });
-    expect(adapter.adaptConflict?.(new Error('simulated 409'))).toBeNull();
-  });
 });

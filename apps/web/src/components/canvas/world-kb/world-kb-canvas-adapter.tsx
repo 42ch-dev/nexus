@@ -8,7 +8,7 @@
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 
-import type { CanvasSurfaceAdapter, ConflictModalProps } from '../canvas-surface-adapter';
+import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import { worldKbNodeTypes } from './entity-node';
 import {
   anchorNodes,
@@ -150,10 +150,6 @@ export function createWorldKbCanvasAdapter(
           ...visibleRelEdges,
         ],
       };
-    },
-
-    adaptConflict(_error) {
-      return null as ConflictModalProps | null;
     },
 
     renderInspector(node) {

@@ -44,11 +44,9 @@
  *
  * Conflict policy (T4 — architect-locked §5): reuses `WorldKbConflictError`
  * (HTTP 409) + `WorldKbValidationError` (HTTP 422); no Timeline-specific
- * conflict DTO. `extractConflict` parses the canonical `ErrorResponse`
- * envelope into a `TimelineConflictInfo`; `adaptConflict` (the inherited
- * interface method) stays `null` — the modal is orchestrator-owned, mirroring
- * the World KB adapter (the Strategy-specific `ConflictModalProps` return type
- * does not fit world-kb-flavored conflicts).
+ * conflict DTO. `extractTimelineConflict` parses the canonical `ErrorResponse`
+ * envelope into a `TimelineConflictInfo`; the modal is orchestrator-owned,
+ * mirroring the World KB adapter.
  *
  * `wire_contracts_changed: true` — attributable to Task 1's single additive
  * `BlockType = "era"` enum value (schema + Rust companion + codegen). V1.123
@@ -1350,10 +1348,8 @@ export function summarizeTimelineGraph(
  *     `ctxRef.current.onPatchEntity` (the orchestrator-owned write callback).
  *     The inspector receives the full ctxRef so it stays decoupled from
  *     stale closures.
- *   - `adaptConflict` is intentionally `null` — the inherited return type
- *     (`ConflictModalProps`) is Strategy-specific and does not fit world-kb-
- *     flavored conflicts. Conflict UX is orchestrator-owned (mirrors World
- *     KB). Use `extractConflict(error)` for the typed parse.
+ *   - Conflict UX is orchestrator-owned (mirrors World KB). Use
+ *     `extractTimelineConflict(error)` for the typed parse.
  *
  * T5 extensions over T4:
  *   - `renderAltView()` — renders the non-spatial sortable Timeline entity
@@ -1432,10 +1428,6 @@ export function createTimelineCanvasAdapter(
         sceneBeatFixture ?? ctxRef.current.sceneBeatFixture,
         ctxRef.current.worldId,
       );
-    },
-
-    adaptConflict(_error) {
-      return null;
     },
 
     renderInspector(node) {
