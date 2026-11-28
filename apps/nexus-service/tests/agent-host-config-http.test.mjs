@@ -32,6 +32,10 @@ function routeFor(method) {
 const handle = (method, service, body) =>
   routeFor(method).handle(service, [], new URLSearchParams(), body);
 
+/** An omitted `enabled` means default-enabled, so only an explicit `false` disables. */
+const enabledIds = (providers) =>
+  providers.filter((provider) => provider.enabled !== false).map(({ id }) => id);
+
 const DEFAULT_CONFIG = {
   max_sessions: 4,
   max_ops_per_session: 1,
@@ -160,17 +164,13 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
 
       assert.deepEqual(saves[0].providers, providers, 'the document is stored as submitted');
       assert.deepEqual(
-        response.body.providers
-          .filter((provider) => provider.enabled !== false)
-          .map(({ id }) => id),
+        enabledIds(response.body.providers),
         ['owner-acp'],
         'the single enabled id owns readiness regardless of position',
       );
       assert.equal(restarts.length, 1);
       assert.deepEqual(
-        restarts[0].providers
-          .filter((provider) => provider.enabled !== false)
-          .map(({ id }) => id),
+        enabledIds(restarts[0].providers),
         ['owner-acp'],
         'the restart is applied with the single enabled provider',
       );
@@ -193,26 +193,41 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
     assert.deepEqual(response.body.providers, providers);
   });
 
-  test('a no-op save disables nothing', async () => {
-    const provider = {
-      id: 'claude-acp',
-      protocol: 'acp',
-      command: 'claude-agent-acp',
-      enabled: true,
-    };
+  test('a no-op save keeps the enabled set and the default-enabled omission', async () => {
+    // `enabled` omitted is the default-enabled form the native core writes back unchanged:
+    // a no-op save must not materialise the flag, drop it, or move providers around.
+    const defaultEnabled = { id: 'claude-acp', protocol: 'acp', command: 'claude-agent-acp' };
     const disabled = { id: 'codex-acp', protocol: 'acp', command: null, enabled: false };
-    const { service, saves } = storeService({
-      ...DEFAULT_CONFIG,
-      providers: [provider, disabled],
-    });
+    const stored = { ...DEFAULT_CONFIG, providers: [defaultEnabled, disabled] };
 
-    const response = await handle('PUT', service, {
-      ...DEFAULT_CONFIG,
-      providers: [provider, disabled],
-    });
+    for (const providers of [
+      [defaultEnabled, disabled],
+      [disabled, defaultEnabled],
+    ]) {
+      const { service, saves, restarts } = storeService(stored);
+      const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers });
 
-    assert.deepEqual(response.body.providers, [provider, disabled]);
-    assert.deepEqual(saves[0].providers, [provider, disabled]);
+      assert.deepEqual(
+        saves[0].providers,
+        providers,
+        'the document is stored exactly as submitted (order and key omission included)',
+      );
+      assert.deepEqual(response.body.providers, providers, 'the response echoes the persisted document');
+      assert.equal(
+        Object.hasOwn(saves[0].providers.find(({ id }) => id === defaultEnabled.id), 'enabled'),
+        false,
+        'a no-op save must not materialise the default-enabled flag',
+      );
+      assert.deepEqual(enabledIds(saves[0].providers), ['claude-acp']);
+      assert.deepEqual(enabledIds(response.body.providers), ['claude-acp']);
+      assert.deepEqual(
+        enabledIds(restarts[0].providers),
+        ['claude-acp'],
+        'the restarted owner sees the same default-enabled provider in either order',
+      );
+      assert.equal(service.providerReady, true);
+      assert.equal(service.engineEpoch, 7);
+    }
   });
 
   test('two overlapping PUTs apply in order and both restart', async () => {
