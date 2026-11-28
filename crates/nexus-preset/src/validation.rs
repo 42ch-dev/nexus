@@ -3766,3 +3766,33 @@ states:
         }
     }
 }
+
+/// The import path and the validation path read asset references from two
+/// different collectors. They must agree: a field added to one alone would let a
+/// reference escape import or validation without any failure.
+#[cfg(test)]
+mod asset_collector_parity {
+    use crate::validation::{collect_asset_file_references, collect_ir_asset_references};
+    use crate::workflow_ir::import_preset_manifest;
+    use crate::{list_embedded_presets, load_embedded_preset, BuiltinCapabilityCatalog};
+
+    #[test]
+    fn both_collectors_name_the_same_assets_for_every_embedded_preset() {
+        let caps = BuiltinCapabilityCatalog;
+        let ids = list_embedded_presets();
+        assert!(!ids.is_empty(), "expected at least one embedded preset");
+        for id in ids {
+            let loaded = load_embedded_preset(&id, &caps).expect("embedded preset loads");
+            let mut from_manifest = collect_asset_file_references(&loaded.manifest);
+            let document = import_preset_manifest(&loaded.manifest)
+                .unwrap_or_else(|e| panic!("preset '{id}' projection refused: {e}"));
+            let mut from_document = collect_ir_asset_references(&document);
+            from_manifest.sort();
+            from_document.sort();
+            assert_eq!(
+                from_manifest, from_document,
+                "asset collectors disagree for preset '{id}'"
+            );
+        }
+    }
+}
