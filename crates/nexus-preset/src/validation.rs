@@ -3772,9 +3772,10 @@ states:
 /// reference escape import or validation without any failure.
 #[cfg(test)]
 mod asset_collector_parity {
+    use crate::capability_catalog::BuiltinCapabilityCatalog;
     use crate::validation::{collect_asset_file_references, collect_ir_asset_references};
     use crate::workflow_ir::import_preset_manifest;
-    use crate::{list_embedded_presets, load_embedded_preset, BuiltinCapabilityCatalog};
+    use crate::{list_embedded_presets, load_embedded_preset};
 
     #[test]
     fn both_collectors_name_the_same_assets_for_every_embedded_preset() {
@@ -3794,5 +3795,68 @@ mod asset_collector_parity {
                 "asset collectors disagree for preset '{id}'"
             );
         }
+    }
+}
+
+/// The embedded presets never set `preset.initial_action.template_file` or an
+/// `enter[].args.system_prompt_file`, so the parity sweep above cannot see those
+/// two branches: dropping either from one collector would keep it green. This
+/// fixture names both, so the branches are exercised by both collectors.
+#[cfg(test)]
+mod asset_collector_branch_coverage {
+    use crate::manifest::PresetManifest;
+    use crate::validation::{collect_asset_file_references, collect_ir_asset_references};
+    use crate::workflow_ir::import_preset_manifest;
+
+    const YAML: &str = r"
+preset:
+  id: branch-coverage
+  version: 1
+  kind: creator
+  description: covers the branches the embedded presets never set
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+  initial_action:
+    kind: seed_expansion
+    capability: context.summarize
+    template_file: prompts/seed-expansion.md
+states:
+  - id: a
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          system_prompt_file: prompts/system.md
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+";
+
+    #[test]
+    fn both_collectors_name_the_initial_action_and_enter_system_prompt() {
+        let manifest: PresetManifest = serde_yaml::from_str(YAML).unwrap();
+        let mut from_manifest = collect_asset_file_references(&manifest);
+        let document = import_preset_manifest(&manifest).expect("projection succeeds");
+        let mut from_document = collect_ir_asset_references(&document);
+
+        let paths: Vec<&str> = from_manifest
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect();
+        assert!(
+            paths.contains(&"preset.initial_action.template_file"),
+            "{paths:?}"
+        );
+        assert!(
+            paths.contains(&"states[0].enter[0].args.system_prompt_file"),
+            "{paths:?}"
+        );
+
+        from_manifest.sort();
+        from_document.sort();
+        assert_eq!(from_manifest, from_document);
     }
 }
