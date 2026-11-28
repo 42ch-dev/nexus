@@ -26,13 +26,14 @@
 //! was given that id on the operator's own command line, so the probe does not
 //! echo it back.
 //!
-//! Peer-supplied values are forwarded verbatim for diagnosis, and every channel
-//! is named here: the host's own code strings (`*_CODE=`, plus the `wire code=`
-//! inside a failure line) and refusal text (`*_MESSAGE=`), its manifest
-//! (`MANIFEST_JSON=`, whose `extensions` is an open map) with the ops derived
-//! from it (`SERVED_OPS=`), and the ids/values it reports back (`remote=`,
-//! `entry=`, `current_hp=`). They are the peer's output, not identifiers the
-//! probe constructs.
+//! Peer-supplied values are forwarded verbatim for diagnosis. This list is the
+//! one `local-runtime-boundary.md` §4.1 delegates to, so a new peer-value line
+//! extends it here: the host's own code strings (`*_CODE=`, plus the
+//! `wire code=` inside a failure line) and refusal text (`*_MESSAGE=`), its
+//! manifest (`MANIFEST_JSON=`, whose `extensions` is an open map) with the ops
+//! derived from it (`SERVED_OPS=`), and the ids/values it reports back
+//! (`remote=`, `entry=`, `current_hp=`). They are the peer's output, not
+//! identifiers the probe constructs.
 //!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
 //! `allowlist.json` entry is deterministic across runs. Usage:
