@@ -2869,9 +2869,10 @@ roles:
 
     /// An in-bundle symlink is an ordinary bundle layout: the read follows it —
     /// exactly as `validate_assets_in_bundle` accepts it — and hands back the
-    /// linked target's bytes. The link is relative, the form every arm follows
-    /// (Linux's kernel `BENEATH` refuses absolute targets even when they stay
-    /// inside, which is stricter and fails closed).
+    /// linked target's bytes. The link here is relative, which every arm resolves
+    /// inside the root; an absolute in-bundle target takes the same verdict (see
+    /// `identity_read_accepts_an_absolute_in_bundle_symlink`), while an absolute
+    /// target outside the root is refused.
     #[test]
     #[cfg(unix)]
     fn identity_read_accepts_an_in_bundle_symlink() {
@@ -2896,13 +2897,14 @@ roles:
         preset_source_identity(&manifest, Some(&bundle), None).unwrap();
     }
 
-    /// An absolute link target that resolves inside the bundle is accepted too:
-    /// the shape `validate_assets_in_bundle` accepts, and the one macOS
-    /// (`F_GETPATH`) and Windows (`GetFinalPathNameByHandleW`) already judge by
-    /// the descriptor. This host exercises the macOS arm. On Linux the kernel's
-    /// `BENEATH` refuses absolute targets with `EXDEV`, so `open_confined` falls
-    /// back to the descriptor-path check, which must reach the same verdict
-    /// (that fallback needs `/proc/self/fd`).
+    /// An absolute link target that resolves inside the bundle is accepted — the
+    /// shape `validate_assets_in_bundle` accepts. macOS (`F_GETPATH`) and Windows
+    /// (`GetFinalPathNameByHandleW`) judge it natively by the descriptor's own
+    /// path; on Linux the kernel's `BENEATH` declines absolute targets with
+    /// `EXDEV`, so `BundleRoot::read` takes the descriptor-path route
+    /// (`/proc/self/fd` plus the `st_nlink` rule) and reaches the same verdict.
+    /// An absolute target outside the root is refused on every arm. This host
+    /// exercises the macOS arm.
     #[test]
     #[cfg(unix)]
     fn identity_read_accepts_an_absolute_in_bundle_symlink() {
