@@ -96,9 +96,11 @@ Rules:
 #### 4.1 Secrets
 
 - Refresh/access tokens should use a credential store when possible
-- Logs must redact tokens, and must not carry credentials or raw session identifiers in cleartext
-- A session is reported instead as a stable tag derived from its id — `<16 lowercase hex>` — so an operator can correlate lines to one session without holding an identifier that would authorize a replay
-- Implementation example: `apps/nexus42/examples/runtime_smoke_probe.rs` prints `session_tag=<16 lowercase hex>` and never `session=<id>` on its `DIAL_OK` / `COMPUTE_OK` lines; this section is the rule, that probe is one consumer of it
+- Logs, operator output, and error text must never carry credentials in cleartext
+- Operator smoke/probe output — the machine-readable lines a test asserts and a human pastes into an issue — renders a session only as a tag derived from its id, never the id itself, so a transcript correlates lines to one session without publishing that session's identifier
+- That tag is a 64-bit digest printed `<16 lowercase hex>` (the probe's `DefaultHasher`): stable within one build and process, not portable across toolchains, deliberately not the id, and not a security boundary — it resists casual reading, not offline enumeration
+- Protocol-level inspection surfaces keep the raw id instead: ACP request tracing and protocol errors (`crates/nexus-acp-host/src/client.rs` logs `session_id` for permission requests, prompt dispatch, and missing-session errors) and the reference dialer (`apps/nexus42/examples/connect_dialer.rs` prints `HANDSHAKE_OK session=<id>`). They exist to debug the wire against what the peer sees, and a session id is a transport-scoped correlation handle, not a credential
+- Implementation example: `apps/nexus42/examples/runtime_smoke_probe.rs` prints `session_tag=<16 lowercase hex>` and never `session=<id>`, including on its failure lines; this section is the rule, that probe is one consumer of it
 
 #### 4.2 Filesystem
 

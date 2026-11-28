@@ -19,10 +19,11 @@
 //! COMPUTE_OK session_tag=<16hex> entry=<id> current_hp=<n>  # compute response's own session/entry ids (tagged)
 //! ```
 //!
-//! No line prints a raw session id: `local-runtime-boundary.md` §4.1
-//! (`docs/specs/architecture/local-runtime-boundary.md`) keeps credentials and
-//! session identifiers out of cleartext logs, so each line carries a
-//! `session_tag` instead.
+//! No line prints a raw session id: `local-runtime-boundary.md` §4.1 keeps
+//! session identifiers out of operator smoke output, so every line carries
+//! either a `session_tag` or a redacted error. A failing `--compute-session <id>`
+//! run was given that id on the operator's own command line, so the probe does
+//! not echo it back.
 //!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
 //! `allowlist.json` entry is deterministic across runs. Usage:
@@ -56,8 +57,9 @@ fn fixed_keypair(seed: u8) -> Keypair {
     Keypair::ed25519_from_bytes([seed; 32]).expect("fixed seed is a valid ed25519 secret")
 }
 
-/// The session identity a probe line reports: a `<16hex>` `DefaultHasher` tag,
-/// never the raw id, per `local-runtime-boundary.md` §4.1. `DIAL_OK` tags the
+/// The session identity a probe line reports: a `<16hex>` `DefaultHasher`
+/// digest, never the raw id — operator smoke output tags a session instead of
+/// publishing its id (`local-runtime-boundary.md` §4.1). `DIAL_OK` tags the
 /// connect session the probe established; `COMPUTE_OK` tags the session id the
 /// compute **response** carries. Both use this shape so the smoke test reads
 /// either line with one parser.
@@ -66,6 +68,28 @@ fn session_tag(session_id: &str) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     session_id.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+/// Redacted description of an invoke failure: the error kind, plus the wire
+/// code for a remote refusal. The envelope and response payload are left out —
+/// a failure body can restate the raw session id (§4.1).
+fn describe_invoke_error(error: &spoke_connect::InvokeError) -> String {
+    use spoke_connect::InvokeError;
+    match error {
+        InvokeError::Wire(envelope) => format!("wire code={}", envelope.code),
+        InvokeError::Transport(_) => "transport".to_string(),
+        InvokeError::SessionClosed => "session closed".to_string(),
+        InvokeError::SequenceExhausted => "sequence exhausted".to_string(),
+        InvokeError::CorrelationMismatch => "correlation mismatch".to_string(),
+    }
+}
+
+/// An invoke that was expected to refuse, described without its payload.
+fn describe_invoke_outcome<T>(outcome: &Result<T, spoke_connect::InvokeError>) -> String {
+    match outcome {
+        Ok(_) => "succeeded".to_string(),
+        Err(error) => describe_invoke_error(error),
+    }
 }
 
 /// Minimal peer manifest (the probe is a reference peer — mirrors the
@@ -190,7 +214,10 @@ async fn main() {
             report_refusal("UNSERVED_REFUSAL", &envelope);
         }
         other => {
-            println!("REFUSAL_UNEXPECTED: project {other:?}");
+            println!(
+                "REFUSAL_UNEXPECTED: project {}",
+                describe_invoke_outcome(&other)
+            );
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -204,7 +231,10 @@ async fn main() {
             println!("SESSION_OK");
         }
         other => {
-            println!("SESSION_CHECK_FAILED: {other:?}");
+            println!(
+                "SESSION_CHECK_FAILED: {}",
+                describe_invoke_outcome(&other)
+            );
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -284,7 +314,7 @@ async fn run_retained_ops(
             }),
         )
         .await
-        .map_err(|e| format!("upsert rejected: {e:?}"))?;
+        .map_err(|e| format!("upsert rejected: {}", describe_invoke_error(&e)))?;
     println!("UPSERT_OK");
     println!("SESSION_ALIVE_OK");
 
@@ -303,29 +333,18 @@ async fn run_retained_ops(
             }),
         )
         .await
-        .map_err(|e| format!("compute rejected: {e:?}"))?;
+        .map_err(|e| format!("compute rejected: {}", describe_invoke_error(&e)))?;
     let current_hp = computed.payload["computable"]["character"]["current_hp"]
         .as_i64()
-        .ok_or_else(|| {
-            format!(
-                "compute response has no numeric current_hp: {}",
-                computed.payload
-            )
-        })?;
+        .ok_or("compute response has no numeric current_hp")?;
     // Tag and entry come from the RESPONSE, not from the request arguments: a
     // lane that resolved another session must print that session's tag.
-    let returned_session = computed.payload["session_id"].as_str().ok_or_else(|| {
-        format!(
-            "compute response has no string session_id: {}",
-            computed.payload
-        )
-    })?;
-    let returned_entry = computed.payload["entry_id"].as_str().ok_or_else(|| {
-        format!(
-            "compute response has no string entry_id: {}",
-            computed.payload
-        )
-    })?;
+    let returned_session = computed.payload["session_id"]
+        .as_str()
+        .ok_or("compute response has no string session_id")?;
+    let returned_entry = computed.payload["entry_id"]
+        .as_str()
+        .ok_or("compute response has no string entry_id")?;
     println!(
         "COMPUTE_OK session_tag={} entry={returned_entry} current_hp={current_hp}",
         session_tag(returned_session)
