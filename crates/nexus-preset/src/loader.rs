@@ -296,11 +296,13 @@ pub fn load_preset(
 /// template invalidates the identity and recovery refuses to fall back to
 /// current bytes.
 ///
-/// For a directory bundle, referenced asset files are read from the
-/// **canonicalized** `bundle_root`; each path is validated as a safe
-/// relative path before joining. For an embedded preset they are read from
-/// the compiled-in embedded directory. A missing referenced asset is an
-/// **error** (never hashed as empty) — the identity must be exact.
+/// For a directory bundle, referenced asset files are read through the bundle
+/// root's **opened directory descriptor** — anchored to that directory, not to
+/// the pathname, so a replaced bundle path cannot supply the hashed bytes — and
+/// each path is validated as a safe relative path before joining. For an
+/// embedded preset they are read from the compiled-in embedded directory. A
+/// missing referenced asset is an **error** (never hashed as empty) — the
+/// identity must be exact.
 ///
 /// # Errors
 /// Returns [`PresetLoadError`] if a referenced asset cannot be read, is an
@@ -327,6 +329,21 @@ pub fn preset_source_identity(
         ),
         None => None,
     };
+    // The reads below resolve against this pinned directory, not the path, so a
+    // bundle path replaced after the identity was computed cannot supply the
+    // hashed bytes.
+    let opened_root = match bundle_root {
+        Some(root) => Some(crate::bundle_root::BundleRoot::open(root).map_err(|e| {
+            PresetLoadError::Validation {
+                len: 1,
+                problems: vec![ValidationProblem {
+                    path: "preset_source_identity".to_string(),
+                    error: format!("failed to open bundle root: {e}"),
+                }],
+            }
+        })?),
+        None => None,
+    };
 
     let mut asset_paths: Vec<String> = super::validation::collect_asset_file_references(manifest)
         .into_iter()
@@ -347,8 +364,8 @@ pub fn preset_source_identity(
         }
         hasher.update(rel.as_bytes());
         hasher.update(&[0u8]);
-        let bytes = if let Some(root) = &canonical_root {
-            match read_confined_asset(root, rel) {
+        let bytes = if let Some(root) = &opened_root {
+            match root.read(rel) {
                 Ok(b) => b,
                 Err(e) => {
                     return Err(PresetLoadError::Validation {
@@ -446,179 +463,6 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-/// Read a referenced asset through one descriptor confined to `root`.
-///
-/// `root` must already be canonical. The descriptor decides, never a second
-/// resolution of the pathname: the bytes come from the descriptor the
-/// confinement check approved. Replacing the asset between an existence check
-/// and this read therefore cannot hand back bytes the check never saw. An
-/// in-bundle symlink is followed; a target outside the bundle is refused.
-pub(crate) fn read_confined_asset(root: &Path, rel: &str) -> std::io::Result<Vec<u8>> {
-    use std::io::Read as _;
-
-    let mut file = open_confined(root, rel)?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
-    Ok(bytes)
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos", windows))]
-fn escape(rel: &str) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        format!("asset `{rel}` resolves outside the bundle sandbox (symlink escape)"),
-    )
-}
-
-/// A FIFO, socket or device answers the open (`O_NONBLOCK` keeps it from
-/// blocking) but is never an asset, and its descriptor name says nothing about
-/// the bundle: refuse it before any path query or byte read.
-#[cfg(any(target_os = "linux", target_os = "macos", windows))]
-fn reject_non_regular(rel: &str, file: &std::fs::File) -> std::io::Result<()> {
-    if file.metadata()?.is_file() {
-        return Ok(());
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("asset `{rel}` is not a regular file"),
-    ))
-}
-
-/// `O_NONBLOCK` is what keeps a FIFO substitution from blocking the open before
-/// the descriptor can be inspected; `O_CLOEXEC` keeps it out of child processes.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
-    use nix::fcntl::{open, OFlag};
-    use nix::sys::stat::Mode;
-
-    open(
-        path,
-        OFlag::O_RDONLY | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
-        Mode::empty(),
-    )
-    .map(std::fs::File::from)
-    .map_err(std::io::Error::from)
-}
-
-/// The kernel proves confinement: `openat2` resolves `rel` relative to a
-/// descriptor on `root` and fails with `EXDEV` for any resolution that leaves
-/// it.
-#[cfg(target_os = "linux")]
-fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
-    match open_beneath(root, rel) {
-        Ok(file) => {
-            reject_non_regular(rel, &file)?;
-            Ok(file)
-        }
-        // `BENEATH` refuses an absolute symlink target with `EXDEV` even when it
-        // resolves inside the bundle. No single resolve-flag set both follows
-        // absolute targets and confines them: `BENEATH | IN_ROOT` is rejected
-        // as mutually exclusive, and `IN_ROOT` alone rebases the target at the
-        // root, so a genuine absolute in-bundle path matches nothing. The
-        // descriptor-path check decides these, as macOS and Windows do.
-        Err(rustix::io::Errno::XDEV) => open_confined_via_proc(root, rel),
-        // Kernels before 5.6 have no `openat2`; only then fall back.
-        Err(rustix::io::Errno::NOSYS) => open_confined_via_proc(root, rel),
-        Err(errno) => Err(std::io::Error::from(errno)),
-    }
-}
-
-/// `BENEATH`, not `NO_SYMLINKS`: the validation pass accepts in-bundle symlinks,
-/// so a relative link that stays inside must resolve here — the kernel refuses
-/// only resolutions that leave the root. Absolute link targets are the one shape
-/// `BENEATH` cannot express; `open_confined` handles their `EXDEV` separately.
-#[cfg(target_os = "linux")]
-fn open_beneath(root: &Path, rel: &str) -> Result<std::fs::File, rustix::io::Errno> {
-    use rustix::fs::{open, openat2, Mode, OFlags, ResolveFlags};
-
-    let dir = open(
-        root,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?;
-    let fd = openat2(
-        &dir,
-        rel,
-        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-        ResolveFlags::BENEATH,
-    )?;
-    Ok(std::fs::File::from(fd))
-}
-
-/// Descriptor-path confinement: `/proc/self/fd` names the object the open
-/// captured, and its link count — never the shape of the name — says whether
-/// that object still has a directory entry. Used where the kernel cannot prove
-/// it: an absolute target `BENEATH` refuses, or a kernel without `openat2`.
-#[cfg(target_os = "linux")]
-fn open_confined_via_proc(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
-    use std::os::fd::AsRawFd as _;
-    use std::os::unix::ffi::OsStrExt as _;
-    use std::os::unix::fs::MetadataExt as _;
-
-    let file = open_asset(&root.join(rel))?;
-    reject_non_regular(rel, &file)?;
-    let unlinked = file.metadata()?.nlink() == 0;
-    let mut resolved =
-        std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).map_err(|error| {
-            match error.kind() {
-                std::io::ErrorKind::NotFound => std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "cannot verify asset confinement on this platform: \
-                 openat2 declined the resolution and /proc/self/fd is unavailable",
-                ),
-                _ => error,
-            }
-        })?;
-    if unlinked {
-        // The kernel appends this marker only for a link with no directory
-        // entry left, which is exactly `st_nlink == 0`.
-        if let Some(stripped) = resolved.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
-            resolved = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(stripped));
-        }
-    }
-    if !resolved.starts_with(root) {
-        return Err(escape(rel));
-    }
-    Ok(file)
-}
-
-/// macOS names the descriptor's own path through `fcntl(F_GETPATH)`.
-#[cfg(target_os = "macos")]
-fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
-    use nix::fcntl::{fcntl, FcntlArg};
-
-    let file = open_asset(&root.join(rel))?;
-    reject_non_regular(rel, &file)?;
-    let mut path = std::path::PathBuf::new();
-    fcntl(&file, FcntlArg::F_GETPATH(&mut path)).map_err(std::io::Error::from)?;
-    if !path.starts_with(root) {
-        return Err(escape(rel));
-    }
-    Ok(file)
-}
-
-/// Windows asks the handle for its final path through the workspace's audited
-/// native bridge; the answer is the object the bytes would come from.
-#[cfg(windows)]
-fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
-    let file = std::fs::File::open(root.join(rel))?;
-    reject_non_regular(rel, &file)?;
-    if !nexus_config_metadata::final_path(&file)?.starts_with(root) {
-        return Err(escape(rel));
-    }
-    Ok(file)
-}
-
-/// No confinement proof is wired for this target, so the read fails closed.
-#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn open_confined(_root: &Path, _rel: &str) -> std::io::Result<std::fs::File> {
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "cannot verify asset confinement on this platform",
-    ))
 }
 
 /// Collect all `template_file` paths from a manifest as `(dot_path, &str)` pairs.
@@ -3176,12 +3020,10 @@ roles:
         std::fs::remove_file(&fifo).unwrap();
         nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::from_bits_truncate(0o600)).unwrap();
 
-        let root = bundle;
+        let root = crate::bundle_root::BundleRoot::open(&bundle).unwrap();
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            sender
-                .send(super::read_confined_asset(&root, "prompts/writer.md"))
-                .ok();
+            sender.send(root.read("prompts/writer.md")).ok();
         });
         let error = receiver
             .recv_timeout(std::time::Duration::from_secs(8))
@@ -3190,6 +3032,61 @@ roles:
         assert!(
             error.to_string().contains("not a regular file"),
             "unexpected refusal: {error}"
+        );
+    }
+
+    /// A bundle root that is only searchable (`0711`) still imports: resolution
+    /// needs execute permission on each component, never a directory listing.
+    #[test]
+    #[cfg(unix)]
+    fn import_accepts_a_search_only_bundle_root() {
+        use crate::workflow_ir::AssetSource as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        let prompts = bundle.join("prompts");
+        std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o711)).unwrap();
+        std::fs::set_permissions(&prompts, std::fs::Permissions::from_mode(0o711)).unwrap();
+        std::fs::set_permissions(
+            prompts.join("writer.md"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+
+        let read = crate::workflow_ir::FsAssetSource::new(&bundle)
+            .unwrap()
+            .read_asset("prompts/writer.md");
+        // Restore before asserting so the temporary tree stays removable.
+        std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&prompts, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(read.unwrap().unwrap(), b"in bundle");
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// The read boundary is the opened root directory, not the pathname: a
+    /// bundle path replaced after the root is opened must never yield the
+    /// replacement's bytes.
+    #[test]
+    #[cfg(unix)]
+    fn asset_read_keeps_the_opened_root_when_the_bundle_path_is_replaced() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (tmp, bundle, _manifest) = role_prompt_bundle();
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+
+        let replacement = tmp.path().join("replacement");
+        std::fs::create_dir_all(replacement.join("prompts")).unwrap();
+        std::fs::write(replacement.join("prompts/writer.md"), "replacement bytes").unwrap();
+
+        let moved = tmp.path().join("swapped-original");
+        std::fs::rename(&bundle, &moved).unwrap();
+        std::os::unix::fs::symlink(&replacement, &bundle).unwrap();
+
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"in bundle",
+            "the read must follow the opened root, not the replacement path"
         );
     }
 }

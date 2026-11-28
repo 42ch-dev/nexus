@@ -156,29 +156,29 @@ pub trait AssetSource {
     fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error>;
 }
 
-/// A bundle directory on disk, confined to its canonicalized root.
-#[derive(Debug, Clone)]
+/// A bundle directory on disk, confined to its opened root descriptor.
+#[derive(Debug)]
 pub struct FsAssetSource {
-    root: std::path::PathBuf,
+    root: crate::bundle_root::BundleRoot,
 }
 
 impl FsAssetSource {
-    /// Canonicalize `root` once; every read opens one descriptor and accepts it
-    /// only while that descriptor's own path stays inside this root.
+    /// Open `root` once; every read resolves relative to that descriptor and is
+    /// accepted only while the asset's own descriptor path stays inside it.
     ///
     /// # Errors
     ///
-    /// Returns the canonicalization error when `root` is not a readable directory.
+    /// Returns the open error when `root` is not a traversable directory.
     pub fn new(root: &Path) -> std::io::Result<Self> {
         Ok(Self {
-            root: root.canonicalize()?,
+            root: crate::bundle_root::BundleRoot::open(root)?,
         })
     }
 }
 
 impl AssetSource for FsAssetSource {
     fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error> {
-        crate::loader::read_confined_asset(&self.root, path).map(Some)
+        self.root.read(path).map(Some)
     }
 }
 
