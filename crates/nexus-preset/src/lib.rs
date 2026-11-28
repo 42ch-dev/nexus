@@ -5,6 +5,7 @@ use include_dir::include_dir;
 use include_dir::Dir;
 use std::path::Path;
 
+mod bundle_root;
 pub mod capability_catalog;
 pub mod expr;
 pub mod loader;

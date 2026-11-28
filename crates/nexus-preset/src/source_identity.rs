@@ -8,7 +8,7 @@ use std::path::PathBuf;
 /// The content hash is over the manifest **and** referenced prompt/template
 /// bytes — not the YAML hash alone — so a changed template invalidates the
 /// identity and recovery refuses to fall back to current bytes.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PresetSourceIdentity {
     /// Compiled-in embedded preset.
     Embedded {
@@ -23,5 +23,110 @@ pub enum PresetSourceIdentity {
         root: PathBuf,
         /// blake3 over manifest + referenced template bytes.
         content_hash: [u8; 32],
+        /// How `root` was obtained; the bytes always came from the root
+        /// descriptor, this only qualifies the recorded location.
+        #[serde(default, skip_serializing_if = "RootLocation::is_descriptor")]
+        location: RootLocation,
     },
+}
+
+impl PartialEq for PresetSourceIdentity {
+    /// Equality covers what defines the source — the preset id or root plus the
+    /// content hash — never `location`, which only records how the path was
+    /// obtained. A replay that names the same root through a descriptor on one
+    /// run and a path query on the next must still compare equal.
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Embedded {
+                    preset_id: left_id,
+                    content_hash: left_hash,
+                },
+                Self::Embedded {
+                    preset_id: right_id,
+                    content_hash: right_hash,
+                },
+            ) => left_id == right_id && left_hash == right_hash,
+            (
+                Self::Directory {
+                    root: left_root,
+                    content_hash: left_hash,
+                    ..
+                },
+                Self::Directory {
+                    root: right_root,
+                    content_hash: right_hash,
+                    ..
+                },
+            ) => left_root == right_root && left_hash == right_hash,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for PresetSourceIdentity {}
+
+/// How a [`PresetSourceIdentity::Directory`] root path was obtained.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RootLocation {
+    /// The path the reads' own descriptor reports, so the recorded location and
+    /// the hashed bytes describe one object.
+    #[default]
+    Descriptor,
+    /// The platform could not name the descriptor (no `/proc/self/fd`), so the
+    /// caller's path was canonicalised instead. The reads still used the
+    /// descriptor; only the recorded location is a path query, and it may name
+    /// a different directory if that path is later replaced.
+    PathQuery,
+}
+
+impl RootLocation {
+    /// Whether this location came from the root descriptor.
+    // serde calls `skip_serializing_if` predicates with a reference.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    const fn is_descriptor(&self) -> bool {
+        matches!(self, Self::Descriptor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PresetSourceIdentity, RootLocation};
+    use std::path::PathBuf;
+
+    fn directory(location: RootLocation) -> PresetSourceIdentity {
+        PresetSourceIdentity::Directory {
+            root: PathBuf::from("/bundles/story"),
+            content_hash: [7; 32],
+            location,
+        }
+    }
+
+    /// `location` records how the path was obtained; it must not decide whether
+    /// two identities describe the same source, or a replay that names the same
+    /// unchanged bundle through a path query would read as "source changed".
+    #[test]
+    fn directory_identity_ignores_the_recorded_location() {
+        assert_eq!(
+            directory(RootLocation::Descriptor),
+            directory(RootLocation::PathQuery),
+        );
+    }
+
+    #[test]
+    fn directory_identity_still_separates_root_and_content() {
+        let other_root = PresetSourceIdentity::Directory {
+            root: PathBuf::from("/bundles/other"),
+            content_hash: [7; 32],
+            location: RootLocation::Descriptor,
+        };
+        let other_hash = PresetSourceIdentity::Directory {
+            root: PathBuf::from("/bundles/story"),
+            content_hash: [8; 32],
+            location: RootLocation::Descriptor,
+        };
+        assert_ne!(directory(RootLocation::Descriptor), other_root);
+        assert_ne!(directory(RootLocation::Descriptor), other_hash);
+    }
 }

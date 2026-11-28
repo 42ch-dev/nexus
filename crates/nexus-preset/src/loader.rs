@@ -12,7 +12,7 @@ use crate::capability_catalog::CapabilityCatalog;
 use crate::manifest::{
     ContextUpdateOp, ExitWhen, InitialAction, InnerGraph, NextTarget, PresetManifest,
 };
-use crate::source_identity::PresetSourceIdentity;
+use crate::source_identity::{PresetSourceIdentity, RootLocation};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
@@ -288,19 +288,57 @@ pub fn load_preset(
     Ok(loaded)
 }
 
+/// Open the bundle root once and resolve the location to record with it.
+///
+/// The reads and the recorded location must come from the same descriptor, so a
+/// symlink switched between two resolutions cannot pair an old directory with
+/// new bytes.
+fn open_identity_root(
+    bundle_root: Option<&Path>,
+) -> Result<
+    Option<(
+        crate::bundle_root::BundleRoot,
+        std::path::PathBuf,
+        RootLocation,
+    )>,
+    PresetLoadError,
+> {
+    let Some(root) = bundle_root else {
+        return Ok(None);
+    };
+    let opened =
+        crate::bundle_root::BundleRoot::open(root).map_err(|e| PresetLoadError::Validation {
+            len: 1,
+            problems: vec![ValidationProblem {
+                path: "preset_source_identity".to_string(),
+                error: format!("failed to open bundle root: {e}"),
+            }],
+        })?;
+    let (path, location) = opened.path().map_err(|e| PresetLoadError::Validation {
+        len: 1,
+        problems: vec![ValidationProblem {
+            path: "preset_source_identity".to_string(),
+            error: format!("failed to resolve bundle root: {e}"),
+        }],
+    })?;
+    Ok(Some((opened, path, location)))
+}
+
 /// Compute the content-addressed [`PresetSourceIdentity`] (A2/A7).
 ///
 /// The content hash is over the manifest **and** every referenced asset
 /// (`template_file`, `prompt_file`, `system_prompt_file` in capability args, and
-/// role `system_prompt_file`) — not the YAML hash alone — so a changed
-/// template invalidates the identity and recovery refuses to fall back to
-/// current bytes.
+/// role `system_prompt_file`) — not the YAML hash alone — so a changed template
+/// invalidates the identity and recovery refuses to fall back to current bytes.
 ///
-/// For a directory bundle, referenced asset files are read from the
-/// **canonicalized** `bundle_root`; each path is validated as a safe
-/// relative path before joining. For an embedded preset they are read from
-/// the compiled-in embedded directory. A missing referenced asset is an
-/// **error** (never hashed as empty) — the identity must be exact.
+/// For a directory bundle the root is opened once: the bytes are read relative
+/// to that descriptor and the recorded
+/// [`Directory`](PresetSourceIdentity::Directory) root is that same descriptor's
+/// own path, so a bundle path replaced between resolutions cannot pair an old
+/// location with new bytes. Each path is validated as a safe relative path
+/// before joining. For an embedded preset assets are read from the compiled-in
+/// embedded directory. A missing referenced asset is an **error** (never hashed
+/// as empty) — the identity must be exact.
 ///
 /// # Errors
 /// Returns [`PresetLoadError`] if a referenced asset cannot be read, is an
@@ -314,19 +352,7 @@ pub fn preset_source_identity(
     let mut hasher = blake3::Hasher::new();
     hasher.update(manifest_yaml.as_bytes());
 
-    let canonical_root = match bundle_root {
-        Some(root) => Some(
-            root.canonicalize()
-                .map_err(|e| PresetLoadError::Validation {
-                    len: 1,
-                    problems: vec![ValidationProblem {
-                        path: "preset_source_identity".to_string(),
-                        error: format!("failed to canonicalize bundle root: {e}"),
-                    }],
-                })?,
-        ),
-        None => None,
-    };
+    let opened_root = open_identity_root(bundle_root)?;
 
     let mut asset_paths: Vec<String> = super::validation::collect_asset_file_references(manifest)
         .into_iter()
@@ -347,8 +373,8 @@ pub fn preset_source_identity(
         }
         hasher.update(rel.as_bytes());
         hasher.update(&[0u8]);
-        let bytes = if let Some(root) = &canonical_root {
-            match std::fs::read(root.join(rel)) {
+        let bytes = if let Some((root, _, _)) = &opened_root {
+            match root.read(rel) {
                 Ok(b) => b,
                 Err(e) => {
                     return Err(PresetLoadError::Validation {
@@ -387,8 +413,12 @@ pub fn preset_source_identity(
     let mut content_hash = [0u8; 32];
     content_hash.copy_from_slice(hasher.finalize().as_bytes());
 
-    Ok(match (canonical_root, embedded_id) {
-        (Some(root), _) => PresetSourceIdentity::Directory { root, content_hash },
+    Ok(match (opened_root, embedded_id) {
+        (Some((_, root, location)), _) => PresetSourceIdentity::Directory {
+            root,
+            content_hash,
+            location,
+        },
         (None, Some(id)) => PresetSourceIdentity::Embedded {
             preset_id: id.to_string(),
             content_hash,
@@ -2809,5 +2839,336 @@ gates:
             );
             drop(messages);
         }
+    }
+
+    /// A bundle whose single role prompt is `asset`, a `prompts/…` relative path.
+    #[cfg(unix)]
+    fn role_prompt_bundle_with(
+        asset: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf, PresetManifest) {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("swapped");
+        std::fs::create_dir_all(bundle.join("prompts")).unwrap();
+        std::fs::write(bundle.join(asset), "in bundle").unwrap();
+        let manifest: PresetManifest = serde_yaml::from_str(&format!(
+            r"
+preset:
+  id: swapped
+  version: 1
+  kind: creator
+  description: swapped asset
+  initial: a
+  terminal: b
+states:
+  - id: a
+    exit_when: {{ kind: manual }}
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: writer
+    description: Writer
+    system_prompt_file: {asset}
+"
+        ))
+        .unwrap();
+        (tmp, bundle, manifest)
+    }
+
+    #[cfg(unix)]
+    fn role_prompt_bundle() -> (tempfile::TempDir, std::path::PathBuf, PresetManifest) {
+        role_prompt_bundle_with("prompts/writer.md")
+    }
+
+    /// An in-bundle symlink is an ordinary bundle layout: the read follows it —
+    /// exactly as `validate_assets_in_bundle` accepts it — and hands back the
+    /// linked target's bytes. The link here is relative, which every arm resolves
+    /// inside the root; an absolute in-bundle target takes the same verdict (see
+    /// `identity_read_accepts_an_absolute_in_bundle_symlink`), while an absolute
+    /// target outside the root is refused.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_accepts_an_in_bundle_symlink() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink("real.md", bundle.join("prompts/writer.md")).unwrap();
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"linked bytes"
+        );
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// An absolute link target that resolves inside the bundle is accepted — the
+    /// shape `validate_assets_in_bundle` accepts. macOS (`F_GETPATH`) and Windows
+    /// (`GetFinalPathNameByHandleW`) judge it natively by the descriptor's own
+    /// path; on Linux the kernel's `BENEATH` declines absolute targets with
+    /// `EXDEV`, so `BundleRoot::read` takes the descriptor-path route
+    /// (`/proc/self/fd` plus the `st_nlink` rule) and reaches the same verdict.
+    /// An absolute target outside the root is refused on every arm. This host
+    /// exercises the macOS arm.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_accepts_an_absolute_in_bundle_symlink() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink(
+            bundle.join("prompts/real.md"),
+            bundle.join("prompts/writer.md"),
+        )
+        .unwrap();
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"linked bytes"
+        );
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// A root removed after it was opened has no directory entry left, so its old
+    /// path may name another directory: the identity step refuses instead of
+    /// recording it.
+    #[test]
+    #[cfg(unix)]
+    fn identity_refuses_a_bundle_root_removed_after_open() {
+        let (_tmp, bundle, _manifest) = role_prompt_bundle();
+        let root = crate::bundle_root::BundleRoot::open(&bundle).unwrap();
+
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::fs::remove_dir(bundle.join("prompts")).unwrap();
+        std::fs::remove_dir(&bundle).unwrap();
+
+        let error = root.path().unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            error.to_string().contains("bundle root"),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    /// macOS proves containment by descriptor ancestry: the walk from the
+    /// asset's containing directory reaches the root's `(st_dev, st_ino)` via
+    /// real `..` links, and the reopened leaf carries the same identity.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_ancestry_walk_accepts_an_in_bundle_link() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (_tmp, bundle, _manifest) = role_prompt_bundle();
+        std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink("real.md", bundle.join("prompts/writer.md")).unwrap();
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"linked bytes"
+        );
+    }
+
+    /// A link that leaves the bundle is refused by the ancestry walk, not by a
+    /// path comparison: the diagnostic names the descriptor ancestry.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_ancestry_walk_refuses_an_outside_link() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (tmp, bundle, _manifest) = role_prompt_bundle();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("writer.md"), "outside bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink(outside.join("writer.md"), bundle.join("prompts/writer.md"))
+            .unwrap();
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        let error = source.read_asset("prompts/writer.md").unwrap_err();
+        assert!(
+            error.to_string().contains("descriptor ancestry"),
+            "expected the ancestry refusal, got: {error}"
+        );
+    }
+
+    /// A file whose own name ends with the procfs deletion marker is an ordinary
+    /// bundle asset: deletion is decided from the descriptor's link count, never
+    /// from the shape of its name.
+    #[test]
+    #[cfg(unix)]
+    fn asset_named_like_a_deleted_proc_link_is_accepted() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let asset = "prompts/note (deleted)";
+        let (_tmp, bundle, manifest) = role_prompt_bundle_with(asset);
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(source.read_asset(asset).unwrap().unwrap(), b"in bundle");
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// A link that leaves the bundle is refused, and what is judged is the
+    /// descriptor the open captured: the deterministic form of the check/read
+    /// race is this hand-placed link, and whichever object the open captures is
+    /// either under the root (its own bytes are what the read returns) or
+    /// refused here — never bytes from outside.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_refuses_an_asset_swapped_for_an_escaping_symlink() {
+        let (tmp, bundle, manifest) = role_prompt_bundle();
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let outside = tmp.path().join("outside.md");
+        std::fs::write(&outside, "outside bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, bundle.join("prompts/writer.md")).unwrap();
+
+        let error = preset_source_identity(&manifest, Some(&bundle), None).unwrap_err();
+        assert!(
+            error
+                .problems()
+                .iter()
+                .any(|problem| problem.error.contains("outside the bundle sandbox")),
+            "expected a sandbox refusal, got: {:?}",
+            error.problems()
+        );
+    }
+
+    /// A missing asset keeps its real IO error: the sandbox text is reserved for
+    /// a descriptor that genuinely resolves outside the root.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_reports_a_missing_asset_as_io() {
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+
+        let error = preset_source_identity(&manifest, Some(&bundle), None).unwrap_err();
+        let problems = error.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|problem| problem.error.contains("failed to read referenced asset")),
+            "expected the read failure to surface, got: {problems:?}"
+        );
+        assert!(
+            !problems
+                .iter()
+                .any(|problem| problem.error.contains("outside the bundle sandbox")),
+            "a missing asset is not a sandbox escape: {problems:?}"
+        );
+    }
+
+    /// A FIFO in an asset's place is refused from the descriptor, and the open
+    /// must not wait for a writer: `O_NONBLOCK` is what keeps this from hanging.
+    /// The timeout turns a regression into a fast failure instead of a hung run.
+    #[test]
+    #[cfg(unix)]
+    fn fifo_asset_is_refused_without_blocking() {
+        let (_tmp, bundle, _manifest) = role_prompt_bundle();
+        let fifo = bundle.join("prompts/writer.md");
+        std::fs::remove_file(&fifo).unwrap();
+        nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::from_bits_truncate(0o600)).unwrap();
+
+        let root = crate::bundle_root::BundleRoot::open(&bundle).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            sender.send(root.read("prompts/writer.md")).ok();
+        });
+        let error = receiver
+            .recv_timeout(std::time::Duration::from_secs(8))
+            .expect("a FIFO asset must not block the read")
+            .expect_err("a FIFO is not a readable asset");
+        assert!(
+            error.to_string().contains("not a regular file"),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    /// A bundle root that is only searchable still imports: resolution needs
+    /// execute permission on each component, never a directory listing. The
+    /// `0111` modes leave the owner without read (a `0711` fixture would keep it
+    /// and prove nothing); `O_PATH` on Linux and `O_SEARCH` on macOS open such a
+    /// root, `openat`/`openat2` from it resolves, and the asset itself is `0644`.
+    #[test]
+    #[cfg(unix)]
+    fn import_accepts_a_search_only_bundle_root() {
+        use crate::workflow_ir::AssetSource as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        let prompts = bundle.join("prompts");
+        std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o111)).unwrap();
+        std::fs::set_permissions(&prompts, std::fs::Permissions::from_mode(0o111)).unwrap();
+        std::fs::set_permissions(
+            prompts.join("writer.md"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+
+        let read = crate::workflow_ir::FsAssetSource::new(&bundle)
+            .unwrap()
+            .read_asset("prompts/writer.md");
+        // Restore before asserting so the temporary tree stays removable.
+        std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&prompts, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(read.unwrap().unwrap(), b"in bundle");
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// The read boundary is the opened root directory, not the pathname: a
+    /// bundle path replaced after the root is opened must never yield the
+    /// replacement's bytes.
+    #[test]
+    #[cfg(unix)]
+    fn asset_read_keeps_the_opened_root_when_the_bundle_path_is_replaced() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (tmp, bundle, _manifest) = role_prompt_bundle();
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+
+        let replacement = tmp.path().join("replacement");
+        std::fs::create_dir_all(replacement.join("prompts")).unwrap();
+        std::fs::write(replacement.join("prompts/writer.md"), "replacement bytes").unwrap();
+
+        let moved = tmp.path().join("swapped-original");
+        std::fs::rename(&bundle, &moved).unwrap();
+        std::os::unix::fs::symlink(&replacement, &bundle).unwrap();
+
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"in bundle",
+            "the read must follow the opened root, not the replacement path"
+        );
     }
 }

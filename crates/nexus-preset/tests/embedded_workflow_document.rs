@@ -77,6 +77,7 @@ fn a_bundle_that_is_not_embedded_is_refused() {
     loaded.source_identity = Some(PresetSourceIdentity::Directory {
         root: PathBuf::from("/tmp/not-an-embedded-bundle"),
         content_hash: [0u8; 32],
+        location: nexus_preset::source_identity::RootLocation::Descriptor,
     });
     let error = embedded_workflow_document(&loaded)
         .expect_err("a directory bundle must not construct from the compiled-in tree");

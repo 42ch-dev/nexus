@@ -122,6 +122,14 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo test -p nexus42 --lib --no-default-features --features connect-host explicit_home
 
+      # The bundle-confinement proof differs per platform: Linux proves it with
+      # openat2(RESOLVE_BENEATH), macOS with the descriptor ancestry walk, and
+      # only the macOS arm is executable on a hosted runner. Without this step
+      # that path is green only on a developer's machine.
+      - name: Check preset bundle confinement (macOS descriptor ancestry)
+        if: always() && runner.os == 'macOS'
+        run: cargo test -p nexus-preset --lib -- loader::tests
+
       - name: Check discovery & native CLI provider tests
         if: always()
         # One feature graph, one compile: libtest filters are OR-combined.

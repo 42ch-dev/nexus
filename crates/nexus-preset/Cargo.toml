@@ -22,6 +22,20 @@ tracing.workspace = true
 blake3.workspace = true
 include_dir = "0.7"
 
+[target.'cfg(unix)'.dependencies]
+# Descriptor-based asset confinement: `open(O_NONBLOCK | O_CLOEXEC)` and the
+# macOS `fcntl(F_GETPATH)` descriptor-path query, both behind safe wrappers —
+# this crate keeps the workspace `unsafe_code = "forbid"`.
+nix = { version = "0.32.0", features = ["fs"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# `openat2(RESOLVE_BENEATH)` lets the kernel prove containment without procfs.
+rustix = { workspace = true, features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+# The descriptor's final path comes from the workspace's audited native bridge.
+nexus-config-metadata = { path = "../nexus-config-metadata" }
+
 [dev-dependencies]
 tempfile.workspace = true
 tracing-subscriber.workspace = true

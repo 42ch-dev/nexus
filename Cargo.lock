@@ -4093,8 +4093,11 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "include_dir",
+ "nexus-config-metadata",
  "nexus-contracts",
  "nexus-workflow-ir",
+ "nix 0.32.0",
+ "rustix",
  "serde",
  "serde_json",
  "serde_yaml",
