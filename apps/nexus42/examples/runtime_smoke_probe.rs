@@ -19,11 +19,13 @@
 //! COMPUTE_OK session_tag=<16hex> entry=<id> current_hp=<n>  # compute response's own session/entry ids (tagged)
 //! ```
 //!
-//! No line prints a raw session id: `local-runtime-boundary.md` §4.1 keeps
-//! session identifiers out of operator smoke output, so every line carries
-//! either a `session_tag` or a redacted error. A failing `--compute-session <id>`
-//! run was given that id on the operator's own command line, so the probe does
-//! not echo it back.
+//! No line prints a raw session id: `local-runtime-boundary.md` §4.1 scopes
+//! session identifiers out of operator smoke output, so the probe never
+//! constructs a line containing one — session lines carry a `session_tag`,
+//! failure lines a redacted error kind. A failing `--compute-session <id>` run
+//! was given that id on the operator's own command line, so the probe does not
+//! echo it back. `*_MESSAGE=` is the exception by construction: it forwards the
+//! peer's refusal text verbatim, which is the host's output, not the probe's.
 //!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
 //! `allowlist.json` entry is deterministic across runs. Usage:
@@ -89,6 +91,23 @@ fn describe_invoke_outcome<T>(outcome: &Result<T, spoke_connect::InvokeError>) -
     match outcome {
         Ok(_) => "succeeded".to_string(),
         Err(error) => describe_invoke_error(error),
+    }
+}
+
+/// Connect/handshake failure kind. No variant payload — a peer-supplied reason
+/// or address never reaches probe output.
+fn describe_connect_error(error: &spoke_connect::ConnectError) -> &'static str {
+    use spoke_connect::ConnectError;
+    match error {
+        ConnectError::NotAllowlisted { .. } => "peer not allowlisted",
+        ConnectError::InvalidHelloSignature => "invalid hello signature",
+        ConnectError::NonceReplay => "hello nonce replayed",
+        ConnectError::HandshakeFailed { .. } => "handshake failed",
+        ConnectError::ProtocolVersionMismatch { .. } => "protocol version mismatch",
+        ConnectError::Transport(_) => "transport",
+        ConnectError::Config(_) => "invalid config",
+        ConnectError::AuthFailed(_) => "capability token invalid",
+        ConnectError::Timeout(_) => "timed out",
     }
 }
 
@@ -177,7 +196,7 @@ async fn main() {
     let node = match SpokeConnectNode::start(config).await {
         Ok(node) => node,
         Err(e) => {
-            eprintln!("PROBE_NODE_START_FAILED: {e:?}");
+            eprintln!("PROBE_NODE_START_FAILED: {}", describe_connect_error(&e));
             std::process::exit(1);
         }
     };
@@ -188,7 +207,7 @@ async fn main() {
     {
         Ok(session) => session,
         Err(e) => {
-            println!("DIAL_REJECTED: {e:?}");
+            println!("DIAL_REJECTED: {}", describe_connect_error(&e));
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -231,10 +250,7 @@ async fn main() {
             println!("SESSION_OK");
         }
         other => {
-            println!(
-                "SESSION_CHECK_FAILED: {}",
-                describe_invoke_outcome(&other)
-            );
+            println!("SESSION_CHECK_FAILED: {}", describe_invoke_outcome(&other));
             node.shutdown().await.expect("shutdown");
             std::process::exit(1);
         }
@@ -256,6 +272,10 @@ async fn main() {
 /// The product keeps ONE `op_unsupported` code for served-op, op-scope and
 /// payload denials (no cross-peer scope leak); the reason text is what
 /// distinguishes "not provided" from "outside the granted scope".
+///
+/// `_MESSAGE=` is the peer's own text passed through verbatim — the probe does
+/// not construct it and adds no identifier of its own (`local-runtime-boundary.md`
+/// §4.1).
 fn report_refusal(
     tag: &str,
     envelope: &spoke_schemas::connect::connect_invoke_response::ErrorEnvelope,

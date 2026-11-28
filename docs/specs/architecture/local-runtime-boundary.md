@@ -100,7 +100,7 @@ Rules:
 - Operator smoke/probe output — the machine-readable lines a test asserts and a human pastes into an issue — renders a session only as a tag derived from its id, never the id itself, so a transcript correlates lines to one session without publishing that session's identifier
 - That tag is a 64-bit digest printed `<16 lowercase hex>` (the probe's `DefaultHasher`): stable within one build and process, not portable across toolchains, deliberately not the id, and not a security boundary — it resists casual reading, not offline enumeration
 - Protocol-level inspection surfaces keep the raw id instead: ACP request tracing and protocol errors (`crates/nexus-acp-host/src/client.rs` logs `session_id` for permission requests, prompt dispatch, and missing-session errors) and the reference dialer (`apps/nexus42/examples/connect_dialer.rs` prints `HANDSHAKE_OK session=<id>`). They exist to debug the wire against what the peer sees, and a session id is a transport-scoped correlation handle, not a credential
-- Implementation example: `apps/nexus42/examples/runtime_smoke_probe.rs` prints `session_tag=<16 lowercase hex>` and never `session=<id>`, including on its failure lines; this section is the rule, that probe is one consumer of it
+- Implementation example: `apps/nexus42/examples/runtime_smoke_probe.rs` never constructs a line containing a session id — session lines carry `session_tag=<16 lowercase hex>`, and failure lines carry a redacted error kind or wire code. Peer-supplied refusal text (`*_MESSAGE=`) is forwarded verbatim and is the host's output, not the probe's. This section is the rule, that probe is one consumer of it
 
 #### 4.2 Filesystem
 
