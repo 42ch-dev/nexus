@@ -2931,6 +2931,49 @@ roles:
         preset_source_identity(&manifest, Some(&bundle), None).unwrap();
     }
 
+    /// macOS proves containment by descriptor ancestry: the walk from the
+    /// asset's containing directory reaches the root's `(st_dev, st_ino)` via
+    /// real `..` links, and the reopened leaf carries the same identity.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_ancestry_walk_accepts_an_in_bundle_link() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (_tmp, bundle, _manifest) = role_prompt_bundle();
+        std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink("real.md", bundle.join("prompts/writer.md")).unwrap();
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"linked bytes"
+        );
+    }
+
+    /// A link that leaves the bundle is refused by the ancestry walk, not by a
+    /// path comparison: the diagnostic names the descriptor ancestry.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn macos_ancestry_walk_refuses_an_outside_link() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (tmp, bundle, _manifest) = role_prompt_bundle();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("writer.md"), "outside bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink(outside.join("writer.md"), bundle.join("prompts/writer.md"))
+            .unwrap();
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        let error = source.read_asset("prompts/writer.md").unwrap_err();
+        assert!(
+            error.to_string().contains("descriptor ancestry"),
+            "expected the ancestry refusal, got: {error}"
+        );
+    }
+
     /// A file whose own name ends with the procfs deletion marker is an ordinary
     /// bundle asset: deletion is decided from the descriptor's link count, never
     /// from the shape of its name.
