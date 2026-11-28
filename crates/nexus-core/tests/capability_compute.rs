@@ -921,11 +921,15 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         unbound.lookup(TOOL).is_none(),
         "the fixture withholds the handler binding"
     );
-    assert_eq!(
-        unbound.len(),
-        host_tool_catalog().len() - 1,
-        "every other canonical row stays bound"
-    );
+    for id in NEXUS_TOOL_IDS.iter().chain(FS_TOOL_IDS) {
+        if *id == TOOL {
+            continue;
+        }
+        assert!(
+            unbound.lookup(id).is_some(),
+            "the fixture withholds one row; '{id}' must stay bound"
+        );
+    }
 
     let before = timeline_event_count(f.core.pool()).await;
     let request = tool_request(TOOL, json!({}));
@@ -946,10 +950,6 @@ async fn canonical_unbound_tool_never_falls_through_to_peer_or_user() {
         unbound.fallback_consultations(),
         0,
         "a canonical id must not reach the peer/user lanes, got {err:?}"
-    );
-    assert!(
-        !format!("{err:?}").contains("no executor wired"),
-        "the competing user capability must never be invoked, got {err:?}"
     );
     assert_eq!(
         timeline_event_count(f.core.pool()).await,
@@ -4357,16 +4357,27 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.trace.correlation",
 ];
 
+/// The two `fs/*` wire ids, written here independently of the catalog: the
+/// reserved namespace must name THESE ids, so substituting one for the other
+/// fails on the id even though the row count is unchanged.
+const FS_TOOL_IDS: &[&str] = &["fs/read_text_file", "fs/write_text_file"];
+
 /// MIGRATED from `cross_caller_e2e.rs::all_nexus_tool_ids_registered_in_capability_registry`
 /// and `::test_profile_sets_are_not_action_capabilities`.
 ///
-/// Preserved: the canonical catalog declares exactly the declared `nexus.*`
-/// action roster (plus the two `fs/*` ids), the process-global registry binds
-/// every canonical row, and the `nexus.profile.*` grouping ids are metadata,
-/// never action capabilities with handler bindings. This is the catalog the
-/// peer admission chain derives its reserved set from
-/// (`reserved_host_tool_ids`), so the peer surface can never shadow a builtin
-/// id — even one this build does not bind.
+/// Preserved: the canonical catalog declares exactly the roster in
+/// [`NEXUS_TOOL_IDS`] plus the two `fs/*` ids in [`FS_TOOL_IDS`], compared id
+/// for id; the process-global registry binds every canonical row; and the
+/// `nexus.profile.*` grouping ids are metadata, never action capabilities with
+/// handler bindings. The expected roster is written here, not read back from
+/// the catalog it checks.
+///
+/// `reserved_host_tool_ids` is the builtin set the peer-tools lane refuses to
+/// mount over (`nexus-runtime`'s boot and `connect start` both hand it to
+/// `start_peer_tools_lane`). The dispatch-level half of that reservation — an
+/// id this build binds no row for is refused rather than falling through to
+/// the peer/user lanes — is owned by
+/// `canonical_unbound_tool_never_falls_through_to_peer_or_user`.
 ///
 /// Deleted with the retired host: the other `cross_caller_e2e` cases drove
 /// `HostToolExecutor` (`POST`-path and Schedule-path wrappers built from the
@@ -4375,13 +4386,16 @@ const NEXUS_TOOL_IDS: &[&str] = &[
 /// owned by this target (P2-T9).
 #[test]
 fn host_tool_registry_roster_is_the_declared_nexus_surface() {
-    let reserved: Vec<&str> = reserved_host_tool_ids().collect();
+    let mut reserved: Vec<&str> = reserved_host_tool_ids().collect();
+    let mut expected: Vec<&str> = NEXUS_TOOL_IDS.iter().chain(FS_TOOL_IDS).copied().collect();
+    reserved.sort_unstable();
+    expected.sort_unstable();
     assert_eq!(
-        reserved.len(),
-        29,
-        "the canonical catalog holds the 27 nexus.* ids plus the 2 fs/* ids"
+        reserved, expected,
+        "the reserved set is exactly the declared roster: 27 nexus.* ids plus fs/read_text_file and fs/write_text_file"
     );
-    for tool_id in NEXUS_TOOL_IDS {
+
+    for tool_id in NEXUS_TOOL_IDS.iter().chain(FS_TOOL_IDS) {
         assert!(
             reserved.contains(tool_id),
             "Tool '{tool_id}' must be in the canonical host-tool catalog"
@@ -4407,6 +4421,8 @@ fn host_tool_registry_roster_is_the_declared_nexus_surface() {
         "the registry lists exactly the canonical rows"
     );
 
+    // Grouping metadata, not actions: the roster asserted above never names a
+    // `nexus.profile.*` id, and neither lookup surface resolves one.
     for profile_id in [
         "nexus.profile.minimal",
         "nexus.profile.writer",
@@ -4418,11 +4434,7 @@ fn host_tool_registry_roster_is_the_declared_nexus_surface() {
         );
         assert!(
             registry.lookup(profile_id).is_none(),
-            "Profile-set id '{profile_id}' is grouping metadata, not an action capability"
-        );
-        assert!(
-            !NEXUS_TOOL_IDS.contains(&profile_id),
-            "Profile-set id '{profile_id}' must not appear in the action roster"
+            "Profile-set id '{profile_id}' binds no handler"
         );
     }
 }

@@ -3184,8 +3184,11 @@ impl CapabilityRegistry {
     /// - `AuditLog` is enforced by the caller (`audit_tool_execution`
     ///   in `registry_dispatch`).
     ///
-    /// The invariant test `registry_all_admission_gates_have_enforcement`
-    /// proves every gate in every row has a corresponding runtime check.
+    /// The `matches!` below is a debug-only sanity check, not an invariant
+    /// proof: it expands with a wildcard arm, so a new `AdmissionGate` variant
+    /// compiles silently, and `debug_assert!` is compiled out of release
+    /// builds. The "every gate in every row has a runtime check" contract is
+    /// unenforced — no test asserts it.
     ///
     /// # Panics
     ///
@@ -3242,7 +3245,7 @@ impl CapabilityRegistry {
                 "unhandled admission gate {gate:?} for capability {}",
                 row.metadata.id.as_str()
             );
-            let _ = gate; // Readability: gate is accounted for by the match above.
+            let _ = gate; // Only the debug-only assert above inspects it.
         }
 
         (row.handler)(req, context, creator_id).await
