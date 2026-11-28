@@ -12,7 +12,7 @@ use crate::capability_catalog::CapabilityCatalog;
 use crate::manifest::{
     ContextUpdateOp, ExitWhen, InitialAction, InnerGraph, NextTarget, PresetManifest,
 };
-use crate::source_identity::PresetSourceIdentity;
+use crate::source_identity::{PresetSourceIdentity, RootLocation};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use thiserror::Error;
@@ -288,16 +288,51 @@ pub fn load_preset(
     Ok(loaded)
 }
 
+/// Open the bundle root once and resolve the location to record with it.
+///
+/// The reads and the recorded location must come from the same descriptor, so a
+/// symlink switched between two resolutions cannot pair an old directory with
+/// new bytes.
+fn open_identity_root(
+    bundle_root: Option<&Path>,
+) -> Result<
+    Option<(
+        crate::bundle_root::BundleRoot,
+        std::path::PathBuf,
+        RootLocation,
+    )>,
+    PresetLoadError,
+> {
+    let Some(root) = bundle_root else {
+        return Ok(None);
+    };
+    let opened =
+        crate::bundle_root::BundleRoot::open(root).map_err(|e| PresetLoadError::Validation {
+            len: 1,
+            problems: vec![ValidationProblem {
+                path: "preset_source_identity".to_string(),
+                error: format!("failed to open bundle root: {e}"),
+            }],
+        })?;
+    let (path, location) = opened.path().map_err(|e| PresetLoadError::Validation {
+        len: 1,
+        problems: vec![ValidationProblem {
+            path: "preset_source_identity".to_string(),
+            error: format!("failed to resolve bundle root: {e}"),
+        }],
+    })?;
+    Ok(Some((opened, path, location)))
+}
+
 /// Compute the content-addressed [`PresetSourceIdentity`] (A2/A7).
 ///
 /// The content hash is over the manifest **and** every referenced asset
 /// (`template_file`, `prompt_file`, `system_prompt_file` in capability args, and
-/// role `system_prompt_file`) — not the YAML hash alone — so a changed
-/// template invalidates the identity and recovery refuses to fall back to
-/// current bytes.
+/// role `system_prompt_file`) — not the YAML hash alone — so a changed template
+/// invalidates the identity and recovery refuses to fall back to current bytes.
 ///
-/// For a directory bundle, the root is opened **once** as a directory
-/// descriptor: the hashed bytes are read relative to it and the recorded
+/// For a directory bundle the root is opened once: the bytes are read relative
+/// to that descriptor and the recorded
 /// [`Directory`](PresetSourceIdentity::Directory) root is that same descriptor's
 /// own path, so a bundle path replaced between resolutions cannot pair an old
 /// location with new bytes. Each path is validated as a safe relative path
@@ -317,31 +352,7 @@ pub fn preset_source_identity(
     let mut hasher = blake3::Hasher::new();
     hasher.update(manifest_yaml.as_bytes());
 
-    // One root, opened once: the recorded location and the hashed bytes both come
-    // from this descriptor, so a symlink switched between two resolutions cannot
-    // pair an old directory with new bytes.
-    let opened_root = match bundle_root {
-        Some(root) => Some(crate::bundle_root::BundleRoot::open(root).map_err(|e| {
-            PresetLoadError::Validation {
-                len: 1,
-                problems: vec![ValidationProblem {
-                    path: "preset_source_identity".to_string(),
-                    error: format!("failed to open bundle root: {e}"),
-                }],
-            }
-        })?),
-        None => None,
-    };
-    let canonical_root = match &opened_root {
-        Some(root) => Some(root.path().map_err(|e| PresetLoadError::Validation {
-            len: 1,
-            problems: vec![ValidationProblem {
-                path: "preset_source_identity".to_string(),
-                error: format!("failed to resolve bundle root: {e}"),
-            }],
-        })?),
-        None => None,
-    };
+    let opened_root = open_identity_root(bundle_root)?;
 
     let mut asset_paths: Vec<String> = super::validation::collect_asset_file_references(manifest)
         .into_iter()
@@ -362,7 +373,7 @@ pub fn preset_source_identity(
         }
         hasher.update(rel.as_bytes());
         hasher.update(&[0u8]);
-        let bytes = if let Some(root) = &opened_root {
+        let bytes = if let Some((root, _, _)) = &opened_root {
             match root.read(rel) {
                 Ok(b) => b,
                 Err(e) => {
@@ -402,8 +413,12 @@ pub fn preset_source_identity(
     let mut content_hash = [0u8; 32];
     content_hash.copy_from_slice(hasher.finalize().as_bytes());
 
-    Ok(match (canonical_root, embedded_id) {
-        (Some(root), _) => PresetSourceIdentity::Directory { root, content_hash },
+    Ok(match (opened_root, embedded_id) {
+        (Some((_, root, location)), _) => PresetSourceIdentity::Directory {
+            root,
+            content_hash,
+            location,
+        },
         (None, Some(id)) => PresetSourceIdentity::Embedded {
             preset_id: id.to_string(),
             content_hash,
@@ -2929,6 +2944,27 @@ roles:
             b"linked bytes"
         );
         preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// A root removed after it was opened has no directory entry left, so its old
+    /// path may name another directory: the identity step refuses instead of
+    /// recording it.
+    #[test]
+    #[cfg(unix)]
+    fn identity_refuses_a_bundle_root_removed_after_open() {
+        let (_tmp, bundle, _manifest) = role_prompt_bundle();
+        let root = crate::bundle_root::BundleRoot::open(&bundle).unwrap();
+
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::fs::remove_dir(bundle.join("prompts")).unwrap();
+        std::fs::remove_dir(&bundle).unwrap();
+
+        let error = root.path().unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            error.to_string().contains("bundle root"),
+            "unexpected refusal: {error}"
+        );
     }
 
     /// macOS proves containment by descriptor ancestry: the walk from the

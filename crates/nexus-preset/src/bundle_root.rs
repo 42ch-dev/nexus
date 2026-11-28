@@ -7,6 +7,7 @@
 //! once, every asset read resolves relative to that descriptor, and the asset's
 //! own descriptor path is compared with the root's.
 
+use crate::source_identity::RootLocation;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -14,9 +15,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 pub struct BundleRoot {
     dir: std::fs::File,
-    /// The root's path at open time. Only targets without `openat` need it, to
-    /// name the assets they open by path.
-    #[cfg(windows)]
+    /// The caller's path at open time. Windows names assets from it, and Linux
+    /// falls back to it only when the kernel cannot name the descriptor.
+    #[cfg(any(target_os = "linux", windows))]
     path: PathBuf,
 }
 
@@ -29,49 +30,81 @@ impl BundleRoot {
     /// traverse.
     pub fn open(root: &Path) -> std::io::Result<Self> {
         let dir = open_root_dir(root)?;
+        #[cfg(target_os = "linux")]
+        let path = root.to_path_buf();
         #[cfg(windows)]
         let path = nexus_config_metadata::final_path(&dir)?;
         Ok(Self {
             dir,
-            #[cfg(windows)]
+            #[cfg(any(target_os = "linux", windows))]
             path,
         })
     }
 
-    /// The directory's own current path, as its descriptor reports it.
+    /// The directory's own current path, and how it was obtained.
     ///
-    /// This is the location to record alongside decisions made through this
-    /// root: it comes from the same descriptor the reads use, never from a
-    /// second resolution of the caller's path.
+    /// The location to record alongside decisions made through this root: it
+    /// comes from the same descriptor the reads use, never from a second
+    /// resolution of the caller's path — unless the kernel cannot name the
+    /// descriptor at all, in which case the caller's path is canonicalised and
+    /// said to be a [`RootLocation::PathQuery`].
+    ///
+    /// A root whose descriptor has no directory entry left is refused: the
+    /// path it used to have may name a different directory by now, and an
+    /// identity must not point there.
     ///
     /// # Errors
     ///
-    /// Returns the platform error when the descriptor's path cannot be read.
+    /// Returns [`std::io::ErrorKind::NotFound`] for an unlinked root, or the
+    /// platform error when the descriptor's path cannot be read.
     #[cfg(target_os = "linux")]
-    pub fn path(&self) -> std::io::Result<PathBuf> {
-        let (path, unlinked) = descriptor_path(&self.dir)?;
-        Ok(linked_path(path, unlinked))
+    pub fn path(&self) -> std::io::Result<(PathBuf, RootLocation)> {
+        match proc_link(&self.dir) {
+            Ok((path, _)) => {
+                verify_named_root(&self.dir, &path)?;
+                Ok((path, RootLocation::Descriptor))
+            }
+            // No procfs: the kernel cannot name the descriptor. Record the
+            // caller's path instead and say so — the reads still use the handle,
+            // so only the recorded location is weaker.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let path = self.path.canonicalize()?;
+                verify_named_root(&self.dir, &path)?;
+                Ok((path, RootLocation::PathQuery))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// # Errors
     ///
-    /// Returns the platform error when the descriptor's path cannot be read.
+    /// Returns [`std::io::ErrorKind::NotFound`] for an unlinked root, or the
+    /// platform error when the descriptor's path cannot be read.
     #[cfg(target_os = "macos")]
-    pub fn path(&self) -> std::io::Result<PathBuf> {
-        descriptor_path(&self.dir)
+    pub fn path(&self) -> std::io::Result<(PathBuf, RootLocation)> {
+        let path = descriptor_path(&self.dir)?;
+        verify_named_root(&self.dir, &path)?;
+        Ok((path, RootLocation::Descriptor))
     }
 
     /// # Errors
     ///
     /// Returns the platform error when the descriptor's path cannot be read.
+    ///
+    /// Windows has no supported directory link count, so a removed-but-open root
+    /// cannot be detected here; the recorded path is the handle's final path and
+    /// the reads stay confined by the handle comparison.
     #[cfg(windows)]
-    pub fn path(&self) -> std::io::Result<PathBuf> {
-        nexus_config_metadata::final_path(&self.dir)
+    pub fn path(&self) -> std::io::Result<(PathBuf, RootLocation)> {
+        Ok((
+            nexus_config_metadata::final_path(&self.dir)?,
+            RootLocation::Descriptor,
+        ))
     }
 
     /// No confinement proof is wired for this target, so there is no path either.
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    pub fn path(&self) -> std::io::Result<PathBuf> {
+    pub fn path(&self) -> std::io::Result<(PathBuf, RootLocation)> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "cannot verify asset confinement on this platform",
@@ -215,7 +248,12 @@ fn open_root_dir(root: &Path) -> std::io::Result<std::fs::File> {
 
 /// `O_SEARCH` opens the directory for search only: Darwin refuses a plain
 /// `O_RDONLY` directory open without read permission, while `openat` from an
-/// `O_SEARCH` descriptor still resolves (verified on macOS).
+/// `O_SEARCH` descriptor still resolves.
+///
+/// Measured on macOS 25.6 (arm64), `libc` 0.2.191 / nix 0.32: `O_RDONLY = 0o0`,
+/// `O_SEARCH = 0o10004000000` (`O_EXEC | O_DIRECTORY`, so not `O_RDONLY`), and
+/// against a `0111` directory — `O_RDONLY|O_DIRECTORY` → EACCES, `O_EVTONLY` →
+/// EACCES, `O_SEARCH` → open, `openat` and `F_GETPATH` all succeed.
 #[cfg(target_os = "macos")]
 fn open_root_dir(root: &Path) -> std::io::Result<std::fs::File> {
     use nix::fcntl::{open, OFlag};
@@ -308,8 +346,8 @@ fn verify_beneath_root(
     rel: &str,
     file: &std::fs::File,
 ) -> std::io::Result<()> {
-    let (root_path, root_unlinked) = descriptor_path(root)?;
-    let (asset_path, asset_unlinked) = descriptor_path(file)?;
+    let (root_path, root_unlinked) = proc_link(root).map_err(procfs_unavailable)?;
+    let (asset_path, asset_unlinked) = proc_link(file).map_err(procfs_unavailable)?;
     if !linked_path(asset_path, asset_unlinked).starts_with(linked_path(root_path, root_unlinked)) {
         return Err(escape(rel));
     }
@@ -317,25 +355,59 @@ fn verify_beneath_root(
 }
 
 /// The descriptor's own path behind `/proc/self/fd`, plus whether that link has
-/// no directory entry left.
+/// no directory entry left. Raw errors: the caller decides what a missing
+/// procfs means for it.
 #[cfg(target_os = "linux")]
-fn descriptor_path(file: &std::fs::File) -> std::io::Result<(PathBuf, bool)> {
+fn proc_link(file: &std::fs::File) -> std::io::Result<(PathBuf, bool)> {
     use std::os::fd::AsRawFd as _;
     use std::os::unix::fs::MetadataExt as _;
 
     let unlinked = file.metadata()?.nlink() == 0;
-    let path =
-        std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).map_err(|error| {
-            match error.kind() {
-                std::io::ErrorKind::NotFound => std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "cannot verify asset confinement on this platform: \
-                 openat2 declined the resolution and /proc/self/fd is unavailable",
-                ),
-                _ => error,
-            }
-        })?;
+    let path = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
     Ok((path, unlinked))
+}
+
+/// An asset read that `openat2` declined cannot be judged without procfs.
+#[cfg(target_os = "linux")]
+fn procfs_unavailable(error: std::io::Error) -> std::io::Error {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "cannot verify asset confinement on this platform: \
+             openat2 declined the resolution and /proc/self/fd is unavailable",
+        );
+    }
+    error
+}
+
+/// A root descriptor with no directory entry left: its old path may name a
+/// different directory now, so it must never be recorded as this bundle.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn root_removed() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "bundle root was removed while it was being read",
+    )
+}
+
+/// Require the location being recorded to still name this directory.
+///
+/// Darwin keeps `st_nlink == 2` for a directory that was removed while open, so
+/// a link count cannot detect that state; comparing the named path's
+/// `(st_dev, st_ino)` with the descriptor's does, on both filesystems, and also
+/// refuses a path that now names a replacement directory. This only guards the
+/// *recorded location*; the reads stay descriptor-relative.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn verify_named_root(root: &std::fs::File, path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let opened = root.metadata()?;
+    match std::fs::metadata(path) {
+        Ok(named) if (named.dev(), named.ino()) == (opened.dev(), opened.ino()) => Ok(()),
+        Ok(_) => Err(root_removed()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(root_removed()),
+        Err(error) => Err(error),
+    }
 }
 
 /// The kernel appends ` (deleted)` only for a link with no directory entry left,
@@ -347,10 +419,12 @@ fn linked_path(path: PathBuf, unlinked: bool) -> PathBuf {
     if !unlinked {
         return path;
     }
-    match path.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
-        Some(stripped) => PathBuf::from(std::ffi::OsStr::from_bytes(stripped)),
-        None => path,
-    }
+    let stripped = path
+        .as_os_str()
+        .as_bytes()
+        .strip_suffix(b" (deleted)")
+        .map(|stripped| PathBuf::from(std::ffi::OsStr::from_bytes(stripped)));
+    stripped.unwrap_or(path)
 }
 
 /// macOS names the descriptor's own path through `fcntl(F_GETPATH)`.
