@@ -110,18 +110,34 @@ impl BundleRoot {
         read_bytes(file)
     }
 
-    /// macOS names the root's and the asset's own paths through
-    /// `fcntl(F_GETPATH)` and compares them. The open is already relative to the
-    /// root descriptor, so this name check only has to catch a resolution that
-    /// escaped it. It is a name comparison, not a handle-ancestry proof — Darwin
-    /// exposes no ancestry query — so a mount redirection, or a rename timed
-    /// against the two lookups, is outside what it can decide.
+    /// macOS proves containment by descriptor identity: the asset is opened
+    /// relative to the root, then its containing directory is walked up via
+    /// `openat(dir, "..")` — a real parent link from the vnode, not a name
+    /// lookup — until an ancestor's `(st_dev, st_ino)` equals the root's. The
+    /// opened object is accepted only if an `O_NOFOLLOW` reopen of it inside
+    /// that proven directory has the same identity, so the bytes come from an
+    /// inode reachable beneath the root.
+    ///
+    /// `F_GETPATH` supplies the location to start from, never the verdict: a
+    /// name query cannot tell a rebased mount from the root, whereas the
+    /// `..` chain is the filesystem's own ancestry.
     #[cfg(target_os = "macos")]
     pub fn read(&self, rel: &str) -> std::io::Result<Vec<u8>> {
         let file = openat_asset(&self.dir, rel)?;
         reject_non_regular(rel, &file)?;
-        if !descriptor_path(&file)?.starts_with(descriptor_path(&self.dir)?) {
-            return Err(escape(rel));
+
+        let path = descriptor_path(&file)?;
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(escape_ancestry(rel));
+        };
+        let parent = open_directory(parent)?;
+        ensure_beneath_root(&self.dir, rel, &parent)?;
+
+        // Tie the object to the proven directory by identity: the name only
+        // locates a candidate, the inode decides whether it is the same object.
+        let sibling = openat_leaf(&parent, name)?;
+        if identity(&sibling)? != identity(&file)? {
+            return Err(escape_ancestry(rel));
         }
         read_bytes(file)
     }
@@ -153,7 +169,7 @@ impl BundleRoot {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[cfg(any(target_os = "linux", windows))]
 fn escape(rel: &str) -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::PermissionDenied,
@@ -345,4 +361,105 @@ fn descriptor_path(file: &std::fs::File) -> std::io::Result<PathBuf> {
     let mut path = PathBuf::new();
     fcntl(file, FcntlArg::F_GETPATH(&mut path)).map_err(std::io::Error::from)?;
     Ok(path)
+}
+
+/// How many `..` steps the ancestry proof may take before refusing.
+#[cfg(target_os = "macos")]
+const MAX_ANCESTOR_LEVELS: usize = 4096;
+
+/// The identity pair a descriptor reports. Names are never compared: a mount or
+/// a rename can move a name, but the inode a descriptor is bound to stays put.
+#[cfg(target_os = "macos")]
+fn identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+/// Refusal from the ancestry proof. Distinct from the path-level wording so a
+/// test can tell which rule decided, while still carrying the sandbox phrase.
+#[cfg(target_os = "macos")]
+fn escape_ancestry(rel: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "asset `{rel}` resolves outside the bundle sandbox \
+             (descriptor ancestry does not reach the root)"
+        ),
+    )
+}
+
+/// Open a directory for search only; a bundle root that permits traversal but
+/// not a listing is still usable.
+#[cfg(target_os = "macos")]
+fn open_directory(path: &Path) -> std::io::Result<std::fs::File> {
+    use nix::fcntl::{open, OFlag};
+    use nix::sys::stat::Mode;
+
+    open(path, OFlag::O_SEARCH | OFlag::O_CLOEXEC, Mode::empty())
+        .map(std::fs::File::from)
+        .map_err(std::io::Error::from)
+}
+
+/// Open a directory relative to an open directory descriptor. Search-only, like
+/// the root itself: an ancestor the bundle may only be traversed through must
+/// not need a listing for the `..` walk.
+#[cfg(target_os = "macos")]
+fn openat_directory(dir: &std::fs::File, name: &str) -> std::io::Result<std::fs::File> {
+    use nix::fcntl::{openat, OFlag};
+    use nix::sys::stat::Mode;
+
+    openat(dir, name, OFlag::O_SEARCH | OFlag::O_CLOEXEC, Mode::empty())
+        .map(std::fs::File::from)
+        .map_err(std::io::Error::from)
+}
+
+/// Open a leaf inside an open directory without following a link at that name.
+#[cfg(target_os = "macos")]
+fn openat_leaf(dir: &std::fs::File, name: &std::ffi::OsStr) -> std::io::Result<std::fs::File> {
+    use nix::fcntl::{openat, OFlag};
+    use nix::sys::stat::Mode;
+
+    openat(
+        dir,
+        name,
+        OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map(std::fs::File::from)
+    .map_err(std::io::Error::from)
+}
+
+/// Walk `..` from `start` until an ancestor is the root directory by identity.
+///
+/// `..` from a directory descriptor is the filesystem's real parent link, so
+/// meeting the root's `(st_dev, st_ino)` proves the directory really is beneath
+/// it — a name prefix cannot: a mount at a path under the root, or a rename
+/// between two lookups, would satisfy the name and not the ancestry.
+#[cfg(target_os = "macos")]
+fn ensure_beneath_root(
+    root: &std::fs::File,
+    rel: &str,
+    start: &std::fs::File,
+) -> std::io::Result<()> {
+    let root_identity = identity(root)?;
+    let mut current = start.try_clone()?;
+    for _ in 0..MAX_ANCESTOR_LEVELS {
+        let current_identity = identity(&current)?;
+        if current_identity == root_identity {
+            return Ok(());
+        }
+        let parent = openat_directory(&current, "..")?;
+        let parent_identity = identity(&parent)?;
+        if parent_identity == current_identity {
+            // The filesystem root, one whose `..` is itself: no bundle root here.
+            return Err(escape_ancestry(rel));
+        }
+        current = parent;
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("asset `{rel}` confinement walk exceeded {MAX_ANCESTOR_LEVELS} ancestor levels"),
+    ))
 }
