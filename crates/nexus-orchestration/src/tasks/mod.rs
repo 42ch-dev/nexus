@@ -2,15 +2,16 @@
 //!
 //! Design: `docs/specs/orchestration/orchestration-engine.md` §4.4.
 //!
-//! # TODO(V1.17): Run and capability-call trace correlation
+//! # Trace correlation
 //!
-//! When the daemon orchestration API is implemented:
-//! - Engine/session start paths should read `_run_id` from `graph_flow::Context`
-//!   and propagate it to all child tasks.
-//! - `CapabilityTask::run` should generate a `capability_call_id` per invocation
-//!   and store `_last_capability_call_id` + capability call metadata in context.
-//! - If `_trace_file` is present in context, append start/finish trace events
-//!   best-effort using the DTOs from `nexus-contracts::local::acp_runtime::trace`.
+//! The work is tracked in I-000628, which also holds its acceptance. That work
+//! will introduce the context keys `_run_id`, `_last_capability_call_id` and
+//! `_trace_file`, and emit trace DTOs from
+//! `nexus-contracts::local::acp_runtime::trace`. No code path writes these keys
+//! or consumes them for tracing yet: `_run_id` appears among
+//! `build_context_json`'s known keys (read-if-present), and that function also
+//! forwards any user-set key not starting with `__`, so readers must not depend
+//! on them.
 
 use crate::engine::OrchestrationEngine;
 use async_trait::async_trait;
