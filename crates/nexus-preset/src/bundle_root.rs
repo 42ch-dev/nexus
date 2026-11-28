@@ -163,7 +163,7 @@ impl BundleRoot {
         let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
             return Err(escape_ancestry(rel));
         };
-        let parent = open_directory(parent)?;
+        let parent = open_root_dir(parent)?;
         ensure_beneath_root(&self.dir, rel, &parent)?;
 
         // Tie the object to the proven directory by identity: the name only
@@ -462,18 +462,6 @@ fn escape_ancestry(rel: &str) -> std::io::Error {
              (descriptor ancestry does not reach the root)"
         ),
     )
-}
-
-/// Open a directory for search only; a bundle root that permits traversal but
-/// not a listing is still usable.
-#[cfg(target_os = "macos")]
-fn open_directory(path: &Path) -> std::io::Result<std::fs::File> {
-    use nix::fcntl::{open, OFlag};
-    use nix::sys::stat::Mode;
-
-    open(path, OFlag::O_SEARCH | OFlag::O_CLOEXEC, Mode::empty())
-        .map(std::fs::File::from)
-        .map_err(std::io::Error::from)
 }
 
 /// Open a directory relative to an open directory descriptor. Search-only, like
