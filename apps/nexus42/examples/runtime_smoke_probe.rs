@@ -24,8 +24,10 @@
 //! constructs a line containing one — session lines carry a `session_tag`,
 //! failure lines a redacted error kind. A failing `--compute-session <id>` run
 //! was given that id on the operator's own command line, so the probe does not
-//! echo it back. `*_MESSAGE=` is the exception by construction: it forwards the
-//! peer's refusal text verbatim, which is the host's output, not the probe's.
+//! echo it back. Peer-supplied text is forwarded verbatim for diagnosis: the
+//! host's refusal messages (`*_MESSAGE=`) and its manifest (`MANIFEST_JSON=`,
+//! whose `extensions` is an open map). Both are the peer's output, not
+//! identifiers the probe constructs.
 //!
 //! The identity comes from a fixed Ed25519 seed (default 7) so the host's
 //! `allowlist.json` entry is deterministic across runs. Usage:
@@ -96,7 +98,7 @@ fn describe_invoke_outcome<T>(outcome: &Result<T, spoke_connect::InvokeError>) -
 
 /// Connect/handshake failure kind. No variant payload — a peer-supplied reason
 /// or address never reaches probe output.
-fn describe_connect_error(error: &spoke_connect::ConnectError) -> &'static str {
+const fn describe_connect_error(error: &spoke_connect::ConnectError) -> &'static str {
     use spoke_connect::ConnectError;
     match error {
         ConnectError::NotAllowlisted { .. } => "peer not allowlisted",
