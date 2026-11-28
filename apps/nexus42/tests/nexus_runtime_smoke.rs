@@ -428,13 +428,13 @@ fn profile_from_exe_infers_the_profile_directory_and_rejects_other_layouts() {
     );
 }
 
-/// Stable, non-reversible tag for a session id.
+/// Stable tag for a session id.
 ///
-/// The probe prints this instead of the raw id: a session id is treated as
-/// sensitive by the cleartext-logging rule, and the proof only needs "this
-/// result belongs to THAT session", not the id itself. Both sides build with
-/// the same pinned toolchain, so `DefaultHasher` agrees across the probe and
-/// this test.
+/// The probe prints this instead of the raw id: `local-runtime-boundary.md`
+/// §4.1 keeps session identifiers out of cleartext logs, and the proof only
+/// needs "this result belongs to THAT session", not the id itself. Both sides
+/// build with the same pinned toolchain, so `DefaultHasher` agrees across the
+/// probe and this test.
 ///
 /// shortcut: `DefaultHasher` is deterministic per toolchain, not per the Rust
 /// spec, upgrade: switch to a fixed digest when the probe and the test build
