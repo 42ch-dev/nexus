@@ -512,7 +512,13 @@ fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
             reject_non_regular(rel, &file)?;
             Ok(file)
         }
-        Err(rustix::io::Errno::XDEV) => Err(escape(rel)),
+        // `BENEATH` refuses an absolute symlink target with `EXDEV` even when it
+        // resolves inside the bundle. No single resolve-flag set both follows
+        // absolute targets and confines them: `BENEATH | IN_ROOT` is rejected
+        // as mutually exclusive, and `IN_ROOT` alone rebases the target at the
+        // root, so a genuine absolute in-bundle path matches nothing. The
+        // descriptor-path check decides these, as macOS and Windows do.
+        Err(rustix::io::Errno::XDEV) => open_confined_via_proc(root, rel),
         // Kernels before 5.6 have no `openat2`; only then fall back.
         Err(rustix::io::Errno::NOSYS) => open_confined_via_proc(root, rel),
         Err(errno) => Err(std::io::Error::from(errno)),
@@ -520,9 +526,9 @@ fn open_confined(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
 }
 
 /// `BENEATH`, not `NO_SYMLINKS`: the validation pass accepts in-bundle symlinks,
-/// so they must resolve here too — the kernel refuses only links that leave the
-/// root. (Absolute link targets are refused by `BENEATH` even when they stay
-/// inside; that is stricter than validation and fails closed.)
+/// so a relative link that stays inside must resolve here — the kernel refuses
+/// only resolutions that leave the root. Absolute link targets are the one shape
+/// `BENEATH` cannot express; `open_confined` handles their `EXDEV` separately.
 #[cfg(target_os = "linux")]
 fn open_beneath(root: &Path, rel: &str) -> Result<std::fs::File, rustix::io::Errno> {
     use rustix::fs::{open, openat2, Mode, OFlags, ResolveFlags};
@@ -542,9 +548,10 @@ fn open_beneath(root: &Path, rel: &str) -> Result<std::fs::File, rustix::io::Err
     Ok(std::fs::File::from(fd))
 }
 
-/// Fallback for kernels without `openat2`: `/proc/self/fd` names the object the
-/// open captured, and its link count — never the shape of the name — says
-/// whether that object still has a directory entry.
+/// Descriptor-path confinement: `/proc/self/fd` names the object the open
+/// captured, and its link count — never the shape of the name — says whether
+/// that object still has a directory entry. Used where the kernel cannot prove
+/// it: an absolute target `BENEATH` refuses, or a kernel without `openat2`.
 #[cfg(target_os = "linux")]
 fn open_confined_via_proc(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
     use std::os::fd::AsRawFd as _;
@@ -554,7 +561,17 @@ fn open_confined_via_proc(root: &Path, rel: &str) -> std::io::Result<std::fs::Fi
     let file = open_asset(&root.join(rel))?;
     reject_non_regular(rel, &file)?;
     let unlinked = file.metadata()?.nlink() == 0;
-    let mut resolved = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
+    let mut resolved =
+        std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).map_err(|error| {
+            match error.kind() {
+                std::io::ErrorKind::NotFound => std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "cannot verify asset confinement on this platform: \
+                 openat2 declined the resolution and /proc/self/fd is unavailable",
+                ),
+                _ => error,
+            }
+        })?;
     if unlinked {
         // The kernel appends this marker only for a link with no directory
         // entry left, which is exactly `st_nlink == 0`.
@@ -3020,6 +3037,41 @@ roles:
         std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
         std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
         std::os::unix::fs::symlink("real.md", bundle.join("prompts/writer.md")).unwrap();
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let source = crate::workflow_ir::FsAssetSource::new(&bundle).unwrap();
+        assert_eq!(
+            source.read_asset("prompts/writer.md").unwrap().unwrap(),
+            b"linked bytes"
+        );
+        preset_source_identity(&manifest, Some(&bundle), None).unwrap();
+    }
+
+    /// An absolute link target that resolves inside the bundle is accepted too:
+    /// the shape `validate_assets_in_bundle` accepts, and the one macOS
+    /// (`F_GETPATH`) and Windows (`GetFinalPathNameByHandleW`) already judge by
+    /// the descriptor. This host exercises the macOS arm. On Linux the kernel's
+    /// `BENEATH` refuses absolute targets with `EXDEV`, so `open_confined` falls
+    /// back to the descriptor-path check, which must reach the same verdict
+    /// (that fallback needs `/proc/self/fd`).
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_accepts_an_absolute_in_bundle_symlink() {
+        use crate::workflow_ir::AssetSource as _;
+
+        let (_tmp, bundle, manifest) = role_prompt_bundle();
+        std::fs::write(bundle.join("prompts/real.md"), "linked bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink(
+            bundle.join("prompts/real.md"),
+            bundle.join("prompts/writer.md"),
+        )
+        .unwrap();
         assert_eq!(
             crate::validation::validate_assets_in_bundle(&manifest, &bundle)
                 .errors()
