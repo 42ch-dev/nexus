@@ -348,7 +348,7 @@ pub fn preset_source_identity(
         hasher.update(rel.as_bytes());
         hasher.update(&[0u8]);
         let bytes = if let Some(root) = &canonical_root {
-            match std::fs::read(root.join(rel)) {
+            match read_confined_asset(root, rel) {
                 Ok(b) => b,
                 Err(e) => {
                     return Err(PresetLoadError::Validation {
@@ -446,6 +446,87 @@ pub fn assert_template_file_safe(path: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Read a referenced asset through one descriptor confined to `root`.
+///
+/// `root` must already be canonical. Existence and symlink checks inspect a
+/// path, so an asset replaced between such a check and this read would
+/// otherwise supply unvalidated bytes; here the bytes come from the descriptor
+/// that was verified to be the file the (still) in-bundle path names.
+pub(crate) fn read_confined_asset(root: &Path, rel: &str) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+
+    let path = root.join(rel);
+    let escape = || {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("asset `{rel}` resolves outside the bundle sandbox (symlink escape)"),
+        )
+    };
+    let mut file = open_asset(&path)?;
+    let resolved = path.canonicalize().map_err(|_| escape())?;
+    if !resolved.starts_with(root) {
+        return Err(escape());
+    }
+    if !same_file(&file, &resolved) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("asset `{rel}` changed while it was being read"),
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+/// Open the leaf as the reparse point it is, so a link cannot redirect the read.
+#[cfg(windows)]
+fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_asset(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+/// Whether the open descriptor is the file the canonical `resolved` path names.
+#[cfg(unix)]
+fn same_file(file: &std::fs::File, resolved: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+
+    match (file.metadata(), std::fs::metadata(resolved)) {
+        (Ok(opened), Ok(target)) => (opened.dev(), opened.ino()) == (target.dev(), target.ino()),
+        _ => false,
+    }
+}
+
+/// The leaf was opened as its own reparse point, so a link is refused here.
+#[cfg(windows)]
+fn same_file(file: &std::fs::File, _resolved: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    file.metadata()
+        .is_ok_and(|opened| opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0)
+}
+
+/// No descriptor identity exists on this target, so the read fails closed.
+#[cfg(not(any(unix, windows)))]
+fn same_file(_file: &std::fs::File, _resolved: &Path) -> bool {
+    false
 }
 
 /// Collect all `template_file` paths from a manifest as `(dot_path, &str)` pairs.
@@ -2809,5 +2890,61 @@ gates:
             );
             drop(messages);
         }
+    }
+
+    /// An asset replaced between the path checks and the identity read must not
+    /// contribute the replacement's bytes. A hand-placed symlink is the
+    /// deterministic form of that swap; the raced form creates the same link
+    /// between `validate_assets_in_bundle` and the read below.
+    #[test]
+    #[cfg(unix)]
+    fn identity_read_refuses_an_asset_swapped_for_an_escaping_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundle = tmp.path().join("swapped");
+        std::fs::create_dir_all(bundle.join("prompts")).unwrap();
+        std::fs::write(bundle.join("prompts/writer.md"), "in bundle").unwrap();
+        let manifest: PresetManifest = serde_yaml::from_str(
+            r"
+preset:
+  id: swapped
+  version: 1
+  kind: creator
+  description: swapped asset
+  initial: a
+  terminal: b
+states:
+  - id: a
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+roles:
+  - id: writer
+    description: Writer
+    system_prompt_file: prompts/writer.md
+",
+        )
+        .unwrap();
+        assert_eq!(
+            crate::validation::validate_assets_in_bundle(&manifest, &bundle)
+                .errors()
+                .count(),
+            0
+        );
+
+        let outside = tmp.path().join("outside.md");
+        std::fs::write(&outside, "outside bytes").unwrap();
+        std::fs::remove_file(bundle.join("prompts/writer.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, bundle.join("prompts/writer.md")).unwrap();
+
+        let error = preset_source_identity(&manifest, Some(&bundle), None).unwrap_err();
+        assert!(
+            error
+                .problems()
+                .iter()
+                .any(|problem| problem.error.contains("outside the bundle sandbox")),
+            "expected a sandbox refusal, got: {:?}",
+            error.problems()
+        );
     }
 }

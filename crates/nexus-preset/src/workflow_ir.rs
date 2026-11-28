@@ -177,14 +177,7 @@ impl FsAssetSource {
 
 impl AssetSource for FsAssetSource {
     fn read_asset(&self, path: &str) -> Result<Option<Vec<u8>>, std::io::Error> {
-        let canonical = self.root.join(path).canonicalize()?;
-        if !canonical.starts_with(&self.root) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!("asset `{path}` resolves outside the bundle sandbox (symlink escape)"),
-            ));
-        }
-        std::fs::read(canonical).map(Some)
+        crate::loader::read_confined_asset(&self.root, path).map(Some)
     }
 }
 
