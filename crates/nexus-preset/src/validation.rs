@@ -3842,17 +3842,18 @@ states:
         let document = import_preset_manifest(&manifest).expect("projection succeeds");
         let mut from_document = collect_ir_asset_references(&document);
 
-        let paths: Vec<String> = from_manifest.iter().map(|(path, _)| path.clone()).collect();
+        // Borrowed on purpose: the borrows end at these assertions, before the
+        // sort below, and the repo's test convention is `.contains`.
+        let paths: Vec<&str> = from_manifest
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect();
         assert!(
-            paths
-                .iter()
-                .any(|p| p == "preset.initial_action.template_file"),
+            paths.contains(&"preset.initial_action.template_file"),
             "{paths:?}"
         );
         assert!(
-            paths
-                .iter()
-                .any(|p| p == "states[0].enter[0].args.system_prompt_file"),
+            paths.contains(&"states[0].enter[0].args.system_prompt_file"),
             "{paths:?}"
         );
 
