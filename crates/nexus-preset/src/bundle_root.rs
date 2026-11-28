@@ -38,6 +38,46 @@ impl BundleRoot {
         })
     }
 
+    /// The directory's own current path, as its descriptor reports it.
+    ///
+    /// This is the location to record alongside decisions made through this
+    /// root: it comes from the same descriptor the reads use, never from a
+    /// second resolution of the caller's path.
+    ///
+    /// # Errors
+    ///
+    /// Returns the platform error when the descriptor's path cannot be read.
+    #[cfg(target_os = "linux")]
+    pub fn path(&self) -> std::io::Result<PathBuf> {
+        let (path, unlinked) = descriptor_path(&self.dir)?;
+        Ok(linked_path(path, unlinked))
+    }
+
+    /// # Errors
+    ///
+    /// Returns the platform error when the descriptor's path cannot be read.
+    #[cfg(target_os = "macos")]
+    pub fn path(&self) -> std::io::Result<PathBuf> {
+        descriptor_path(&self.dir)
+    }
+
+    /// # Errors
+    ///
+    /// Returns the platform error when the descriptor's path cannot be read.
+    #[cfg(windows)]
+    pub fn path(&self) -> std::io::Result<PathBuf> {
+        nexus_config_metadata::final_path(&self.dir)
+    }
+
+    /// No confinement proof is wired for this target, so there is no path either.
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    pub fn path(&self) -> std::io::Result<PathBuf> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "cannot verify asset confinement on this platform",
+        ))
+    }
+
     /// Read a bundle-relative asset through one descriptor inside this root.
     ///
     /// The bytes come from the descriptor the confinement check approved, and
@@ -71,7 +111,11 @@ impl BundleRoot {
     }
 
     /// macOS names the root's and the asset's own paths through
-    /// `fcntl(F_GETPATH)` and compares them.
+    /// `fcntl(F_GETPATH)` and compares them. The open is already relative to the
+    /// root descriptor, so this name check only has to catch a resolution that
+    /// escaped it. It is a name comparison, not a handle-ancestry proof — Darwin
+    /// exposes no ancestry query — so a mount redirection, or a rename timed
+    /// against the two lookups, is outside what it can decide.
     #[cfg(target_os = "macos")]
     pub fn read(&self, rel: &str) -> std::io::Result<Vec<u8>> {
         let file = openat_asset(&self.dir, rel)?;
@@ -84,7 +128,9 @@ impl BundleRoot {
 
     /// Windows opens the asset by path; the root handle's own final path is the
     /// boundary, so an asset reached through a replaced bundle path is refused
-    /// instead of read.
+    /// instead of read. Like the macOS arm this is a name comparison — Windows
+    /// has no handle-ancestry query — so a reparse/junction redirection or a
+    /// rename timed against the two lookups is outside what it can decide.
     #[cfg(windows)]
     pub fn read(&self, rel: &str) -> std::io::Result<Vec<u8>> {
         let file = std::fs::File::open(self.path.join(rel))?;
@@ -151,22 +197,30 @@ fn open_root_dir(root: &Path) -> std::io::Result<std::fs::File> {
     .map_err(std::io::Error::from)
 }
 
-/// Darwin opens a read-only directory handle with search permission alone.
+/// `O_SEARCH` opens the directory for search only: Darwin refuses a plain
+/// `O_RDONLY` directory open without read permission, while `openat` from an
+/// `O_SEARCH` descriptor still resolves (verified on macOS).
 #[cfg(target_os = "macos")]
 fn open_root_dir(root: &Path) -> std::io::Result<std::fs::File> {
     use nix::fcntl::{open, OFlag};
     use nix::sys::stat::Mode;
 
-    open(
-        root,
-        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC,
-        Mode::empty(),
-    )
-    .map(std::fs::File::from)
-    .map_err(std::io::Error::from)
+    open(root, OFlag::O_SEARCH | OFlag::O_CLOEXEC, Mode::empty())
+        .map(std::fs::File::from)
+        .map_err(std::io::Error::from)
 }
 
 /// A directory handle needs backup semantics; `File::open` alone refuses one.
+///
+/// # Search-only roots
+///
+/// `read(true)` requests `GENERIC_READ`, which carries `FILE_LIST_DIRECTORY` for
+/// a directory, so a root the caller may only traverse is refused here. A
+/// minimal-rights `CreateFileW` handle would not help: `final_path` uses
+/// `FILE_NAME_NORMALIZED`, and Microsoft documents that this normalization
+/// queries every path component and fails with `ERROR_ACCESS_DENIED` when access
+/// to any one of them is missing. Windows therefore has no search-only open for
+/// this reader; the refusal is the documented boundary, not an oversight.
 #[cfg(windows)]
 fn open_root_dir(root: &Path) -> std::io::Result<std::fs::File> {
     use std::os::windows::fs::OpenOptionsExt as _;
@@ -225,6 +279,13 @@ fn open_beneath(dir: &std::fs::File, rel: &str) -> Result<std::fs::File, rustix:
 /// Descriptor-path confinement for the cases the kernel declines: `/proc/self/fd`
 /// names the object each descriptor is bound to, and a descriptor's link count —
 /// never the shape of the name — says whether it still has a directory entry.
+///
+/// This comparison is by name, not a handle-ancestry proof: both paths are read
+/// from their own descriptors, so a rename racing the pair could align them.
+/// It only has to catch a *resolution that escaped* the root (the open itself
+/// was already relative to the root descriptor), and Linux exposes no
+/// handle-ancestry query to do better; `openat2(RESOLVE_BENEATH)` is the only
+/// such proof and it is the primary arm.
 #[cfg(target_os = "linux")]
 fn verify_beneath_root(
     root: &std::fs::File,

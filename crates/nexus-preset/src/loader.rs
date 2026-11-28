@@ -296,13 +296,14 @@ pub fn load_preset(
 /// template invalidates the identity and recovery refuses to fall back to
 /// current bytes.
 ///
-/// For a directory bundle, referenced asset files are read through the bundle
-/// root's **opened directory descriptor** — anchored to that directory, not to
-/// the pathname, so a replaced bundle path cannot supply the hashed bytes — and
-/// each path is validated as a safe relative path before joining. For an
-/// embedded preset they are read from the compiled-in embedded directory. A
-/// missing referenced asset is an **error** (never hashed as empty) — the
-/// identity must be exact.
+/// For a directory bundle, the root is opened **once** as a directory
+/// descriptor: the hashed bytes are read relative to it and the recorded
+/// [`Directory`](PresetSourceIdentity::Directory) root is that same descriptor's
+/// own path, so a bundle path replaced between resolutions cannot pair an old
+/// location with new bytes. Each path is validated as a safe relative path
+/// before joining. For an embedded preset assets are read from the compiled-in
+/// embedded directory. A missing referenced asset is an **error** (never hashed
+/// as empty) — the identity must be exact.
 ///
 /// # Errors
 /// Returns [`PresetLoadError`] if a referenced asset cannot be read, is an
@@ -316,22 +317,9 @@ pub fn preset_source_identity(
     let mut hasher = blake3::Hasher::new();
     hasher.update(manifest_yaml.as_bytes());
 
-    let canonical_root = match bundle_root {
-        Some(root) => Some(
-            root.canonicalize()
-                .map_err(|e| PresetLoadError::Validation {
-                    len: 1,
-                    problems: vec![ValidationProblem {
-                        path: "preset_source_identity".to_string(),
-                        error: format!("failed to canonicalize bundle root: {e}"),
-                    }],
-                })?,
-        ),
-        None => None,
-    };
-    // The reads below resolve against this pinned directory, not the path, so a
-    // bundle path replaced after the identity was computed cannot supply the
-    // hashed bytes.
+    // One root, opened once: the recorded location and the hashed bytes both come
+    // from this descriptor, so a symlink switched between two resolutions cannot
+    // pair an old directory with new bytes.
     let opened_root = match bundle_root {
         Some(root) => Some(crate::bundle_root::BundleRoot::open(root).map_err(|e| {
             PresetLoadError::Validation {
@@ -341,6 +329,16 @@ pub fn preset_source_identity(
                     error: format!("failed to open bundle root: {e}"),
                 }],
             }
+        })?),
+        None => None,
+    };
+    let canonical_root = match &opened_root {
+        Some(root) => Some(root.path().map_err(|e| PresetLoadError::Validation {
+            len: 1,
+            problems: vec![ValidationProblem {
+                path: "preset_source_identity".to_string(),
+                error: format!("failed to resolve bundle root: {e}"),
+            }],
         })?),
         None => None,
     };
@@ -3037,8 +3035,11 @@ roles:
         );
     }
 
-    /// A bundle root that is only searchable (`0711`) still imports: resolution
-    /// needs execute permission on each component, never a directory listing.
+    /// A bundle root that is only searchable still imports: resolution needs
+    /// execute permission on each component, never a directory listing. The
+    /// `0111` modes leave the owner without read (a `0711` fixture would keep it
+    /// and prove nothing); `O_PATH` on Linux and `O_SEARCH` on macOS open such a
+    /// root, `openat`/`openat2` from it resolves, and the asset itself is `0644`.
     #[test]
     #[cfg(unix)]
     fn import_accepts_a_search_only_bundle_root() {
@@ -3047,8 +3048,8 @@ roles:
 
         let (_tmp, bundle, manifest) = role_prompt_bundle();
         let prompts = bundle.join("prompts");
-        std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o711)).unwrap();
-        std::fs::set_permissions(&prompts, std::fs::Permissions::from_mode(0o711)).unwrap();
+        std::fs::set_permissions(&bundle, std::fs::Permissions::from_mode(0o111)).unwrap();
+        std::fs::set_permissions(&prompts, std::fs::Permissions::from_mode(0o111)).unwrap();
         std::fs::set_permissions(
             prompts.join("writer.md"),
             std::fs::Permissions::from_mode(0o644),
