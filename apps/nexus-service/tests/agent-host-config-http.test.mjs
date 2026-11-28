@@ -180,43 +180,60 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
   });
 
   test('a document with zero enabled providers saves unchanged', async () => {
-    const providers = [
+    const expected = [
       { id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: false },
       { id: 'second-acp', protocol: 'acp', command: null, enabled: false },
     ];
     const { service, saves } = storeService(DEFAULT_CONFIG);
 
-    const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers });
+    const response = await handle('PUT', service, {
+      ...DEFAULT_CONFIG,
+      providers: [
+        { id: 'first-acp', protocol: 'acp', command: 'first-agent', enabled: false },
+        { id: 'second-acp', protocol: 'acp', command: null, enabled: false },
+      ],
+    });
 
     assert.equal(saves.length, 1);
-    assert.deepEqual(saves[0].providers, providers);
-    assert.deepEqual(response.body.providers, providers);
+    assert.deepEqual(saves[0].providers, expected);
+    assert.deepEqual(response.body.providers, expected);
   });
 
-  test('a no-op save keeps the enabled set and the default-enabled omission', async () => {
-    // `enabled` omitted is the default-enabled form the native core writes back unchanged:
-    // a no-op save must not materialise the flag, drop it, or move providers around.
-    const defaultEnabled = { id: 'claude-acp', protocol: 'acp', command: 'claude-agent-acp' };
-    const disabled = { id: 'codex-acp', protocol: 'acp', command: null, enabled: false };
-    const stored = { ...DEFAULT_CONFIG, providers: [defaultEnabled, disabled] };
+  test('a no-op save keeps the enabled set and hands the default-enabled document to the core', async () => {
+    // An omitted `enabled` means enabled. The service hands the parsed document to the native
+    // core untouched; the core materialises `enabled = true` when it writes `config.toml`
+    // (`ProviderConfig.enabled` in `crates/nexus-agent-host/src/config.rs`, serialized by
+    // `save_config`), so the omission is a handler property, not an on-disk shape.
+    const defaultEnabled = () => ({ id: 'claude-acp', protocol: 'acp', command: 'claude-agent-acp' });
+    const disabled = () => ({ id: 'codex-acp', protocol: 'acp', command: null, enabled: false });
 
-    for (const providers of [
-      [defaultEnabled, disabled],
-      [disabled, defaultEnabled],
+    // The expected documents come from separate factory calls, so a rewrite that mutates the
+    // submitted providers in place cannot pass by comparing an array with itself.
+    for (const [submitted, expected] of [
+      [
+        [defaultEnabled(), disabled()],
+        [defaultEnabled(), disabled()],
+      ],
+      [
+        [disabled(), defaultEnabled()],
+        [disabled(), defaultEnabled()],
+      ],
     ]) {
-      const { service, saves, restarts } = storeService(stored);
-      const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers });
+      const { service, saves, restarts } = storeService({
+        ...DEFAULT_CONFIG,
+        providers: [defaultEnabled(), disabled()],
+      });
+      const response = await handle('PUT', service, { ...DEFAULT_CONFIG, providers: submitted });
 
       assert.deepEqual(
         saves[0].providers,
-        providers,
-        'the document is stored exactly as submitted (order and key omission included)',
+        expected,
+        'the handler hands the core the document as submitted, order and omission intact',
       );
-      assert.deepEqual(response.body.providers, providers, 'the response echoes the persisted document');
-      assert.equal(
-        Object.hasOwn(saves[0].providers.find(({ id }) => id === defaultEnabled.id), 'enabled'),
-        false,
-        'a no-op save must not materialise the default-enabled flag',
+      assert.deepEqual(
+        response.body.providers.map(({ id }) => id),
+        expected.map(({ id }) => id),
+        'the response keeps the persisted order',
       );
       assert.deepEqual(enabledIds(saves[0].providers), ['claude-acp']);
       assert.deepEqual(enabledIds(response.body.providers), ['claude-acp']);
@@ -228,6 +245,20 @@ describe('agent-host config routes (I-000124 follow-up)', () => {
       assert.equal(service.providerReady, true);
       assert.equal(service.engineEpoch, 7);
     }
+
+    // The omission counts as enabled, so it must also carry the enabled command requirement.
+    await assert.rejects(
+      () =>
+        handle('PUT', storeService(DEFAULT_CONFIG).service, {
+          ...DEFAULT_CONFIG,
+          providers: [{ id: 'claude-acp', protocol: 'acp' }],
+        }),
+      (error) => {
+        assert.equal(error.code, 'invalid_input');
+        assert.match(error.message, /command is required when provider 'claude-acp' is enabled/);
+        return true;
+      },
+    );
   });
 
   test('two overlapping PUTs apply in order and both restart', async () => {
