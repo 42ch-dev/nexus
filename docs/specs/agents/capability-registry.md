@@ -2,7 +2,7 @@
 
 ## Scope
 
-Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **28 static host tools (26 `nexus.*` + 2 `fs/*`)**, retired reference ids removed (V1.231), peer/user-capability resolution, admission and audit ownership.
+Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **29 reserved host tools (27 `nexus.*` + 2 `fs/*`); 28 bind a handler in the default build, 29 with `strategy-authoring`**, retired reference ids removed (V1.231), peer/user-capability resolution, admission and audit ownership.
 
 ## Current state
 
@@ -10,7 +10,7 @@ Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **
 **Document class**: Master  
 **Created**: 2026-06-20  
 **Last updated**: 2026-09-29 — retained core dispatch and static roster
-**Scope**: Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **28 static host tools (26 `nexus.*` + 2 `fs/*`)**, retired reference ids removed (V1.231), peer/user-capability resolution, admission and audit ownership.
+**Scope**: Runtime SSOT for the retained Nexus host-tool registry and dispatch spine — **29 reserved host tools (27 `nexus.*` + 2 `fs/*`); 28 bind a handler in the default build, 29 with `strategy-authoring`**, retired reference ids removed (V1.231), peer/user-capability resolution, admission and audit ownership.
 **Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](../orchestration/orchestration-engine.md) (separate orchestration registry), [local-runtime-boundary.md](../architecture/local-runtime-boundary.md) (current host boundaries)
 
 ---
@@ -25,7 +25,7 @@ Non-overlap rule: **catalog = ID + one-liner**; **registry = handler + wire + fa
 
 [`nexus_core::owner::capabilities`](../../../crates/nexus-core/src/owner/capabilities.rs) owns `host_tool_registry()` and its process-global `LazyLock<CapabilityRegistry>`. `execute_tool` runs admission, calls that registry's `dispatch`, then audits success or refusal. The allowlist uses `spine_resolves`: static builtin → admitted peer → admitted user capability. Unknown IDs fail with `not_supported`; callers must not maintain a second lookup/allowlist table.
 
-The static registry contains **28 rows: 26 `nexus.*` and 2 `fs/*`**. `build_registry` is the row authority; [`capability_compute.rs`](../../../crates/nexus-core/tests/capability_compute.rs), `host_tool_registry_roster_is_the_declared_nexus_surface`, pins the same set and excludes `nexus.profile.*` grouping metadata. Dynamic peer/user entries are additional spine resolutions, not part of this static count.
+The catalog declares **29 rows: 27 `nexus.*` and 2 `fs/*`**, reserved in every build regardless of features. `build_registry` binds a handler for each row the build links: **28 in the default build** (the empty `default` feature set leaves `nexus.strategy.generate` reserved but unbound) and **29 with `strategy-authoring`**. [`capability_compute.rs`](../../../crates/nexus-core/tests/capability_compute.rs), `host_tool_registry_roster_is_the_declared_nexus_surface`, pins the reserved set and excludes `nexus.profile.*` grouping metadata; that target's dev-dependency enables `strategy-authoring`, so its `host_tool_registry()` is the 29-row build. Dynamic peer/user entries are additional spine resolutions, not part of this static count.
 
 The [`nexus-orchestration` `CapabilityRegistry`](../../../crates/nexus-orchestration/src/capability/mod.rs) is a **separate registry** of orchestration `Capability` implementations. Its live admitted user entries may be resolved by the core spine; it does not own the static host-tool dispatch table. ACP **agent discovery/selection** is yet another surface, governed by [registry-integration.md](registry-integration.md), not by this spec.
 
@@ -207,7 +207,7 @@ documents the runtime contract and per-ID test vectors (success + failure paths)
 - **ACP wire**: `{}` → `{runtime_mode, registry_reachable, registry_size, sync_state, cloud_enabled, pool_healthy}`
 - **failure mode**: `Forbidden` (missing active creator).
 - **test vectors**:
-  - success: `runtime_health_returns_agent_visible_status` — returns `registry_size=28`, `cloud_enabled=false`, `sync_state="disabled"` in local-only mode.
+  - success: `runtime_health_returns_agent_visible_status` — returns `registry_size=28` in the default build and `registry_size=29` with `strategy-authoring` (it is the bound row count, not the reserved catalog size), `cloud_enabled=false`, `sync_state="disabled"` in local-only mode.
   - failure: `runtime_health_rejects_without_active_creator` — `FORBIDDEN` when no active creator.
 
 #### `nexus.trace.correlation`
