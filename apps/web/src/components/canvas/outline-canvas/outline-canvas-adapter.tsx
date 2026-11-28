@@ -19,7 +19,7 @@ import type {
   WorkOutline,
 } from '@42ch/nexus-contracts';
 
-import type { CanvasSurfaceAdapter, ConflictModalProps } from '../canvas-surface-adapter';
+import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import { outlineNodeTypes } from './outline-nodes';
 import {
   outlineGraphSummary,
@@ -117,10 +117,6 @@ export function createOutlineCanvasAdapter(
         nodes: projected.nodes as Node<OutlineNodeData>[],
         edges: projected.edges as Edge<OutlineEdgeData>[],
       };
-    },
-
-    adaptConflict(_error) {
-      return null as ConflictModalProps | null;
     },
 
     renderInspector(node) {

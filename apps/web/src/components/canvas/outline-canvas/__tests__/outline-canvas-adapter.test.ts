@@ -107,10 +107,6 @@ describe('OutlineCanvasAdapter — shape', () => {
     expect(adapter.nodeTypes['outline-beat']).toBeDefined();
   });
 
-  it('adaptConflict returns null (surface-owned conflict modal)', () => {
-    const adapter = makeAdapter();
-    expect(adapter.adaptConflict?.(new Error('409'))).toBeNull();
-  });
 });
 
 describe('OutlineCanvasAdapter.projectGraph — projection equivalence', () => {

@@ -1,30 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Edge, EdgeTypes, Node, NodeTypes } from '@xyflow/react';
 
-import type { PresetState } from '@/lib/canvas/preset-yaml';
-
-export type ChangedField = 'label' | 'description' | 'nextTarget' | 'promptBody';
-
-export interface ConflictModalDraft {
-  label: string;
-  description: string;
-  nextTarget: string;
-  promptBody: string;
-}
-
-/** Strategy conflict-modal payload shape (no producer today; adapters return null). */
-export interface ConflictModalProps {
-  open: boolean;
-  currentRevision: number;
-  draft: ConflictModalDraft;
-  canonicalState?: PresetState;
-  promptTemplateRef?: string;
-  changedFields: readonly ChangedField[];
-  onUseCurrent: () => void;
-  onReapply: () => void;
-  onDismiss: () => void;
-}
-
 export type CanvasSurfaceKind =
   | 'strategy'
   | 'outline'
@@ -56,8 +32,6 @@ export interface CanvasSurfaceAdapter<TGraph, TNodeData extends Record<string, u
   edgeTypes?: EdgeTypes;
   /** Layout options for dagre (T4 integration point — stub for now). */
   layoutOptions?: CanvasSurfaceLayoutOptions;
-  /** Conflict DTO → conflict-modal props. */
-  adaptConflict?(error: unknown): ConflictModalProps | null;
   /** Inspector routing: which inspector renders for a selected node. */
   renderInspector?(node: Node<TNodeData>): ReactNode;
   /** Alt-view companion (table/list). */

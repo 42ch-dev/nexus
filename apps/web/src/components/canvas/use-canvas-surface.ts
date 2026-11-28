@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { type Edge, type Node, type NodeChangeset, type Viewport } from '@xyflow/react';
 
-import type { CanvasSurfaceAdapter, ConflictModalProps } from './canvas-surface-adapter';
+import type { CanvasSurfaceAdapter } from './canvas-surface-adapter';
 import { useCanvasViewport } from './use-canvas-viewport';
 import { useAutoLayout } from './use-auto-layout';
 
@@ -31,9 +31,6 @@ export interface UseCanvasSurfaceResult<TNodeData extends Record<string, unknown
   inspector: ReactNode;
   selectedNode: Node<TNodeData> | null;
   selectedNodeId: string | null;
-  conflict: ConflictModalProps | null;
-  setConflict: (conflict: ConflictModalProps | null) => void;
-  handleConflict: (error: unknown) => void;
   isLoading: boolean;
   isError: boolean;
   refetch: () => void;
@@ -44,7 +41,7 @@ export interface UseCanvasSurfaceResult<TNodeData extends Record<string, unknown
  * Shared composition hook for canvas surfaces.
  *
  * Delegates viewport caching to {@link useCanvasViewport} and layout to
- * {@link useAutoLayout}. Owns graph projection, conflict state, alt-view toggle,
+ * {@link useAutoLayout}. Owns graph projection, alt-view toggle,
  * and inspector selection so surface orchestrators do not duplicate shell wiring.
  */
 export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknown>, TEdgeData extends Record<string, unknown>>(
@@ -55,7 +52,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
   const { cachedViewport, onViewportChange } = useCanvasViewport(surfaceKey);
 
   const [showAlt, setShowAlt] = useState(false);
-  const [conflict, setConflict] = useState<ConflictModalProps | null>(null);
 
   const graph = queryResult.data;
 
@@ -122,20 +118,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
     return adapter.renderInspector?.(selectedNode) ?? null;
   }, [selectedNode, adapter]);
 
-  useEffect(() => {
-    if (queryResult.isError && adapter.adaptConflict) {
-      setConflict(adapter.adaptConflict(queryResult.error));
-    }
-  }, [queryResult.isError, queryResult.error, adapter]);
-
-  const handleConflict = useCallback(
-    (error: unknown) => {
-      if (!adapter.adaptConflict) return;
-      setConflict(adapter.adaptConflict(error));
-    },
-    [adapter],
-  );
-
   return {
     nodes: layout.nodes,
     edges: projected.edges,
@@ -151,9 +133,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
     inspector,
     selectedNode,
     selectedNodeId,
-    conflict,
-    setConflict,
-    handleConflict,
     isLoading: queryResult.isLoading,
     isError: queryResult.isError,
     refetch: queryResult.refetch,

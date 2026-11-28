@@ -808,10 +808,6 @@ export function createWorkTimelineCanvasAdapter(
       return projectNarrativeLayer(graph);
     },
 
-    adaptConflict(_error) {
-      return null;
-    },
-
     renderInspector(node) {
       // V1.123 P3 Task 4 — also forwards the cross-surface navigation slots
       // (`worldId` + `onViewOnWorldTimeline`) from the adapter context so the
