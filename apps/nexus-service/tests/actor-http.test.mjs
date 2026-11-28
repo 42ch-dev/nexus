@@ -453,6 +453,31 @@ function readLog(path) {
   }
 }
 
+/** Strict sibling of `readLog` for launch evidence: a missing file is genuinely
+ * "nothing has started yet", but an unreadable line must fail loudly instead of
+ * emptying the witness, so `launchPids` can never compare two silent empties.
+ * `readLog` stays lenient for the calls that poll or count during a live run
+ * (`late_end_turn`, cancel and launch counts), where a torn read may be retried. */
+function readLogStrict(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  return text
+    .split('\n')
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        throw new Error(`unreadable fixture log line ${path}:${index + 1}: ${line}`);
+      }
+    });
+}
+
 /** Launch identities: both fixture peers log `start` with their own pid as their
  * first write, and a session create only returns after that peer answered
  * `initialize`, so any admitted session's pid is already recorded. A provider
@@ -460,7 +485,7 @@ function readLog(path) {
 function launchPids(...paths) {
   const pids = new Set();
   for (const path of paths) {
-    for (const entry of readLog(path)) if (entry.event === 'start') pids.add(entry.pid);
+    for (const entry of readLogStrict(path)) if (entry.event === 'start') pids.add(entry.pid);
   }
   return pids;
 }
@@ -904,6 +929,7 @@ describe('actor-http Agent-Host Actor journey (P0-T6)', { concurrency: 1 }, () =
     assert.equal(prompt.status, 200, prompt.text);
 
     const launchesBeforeBusy = launchPids(acpLog, peerLog);
+    assert.ok(launchesBeforeBusy.size > 0, 'the Busy session provider launch must be on record before the reuse');
     const busy = await jsonFetch('/v1/daemon/agent-host/sessions', {
       method: 'POST',
       body: actorBody({ provider_id: LATE_PROVIDER }),
